@@ -398,6 +398,30 @@ fn sqlite_platform_store_upgrades_accepted_m8_and_preserves_post_commit_actions(
         )?,
     ];
     refinery::Runner::new(&accepted_m8_migrations).run(&mut connection)?;
+    connection.execute_batch(
+        "INSERT INTO auth_principals (
+             principal_id, kind, state, created_at, updated_at, version,
+             disabled_at, revoked_at
+         ) VALUES ('dev_cancelled', 'device', 'active', 1, 1, 1, NULL, NULL);
+         INSERT INTO auth_deployments (
+             deployment_id, participant_id, participant_kind, state, expires_at
+         ) VALUES ('dep_cancelled', 'participant', 'device', 'active', NULL);
+         INSERT INTO auth_instances (
+             instance_id, deployment_id, principal_id, state,
+             created_at, updated_at, version
+         ) VALUES ('inst_cancelled', 'dep_cancelled', 'dev_cancelled', 'active', 1, 1, 1);
+         INSERT INTO auth_devices (
+             principal_id, deployment_id, state, created_at, updated_at, version
+         ) VALUES ('dev_cancelled', 'dep_cancelled', 'pending', 1, 1, 1);
+         INSERT INTO auth_device_activation_reviews (
+             review_id, principal_id, deployment_id, instance_id, request_digest,
+             payload_json, state, requested_at, decided_at, decided_by, reason, version
+         ) VALUES (
+             'review_cancelled', 'dev_cancelled', 'dep_cancelled', 'inst_cancelled',
+             'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
+             '{\"expiresAt\":2}', 'cancelled', 1, NULL, NULL, NULL, 1
+         );",
+    )?;
     for (id, kind) in [
         ("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "event"),
         ("AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE", "kick"),
@@ -444,6 +468,14 @@ fn sqlite_platform_store_upgrades_accepted_m8_and_preserves_post_commit_actions(
     assert!(actions
         .iter()
         .all(|action| action.2 == "{}" && action.3 == 1 && action.4 == 2 && action.5 == 3));
+    assert_eq!(
+        connection.query_row(
+            "SELECT state FROM auth_device_activation_reviews WHERE review_id = 'review_cancelled'",
+            [],
+            |row| row.get::<_, String>(0),
+        )?,
+        "expired",
+    );
     assert!(connection
         .prepare("PRAGMA foreign_key_check")?
         .query_map([], |_| Ok(()))?

@@ -2,7 +2,7 @@ use async_trait::async_trait;
 use rusqlite::{params, Connection, OptionalExtension};
 
 use super::super::application::repository::{
-    ActivationReviewCreation, ActivationReviewDecision, DeviceProvisioning,
+    ActivationReviewClaim, ActivationReviewCreation, ActivationReviewDecision, DeviceProvisioning,
     DeviceProvisioningSecretConsumption, IdempotentOutcome, ProvisionedInstanceMutation,
     ProvisioningRepository, ServiceIdentityProvisioning,
 };
@@ -10,10 +10,12 @@ use super::super::context::{
     revoke_sql_contexts, AuthorizationContextRevocationReason, AuthorizationContextSelector,
 };
 use super::super::{
-    AuthorizationStateError, DeviceActivationReviewRecord, DeviceActivationReviewState,
-    DeviceProvisioningSecretRecord, DeviceRecord, DeviceState, PrincipalKind, PrincipalRecord,
-    PrincipalState, ProvisionedIdentityKind, ProvisionedIdentityRecord, ProvisioningSecretState,
-    RuntimeInstanceRecord, RuntimeInstanceState,
+    activation_review_event, activation_review_event_action_id, AuthorizationStateError,
+    DeviceActivationReviewRecord, DeviceActivationReviewState, DeviceDelegationState,
+    DeviceProvisioningSecretRecord, DeviceRecord, DeviceState, IdempotencyResultRecord,
+    PrincipalKind, PrincipalRecord, PrincipalState, ProvisionedIdentityKind,
+    ProvisionedIdentityRecord, ProvisioningSecretState, RuntimeInstanceRecord,
+    RuntimeInstanceState,
 };
 use super::common::{
     decode_enum, decode_json, encode_enum, encode_json, from_sql_version, map_write_error,
@@ -142,8 +144,8 @@ impl ProvisioningRepository for SqliteAuthorizationStore {
             }
             transaction
                 .execute(
-                    "INSERT INTO auth_device_activation_reviews (review_id, principal_id, deployment_id, instance_id, request_digest, payload_json, state, requested_at, decided_at, decided_by, reason, version)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+                    "INSERT INTO auth_device_activation_reviews (review_id, principal_id, deployment_id, instance_id, request_digest, payload_json, state, requested_at, expires_at, activated_by_user_principal_id, decided_at, decided_by, reason, version)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
                     params![
                         command.review.review_id,
                         command.review.principal_id,
@@ -153,6 +155,8 @@ impl ProvisioningRepository for SqliteAuthorizationStore {
                         encode_json(&command.review.payload)?,
                         encode_enum(command.review.state)?,
                         command.review.requested_at,
+                        command.review.expires_at,
+                        command.review.activated_by_user_principal_id,
                         command.review.decided_at,
                         command.review.decided_by,
                         command.review.reason,
@@ -176,8 +180,231 @@ impl ProvisioningRepository for SqliteAuthorizationStore {
         review_id: &str,
     ) -> Result<Option<DeviceActivationReviewRecord>, AuthorizationStateError> {
         let review_id = review_id.to_owned();
+        #[cfg(feature = "integration-test-hooks")]
+        return self
+            .run(move |connection| {
+                let exists = connection
+                    .query_row(
+                        "SELECT EXISTS(SELECT 1 FROM sqlite_master
+                         WHERE type = 'table'
+                           AND name = '__trellis_test_activation_review_reads')",
+                        [],
+                        |row| row.get::<_, bool>(0),
+                    )
+                    .map_err(sql_error)?;
+                if exists {
+                    connection
+                        .execute(
+                            "UPDATE __trellis_test_activation_review_reads
+                             SET read_count = read_count + 1
+                             WHERE review_id = ?1",
+                            params![review_id],
+                        )
+                        .map_err(map_write_error)?;
+                }
+                load_activation_review(connection, &review_id)
+            })
+            .await;
+        #[cfg(not(feature = "integration-test-hooks"))]
         self.run_read(move |connection| load_activation_review(connection, &review_id))
             .await
+    }
+
+    async fn expire_due_activation_reviews(
+        &self,
+        now: i64,
+    ) -> Result<Vec<DeviceActivationReviewRecord>, AuthorizationStateError> {
+        self.run(move |connection| {
+            let transaction = connection.transaction().map_err(sql_error)?;
+            let ids = {
+                let mut statement = transaction
+                    .prepare(
+                        "SELECT review.review_id, review.state, review.activated_by_user_principal_id
+                         FROM auth_device_activation_reviews AS review
+                         WHERE review.state IN ('pending', 'approved')
+                           AND review.expires_at <= ?1
+                           AND EXISTS (
+                               SELECT 1 FROM auth_devices AS device
+                               WHERE device.principal_id = review.principal_id
+                                 AND device.deployment_id = review.deployment_id
+                                 AND device.state = 'pending'
+                           )
+                         ORDER BY review.review_id",
+                    )
+                    .map_err(sql_error)?;
+                let ids = statement
+                    .query_map([now], |row| {
+                        Ok((
+                            row.get::<_, String>(0)?,
+                            decode_enum::<DeviceActivationReviewState>(row.get::<_, String>(1)?)?,
+                            row.get::<_, Option<String>>(2)?,
+                        ))
+                    })
+                    .map_err(sql_error)?
+                    .collect::<rusqlite::Result<Vec<_>>>()
+                    .map_err(sql_error)?;
+                ids
+            };
+            transaction
+                .execute(
+                    "UPDATE auth_device_activation_reviews AS review
+                     SET state = 'expired', version = version + 1
+                     WHERE review.state IN ('pending', 'approved')
+                       AND review.expires_at <= ?1
+                       AND EXISTS (
+                           SELECT 1 FROM auth_devices AS device
+                           WHERE device.principal_id = review.principal_id
+                             AND device.deployment_id = review.deployment_id
+                             AND device.state = 'pending'
+                       )",
+                    [now],
+                )
+                .map_err(map_write_error)?;
+            let reviews = ids
+                .into_iter()
+                .map(|(review_id, previous_state, claimant)| {
+                    let review = load_activation_review(&transaction, &review_id)?
+                        .ok_or(AuthorizationStateError::StorageConflict)?;
+                    let mut action = activation_review_event(
+                        &review,
+                        "resolved",
+                        "Auth.DeviceUserAuthorities.Resolved",
+                        now,
+                        serde_json::json!({ "state": "expired" }),
+                    )?;
+                    action.predecessor_action_id = Some(activation_review_event_action_id(
+                        &review_id,
+                        if previous_state == DeviceActivationReviewState::Approved {
+                            "approved"
+                        } else if claimant.is_some() {
+                            "requested"
+                        } else {
+                            "review-requested"
+                        },
+                    )?);
+                    insert_sql_idempotency_and_actions(
+                        &transaction,
+                        &IdempotencyResultRecord {
+                            scope_key: trellis_protocol::digest_json(&serde_json::json!({
+                                "purpose": "device.activation.expire",
+                                "reviewId": review_id,
+                            }))
+                            .map_err(|error| {
+                                AuthorizationStateError::InvalidRecord(error.to_string())
+                            })?,
+                            purpose: "device.activation.expire".to_owned(),
+                            signer_id: "trellis.auth".to_owned(),
+                            request_id: review_id,
+                            request_digest: review.request_digest.clone(),
+                            result: serde_json::Value::Null,
+                            created_at: now,
+                            expires_at: now.checked_add(86_400_000).ok_or_else(|| {
+                                AuthorizationStateError::InvalidRecord(
+                                    "activation expiry idempotency overflow".to_owned(),
+                                )
+                            })?,
+                        },
+                        &[action],
+                    )?;
+                    Ok(review)
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            transaction.commit().map_err(sql_error)?;
+            Ok(reviews)
+        })
+        .await
+    }
+
+    async fn claim_activation_review(
+        &self,
+        command: ActivationReviewClaim,
+    ) -> Result<IdempotentOutcome<DeviceActivationReviewRecord>, AuthorizationStateError> {
+        self.run(move |connection| {
+            let transaction = connection.transaction().map_err(sql_error)?;
+            if let Some(result) = sqlite_idempotency_replay(&transaction, &command.idempotency)? {
+                return Ok(IdempotentOutcome::Replayed(result));
+            }
+            let current = load_activation_review(&transaction, &command.review_id)?
+                .ok_or(AuthorizationStateError::StorageConflict)?;
+            if current.version != command.expected_version
+                || !matches!(
+                    current.state,
+                    DeviceActivationReviewState::Pending
+                        | DeviceActivationReviewState::Approved
+                )
+                || current.activated_by_user_principal_id.as_deref().is_some_and(|principal| {
+                    principal != command.activated_by_user_principal_id
+                })
+            {
+                return Err(AuthorizationStateError::StorageConflict);
+            }
+            if let Some(delegation) = &command.delegation {
+                if current.state != DeviceActivationReviewState::Approved
+                    || delegation.principal_id != current.principal_id
+                    || delegation.deployment_id != current.deployment_id
+                    || !delegation.required
+                    || delegation.state != DeviceDelegationState::Active
+                {
+                    return Err(AuthorizationStateError::InvalidRecord(
+                        "activation claim delegation does not match approved review".to_owned(),
+                    ));
+                }
+                transaction
+                    .execute(
+                        "INSERT INTO auth_device_delegations (principal_id, deployment_id, required, state, expires_at) VALUES (?1, ?2, ?3, ?4, ?5)
+                      ON CONFLICT(principal_id, deployment_id) DO UPDATE SET required = excluded.required, state = excluded.state, expires_at = excluded.expires_at",
+                        params![
+                            delegation.principal_id,
+                            delegation.deployment_id,
+                            delegation.required,
+                            encode_enum(delegation.state)?,
+                            delegation.expires_at
+                        ],
+                    )
+                    .map_err(map_write_error)?;
+                let changed = transaction
+                    .execute(
+                        "UPDATE auth_devices SET state = ?1, updated_at = ?2, version = version + 1
+                         WHERE principal_id = ?3 AND deployment_id = ?4",
+                        params![
+                            encode_enum(DeviceState::Active)?,
+                            command.now,
+                            current.principal_id,
+                            current.deployment_id,
+                        ],
+                    )
+                    .map_err(map_write_error)?;
+                if changed != 1 {
+                    return Err(AuthorizationStateError::StorageConflict);
+                }
+            }
+            let next = next_version(command.expected_version)?;
+            let changed = transaction
+                .execute(
+                    "UPDATE auth_device_activation_reviews SET activated_by_user_principal_id = ?1, version = ?2 WHERE review_id = ?3 AND version = ?4 AND expires_at > ?5 AND (activated_by_user_principal_id IS NULL OR activated_by_user_principal_id = ?1)",
+                    params![
+                        command.activated_by_user_principal_id,
+                        to_sql_version(next)?,
+                        command.review_id,
+                        to_sql_version(command.expected_version)?,
+                        command.now,
+                    ],
+                )
+                .map_err(map_write_error)?;
+            if changed != 1 {
+                return Err(AuthorizationStateError::StorageConflict);
+            }
+            let result = load_activation_review(&transaction, &command.review_id)?
+                .ok_or(AuthorizationStateError::StorageConflict)?;
+            insert_sql_idempotency_and_actions(
+                &transaction,
+                &command.idempotency,
+                &command.actions,
+            )?;
+            transaction.commit().map_err(sql_error)?;
+            Ok(IdempotentOutcome::Applied(result))
+        })
+        .await
     }
 
     async fn list_activation_reviews(
@@ -219,7 +446,7 @@ impl ProvisioningRepository for SqliteAuthorizationStore {
             {
                 return Err(AuthorizationStateError::StorageConflict);
             }
-            if command.state == DeviceActivationReviewState::Approved {
+            if command.activate_device {
                 let changed = transaction
                     .execute(
                         "UPDATE auth_devices SET state = ?1, updated_at = ?2, version = version + 1
@@ -262,7 +489,7 @@ impl ProvisioningRepository for SqliteAuthorizationStore {
             let changed = transaction
                 .execute(
                     "UPDATE auth_device_activation_reviews SET state = ?1, decided_at = ?2, decided_by = ?3, reason = ?4, version = ?5
-                  WHERE review_id = ?6 AND version = ?7 AND state = 'pending'",
+                   WHERE review_id = ?6 AND version = ?7 AND state = 'pending' AND expires_at > ?2",
                     params![
                         encode_enum(command.state)?,
                         command.decided_at,
@@ -863,7 +1090,7 @@ pub(in crate::platform::auth) fn load_activation_review(
 ) -> Result<Option<DeviceActivationReviewRecord>, AuthorizationStateError> {
     connection
     .query_row(
-        "SELECT review_id, principal_id, deployment_id, instance_id, request_digest, payload_json, state, requested_at, decided_at, decided_by, reason, version FROM auth_device_activation_reviews WHERE review_id = ?1",
+        "SELECT review_id, principal_id, deployment_id, instance_id, request_digest, payload_json, state, requested_at, expires_at, activated_by_user_principal_id, decided_at, decided_by, reason, version FROM auth_device_activation_reviews WHERE review_id = ?1",
         [review_id],
         |row| {
             Ok(DeviceActivationReviewRecord {
@@ -875,10 +1102,12 @@ pub(in crate::platform::auth) fn load_activation_review(
                 payload: decode_json(row.get(5)?)?,
                 state: decode_enum(row.get(6)?)?,
                 requested_at: row.get(7)?,
-                decided_at: row.get(8)?,
-                decided_by: row.get(9)?,
-                reason: row.get(10)?,
-                version: from_sql_version(row.get(11)?)?,
+                expires_at: row.get(8)?,
+                activated_by_user_principal_id: row.get(9)?,
+                decided_at: row.get(10)?,
+                decided_by: row.get(11)?,
+                reason: row.get(12)?,
+                version: from_sql_version(row.get(13)?)?,
             })
         },
     )

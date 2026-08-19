@@ -391,7 +391,7 @@ fn generate_rust_participant_generated_sources(
             &opts.out_dir.join("src/jobs.rs"),
             &format!(
                 "{}\n{}",
-                render_jobs_rs(&participant),
+                render_participant_job_descriptors_rs(&participant),
                 render_participant_jobs_facade_rs(&participant),
             ),
         )?;
@@ -1347,9 +1347,9 @@ fn render_event_consumer_method(
 
 fn render_participant_jobs_facade_rs(loaded: &LoadedParticipant) -> String {
     let mut lines = vec![
-        "//! Generated service-private jobs facade.".to_string(),
+        "// Generated service-private jobs facade.".to_string(),
         String::new(),
-        "use trellis_rs::service::{ActiveJob, JobDescriptor, JobRef, JobsError};".to_string(),
+        "use trellis_rs::service::{ActiveJob, JobRef, JobsError};".to_string(),
         String::new(),
         "/// Service-private jobs declared by this participant contract.".to_string(),
         "pub struct Jobs<'a> { service: &'a mut crate::ConnectedService }".to_string(),
@@ -1576,6 +1576,16 @@ pub struct ConnectedClient { inner: Caller }
 impl ConnectedClient {
     /// Access only the contract surfaces declared by this participant.
     pub fn client(&self) -> Client<'_> { Client::new(&self.inner) }
+
+    /// Connect using the exact ready bootstrap evidence returned by device activation.
+    pub async fn connect_activated(
+        options: trellis_rs::auth::DeviceActivationOptions<'_>,
+        session: trellis_rs::auth::DeviceActivationSession,
+    ) -> Result<Self, TrellisClientError> {
+        Ok(Self {
+            inner: Caller::connect_device(options.into_connect_options(session)).await?,
+        })
+    }
 }
 
 /// Connect this activated device.
@@ -3049,7 +3059,7 @@ fn render_operations_rs(loaded: &trellis_contracts::LoadedApi) -> String {
     format!("{}\n", lines.join("\n"))
 }
 
-fn render_jobs_rs(loaded: &LoadedParticipant) -> String {
+fn render_participant_job_descriptors_rs(loaded: &LoadedParticipant) -> String {
     let mut lines = vec![
         format!(
             "//! Typed jobs descriptors for `{}`.",
@@ -3058,6 +3068,36 @@ fn render_jobs_rs(loaded: &LoadedParticipant) -> String {
         String::new(),
     ];
     if !loaded.render_model.jobs.is_empty() {
+        let mut renderer = TypeRenderer::default();
+        for job in loaded.render_model.jobs.values() {
+            for schema_name in [
+                Some(job.payload.schema.as_str()),
+                job.result.as_ref().map(|schema| schema.schema.as_str()),
+                job.update.as_ref().map(|schema| schema.schema.as_str()),
+            ]
+            .into_iter()
+            .flatten()
+            {
+                let schema = loaded
+                    .render_model
+                    .schemas
+                    .get(schema_name)
+                    .expect("validated job schema");
+                if !is_empty_object_schema(schema) {
+                    renderer.render_named_type(&key_to_pascal(schema_name), schema);
+                }
+            }
+        }
+        let rendered = renderer.finish();
+        if !rendered.is_empty() {
+            lines.push("use serde::{Deserialize, Serialize};".to_string());
+            if rendered.iter().any(|line| line.contains("Value")) {
+                lines.push("use serde_json::Value;".to_string());
+            }
+            lines.push(String::new());
+            lines.extend(rendered);
+            lines.push(String::new());
+        }
         lines.push("use trellis_rs::service::JobDescriptor;".to_string());
     }
     if loaded
@@ -3074,7 +3114,6 @@ fn render_jobs_rs(loaded: &LoadedParticipant) -> String {
 
     for (key, job) in &loaded.render_model.jobs {
         let base = key_to_pascal(key);
-        let schema_base = key_to_schema_constant_base(key);
         let payload_type = if is_empty_object_schema(
             loaded
                 .render_model
@@ -3082,9 +3121,9 @@ fn render_jobs_rs(loaded: &LoadedParticipant) -> String {
                 .get(&job.payload.schema)
                 .expect("validated job payload schema"),
         ) {
-            "crate::rpc::Empty".to_string()
+            "serde_json::Value".to_string()
         } else {
-            format!("crate::types::{base}JobPayload")
+            format!("crate::jobs::{}", key_to_pascal(&job.payload.schema))
         };
         let result_type = job
             .result
@@ -3097,9 +3136,9 @@ fn render_jobs_rs(loaded: &LoadedParticipant) -> String {
                         .get(&result.schema)
                         .expect("validated job result schema"),
                 ) {
-                    "crate::rpc::Empty".to_string()
+                    "serde_json::Value".to_string()
                 } else {
-                    format!("crate::types::{base}JobResult")
+                    format!("crate::jobs::{}", key_to_pascal(&result.schema))
                 }
             })
             .unwrap_or_else(|| "serde_json::Value".to_string());
@@ -3113,14 +3152,30 @@ fn render_jobs_rs(loaded: &LoadedParticipant) -> String {
             "    const QUEUE_TYPE: &'static str = {};",
             string_literal(key)
         ));
+        let payload_schema = loaded
+            .render_model
+            .schemas
+            .get(&job.payload.schema)
+            .expect("validated job payload schema");
         lines.push(format!(
-            "    const PAYLOAD_SCHEMA_JSON: &'static str = crate::schemas::{schema_base}_JOB_PAYLOAD_SCHEMA_JSON;"
+            "    const PAYLOAD_SCHEMA_JSON: &'static str = {};",
+            string_literal(&canonicalize_json(payload_schema).expect("valid job payload schema"))
         ));
         match &job.result {
-            Some(_) => lines.push(format!(
-                "    const RESULT_SCHEMA_JSON: Option<&'static str> = Some(crate::schemas::{schema_base}_JOB_RESULT_SCHEMA_JSON);"
-            )),
-            None => lines.push("    const RESULT_SCHEMA_JSON: Option<&'static str> = None;".to_string()),
+            Some(result) => {
+                let schema = loaded
+                    .render_model
+                    .schemas
+                    .get(&result.schema)
+                    .expect("validated job result schema");
+                lines.push(format!(
+                    "    const RESULT_SCHEMA_JSON: Option<&'static str> = Some({});",
+                    string_literal(&canonicalize_json(schema).expect("valid job result schema"))
+                ));
+            }
+            None => {
+                lines.push("    const RESULT_SCHEMA_JSON: Option<&'static str> = None;".to_string())
+            }
         }
         lines.push("}".to_string());
         lines.push(String::new());
@@ -3133,9 +3188,9 @@ fn render_jobs_rs(loaded: &LoadedParticipant) -> String {
                     .get(&update.schema)
                     .expect("validated job update schema"),
             ) {
-                "crate::rpc::Empty".to_string()
+                "serde_json::Value".to_string()
             } else {
-                format!("crate::types::{base}JobUpdate")
+                format!("crate::jobs::{}", key_to_pascal(&update.schema))
             };
             lines.push(format!("impl JobUpdateDescriptor for {base}Job {{"));
             lines.push(format!("    type Update = {update_type};"));
@@ -3143,8 +3198,14 @@ fn render_jobs_rs(loaded: &LoadedParticipant) -> String {
                 "    const UPDATE_SCHEMA: &'static str = {};",
                 string_literal(&update.schema)
             ));
+            let schema = loaded
+                .render_model
+                .schemas
+                .get(&update.schema)
+                .expect("validated job update schema");
             lines.push(format!(
-                "    const UPDATE_SCHEMA_JSON: &'static str = crate::schemas::{schema_base}_JOB_UPDATE_SCHEMA_JSON;"
+                "    const UPDATE_SCHEMA_JSON: &'static str = {};",
+                string_literal(&canonicalize_json(schema).expect("valid job update schema"))
             ));
             lines.push("}".to_string());
             lines.push(String::new());

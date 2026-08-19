@@ -3108,12 +3108,17 @@ export const AuthDeploymentsCreateRequestSchema = {
     "participantId": { "type": ["string", "null"] },
     "portalId": { "type": ["string", "null"] },
     "requiresDeviceDelegation": { "type": "boolean" },
+    "reviewMode": {
+      "enum": ["none", "required", null],
+      "type": ["string", "null"],
+    },
   },
   "required": [
     "kind",
     "displayName",
     "participantId",
     "expiresAt",
+    "reviewMode",
     "requiresDeviceDelegation",
     "portalId",
     "idempotencyKey",
@@ -3146,6 +3151,10 @@ export const AuthDeploymentsCreateResponseSchema = {
         "participantId": { "type": ["string", "null"] },
         "portalId": { "type": ["string", "null"] },
         "requiresDeviceDelegation": { "type": "boolean" },
+        "reviewMode": {
+          "enum": ["none", "required", null],
+          "type": ["string", "null"],
+        },
         "revokedAt": {
           "maximum": 9007199254740991,
           "minimum": 0,
@@ -3170,6 +3179,7 @@ export const AuthDeploymentsCreateResponseSchema = {
         "state",
         "participantId",
         "expiresAt",
+        "reviewMode",
         "requiresDeviceDelegation",
         "portalId",
         "createdAt",
@@ -3225,6 +3235,10 @@ export const AuthDeploymentsDisableResponseSchema = {
         "participantId": { "type": ["string", "null"] },
         "portalId": { "type": ["string", "null"] },
         "requiresDeviceDelegation": { "type": "boolean" },
+        "reviewMode": {
+          "enum": ["none", "required", null],
+          "type": ["string", "null"],
+        },
         "revokedAt": {
           "maximum": 9007199254740991,
           "minimum": 0,
@@ -3249,6 +3263,7 @@ export const AuthDeploymentsDisableResponseSchema = {
         "state",
         "participantId",
         "expiresAt",
+        "reviewMode",
         "requiresDeviceDelegation",
         "portalId",
         "createdAt",
@@ -3318,6 +3333,10 @@ export const AuthDeploymentsEnableResponseSchema = {
         "participantId": { "type": ["string", "null"] },
         "portalId": { "type": ["string", "null"] },
         "requiresDeviceDelegation": { "type": "boolean" },
+        "reviewMode": {
+          "enum": ["none", "required", null],
+          "type": ["string", "null"],
+        },
         "revokedAt": {
           "maximum": 9007199254740991,
           "minimum": 0,
@@ -3342,6 +3361,7 @@ export const AuthDeploymentsEnableResponseSchema = {
         "state",
         "participantId",
         "expiresAt",
+        "reviewMode",
         "requiresDeviceDelegation",
         "portalId",
         "createdAt",
@@ -3408,6 +3428,10 @@ export const AuthDeploymentsListResponseSchema = {
           "participantId": { "type": ["string", "null"] },
           "portalId": { "type": ["string", "null"] },
           "requiresDeviceDelegation": { "type": "boolean" },
+          "reviewMode": {
+            "enum": ["none", "required", null],
+            "type": ["string", "null"],
+          },
           "revokedAt": {
             "maximum": 9007199254740991,
             "minimum": 0,
@@ -3432,6 +3456,7 @@ export const AuthDeploymentsListResponseSchema = {
           "state",
           "participantId",
           "expiresAt",
+          "reviewMode",
           "requiresDeviceDelegation",
           "portalId",
           "createdAt",
@@ -3490,6 +3515,10 @@ export const AuthDeploymentsRemoveResponseSchema = {
         "participantId": { "type": ["string", "null"] },
         "portalId": { "type": ["string", "null"] },
         "requiresDeviceDelegation": { "type": "boolean" },
+        "reviewMode": {
+          "enum": ["none", "required", null],
+          "type": ["string", "null"],
+        },
         "revokedAt": {
           "maximum": 9007199254740991,
           "minimum": 0,
@@ -3514,6 +3543,7 @@ export const AuthDeploymentsRemoveResponseSchema = {
         "state",
         "participantId",
         "expiresAt",
+        "reviewMode",
         "requiresDeviceDelegation",
         "portalId",
         "createdAt",
@@ -4046,8 +4076,11 @@ export const AuthDeviceUserAuthoritiesResolveProgressSchema = {
 } as const;
 
 export const AuthDeviceUserAuthoritiesResolveRequestSchema = {
-  "properties": { "flowId": { "minLength": 1, "type": "string" } },
-  "required": ["flowId"],
+  "properties": {
+    "confirmationCode": { "minLength": 1, "type": "string" },
+    "flowId": { "minLength": 1, "type": "string" },
+  },
+  "required": ["flowId", "confirmationCode"],
   "type": "object",
 } as const;
 
@@ -4430,7 +4463,7 @@ export const AuthDeviceUserAuthoritiesResolveResponseSchema = {
     },
     "review": {
       "properties": {
-        "confirmationCode": { "minLength": 1, "type": "string" },
+        "activatedByUserPrincipalId": { "type": ["string", "null"] },
         "decidedAt": {
           "maximum": 9007199254740991,
           "minimum": 0,
@@ -4466,8 +4499,8 @@ export const AuthDeviceUserAuthoritiesResolveResponseSchema = {
         "deploymentId",
         "instanceId",
         "devicePrincipalId",
+        "activatedByUserPrincipalId",
         "state",
-        "confirmationCode",
         "requestedAt",
         "expiresAt",
         "decidedAt",
@@ -4546,6 +4579,7 @@ export const AuthDeviceUserAuthoritiesReviewsDecideResponseSchema = {
   "properties": {
     "review": {
       "properties": {
+        "activatedByUserPrincipalId": { "type": ["string", "null"] },
         "confirmationCode": { "minLength": 1, "type": "string" },
         "decidedAt": {
           "maximum": 9007199254740991,
@@ -4582,6 +4616,7 @@ export const AuthDeviceUserAuthoritiesReviewsDecideResponseSchema = {
         "deploymentId",
         "instanceId",
         "devicePrincipalId",
+        "activatedByUserPrincipalId",
         "state",
         "confirmationCode",
         "requestedAt",
@@ -4616,6 +4651,7 @@ export const AuthDeviceUserAuthoritiesReviewsListResponseSchema = {
     "entries": {
       "items": {
         "properties": {
+          "activatedByUserPrincipalId": { "type": ["string", "null"] },
           "confirmationCode": { "minLength": 1, "type": "string" },
           "decidedAt": {
             "maximum": 9007199254740991,
@@ -4652,6 +4688,7 @@ export const AuthDeviceUserAuthoritiesReviewsListResponseSchema = {
           "deploymentId",
           "instanceId",
           "devicePrincipalId",
+          "activatedByUserPrincipalId",
           "state",
           "confirmationCode",
           "requestedAt",

@@ -1113,6 +1113,7 @@ export type AuthDeploymentsCreateInput = {
   participantId: string | null;
   portalId: string | null;
   requiresDeviceDelegation: boolean;
+  reviewMode: "none" | "required" | null;
 };
 export type AuthDeploymentsCreateOutput = {
   deployment: {
@@ -1125,6 +1126,7 @@ export type AuthDeploymentsCreateOutput = {
     participantId: string | null;
     portalId: string | null;
     requiresDeviceDelegation: boolean;
+    reviewMode: "none" | "required" | null;
     revokedAt: number | null;
     state: "active" | "disabled" | "revoked";
     updatedAt: number;
@@ -1149,6 +1151,7 @@ export type AuthDeploymentsDisableOutput = {
     participantId: string | null;
     portalId: string | null;
     requiresDeviceDelegation: boolean;
+    reviewMode: "none" | "required" | null;
     revokedAt: number | null;
     state: "active" | "disabled" | "revoked";
     updatedAt: number;
@@ -1179,6 +1182,7 @@ export type AuthDeploymentsEnableOutput = {
     participantId: string | null;
     portalId: string | null;
     requiresDeviceDelegation: boolean;
+    reviewMode: "none" | "required" | null;
     revokedAt: number | null;
     state: "active" | "disabled" | "revoked";
     updatedAt: number;
@@ -1210,6 +1214,7 @@ export type AuthDeploymentsListOutput = {
       participantId: string | null;
       portalId: string | null;
       requiresDeviceDelegation: boolean;
+      reviewMode: "none" | "required" | null;
       revokedAt: number | null;
       state: "active" | "disabled" | "revoked";
       updatedAt: number;
@@ -1236,6 +1241,7 @@ export type AuthDeploymentsRemoveOutput = {
     participantId: string | null;
     portalId: string | null;
     requiresDeviceDelegation: boolean;
+    reviewMode: "none" | "required" | null;
     revokedAt: number | null;
     state: "active" | "disabled" | "revoked";
     updatedAt: number;
@@ -1408,6 +1414,7 @@ export type AuthDeviceUserAuthoritiesReviewsDecideInput = {
 };
 export type AuthDeviceUserAuthoritiesReviewsDecideOutput = {
   review: {
+    activatedByUserPrincipalId: string | null;
     confirmationCode: string;
     decidedAt: number | null;
     decidedBy: string | null;
@@ -1432,6 +1439,7 @@ export type AuthDeviceUserAuthoritiesReviewsListInput = {
 export type AuthDeviceUserAuthoritiesReviewsListOutput = {
   entries: Array<
     {
+      activatedByUserPrincipalId: string | null;
       confirmationCode: string;
       decidedAt: number | null;
       decidedBy: string | null;
@@ -2734,7 +2742,10 @@ export type AuthUsersUpdateOutput = {
   };
 };
 
-export type AuthDeviceUserAuthoritiesResolveInput = { flowId: string };
+export type AuthDeviceUserAuthoritiesResolveInput = {
+  confirmationCode: string;
+  flowId: string;
+};
 export type AuthDeviceUserAuthoritiesResolveProgress = {
   retryAfterMs: number;
   state: "waiting" | "review_pending" | "delegation_pending";
@@ -2865,7 +2876,7 @@ export type AuthDeviceUserAuthoritiesResolveOutput = {
     version: number;
   };
   review: {
-    confirmationCode: string;
+    activatedByUserPrincipalId: string | null;
     decidedAt: number | null;
     decidedBy: string | null;
     deploymentId: string;

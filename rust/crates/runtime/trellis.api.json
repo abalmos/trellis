@@ -3431,6 +3431,17 @@
           "minimum": 0,
           "maximum": 9007199254740991
         },
+        "reviewMode": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "enum": [
+            "none",
+            "required",
+            null
+          ]
+        },
         "requiresDeviceDelegation": {
           "type": "boolean"
         },
@@ -3450,6 +3461,7 @@
         "displayName",
         "participantId",
         "expiresAt",
+        "reviewMode",
         "requiresDeviceDelegation",
         "portalId",
         "idempotencyKey"
@@ -3495,6 +3507,17 @@
               ],
               "minimum": 0,
               "maximum": 9007199254740991
+            },
+            "reviewMode": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "enum": [
+                "none",
+                "required",
+                null
+              ]
             },
             "requiresDeviceDelegation": {
               "type": "boolean"
@@ -3544,6 +3567,7 @@
             "state",
             "participantId",
             "expiresAt",
+            "reviewMode",
             "requiresDeviceDelegation",
             "portalId",
             "createdAt",
@@ -3629,6 +3653,17 @@
                 "minimum": 0,
                 "maximum": 9007199254740991
               },
+              "reviewMode": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "enum": [
+                  "none",
+                  "required",
+                  null
+                ]
+              },
               "requiresDeviceDelegation": {
                 "type": "boolean"
               },
@@ -3677,6 +3712,7 @@
               "state",
               "participantId",
               "expiresAt",
+              "reviewMode",
               "requiresDeviceDelegation",
               "portalId",
               "createdAt",
@@ -3770,6 +3806,17 @@
               "minimum": 0,
               "maximum": 9007199254740991
             },
+            "reviewMode": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "enum": [
+                "none",
+                "required",
+                null
+              ]
+            },
             "requiresDeviceDelegation": {
               "type": "boolean"
             },
@@ -3818,6 +3865,7 @@
             "state",
             "participantId",
             "expiresAt",
+            "reviewMode",
             "requiresDeviceDelegation",
             "portalId",
             "createdAt",
@@ -3931,6 +3979,17 @@
               "minimum": 0,
               "maximum": 9007199254740991
             },
+            "reviewMode": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "enum": [
+                "none",
+                "required",
+                null
+              ]
+            },
             "requiresDeviceDelegation": {
               "type": "boolean"
             },
@@ -3979,6 +4038,7 @@
             "state",
             "participantId",
             "expiresAt",
+            "reviewMode",
             "requiresDeviceDelegation",
             "portalId",
             "createdAt",
@@ -4092,6 +4152,17 @@
               "minimum": 0,
               "maximum": 9007199254740991
             },
+            "reviewMode": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "enum": [
+                "none",
+                "required",
+                null
+              ]
+            },
             "requiresDeviceDelegation": {
               "type": "boolean"
             },
@@ -4140,6 +4211,7 @@
             "state",
             "participantId",
             "expiresAt",
+            "reviewMode",
             "requiresDeviceDelegation",
             "portalId",
             "createdAt",
@@ -10971,6 +11043,12 @@
                 "type": "string",
                 "minLength": 1
               },
+              "activatedByUserPrincipalId": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
               "state": {
                 "enum": [
                   "pending",
@@ -11025,6 +11103,7 @@
               "deploymentId",
               "instanceId",
               "devicePrincipalId",
+              "activatedByUserPrincipalId",
               "state",
               "confirmationCode",
               "requestedAt",
@@ -11107,6 +11186,12 @@
               "type": "string",
               "minLength": 1
             },
+            "activatedByUserPrincipalId": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
             "state": {
               "enum": [
                 "pending",
@@ -11161,6 +11246,7 @@
             "deploymentId",
             "instanceId",
             "devicePrincipalId",
+            "activatedByUserPrincipalId",
             "state",
             "confirmationCode",
             "requestedAt",
@@ -11182,10 +11268,15 @@
         "flowId": {
           "type": "string",
           "minLength": 1
+        },
+        "confirmationCode": {
+          "type": "string",
+          "minLength": 1
         }
       },
       "required": [
-        "flowId"
+        "flowId",
+        "confirmationCode"
       ]
     },
     "AuthDeviceUserAuthoritiesResolveProgress": {
@@ -11331,6 +11422,12 @@
               "type": "string",
               "minLength": 1
             },
+            "activatedByUserPrincipalId": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
             "state": {
               "enum": [
                 "pending",
@@ -11339,10 +11436,6 @@
                 "expired",
                 "revoked"
               ]
-            },
-            "confirmationCode": {
-              "type": "string",
-              "minLength": 1
             },
             "requestedAt": {
               "type": "integer",
@@ -11385,8 +11478,8 @@
             "deploymentId",
             "instanceId",
             "devicePrincipalId",
+            "activatedByUserPrincipalId",
             "state",
-            "confirmationCode",
             "requestedAt",
             "expiresAt",
             "decidedAt",
@@ -15496,7 +15589,7 @@
         "ValidationError",
         "UnexpectedError"
       ],
-      "cancel": true,
+      "cancel": false,
       "docs": {
         "summary": "Resolve bounded device activation and delegation.",
         "markdown": "Resolve bounded device activation and delegation without busy-polling storage.\n"

@@ -478,15 +478,15 @@
         ]
       },
       "completion": {
-        "rust": "pending"
+        "rust": "implemented"
       },
-      "pending": {
-        "reason": "The obsolete pre-Rust-auth test port was removed; this runtime behavior requires a current Rust live test.",
-        "owner": "Trellis Rust runtime",
-        "intendedMilestone": "post-M9 testing correction follow-up"
-      },
-      "classification": "isolated-process",
-      "isolationReason": "mutates process-global state or process lifecycle"
+      "classification": "shared",
+      "implementations": {
+        "rust": {
+          "module": "jobs",
+          "function": "jobs_keyed_jobs_queue_policies_live"
+        }
+      }
     },
     {
       "id": "jobs.live-updates-are-typed-and-stop-at-terminal-state",
@@ -854,15 +854,15 @@
         ]
       },
       "completion": {
-        "rust": "pending"
+        "rust": "implemented"
       },
-      "pending": {
-        "reason": "The obsolete pre-Rust-auth test port was removed; this runtime behavior requires a current Rust live test.",
-        "owner": "Trellis Rust runtime",
-        "intendedMilestone": "post-M9 testing correction follow-up"
-      },
-      "classification": "isolated-process",
-      "isolationReason": "mutates process-global state or process lifecycle"
+      "classification": "shared",
+      "implementations": {
+        "rust": {
+          "module": "jobs",
+          "function": "jobs_terminal_local_job_edges_and_admin_rpcs"
+        }
+      }
     },
     {
       "id": "health.projection-lifecycle-and-recovery",
@@ -925,93 +925,6 @@
       }
     },
     {
-      "id": "authority-plan.preapproved-contract-connects",
-      "fixture": "authority-plan",
-      "title": "Pre-approved service contract connects without a pending authority plan",
-      "coverage": [
-        "deployment-authority",
-        "contract-planning",
-        "plan-approval",
-        "cross-runtime-rpc"
-      ],
-      "description": "A service contract approved before startup connects, handles an RPC, and leaves no pending authority plans.",
-      "scenario": {
-        "participants": [
-          {
-            "name": "service",
-            "kind": "service",
-            "contract": "trellis.integration.authority-plan.service@v1"
-          },
-          {
-            "name": "client",
-            "kind": "app",
-            "contract": "trellis.integration.authority-plan.base-client@v1"
-          }
-        ],
-        "given": [
-          "a strict deployment has accepted the base service contract"
-        ],
-        "when": [
-          "the service connects and the client calls Plan.Ping"
-        ],
-        "then": [
-          "the RPC succeeds",
-          "no pending authority plan remains for the deployment"
-        ]
-      },
-      "completion": {
-        "rust": "pending"
-      },
-      "pending": {
-        "reason": "The obsolete pre-Rust-auth test port was removed; this runtime behavior requires a current Rust live test.",
-        "owner": "Trellis Rust runtime",
-        "intendedMilestone": "post-M9 testing correction follow-up"
-      },
-      "classification": "shared"
-    },
-    {
-      "id": "authority-plan.presented-update-is-pending-at-connect",
-      "fixture": "authority-plan",
-      "title": "Presented additive contract creates a pending update and blocks connect",
-      "coverage": [
-        "deployment-authority",
-        "contract-planning",
-        "strict-compatibility",
-        "plan-approval"
-      ],
-      "description": "A service presents a same-lineage additive contract at connect time; Trellis records a pending update plan and the service remains blocked.",
-      "scenario": {
-        "participants": [
-          {
-            "name": "service",
-            "kind": "service",
-            "contract": "trellis.integration.authority-plan.service@v1"
-          }
-        ],
-        "given": [
-          "a strict deployment has accepted the base contract",
-          "a service instance presents an additive same-contract digest"
-        ],
-        "when": [
-          "the service attempts to connect"
-        ],
-        "then": [
-          "the connect remains pending",
-          "a pending update plan exists for the additive digest",
-          "the added RPC is not mounted"
-        ]
-      },
-      "completion": {
-        "rust": "pending"
-      },
-      "pending": {
-        "reason": "The obsolete pre-Rust-auth test port was removed; this runtime behavior requires a current Rust live test.",
-        "owner": "Trellis Rust runtime",
-        "intendedMilestone": "post-M9 testing correction follow-up"
-      },
-      "classification": "shared"
-    },
-    {
       "id": "authority-plan.presented-update-approved-then-connects",
       "fixture": "authority-plan",
       "title": "Accepted additive update unblocks service connect",
@@ -1049,61 +962,15 @@
         ]
       },
       "completion": {
-        "rust": "pending"
+        "rust": "implemented"
       },
-      "pending": {
-        "reason": "The obsolete pre-Rust-auth test port was removed; this runtime behavior requires a current Rust live test.",
-        "owner": "Trellis Rust runtime",
-        "intendedMilestone": "post-M9 testing correction follow-up"
-      },
-      "classification": "shared"
-    },
-    {
-      "id": "authority-plan.presented-update-rejected-stays-blocked",
-      "fixture": "authority-plan",
-      "title": "Rejected additive update remains blocked and preserves old authority",
-      "coverage": [
-        "deployment-authority",
-        "contract-planning",
-        "strict-compatibility",
-        "plan-rejection",
-        "cross-runtime-rpc"
-      ],
-      "description": "Rejecting a pending additive update keeps the new service blocked while the old approved contract path remains usable.",
-      "scenario": {
-        "participants": [
-          {
-            "name": "service",
-            "kind": "service",
-            "contract": "trellis.integration.authority-plan.service@v1"
-          },
-          {
-            "name": "client",
-            "kind": "app",
-            "contract": "trellis.integration.authority-plan.base-client@v1"
-          }
-        ],
-        "given": [
-          "a pending additive update plan exists"
-        ],
-        "when": [
-          "the update plan is rejected"
-        ],
-        "then": [
-          "the plan is listed as rejected with the supplied reason",
-          "the additive service remains blocked",
-          "the base contract RPC still works"
-        ]
-      },
-      "completion": {
-        "rust": "pending"
-      },
-      "pending": {
-        "reason": "The obsolete pre-Rust-auth test port was removed; this runtime behavior requires a current Rust live test.",
-        "owner": "Trellis Rust runtime",
-        "intendedMilestone": "post-M9 testing correction follow-up"
-      },
-      "classification": "shared"
+      "classification": "shared",
+      "implementations": {
+        "rust": {
+          "module": "authority_plan",
+          "function": "accepted_additive_update_unblocks_service_and_rpc"
+        }
+      }
     },
     {
       "id": "authority-plan.incompatible-migration-approved-replaces-contract",
@@ -1143,61 +1010,15 @@
         ]
       },
       "completion": {
-        "rust": "pending"
+        "rust": "implemented"
       },
-      "pending": {
-        "reason": "The obsolete pre-Rust-auth test port was removed; this runtime behavior requires a current Rust live test.",
-        "owner": "Trellis Rust runtime",
-        "intendedMilestone": "post-M9 testing correction follow-up"
-      },
-      "classification": "shared"
-    },
-    {
-      "id": "authority-plan.incompatible-migration-rejected-keeps-old-contract",
-      "fixture": "authority-plan",
-      "title": "Rejected incompatible migration keeps old contract usable",
-      "coverage": [
-        "deployment-authority",
-        "contract-planning",
-        "strict-compatibility",
-        "plan-rejection",
-        "cross-runtime-rpc"
-      ],
-      "description": "Rejecting an incompatible same-contract migration keeps the replacement blocked and preserves the old approved runtime path.",
-      "scenario": {
-        "participants": [
-          {
-            "name": "service",
-            "kind": "service",
-            "contract": "trellis.integration.authority-plan.service@v1"
-          },
-          {
-            "name": "client",
-            "kind": "app",
-            "contract": "trellis.integration.authority-plan.base-client@v1"
-          }
-        ],
-        "given": [
-          "a strict deployment has accepted and used the base digest",
-          "a replacement service presents an incompatible same-contract digest"
-        ],
-        "when": [
-          "the migration plan is rejected"
-        ],
-        "then": [
-          "the replacement service remains blocked",
-          "the old base RPC still succeeds"
-        ]
-      },
-      "completion": {
-        "rust": "pending"
-      },
-      "pending": {
-        "reason": "The obsolete pre-Rust-auth test port was removed; this runtime behavior requires a current Rust live test.",
-        "owner": "Trellis Rust runtime",
-        "intendedMilestone": "post-M9 testing correction follow-up"
-      },
-      "classification": "shared"
+      "classification": "shared",
+      "implementations": {
+        "rust": {
+          "module": "authority_plan",
+          "function": "accepted_incompatible_migration_replaces_service_contract"
+        }
+      }
     },
     {
       "id": "authority-plan.compatible-replacement-auto-allowed-strict",
@@ -1236,102 +1057,15 @@
         ]
       },
       "completion": {
-        "rust": "pending"
+        "rust": "implemented"
       },
-      "pending": {
-        "reason": "The obsolete pre-Rust-auth test port was removed; this runtime behavior requires a current Rust live test.",
-        "owner": "Trellis Rust runtime",
-        "intendedMilestone": "post-M9 testing correction follow-up"
-      },
-      "classification": "shared"
-    },
-    {
-      "id": "authority-plan.mutable-dev-auto-accepts-incompatible-migration",
-      "fixture": "authority-plan",
-      "title": "Mutable-dev auto-accepts incompatible same-contract migration",
-      "coverage": [
-        "deployment-authority",
-        "contract-planning",
-        "mutable-dev",
-        "plan-approval",
-        "cross-runtime-rpc"
-      ],
-      "description": "A mutable-dev deployment records and auto-accepts an incompatible same-contract migration, allowing the replacement service to connect.",
-      "scenario": {
-        "participants": [
-          {
-            "name": "service",
-            "kind": "service",
-            "contract": "trellis.integration.authority-plan.service@v1"
-          },
-          {
-            "name": "client",
-            "kind": "app",
-            "contract": "trellis.integration.authority-plan.incompatible-client@v1"
-          }
-        ],
-        "given": [
-          "a mutable-dev deployment has accepted and used the base digest"
-        ],
-        "when": [
-          "a replacement service presents an incompatible same-contract digest"
-        ],
-        "then": [
-          "an accepted migration plan is listed",
-          "the replacement service connects",
-          "the replacement RPC succeeds"
-        ]
-      },
-      "completion": {
-        "rust": "pending"
-      },
-      "pending": {
-        "reason": "The obsolete pre-Rust-auth test port was removed; this runtime behavior requires a current Rust live test.",
-        "owner": "Trellis Rust runtime",
-        "intendedMilestone": "post-M9 testing correction follow-up"
-      },
-      "classification": "shared"
-    },
-    {
-      "id": "authority-plan.mutable-dev-rejected-explicit-update-still-blocks",
-      "fixture": "authority-plan",
-      "title": "Mutable-dev does not ignore an explicitly rejected update",
-      "coverage": [
-        "deployment-authority",
-        "contract-planning",
-        "mutable-dev",
-        "plan-rejection"
-      ],
-      "description": "An additive update in mutable-dev can be rejected and remains blocked, proving auto-accept is limited to same-contract migrations.",
-      "scenario": {
-        "participants": [
-          {
-            "name": "service",
-            "kind": "service",
-            "contract": "trellis.integration.authority-plan.service@v1"
-          }
-        ],
-        "given": [
-          "a mutable-dev deployment has accepted the base contract",
-          "an additive update plan is pending"
-        ],
-        "when": [
-          "the update plan is rejected"
-        ],
-        "then": [
-          "the plan remains rejected",
-          "the additive service remains blocked"
-        ]
-      },
-      "completion": {
-        "rust": "pending"
-      },
-      "pending": {
-        "reason": "The obsolete pre-Rust-auth test port was removed; this runtime behavior requires a current Rust live test.",
-        "owner": "Trellis Rust runtime",
-        "intendedMilestone": "post-M9 testing correction follow-up"
-      },
-      "classification": "shared"
+      "classification": "shared",
+      "implementations": {
+        "rust": {
+          "module": "authority_plan",
+          "function": "compatible_metadata_replacement_connects_without_approval"
+        }
+      }
     },
     {
       "id": "authority-plan.resource-change-migration-approved-and-bound",
@@ -1345,7 +1079,7 @@
         "resource-migration",
         "cross-runtime-rpc"
       ],
-      "description": "A changed required KV resource definition creates a migration plan; after acceptance, the replacement service receives a usable bound KV handle.",
+      "description": "A changed required KV resource definition creates an update plan; after acceptance, the replacement service receives only the exact new usable KV binding.",
       "scenario": {
         "participants": [
           {
@@ -1372,57 +1106,15 @@
         ]
       },
       "completion": {
-        "rust": "pending"
+        "rust": "implemented"
       },
-      "pending": {
-        "reason": "The obsolete pre-Rust-auth test port was removed; this runtime behavior requires a current Rust live test.",
-        "owner": "Trellis Rust runtime",
-        "intendedMilestone": "post-M9 testing correction follow-up"
-      },
-      "classification": "shared"
-    },
-    {
-      "id": "service-approval.startup-blocks-before-authority-approval",
-      "fixture": "service-approval",
-      "title": "Service startup blocks before deployment authority approval",
-      "coverage": [
-        "service-authority-acceptance-flow",
-        "cross-runtime-rpc",
-        "observability-trace-matrix"
-      ],
-      "description": "A service instance key is provisioned before contract approval, and the service connect remains pending.",
-      "scenario": {
-        "participants": [
-          {
-            "name": "admin",
-            "kind": "admin",
-            "contract": "trellis.integration.service-approval-admin@v1"
-          },
-          {
-            "name": "service",
-            "kind": "service",
-            "contract": "trellis.integration.service-approval-service@v1"
-          }
-        ],
-        "given": [
-          "a service instance key is provisioned before contract approval"
-        ],
-        "when": [
-          "the service attempts to connect"
-        ],
-        "then": [
-          "the service connect remains pending"
-        ]
-      },
-      "completion": {
-        "rust": "pending"
-      },
-      "pending": {
-        "reason": "The obsolete pre-Rust-auth test port was removed; this runtime behavior requires a current Rust live test.",
-        "owner": "Trellis Rust runtime",
-        "intendedMilestone": "post-M9 testing correction follow-up"
-      },
-      "classification": "shared"
+      "classification": "shared",
+      "implementations": {
+        "rust": {
+          "module": "authority_plan",
+          "function": "accepted_resource_migration_binds_changed_kv_definition"
+        }
+      }
     },
     {
       "id": "service-approval.startup-completes-after-authority-approval",
@@ -1459,63 +1151,15 @@
         ]
       },
       "completion": {
-        "rust": "pending"
+        "rust": "implemented"
       },
-      "pending": {
-        "reason": "The obsolete pre-Rust-auth test port was removed; this runtime behavior requires a current Rust live test.",
-        "owner": "Trellis Rust runtime",
-        "intendedMilestone": "post-M9 testing correction follow-up"
-      },
-      "classification": "shared"
-    },
-    {
-      "id": "service-approval.approved-service-handles-client-rpc",
-      "fixture": "service-approval",
-      "title": "Approved service handles a client RPC",
-      "coverage": [
-        "service-authority-acceptance-flow",
-        "cross-runtime-rpc",
-        "observability-trace-matrix"
-      ],
-      "description": "An approved service registers an RPC handler and an authorized client receives a typed response.",
-      "scenario": {
-        "participants": [
-          {
-            "name": "admin",
-            "kind": "admin",
-            "contract": "trellis.integration.service-approval-admin@v1"
-          },
-          {
-            "name": "service",
-            "kind": "service",
-            "contract": "trellis.integration.service-approval-service@v1"
-          },
-          {
-            "name": "client",
-            "kind": "app",
-            "contract": "trellis.integration.service-approval-client@v1"
-          }
-        ],
-        "given": [
-          "a service is connected and approved",
-          "the service registers an RPC handler"
-        ],
-        "when": [
-          "the client calls the service RPC"
-        ],
-        "then": [
-          "the client receives a typed response"
-        ]
-      },
-      "completion": {
-        "rust": "pending"
-      },
-      "pending": {
-        "reason": "The obsolete pre-Rust-auth test port was removed; this runtime behavior requires a current Rust live test.",
-        "owner": "Trellis Rust runtime",
-        "intendedMilestone": "post-M9 testing correction follow-up"
-      },
-      "classification": "shared"
+      "classification": "shared",
+      "implementations": {
+        "rust": {
+          "module": "authority_plan",
+          "function": "service_startup_waits_for_additive_authority_approval"
+        }
+      }
     },
     {
       "id": "service-approval.service-bootstrap-denies-missing-disabled-and-digest-drift",
@@ -1556,153 +1200,15 @@
         ]
       },
       "completion": {
-        "rust": "pending"
+        "rust": "implemented"
       },
-      "pending": {
-        "reason": "The obsolete pre-Rust-auth test port was removed; this runtime behavior requires a current Rust live test.",
-        "owner": "Trellis Rust runtime",
-        "intendedMilestone": "post-M9 testing correction follow-up"
-      },
-      "classification": "shared"
-    },
-    {
-      "id": "app-identity-approval.connect-requires-auth-flow",
-      "fixture": "app-identity-approval",
-      "title": "App client connect triggers auth-required callback before approval",
-      "coverage": [
-        "app-identity-grant-approval",
-        "auth-protocol-matrix",
-        "observability-trace-matrix"
-      ],
-      "description": "TrellisClient.connect invoked before approval triggers an auth-required callback with a login URL, session key mode, and session key.",
-      "scenario": {
-        "participants": [
-          {
-            "name": "admin",
-            "kind": "admin",
-            "contract": "trellis.auth@v1"
-          },
-          {
-            "name": "client",
-            "kind": "app",
-            "contract": "trellis.integration.app-identity-approval-client@v1"
-          }
-        ],
-        "given": [
-          "the app client contract requires identity grant approval"
-        ],
-        "when": [
-          "the client attempts to connect before approval"
-        ],
-        "then": [
-          "the client receives an auth-required callback",
-          "the callback includes a login URL",
-          "the callback includes a session key mode",
-          "the callback includes a session key"
-        ]
-      },
-      "completion": {
-        "rust": "pending"
-      },
-      "pending": {
-        "reason": "The obsolete pre-Rust-auth test port was removed; this runtime behavior requires a current Rust live test.",
-        "owner": "Trellis Rust runtime",
-        "intendedMilestone": "post-M9 testing correction follow-up"
-      },
-      "classification": "shared"
-    },
-    {
-      "id": "app-identity-approval.approved-client-connects",
-      "fixture": "app-identity-approval",
-      "title": "Approved app client connects successfully",
-      "coverage": [
-        "app-identity-grant-approval",
-        "auth-protocol-matrix",
-        "observability-trace-matrix"
-      ],
-      "description": "After admin-assisted approval completes, the client connects with an open connection.",
-      "scenario": {
-        "participants": [
-          {
-            "name": "admin",
-            "kind": "admin",
-            "contract": "trellis.auth@v1"
-          },
-          {
-            "name": "client",
-            "kind": "app",
-            "contract": "trellis.integration.app-identity-approval-client@v1"
-          }
-        ],
-        "given": [
-          "the app client contract requires identity grant approval"
-        ],
-        "when": [
-          "the admin completes the approval flow",
-          "the client connects"
-        ],
-        "then": [
-          "the client connects with an open connection"
-        ]
-      },
-      "completion": {
-        "rust": "pending"
-      },
-      "pending": {
-        "reason": "The obsolete pre-Rust-auth test port was removed; this runtime behavior requires a current Rust live test.",
-        "owner": "Trellis Rust runtime",
-        "intendedMilestone": "post-M9 testing correction follow-up"
-      },
-      "classification": "shared"
-    },
-    {
-      "id": "app-identity-approval.approved-client-calls-service",
-      "fixture": "app-identity-approval",
-      "title": "Approved app client calls a service RPC",
-      "coverage": [
-        "app-identity-grant-approval",
-        "auth-protocol-matrix",
-        "observability-trace-matrix"
-      ],
-      "description": "An approved app client calls a generated service RPC and receives a typed response.",
-      "scenario": {
-        "participants": [
-          {
-            "name": "admin",
-            "kind": "admin",
-            "contract": "trellis.auth@v1"
-          },
-          {
-            "name": "service",
-            "kind": "service",
-            "contract": "trellis.integration.app-identity-approval-service@v1"
-          },
-          {
-            "name": "client",
-            "kind": "app",
-            "contract": "trellis.integration.app-identity-approval-client@v1"
-          }
-        ],
-        "given": [
-          "a service is connected and handles an RPC",
-          "the client has an approved identity grant"
-        ],
-        "when": [
-          "the client calls the generated service RPC"
-        ],
-        "then": [
-          "the client receives a typed response"
-        ]
-      },
-      "completion": {
-        "rust": "pending"
-      },
-      "pending": {
-        "reason": "The obsolete pre-Rust-auth test port was removed; this runtime behavior requires a current Rust live test.",
-        "owner": "Trellis Rust runtime",
-        "intendedMilestone": "post-M9 testing correction follow-up"
-      },
-      "classification": "shared"
+      "classification": "shared",
+      "implementations": {
+        "rust": {
+          "module": "authority_plan",
+          "function": "service_bootstrap_denies_invalid_or_disabled_identity"
+        }
+      }
     },
     {
       "id": "auth.local-login-binds-approved-client",
@@ -1750,12 +1256,13 @@
         ]
       },
       "completion": {
-        "rust": "pending"
+        "rust": "implemented"
       },
-      "pending": {
-        "reason": "The obsolete pre-Rust-auth test port was removed; this runtime behavior requires a current Rust live test.",
-        "owner": "Trellis Rust runtime",
-        "intendedMilestone": "post-M9 testing correction follow-up"
+      "implementations": {
+        "rust": {
+          "module": "auth",
+          "function": "local_login_binds_approved_client_and_calls_authorized_rpc"
+        }
       },
       "classification": "shared"
     },
@@ -1805,80 +1312,27 @@
         ]
       },
       "completion": {
-        "rust": "pending"
+        "rust": "implemented"
       },
-      "pending": {
-        "reason": "The obsolete pre-Rust-auth test port was removed; this runtime behavior requires a current Rust live test.",
-        "owner": "Trellis Rust runtime",
-        "intendedMilestone": "post-M9 testing correction follow-up"
-      },
-      "classification": "shared"
-    },
-    {
-      "id": "auth.local-login-replaces-session-when-identity-changes",
-      "fixture": "auth",
-      "title": "Local login replaces a session when the authenticated identity changes",
-      "coverage": [
-        "app-identity-grant-approval",
-        "auth-protocol-matrix",
-        "capability-permission-matrix",
-        "cross-runtime-rpc",
-        "observability-trace-matrix"
-      ],
-      "description": "An app client authenticates with local login, then the same session key completes a later local-login bind as a different local identity. Auth replaces the session principal and removes stale runtime access from the previous identity.",
-      "scenario": {
-        "participants": [
-          {
-            "name": "admin",
-            "kind": "admin",
-            "contract": "trellis.auth@v1"
-          },
-          {
-            "name": "service",
-            "kind": "service",
-            "contract": "trellis.integration.auth-local-login-service@v1"
-          },
-          {
-            "name": "client",
-            "kind": "app",
-            "contract": "trellis.integration.auth-local-login-client@v1"
-          }
-        ],
-        "given": [
-          "a registered service handles an RPC required by the app client contract",
-          "the app client has an authenticated approved session for one local identity",
-          "a second active local admin identity exists"
-        ],
-        "when": [
-          "the same app session key completes local login and approval as the second identity"
-        ],
-        "then": [
-          "Auth.Sessions.List shows the app session principal has changed",
-          "Auth.Sessions.Me on the replacement connection reports the second identity",
-          "the previous live connection is denied after replacement"
-        ]
-      },
-      "completion": {
-        "rust": "pending"
-      },
-      "pending": {
-        "reason": "The obsolete pre-Rust-auth test port was removed; this runtime behavior requires a current Rust live test.",
-        "owner": "Trellis Rust runtime",
-        "intendedMilestone": "post-M9 testing correction follow-up"
+      "implementations": {
+        "rust": {
+          "module": "auth",
+          "function": "local_login_rebinds_with_updated_authority"
+        }
       },
       "classification": "shared"
     },
     {
       "id": "auth.sessions-logout-deletes-session-and-connections",
       "fixture": "auth",
-      "title": "Auth.Sessions.Logout deletes the caller session and connection presence",
+      "title": "Auth.Sessions.Logout revokes the caller session and clears connection presence",
       "coverage": [
         "app-identity-grant-approval",
         "auth-protocol-matrix",
         "capability-permission-matrix",
         "cross-runtime-rpc"
       ],
-      "description": "An authenticated app/client session calls Auth.Sessions.Logout with empty input through the generated RPC surface; the session row and matching runtime connection presence disappear, and the old session can no longer call Auth.Sessions.Me.",
+      "description": "An authenticated app/client session calls Auth.Sessions.Logout through the generated RPC surface; the session is durably revoked, matching runtime connection presence disappears, and the old session material can no longer connect.",
       "scenario": {
         "participants": [
           {
@@ -1906,118 +1360,21 @@
           "the app client calls Auth.Sessions.Logout with empty input"
         ],
         "then": [
-          "Auth.Sessions.List no longer shows the logged-out app session",
+          "the durable app session is marked revoked",
           "Auth.Connections.List no longer shows runtime presence for the logged-out session",
           "the existing app session is denied for subsequent Auth.Sessions.Me calls"
         ]
       },
       "completion": {
-        "rust": "pending"
+        "rust": "implemented"
       },
-      "pending": {
-        "reason": "The obsolete pre-Rust-auth test port was removed; this runtime behavior requires a current Rust live test.",
-        "owner": "Trellis Rust runtime",
-        "intendedMilestone": "post-M9 testing correction follow-up"
-      },
-      "classification": "shared"
-    },
-    {
-      "id": "auth.sessions-logout-cleans-connections-after-kick-failure",
-      "fixture": "auth",
-      "title": "Auth.Sessions.Logout removes connection presence when kick fails",
-      "coverage": [
-        "app-identity-grant-approval",
-        "auth-protocol-matrix",
-        "cross-runtime-rpc"
-      ],
-      "description": "An authenticated app/client session calls Auth.Sessions.Logout while the live kick path rejects; logout still succeeds and durable session and connection presence are removed.",
-      "scenario": {
-        "participants": [
-          {
-            "name": "admin",
-            "kind": "admin",
-            "contract": "trellis.auth@v1"
-          },
-          {
-            "name": "service",
-            "kind": "service",
-            "contract": "trellis.integration.auth-local-login-service@v1"
-          },
-          {
-            "name": "client",
-            "kind": "app",
-            "contract": "trellis.integration.auth-local-login-client@v1"
-          }
-        ],
-        "given": [
-          "the app client has an authenticated approved session",
-          "Auth.Connections.List shows runtime connection presence for the app session",
-          "the Trellis test hook makes the logout kick reject once"
-        ],
-        "when": [
-          "the app client calls Auth.Sessions.Logout with empty input"
-        ],
-        "then": [
-          "Auth.Sessions.Logout succeeds",
-          "Auth.Sessions.List no longer shows the logged-out app session",
-          "Auth.Connections.List no longer shows runtime presence for the logged-out session"
-        ]
-      },
-      "completion": {
-        "rust": "pending"
-      },
-      "pending": {
-        "reason": "The obsolete pre-Rust-auth test port was removed; this runtime behavior requires a current Rust live test.",
-        "owner": "Trellis Rust runtime",
-        "intendedMilestone": "post-M9 testing correction follow-up"
-      },
-      "classification": "isolated-process",
-      "isolationReason": "mutates process-global state or process lifecycle"
-    },
-    {
-      "id": "auth.sessions-me-reports-app-envelope",
-      "fixture": "auth",
-      "title": "Auth.Sessions.Me reports the app user envelope",
-      "coverage": [
-        "app-identity-grant-approval",
-        "auth-protocol-matrix",
-        "cross-runtime-rpc"
-      ],
-      "description": "An authenticated app/client session calls Auth.Sessions.Me through the generated RPC surface and receives app participant metadata with a live user envelope and null device/service envelopes.",
-      "scenario": {
-        "participants": [
-          {
-            "name": "service",
-            "kind": "service",
-            "contract": "trellis.integration.auth-local-login-service@v1"
-          },
-          {
-            "name": "client",
-            "kind": "app",
-            "contract": "trellis.integration.auth-local-login-client@v1"
-          }
-        ],
-        "given": [
-          "the app client has an authenticated approved session"
-        ],
-        "when": [
-          "the app client calls Auth.Sessions.Me"
-        ],
-        "then": [
-          "the response participantKind is app",
-          "the response includes an active user envelope with current capabilities",
-          "the response device and service envelopes are null"
-        ]
-      },
-      "completion": {
-        "rust": "pending"
-      },
-      "pending": {
-        "reason": "The obsolete pre-Rust-auth test port was removed; this runtime behavior requires a current Rust live test.",
-        "owner": "Trellis Rust runtime",
-        "intendedMilestone": "post-M9 testing correction follow-up"
-      },
-      "classification": "shared"
+      "classification": "shared",
+      "implementations": {
+        "rust": {
+          "module": "auth",
+          "function": "sessions_logout_revokes_session_and_cleans_connections"
+        }
+      }
     },
     {
       "id": "auth.sessions-list-and-connections-list-report-participant-metadata",
@@ -2075,14 +1432,15 @@
         ]
       },
       "completion": {
-        "rust": "pending"
+        "rust": "implemented"
       },
-      "pending": {
-        "reason": "The obsolete pre-Rust-auth test port was removed; this runtime behavior requires a current Rust live test.",
-        "owner": "Trellis Rust runtime",
-        "intendedMilestone": "post-M9 testing correction follow-up"
-      },
-      "classification": "shared"
+      "classification": "shared",
+      "implementations": {
+        "rust": {
+          "module": "auth",
+          "function": "session_and_connection_inventory_report_participant_metadata"
+        }
+      }
     },
     {
       "id": "auth.connections-list-skips-malformed-connection-entries",
@@ -2126,107 +1484,15 @@
         ]
       },
       "completion": {
-        "rust": "pending"
+        "rust": "implemented"
       },
-      "pending": {
-        "reason": "The obsolete pre-Rust-auth test port was removed; this runtime behavior requires a current Rust live test.",
-        "owner": "Trellis Rust runtime",
-        "intendedMilestone": "post-M9 testing correction follow-up"
-      },
-      "classification": "shared"
-    },
-    {
-      "id": "auth.sessions-me-reports-service-envelope-and-current-user-state",
-      "fixture": "auth",
-      "title": "Auth.Sessions.Me reports service envelope and current user state",
-      "coverage": [
-        "app-identity-grant-approval",
-        "auth-protocol-matrix",
-        "cross-runtime-rpc"
-      ],
-      "description": "An authenticated app session observes current SQL-backed user active/capability state through Auth.Sessions.Me, and a connected service observes the service envelope from durable service instance state even when the stored service session deployment is stale.",
-      "scenario": {
-        "participants": [
-          {
-            "name": "service",
-            "kind": "service",
-            "contract": "trellis.integration.auth-local-login-service@v1"
-          },
-          {
-            "name": "client",
-            "kind": "app",
-            "contract": "trellis.integration.auth-local-login-client@v1"
-          }
-        ],
-        "given": [
-          "the app client has an authenticated approved session",
-          "a registered service is connected"
-        ],
-        "when": [
-          "the durable user projection is updated",
-          "the service session deployment is made stale while the durable service instance remains current",
-          "the app and service call Auth.Sessions.Me"
-        ],
-        "then": [
-          "Auth.Sessions.Me reports current user active and resolved capability state",
-          "Auth.Sessions.Me reports participantKind service with an active service envelope",
-          "the service envelope capabilities come from the current durable service instance"
-        ]
-      },
-      "completion": {
-        "rust": "pending"
-      },
-      "pending": {
-        "reason": "The obsolete pre-Rust-auth test port was removed; this runtime behavior requires a current Rust live test.",
-        "owner": "Trellis Rust runtime",
-        "intendedMilestone": "post-M9 testing correction follow-up"
-      },
-      "classification": "shared"
-    },
-    {
-      "id": "auth.sessions-me-reports-device-envelope",
-      "fixture": "auth",
-      "title": "Auth.Sessions.Me reports the activated device envelope",
-      "coverage": [
-        "auth-protocol-matrix",
-        "device-activation-parity",
-        "cross-runtime-rpc"
-      ],
-      "description": "An activated device session calls Auth.Sessions.Me and receives device participant metadata with the activated device envelope and activating user context.",
-      "scenario": {
-        "participants": [
-          {
-            "name": "admin",
-            "kind": "admin",
-            "contract": "trellis.auth@v1"
-          },
-          {
-            "name": "device",
-            "kind": "device",
-            "contract": "trellis.integration.device-activation-device@v1"
-          }
-        ],
-        "given": [
-          "a known device is provisioned and activated"
-        ],
-        "when": [
-          "the activated device calls Auth.Sessions.Me"
-        ],
-        "then": [
-          "the response participantKind is device",
-          "the response includes the activated device deployment and runtime public key",
-          "the response includes activating user context"
-        ]
-      },
-      "completion": {
-        "rust": "pending"
-      },
-      "pending": {
-        "reason": "The obsolete pre-Rust-auth test port was removed; this runtime behavior requires a current Rust live test.",
-        "owner": "Trellis Rust runtime",
-        "intendedMilestone": "post-M9 testing correction follow-up"
-      },
-      "classification": "shared"
+      "classification": "shared",
+      "implementations": {
+        "rust": {
+          "module": "auth",
+          "function": "connections_list_skips_malformed_entries"
+        }
+      }
     },
     {
       "id": "auth.sessions-me-rejects-stale-user-principals",
@@ -2237,7 +1503,7 @@
         "auth-protocol-matrix",
         "cross-runtime-rpc"
       ],
-      "description": "An authenticated app session is made stale by deleting the durable session row and then the durable user projection; Auth.Sessions.Me rejects both stale user principal states.",
+      "description": "An authenticated app session is made stale by directly disabling its durable user principal; Auth.Sessions.Me rejects the stale principal state.",
       "scenario": {
         "participants": [
           {
@@ -2255,70 +1521,23 @@
           "the app client has an authenticated approved session"
         ],
         "when": [
-          "the session row is deleted",
-          "the user projection row is deleted"
+          "the runtime-owned user principal row is directly disabled"
         ],
         "then": [
-          "Auth.Sessions.Me rejects the deleted session",
-          "Auth.Sessions.Me rejects the session whose durable user projection is missing"
+          "Auth.Sessions.Me rejects the session whose durable user principal is inactive"
         ]
       },
       "completion": {
-        "rust": "pending"
+        "rust": "implemented"
       },
-      "pending": {
-        "reason": "The obsolete pre-Rust-auth test port was removed; this runtime behavior requires a current Rust live test.",
-        "owner": "Trellis Rust runtime",
-        "intendedMilestone": "post-M9 testing correction follow-up"
-      },
-      "classification": "shared"
-    },
-    {
-      "id": "auth.sessions-me-rejects-stale-device-principals",
-      "fixture": "auth",
-      "title": "Auth.Sessions.Me rejects stale device session state",
-      "coverage": [
-        "auth-protocol-matrix",
-        "device-activation-parity",
-        "cross-runtime-rpc"
-      ],
-      "description": "An activated device session is made stale by deleting the durable session row, changing the device instance deployment, and changing the activation identity key; Auth.Sessions.Me rejects each stale device principal state.",
-      "scenario": {
-        "participants": [
-          {
-            "name": "admin",
-            "kind": "admin",
-            "contract": "trellis.auth@v1"
-          },
-          {
-            "name": "device",
-            "kind": "device",
-            "contract": "trellis.integration.device-activation-device@v1"
-          }
-        ],
-        "given": [
-          "a known device is provisioned and activated"
-        ],
-        "when": [
-          "the device session row is deleted",
-          "the device instance deployment no longer matches the activation",
-          "the activation identity key no longer matches the session"
-        ],
-        "then": [
-          "Auth.Sessions.Me rejects the deleted device session",
-          "Auth.Sessions.Me rejects the stale activation deployment",
-          "Auth.Sessions.Me rejects the stale activation identity key"
-        ]
-      },
-      "completion": {
-        "rust": "pending"
-      },
-      "pending": {
-        "reason": "The obsolete pre-Rust-auth test port was removed; this runtime behavior requires a current Rust live test.",
-        "owner": "Trellis Rust runtime",
-        "intendedMilestone": "post-M9 testing correction follow-up"
-      },
-      "classification": "shared"
+      "classification": "isolated-process",
+      "isolationReason": "requires test-only mutation of a user principal in the runtime-owned SQLite database",
+      "implementations": {
+        "rust": {
+          "module": "auth",
+          "function": "sessions_me_rejects_stale_user_principal"
+        }
+      }
     },
     {
       "id": "auth.session-revoke-denies-reconnect",
@@ -2365,466 +1584,13 @@
         ]
       },
       "completion": {
-        "rust": "pending"
+        "rust": "implemented"
       },
-      "pending": {
-        "reason": "The obsolete pre-Rust-auth test port was removed; this runtime behavior requires a current Rust live test.",
-        "owner": "Trellis Rust runtime",
-        "intendedMilestone": "post-M9 testing correction follow-up"
-      },
-      "classification": "shared"
-    },
-    {
-      "id": "auth.session-revoke-cleans-runtime-connection-presence",
-      "fixture": "auth",
-      "title": "Revoking an app session removes runtime connection presence",
-      "coverage": [
-        "app-identity-grant-approval",
-        "auth-protocol-matrix",
-        "capability-permission-matrix",
-        "cross-runtime-rpc",
-        "observability-trace-matrix"
-      ],
-      "description": "An authenticated app session appears in Auth.Connections.List, an admin revokes the session through Auth.Sessions.Revoke, and the matching runtime connection presence disappears from Auth.Connections.List along with the session row.",
-      "scenario": {
-        "participants": [
-          {
-            "name": "admin",
-            "kind": "admin",
-            "contract": "trellis.auth@v1"
-          },
-          {
-            "name": "service",
-            "kind": "service",
-            "contract": "trellis.integration.auth-local-login-service@v1"
-          },
-          {
-            "name": "client",
-            "kind": "app",
-            "contract": "trellis.integration.auth-local-login-client@v1"
-          }
-        ],
-        "given": [
-          "a registered service handles an RPC required by the app client contract",
-          "the app client has an authenticated approved session",
-          "Auth.Connections.List shows runtime connection presence for the app session"
-        ],
-        "when": [
-          "the admin revokes the app session through Auth.Sessions.Revoke"
-        ],
-        "then": [
-          "Auth.Sessions.List no longer shows the revoked app session",
-          "Auth.Connections.List no longer shows runtime presence for the revoked session",
-          "the existing app session is denied for subsequent Auth.Sessions.Me calls"
-        ]
-      },
-      "completion": {
-        "rust": "pending"
-      },
-      "pending": {
-        "reason": "The obsolete pre-Rust-auth test port was removed; this runtime behavior requires a current Rust live test.",
-        "owner": "Trellis Rust runtime",
-        "intendedMilestone": "post-M9 testing correction follow-up"
-      },
-      "classification": "shared"
-    },
-    {
-      "id": "auth.sessions-revoke-revokes-device-and-service-access",
-      "fixture": "auth",
-      "title": "Auth.Sessions.Revoke revokes device and service runtime access",
-      "coverage": [
-        "device-activation-end-to-end",
-        "service-bootstrap-authority",
-        "auth-protocol-matrix",
-        "cross-runtime-rpc"
-      ],
-      "description": "Revoking a live device session through Auth.Sessions.Revoke revokes the durable device activation and blocks device reconnect. Revoking a live service session through Auth.Sessions.Revoke disables the durable service instance and blocks service reconnect.",
-      "scenario": {
-        "participants": [
-          {
-            "name": "admin",
-            "kind": "admin",
-            "contract": "trellis.auth@v1"
-          },
-          {
-            "name": "device",
-            "kind": "device",
-            "contract": "trellis.integration.device-activation-device@v1"
-          },
-          {
-            "name": "service",
-            "kind": "service",
-            "contract": "trellis.integration.service-approval-service@v1"
-          }
-        ],
-        "given": [
-          "an activated device is connected with a live device session",
-          "a provisioned service instance is connected with a live service session"
-        ],
-        "when": [
-          "the admin revokes the device session through Auth.Sessions.Revoke",
-          "the admin revokes the service session through Auth.Sessions.Revoke"
-        ],
-        "then": [
-          "the durable device activation is listed as revoked",
-          "the old device session is removed and denied",
-          "the device cannot reconnect with the same root secret",
-          "the durable service instance is listed as disabled",
-          "the old service session is removed",
-          "the service cannot reconnect with the same instance key"
-        ]
-      },
-      "completion": {
-        "rust": "pending"
-      },
-      "pending": {
-        "reason": "The obsolete pre-Rust-auth test port was removed; this runtime behavior requires a current Rust live test.",
-        "owner": "Trellis Rust runtime",
-        "intendedMilestone": "post-M9 testing correction follow-up"
-      },
-      "classification": "shared"
-    },
-    {
-      "id": "device-activation.admin-provisions-known-device",
-      "fixture": "device-activation",
-      "title": "Admin provisions a known device identity",
-      "coverage": [
-        "device-activation-end-to-end",
-        "auth-protocol-matrix",
-        "observability-trace-matrix"
-      ],
-      "description": "The admin creates a device deployment, approves the device contract, provisions the device public identity and activation key, and receives expected instance metadata.",
-      "scenario": {
-        "participants": [
-          {
-            "name": "admin",
-            "kind": "admin",
-            "contract": "trellis.auth@v1"
-          },
-          {
-            "name": "device",
-            "kind": "device",
-            "contract": "trellis.integration.device-activation-device@v1"
-          }
-        ],
-        "given": [
-          "a deployment authority is configured"
-        ],
-        "when": [
-          "the admin creates a device deployment",
-          "the admin approves the device contract",
-          "the admin provisions the device with public identity and activation key"
-        ],
-        "then": [
-          "the admin receives expected instance metadata",
-          "the admin receives a deployment id",
-          "the admin receives a public identity key"
-        ]
-      },
-      "completion": {
-        "rust": "pending"
-      },
-      "pending": {
-        "reason": "The obsolete pre-Rust-auth test port was removed; this runtime behavior requires a current Rust live test.",
-        "owner": "Trellis Rust runtime",
-        "intendedMilestone": "post-M9 testing correction follow-up"
-      },
-      "classification": "shared"
-    },
-    {
-      "id": "device-activation.device-starts-activation-request",
-      "fixture": "device-activation",
-      "title": "Device starts an activation request",
-      "coverage": [
-        "device-activation-end-to-end",
-        "auth-protocol-matrix",
-        "observability-trace-matrix"
-      ],
-      "description": "The device builds a signed activation payload, starts the activation request through the public HTTP helper, and receives an activation URL with flow id.",
-      "scenario": {
-        "participants": [
-          {
-            "name": "admin",
-            "kind": "admin",
-            "contract": "trellis.integration.device-activation-admin@v1"
-          },
-          {
-            "name": "device",
-            "kind": "device",
-            "contract": "trellis.integration.device-activation-device@v1"
-          }
-        ],
-        "given": [
-          "a device has an activation key and public identity key"
-        ],
-        "when": [
-          "the device builds a signed activation payload",
-          "the device starts the activation request"
-        ],
-        "then": [
-          "the device receives an activation URL",
-          "the activation URL includes a flow id"
-        ]
-      },
-      "completion": {
-        "rust": "pending"
-      },
-      "pending": {
-        "reason": "The obsolete pre-Rust-auth test port was removed; this runtime behavior requires a current Rust live test.",
-        "owner": "Trellis Rust runtime",
-        "intendedMilestone": "post-M9 testing correction follow-up"
-      },
-      "classification": "shared"
-    },
-    {
-      "id": "device-activation.admin-resolves-activation-operation",
-      "fixture": "device-activation",
-      "title": "Admin resolves the device activation operation",
-      "coverage": [
-        "device-activation-end-to-end",
-        "auth-protocol-matrix",
-        "observability-trace-matrix"
-      ],
-      "description": "The admin starts Auth.DeviceUserAuthorities.Resolve operation and it completes with activated status, deployment id, and instance id.",
-      "scenario": {
-        "participants": [
-          {
-            "name": "admin",
-            "kind": "admin",
-            "contract": "trellis.integration.device-activation-admin@v1"
-          }
-        ],
-        "given": [
-          "a device activation request is pending"
-        ],
-        "when": [
-          "the admin starts the resolve operation"
-        ],
-        "then": [
-          "the operation completes with activated status",
-          "the operation completes with a deployment id",
-          "the operation completes with an instance id"
-        ]
-      },
-      "completion": {
-        "rust": "pending"
-      },
-      "pending": {
-        "reason": "The obsolete pre-Rust-auth test port was removed; this runtime behavior requires a current Rust live test.",
-        "owner": "Trellis Rust runtime",
-        "intendedMilestone": "post-M9 testing correction follow-up"
-      },
-      "classification": "shared"
-    },
-    {
-      "id": "device-activation.review-reject-denies-connect",
-      "fixture": "device-activation",
-      "title": "Rejected device activation review denies device connection",
-      "coverage": [
-        "device-activation-end-to-end",
-        "auth-protocol-matrix",
-        "capability-permission-matrix",
-        "observability-trace-matrix"
-      ],
-      "description": "An admin provisions a known device requiring review, the device starts activation, the admin rejects the activation review through public Auth operation/admin surfaces, the device wait observes terminal rejection, and the device cannot connect or authenticate.",
-      "scenario": {
-        "participants": [
-          {
-            "name": "admin",
-            "kind": "admin",
-            "contract": "trellis.integration.device-activation-admin@v1"
-          },
-          {
-            "name": "device",
-            "kind": "device",
-            "contract": "trellis.integration.device-activation-device@v1"
-          }
-        ],
-        "given": [
-          "an admin provisions a known device in a deployment that requires device activation review",
-          "the device starts an activation request",
-          "the admin starts Auth.DeviceUserAuthorities.Resolve and observes a pending review"
-        ],
-        "when": [
-          "the admin rejects the pending review through Auth.DeviceUserAuthorities.Reviews.Decide"
-        ],
-        "then": [
-          "the resolve operation reaches terminal rejected output",
-          "the device activation wait observes terminal rejection",
-          "the device cannot connect or authenticate as the rejected device"
-        ]
-      },
-      "completion": {
-        "rust": "pending"
-      },
-      "pending": {
-        "reason": "The obsolete pre-Rust-auth test port was removed; this runtime behavior requires a current Rust live test.",
-        "owner": "Trellis Rust runtime",
-        "intendedMilestone": "post-M9 testing correction follow-up"
-      },
-      "classification": "shared"
-    },
-    {
-      "id": "device-activation.revoked-device-cannot-reconnect",
-      "fixture": "device-activation",
-      "title": "Revoked device activation cannot reconnect or authenticate",
-      "coverage": [
-        "device-activation-end-to-end",
-        "auth-protocol-matrix",
-        "capability-permission-matrix",
-        "observability-trace-matrix"
-      ],
-      "description": "An admin provisions and activates a known device, the device connects and authenticates, the admin revokes the device activation through public Auth admin surfaces, public activation state reflects revocation, and the device cannot reconnect or authenticate afterwards.",
-      "scenario": {
-        "participants": [
-          {
-            "name": "admin",
-            "kind": "admin",
-            "contract": "trellis.integration.device-activation-admin@v1"
-          },
-          {
-            "name": "device",
-            "kind": "device",
-            "contract": "trellis.integration.device-activation-device@v1"
-          }
-        ],
-        "given": [
-          "an admin provisions and activates a known device",
-          "the device connects through the public device client surface",
-          "Auth.Sessions.Me reports the connected participant as the device"
-        ],
-        "when": [
-          "the admin revokes the device activation through Auth.DeviceUserAuthorities.Revoke"
-        ],
-        "then": [
-          "Auth.DeviceUserAuthorities.List shows the device activation as revoked",
-          "the existing device session is denied for subsequent Auth.Sessions.Me calls",
-          "the device cannot reconnect or authenticate as the revoked device"
-        ]
-      },
-      "completion": {
-        "rust": "pending"
-      },
-      "pending": {
-        "reason": "The obsolete pre-Rust-auth test port was removed; this runtime behavior requires a current Rust live test.",
-        "owner": "Trellis Rust runtime",
-        "intendedMilestone": "post-M9 testing correction follow-up"
-      },
-      "classification": "shared"
-    },
-    {
-      "id": "device-activation.device-receives-connect-info",
-      "fixture": "device-activation",
-      "title": "Device receives connection information after activation",
-      "coverage": [
-        "device-activation-end-to-end",
-        "auth-protocol-matrix",
-        "observability-trace-matrix"
-      ],
-      "description": "The device waits for activation and receives connect info with deployment id and contract digest.",
-      "scenario": {
-        "participants": [
-          {
-            "name": "device",
-            "kind": "device",
-            "contract": "trellis.integration.device-activation-device@v1"
-          }
-        ],
-        "given": [
-          "a device activation is in progress"
-        ],
-        "when": [
-          "the device waits for activation to complete"
-        ],
-        "then": [
-          "the device receives connect info with deployment id",
-          "the device receives connect info with contract digest"
-        ]
-      },
-      "completion": {
-        "rust": "pending"
-      },
-      "pending": {
-        "reason": "The obsolete pre-Rust-auth test port was removed; this runtime behavior requires a current Rust live test.",
-        "owner": "Trellis Rust runtime",
-        "intendedMilestone": "post-M9 testing correction follow-up"
-      },
-      "classification": "shared"
-    },
-    {
-      "id": "device-activation.activated-device-connects-and-authenticates",
-      "fixture": "device-activation",
-      "title": "Activated device connects and authenticates",
-      "coverage": [
-        "device-activation-end-to-end",
-        "auth-protocol-matrix",
-        "observability-trace-matrix"
-      ],
-      "description": "The activated device connects through the public device client surface and Auth.Sessions.Me reports participant kind device with expected identity.",
-      "scenario": {
-        "participants": [
-          {
-            "name": "device",
-            "kind": "device",
-            "contract": "trellis.integration.device-activation-device@v1"
-          }
-        ],
-        "given": [
-          "a device has been activated"
-        ],
-        "when": [
-          "the device connects through the public device client surface"
-        ],
-        "then": [
-          "Auth.Sessions.Me reports participant kind device",
-          "Auth.Sessions.Me reports the expected identity"
-        ]
-      },
-      "completion": {
-        "rust": "pending"
-      },
-      "pending": {
-        "reason": "The obsolete pre-Rust-auth test port was removed; this runtime behavior requires a current Rust live test.",
-        "owner": "Trellis Rust runtime",
-        "intendedMilestone": "post-M9 testing correction follow-up"
-      },
-      "classification": "shared"
-    },
-    {
-      "id": "device-activation.activated-device-authority-is-listed",
-      "fixture": "device-activation",
-      "title": "Activated device appears in admin authority list",
-      "coverage": [
-        "device-activation-end-to-end",
-        "auth-protocol-matrix",
-        "observability-trace-matrix"
-      ],
-      "description": "The admin lists device user authorities and the activated device entry is present.",
-      "scenario": {
-        "participants": [
-          {
-            "name": "admin",
-            "kind": "admin",
-            "contract": "trellis.integration.device-activation-admin@v1"
-          }
-        ],
-        "given": [
-          "a device has been activated"
-        ],
-        "when": [
-          "the admin lists device user authorities"
-        ],
-        "then": [
-          "the list includes the activated device entry"
-        ]
-      },
-      "completion": {
-        "rust": "pending"
-      },
-      "pending": {
-        "reason": "The obsolete pre-Rust-auth test port was removed; this runtime behavior requires a current Rust live test.",
-        "owner": "Trellis Rust runtime",
-        "intendedMilestone": "post-M9 testing correction follow-up"
+      "implementations": {
+        "rust": {
+          "module": "auth",
+          "function": "session_revoke_denies_reconnect"
+        }
       },
       "classification": "shared"
     },
@@ -2867,14 +1633,15 @@
         ]
       },
       "completion": {
-        "rust": "pending"
+        "rust": "implemented"
       },
-      "pending": {
-        "reason": "The obsolete pre-Rust-auth test port was removed; this runtime behavior requires a current Rust live test.",
-        "owner": "Trellis Rust runtime",
-        "intendedMilestone": "post-M9 testing correction follow-up"
-      },
-      "classification": "shared"
+      "classification": "shared",
+      "implementations": {
+        "rust": {
+          "module": "auth",
+          "function": "portal_grant_override_binds_without_user_selected_capability"
+        }
+      }
     },
     {
       "id": "auth.portal-route-selection-and-policy-drive-browser-flow",
@@ -2912,64 +1679,26 @@
         ]
       },
       "completion": {
-        "rust": "pending"
-      },
-      "pending": {
-        "reason": "The obsolete pre-Rust-auth test port was removed; this runtime behavior requires a current Rust live test.",
-        "owner": "Trellis Rust runtime",
-        "intendedMilestone": "post-M9 testing correction follow-up"
+        "rust": "implemented"
       },
       "classification": "isolated-process",
-      "isolationReason": "mutates process-global state or process lifecycle"
-    },
-    {
-      "id": "auth.portal-admin-protects-built-in-and-route-conflicts",
-      "fixture": "auth",
-      "title": "Portal admin protects built-in login portal and active route selectors",
-      "coverage": [
-        "auth-protocol-matrix",
-        "capability-permission-matrix",
-        "cross-runtime-rpc"
-      ],
-      "description": "Generated Auth.Portals admin RPCs reject built-in portal mutation, active selector conflicts, and removal of portals still targeted by routes.",
-      "scenario": {
-        "participants": [
-          {
-            "name": "admin",
-            "kind": "admin",
-            "contract": "trellis.auth@v1"
-          }
-        ],
-        "given": [
-          "the built-in login portal and two custom portals exist"
-        ],
-        "when": [
-          "the admin mutates the built-in portal, creates conflicting routes, and removes a targeted portal"
-        ],
-        "then": [
-          "protected mutations return validation errors",
-          "removing the route first allows portal removal"
-        ]
-      },
-      "completion": {
-        "rust": "pending"
-      },
-      "pending": {
-        "reason": "The obsolete pre-Rust-auth test port was removed; this runtime behavior requires a current Rust live test.",
-        "owner": "Trellis Rust runtime",
-        "intendedMilestone": "post-M9 testing correction follow-up"
-      },
-      "classification": "shared"
+      "isolationReason": "mutates process-global state or process lifecycle",
+      "implementations": {
+        "rust": {
+          "module": "auth",
+          "function": "portal_route_selection_and_policy_drive_browser_flow"
+        }
+      }
     },
     {
       "id": "auth.capability-groups-and-last-admin-guard-are-enforced",
       "fixture": "auth",
-      "title": "Capability groups and last-admin guardrails are enforced",
+      "title": "Capability groups validate references and protect built-ins",
       "coverage": [
         "auth-protocol-matrix",
         "capability-permission-matrix"
       ],
-      "description": "Auth capability group CRUD affects resolved user authority, rejects unknown capabilities and built-in group mutation, and protects the last active admin until another active admin exists.",
+      "description": "Auth capability group CRUD preserves contract-owned capabilities, rejects unknown included groups, protects built-in groups, and deletes custom groups with optimistic version checks.",
       "scenario": {
         "participants": [
           {
@@ -2982,23 +1711,24 @@
           "an authenticated local admin session exists"
         ],
         "when": [
-          "the admin manages capability groups and attempts last-admin mutations"
+          "the admin manages custom and built-in capability groups"
         ],
         "then": [
-          "custom groups affect resolved authority",
-          "invalid group mutations fail",
-          "last-admin mutations fail until a second admin exists"
+          "custom groups preserve declared capabilities",
+          "unknown included groups are rejected",
+          "built-in deletion fails while versioned custom deletion succeeds"
         ]
       },
       "completion": {
-        "rust": "pending"
+        "rust": "implemented"
       },
-      "pending": {
-        "reason": "The obsolete pre-Rust-auth test port was removed; this runtime behavior requires a current Rust live test.",
-        "owner": "Trellis Rust runtime",
-        "intendedMilestone": "post-M9 testing correction follow-up"
-      },
-      "classification": "shared"
+      "classification": "shared",
+      "implementations": {
+        "rust": {
+          "module": "auth",
+          "function": "capability_groups_validate_and_protect_builtins"
+        }
+      }
     },
     {
       "id": "auth.users-identities-admin-surfaces-page-and-scope",
@@ -3031,14 +1761,15 @@
         ]
       },
       "completion": {
-        "rust": "pending"
+        "rust": "implemented"
       },
-      "pending": {
-        "reason": "The obsolete pre-Rust-auth test port was removed; this runtime behavior requires a current Rust live test.",
-        "owner": "Trellis Rust runtime",
-        "intendedMilestone": "post-M9 testing correction follow-up"
-      },
-      "classification": "shared"
+      "classification": "shared",
+      "implementations": {
+        "rust": {
+          "module": "auth",
+          "function": "user_and_identity_surfaces_paginate_scope_and_reject_missing_unlink"
+        }
+      }
     },
     {
       "id": "auth.account-flow-oauth-callback-runtime",
@@ -3079,133 +1810,16 @@
         ]
       },
       "completion": {
-        "rust": "pending"
-      },
-      "pending": {
-        "reason": "The obsolete pre-Rust-auth test port was removed; this runtime behavior requires a current Rust live test.",
-        "owner": "Trellis Rust runtime",
-        "intendedMilestone": "post-M9 testing correction follow-up"
+        "rust": "implemented"
       },
       "classification": "isolated-process",
-      "isolationReason": "mutates process-global state or process lifecycle"
-    },
-    {
-      "id": "device-activation.connect-info-admin-reviewed-before-activation",
-      "fixture": "device-activation",
-      "title": "Preregistered no-review device receives admin-reviewed connect info before activation",
-      "coverage": [
-        "device-activation-end-to-end",
-        "auth-protocol-matrix",
-        "observability-trace-matrix"
-      ],
-      "description": "A preregistered device in a no-review deployment fetches connect info before user activation, receives admin-reviewed authority, connects as a device, and does not create an activation review record.",
-      "scenario": {
-        "participants": [
-          {
-            "name": "device",
-            "kind": "device",
-            "contract": "trellis.integration.device-activation-device@v1"
-          }
-        ],
-        "given": [
-          "a preregistered no-review device has not been user activated"
-        ],
-        "when": [
-          "the device requests connect info"
-        ],
-        "then": [
-          "connect info is ready with admin_reviewed authority",
-          "the device can connect and Auth.Sessions.Me works",
-          "no activation review record is created"
-        ]
-      },
-      "completion": {
-        "rust": "pending"
-      },
-      "pending": {
-        "reason": "The obsolete pre-Rust-auth test port was removed; this runtime behavior requires a current Rust live test.",
-        "owner": "Trellis Rust runtime",
-        "intendedMilestone": "post-M9 testing correction follow-up"
-      },
-      "classification": "shared"
-    },
-    {
-      "id": "device-activation.wait-and-connect-info-reject-bad-proofs-and-stale-iats",
-      "fixture": "device-activation",
-      "title": "Device activation pre-auth endpoints reject bad proofs and stale iats",
-      "coverage": [
-        "device-activation-end-to-end",
-        "auth-protocol-matrix",
-        "capability-permission-matrix"
-      ],
-      "description": "Device activation wait and connect-info HTTP endpoints reject stale iat values, invalid signatures, mismatched flow nonce or key, expired or missing flows, and unauthorized contract digests.",
-      "scenario": {
-        "participants": [
-          {
-            "name": "device",
-            "kind": "device",
-            "contract": "trellis.integration.device-activation-device@v1"
-          }
-        ],
-        "given": [
-          "a known device is provisioned and an activation flow exists"
-        ],
-        "when": [
-          "the device calls pre-auth endpoints with bad proofs or stale flow state"
-        ],
-        "then": [
-          "stale iat, bad signature, wrong nonce/key, missing or expired flow, and unauthorized digest return public errors"
-        ]
-      },
-      "completion": {
-        "rust": "pending"
-      },
-      "pending": {
-        "reason": "The obsolete pre-Rust-auth test port was removed; this runtime behavior requires a current Rust live test.",
-        "owner": "Trellis Rust runtime",
-        "intendedMilestone": "post-M9 testing correction follow-up"
-      },
-      "classification": "shared"
-    },
-    {
-      "id": "device-activation.review-capability-is-deployment-scoped",
-      "fixture": "device-activation",
-      "title": "Device activation review capability is deployment scoped",
-      "coverage": [
-        "device-activation-end-to-end",
-        "auth-protocol-matrix",
-        "capability-permission-matrix",
-        "observability-trace-matrix"
-      ],
-      "description": "A reviewer with trellis.auth::device.review.<deployment> can list and decide only reviews for that deployment while a broad reviewer can review all deployments.",
-      "scenario": {
-        "participants": [
-          {
-            "name": "admin",
-            "kind": "admin",
-            "contract": "trellis.integration.device-activation-admin@v1"
-          }
-        ],
-        "given": [
-          "two device deployments require activation review"
-        ],
-        "when": [
-          "a reviewer scoped to one deployment lists and decides reviews"
-        ],
-        "then": [
-          "the scoped reviewer sees and decides only that deployment",
-          "the admin sees both deployment reviews"
-        ]
-      },
-      "completion": {
-        "rust": "pending"
-      },
-      "pending": {
-        "reason": "The obsolete pre-Rust-auth test port was removed; this runtime behavior requires a current Rust live test.",
-        "owner": "Trellis Rust runtime",
-        "intendedMilestone": "post-M9 testing correction follow-up"
-      },
-      "classification": "shared"
+      "isolationReason": "mutates process-global state or process lifecycle",
+      "implementations": {
+        "rust": {
+          "module": "auth",
+          "function": "account_flow_oauth_callback_handles_errors_mismatch_and_link"
+        }
+      }
     },
     {
       "id": "state.migration-required-is-returned-live",
@@ -3783,14 +2397,16 @@
         ]
       },
       "completion": {
-        "rust": "pending"
+        "rust": "implemented"
       },
-      "pending": {
-        "reason": "The obsolete pre-Rust-auth test port was removed; this runtime behavior requires a current Rust live test.",
-        "owner": "Trellis Rust runtime",
-        "intendedMilestone": "post-M9 testing correction follow-up"
-      },
-      "classification": "shared"
+      "classification": "isolated-process",
+      "isolationReason": "requires test-only expiry of an authority proposal in the runtime-owned SQLite database",
+      "implementations": {
+        "rust": {
+          "module": "authority_plan",
+          "function": "invalid_authority_acceptance_preserves_desired_and_proposal_state"
+        }
+      }
     },
     {
       "id": "jobs.admin-list-services-filters-stale-worker-heartbeats",
@@ -3834,311 +2450,6 @@
       }
     },
     {
-      "id": "outbox.commits-event-through-sql-outbox",
-      "fixture": "outbox",
-      "title": "SQL outbox commits event through service-owned database transaction and delivers to NATS",
-      "coverage": [
-        "service-sql-outbox",
-        "outbox-event-delivery",
-        "observability-trace-matrix"
-      ],
-      "description": "A service handler uses createSqlOutbox in an RPC handler, enqueues an event inside the transaction, and the event is published to NATS after the SQL transaction commits. The event is observable through a live event capture.",
-      "scenario": {
-        "participants": [
-          {
-            "name": "client",
-            "kind": "app",
-            "contract": "trellis.integration.outbox-client@v1"
-          },
-          {
-            "name": "service",
-            "kind": "service",
-            "contract": "trellis.integration.outbox-service@v1"
-          }
-        ],
-        "given": [
-          "a service is connected with real SQLite and SQL outbox configured",
-          "the service RPC handler uses outbox.transaction to enqueue an event"
-        ],
-        "when": [
-          "the client calls Documents.Process"
-        ],
-        "then": [
-          "the RPC response includes the expected documentId",
-          "the event is captured by a live event subscriber"
-        ]
-      },
-      "completion": {
-        "rust": "pending"
-      },
-      "pending": {
-        "reason": "The obsolete pre-Rust-auth test port was removed; this runtime behavior requires a current Rust live test.",
-        "owner": "Trellis Rust runtime",
-        "intendedMilestone": "post-M9 testing correction follow-up"
-      },
-      "classification": "shared"
-    },
-    {
-      "id": "outbox.dispatches-jobs-through-sql-outbox",
-      "fixture": "outbox",
-      "title": "SQL outbox dispatches durable job creation and submission after commit",
-      "coverage": [
-        "service-sql-outbox",
-        "outbox-job-delivery",
-        "jobs-create-submit"
-      ],
-      "description": "A service transaction atomically records job creation and submission intents. After commit, the SQL outbox dispatches both through the normal Trellis job manager and real workers process them.",
-      "scenario": {
-        "participants": [
-          {
-            "name": "client",
-            "kind": "app",
-            "contract": "trellis.integration.outbox-client@v1"
-          },
-          {
-            "name": "service",
-            "kind": "service",
-            "contract": "trellis.integration.outbox-service@v1"
-          }
-        ],
-        "given": [
-          "a service is connected with real SQLite, SQL outbox, and a job worker",
-          "the service RPC handler enqueues create and submit job intents in one transaction"
-        ],
-        "when": [
-          "the transaction commits"
-        ],
-        "then": [
-          "both intents are dispatched through the normal job runtime",
-          "the worker processes both jobs",
-          "the outbox rows record dispatched state and accepted outcomes"
-        ]
-      },
-      "completion": {
-        "rust": "pending"
-      },
-      "pending": {
-        "reason": "The obsolete pre-Rust-auth test port was removed; this runtime behavior requires a current Rust live test.",
-        "owner": "Trellis Rust runtime",
-        "intendedMilestone": "post-M9 testing correction follow-up"
-      },
-      "classification": "shared"
-    },
-    {
-      "id": "outbox.rollback-does-not-publish",
-      "fixture": "outbox",
-      "title": "SQL outbox suppresses events when the service transaction rolls back",
-      "coverage": [
-        "service-sql-outbox",
-        "outbox-rollback-behavior"
-      ],
-      "description": "A service handler starts an outbox transaction, enqueues an event, then throws. The rollback ensures no event is published to NATS.",
-      "scenario": {
-        "participants": [
-          {
-            "name": "client",
-            "kind": "app",
-            "contract": "trellis.integration.outbox-client@v1"
-          },
-          {
-            "name": "service",
-            "kind": "service",
-            "contract": "trellis.integration.outbox-service@v1"
-          }
-        ],
-        "given": [
-          "a service is connected with real SQLite and SQL outbox configured",
-          "the service RPC handler throws inside outbox.transaction"
-        ],
-        "when": [
-          "the client calls Documents.ProcessWithRollback"
-        ],
-        "then": [
-          "no event is captured by a live event subscriber"
-        ]
-      },
-      "completion": {
-        "rust": "pending"
-      },
-      "pending": {
-        "reason": "The obsolete pre-Rust-auth test port was removed; this runtime behavior requires a current Rust live test.",
-        "owner": "Trellis Rust runtime",
-        "intendedMilestone": "post-M9 testing correction follow-up"
-      },
-      "classification": "shared"
-    },
-    {
-      "id": "outbox.multiple-events-in-one-transaction",
-      "fixture": "outbox",
-      "title": "SQL outbox publishes multiple events from a single transaction commit",
-      "coverage": [
-        "service-sql-outbox",
-        "outbox-multi-event-delivery"
-      ],
-      "description": "A service handler enqueues two different events in the same outbox transaction. Both events are published to NATS after the SQL transaction commits.",
-      "scenario": {
-        "participants": [
-          {
-            "name": "client",
-            "kind": "app",
-            "contract": "trellis.integration.outbox-client@v1"
-          },
-          {
-            "name": "service",
-            "kind": "service",
-            "contract": "trellis.integration.outbox-service@v1"
-          }
-        ],
-        "given": [
-          "a service is connected with real SQLite and SQL outbox configured",
-          "the service RPC handler enqueues two events in one outbox.transaction"
-        ],
-        "when": [
-          "the client calls Documents.ProcessMultiEvent"
-        ],
-        "then": [
-          "both Document.Processed and Document.Audited events are captured",
-          "each event has the expected documentId payload"
-        ]
-      },
-      "completion": {
-        "rust": "pending"
-      },
-      "pending": {
-        "reason": "The obsolete pre-Rust-auth test port was removed; this runtime behavior requires a current Rust live test.",
-        "owner": "Trellis Rust runtime",
-        "intendedMilestone": "post-M9 testing correction follow-up"
-      },
-      "classification": "shared"
-    },
-    {
-      "id": "outbox.listener-derives-event",
-      "fixture": "outbox",
-      "title": "Authorized event consumption derives a new event through SQL outbox",
-      "coverage": [
-        "service-sql-outbox",
-        "outbox-listener-derivation"
-      ],
-      "description": "An authorized capture consumes the source event, then the provider uses outbox.transaction to enqueue a derived audit event. Both events are published to NATS.",
-      "scenario": {
-        "participants": [
-          {
-            "name": "client",
-            "kind": "app",
-            "contract": "trellis.integration.outbox-client@v1"
-          },
-          {
-            "name": "service",
-            "kind": "service",
-            "contract": "trellis.integration.outbox-service@v1"
-          }
-        ],
-        "given": [
-          "a service with an ephemeral event listener that derives an audited event through SQL outbox"
-        ],
-        "when": [
-          "the client calls Documents.Process"
-        ],
-        "then": [
-          "the Document.Processed event is captured",
-          "the Document.Audited event derived by the listener is captured"
-        ]
-      },
-      "completion": {
-        "rust": "pending"
-      },
-      "pending": {
-        "reason": "The obsolete pre-Rust-auth test port was removed; this runtime behavior requires a current Rust live test.",
-        "owner": "Trellis Rust runtime",
-        "intendedMilestone": "post-M9 testing correction follow-up"
-      },
-      "classification": "shared"
-    },
-    {
-      "id": "outbox.sql-row-state-is-dispatched",
-      "fixture": "outbox",
-      "title": "Outbox SQL row is marked dispatched after successful commit",
-      "coverage": [
-        "service-sql-outbox",
-        "outbox-row-state"
-      ],
-      "description": "After a successful outbox transaction commit, the outbox SQL row is marked with state 'dispatched' and kind 'event.publish'.",
-      "scenario": {
-        "participants": [
-          {
-            "name": "client",
-            "kind": "app",
-            "contract": "trellis.integration.outbox-client@v1"
-          },
-          {
-            "name": "service",
-            "kind": "service",
-            "contract": "trellis.integration.outbox-service@v1"
-          }
-        ],
-        "given": [
-          "a service with SQL outbox configured and real SQLite"
-        ],
-        "when": [
-          "the client calls Documents.Process"
-        ],
-        "then": [
-          "the SQL outbox row has state 'dispatched'",
-          "the SQL outbox row has kind 'event.publish'"
-        ]
-      },
-      "completion": {
-        "rust": "pending"
-      },
-      "pending": {
-        "reason": "The obsolete pre-Rust-auth test port was removed; this runtime behavior requires a current Rust live test.",
-        "owner": "Trellis Rust runtime",
-        "intendedMilestone": "post-M9 testing correction follow-up"
-      },
-      "classification": "shared"
-    },
-    {
-      "id": "outbox.sqlite-010-schema-upgrades",
-      "fixture": "outbox",
-      "title": "SQLite SQL outbox migration upgrades 0.10 rows",
-      "coverage": [
-        "service-sql-outbox",
-        "outbox-schema-migration"
-      ],
-      "description": "A SQLite outbox table created by Trellis 0.10 with an event column is upgraded by Trellis-owned migration artifacts so 0.11 inserts succeed and pending rows are preserved.",
-      "scenario": {
-        "participants": [
-          {
-            "name": "service",
-            "kind": "service",
-            "contract": "trellis.integration.outbox-service@v1"
-          }
-        ],
-        "given": [
-          "a real SQLite database with the Trellis 0.10 trellis_outbox schema",
-          "a pending legacy outbox row stores its event name in the event column"
-        ],
-        "when": [
-          "the 0.11 SQL outbox migration artifacts are applied twice",
-          "the service enqueues through service.createSqlOutbox"
-        ],
-        "then": [
-          "the legacy row is preserved with kind 'event.publish'",
-          "the legacy event value is available as name",
-          "the 0.11 SQL outbox insert succeeds"
-        ]
-      },
-      "completion": {
-        "rust": "pending"
-      },
-      "pending": {
-        "reason": "The obsolete pre-Rust-auth test port was removed; this runtime behavior requires a current Rust live test.",
-        "owner": "Trellis Rust runtime",
-        "intendedMilestone": "post-M9 testing correction follow-up"
-      },
-      "classification": "shared"
-    },
-    {
       "id": "control-plane.admin-bootstrap-creates-first-local-admin",
       "fixture": "control-plane",
       "title": "Admin bootstrap creates the first local admin",
@@ -4171,15 +2482,16 @@
         ]
       },
       "completion": {
-        "rust": "pending"
-      },
-      "pending": {
-        "reason": "The obsolete pre-Rust-auth test port was removed; this runtime behavior requires a current Rust live test.",
-        "owner": "Trellis Rust runtime",
-        "intendedMilestone": "post-M9 testing correction follow-up"
+        "rust": "implemented"
       },
       "classification": "isolated-process",
-      "isolationReason": "mutates process-global state or process lifecycle"
+      "isolationReason": "mutates process-global state or process lifecycle",
+      "implementations": {
+        "rust": {
+          "module": "auth",
+          "function": "admin_bootstrap_creates_exactly_one_first_administrator"
+        }
+      }
     },
     {
       "id": "control-plane.password-reset-change-invalidates-old-password",
@@ -4216,609 +2528,16 @@
         ]
       },
       "completion": {
-        "rust": "pending"
-      },
-      "pending": {
-        "reason": "The obsolete pre-Rust-auth test port was removed; this runtime behavior requires a current Rust live test.",
-        "owner": "Trellis Rust runtime",
-        "intendedMilestone": "post-M9 testing correction follow-up"
+        "rust": "implemented"
       },
       "classification": "isolated-process",
-      "isolationReason": "mutates process-global state or process lifecycle"
-    },
-    {
-      "id": "control-plane.http-route-security-requires-admin-session",
-      "fixture": "control-plane",
-      "title": "HTTP bootstrap route security requires an admin session",
-      "coverage": [
-        "auth",
-        "http-route-security",
-        "admin-session"
-      ],
-      "description": "Fetches the bootstrap client HTTP route without and with an authenticated admin session to verify public access control.",
-      "scenario": {
-        "participants": [
-          {
-            "name": "trellis control plane",
-            "kind": "control-plane",
-            "contract": "Trellis bootstrap/client HTTP route"
-          },
-          {
-            "name": "local admin",
-            "kind": "admin",
-            "contract": "Trellis built-in admin identity"
-          }
-        ],
-        "given": [
-          "A Trellis control plane has bootstrap client data protected by admin authentication."
-        ],
-        "when": [
-          "The route is fetched without a session and then with an admin session."
-        ],
-        "then": [
-          "Unauthenticated access is modeled as auth-required and authenticated admin access succeeds."
-        ]
-      },
-      "completion": {
-        "rust": "pending"
-      },
-      "pending": {
-        "reason": "The obsolete pre-Rust-auth test port was removed; this runtime behavior requires a current Rust live test.",
-        "owner": "Trellis Rust runtime",
-        "intendedMilestone": "post-M9 testing correction follow-up"
-      },
-      "classification": "isolated-process",
-      "isolationReason": "mutates process-global state or process lifecycle"
-    },
-    {
-      "id": "control-plane.bootstrap-requires-auth-for-unbound-client",
-      "fixture": "control-plane",
-      "title": "Bootstrap client requires auth for an unbound session",
-      "coverage": [
-        "auth",
-        "bootstrap-client"
-      ],
-      "description": "Fetches /bootstrap/client with valid proof material for a session key that is not bound to a user session and receives auth_required.",
-      "scenario": {
-        "participants": [
-          {
-            "name": "trellis control plane",
-            "kind": "control-plane",
-            "contract": "Trellis bootstrap/client HTTP route"
-          },
-          {
-            "name": "unbound client",
-            "kind": "app",
-            "contract": "unbound session-key proof"
-          }
-        ],
-        "given": [
-          "No user session exists for a valid client session key proof."
-        ],
-        "when": [
-          "The client fetches /bootstrap/client."
-        ],
-        "then": [
-          "The route returns auth_required."
-        ]
-      },
-      "completion": {
-        "rust": "pending"
-      },
-      "pending": {
-        "reason": "The obsolete pre-Rust-auth test port was removed; this runtime behavior requires a current Rust live test.",
-        "owner": "Trellis Rust runtime",
-        "intendedMilestone": "post-M9 testing correction follow-up"
-      },
-      "classification": "isolated-process",
-      "isolationReason": "mutates process-global state or process lifecycle"
-    },
-    {
-      "id": "control-plane.bootstrap-rejects-unknown-contract-digest",
-      "fixture": "control-plane",
-      "title": "Bootstrap client rejects an unknown stored contract digest",
-      "coverage": [
-        "auth",
-        "bootstrap-client",
-        "session-cleanup"
-      ],
-      "description": "A live bound app session whose stored contract digest no longer resolves returns auth_required from /bootstrap/client and is deleted.",
-      "scenario": {
-        "participants": [
-          {
-            "name": "trellis control plane",
-            "kind": "control-plane",
-            "contract": "Trellis bootstrap/client HTTP route and session storage"
-          },
-          {
-            "name": "client app",
-            "kind": "app",
-            "contract": "case-scoped app auth contract"
-          }
-        ],
-        "given": [
-          "An app has a bound user session.",
-          "The live session row is updated to reference an unknown contract digest."
-        ],
-        "when": [
-          "The client fetches /bootstrap/client with that session key."
-        ],
-        "then": [
-          "The route returns auth_required.",
-          "The invalid session row is deleted."
-        ]
-      },
-      "completion": {
-        "rust": "pending"
-      },
-      "pending": {
-        "reason": "The obsolete pre-Rust-auth test port was removed; this runtime behavior requires a current Rust live test.",
-        "owner": "Trellis Rust runtime",
-        "intendedMilestone": "post-M9 testing correction follow-up"
-      },
-      "classification": "isolated-process",
-      "isolationReason": "mutates process-global state or process lifecycle"
-    },
-    {
-      "id": "control-plane.bootstrap-rejects-non-client-contract",
-      "fixture": "control-plane",
-      "title": "Bootstrap client rejects known non-client contract digests",
-      "coverage": [
-        "auth",
-        "bootstrap-client",
-        "session-cleanup"
-      ],
-      "description": "A live bound app session whose stored contract digest resolves to a service or device contract returns auth_required from /bootstrap/client and is deleted.",
-      "scenario": {
-        "participants": [
-          {
-            "name": "trellis control plane",
-            "kind": "control-plane",
-            "contract": "Trellis bootstrap/client HTTP route and participant authority"
-          },
-          {
-            "name": "client app",
-            "kind": "app",
-            "contract": "case-scoped app auth contract"
-          },
-          {
-            "name": "service contract",
-            "kind": "service",
-            "contract": "case-scoped service contract"
-          },
-          {
-            "name": "device contract",
-            "kind": "service",
-            "contract": "case-scoped device contract made known through device deployment authority"
-          }
-        ],
-        "given": [
-          "An app has a bound user session.",
-          "A known service participant exists in control-plane authority.",
-          "A known device participant exists in control-plane authority.",
-          "The live app session row is updated to reference each non-client digest."
-        ],
-        "when": [
-          "The client fetches /bootstrap/client with each mutated session key."
-        ],
-        "then": [
-          "The route returns auth_required.",
-          "Each invalid session row is deleted."
-        ]
-      },
-      "completion": {
-        "rust": "pending"
-      },
-      "pending": {
-        "reason": "The obsolete pre-Rust-auth test port was removed; this runtime behavior requires a current Rust live test.",
-        "owner": "Trellis Rust runtime",
-        "intendedMilestone": "post-M9 testing correction follow-up"
-      },
-      "classification": "isolated-process",
-      "isolationReason": "mutates process-global state or process lifecycle"
-    },
-    {
-      "id": "control-plane.bootstrap-selects-exact-session-contract-digest",
-      "fixture": "control-plane",
-      "title": "Bootstrap client selects the exact session contract digest",
-      "coverage": [
-        "auth",
-        "bootstrap-client"
-      ],
-      "description": "A live app session remains bound to its exact stored contract digest when another known app digest shares the same contract id.",
-      "scenario": {
-        "participants": [
-          {
-            "name": "trellis control plane",
-            "kind": "control-plane",
-            "contract": "Trellis bootstrap/client HTTP route and participant authority"
-          },
-          {
-            "name": "client app",
-            "kind": "app",
-            "contract": "two known revisions of the same app contract id"
-          }
-        ],
-        "given": [
-          "Two app contract digests with the same contract id are known.",
-          "The live session row is bound to the second digest."
-        ],
-        "when": [
-          "The client fetches /bootstrap/client with that session key."
-        ],
-        "then": [
-          "The route returns ready with the exact session-bound digest."
-        ]
-      },
-      "completion": {
-        "rust": "pending"
-      },
-      "pending": {
-        "reason": "The obsolete pre-Rust-auth test port was removed; this runtime behavior requires a current Rust live test.",
-        "owner": "Trellis Rust runtime",
-        "intendedMilestone": "post-M9 testing correction follow-up"
-      },
-      "classification": "isolated-process",
-      "isolationReason": "mutates process-global state or process lifecycle"
-    },
-    {
-      "id": "control-plane.bootstrap-deletes-session-for-inactive-user",
-      "fixture": "control-plane",
-      "title": "Bootstrap client deletes sessions for inactive users",
-      "coverage": [
-        "auth",
-        "bootstrap-client",
-        "session-cleanup"
-      ],
-      "description": "A live bound app session whose user projection is inactive returns auth_required from /bootstrap/client and is deleted.",
-      "scenario": {
-        "participants": [
-          {
-            "name": "trellis control plane",
-            "kind": "control-plane",
-            "contract": "Trellis bootstrap/client HTTP route and session storage"
-          },
-          {
-            "name": "client app",
-            "kind": "app",
-            "contract": "case-scoped app auth contract"
-          }
-        ],
-        "given": [
-          "An app has a bound user session.",
-          "The live user projection is marked inactive."
-        ],
-        "when": [
-          "The client fetches /bootstrap/client with that session key."
-        ],
-        "then": [
-          "The route returns auth_required.",
-          "The invalid session row is deleted."
-        ]
-      },
-      "completion": {
-        "rust": "pending"
-      },
-      "pending": {
-        "reason": "The obsolete pre-Rust-auth test port was removed; this runtime behavior requires a current Rust live test.",
-        "owner": "Trellis Rust runtime",
-        "intendedMilestone": "post-M9 testing correction follow-up"
-      },
-      "classification": "isolated-process",
-      "isolationReason": "mutates process-global state or process lifecycle"
-    },
-    {
-      "id": "control-plane.bootstrap-deletes-session-for-missing-user-projection",
-      "fixture": "control-plane",
-      "title": "Bootstrap client deletes sessions for missing user projections",
-      "coverage": [
-        "auth",
-        "bootstrap-client",
-        "session-cleanup"
-      ],
-      "description": "A live bound app session whose user projection is missing returns auth_required from /bootstrap/client and is deleted.",
-      "scenario": {
-        "participants": [
-          {
-            "name": "trellis control plane",
-            "kind": "control-plane",
-            "contract": "Trellis bootstrap/client HTTP route and session storage"
-          },
-          {
-            "name": "client app",
-            "kind": "app",
-            "contract": "case-scoped app auth contract"
-          }
-        ],
-        "given": [
-          "An app has a bound user session.",
-          "The live user projection row is deleted."
-        ],
-        "when": [
-          "The client fetches /bootstrap/client with that session key."
-        ],
-        "then": [
-          "The route returns auth_required.",
-          "The invalid session row is deleted."
-        ]
-      },
-      "completion": {
-        "rust": "pending"
-      },
-      "pending": {
-        "reason": "The obsolete pre-Rust-auth test port was removed; this runtime behavior requires a current Rust live test.",
-        "owner": "Trellis Rust runtime",
-        "intendedMilestone": "post-M9 testing correction follow-up"
-      },
-      "classification": "isolated-process",
-      "isolationReason": "mutates process-global state or process lifecycle"
-    },
-    {
-      "id": "control-plane.bootstrap-deletes-session-for-insufficient-user-capabilities",
-      "fixture": "control-plane",
-      "title": "Bootstrap client deletes sessions when user capabilities no longer cover delegated access",
-      "coverage": [
-        "auth",
-        "bootstrap-client",
-        "session-cleanup"
-      ],
-      "description": "A live bound app session whose user projection no longer includes the delegated capabilities returns auth_required from /bootstrap/client and is deleted.",
-      "scenario": {
-        "participants": [
-          {
-            "name": "trellis control plane",
-            "kind": "control-plane",
-            "contract": "Trellis bootstrap/client HTTP route and session storage"
-          },
-          {
-            "name": "client app",
-            "kind": "app",
-            "contract": "case-scoped app auth contract with delegated Auth.Sessions.Me access"
-          }
-        ],
-        "given": [
-          "An app has a bound user session with delegated capabilities.",
-          "The live user projection capabilities are cleared."
-        ],
-        "when": [
-          "The client fetches /bootstrap/client with that session key."
-        ],
-        "then": [
-          "The route returns auth_required.",
-          "The invalid session row is deleted."
-        ]
-      },
-      "completion": {
-        "rust": "pending"
-      },
-      "pending": {
-        "reason": "The obsolete pre-Rust-auth test port was removed; this runtime behavior requires a current Rust live test.",
-        "owner": "Trellis Rust runtime",
-        "intendedMilestone": "post-M9 testing correction follow-up"
-      },
-      "classification": "isolated-process",
-      "isolationReason": "mutates process-global state or process lifecycle"
-    },
-    {
-      "id": "control-plane.bootstrap-reports-server-time-for-stale-proof",
-      "fixture": "control-plane",
-      "title": "Bootstrap client reports server time for stale proofs",
-      "coverage": [
-        "auth",
-        "bootstrap-client"
-      ],
-      "description": "A live /bootstrap/client request with an out-of-range proof iat returns iat_out_of_range and a fresh serverNow value.",
-      "scenario": {
-        "participants": [
-          {
-            "name": "trellis control plane",
-            "kind": "control-plane",
-            "contract": "Trellis bootstrap/client HTTP route"
-          },
-          {
-            "name": "client app",
-            "kind": "app",
-            "contract": "case-scoped app auth contract"
-          }
-        ],
-        "given": [
-          "An app has a bound user session."
-        ],
-        "when": [
-          "The client fetches /bootstrap/client with a stale signed iat."
-        ],
-        "then": [
-          "The route rejects the request with iat_out_of_range.",
-          "The response includes serverNow."
-        ]
-      },
-      "completion": {
-        "rust": "pending"
-      },
-      "pending": {
-        "reason": "The obsolete pre-Rust-auth test port was removed; this runtime behavior requires a current Rust live test.",
-        "owner": "Trellis Rust runtime",
-        "intendedMilestone": "post-M9 testing correction follow-up"
-      },
-      "classification": "isolated-process",
-      "isolationReason": "mutates process-global state or process lifecycle"
-    },
-    {
-      "id": "control-plane.bootstrap-rejects-invalid-signature",
-      "fixture": "control-plane",
-      "title": "Bootstrap client rejects invalid signatures",
-      "coverage": [
-        "auth",
-        "bootstrap-client"
-      ],
-      "description": "A live /bootstrap/client request for a bound app session with an invalid bootstrap signature returns invalid_signature.",
-      "scenario": {
-        "participants": [
-          {
-            "name": "trellis control plane",
-            "kind": "control-plane",
-            "contract": "Trellis bootstrap/client HTTP route"
-          },
-          {
-            "name": "client app",
-            "kind": "app",
-            "contract": "case-scoped app auth contract"
-          }
-        ],
-        "given": [
-          "An app has a bound user session."
-        ],
-        "when": [
-          "The client fetches /bootstrap/client with a signature that does not match the proof payload."
-        ],
-        "then": [
-          "The route rejects the request with invalid_signature."
-        ]
-      },
-      "completion": {
-        "rust": "pending"
-      },
-      "pending": {
-        "reason": "The obsolete pre-Rust-auth test port was removed; this runtime behavior requires a current Rust live test.",
-        "owner": "Trellis Rust runtime",
-        "intendedMilestone": "post-M9 testing correction follow-up"
-      },
-      "classification": "isolated-process",
-      "isolationReason": "mutates process-global state or process lifecycle"
-    },
-    {
-      "id": "control-plane.bootstrap-allows-known-inactive-app-digest",
-      "fixture": "control-plane",
-      "title": "Bootstrap client allows known inactive app digests",
-      "coverage": [
-        "auth",
-        "bootstrap-client"
-      ],
-      "description": "A live app session bound to a known app participant digest succeeds even though user app participants are not active service authority entries.",
-      "scenario": {
-        "participants": [
-          {
-            "name": "trellis control plane",
-            "kind": "control-plane",
-            "contract": "Trellis bootstrap/client HTTP route and participant authority"
-          },
-          {
-            "name": "client app",
-            "kind": "app",
-            "contract": "case-scoped app auth contract"
-          }
-        ],
-        "given": [
-          "An app has a bound user session for a known app contract digest.",
-          "The app participant is not an active service authority entry."
-        ],
-        "when": [
-          "The client fetches /bootstrap/client with that session key."
-        ],
-        "then": [
-          "The route returns ready for the known app digest."
-        ]
-      },
-      "completion": {
-        "rust": "pending"
-      },
-      "pending": {
-        "reason": "The obsolete pre-Rust-auth test port was removed; this runtime behavior requires a current Rust live test.",
-        "owner": "Trellis Rust runtime",
-        "intendedMilestone": "post-M9 testing correction follow-up"
-      },
-      "classification": "isolated-process",
-      "isolationReason": "mutates process-global state or process lifecycle"
-    },
-    {
-      "id": "control-plane.service-resource-removal-purges-old-binding",
-      "fixture": "control-plane",
-      "title": "Service resource removal purges obsolete bindings",
-      "coverage": [
-        "authority",
-        "resources",
-        "resource-bindings"
-      ],
-      "description": "After accepting a migration that removes a service-owned resource, the replacement service no longer has the old handle and authority no longer reports the old binding.",
-      "scenario": {
-        "participants": [
-          {
-            "name": "trellis control plane",
-            "kind": "control-plane",
-            "contract": "Trellis resource binding runtime"
-          },
-          {
-            "name": "service provider",
-            "kind": "service",
-            "contract": "case-scoped service resource contract"
-          }
-        ],
-        "given": [
-          "A service deployment has a resolved required KV resource binding."
-        ],
-        "when": [
-          "A migration replacing the service contract with one that removes the KV resource is accepted."
-        ],
-        "then": [
-          "The replacement service does not expose the removed KV handle.",
-          "Deployment authority desired and materialized resource bindings no longer include the removed resource."
-        ]
-      },
-      "completion": {
-        "rust": "pending"
-      },
-      "pending": {
-        "reason": "The obsolete pre-Rust-auth test port was removed; this runtime behavior requires a current Rust live test.",
-        "owner": "Trellis Rust runtime",
-        "intendedMilestone": "post-M9 testing correction follow-up"
-      },
-      "classification": "isolated-process",
-      "isolationReason": "mutates process-global state or process lifecycle"
-    },
-    {
-      "id": "control-plane.authority-plan-migration-replaces-desired-state",
-      "fixture": "control-plane",
-      "title": "Authority migration replaces desired state",
-      "coverage": [
-        "authority",
-        "authority-plans",
-        "migration"
-      ],
-      "description": "Accepting an authority migration replaces the deployment desired state with the proposed contract state rather than merging legacy surfaces.",
-      "scenario": {
-        "participants": [
-          {
-            "name": "trellis control plane",
-            "kind": "control-plane",
-            "contract": "Trellis deployment authority"
-          },
-          {
-            "name": "service provider",
-            "kind": "service",
-            "contract": "case-scoped migration contracts"
-          }
-        ],
-        "given": [
-          "A service deployment has base desired authority with a legacy surface."
-        ],
-        "when": [
-          "An incompatible migration plan with a replacement surface is accepted."
-        ],
-        "then": [
-          "The legacy surface is absent from desired state.",
-          "The replacement surface is present in desired state."
-        ]
-      },
-      "completion": {
-        "rust": "pending"
-      },
-      "pending": {
-        "reason": "The obsolete pre-Rust-auth test port was removed; this runtime behavior requires a current Rust live test.",
-        "owner": "Trellis Rust runtime",
-        "intendedMilestone": "post-M9 testing correction follow-up"
-      },
-      "classification": "isolated-process",
-      "isolationReason": "mutates process-global state or process lifecycle"
+      "isolationReason": "mutates process-global state or process lifecycle",
+      "implementations": {
+        "rust": {
+          "module": "auth",
+          "function": "password_reset_and_change_invalidate_old_credentials"
+        }
+      }
     },
     {
       "id": "control-plane.sessions-survive-control-plane-restart",
@@ -4856,874 +2575,16 @@
         ]
       },
       "completion": {
-        "rust": "pending"
-      },
-      "pending": {
-        "reason": "The obsolete pre-Rust-auth test port was removed; this runtime behavior requires a current Rust live test.",
-        "owner": "Trellis Rust runtime",
-        "intendedMilestone": "post-M9 testing correction follow-up"
+        "rust": "implemented"
       },
       "classification": "isolated-process",
-      "isolationReason": "mutates process-global state or process lifecycle"
-    },
-    {
-      "id": "control-plane.state-persists-across-control-plane-restart",
-      "fixture": "control-plane",
-      "title": "State persists across control-plane restart",
-      "coverage": [
-        "state",
-        "persistence",
-        "restart"
-      ],
-      "description": "Writes generated value and map state, restarts only the control plane, and verifies state values and metadata are preserved.",
-      "scenario": {
-        "participants": [
-          {
-            "name": "trellis control plane",
-            "kind": "control-plane",
-            "contract": "Trellis state runtime"
-          },
-          {
-            "name": "client app",
-            "kind": "app",
-            "contract": "case-scoped state contract"
-          }
-        ],
-        "given": [
-          "A client has written generated value and map state."
-        ],
-        "when": [
-          "The Trellis control plane restarts with the same storage."
-        ],
-        "then": [
-          "The client reads the previously written state after restart."
-        ]
-      },
-      "completion": {
-        "rust": "pending"
-      },
-      "pending": {
-        "reason": "The obsolete pre-Rust-auth test port was removed; this runtime behavior requires a current Rust live test.",
-        "owner": "Trellis Rust runtime",
-        "intendedMilestone": "post-M9 testing correction follow-up"
-      },
-      "classification": "isolated-process",
-      "isolationReason": "mutates process-global state or process lifecycle"
-    },
-    {
-      "id": "control-plane.resources-survive-control-plane-restart",
-      "fixture": "control-plane",
-      "title": "Resource bindings survive control-plane restart",
-      "coverage": [
-        "resources",
-        "resource-bindings",
-        "persistence",
-        "restart"
-      ],
-      "description": "Uses service KV and store resource handles, restarts the control plane, and verifies the same bindings and backing data remain available.",
-      "scenario": {
-        "participants": [
-          {
-            "name": "trellis control plane",
-            "kind": "control-plane",
-            "contract": "Trellis resource binding runtime"
-          },
-          {
-            "name": "service provider",
-            "kind": "service",
-            "contract": "case-scoped resource contract"
-          }
-        ],
-        "given": [
-          "A service has resolved KV and store bindings and written data."
-        ],
-        "when": [
-          "The Trellis control plane restarts with the same storage."
-        ],
-        "then": [
-          "The service reconnects and reads the previously stored resource data."
-        ]
-      },
-      "completion": {
-        "rust": "pending"
-      },
-      "pending": {
-        "reason": "The obsolete pre-Rust-auth test port was removed; this runtime behavior requires a current Rust live test.",
-        "owner": "Trellis Rust runtime",
-        "intendedMilestone": "post-M9 testing correction follow-up"
-      },
-      "classification": "isolated-process",
-      "isolationReason": "mutates process-global state or process lifecycle"
-    },
-    {
-      "id": "control-plane.outbox-dispatches-after-control-plane-restart",
-      "fixture": "control-plane",
-      "title": "Outbox dispatches after control-plane restart",
-      "coverage": [
-        "outbox",
-        "events",
-        "persistence",
-        "restart"
-      ],
-      "description": "Queues a service SQL outbox event, restarts Trellis before dispatch, and observes the queued event after restart.",
-      "scenario": {
-        "participants": [
-          {
-            "name": "trellis control plane",
-            "kind": "control-plane",
-            "contract": "Trellis restart and event routing runtime"
-          },
-          {
-            "name": "service provider",
-            "kind": "service",
-            "contract": "case-scoped outbox contract"
-          },
-          {
-            "name": "client app",
-            "kind": "app",
-            "contract": "case-scoped outbox client contract"
-          }
-        ],
-        "given": [
-          "A service queues an event in its SQL outbox before dispatch."
-        ],
-        "when": [
-          "The Trellis control plane restarts and the service reconnects."
-        ],
-        "then": [
-          "The queued event is dispatched and observed by a public subscriber."
-        ]
-      },
-      "completion": {
-        "rust": "pending"
-      },
-      "pending": {
-        "reason": "The obsolete pre-Rust-auth test port was removed; this runtime behavior requires a current Rust live test.",
-        "owner": "Trellis Rust runtime",
-        "intendedMilestone": "post-M9 testing correction follow-up"
-      },
-      "classification": "isolated-process",
-      "isolationReason": "mutates process-global state or process lifecycle"
-    },
-    {
-      "id": "control-plane.jobs-admin-lists-and-cancels-job",
-      "fixture": "control-plane",
-      "title": "Jobs admin lists and cancels a service-local job",
-      "coverage": [
-        "jobs",
-        "jobs-admin",
-        "jobs-cancel"
-      ],
-      "description": "Starts a service-local job and uses generated Jobs admin RPCs to observe and cancel it through the control plane.",
-      "scenario": {
-        "participants": [
-          {
-            "name": "trellis control plane",
-            "kind": "control-plane",
-            "contract": "Trellis Jobs admin RPC"
-          },
-          {
-            "name": "local admin",
-            "kind": "admin",
-            "contract": "Trellis built-in admin identity"
-          },
-          {
-            "name": "service provider",
-            "kind": "service",
-            "contract": "case-scoped jobs service contract"
-          }
-        ],
-        "given": [
-          "A service-local long-running job is active."
-        ],
-        "when": [
-          "An admin lists, gets, and cancels the job through generated Jobs RPCs."
-        ],
-        "then": [
-          "The job is observable through Jobs admin and reaches the cancelled state."
-        ]
-      },
-      "completion": {
-        "rust": "pending"
-      },
-      "pending": {
-        "reason": "The obsolete pre-Rust-auth test port was removed; this runtime behavior requires a current Rust live test.",
-        "owner": "Trellis Rust runtime",
-        "intendedMilestone": "post-M9 testing correction follow-up"
-      },
-      "classification": "isolated-process",
-      "isolationReason": "mutates process-global state or process lifecycle"
-    },
-    {
-      "id": "control-plane.service-admin-removal-rejects-unsafe-purge-and-noncascade-in-use",
-      "fixture": "control-plane",
-      "title": "Auth admin rejects unsafe service deployment removal while in use",
-      "coverage": [
-        "auth-admin",
-        "deployments",
-        "service-instances",
-        "validation",
-        "generated-rpc",
-        "runtime-access"
-      ],
-      "description": "Uses generated Auth admin RPCs and a live service/client to verify unsafe service deployment removal requests return validation errors without deleting deployment, instance, authority, or session records.",
-      "scenario": {
-        "participants": [
-          {
-            "name": "trellis control plane",
-            "kind": "control-plane",
-            "contract": "Trellis Auth admin RPC"
-          },
-          {
-            "name": "local admin",
-            "kind": "admin",
-            "contract": "Trellis built-in admin identity"
-          },
-          {
-            "name": "removal probe service",
-            "kind": "service",
-            "contract": "case-scoped ping service"
-          },
-          {
-            "name": "removal probe client",
-            "kind": "app",
-            "contract": "case-scoped ping client"
-          }
-        ],
-        "given": [
-          "A live Trellis control plane has an enabled service deployment with a connected service instance and connected client."
-        ],
-        "when": [
-          "The admin attempts service deployment removal with purgeResources, purgeUnusedContracts without cascade, and non-cascade while in use."
-        ],
-        "then": [
-          "Each remove returns a validation error.",
-          "Deployment, instance, authority, and session records remain listed.",
-          "The connected client can still call the connected service."
-        ]
-      },
-      "completion": {
-        "rust": "pending"
-      },
-      "pending": {
-        "reason": "The obsolete pre-Rust-auth test port was removed; this runtime behavior requires a current Rust live test.",
-        "owner": "Trellis Rust runtime",
-        "intendedMilestone": "post-M9 testing correction follow-up"
-      },
-      "classification": "isolated-process",
-      "isolationReason": "mutates process-global state or process lifecycle"
-    },
-    {
-      "id": "control-plane.admin-service-deployment-rollback-fault",
-      "fixture": "control-plane",
-      "title": "Auth admin rolls back service deployment fault edges",
-      "coverage": [
-        "auth-admin",
-        "deployments",
-        "rollback",
-        "fault-injection",
-        "generated-rpc"
-      ],
-      "description": "Uses generated Auth admin RPCs and one-shot trellis-test hooks to verify service deployment create-authority rollback and cascade removal rollback with a provisioned service instance, then retries successfully.",
-      "scenario": {
-        "participants": [
-          {
-            "name": "trellis control plane",
-            "kind": "control-plane",
-            "contract": "Trellis Auth admin RPC"
-          },
-          {
-            "name": "local admin",
-            "kind": "admin",
-            "contract": "Trellis built-in admin identity"
-          }
-        ],
-        "given": [
-          "A live Trellis control plane has create-authority and cascade-delete fail-once hooks enabled for service deployments."
-        ],
-        "when": [
-          "The admin creates a service deployment, provisions a service instance, and removes the deployment with cascade through generated Auth admin RPCs."
-        ],
-        "then": [
-          "The create-authority fault leaves no deployment, the cascade-delete fault restores a deleted service instance while the deployment remains available, and the retry removes both records."
-        ]
-      },
-      "completion": {
-        "rust": "pending"
-      },
-      "pending": {
-        "reason": "The obsolete pre-Rust-auth test port was removed; this runtime behavior requires a current Rust live test.",
-        "owner": "Trellis Rust runtime",
-        "intendedMilestone": "post-M9 testing correction follow-up"
-      },
-      "classification": "isolated-process",
-      "isolationReason": "mutates process-global state or process lifecycle"
-    },
-    {
-      "id": "control-plane.admin-device-deployment-rollback-fault",
-      "fixture": "control-plane",
-      "title": "Auth admin rolls back device deployment fault edges",
-      "coverage": [
-        "auth-admin",
-        "deployments",
-        "rollback",
-        "fault-injection",
-        "generated-rpc"
-      ],
-      "description": "Uses generated Auth admin RPCs and one-shot trellis-test hooks to verify device deployment create-authority rollback and cascade removal rollback with a provisioned device, then retries successfully.",
-      "scenario": {
-        "participants": [
-          {
-            "name": "trellis control plane",
-            "kind": "control-plane",
-            "contract": "Trellis Auth admin RPC"
-          },
-          {
-            "name": "local admin",
-            "kind": "admin",
-            "contract": "Trellis built-in admin identity"
-          }
-        ],
-        "given": [
-          "A live Trellis control plane has create-authority and cascade-delete fail-once hooks enabled for device deployments."
-        ],
-        "when": [
-          "The admin creates a device deployment, provisions a device, and removes the deployment with cascade through generated Auth admin RPCs."
-        ],
-        "then": [
-          "The create-authority fault leaves no deployment, the cascade-delete fault restores a deleted device while the deployment remains available, and the retry removes both records."
-        ]
-      },
-      "completion": {
-        "rust": "pending"
-      },
-      "pending": {
-        "reason": "The obsolete pre-Rust-auth test port was removed; this runtime behavior requires a current Rust live test.",
-        "owner": "Trellis Rust runtime",
-        "intendedMilestone": "post-M9 testing correction follow-up"
-      },
-      "classification": "isolated-process",
-      "isolationReason": "mutates process-global state or process lifecycle"
-    },
-    {
-      "id": "control-plane.admin-service-deployment-validate-before-persist-kick",
-      "fixture": "control-plane",
-      "title": "Auth admin validates service deployment disable before persisting or kicking",
-      "coverage": [
-        "auth-admin",
-        "deployments",
-        "rollback",
-        "fault-injection",
-        "generated-rpc",
-        "runtime-kick"
-      ],
-      "description": "Uses generated Auth admin RPCs, a live ping service/client, and a one-shot trellis-test validation hook to verify a failed service deployment disable validation leaves the deployment enabled and the connected service callable.",
-      "scenario": {
-        "participants": [
-          {
-            "name": "trellis control plane",
-            "kind": "control-plane",
-            "contract": "Trellis Auth admin RPC"
-          },
-          {
-            "name": "local admin",
-            "kind": "admin",
-            "contract": "Trellis built-in admin identity"
-          },
-          {
-            "name": "validation probe service",
-            "kind": "service",
-            "contract": "case-scoped ping service"
-          },
-          {
-            "name": "validation probe client",
-            "kind": "app",
-            "contract": "case-scoped ping client"
-          }
-        ],
-        "given": [
-          "A live Trellis control plane has an enabled service deployment with a connected service and ping client.",
-          "The service deployment active-authority validation fail-once hook is enabled."
-        ],
-        "when": [
-          "The admin disables the service deployment through generated Auth admin RPCs."
-        ],
-        "then": [
-          "Disable returns the injected validation error.",
-          "Auth.Deployments.List still shows the deployment enabled.",
-          "The already connected client can still call the already connected service."
-        ]
-      },
-      "completion": {
-        "rust": "pending"
-      },
-      "pending": {
-        "reason": "The obsolete pre-Rust-auth test port was removed; this runtime behavior requires a current Rust live test.",
-        "owner": "Trellis Rust runtime",
-        "intendedMilestone": "post-M9 testing correction follow-up"
-      },
-      "classification": "isolated-process",
-      "isolationReason": "mutates process-global state or process lifecycle"
-    },
-    {
-      "id": "control-plane.admin-service-deployment-disable-refresh-rollback",
-      "fixture": "control-plane",
-      "title": "Auth admin rolls back service deployment disable refresh failure",
-      "coverage": [
-        "auth-admin",
-        "deployments",
-        "rollback",
-        "fault-injection",
-        "generated-rpc"
-      ],
-      "description": "Uses generated Auth admin RPCs and a one-shot trellis-test refresh hook to verify failed service deployment disable leaves the public deployment enabled.",
-      "scenario": {
-        "participants": [
-          {
-            "name": "trellis control plane",
-            "kind": "control-plane",
-            "contract": "Trellis Auth admin RPC"
-          },
-          {
-            "name": "local admin",
-            "kind": "admin",
-            "contract": "Trellis built-in admin identity"
-          }
-        ],
-        "given": [
-          "A live Trellis control plane has the service deployment refresh fail-once hook enabled."
-        ],
-        "when": [
-          "The admin creates a service deployment and disables it through generated Auth admin RPCs."
-        ],
-        "then": [
-          "Disable returns an error and Auth.Deployments.List still shows the deployment enabled."
-        ]
-      },
-      "completion": {
-        "rust": "pending"
-      },
-      "pending": {
-        "reason": "The obsolete pre-Rust-auth test port was removed; this runtime behavior requires a current Rust live test.",
-        "owner": "Trellis Rust runtime",
-        "intendedMilestone": "post-M9 testing correction follow-up"
-      },
-      "classification": "isolated-process",
-      "isolationReason": "mutates process-global state or process lifecycle"
-    },
-    {
-      "id": "control-plane.admin-service-deployment-enable-refresh-rollback",
-      "fixture": "control-plane",
-      "title": "Auth admin rolls back service deployment enable refresh failure",
-      "coverage": [
-        "auth-admin",
-        "deployments",
-        "rollback",
-        "fault-injection",
-        "generated-rpc"
-      ],
-      "description": "Uses generated Auth admin RPCs and a one-shot trellis-test refresh hook to verify failed service deployment enable leaves the public deployment disabled.",
-      "scenario": {
-        "participants": [
-          {
-            "name": "trellis control plane",
-            "kind": "control-plane",
-            "contract": "Trellis Auth admin RPC"
-          },
-          {
-            "name": "local admin",
-            "kind": "admin",
-            "contract": "Trellis built-in admin identity"
-          }
-        ],
-        "given": [
-          "A live Trellis control plane has a disabled service deployment and the service deployment refresh fail-once hook enabled."
-        ],
-        "when": [
-          "The admin enables the service deployment through generated Auth admin RPCs."
-        ],
-        "then": [
-          "Enable returns an error and Auth.Deployments.List still shows the deployment disabled."
-        ]
-      },
-      "completion": {
-        "rust": "pending"
-      },
-      "pending": {
-        "reason": "The obsolete pre-Rust-auth test port was removed; this runtime behavior requires a current Rust live test.",
-        "owner": "Trellis Rust runtime",
-        "intendedMilestone": "post-M9 testing correction follow-up"
-      },
-      "classification": "isolated-process",
-      "isolationReason": "mutates process-global state or process lifecycle"
-    },
-    {
-      "id": "control-plane.admin-service-instance-disable-refresh-rollback",
-      "fixture": "control-plane",
-      "title": "Auth admin rolls back service instance disable refresh failure",
-      "coverage": [
-        "auth-admin",
-        "service-instances",
-        "rollback",
-        "fault-injection",
-        "generated-rpc"
-      ],
-      "description": "Uses generated Auth admin RPCs and a one-shot trellis-test refresh hook to verify failed service instance disable leaves the instance enabled.",
-      "scenario": {
-        "participants": [
-          {
-            "name": "trellis control plane",
-            "kind": "control-plane",
-            "contract": "Trellis Auth admin RPC"
-          },
-          {
-            "name": "local admin",
-            "kind": "admin",
-            "contract": "Trellis built-in admin identity"
-          }
-        ],
-        "given": [
-          "A live Trellis control plane has a provisioned service instance and the service instance refresh fail-once hook enabled."
-        ],
-        "when": [
-          "The admin disables the service instance through generated Auth admin RPCs."
-        ],
-        "then": [
-          "Disable returns an error and Auth.ServiceInstances.List still shows the instance enabled."
-        ]
-      },
-      "completion": {
-        "rust": "pending"
-      },
-      "pending": {
-        "reason": "The obsolete pre-Rust-auth test port was removed; this runtime behavior requires a current Rust live test.",
-        "owner": "Trellis Rust runtime",
-        "intendedMilestone": "post-M9 testing correction follow-up"
-      },
-      "classification": "isolated-process",
-      "isolationReason": "mutates process-global state or process lifecycle"
-    },
-    {
-      "id": "control-plane.admin-service-instance-enable-refresh-rollback",
-      "fixture": "control-plane",
-      "title": "Auth admin rolls back service instance enable refresh failure",
-      "coverage": [
-        "auth-admin",
-        "service-instances",
-        "rollback",
-        "fault-injection",
-        "generated-rpc"
-      ],
-      "description": "Uses generated Auth admin RPCs and a one-shot trellis-test refresh hook to verify failed service instance enable leaves the instance disabled.",
-      "scenario": {
-        "participants": [
-          {
-            "name": "trellis control plane",
-            "kind": "control-plane",
-            "contract": "Trellis Auth admin RPC"
-          },
-          {
-            "name": "local admin",
-            "kind": "admin",
-            "contract": "Trellis built-in admin identity"
-          }
-        ],
-        "given": [
-          "A live Trellis control plane has a disabled service instance and the service instance refresh fail-once hook enabled."
-        ],
-        "when": [
-          "The admin enables the service instance through generated Auth admin RPCs."
-        ],
-        "then": [
-          "Enable returns an error and Auth.ServiceInstances.List still shows the instance disabled."
-        ]
-      },
-      "completion": {
-        "rust": "pending"
-      },
-      "pending": {
-        "reason": "The obsolete pre-Rust-auth test port was removed; this runtime behavior requires a current Rust live test.",
-        "owner": "Trellis Rust runtime",
-        "intendedMilestone": "post-M9 testing correction follow-up"
-      },
-      "classification": "isolated-process",
-      "isolationReason": "mutates process-global state or process lifecycle"
-    },
-    {
-      "id": "control-plane.admin-service-instance-remove-refresh-rollback",
-      "fixture": "control-plane",
-      "title": "Auth admin rolls back service instance remove refresh failure",
-      "coverage": [
-        "auth-admin",
-        "service-instances",
-        "rollback",
-        "fault-injection",
-        "generated-rpc"
-      ],
-      "description": "Uses generated Auth admin RPCs and a one-shot trellis-test refresh hook to verify failed service instance remove leaves the instance present.",
-      "scenario": {
-        "participants": [
-          {
-            "name": "trellis control plane",
-            "kind": "control-plane",
-            "contract": "Trellis Auth admin RPC"
-          },
-          {
-            "name": "local admin",
-            "kind": "admin",
-            "contract": "Trellis built-in admin identity"
-          }
-        ],
-        "given": [
-          "A live Trellis control plane has a provisioned service instance and the service instance refresh fail-once hook enabled."
-        ],
-        "when": [
-          "The admin removes the service instance through generated Auth admin RPCs."
-        ],
-        "then": [
-          "Remove returns an error and Auth.ServiceInstances.List still shows the instance present."
-        ]
-      },
-      "completion": {
-        "rust": "pending"
-      },
-      "pending": {
-        "reason": "The obsolete pre-Rust-auth test port was removed; this runtime behavior requires a current Rust live test.",
-        "owner": "Trellis Rust runtime",
-        "intendedMilestone": "post-M9 testing correction follow-up"
-      },
-      "classification": "isolated-process",
-      "isolationReason": "mutates process-global state or process lifecycle"
-    },
-    {
-      "id": "control-plane.admin-device-deployment-disable-refresh-rollback",
-      "fixture": "control-plane",
-      "title": "Auth admin rolls back device deployment disable refresh failure",
-      "coverage": [
-        "auth-admin",
-        "deployments",
-        "rollback",
-        "fault-injection",
-        "generated-rpc"
-      ],
-      "description": "Uses generated Auth admin RPCs and a one-shot trellis-test refresh hook to verify failed device deployment disable leaves the public deployment enabled.",
-      "scenario": {
-        "participants": [
-          {
-            "name": "trellis control plane",
-            "kind": "control-plane",
-            "contract": "Trellis Auth admin RPC"
-          },
-          {
-            "name": "local admin",
-            "kind": "admin",
-            "contract": "Trellis built-in admin identity"
-          }
-        ],
-        "given": [
-          "A live Trellis control plane has the device deployment refresh fail-once hook enabled."
-        ],
-        "when": [
-          "The admin creates a device deployment and disables it through generated Auth admin RPCs."
-        ],
-        "then": [
-          "Disable returns an error and Auth.Deployments.List still shows the deployment enabled."
-        ]
-      },
-      "completion": {
-        "rust": "pending"
-      },
-      "pending": {
-        "reason": "The obsolete pre-Rust-auth test port was removed; this runtime behavior requires a current Rust live test.",
-        "owner": "Trellis Rust runtime",
-        "intendedMilestone": "post-M9 testing correction follow-up"
-      },
-      "classification": "isolated-process",
-      "isolationReason": "mutates process-global state or process lifecycle"
-    },
-    {
-      "id": "control-plane.admin-device-deployment-enable-refresh-rollback",
-      "fixture": "control-plane",
-      "title": "Auth admin rolls back device deployment enable refresh failure",
-      "coverage": [
-        "auth-admin",
-        "deployments",
-        "rollback",
-        "fault-injection",
-        "generated-rpc"
-      ],
-      "description": "Uses generated Auth admin RPCs and a one-shot trellis-test refresh hook to verify failed device deployment enable leaves the public deployment disabled.",
-      "scenario": {
-        "participants": [
-          {
-            "name": "trellis control plane",
-            "kind": "control-plane",
-            "contract": "Trellis Auth admin RPC"
-          },
-          {
-            "name": "local admin",
-            "kind": "admin",
-            "contract": "Trellis built-in admin identity"
-          }
-        ],
-        "given": [
-          "A live Trellis control plane has a disabled device deployment and the device deployment refresh fail-once hook enabled."
-        ],
-        "when": [
-          "The admin enables the device deployment through generated Auth admin RPCs."
-        ],
-        "then": [
-          "Enable returns an error and Auth.Deployments.List still shows the deployment disabled."
-        ]
-      },
-      "completion": {
-        "rust": "pending"
-      },
-      "pending": {
-        "reason": "The obsolete pre-Rust-auth test port was removed; this runtime behavior requires a current Rust live test.",
-        "owner": "Trellis Rust runtime",
-        "intendedMilestone": "post-M9 testing correction follow-up"
-      },
-      "classification": "isolated-process",
-      "isolationReason": "mutates process-global state or process lifecycle"
-    },
-    {
-      "id": "control-plane.admin-device-instance-disable-refresh-rollback",
-      "fixture": "control-plane",
-      "title": "Auth admin rolls back device instance disable refresh failure",
-      "coverage": [
-        "auth-admin",
-        "device-instances",
-        "rollback",
-        "fault-injection",
-        "generated-rpc"
-      ],
-      "description": "Uses generated Auth admin RPCs and a one-shot trellis-test refresh hook to verify failed device instance disable leaves the device registered.",
-      "scenario": {
-        "participants": [
-          {
-            "name": "trellis control plane",
-            "kind": "control-plane",
-            "contract": "Trellis Auth admin RPC"
-          },
-          {
-            "name": "local admin",
-            "kind": "admin",
-            "contract": "Trellis built-in admin identity"
-          }
-        ],
-        "given": [
-          "A live Trellis control plane has a provisioned device and the device instance refresh fail-once hook enabled."
-        ],
-        "when": [
-          "The admin disables the device through generated Auth admin RPCs."
-        ],
-        "then": [
-          "Disable returns an error and Auth.Devices.List still shows the device registered."
-        ]
-      },
-      "completion": {
-        "rust": "pending"
-      },
-      "pending": {
-        "reason": "The obsolete pre-Rust-auth test port was removed; this runtime behavior requires a current Rust live test.",
-        "owner": "Trellis Rust runtime",
-        "intendedMilestone": "post-M9 testing correction follow-up"
-      },
-      "classification": "isolated-process",
-      "isolationReason": "mutates process-global state or process lifecycle"
-    },
-    {
-      "id": "control-plane.admin-device-instance-enable-refresh-rollback",
-      "fixture": "control-plane",
-      "title": "Auth admin rolls back device instance enable refresh failure",
-      "coverage": [
-        "auth-admin",
-        "device-instances",
-        "rollback",
-        "fault-injection",
-        "generated-rpc"
-      ],
-      "description": "Uses generated Auth admin RPCs and a one-shot trellis-test refresh hook to verify failed device instance enable leaves the device disabled.",
-      "scenario": {
-        "participants": [
-          {
-            "name": "trellis control plane",
-            "kind": "control-plane",
-            "contract": "Trellis Auth admin RPC"
-          },
-          {
-            "name": "local admin",
-            "kind": "admin",
-            "contract": "Trellis built-in admin identity"
-          }
-        ],
-        "given": [
-          "A live Trellis control plane has a disabled device and the device instance refresh fail-once hook enabled."
-        ],
-        "when": [
-          "The admin enables the device through generated Auth admin RPCs."
-        ],
-        "then": [
-          "Enable returns an error and Auth.Devices.List still shows the device disabled."
-        ]
-      },
-      "completion": {
-        "rust": "pending"
-      },
-      "pending": {
-        "reason": "The obsolete pre-Rust-auth test port was removed; this runtime behavior requires a current Rust live test.",
-        "owner": "Trellis Rust runtime",
-        "intendedMilestone": "post-M9 testing correction follow-up"
-      },
-      "classification": "isolated-process",
-      "isolationReason": "mutates process-global state or process lifecycle"
-    },
-    {
-      "id": "control-plane.admin-device-instance-remove-refresh-rollback",
-      "fixture": "control-plane",
-      "title": "Auth admin rolls back device instance remove refresh failure",
-      "coverage": [
-        "auth-admin",
-        "device-instances",
-        "rollback",
-        "fault-injection",
-        "generated-rpc"
-      ],
-      "description": "Uses generated Auth admin RPCs and a one-shot trellis-test refresh hook to verify failed device instance remove leaves the device present.",
-      "scenario": {
-        "participants": [
-          {
-            "name": "trellis control plane",
-            "kind": "control-plane",
-            "contract": "Trellis Auth admin RPC"
-          },
-          {
-            "name": "local admin",
-            "kind": "admin",
-            "contract": "Trellis built-in admin identity"
-          }
-        ],
-        "given": [
-          "A live Trellis control plane has a provisioned device and the device instance refresh fail-once hook enabled."
-        ],
-        "when": [
-          "The admin removes the device through generated Auth admin RPCs."
-        ],
-        "then": [
-          "Remove returns an error and Auth.Devices.List still shows the device present."
-        ]
-      },
-      "completion": {
-        "rust": "pending"
-      },
-      "pending": {
-        "reason": "The obsolete pre-Rust-auth test port was removed; this runtime behavior requires a current Rust live test.",
-        "owner": "Trellis Rust runtime",
-        "intendedMilestone": "post-M9 testing correction follow-up"
-      },
-      "classification": "isolated-process",
-      "isolationReason": "mutates process-global state or process lifecycle"
+      "isolationReason": "mutates process-global state or process lifecycle",
+      "implementations": {
+        "rust": {
+          "module": "auth",
+          "function": "sessions_survive_control_plane_restart"
+        }
+      }
     },
     {
       "id": "control-plane.admin-service-deployment-lifecycle",
@@ -5759,15 +2620,16 @@
         ]
       },
       "completion": {
-        "rust": "pending"
-      },
-      "pending": {
-        "reason": "The obsolete pre-Rust-auth test port was removed; this runtime behavior requires a current Rust live test.",
-        "owner": "Trellis Rust runtime",
-        "intendedMilestone": "post-M9 testing correction follow-up"
+        "rust": "implemented"
       },
       "classification": "isolated-process",
-      "isolationReason": "mutates process-global state or process lifecycle"
+      "isolationReason": "mutates process-global state or process lifecycle",
+      "implementations": {
+        "rust": {
+          "module": "auth",
+          "function": "admin_service_deployment_lifecycle_controls_bootstrap"
+        }
+      }
     },
     {
       "id": "event-consumers.durable-listen-without-declared-group-returns-err",
@@ -6748,19 +3610,27 @@
       "id": "auth.trusted-local-registration-applies-portal-policy",
       "fixture": "auth",
       "title": "Trusted local registration applies portal policy immediately",
-      "coverage": ["auth", "browser-auth-flow", "trusted-portals"],
+      "coverage": [
+        "auth",
+        "browser-auth-flow",
+        "trusted-portals"
+      ],
       "description": "A new local user registered through a trusted portal reaches approved state without a separate consent step and receives the portal-selected authority.",
       "scenario": {
         "participants": [],
         "given": [
           "a trusted portal policy and a previously unregistered local user"
         ],
-        "when": ["the user completes local registration"],
+        "when": [
+          "the user completes local registration"
+        ],
         "then": [
           "the flow is approved immediately with the trusted portal authority"
         ]
       },
-      "completion": { "rust": "implemented" },
+      "completion": {
+        "rust": "implemented"
+      },
       "implementations": {
         "rust": {
           "module": "auth",
@@ -6773,17 +3643,27 @@
       "id": "auth.portal-policy-removal-requires-new-login",
       "fixture": "auth",
       "title": "Removed portal policy cannot resurrect cached authority",
-      "coverage": ["auth", "authorization-context", "trusted-portals"],
+      "coverage": [
+        "auth",
+        "authorization-context",
+        "trusted-portals"
+      ],
       "description": "Removing trusted portal policy revokes authority, clears verified-role provenance, and prevents policy restoration from resurrecting authority without a new verified login.",
       "scenario": {
         "participants": [],
-        "given": ["an active trusted-portal authority and verified provenance"],
-        "when": ["the grant override is removed and later restored"],
+        "given": [
+          "an active trusted-portal authority and verified provenance"
+        ],
+        "when": [
+          "the grant override is removed and later restored"
+        ],
         "then": [
           "authority and contexts are revoked, provenance is cleared, and cached roles cannot restore authority"
         ]
       },
-      "completion": { "rust": "implemented" },
+      "completion": {
+        "rust": "implemented"
+      },
       "implementations": {
         "rust": {
           "module": "auth",
@@ -6796,11 +3676,18 @@
       "id": "auth.oidc-role-mapping-converges-authority",
       "fixture": "auth",
       "title": "OIDC role mapping converges trusted portal authority",
-      "coverage": ["auth", "browser-auth-flow", "oidc", "trusted-portals"],
+      "coverage": [
+        "auth",
+        "browser-auth-flow",
+        "oidc",
+        "trusted-portals"
+      ],
       "description": "Verified provider-scoped roles resolve direct capabilities and recursive capability groups, replace provenance on later login, and fail closed for malformed role claims.",
       "scenario": {
         "participants": [],
-        "given": ["an OIDC provider and trusted role mappings"],
+        "given": [
+          "an OIDC provider and trusted role mappings"
+        ],
         "when": [
           "verified roles change across logins or the configured claim is malformed"
         ],
@@ -6808,7 +3695,9 @@
           "authority and provenance converge for valid roles and malformed claims are denied"
         ]
       },
-      "completion": { "rust": "implemented" },
+      "completion": {
+        "rust": "implemented"
+      },
       "implementations": {
         "rust": {
           "module": "auth",
@@ -6822,17 +3711,27 @@
       "id": "auth.portal-policy-reduction-and-expansion-converge",
       "fixture": "auth",
       "title": "Portal policy reduction and expansion converge live sessions",
-      "coverage": ["auth", "authorization-context", "trusted-portals"],
+      "coverage": [
+        "auth",
+        "authorization-context",
+        "trusted-portals"
+      ],
       "description": "Reducing trusted portal policy removes authority from retained sessions, while later expansion issues fresh contexts and restores the selected authority without recreating sessions.",
       "scenario": {
         "participants": [],
-        "given": ["active retained sessions governed by trusted portal policy"],
-        "when": ["the policy is reduced and later expanded"],
+        "given": [
+          "active retained sessions governed by trusted portal policy"
+        ],
+        "when": [
+          "the policy is reduced and later expanded"
+        ],
         "then": [
           "old authority is denied and fresh contexts recover the expanded authority"
         ]
       },
-      "completion": { "rust": "implemented" },
+      "completion": {
+        "rust": "implemented"
+      },
       "implementations": {
         "rust": {
           "module": "auth",
@@ -6842,22 +3741,65 @@
       "classification": "shared"
     },
     {
+      "id": "auth.portal-login-policy-snapshot-race",
+      "fixture": "auth",
+      "title": "Trusted portal login commits only a current policy snapshot",
+      "coverage": [
+        "auth",
+        "authorization-context",
+        "trusted-portals"
+      ],
+      "description": "Browser trusted-portal admission fails closed when the authenticated provider becomes ineligible and retries typed snapshot conflicts across policy reduction, override removal, and direct or transitive capability-group changes without relying on keyed reconciliation.",
+      "scenario": {
+        "participants": [],
+        "given": [
+          "browser admission has resolved one immutable portal policy snapshot"
+        ],
+        "when": [
+          "the portal or authenticated provider becomes ineligible, or the policy changes, disappears, or expands through a new capability group after resolution while reconciliation is either drained or independently paused"
+        ],
+        "then": [
+          "an ineligible paused trusted flow creates no authority, binding, context, or session, while eligible stale authority transactions retry with current policy and never expose a missing-group InvalidRecord"
+        ]
+      },
+      "completion": {
+        "rust": "implemented"
+      },
+      "implementations": {
+        "rust": {
+          "module": "auth",
+          "function": "portal_policy_snapshot_races_are_fenced"
+        }
+      },
+      "classification": "isolated-process",
+      "isolationReason": "installs exact integration-only SQLite barriers in the runtime-owned Auth database"
+    },
+    {
       "id": "auth.hostile-old-context-and-proofs-are-denied",
       "fixture": "auth",
       "title": "Hostile old context and signed proofs are denied after reduction",
-      "coverage": ["auth", "authorization-context", "events", "security"],
+      "coverage": [
+        "auth",
+        "authorization-context",
+        "events",
+        "security"
+      ],
       "description": "After authority reduction, exact stale NATS admission material and old signed RPC and event proofs cannot exercise the removed authority before context expiry.",
       "scenario": {
         "participants": [],
         "given": [
           "captured context, routing, RPC, and event proof material from before reduction"
         ],
-        "when": ["an adversarial client replays that material after reduction"],
+        "when": [
+          "an adversarial client replays that material after reduction"
+        ],
         "then": [
           "NATS admission and local proof verification deny every stale attempt"
         ]
       },
-      "completion": { "rust": "implemented" },
+      "completion": {
+        "rust": "implemented"
+      },
       "implementations": {
         "rust": {
           "module": "auth",
@@ -6870,19 +3812,27 @@
       "id": "auth.same-session-multiple-connections-are-kicked",
       "fixture": "auth",
       "title": "Every physical connection for one session is kicked",
-      "coverage": ["auth", "authorization-context", "connection-presence"],
+      "coverage": [
+        "auth",
+        "authorization-context",
+        "connection-presence"
+      ],
       "description": "Two physical NATS connections sharing one logical session are tracked independently and both are kicked when their authorization context is revoked.",
       "scenario": {
         "participants": [],
         "given": [
           "two physical connections authenticated by the same retained session"
         ],
-        "when": ["the session authorization context is revoked"],
+        "when": [
+          "the session authorization context is revoked"
+        ],
         "then": [
           "both physical connections are disconnected while the logical session remains"
         ]
       },
-      "completion": { "rust": "implemented" },
+      "completion": {
+        "rust": "implemented"
+      },
       "implementations": {
         "rust": {
           "module": "auth",
@@ -6905,13 +3855,19 @@
       "description": "Portal policy reconciliation treats each complete source and target transition as distinct, allowing authority A to reduce to B and later return to A.",
       "scenario": {
         "participants": [],
-        "given": ["a trusted portal authority at policy A"],
-        "when": ["policy changes to B and later returns to A"],
+        "given": [
+          "a trusted portal authority at policy A"
+        ],
+        "when": [
+          "policy changes to B and later returns to A"
+        ],
         "then": [
           "both transitions commit and the final authority converges to A"
         ]
       },
-      "completion": { "rust": "implemented" },
+      "completion": {
+        "rust": "implemented"
+      },
       "implementations": {
         "rust": {
           "module": "auth",
@@ -6943,7 +3899,9 @@
           "durable authority and portal provenance converge without a torn postcondition"
         ]
       },
-      "completion": { "rust": "implemented" },
+      "completion": {
+        "rust": "implemented"
+      },
       "implementations": {
         "rust": {
           "module": "auth",
@@ -6990,6 +3948,437 @@
           "function": "cli_server_managed_nats"
         }
       }
+    },
+    {
+      "id": "auth.device-activation-none-connect-revoke",
+      "fixture": "auth",
+      "title": "No-review device activation connects and revocation denies reuse",
+      "coverage": [
+        "auth",
+        "device-activation",
+        "rust-client",
+        "revocation"
+      ],
+      "description": "A preregistered Rust device uses the current bootstrap route, a user confirms the device code without administrative review, the activated device connects through its generated contract, and revocation denies reuse.",
+      "scenario": {
+        "participants": [
+          {
+            "name": "device",
+            "kind": "device",
+            "contract": "device activation integration contract"
+          },
+          {
+            "name": "activating user",
+            "kind": "app",
+            "contract": "device activation portal contract"
+          }
+        ],
+        "given": [
+          "a preregistered device deployment with reviewMode none and required user delegation"
+        ],
+        "when": [
+          "the device submits fresh proof-bound bootstrap requests and the user resolves the review with the displayed confirmation code"
+        ],
+        "then": [
+          "pure connect fails before activation and succeeds after Resolve",
+          "Auth.Sessions.Me and Auth.DeviceUserAuthorities.List project the activated device",
+          "revocation denies reconnect"
+        ]
+      },
+      "completion": {
+        "rust": "implemented"
+      },
+      "implementations": {
+        "rust": {
+          "module": "auth",
+          "function": "device_activation_without_review_connects_and_revocation_denies_reuse"
+        }
+      },
+      "classification": "shared"
+    },
+    {
+      "id": "auth.device-activation-required-review",
+      "fixture": "auth",
+      "title": "Required device review needs a privileged decision",
+      "coverage": [
+        "auth",
+        "device-activation",
+        "review-authorization",
+        "rust-client"
+      ],
+      "description": "A required-review activation remains pending after the user starts Resolve until a privileged caller decides the deployment-scoped review.",
+      "scenario": {
+        "participants": [
+          {
+            "name": "device",
+            "kind": "device",
+            "contract": "required-review and no-review device contracts"
+          },
+          {
+            "name": "activating user",
+            "kind": "app",
+            "contract": "device activation portal contract"
+          },
+          {
+            "name": "reviewer",
+            "kind": "service",
+            "contract": "trellis auth administrator contract"
+          }
+        ],
+        "given": [
+          "a preregistered device deployment with reviewMode required"
+        ],
+        "when": [
+          "the user starts Resolve and both an unprivileged caller and the privileged reviewer attempt a decision"
+        ],
+        "then": [
+          "Resolve does not self-approve the pending review",
+          "the unprivileged decision fails",
+          "the deployment-scoped review records the activating user",
+          "the privileged approval completes the original operation and device bootstrap becomes ready",
+          "privileged rejection completes Resolve with a rejected projection and keeps bootstrap and connect denied"
+        ]
+      },
+      "completion": {
+        "rust": "implemented"
+      },
+      "implementations": {
+        "rust": {
+          "module": "auth",
+          "function": "device_activation_required_review_needs_privileged_decision"
+        }
+      },
+      "classification": "shared"
+    },
+    {
+      "id": "auth.device-activation-wait-is-event-driven",
+      "fixture": "auth",
+      "title": "Activation operation wait is event-driven",
+      "coverage": [
+        "auth",
+        "device-activation",
+        "operation-wait",
+        "bounded-reads"
+      ],
+      "description": "A pending Resolve wait uses a read-register-reread notifier handoff rather than SQLite polling and wakes promptly after committed approval.",
+      "scenario": {
+        "participants": [
+          {
+            "name": "activating user",
+            "kind": "app",
+            "contract": "device activation portal contract"
+          },
+          {
+            "name": "reviewer",
+            "kind": "service",
+            "contract": "trellis auth administrator contract"
+          }
+        ],
+        "given": [
+          "a claimed required-review activation held pending for more than one second"
+        ],
+        "when": [
+          "the operation waits before the reviewer approves"
+        ],
+        "then": [
+          "the pending wait performs exactly the bounded read-register-reread sequence",
+          "approval wakes the waiter promptly without a polling interval"
+        ]
+      },
+      "completion": {
+        "rust": "implemented"
+      },
+      "implementations": {
+        "rust": {
+          "module": "auth",
+          "function": "device_activation_wait_is_event_driven"
+        }
+      },
+      "classification": "isolated-process",
+      "isolationReason": "This case installs an exact-review integration-only SQLite read counter outside the runtime repository mutex."
+    },
+    {
+      "id": "auth.device-activation-events-follow-effective-state",
+      "fixture": "auth",
+      "title": "Activation lifecycle events follow effective state",
+      "coverage": [
+        "auth",
+        "device-activation",
+        "events",
+        "event-order"
+      ],
+      "description": "Required-review and no-review lifecycle events publish in their exact durable order, with active resolution following active device and delegation state.",
+      "scenario": {
+        "participants": [
+          {
+            "name": "device",
+            "kind": "device",
+            "contract": "required-review device contract"
+          },
+          {
+            "name": "activating user",
+            "kind": "app",
+            "contract": "device activation portal contract"
+          },
+          {
+            "name": "event observer",
+            "kind": "service",
+            "contract": "trellis auth event observer contract"
+          }
+        ],
+        "given": [
+          "required-review and no-review activations with ordered lifecycle subscriptions"
+        ],
+        "when": [
+          "the required device is claimed and approved and the no-review device is claimed and automatically approved"
+        ],
+        "then": [
+          "required review publishes ReviewRequested, Requested, Approved, and Resolved",
+          "no review publishes exactly Requested, Approved, and Resolved without ReviewRequested",
+          "the device and required delegation are active before Resolved(active)",
+          "device bootstrap is ready when active resolution is observed"
+        ]
+      },
+      "completion": {
+        "rust": "implemented"
+      },
+      "implementations": {
+        "rust": {
+          "module": "auth",
+          "function": "device_activation_events_follow_effective_state"
+        }
+      },
+      "classification": "shared"
+    },
+    {
+      "id": "auth.device-activation-approved-unclaimed-cannot-complete-delegation",
+      "fixture": "auth",
+      "title": "Administrative approval waits for the claiming user and ready state",
+      "coverage": [
+        "auth",
+        "device-activation",
+        "review-ownership",
+        "event-order"
+      ],
+      "description": "Administrative approval of an unclaimed required review cannot create delegation or resolve activation; the first user to prove confirmation possession becomes the sole claimant and Resolved(active) is observable only after bootstrap is ready.",
+      "scenario": {
+        "participants": [
+          {
+            "name": "device",
+            "kind": "device",
+            "contract": "required-review device contract"
+          },
+          {
+            "name": "claiming users",
+            "kind": "app",
+            "contract": "device activation portal contract"
+          },
+          {
+            "name": "reviewer",
+            "kind": "service",
+            "contract": "trellis auth administrator contract"
+          }
+        ],
+        "given": [
+          "an unclaimed required-review activation with mandatory user delegation"
+        ],
+        "when": [
+          "the reviewer approves before either user submits the device confirmation code"
+        ],
+        "then": [
+          "approval remains pending for user delegation and publishes no active resolution",
+          "the first confirming user completes activation and a competing user is denied",
+          "Resolved(active) is observed only after device bootstrap reports ready"
+        ]
+      },
+      "completion": {
+        "rust": "implemented"
+      },
+      "implementations": {
+        "rust": {
+          "module": "auth",
+          "function": "device_activation_approved_unclaimed_cannot_complete_delegation"
+        }
+      },
+      "classification": "shared"
+    },
+    {
+      "id": "auth.device-activation-expired-review-is-terminal",
+      "fixture": "auth",
+      "title": "Activation review expiry is authoritative and wakes waiters",
+      "coverage": [
+        "auth",
+        "device-activation",
+        "expiry",
+        "operation-wait"
+      ],
+      "description": "Server-time review expiry is committed at public boundaries before and after claim, wakes operation waiters without SQLite polling, and rejects late administrative decisions without mutation.",
+      "scenario": {
+        "participants": [
+          {
+            "name": "device",
+            "kind": "device",
+            "contract": "required-review device contract"
+          },
+          {
+            "name": "activating user",
+            "kind": "app",
+            "contract": "device activation portal contract"
+          },
+          {
+            "name": "reviewer",
+            "kind": "service",
+            "contract": "trellis auth administrator contract"
+          }
+        ],
+        "given": [
+          "required activation reviews with integration-scoped short server TTLs"
+        ],
+        "when": [
+          "one review expires while claimed and another expires before claim"
+        ],
+        "then": [
+          "a public review boundary commits the claimed expiry and wakes the registered waiter",
+          "the wait path performs a bounded read-register-reread sequence without polling",
+          "late approval fails without changing the expired review version",
+          "an unclaimed expired review projects the same stable terminal result"
+        ]
+      },
+      "completion": {
+        "rust": "implemented"
+      },
+      "implementations": {
+        "rust": {
+          "module": "auth",
+          "function": "device_activation_expired_review_is_terminal"
+        }
+      },
+      "classification": "isolated-process",
+      "isolationReason": "This case installs exact-target integration-only SQLite TTL and read-count controls outside the runtime repository mutex."
+    },
+    {
+      "id": "auth.device-activation-proof-scoping",
+      "fixture": "auth",
+      "title": "Device activation rejects invalid proofs, confirmation, and deployment evidence",
+      "coverage": [
+        "auth",
+        "device-activation",
+        "proof",
+        "deployment-scoping"
+      ],
+      "description": "The current device bootstrap and Resolve boundaries reject corrupted and stale identity proofs, mismatched deployment evidence, and a wrong device-displayed confirmation code before claiming the durable review.",
+      "scenario": {
+        "participants": [
+          {
+            "name": "device",
+            "kind": "device",
+            "contract": "device activation integration contract"
+          },
+          {
+            "name": "activating user",
+            "kind": "app",
+            "contract": "device activation portal contract"
+          }
+        ],
+        "given": [
+          "a preregistered inactive device and its exact deployment evidence"
+        ],
+        "when": [
+          "the device presents a corrupt proof, stale issued-at, or wrong deployment and the user submits a wrong confirmation code"
+        ],
+        "then": [
+          "all invalid bootstrap presentations are rejected without a session",
+          "wrong confirmation does not claim or version the pending review"
+        ]
+      },
+      "completion": {
+        "rust": "implemented"
+      },
+      "implementations": {
+        "rust": {
+          "module": "auth",
+          "function": "device_activation_rejects_invalid_proof_confirmation_and_deployment"
+        }
+      },
+      "classification": "shared"
+    },
+    {
+      "id": "auth.validation-failure-persists-no-state-or-actions",
+      "fixture": "auth",
+      "title": "Auth validation failure has no durable side effects",
+      "coverage": ["auth", "transactions", "idempotency", "post-commit"],
+      "description": "A live Auth mutation rejected before persistence creates no principal, idempotency result, event, kick, or other post-commit action.",
+      "scenario": {
+        "participants": [],
+        "given": ["an authenticated Auth administrator"],
+        "when": ["a user mutation targets a nonexistent principal"],
+        "then": [
+          "validation fails before persistence",
+          "durable state, idempotency, and post-commit action counts remain unchanged"
+        ]
+      },
+      "completion": { "rust": "implemented" },
+      "implementations": {
+        "rust": {
+          "module": "auth",
+          "function": "auth_validation_failure_persists_no_state_or_actions"
+        }
+      },
+      "classification": "shared"
+    },
+    {
+      "id": "auth.transaction-failure-rolls-back-state-idempotency-and-actions",
+      "fixture": "auth",
+      "title": "Auth aggregate transaction failure rolls back completely",
+      "coverage": ["auth", "transactions", "idempotency", "post-commit"],
+      "description": "A target-scoped SQLite trigger fails one live user aggregate after its principal write; the aggregate rolls back state, idempotency, and post-commit actions together.",
+      "scenario": {
+        "participants": [],
+        "given": ["an active user and a target-scoped aggregate failure hook"],
+        "when": ["Auth.Users.Update reaches the repository transaction"],
+        "then": [
+          "the mutation fails",
+          "principal and profile state remain byte-for-byte equivalent",
+          "no idempotency result or post-commit action commits"
+        ]
+      },
+      "completion": { "rust": "implemented" },
+      "implementations": {
+        "rust": {
+          "module": "auth",
+          "function": "auth_transaction_failure_rolls_back_state_idempotency_and_actions"
+        }
+      },
+      "classification": "isolated-process",
+      "isolationReason": "installs a temporary process-global SQLite trigger on the runtime-owned Auth schema"
+    },
+    {
+      "id": "auth.post-commit-failure-retries-committed-context-revocation-once",
+      "fixture": "auth",
+      "title": "Auth post-commit failure retries a committed revocation",
+      "coverage": ["auth", "post-commit", "retry", "authorization-context"],
+      "description": "A target-scoped test hook fails the first dispatch of one committed context-revocation action; the durable user mutation remains committed and retry produces one revoked context and denied reconnect.",
+      "scenario": {
+        "participants": [],
+        "given": [
+          "an active user context and a one-shot dispatch failure for its exact digest"
+        ],
+        "when": ["the user is disabled in a committed aggregate transaction"],
+        "then": [
+          "the durable mutation remains committed while the first action attempt fails",
+          "the dispatcher retries and removes the acknowledged action",
+          "one context is externally revoked and reconnect is denied"
+        ]
+      },
+      "completion": { "rust": "implemented" },
+      "implementations": {
+        "rust": {
+          "module": "auth",
+          "function": "auth_post_commit_failure_retries_committed_context_revocation_once"
+        }
+      },
+      "classification": "isolated-process",
+      "isolationReason": "installs temporary process-global SQLite trigger and hook tables on the runtime-owned Auth schema"
     }
   ]
 }

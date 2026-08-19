@@ -67,6 +67,7 @@ export async function createDeployment(
       participantId: null,
       portalId: null,
       requiresDeviceDelegation: false,
+      reviewMode: args.kind === "device" ? "none" : null,
     });
     context.deploymentIds.set(deployment, created.deployment.deploymentId);
     context.createdDeployments.set(key, Promise.resolve());

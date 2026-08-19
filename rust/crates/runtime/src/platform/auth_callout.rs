@@ -610,9 +610,9 @@ fn callout_denial_code(error: &AuthorizationStateError) -> &'static str {
         AuthorizationStateError::SessionMissing => "session_not_found",
         AuthorizationStateError::SessionExpired => "session_expired",
         AuthorizationStateError::SessionRevoked => "session_revoked",
-        AuthorizationStateError::PrincipalMissing | AuthorizationStateError::PrincipalInactive => {
-            "principal_inactive"
-        }
+        AuthorizationStateError::PrincipalMissing
+        | AuthorizationStateError::PrincipalInactive
+        | AuthorizationStateError::IdentityMissing => "principal_inactive",
         AuthorizationStateError::ParticipantMissing
         | AuthorizationStateError::ParticipantDigestMismatch
         | AuthorizationStateError::NeedsDigestMismatch => "participant_changed",
@@ -626,7 +626,8 @@ fn callout_denial_code(error: &AuthorizationStateError) -> &'static str {
         | AuthorizationStateError::RequiredResourceUnavailable(_)
         | AuthorizationStateError::MaterializationStale
         | AuthorizationStateError::ContextLifetimeUnavailable
-        | AuthorizationStateError::ContextSnapshotChanged => "authority_unavailable",
+        | AuthorizationStateError::ContextSnapshotChanged
+        | AuthorizationStateError::PortalPolicyChanged => "authority_unavailable",
         AuthorizationStateError::DeploymentInactive => "deployment_inactive",
         AuthorizationStateError::InstanceInactive => "instance_inactive",
         AuthorizationStateError::DeviceInactive => "device_inactive",

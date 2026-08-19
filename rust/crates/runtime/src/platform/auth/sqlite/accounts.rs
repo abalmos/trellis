@@ -785,9 +785,7 @@ impl AccountRepository for SqliteAuthorizationStore {
                 .optional()
                 .map_err(sql_error)?
                 .filter(|owner| owner == &command.principal_id)
-                .ok_or_else(|| {
-                    AuthorizationStateError::InvalidRecord("identity not found".to_owned())
-                })?;
+                .ok_or(AuthorizationStateError::IdentityMissing)?;
             let method_count: i64 = transaction
                 .query_row(
                     "SELECT
@@ -868,6 +866,161 @@ impl AccountRepository for SqliteAuthorizationStore {
 
 #[async_trait]
 impl PortalRepository for SqliteAuthorizationStore {
+    #[cfg(feature = "integration-test-hooks")]
+    async fn wait_for_portal_reconciliation_test_barrier(
+        &self,
+        portal_id: &str,
+    ) -> Result<(), AuthorizationStateError> {
+        let portal_id = portal_id.to_owned();
+        let setup_portal_id = portal_id.clone();
+        let enabled = self
+            .run(move |connection| {
+                let exists = connection
+                    .query_row(
+                        "SELECT EXISTS(SELECT 1 FROM sqlite_master
+                         WHERE type = 'table'
+                           AND name = '__trellis_test_portal_reconciliation_barriers')",
+                        [],
+                        |row| row.get::<_, bool>(0),
+                    )
+                    .map_err(sql_error)?;
+                if !exists {
+                    return Ok(false);
+                }
+                let updated = connection
+                    .execute(
+                        "UPDATE __trellis_test_portal_reconciliation_barriers
+                         SET reached = 1 WHERE portal_id = ?1",
+                        [setup_portal_id],
+                    )
+                    .map_err(map_write_error)?;
+                Ok(updated == 1)
+            })
+            .await?;
+        if !enabled {
+            return Ok(());
+        }
+        loop {
+            let portal_id = portal_id.clone();
+            let released = self
+                .run_read(move |connection| {
+                    connection
+                        .query_row(
+                            "SELECT released
+                             FROM __trellis_test_portal_reconciliation_barriers
+                             WHERE portal_id = ?1",
+                            [portal_id],
+                            |row| row.get::<_, bool>(0),
+                        )
+                        .optional()
+                        .map_err(sql_error)
+                })
+                .await?
+                .unwrap_or(true);
+            if released {
+                return Ok(());
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+    }
+
+    #[cfg(feature = "integration-test-hooks")]
+    async fn record_portal_reconciliation_test_pass(
+        &self,
+        portal_ids: &[String],
+    ) -> Result<(), AuthorizationStateError> {
+        let portal_ids = portal_ids.to_vec();
+        self.run(move |connection| {
+            let exists = connection
+                .query_row(
+                    "SELECT EXISTS(SELECT 1 FROM sqlite_master
+                     WHERE type = 'table'
+                       AND name = '__trellis_test_portal_reconciliation_passes')",
+                    [],
+                    |row| row.get::<_, bool>(0),
+                )
+                .map_err(sql_error)?;
+            if exists {
+                for portal_id in portal_ids {
+                    connection
+                        .execute(
+                            "UPDATE __trellis_test_portal_reconciliation_passes
+                             SET pass_count = pass_count + 1
+                             WHERE portal_id = ?1",
+                            params![portal_id],
+                        )
+                        .map_err(map_write_error)?;
+                }
+            }
+            Ok(())
+        })
+        .await
+    }
+
+    #[cfg(feature = "integration-test-hooks")]
+    async fn wait_for_portal_snapshot_test_barrier(
+        &self,
+        flow_id: &str,
+        portal_id: &str,
+    ) -> Result<(), AuthorizationStateError> {
+        let flow_id = flow_id.to_owned();
+        let portal_id = portal_id.to_owned();
+        let setup_flow_id = flow_id.clone();
+        let setup_portal_id = portal_id.clone();
+        let enabled = self
+            .run(move |connection| {
+                let exists = connection
+                    .query_row(
+                        "SELECT EXISTS(SELECT 1 FROM sqlite_master
+                         WHERE type = 'table'
+                           AND name = '__trellis_test_portal_snapshot_barriers')",
+                        [],
+                        |row| row.get::<_, bool>(0),
+                    )
+                    .map_err(sql_error)?;
+                if !exists {
+                    return Ok(false);
+                }
+                let updated = connection
+                    .execute(
+                        "UPDATE __trellis_test_portal_snapshot_barriers
+                         SET reached = 1
+                         WHERE flow_id = ?1 OR flow_id = ?2",
+                        params![setup_flow_id, setup_portal_id],
+                    )
+                    .map_err(map_write_error)?;
+                Ok(updated == 1)
+            })
+            .await?;
+        if !enabled {
+            return Ok(());
+        }
+        loop {
+            let flow_id = flow_id.clone();
+            let portal_id = portal_id.clone();
+            let released = self
+                .run_read(move |connection| {
+                    connection
+                        .query_row(
+                            "SELECT released
+                             FROM __trellis_test_portal_snapshot_barriers
+                             WHERE flow_id = ?1 OR flow_id = ?2
+                             LIMIT 1",
+                            params![flow_id, portal_id],
+                            |row| row.get::<_, bool>(0),
+                        )
+                        .optional()
+                        .map_err(sql_error)
+                })
+                .await?
+                .unwrap_or(true);
+            if released {
+                return Ok(());
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+    }
+
     async fn list_login_portals(&self) -> Result<Vec<LoginPortalRecord>, AuthorizationStateError> {
         self.run_read(move |connection| {
             let mut statement = connection

@@ -6,6 +6,7 @@ use super::AuthorizationStateError;
 
 mod account_flows;
 mod accounts;
+mod activation_review_notifier;
 mod authority;
 mod deployments;
 pub(crate) mod repository;
@@ -25,13 +26,14 @@ pub use accounts::{
 };
 pub(crate) use authority::{
     ApplyIdentityAuthoritySelectionInput, PortalAuthoritySource, PortalBindingMutation,
+    PortalPolicySnapshot,
 };
 pub use authority::{
     CreateAuthorityProposalInput, DecideAuthorityProposalInput, PresentDeploymentAuthorityInput,
 };
 pub use deployments::{
-    CreateActivationReviewInput, DecideActivationReviewInput, EnrollDeviceIdentityInput,
-    ProvisionDeviceInput, ProvisionServiceIdentityInput,
+    ClaimActivationReviewInput, CreateActivationReviewInput, DecideActivationReviewInput,
+    EnrollDeviceIdentityInput, ProvisionDeviceInput, ProvisionServiceIdentityInput,
 };
 pub use sessions::CreateSessionInput;
 

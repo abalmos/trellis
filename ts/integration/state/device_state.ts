@@ -15,7 +15,7 @@ import { Type } from "typebox";
 import { caseScopedContractId, caseScopedName } from "../_support/names.ts";
 import type { LiveTrellisRuntime } from "../_support/runtime.ts";
 
-const CASE_ID = "state.typescript-device-rust-owner" as const;
+const CASE_ID = "state.activated-devices-rust-owner" as const;
 
 const adminContract = defineAppContract(() => ({
   id: caseScopedContractId("trellis.integration.state-device-admin", CASE_ID),
@@ -93,6 +93,7 @@ export async function exerciseDeviceState(runtime: LiveTrellisRuntime) {
       .searchParams.get("flowId");
     assert(flowId !== null);
     const activationRef = await admin.authDeviceUserAuthoritiesResolve({
+      confirmationCode: activation.confirmationCode,
       flowId,
     }).start().orThrow();
     await assertOperationCompleted(activationRef);

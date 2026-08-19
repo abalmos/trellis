@@ -956,6 +956,7 @@ fn context_action(
             AuthorizationStateError::InvalidRecord("context time overflow".to_owned())
         })?;
     Ok(PostCommitActionRecord {
+        predecessor_action_id: None,
         action_id: URL_SAFE_NO_PAD.encode(Sha256::digest(canonical.as_bytes())),
         kind,
         payload,
@@ -1339,6 +1340,7 @@ mod tests {
                     revoked_at: None,
                     version: 1,
                 },
+                previous_session: None,
                 desired_authority: Some(DesiredAuthorityRecord::Identity(authority)),
                 runtime_binding: None,
                 idempotency: IdempotencyResultRecord {
@@ -2891,6 +2893,7 @@ mod tests {
                 },
                 portal_binding: None,
                 expected_portal_binding: None,
+                portal_policy_snapshot: None,
                 actions: Vec::new(),
             })
             .await?;

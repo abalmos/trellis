@@ -8,10 +8,10 @@ pub enum DeviceReviewMode {
 }
 
 impl DeviceReviewMode {
-    pub fn as_optional_wire_value(self) -> Option<&'static str> {
+    pub fn as_wire_value(self) -> &'static str {
         match self {
-            Self::None => None,
-            Self::Required => Some("required"),
+            Self::None => "none",
+            Self::Required => "required",
         }
     }
 }
@@ -258,6 +258,9 @@ pub struct SvcCreateArgs {
 pub struct DevCreateArgs {
     #[arg(long = "review-mode", default_value = "none")]
     pub review_mode: DeviceReviewMode,
+    /// Require an activating user to establish delegation independently of review.
+    #[arg(long)]
+    pub requires_device_delegation: bool,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Args)]

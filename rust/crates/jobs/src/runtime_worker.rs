@@ -147,8 +147,12 @@ impl JobEventPublisher for NatsJobEventPublisher {
             if let Some(tracestate) = headers.tracestate.as_deref() {
                 nats_headers.insert("tracestate", tracestate);
             }
-            nats.publish_with_headers(subject, nats_headers, payload.into())
+            async_nats::jetstream::new(nats)
+                .publish_with_headers(subject, nats_headers, payload.into())
                 .await
+                .map_err(|error| error.to_string())?
+                .await
+                .map(|_| ())
                 .map_err(|error| error.to_string())
         }
     }

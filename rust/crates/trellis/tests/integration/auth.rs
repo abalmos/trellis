@@ -2,21 +2,32 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+use base64::Engine as _;
 use futures_util::StreamExt;
+use rusqlite::params;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use tokio::task::JoinHandle;
-use trellis_rs::client::{EventDescriptor, RpcDescriptor};
+use trellis_rs::auth::{
+    check_device_activation, check_device_activation_with_test_proof, derive_device_identity,
+    wait_for_device_activation, DeviceActivationOptions, DeviceActivationStatus,
+};
+use trellis_rs::client::OperationState as ClientOperationState;
+use trellis_rs::client::{
+    DeviceConnectOptions, EventDescriptor, MemoryAuthorizationContextStore, RpcDescriptor,
+};
 use trellis_rs::generated::Caller;
 use trellis_rs::sdk::auth as auth_sdk;
 use trellis_rs::service::{
     ConnectedServiceRuntime, ServiceEventListenOptions, ServiceEventListenerMode,
 };
 
-use crate::support::assertions::assert_runtime_case_registered;
+use crate::support::assertions::{assert_case_registered, assert_runtime_case_registered};
 
 const SERVICE_ID: &str = "trellis.integration.trusted-portal-service@v1";
 const CLIENT_ID: &str = "trellis.integration.trusted-portal-client@v1";
+const APPROVED_CLIENT_ID: &str = "trellis.integration.approved-client@v1";
 const READ_CAPABILITY: &str = "trellis.integration.trusted-portal-service::read";
 const PUBLISH_CAPABILITY: &str = "trellis.integration.trusted-portal-service::publish";
 const API_SOURCE: &str = r#"{
@@ -52,7 +63,6 @@ struct ValueMessage {
 }
 
 struct ValueGet;
-
 struct ValueChanged;
 
 struct TrustedPortalListenerContract;
@@ -95,10 +105,113 @@ struct Fixture {
     admin: trellis_test::TrellisTestAdmin,
     bootstrap_url: String,
     portal_id: String,
+    service_contract: trellis_test::TrellisTestContract,
+    service_handle: trellis_rs::service::ServiceHandle,
     client_contract: trellis_test::TrellisTestContract,
     read_capability: String,
     publish_capability: String,
     _service: AbortOnDrop,
+}
+
+struct DeviceActivationCase {
+    approval: trellis_test::TrellisTestContractApproval,
+    identity: trellis_rs::auth::DeviceIdentity,
+    instance_id: String,
+    principal_id: String,
+    session_seed: String,
+}
+
+impl DeviceActivationCase {
+    fn connect_options<'a>(&'a self, trellis_url: &'a str) -> DeviceConnectOptions<'a> {
+        self.connect_options_for_deployment(trellis_url, &self.approval.deployment_id)
+    }
+
+    fn connect_options_for_deployment<'a>(
+        &'a self,
+        trellis_url: &'a str,
+        deployment_id: &'a str,
+    ) -> DeviceConnectOptions<'a> {
+        let referenced = self
+            .approval
+            .referenced_api_artifacts
+            .iter()
+            .map(|(json, digest)| (json.as_str(), digest.as_str()))
+            .collect::<Vec<_>>();
+        DeviceConnectOptions::new(
+            trellis_url,
+            deployment_id,
+            &self.instance_id,
+            &self.approval.participant_id,
+            &self.approval.participant_digest,
+            &self.approval.participant_needs_digest,
+            &self.approval.participant_json,
+            &self.approval.api_json,
+            &self.approval.api_digest,
+            &referenced,
+            &self.identity.public_identity_key,
+            &self.identity.identity_seed_base64url,
+            &self.session_seed,
+            10_000,
+            Arc::new(MemoryAuthorizationContextStore::default()),
+        )
+    }
+
+    fn activation_options<'a>(&'a self, trellis_url: &'a str) -> DeviceActivationOptions<'a> {
+        DeviceActivationOptions::new(
+            self.connect_options(trellis_url),
+            &self.identity.activation_key_base64url,
+        )
+        .with_nonce(format!("activation:{}", self.instance_id))
+    }
+}
+
+#[tokio::test]
+async fn admin_bootstrap_creates_exactly_one_first_administrator() {
+    assert_runtime_case_registered(
+        "control-plane.admin-bootstrap-creates-first-local-admin",
+        "control-plane",
+        "auth",
+    );
+
+    let runtime = trellis_test::TrellisTestRuntime::start(
+        trellis_test::TrellisTestRuntimeOptions::repo_platform(),
+    )
+    .await
+    .expect("start bootstrap runtime");
+    let _bootstrap_url = runtime
+        .wait_for_bootstrap_url(Duration::from_secs(10))
+        .await
+        .expect("observe first administrator bootstrap URL");
+    runtime
+        .complete_bootstrap()
+        .await
+        .expect("complete first administrator bootstrap");
+    assert_eq!(
+        runtime
+            .control_plane_sqlite()
+            .query(
+                "SELECT principal_id FROM auth_principals WHERE kind = 'user' AND state = 'active'",
+                [],
+            )
+            .expect("query active administrators")
+            .len(),
+        1
+    );
+    assert!(
+        runtime.complete_bootstrap().await.is_err(),
+        "first administrator bootstrap completed twice"
+    );
+    assert_eq!(
+        runtime
+            .control_plane_sqlite()
+            .query(
+                "SELECT principal_id FROM auth_principals WHERE kind = 'user' AND state = 'active'",
+                [],
+            )
+            .expect("query administrators after replay")
+            .len(),
+        1
+    );
 }
 
 async fn start_fixture(user_jwt_ttl_ms: Option<u64>, use_test_oidc_provider: bool) -> Fixture {
@@ -112,11 +225,52 @@ async fn start_fixture(user_jwt_ttl_ms: Option<u64>, use_test_oidc_provider: boo
         .wait_for_bootstrap_url(Duration::from_secs(10))
         .await
         .expect("observe first administrator bootstrap URL");
-    let service_contract = trellis_test::TrellisTestContract::from_native_api_json(
+    let auth_contract = trellis_test::TrellisTestContract::from_native_api_json(
+        auth_sdk::API_JSON,
+        trellis_rs::contracts::ContractKind::App,
+    )
+    .expect("build Auth API reference contract");
+    let auth_rpc_names = serde_json::from_str::<Value>(auth_sdk::API_JSON)
+        .expect("parse Auth API")
+        .get("rpc")
+        .and_then(Value::as_object)
+        .expect("Auth API has RPC surfaces")
+        .keys()
+        .cloned()
+        .collect::<Vec<_>>();
+    let base_service_contract = trellis_test::TrellisTestContract::from_native_api_json(
         API_SOURCE,
         trellis_rs::contracts::ContractKind::Service,
     )
-    .expect("build trusted-portal service contract");
+    .expect("build trusted-portal base service contract");
+    let mut service_participant = base_service_contract.participant().clone();
+    service_participant
+        .as_object_mut()
+        .expect("service participant is an object")
+        .insert(
+            "uses".to_owned(),
+            serde_json::json!({
+                "required": {
+                    (auth_sdk::API_ID): {
+                        "api": auth_sdk::API_ID,
+                        "apiDigest": auth_contract.api_digest(),
+                        "rpc": { "call": auth_rpc_names }
+                    }
+                }
+            }),
+        );
+    let service_contract =
+        trellis_test::TrellisTestContract::from_artifacts_with_referenced_contracts(
+            trellis_rs::contracts::ContractBuilder::from_native(
+                base_service_contract.api().clone(),
+                service_participant,
+            )
+            .referenced_api(auth_sdk::API_ID, auth_contract.api().clone())
+            .build()
+            .expect("compile trusted-portal service contract"),
+            &[&auth_contract],
+        )
+        .expect("build trusted-portal service contract");
     let client_contract =
         trellis_test::TrellisTestContract::from_builder_with_referenced_contracts(
             trellis_rs::contracts::ContractBuilder::authoring(
@@ -130,8 +284,19 @@ async fn start_fixture(user_jwt_ttl_ms: Option<u64>, use_test_oidc_provider: boo
                 trellis_rs::contracts::use_contract(SERVICE_ID)
                     .with_rpc_call(["Value.Get"])
                     .with_event_publish(["Value.Changed"]),
+            )
+            .use_ref(
+                "auth",
+                trellis_rs::contracts::use_contract(auth_sdk::API_ID).with_rpc_call([
+                    "Auth.Sessions.Logout",
+                    "Auth.Sessions.Me",
+                    "Auth.UserIdentities.List",
+                    "Auth.UserIdentities.Unlink",
+                    "Auth.Users.IdentityLink.Create",
+                    "Auth.Users.Password.Change",
+                ]),
             ),
-            &[&service_contract],
+            &[&service_contract, &auth_contract],
         )
         .expect("build trusted-portal client contract");
     let read_capability = format!(
@@ -169,17 +334,2629 @@ async fn start_fixture(user_jwt_ttl_ms: Option<u64>, use_test_oidc_provider: boo
             .await
             .expect("connect trusted-portal service");
     service.register_rpc::<ValueGet, _, _>(|_, input| async move { Ok(input) });
+    let service_handle = service.generated_handle();
     let service = AbortOnDrop(Some(tokio::spawn(async move { service.run().await })));
     Fixture {
         runtime,
         admin,
         bootstrap_url,
         portal_id,
+        service_contract,
+        service_handle,
         client_contract,
         read_capability,
         publish_capability,
         _service: service,
     }
+}
+
+async fn provision_device_activation_case(
+    fixture: &mut Fixture,
+    case_id: &str,
+    review_mode: &str,
+) -> DeviceActivationCase {
+    provision_device_activation_case_with_delegation(fixture, case_id, review_mode, true).await
+}
+
+async fn provision_device_activation_case_with_delegation(
+    fixture: &mut Fixture,
+    case_id: &str,
+    review_mode: &str,
+    requires_device_delegation: bool,
+) -> DeviceActivationCase {
+    let auth_contract = trellis_test::TrellisTestContract::from_native_api_json(
+        auth_sdk::API_JSON,
+        trellis_rs::contracts::ContractKind::Service,
+    )
+    .expect("build Auth API reference contract");
+    let contract = trellis_test::TrellisTestContract::from_builder_with_referenced_contracts(
+        trellis_rs::contracts::ContractBuilder::authoring(
+            format!("trellis.integration.{case_id}.device@v1"),
+            "Device Activation Integration Device",
+            "Exercises current preregistered device activation.",
+            trellis_rs::contracts::ContractKind::Device,
+        )
+        .use_ref(
+            "auth",
+            trellis_rs::contracts::use_contract(auth_sdk::API_ID)
+                .with_rpc_call(["Auth.Sessions.Me"]),
+        ),
+        &[&auth_contract],
+    )
+    .expect("build device activation contract");
+    let deployment_name = format!("{case_id}-deployment");
+    fixture
+        .admin
+        .create_device_deployment(
+            &fixture.bootstrap_url,
+            &deployment_name,
+            requires_device_delegation,
+            review_mode,
+        )
+        .await
+        .expect("create device deployment");
+    let approval = fixture
+        .admin
+        .approve_contract(
+            &fixture.bootstrap_url,
+            &contract,
+            Some(&deployment_name),
+            &[trellis_test::AuthorityPlanClassification::Update],
+        )
+        .await
+        .expect("approve device contract");
+    let root_secret = rand::random::<[u8; 32]>();
+    let identity = derive_device_identity(&root_secret).expect("derive device identity");
+    let service_caller = fixture.service_handle.caller();
+    let auth = auth_sdk::AuthClient::new(&service_caller).rpc().auth();
+    let provisioned = auth
+        .devices_provision(&auth_sdk::AuthDevicesProvisionRequest {
+            deployment_id: approval.deployment_id.clone(),
+            idempotency_key: format!("provision-{case_id}"),
+            identity_public_key: Some(identity.public_identity_key.clone()),
+            instance_id: Some(format!("{case_id}-device")),
+            participant_id: Some(approval.participant_id.clone()),
+        })
+        .await
+        .expect("provision device identity")
+        .device;
+    DeviceActivationCase {
+        approval,
+        identity,
+        instance_id: provisioned.instance_id,
+        principal_id: provisioned.principal_id,
+        session_seed: URL_SAFE_NO_PAD.encode(rand::random::<[u8; 32]>()),
+    }
+}
+
+async fn connect_device_activation_user(fixture: &mut Fixture, case_id: &str) -> Caller {
+    let auth_contract = trellis_test::TrellisTestContract::from_native_api_json(
+        auth_sdk::API_JSON,
+        trellis_rs::contracts::ContractKind::Service,
+    )
+    .expect("build Auth API reference contract");
+    let contract = trellis_test::TrellisTestContract::from_builder_with_referenced_contracts(
+        trellis_rs::contracts::ContractBuilder::authoring(
+            format!("trellis.integration.{case_id}.activator@v1"),
+            "Device Activation Integration User",
+            "Exercises user activation and unprivileged review denial.",
+            trellis_rs::contracts::ContractKind::App,
+        )
+        .use_ref(
+            "auth",
+            trellis_rs::contracts::use_contract(auth_sdk::API_ID)
+                .with_rpc_call(["Auth.DeviceUserAuthorities.Reviews.Decide"])
+                .with_operation_call(["Auth.DeviceUserAuthorities.Resolve"]),
+        ),
+        &[&auth_contract],
+    )
+    .expect("build device activator contract");
+    fixture
+        .admin
+        .connect_new_local_user(
+            &fixture.bootstrap_url,
+            &contract,
+            &format!("{case_id}-user"),
+            &format!("{case_id}-password-123"),
+        )
+        .await
+        .expect("connect device activation user")
+}
+
+#[tokio::test]
+async fn local_login_binds_approved_client_and_calls_authorized_rpc() {
+    assert_runtime_case_registered("auth.local-login-binds-approved-client", "auth", "auth");
+    let mut fixture = start_fixture(None, false).await;
+    let auth_api = trellis_test::TrellisTestContract::from_native_api_json(
+        trellis_rs::sdk::auth::API_JSON,
+        trellis_rs::contracts::ContractKind::Service,
+    )
+    .expect("build Auth API reference");
+    let client_contract =
+        trellis_test::TrellisTestContract::from_builder_with_referenced_contracts(
+            trellis_rs::contracts::ContractBuilder::authoring(
+                APPROVED_CLIENT_ID,
+                "Approved Integration Client",
+                "Exercises approved local-user binding and authenticated RPC.",
+                trellis_rs::contracts::ContractKind::App,
+            )
+            .use_ref(
+                "service",
+                trellis_rs::contracts::use_contract(SERVICE_ID).with_rpc_call(["Value.Get"]),
+            )
+            .use_ref(
+                "auth",
+                trellis_rs::contracts::use_contract(trellis_rs::sdk::auth::API_ID)
+                    .with_rpc_call(["Auth.Sessions.Me"]),
+            ),
+            &[&fixture.service_contract, &auth_api],
+        )
+        .expect("build approved client contract");
+    let participant_id = fixture
+        .runtime
+        .scoped_contract(&client_contract)
+        .expect("scope approved client contract")
+        .id()
+        .to_owned();
+    let client = fixture
+        .admin
+        .connect_new_local_user(
+            &fixture.bootstrap_url,
+            &client_contract,
+            "approved-client-user",
+            "approved-client-password-123",
+        )
+        .await
+        .expect("register and bind approved local user");
+
+    let session = auth_sdk::AuthClient::new(&client)
+        .rpc()
+        .auth()
+        .sessions_me()
+        .await
+        .expect("read current bound session");
+    assert_eq!(session.session.state, "active");
+    assert_eq!(session.session.participant_kind, "app");
+    assert_eq!(session.session.principal_kind, "user");
+    assert_eq!(session.session.participant_id, participant_id);
+    assert_eq!(
+        call_value(&client, "approved")
+            .await
+            .expect("call authorized service RPC"),
+        ValueMessage {
+            value: "approved".to_owned()
+        }
+    );
+}
+
+#[tokio::test]
+async fn portal_grant_override_binds_without_user_selected_capability() {
+    assert_runtime_case_registered(
+        "auth.grant-overrides-bind-without-user-capability",
+        "auth",
+        "auth",
+    );
+    let mut fixture = start_fixture(None, false).await;
+    let participant_id = fixture
+        .runtime
+        .scoped_contract(&fixture.client_contract)
+        .expect("scope optional client contract")
+        .id()
+        .to_owned();
+    fixture
+        .admin
+        .put_portal_grant_override(
+            &fixture.bootstrap_url,
+            &fixture.portal_id,
+            &participant_id,
+            None,
+            vec![fixture.read_capability.clone()],
+        )
+        .await
+        .expect("put portal grant override");
+
+    let client = fixture
+        .admin
+        .connect_new_local_user(
+            &fixture.bootstrap_url,
+            &fixture.client_contract,
+            "grant-override-user",
+            "grant-override-password-123",
+        )
+        .await
+        .expect("bind without selecting an optional capability");
+    assert_eq!(
+        call_value(&client, "override")
+            .await
+            .expect("call RPC granted only by portal override"),
+        ValueMessage {
+            value: "override".to_owned()
+        }
+    );
+}
+
+#[tokio::test]
+async fn session_revoke_denies_reconnect() {
+    assert_runtime_case_registered("auth.session-revoke-denies-reconnect", "auth", "auth");
+    let mut fixture = start_fixture(None, false).await;
+    let (client, reconnect) = fixture
+        .admin
+        .connect_new_trusted_local_user_reconnectable(
+            &fixture.bootstrap_url,
+            &fixture.client_contract,
+            &fixture.portal_id,
+            "revoked-session-user",
+            "revoked-session-password-123",
+            vec![fixture.read_capability.clone()],
+        )
+        .await
+        .expect("connect session that will be revoked");
+    assert_eq!(
+        fixture
+            .runtime
+            .control_plane_sqlite()
+            .query(
+                "SELECT state FROM auth_sessions WHERE session_id = ?",
+                [reconnect.session_id()],
+            )
+            .expect("query active session")[0]["state"],
+        "active"
+    );
+
+    fixture
+        .admin
+        .revoke_session(
+            &fixture.bootstrap_url,
+            &auth_sdk::AuthSessionsRevokeRequest {
+                expected_version: None,
+                idempotency_key: "revoke-integration-session".to_owned(),
+                reason: Some("integration test".to_owned()),
+                session_id: reconnect.session_id().to_owned(),
+            },
+        )
+        .await
+        .expect("revoke active session through Auth admin RPC");
+    wait_for_reconnect_denied(&reconnect).await;
+    drop(client);
+    assert_eq!(
+        fixture
+            .runtime
+            .control_plane_sqlite()
+            .query(
+                "SELECT state FROM auth_sessions WHERE session_id = ?",
+                [reconnect.session_id()],
+            )
+            .expect("query revoked session")[0]["state"],
+        "revoked"
+    );
+}
+
+#[tokio::test]
+async fn sessions_logout_revokes_session_and_cleans_connections() {
+    assert_runtime_case_registered(
+        "auth.sessions-logout-deletes-session-and-connections",
+        "auth",
+        "auth",
+    );
+
+    let mut fixture = start_fixture(None, false).await;
+    let (client, reconnect) = fixture
+        .admin
+        .connect_new_trusted_local_user_reconnectable(
+            &fixture.bootstrap_url,
+            &fixture.client_contract,
+            &fixture.portal_id,
+            "logout-user",
+            "logout-password-123",
+            vec![fixture.read_capability.clone()],
+        )
+        .await
+        .expect("connect session to log out");
+    assert!(!fixture
+        .admin
+        .list_connections(&fixture.bootstrap_url, reconnect.session_id())
+        .await
+        .expect("list connection before logout")
+        .is_empty());
+
+    let logout = auth_sdk::AuthClient::new(&client)
+        .rpc()
+        .auth()
+        .sessions_logout()
+        .await;
+    if let Err(error) = &logout {
+        assert!(
+            matches!(error, trellis_rs::client::CallError::Timeout)
+                || matches!(error, trellis_rs::client::CallError::Transport(_)),
+            "logout failed before revoking the session: {logout:?}"
+        );
+    }
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        if fixture
+            .admin
+            .list_connections(&fixture.bootstrap_url, reconnect.session_id())
+            .await
+            .expect("list connections after logout")
+            .is_empty()
+        {
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "logout did not clear connections"
+        );
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    assert_eq!(
+        fixture
+            .runtime
+            .control_plane_sqlite()
+            .query(
+                "SELECT state FROM auth_sessions WHERE session_id = ?",
+                [reconnect.session_id()],
+            )
+            .expect("query logged-out session")[0]["state"],
+        "revoked"
+    );
+    drop(client);
+    wait_for_reconnect_denied(&reconnect).await;
+}
+
+#[tokio::test]
+async fn connections_list_skips_malformed_entries() {
+    assert_runtime_case_registered(
+        "auth.connections-list-skips-malformed-connection-entries",
+        "auth",
+        "auth",
+    );
+
+    let mut fixture = start_fixture(None, false).await;
+    let (client, reconnect) = fixture
+        .admin
+        .connect_new_trusted_local_user_reconnectable(
+            &fixture.bootstrap_url,
+            &fixture.client_contract,
+            &fixture.portal_id,
+            "connection-list-user",
+            "connection-list-password-123",
+            vec![fixture.read_capability.clone()],
+        )
+        .await
+        .expect("connect valid session");
+    fixture
+        .runtime
+        .seed_raw_auth_connection_presence(trellis_test::TrellisRawAuthConnectionPresence {
+            key: "malformed-presence-entry".to_owned(),
+            value: Value::String("not a connection record".to_owned()),
+        })
+        .await
+        .expect("seed malformed connection presence");
+
+    let entries = fixture
+        .admin
+        .list_connections(&fixture.bootstrap_url, reconnect.session_id())
+        .await
+        .expect("list connections despite malformed presence");
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].session_id, reconnect.session_id());
+    drop(client);
+}
+
+#[tokio::test]
+async fn session_and_connection_inventory_report_participant_metadata() {
+    assert_runtime_case_registered(
+        "auth.sessions-list-and-connections-list-report-participant-metadata",
+        "auth",
+        "auth",
+    );
+
+    let mut fixture = start_fixture(None, false).await;
+    let (client, reconnect) = fixture
+        .admin
+        .connect_new_trusted_local_user_reconnectable(
+            &fixture.bootstrap_url,
+            &fixture.client_contract,
+            &fixture.portal_id,
+            "inventory-user",
+            "inventory-password-123",
+            vec![fixture.read_capability.clone()],
+        )
+        .await
+        .expect("connect inventoried session");
+    let expected_contract = fixture
+        .runtime
+        .scoped_contract(&fixture.client_contract)
+        .expect("scope inventoried participant");
+    let expected_needs_digest = expected_contract.needs_digest();
+    let service_caller = fixture.service_handle.caller();
+    let auth = auth_sdk::AuthClient::new(&service_caller).rpc().auth();
+    let sessions = auth
+        .sessions_list(&auth_sdk::AuthSessionsListRequest {
+            cursor: None,
+            deployment_id: None,
+            limit: None,
+            participant_id: Some(expected_contract.id().to_owned()),
+            principal_id: None,
+            state: Some(auth_sdk::AuthSessionsListRequestState::Active),
+        })
+        .await
+        .expect("list participant sessions");
+    let session = sessions
+        .entries
+        .iter()
+        .find(|session| session.session_id == reconnect.session_id())
+        .expect("find inventoried session");
+    assert_eq!(session.participant_id, expected_contract.id());
+    assert_eq!(
+        session.participant_artifact_digest,
+        expected_contract.digest()
+    );
+    assert_eq!(session.participant_needs_digest, expected_needs_digest);
+    assert_eq!(session.participant_kind.as_str(), "app");
+
+    let connections = auth
+        .connections_list(&auth_sdk::AuthConnectionsListRequest {
+            cursor: None,
+            limit: None,
+            session_id: Some(reconnect.session_id().to_owned()),
+        })
+        .await
+        .expect("list participant connections");
+    assert!(connections
+        .entries
+        .iter()
+        .any(|connection| connection.session_id == reconnect.session_id()));
+    drop(client);
+}
+
+#[tokio::test]
+async fn sessions_me_rejects_stale_user_principal() {
+    assert_runtime_case_registered(
+        "auth.sessions-me-rejects-stale-user-principals",
+        "auth",
+        "auth",
+    );
+
+    let mut fixture = start_fixture(None, false).await;
+    let (client, reconnect) = fixture
+        .admin
+        .connect_new_trusted_local_user_reconnectable(
+            &fixture.bootstrap_url,
+            &fixture.client_contract,
+            &fixture.portal_id,
+            "stale-user",
+            "stale-password-123",
+            vec![fixture.read_capability.clone()],
+        )
+        .await
+        .expect("connect user before stale-principal mutation");
+    auth_sdk::AuthClient::new(&client)
+        .rpc()
+        .auth()
+        .sessions_me()
+        .await
+        .expect("read active session before stale-principal mutation");
+    let sqlite = fixture.runtime.control_plane_sqlite();
+    let principal_id = sqlite
+        .query(
+            "SELECT principal_id FROM auth_sessions WHERE session_id = ?1",
+            params![reconnect.session_id()],
+        )
+        .expect("read session principal")[0]["principal_id"]
+        .as_str()
+        .expect("session principal ID")
+        .to_owned();
+    assert_eq!(
+        sqlite
+            .execute(
+                "UPDATE auth_principals SET state = 'disabled', disabled_at = CAST(strftime('%s', 'now') AS INTEGER) * 1000 WHERE principal_id = ?1",
+                params![principal_id],
+            )
+            .expect("make session principal stale")
+            .rows_affected,
+        1
+    );
+
+    let error = auth_sdk::AuthClient::new(&client)
+        .rpc()
+        .auth()
+        .sessions_me()
+        .await
+        .expect_err("stale principal retained Sessions.Me access");
+    assert!(
+        error.to_string().contains("stale")
+            || error.to_string().contains("inactive")
+            || error.to_string().contains("disabled")
+            || error.to_string().contains("not_authorized"),
+        "unexpected stale-principal rejection: {error}"
+    );
+}
+
+#[tokio::test]
+async fn user_and_identity_surfaces_paginate_scope_and_reject_missing_unlink() {
+    assert_runtime_case_registered(
+        "auth.users-identities-admin-surfaces-page-and-scope",
+        "auth",
+        "auth",
+    );
+
+    let mut fixture = start_fixture(None, false).await;
+    let (first_client, _) = fixture
+        .admin
+        .connect_new_trusted_local_user_reconnectable(
+            &fixture.bootstrap_url,
+            &fixture.client_contract,
+            &fixture.portal_id,
+            "identity-page-user-one",
+            "identity-page-password-one-123",
+            vec![fixture.read_capability.clone()],
+        )
+        .await
+        .expect("connect first identity-page user");
+    let (second_client, _) = fixture
+        .admin
+        .connect_new_local_user_with_session_seed_reconnectable(
+            &fixture.bootstrap_url,
+            &fixture.client_contract,
+            "identity-page-user-two",
+            "identity-page-password-two-123",
+            &URL_SAFE_NO_PAD.encode([19_u8; 32]),
+        )
+        .await
+        .expect("connect second identity-page user");
+    let service_caller = fixture.service_handle.caller();
+    let admin_auth = auth_sdk::AuthClient::new(&service_caller).rpc().auth();
+    let first_page = admin_auth
+        .users_list(&auth_sdk::AuthUsersListRequest {
+            cursor: None,
+            limit: Some(1),
+            state: Some(auth_sdk::AuthUsersListRequestState::Active),
+        })
+        .await
+        .expect("list first user page");
+    assert_eq!(first_page.entries.len(), 1);
+    let cursor = first_page.next_cursor.expect("first user page cursor");
+    let second_page = admin_auth
+        .users_list(&auth_sdk::AuthUsersListRequest {
+            cursor: Some(cursor),
+            limit: Some(10),
+            state: Some(auth_sdk::AuthUsersListRequestState::Active),
+        })
+        .await
+        .expect("list second user page");
+    assert!(!second_page.entries.is_empty());
+    let user_id = second_page.entries[0].user_id.clone();
+    assert_eq!(
+        admin_auth
+            .users_get(&auth_sdk::AuthUsersGetRequest {
+                user_id: user_id.clone(),
+            })
+            .await
+            .expect("get paged user")
+            .user
+            .user_id,
+        user_id
+    );
+
+    let user_auth = auth_sdk::AuthClient::new(&first_client).rpc().auth();
+    assert!(!user_auth
+        .user_identities_list(&auth_sdk::AuthUserIdentitiesListRequest {
+            cursor: None,
+            limit: Some(10),
+            provider_id: None,
+        })
+        .await
+        .expect("list caller-scoped identities")
+        .entries
+        .is_empty());
+    let unlink_error = user_auth
+        .user_identities_unlink(&auth_sdk::AuthUserIdentitiesUnlinkRequest {
+            idempotency_key: "unlink-missing-identity".to_owned(),
+            provider_id: "missing-provider".to_owned(),
+            subject: "missing-subject".to_owned(),
+        })
+        .await
+        .expect_err("missing identity unlink succeeded");
+    assert!(
+        unlink_error.to_string().contains("identity_not_found"),
+        "unexpected missing identity error: {unlink_error}"
+    );
+    assert!(
+        auth_sdk::AuthClient::new(&second_client)
+            .rpc()
+            .auth()
+            .users_list(&auth_sdk::AuthUsersListRequest {
+                cursor: None,
+                limit: Some(1),
+                state: None,
+            })
+            .await
+            .is_err(),
+        "non-admin caller bound the Users.List surface"
+    );
+}
+
+#[tokio::test]
+async fn capability_groups_validate_and_protect_builtins() {
+    assert_runtime_case_registered(
+        "auth.capability-groups-and-last-admin-guard-are-enforced",
+        "auth",
+        "auth",
+    );
+    let fixture = start_fixture(None, false).await;
+    let service_caller = fixture.service_handle.caller();
+    let auth = auth_sdk::AuthClient::new(&service_caller).rpc().auth();
+    let group_key = "integration-readers";
+    let created = auth
+        .capability_groups_put(&auth_sdk::AuthCapabilityGroupsPutRequest {
+            capabilities: vec![fixture.read_capability.clone()],
+            description: "Rust integration capability group".to_owned(),
+            display_name: "Integration Readers".to_owned(),
+            expected_version: None,
+            group_key: group_key.to_owned(),
+            idempotency_key: "put-integration-readers".to_owned(),
+            included_groups: Vec::new(),
+        })
+        .await
+        .expect("create capability group");
+    assert_eq!(created.group.group_key, group_key);
+    assert_eq!(
+        auth.capability_groups_get(&auth_sdk::AuthCapabilityGroupsGetRequest {
+            group_key: group_key.to_owned(),
+        })
+        .await
+        .expect("get capability group")
+        .group
+        .capabilities,
+        vec![fixture.read_capability.clone()]
+    );
+    assert!(auth
+        .capability_groups_put(&auth_sdk::AuthCapabilityGroupsPutRequest {
+            capabilities: Vec::new(),
+            description: "Invalid group".to_owned(),
+            display_name: "Invalid Group".to_owned(),
+            expected_version: None,
+            group_key: "integration-invalid".to_owned(),
+            idempotency_key: "put-invalid-group".to_owned(),
+            included_groups: vec!["missing-group".to_owned()],
+        })
+        .await
+        .is_err());
+
+    assert!(auth
+        .capability_groups_delete(&auth_sdk::AuthCapabilityGroupsDeleteRequest {
+            expected_version: 1,
+            group_key: "admin".to_owned(),
+            idempotency_key: "delete-builtin-group".to_owned(),
+        })
+        .await
+        .is_err());
+    assert!(
+        auth.capability_groups_delete(&auth_sdk::AuthCapabilityGroupsDeleteRequest {
+            expected_version: created.group.version,
+            group_key: group_key.to_owned(),
+            idempotency_key: "delete-integration-readers".to_owned(),
+        })
+        .await
+        .expect("delete custom capability group")
+        .success
+    );
+}
+
+#[tokio::test]
+async fn auth_validation_failure_persists_no_state_or_actions() {
+    assert_runtime_case_registered(
+        "auth.validation-failure-persists-no-state-or-actions",
+        "auth",
+        "auth",
+    );
+    let fixture = start_fixture(None, false).await;
+    let sqlite = fixture.runtime.control_plane_sqlite();
+    let service_caller = fixture.service_handle.caller();
+    let auth = auth_sdk::AuthClient::new(&service_caller).rpc().auth();
+
+    auth.users_update(&auth_sdk::AuthUsersUpdateRequest {
+        email: None,
+        expected_version: 1,
+        idempotency_key: "validation-failure-missing-user".to_owned(),
+        image: None,
+        name: None,
+        state: auth_sdk::AuthUsersUpdateRequestState::Disabled,
+        user_id: "missing-validation-user".to_owned(),
+    })
+    .await
+    .expect_err("missing user update passed validation");
+
+    assert!(sqlite
+        .query(
+            "SELECT 1 FROM auth_principals WHERE principal_id = ?",
+            ["missing-validation-user"],
+        )
+        .expect("query missing validation principal")
+        .is_empty());
+    assert!(sqlite
+        .query(
+            "SELECT 1 FROM auth_idempotency_results WHERE request_id = ?",
+            ["validation-failure-missing-user"],
+        )
+        .expect("query missing validation idempotency result")
+        .is_empty());
+    assert!(sqlite
+        .query(
+            "SELECT 1 FROM auth_post_commit_actions WHERE payload_json LIKE ?",
+            ["%missing-validation-user%"],
+        )
+        .expect("query missing validation post-commit action")
+        .is_empty());
+}
+
+#[tokio::test]
+async fn auth_transaction_failure_rolls_back_state_idempotency_and_actions() {
+    assert_runtime_case_registered(
+        "auth.transaction-failure-rolls-back-state-idempotency-and-actions",
+        "auth",
+        "auth",
+    );
+    let mut fixture = start_fixture(None, false).await;
+    let (_client, reconnect) = fixture
+        .admin
+        .connect_new_trusted_local_user_reconnectable(
+            &fixture.bootstrap_url,
+            &fixture.client_contract,
+            &fixture.portal_id,
+            "transaction-failure-user",
+            "transaction-failure-password-123",
+            vec![fixture.read_capability.clone()],
+        )
+        .await
+        .expect("connect transaction-failure user");
+    let sqlite = fixture.runtime.control_plane_sqlite();
+    let principal_id = sqlite
+        .query(
+            "SELECT principal_id FROM auth_sessions WHERE session_id = ?",
+            [reconnect.session_id()],
+        )
+        .expect("query transaction-failure principal")[0]["principal_id"]
+        .as_str()
+        .expect("transaction-failure principal ID")
+        .to_owned();
+    let before = sqlite
+        .query(
+            "SELECT p.state, p.version, u.display_name, u.email, u.image_url, u.version AS profile_version
+             FROM auth_principals p JOIN auth_user_profiles u USING (principal_id)
+             WHERE p.principal_id = ?",
+            [&principal_id],
+        )
+        .expect("query user before transaction failure");
+    sqlite
+        .fail_user_update_transaction(&principal_id)
+        .expect("arm user transaction failure");
+    let service_caller = fixture.service_handle.caller();
+    let auth = auth_sdk::AuthClient::new(&service_caller).rpc().auth();
+    auth.users_update(&auth_sdk::AuthUsersUpdateRequest {
+        email: Some("not-committed@example.test".to_owned()),
+        expected_version: 1,
+        idempotency_key: "transaction-failure-user-update".to_owned(),
+        image: None,
+        name: Some("Not committed".to_owned()),
+        state: auth_sdk::AuthUsersUpdateRequestState::Disabled,
+        user_id: principal_id.clone(),
+    })
+    .await
+    .expect_err("injected aggregate transaction failure committed");
+    sqlite
+        .clear_user_update_transaction_failure(&principal_id)
+        .expect("clear user transaction failure");
+
+    assert_eq!(
+        sqlite
+            .query(
+                "SELECT p.state, p.version, u.display_name, u.email, u.image_url, u.version AS profile_version
+                 FROM auth_principals p JOIN auth_user_profiles u USING (principal_id)
+                 WHERE p.principal_id = ?",
+                [&principal_id],
+            )
+            .expect("query user after transaction failure"),
+        before
+    );
+    assert!(sqlite
+        .query(
+            "SELECT 1 FROM auth_idempotency_results WHERE request_id = ?",
+            ["transaction-failure-user-update"],
+        )
+        .expect("query failed transaction idempotency")
+        .is_empty());
+    assert!(sqlite
+        .query(
+            "SELECT 1 FROM auth_post_commit_actions WHERE payload_json LIKE ?",
+            [format!("%{principal_id}%")],
+        )
+        .expect("query failed transaction actions")
+        .is_empty());
+}
+
+#[tokio::test]
+async fn auth_post_commit_failure_retries_committed_context_revocation_once() {
+    assert_runtime_case_registered(
+        "auth.post-commit-failure-retries-committed-context-revocation-once",
+        "auth",
+        "auth",
+    );
+    let mut fixture = start_fixture(None, false).await;
+    let (_client, reconnect) = fixture
+        .admin
+        .connect_new_trusted_local_user_reconnectable(
+            &fixture.bootstrap_url,
+            &fixture.client_contract,
+            &fixture.portal_id,
+            "post-commit-failure-user",
+            "post-commit-failure-password-123",
+            vec![fixture.read_capability.clone()],
+        )
+        .await
+        .expect("connect post-commit-failure user");
+    let sqlite = fixture.runtime.control_plane_sqlite();
+    let session = sqlite
+        .query(
+            "SELECT s.principal_id, c.context_digest
+             FROM auth_sessions s JOIN auth_authorization_contexts c USING (session_id)
+             WHERE s.session_id = ? AND c.state = 'active'",
+            [reconnect.session_id()],
+        )
+        .expect("query active post-commit context");
+    let principal_id = session[0]["principal_id"]
+        .as_str()
+        .expect("post-commit principal ID")
+        .to_owned();
+    let context_digest = session[0]["context_digest"]
+        .as_str()
+        .expect("post-commit context digest")
+        .to_owned();
+    sqlite
+        .fail_next_context_revocation_dispatch(&context_digest)
+        .expect("arm context-revocation dispatch failure");
+    let service_caller = fixture.service_handle.caller();
+    let auth = auth_sdk::AuthClient::new(&service_caller).rpc().auth();
+    let response = auth
+        .users_update(&auth_sdk::AuthUsersUpdateRequest {
+            email: None,
+            expected_version: 1,
+            idempotency_key: "post-commit-failure-user-update".to_owned(),
+            image: None,
+            name: Some("Post-commit failure user".to_owned()),
+            state: auth_sdk::AuthUsersUpdateRequestState::Disabled,
+            user_id: principal_id.clone(),
+        })
+        .await
+        .expect("commit user mutation before injected dispatch failure");
+    assert_eq!(response.user.state.as_str(), "disabled");
+
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        let actions = sqlite
+            .query(
+                "SELECT attempts FROM auth_post_commit_actions
+                 WHERE kind = 'context_revoke' AND payload_json LIKE ?",
+                [format!("%{context_digest}%")],
+            )
+            .expect("query failed context-revocation action");
+        if actions
+            .first()
+            .and_then(|row| row["attempts"].as_i64())
+            .is_some_and(|attempts| attempts == 1)
+        {
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "injected post-commit failure was not recorded"
+        );
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+    assert_eq!(
+        sqlite
+            .query(
+                "SELECT state FROM auth_principals WHERE principal_id = ?",
+                [&principal_id],
+            )
+            .expect("query committed disabled principal")[0]["state"],
+        "disabled"
+    );
+
+    wait_for_reconnect_denied(&reconnect).await;
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        if sqlite
+            .query(
+                "SELECT 1 FROM auth_post_commit_actions
+                 WHERE kind = 'context_revoke' AND payload_json LIKE ?",
+                [format!("%{context_digest}%")],
+            )
+            .expect("query completed context-revocation action")
+            .is_empty()
+        {
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "context-revocation action did not complete after retry"
+        );
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+    assert_eq!(
+        sqlite
+            .query(
+                "SELECT COUNT(*) AS count FROM auth_authorization_contexts
+                 WHERE context_digest = ? AND state = 'revoked'",
+                [&context_digest],
+            )
+            .expect("count revoked authorization context")[0]["count"],
+        1
+    );
+}
+
+#[tokio::test]
+async fn portal_route_selection_and_policy_drive_browser_flow() {
+    assert_runtime_case_registered(
+        "auth.portal-route-selection-and-policy-drive-browser-flow",
+        "auth",
+        "auth",
+    );
+    let mut fixture = start_fixture(None, false).await;
+    let service_caller = fixture.service_handle.caller();
+    let auth = auth_sdk::AuthClient::new(&service_caller).rpc().auth();
+    let portal_id = "integration-custom-portal";
+    let portal = auth
+        .portals_put(&auth_sdk::AuthPortalsPutRequest {
+            disabled: false,
+            display_name: "Integration Custom Portal".to_owned(),
+            entry_url: None,
+            expected_version: None,
+            idempotency_key: "put-integration-custom-portal".to_owned(),
+            login_settings: auth_sdk::AuthPortalsPutRequestLoginSettings {
+                federated_registration: false,
+                local_login: false,
+                local_registration: false,
+                providers: Some(Vec::new()),
+            },
+            portal_id: portal_id.to_owned(),
+        })
+        .await
+        .expect("create custom portal");
+    let participant_id = fixture
+        .runtime
+        .scoped_contract(&fixture.client_contract)
+        .expect("scope routed client")
+        .id()
+        .to_owned();
+    let route = auth
+        .portals_routes_put(&auth_sdk::AuthPortalsRoutesPutRequest {
+            deployment_id: None,
+            expected_version: None,
+            idempotency_key: "put-integration-custom-route".to_owned(),
+            origin: None,
+            participant_id: Some(participant_id),
+            portal_id: portal_id.to_owned(),
+            priority: 137,
+            route_id: None,
+        })
+        .await
+        .expect("create custom portal route")
+        .route;
+    assert!(auth
+        .portals_routes_put(&auth_sdk::AuthPortalsRoutesPutRequest {
+            deployment_id: None,
+            expected_version: None,
+            idempotency_key: "put-conflicting-custom-route".to_owned(),
+            origin: None,
+            participant_id: route.participant_id.clone(),
+            portal_id: portal_id.to_owned(),
+            priority: 137,
+            route_id: None,
+        })
+        .await
+        .is_err());
+    let redirect = format!(
+        "{}/_trellis/test/portal-route",
+        fixture.runtime.trellis_url()
+    );
+    let flow_id = fixture
+        .admin
+        .start_browser_auth_flow(&fixture.bootstrap_url, &fixture.client_contract, &redirect)
+        .await
+        .expect("start custom portal auth flow");
+    let selected: Value = reqwest::get(format!(
+        "{}/auth/flow/{flow_id}",
+        fixture.runtime.trellis_url()
+    ))
+    .await
+    .expect("fetch selected custom flow")
+    .error_for_status()
+    .expect("custom flow status")
+    .json()
+    .await
+    .expect("decode custom flow");
+    assert_eq!(selected["providers"], serde_json::json!([]));
+    assert_eq!(selected["registrationEnabled"], false);
+
+    auth.portals_put(&auth_sdk::AuthPortalsPutRequest {
+        disabled: true,
+        display_name: portal.portal.display_name,
+        entry_url: portal.portal.entry_url,
+        expected_version: Some(portal.portal.version),
+        idempotency_key: "disable-integration-custom-portal".to_owned(),
+        login_settings: auth_sdk::AuthPortalsPutRequestLoginSettings {
+            federated_registration: false,
+            local_login: false,
+            local_registration: false,
+            providers: Some(Vec::new()),
+        },
+        portal_id: portal_id.to_owned(),
+    })
+    .await
+    .expect("disable custom portal");
+    let fallback_flow = fixture
+        .admin
+        .start_browser_auth_flow(&fixture.bootstrap_url, &fixture.client_contract, &redirect)
+        .await
+        .expect("start fallback portal auth flow");
+    let fallback: Value = reqwest::get(format!(
+        "{}/auth/flow/{fallback_flow}",
+        fixture.runtime.trellis_url()
+    ))
+    .await
+    .expect("fetch fallback flow")
+    .error_for_status()
+    .expect("fallback flow status")
+    .json()
+    .await
+    .expect("decode fallback flow");
+    assert!(fallback["providers"]
+        .as_array()
+        .expect("fallback providers")
+        .iter()
+        .any(|provider| provider == "local"));
+    assert_eq!(fallback["registrationEnabled"], true);
+
+    auth.portals_routes_remove(&auth_sdk::AuthPortalsRoutesRemoveRequest {
+        expected_version: route.version,
+        idempotency_key: "remove-integration-custom-route".to_owned(),
+        route_id: route.route_id,
+    })
+    .await
+    .expect("remove custom portal route");
+    assert!(auth
+        .portals_remove(&auth_sdk::AuthPortalsRemoveRequest {
+            expected_version: 1,
+            idempotency_key: "remove-builtin-portal".to_owned(),
+            portal_id: "builtin".to_owned(),
+        })
+        .await
+        .is_err());
+}
+
+#[tokio::test]
+async fn account_flow_oauth_callback_handles_errors_mismatch_and_link() {
+    assert_runtime_case_registered("auth.account-flow-oauth-callback-runtime", "auth", "auth");
+    let mut fixture = start_fixture(None, true).await;
+    let service_caller = fixture.service_handle.caller();
+    let admin_auth = auth_sdk::AuthClient::new(&service_caller).rpc().auth();
+    let builtin = admin_auth
+        .portals_list(&auth_sdk::AuthPortalsListRequest {
+            cursor: None,
+            disabled: None,
+            limit: Some(100),
+        })
+        .await
+        .expect("list OIDC portals")
+        .entries
+        .into_iter()
+        .find(|portal| portal.portal_id == "builtin")
+        .expect("built-in OIDC portal");
+    fixture
+        .admin
+        .update_login_providers(
+            &fixture.bootstrap_url,
+            builtin.version,
+            vec![
+                "local".to_owned(),
+                "test-oidc".to_owned(),
+                "other-oidc".to_owned(),
+            ],
+        )
+        .await
+        .expect("enable test OIDC providers");
+    let (user, _) = fixture
+        .admin
+        .connect_new_trusted_local_user_reconnectable(
+            &fixture.bootstrap_url,
+            &fixture.client_contract,
+            &fixture.portal_id,
+            "account-flow-oauth-user",
+            "account-flow-oauth-password-123",
+            vec![fixture.read_capability.clone()],
+        )
+        .await
+        .expect("connect account-flow OAuth user");
+    let user_auth = auth_sdk::AuthClient::new(&user).rpc().auth();
+
+    let denied = user_auth
+        .users_identity_link_create(&auth_sdk::AuthUsersIdentityLinkCreateRequest {
+            allowed_providers: vec!["test-oidc".to_owned()],
+            idempotency_key: "oauth-provider-error-flow".to_owned(),
+            return_target: None,
+        })
+        .await
+        .expect("create provider-error identity flow");
+    let (status, body, _) = fixture
+        .admin
+        .complete_test_oidc_account_flow(
+            &denied.flow.completion_url,
+            "test-oidc",
+            "test-oidc",
+            true,
+        )
+        .await
+        .expect("complete provider-error callback");
+    assert_eq!(status, 400, "provider-error body: {body}");
+
+    let mismatched = user_auth
+        .users_identity_link_create(&auth_sdk::AuthUsersIdentityLinkCreateRequest {
+            allowed_providers: vec!["test-oidc".to_owned()],
+            idempotency_key: "oauth-provider-mismatch-flow".to_owned(),
+            return_target: None,
+        })
+        .await
+        .expect("create provider-mismatch identity flow");
+    let (status, body, _) = fixture
+        .admin
+        .complete_test_oidc_account_flow(
+            &mismatched.flow.completion_url,
+            "test-oidc",
+            "other-oidc",
+            false,
+        )
+        .await
+        .expect("complete provider-mismatch callback");
+    assert_eq!(status, 400, "provider-mismatch body: {body}");
+
+    fixture
+        .admin
+        .set_test_oidc_claims(serde_json::json!({ "roles": ["linked"] }))
+        .await
+        .expect("set account-flow OIDC claims");
+    let linked = user_auth
+        .users_identity_link_create(&auth_sdk::AuthUsersIdentityLinkCreateRequest {
+            allowed_providers: vec!["test-oidc".to_owned()],
+            idempotency_key: "oauth-success-flow".to_owned(),
+            return_target: None,
+        })
+        .await
+        .expect("create successful identity flow");
+    let (status, body, location) = fixture
+        .admin
+        .complete_test_oidc_account_flow(
+            &linked.flow.completion_url,
+            "test-oidc",
+            "test-oidc",
+            false,
+        )
+        .await
+        .expect("complete successful identity callback");
+    assert_eq!(status, 307, "successful callback body: {body}");
+    assert!(location
+        .as_deref()
+        .is_some_and(|value| value.contains("/_trellis/portal/account/complete")));
+    assert!(user_auth
+        .user_identities_list(&auth_sdk::AuthUserIdentitiesListRequest {
+            cursor: None,
+            limit: Some(100),
+            provider_id: Some("test-oidc".to_owned()),
+        })
+        .await
+        .expect("list linked OIDC identity")
+        .entries
+        .iter()
+        .any(|identity| identity.provider_id == "test-oidc"));
+}
+
+#[tokio::test]
+async fn local_login_rebinds_with_updated_authority() {
+    assert_runtime_case_registered(
+        "auth.local-login-rebinds-existing-session-with-updated-authority",
+        "auth",
+        "auth",
+    );
+    let mut fixture = start_fixture(None, false).await;
+    let username = "rebound-authority-user";
+    let password = "rebound-authority-password-123";
+    let session_seed = URL_SAFE_NO_PAD.encode([14_u8; 32]);
+    let (first_client, first_reconnect) = fixture
+        .admin
+        .connect_new_trusted_local_user_with_session_seed_reconnectable(
+            &fixture.bootstrap_url,
+            &fixture.client_contract,
+            &fixture.portal_id,
+            username,
+            password,
+            vec![fixture.read_capability.clone()],
+            &session_seed,
+        )
+        .await
+        .expect("establish initial local-user authority");
+    drop(first_client);
+    let first_session = fixture
+        .runtime
+        .control_plane_sqlite()
+        .query(
+            "SELECT session_id, principal_id, session_key_id, created_at FROM auth_sessions WHERE session_id = ?",
+            [first_reconnect.session_id()],
+        )
+        .expect("query initial bound session")
+        .remove(0);
+    assert_eq!(
+        wait_for_authority(
+            &fixture.runtime,
+            first_reconnect.session_id(),
+            "accepted",
+            &[fixture.read_capability.as_str()],
+        )
+        .await["version"],
+        1
+    );
+
+    let read_capability = fixture.read_capability.clone();
+    let publish_capability = fixture.publish_capability.clone();
+    update_policy(
+        &mut fixture,
+        vec![read_capability.clone(), publish_capability.clone()],
+    )
+    .await;
+    let (rebound_client, rebound) = fixture
+        .admin
+        .connect_local_user_for_portal_with_session_seed_reconnectable(
+            &fixture.bootstrap_url,
+            &fixture.client_contract,
+            username,
+            password,
+            &session_seed,
+        )
+        .await
+        .expect("rebind existing local identity after policy update");
+
+    assert_eq!(first_reconnect.session_id(), rebound.session_id());
+    let rebound_session = fixture
+        .runtime
+        .control_plane_sqlite()
+        .query(
+            "SELECT session_id, principal_id, session_key_id, created_at FROM auth_sessions WHERE session_id = ?",
+            [rebound.session_id()],
+        )
+        .expect("query rebound session")
+        .remove(0);
+    assert_eq!(
+        rebound_session["principal_id"],
+        first_session["principal_id"]
+    );
+    assert_eq!(
+        rebound_session["session_key_id"],
+        first_session["session_key_id"]
+    );
+    assert_eq!(rebound_session["created_at"], first_session["created_at"]);
+    assert_eq!(
+        wait_for_authority(
+            &fixture.runtime,
+            rebound.session_id(),
+            "accepted",
+            &[publish_capability.as_str(), read_capability.as_str()],
+        )
+        .await["version"],
+        2
+    );
+    assert_eq!(
+        call_value(&rebound_client, "rebound")
+            .await
+            .expect("call service with rebound authority"),
+        ValueMessage {
+            value: "rebound".to_owned()
+        }
+    );
+    rebound_client
+        .publish::<ValueChanged>(&ValueMessage {
+            value: "expanded".to_owned(),
+        })
+        .await
+        .expect("publish with expanded rebound authority");
+
+    drop(rebound_client);
+    let (replacement_client, replacement) = fixture
+        .admin
+        .connect_new_local_user_with_session_seed_reconnectable(
+            &fixture.bootstrap_url,
+            &fixture.client_contract,
+            "replacement-authority-user",
+            "replacement-authority-password-123",
+            session_seed,
+        )
+        .await
+        .expect("bind the session key to a different local identity");
+    drop(replacement_client);
+    assert_ne!(replacement.session_id(), rebound.session_id());
+    let replacement_session = fixture
+        .runtime
+        .control_plane_sqlite()
+        .query(
+            "SELECT principal_id, session_key_id FROM auth_sessions WHERE session_id = ?",
+            [replacement.session_id()],
+        )
+        .expect("query replacement session")
+        .remove(0);
+    assert_ne!(
+        replacement_session["principal_id"],
+        first_session["principal_id"]
+    );
+    assert_eq!(
+        replacement_session["session_key_id"],
+        first_session["session_key_id"]
+    );
+    assert!(fixture
+        .runtime
+        .control_plane_sqlite()
+        .query(
+            "SELECT session_id FROM auth_sessions WHERE session_id = ?",
+            [rebound.session_id()],
+        )
+        .expect("query replaced session")
+        .is_empty());
+}
+
+#[tokio::test]
+async fn password_reset_and_change_invalidate_old_credentials() {
+    assert_runtime_case_registered(
+        "control-plane.password-reset-change-invalidates-old-password",
+        "control-plane",
+        "auth",
+    );
+
+    let mut fixture = start_fixture(None, false).await;
+    let username = "password-change-user";
+    let old_password = "password-reset-old-123";
+    let reset_password = "password-reset-new-456";
+    let final_password = "password-change-final-789";
+    let (old_session, old_reconnect) = fixture
+        .admin
+        .connect_new_trusted_local_user_reconnectable(
+            &fixture.bootstrap_url,
+            &fixture.client_contract,
+            &fixture.portal_id,
+            username,
+            old_password,
+            vec![fixture.read_capability.clone()],
+        )
+        .await
+        .expect("connect password-reset target");
+    let principal_id = fixture
+        .runtime
+        .control_plane_sqlite()
+        .query(
+            "SELECT principal_id FROM auth_local_credentials WHERE normalized_username = ?",
+            [username],
+        )
+        .expect("query password-reset principal")[0]["principal_id"]
+        .as_str()
+        .expect("password-reset principal ID")
+        .to_owned();
+    let service_caller = fixture.service_handle.caller();
+    let reset = auth_sdk::AuthClient::new(&service_caller)
+        .rpc()
+        .auth()
+        .users_password_reset_create(&auth_sdk::AuthUsersPasswordResetCreateRequest {
+            idempotency_key: "create-password-reset-integration".to_owned(),
+            return_target: None,
+            user_id: principal_id,
+        })
+        .await
+        .expect("create password reset flow");
+    fixture
+        .admin
+        .complete_local_password_flow(&reset.flow.completion_url, reset_password)
+        .await
+        .expect("complete password reset flow");
+    drop(old_session);
+    assert!(
+        old_reconnect.connect_bound_only().await.is_err(),
+        "password reset left old session active"
+    );
+    assert!(fixture
+        .admin
+        .connect_local_user_for_portal_reconnectable(
+            &fixture.bootstrap_url,
+            &fixture.client_contract,
+            username,
+            old_password,
+        )
+        .await
+        .is_err());
+
+    let (current, _current_reconnect) = fixture
+        .admin
+        .connect_local_user_for_portal_reconnectable(
+            &fixture.bootstrap_url,
+            &fixture.client_contract,
+            username,
+            reset_password,
+        )
+        .await
+        .expect("log in with reset password");
+    let (sibling, sibling_reconnect) = fixture
+        .admin
+        .connect_local_user_for_portal_reconnectable(
+            &fixture.bootstrap_url,
+            &fixture.client_contract,
+            username,
+            reset_password,
+        )
+        .await
+        .expect("connect sibling password session");
+    drop(sibling);
+
+    let response = auth_sdk::AuthClient::new(&current)
+        .rpc()
+        .auth()
+        .users_password_change(&auth_sdk::AuthUsersPasswordChangeRequest {
+            current_password: reset_password.to_owned(),
+            idempotency_key: "change-password-integration".to_owned(),
+            new_password: final_password.to_owned(),
+        })
+        .await
+        .expect("change account password");
+    assert!(response.revoked_session_count >= 1);
+    assert!(
+        sibling_reconnect.connect_bound_only().await.is_err(),
+        "sibling session survived password change"
+    );
+    assert!(fixture
+        .admin
+        .connect_local_user_for_portal_reconnectable(
+            &fixture.bootstrap_url,
+            &fixture.client_contract,
+            username,
+            reset_password,
+        )
+        .await
+        .is_err());
+    let (replacement, _) = fixture
+        .admin
+        .connect_local_user_for_portal_reconnectable(
+            &fixture.bootstrap_url,
+            &fixture.client_contract,
+            username,
+            final_password,
+        )
+        .await
+        .expect("log in with changed password");
+    auth_sdk::AuthClient::new(&replacement)
+        .rpc()
+        .auth()
+        .sessions_me()
+        .await
+        .expect("use replacement password session");
+}
+
+#[tokio::test]
+async fn sessions_survive_control_plane_restart() {
+    assert_runtime_case_registered(
+        "control-plane.sessions-survive-control-plane-restart",
+        "control-plane",
+        "auth",
+    );
+
+    let mut fixture = start_fixture(None, false).await;
+    let (client, reconnect) = fixture
+        .admin
+        .connect_new_trusted_local_user_reconnectable(
+            &fixture.bootstrap_url,
+            &fixture.client_contract,
+            &fixture.portal_id,
+            "restart-session-user",
+            "restart-session-password-123",
+            vec![fixture.publish_capability.clone()],
+        )
+        .await
+        .expect("connect user before restart");
+    drop(client);
+
+    fixture
+        .runtime
+        .restart_control_plane()
+        .await
+        .expect("restart control plane");
+    let reconnected = reconnect
+        .connect_bound_only()
+        .await
+        .expect("reconnect persisted session after restart");
+    reconnected
+        .publish::<ValueChanged>(&ValueMessage {
+            value: "after restart".to_owned(),
+        })
+        .await
+        .expect("use persisted authority after restart");
+}
+
+#[tokio::test]
+async fn admin_service_deployment_lifecycle_controls_bootstrap() {
+    assert_runtime_case_registered(
+        "control-plane.admin-service-deployment-lifecycle",
+        "control-plane",
+        "auth",
+    );
+    let fixture = start_fixture(None, false).await;
+    let service_caller = fixture.service_handle.caller();
+    let auth = auth_sdk::AuthClient::new(&service_caller).rpc().auth();
+    let created = auth
+        .deployments_create(&auth_sdk::AuthDeploymentsCreateRequest {
+            display_name: "Lifecycle Deployment".to_owned(),
+            expires_at: None,
+            idempotency_key: "create-lifecycle-deployment".to_owned(),
+            kind: auth_sdk::AuthDeploymentsCreateRequestKind::Service,
+            participant_id: None,
+            portal_id: None,
+            requires_device_delegation: false,
+            review_mode: None,
+        })
+        .await
+        .expect("create lifecycle deployment")
+        .deployment;
+    let deployment_id = created.deployment_id;
+    assert_eq!(created.version, 1);
+    auth.deployments_disable(&auth_sdk::AuthDeploymentsDisableRequest {
+        deployment_id: deployment_id.clone(),
+        expected_version: 1,
+        idempotency_key: "disable-lifecycle-deployment".to_owned(),
+        reason: Some("lifecycle integration test".to_owned()),
+    })
+    .await
+    .expect("disable lifecycle deployment");
+    auth.deployments_enable(&auth_sdk::AuthDeploymentsEnableRequest {
+        deployment_id: deployment_id.clone(),
+        expected_version: 2,
+        idempotency_key: "enable-lifecycle-deployment".to_owned(),
+        reason: Some("lifecycle integration test".to_owned()),
+    })
+    .await
+    .expect("enable lifecycle deployment");
+    auth.deployments_remove(&auth_sdk::AuthDeploymentsRemoveRequest {
+        deployment_id: deployment_id.clone(),
+        expected_version: 3,
+        idempotency_key: "remove-lifecycle-deployment".to_owned(),
+        reason: Some("lifecycle integration test".to_owned()),
+    })
+    .await
+    .expect("remove lifecycle deployment");
+    let removed = auth
+        .deployments_list(&auth_sdk::AuthDeploymentsListRequest {
+            cursor: None,
+            kind: None,
+            limit: None,
+            state: Some(auth_sdk::AuthDeploymentsListRequestState::Revoked),
+        })
+        .await
+        .expect("list removed deployments");
+    assert!(removed
+        .entries
+        .iter()
+        .any(|deployment| deployment.deployment_id == deployment_id && deployment.version == 4));
+}
+
+#[tokio::test]
+async fn device_activation_without_review_connects_and_revocation_denies_reuse() {
+    run_device_activation_without_review("auth.device-activation-none-connect-revoke", true).await;
+}
+
+#[tokio::test]
+async fn rust_device_activation_client_reaches_rust_owner() {
+    run_device_activation_without_review("state.activated-devices-rust-owner", false).await;
+}
+
+async fn run_device_activation_without_review(case_id: &str, runtime_case: bool) {
+    if runtime_case {
+        assert_runtime_case_registered(case_id, "auth", "auth");
+    } else {
+        assert_case_registered(case_id, "state", "auth");
+    }
+    let mut fixture = start_fixture(None, false).await;
+    let device = provision_device_activation_case(&mut fixture, case_id, "none").await;
+    let trellis_url = fixture.runtime.trellis_url().to_owned();
+    let activation = device.activation_options(&trellis_url);
+    let pending = match check_device_activation(&activation)
+        .await
+        .expect("start device activation")
+    {
+        DeviceActivationStatus::Pending(pending) => pending,
+        DeviceActivationStatus::Ready(_) => panic!("unactivated device was ready"),
+    };
+    assert!(pending.activation_url.contains(&pending.review_id));
+    assert!(Caller::connect_device(device.connect_options(&trellis_url))
+        .await
+        .is_err());
+
+    let user = connect_device_activation_user(&mut fixture, case_id).await;
+    let operation = auth_sdk::AuthClient::new(&user)
+        .operation()
+        .auth()
+        .device_user_authorities_resolve();
+    let operation = operation
+        .start(&auth_sdk::AuthDeviceUserAuthoritiesResolveInput {
+            confirmation_code: pending.confirmation_code.clone(),
+            flow_id: pending.review_id.clone(),
+        })
+        .await
+        .expect("start no-review activation operation");
+    let terminal = operation
+        .wait()
+        .await
+        .expect("wait for no-review activation");
+    assert_eq!(terminal.state, ClientOperationState::Completed);
+    let session = wait_for_device_activation(&activation, &pending, Duration::from_secs(20))
+        .await
+        .expect("observe ready device activation");
+
+    let connected = Caller::connect_device(activation.into_connect_options(session))
+        .await
+        .expect("connect activated device");
+    let session = auth_sdk::AuthClient::new(&connected)
+        .rpc()
+        .auth()
+        .sessions_me()
+        .await
+        .expect("project device session");
+    assert_eq!(session.session.principal_kind, "device");
+    assert_eq!(session.session.principal_id, device.principal_id);
+
+    let service_caller = fixture.service_handle.caller();
+    let auth = auth_sdk::AuthClient::new(&service_caller).rpc().auth();
+    let authorities = auth
+        .device_user_authorities_list(&auth_sdk::AuthDeviceUserAuthoritiesListRequest {
+            cursor: None,
+            deployment_id: Some(device.approval.deployment_id.clone()),
+            limit: None,
+            principal_id: Some(device.principal_id.clone()),
+        })
+        .await
+        .expect("list activated device authority");
+    assert_eq!(authorities.entries.len(), 1);
+    assert_eq!(
+        authorities.entries[0].device.administrative_approval,
+        "approved"
+    );
+    auth.device_user_authorities_revoke(&auth_sdk::AuthDeviceUserAuthoritiesRevokeRequest {
+        deployment_id: device.approval.deployment_id.clone(),
+        device_principal_id: device.principal_id.clone(),
+        idempotency_key: format!("revoke-device-none-{case_id}"),
+        reason: Some("live activation revocation".to_owned()),
+    })
+    .await
+    .expect("revoke device activation");
+    assert!(Caller::connect_device(device.connect_options(&trellis_url))
+        .await
+        .is_err());
+}
+
+#[tokio::test]
+async fn device_activation_required_review_needs_privileged_decision() {
+    assert_runtime_case_registered("auth.device-activation-required-review", "auth", "auth");
+    let mut fixture = start_fixture(None, false).await;
+    let device =
+        provision_device_activation_case(&mut fixture, "device-required", "required").await;
+    let trellis_url = fixture.runtime.trellis_url().to_owned();
+    let activation = device.activation_options(&trellis_url);
+    let pending = match check_device_activation(&activation)
+        .await
+        .expect("start required-review activation")
+    {
+        DeviceActivationStatus::Pending(pending) => pending,
+        DeviceActivationStatus::Ready(_) => panic!("unreviewed device was ready"),
+    };
+    let user = connect_device_activation_user(&mut fixture, "device-required").await;
+    let operation = auth_sdk::AuthClient::new(&user)
+        .operation()
+        .auth()
+        .device_user_authorities_resolve()
+        .start(&auth_sdk::AuthDeviceUserAuthoritiesResolveInput {
+            confirmation_code: pending.confirmation_code.clone(),
+            flow_id: pending.review_id.clone(),
+        })
+        .await
+        .expect("start required-review operation");
+    let mut wait = Box::pin(operation.wait());
+    assert!(auth_sdk::AuthClient::new(&user)
+        .rpc()
+        .auth()
+        .device_user_authorities_reviews_decide(
+            &auth_sdk::AuthDeviceUserAuthoritiesReviewsDecideRequest {
+                decision: auth_sdk::AuthDeviceUserAuthoritiesReviewsDecideRequestDecision::Approve,
+                expected_version: 2,
+                idempotency_key: "unauthorized-device-review".to_owned(),
+                reason: None,
+                review_id: pending.review_id.clone(),
+            },
+        )
+        .await
+        .is_err());
+
+    let service_caller = fixture.service_handle.caller();
+    let auth = auth_sdk::AuthClient::new(&service_caller).rpc().auth();
+    let reviews = auth
+        .device_user_authorities_reviews_list(
+            &auth_sdk::AuthDeviceUserAuthoritiesReviewsListRequest {
+                cursor: None,
+                deployment_id: Some(device.approval.deployment_id.clone()),
+                limit: None,
+                state: Some(auth_sdk::AuthDeviceUserAuthoritiesReviewsListRequestState::Pending),
+            },
+        )
+        .await
+        .expect("list deployment-scoped pending review");
+    let review = reviews
+        .entries
+        .iter()
+        .find(|review| review.review_id == pending.review_id)
+        .expect("find claimed review");
+    assert!(review.activated_by_user_principal_id.is_some());
+    auth.device_user_authorities_reviews_decide(
+        &auth_sdk::AuthDeviceUserAuthoritiesReviewsDecideRequest {
+            decision: auth_sdk::AuthDeviceUserAuthoritiesReviewsDecideRequestDecision::Approve,
+            expected_version: review.version,
+            idempotency_key: "approve-device-required".to_owned(),
+            reason: None,
+            review_id: pending.review_id.clone(),
+        },
+    )
+    .await
+    .expect("approve required device review");
+    let terminal = tokio::time::timeout(Duration::from_secs(5), &mut wait)
+        .await
+        .expect("review decision did not notify the operation waiter")
+        .expect("wait for reviewed activation");
+    assert_eq!(terminal.state, ClientOperationState::Completed);
+    let session = wait_for_device_activation(&activation, &pending, Duration::from_secs(20))
+        .await
+        .expect("observe approved activation");
+    Caller::connect_device(activation.into_connect_options(session))
+        .await
+        .expect("connect reviewed device");
+
+    let rejected_device =
+        provision_device_activation_case(&mut fixture, "device-required-rejected", "required")
+            .await;
+    let rejected_activation = rejected_device.activation_options(&trellis_url);
+    let rejected_pending = match check_device_activation(&rejected_activation)
+        .await
+        .expect("start rejected device activation")
+    {
+        DeviceActivationStatus::Pending(pending) => pending,
+        DeviceActivationStatus::Ready(_) => panic!("unreviewed rejected device was ready"),
+    };
+    let rejected_operation = auth_sdk::AuthClient::new(&user)
+        .operation()
+        .auth()
+        .device_user_authorities_resolve()
+        .start(&auth_sdk::AuthDeviceUserAuthoritiesResolveInput {
+            confirmation_code: rejected_pending.confirmation_code.clone(),
+            flow_id: rejected_pending.review_id.clone(),
+        })
+        .await
+        .expect("start rejected activation operation");
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    let rejected_reviews = auth
+        .device_user_authorities_reviews_list(
+            &auth_sdk::AuthDeviceUserAuthoritiesReviewsListRequest {
+                cursor: None,
+                deployment_id: Some(rejected_device.approval.deployment_id.clone()),
+                limit: None,
+                state: Some(auth_sdk::AuthDeviceUserAuthoritiesReviewsListRequestState::Pending),
+            },
+        )
+        .await
+        .expect("list rejected device review");
+    let rejected_review = rejected_reviews
+        .entries
+        .iter()
+        .find(|review| review.review_id == rejected_pending.review_id)
+        .expect("find rejected device review");
+    auth.device_user_authorities_reviews_decide(
+        &auth_sdk::AuthDeviceUserAuthoritiesReviewsDecideRequest {
+            decision: auth_sdk::AuthDeviceUserAuthoritiesReviewsDecideRequestDecision::Reject,
+            expected_version: rejected_review.version,
+            idempotency_key: "reject-device-required".to_owned(),
+            reason: Some("integration rejection".to_owned()),
+            review_id: rejected_pending.review_id.clone(),
+        },
+    )
+    .await
+    .expect("reject required device review");
+    let rejected_terminal = rejected_operation
+        .wait()
+        .await
+        .expect("wait for rejected activation");
+    assert_eq!(rejected_terminal.state, ClientOperationState::Completed);
+    assert!(matches!(
+        check_device_activation(&rejected_activation).await,
+        Err(trellis_rs::auth::DeviceActivationError::Rejected)
+    ));
+    assert!(
+        Caller::connect_device(rejected_device.connect_options(&trellis_url))
+            .await
+            .is_err()
+    );
+}
+
+#[tokio::test]
+async fn device_activation_wait_is_event_driven() {
+    assert_runtime_case_registered(
+        "auth.device-activation-wait-is-event-driven",
+        "auth",
+        "auth",
+    );
+    let mut fixture = start_fixture(None, false).await;
+    let device =
+        provision_device_activation_case(&mut fixture, "device-event-driven-wait", "required")
+            .await;
+    let activation = device.activation_options(fixture.runtime.trellis_url());
+    let pending = match check_device_activation(&activation)
+        .await
+        .expect("start event-driven-wait activation")
+    {
+        DeviceActivationStatus::Pending(pending) => pending,
+        DeviceActivationStatus::Ready(_) => panic!("unreviewed device was ready"),
+    };
+    let user = connect_device_activation_user(&mut fixture, "device-event-driven-wait").await;
+    let operation = auth_sdk::AuthClient::new(&user)
+        .operation()
+        .auth()
+        .device_user_authorities_resolve()
+        .start(&auth_sdk::AuthDeviceUserAuthoritiesResolveInput {
+            confirmation_code: pending.confirmation_code,
+            flow_id: pending.review_id.clone(),
+        })
+        .await
+        .expect("claim event-driven-wait review");
+    let sqlite = fixture.runtime.control_plane_sqlite();
+    sqlite
+        .count_activation_review_reads(&pending.review_id)
+        .expect("count event-driven wait reads");
+    let mut wait = Box::pin(operation.wait());
+    tokio::select! {
+        result = &mut wait => panic!("review wait completed before approval: {result:?}"),
+        () = tokio::time::sleep(Duration::from_millis(1_100)) => {}
+    }
+    assert_eq!(
+        sqlite
+            .activation_review_read_count(&pending.review_id)
+            .expect("read pending wait count"),
+        3,
+        "a pending operation wait must read-register-reread and establish one expiry deadline without polling",
+    );
+
+    let service_caller = fixture.service_handle.caller();
+    let auth = auth_sdk::AuthClient::new(&service_caller).rpc().auth();
+    let reviews = auth
+        .device_user_authorities_reviews_list(
+            &auth_sdk::AuthDeviceUserAuthoritiesReviewsListRequest {
+                cursor: None,
+                deployment_id: Some(device.approval.deployment_id.clone()),
+                limit: None,
+                state: Some(auth_sdk::AuthDeviceUserAuthoritiesReviewsListRequestState::Pending),
+            },
+        )
+        .await
+        .expect("list review for event-driven approval");
+    let review = reviews
+        .entries
+        .iter()
+        .find(|review| review.review_id == pending.review_id)
+        .expect("find event-driven-wait review");
+    auth.device_user_authorities_reviews_decide(
+        &auth_sdk::AuthDeviceUserAuthoritiesReviewsDecideRequest {
+            decision: auth_sdk::AuthDeviceUserAuthoritiesReviewsDecideRequestDecision::Approve,
+            expected_version: review.version,
+            idempotency_key: "approve-event-driven-wait".to_owned(),
+            reason: None,
+            review_id: pending.review_id.clone(),
+        },
+    )
+    .await
+    .expect("approve event-driven-wait review");
+    let terminal = tokio::time::timeout(Duration::from_secs(2), &mut wait)
+        .await
+        .expect("approval did not promptly wake the operation wait")
+        .expect("observe approved event-driven operation");
+    assert_eq!(terminal.state, ClientOperationState::Completed);
+    assert!(
+        sqlite
+            .activation_review_read_count(&pending.review_id)
+            .expect("read terminal wait count")
+            <= 5,
+        "approval and terminal projection must use a bounded number of reads",
+    );
+}
+
+#[tokio::test]
+async fn device_activation_events_follow_effective_state() {
+    assert_runtime_case_registered(
+        "auth.device-activation-events-follow-effective-state",
+        "auth",
+        "auth",
+    );
+    let mut fixture = start_fixture(None, false).await;
+    let device =
+        provision_device_activation_case(&mut fixture, "device-event-order", "required").await;
+    let user = connect_device_activation_user(&mut fixture, "device-event-order").await;
+    let observer = async_nats::ConnectOptions::new()
+        .credentials_file(
+            fixture
+                .runtime
+                .workdir()
+                .join("nats/creds/trellis-auth.creds"),
+        )
+        .await
+        .expect("load event-order observer credentials")
+        .connect(fixture.runtime.nats_url())
+        .await
+        .expect("connect event-order observer");
+    let event_subject = fixture
+        .runtime
+        .integration_test_descriptor_subject(&format!(
+            "events.v1.Auth.DeviceUserAuthorities.*.{}",
+            device.approval.deployment_id,
+        ));
+    let mut events = observer
+        .subscribe(event_subject)
+        .await
+        .expect("subscribe to activation lifecycle events");
+    observer.flush().await.expect("flush event-order observer");
+
+    let activation = device.activation_options(fixture.runtime.trellis_url());
+    let pending = match check_device_activation(&activation)
+        .await
+        .expect("start event-order activation")
+    {
+        DeviceActivationStatus::Pending(pending) => pending,
+        DeviceActivationStatus::Ready(_) => panic!("unreviewed device was ready"),
+    };
+    let review_requested = tokio::time::timeout(Duration::from_secs(5), events.next())
+        .await
+        .expect("ReviewRequested event was not published")
+        .expect("activation lifecycle event stream ended");
+    assert!(review_requested
+        .subject
+        .as_str()
+        .contains(".ReviewRequested."));
+    assert!(matches!(
+        check_device_activation(&activation).await,
+        Ok(DeviceActivationStatus::Pending(_))
+    ));
+
+    let operation = auth_sdk::AuthClient::new(&user)
+        .operation()
+        .auth()
+        .device_user_authorities_resolve()
+        .start(&auth_sdk::AuthDeviceUserAuthoritiesResolveInput {
+            confirmation_code: pending.confirmation_code,
+            flow_id: pending.review_id.clone(),
+        })
+        .await
+        .expect("claim event-order activation review");
+    let requested = tokio::time::timeout(Duration::from_secs(5), events.next())
+        .await
+        .expect("Requested event was not published")
+        .expect("activation lifecycle event stream ended");
+    assert!(requested.subject.as_str().contains(".Requested."));
+    assert!(matches!(
+        check_device_activation(&activation).await,
+        Ok(DeviceActivationStatus::Pending(_))
+    ));
+
+    let service_caller = fixture.service_handle.caller();
+    let auth = auth_sdk::AuthClient::new(&service_caller).rpc().auth();
+    let reviews = auth
+        .device_user_authorities_reviews_list(
+            &auth_sdk::AuthDeviceUserAuthoritiesReviewsListRequest {
+                cursor: None,
+                deployment_id: Some(device.approval.deployment_id.clone()),
+                limit: None,
+                state: Some(auth_sdk::AuthDeviceUserAuthoritiesReviewsListRequestState::Pending),
+            },
+        )
+        .await
+        .expect("list event-order activation review");
+    let review = reviews
+        .entries
+        .iter()
+        .find(|review| review.review_id == pending.review_id)
+        .expect("find event-order activation review");
+    auth.device_user_authorities_reviews_decide(
+        &auth_sdk::AuthDeviceUserAuthoritiesReviewsDecideRequest {
+            decision: auth_sdk::AuthDeviceUserAuthoritiesReviewsDecideRequestDecision::Approve,
+            expected_version: review.version,
+            idempotency_key: "approve-device-event-order".to_owned(),
+            reason: None,
+            review_id: pending.review_id.clone(),
+        },
+    )
+    .await
+    .expect("approve event-order activation review");
+    let approved = tokio::time::timeout(Duration::from_secs(5), events.next())
+        .await
+        .expect("Approved event was not published")
+        .expect("activation lifecycle event stream ended");
+    assert!(approved.subject.as_str().contains(".Approved."));
+    let authorities = auth
+        .device_user_authorities_list(&auth_sdk::AuthDeviceUserAuthoritiesListRequest {
+            cursor: None,
+            deployment_id: Some(device.approval.deployment_id.clone()),
+            limit: None,
+            principal_id: Some(device.principal_id.clone()),
+        })
+        .await
+        .expect("inspect authority at Approved event");
+    assert_eq!(authorities.entries.len(), 1);
+    assert_eq!(authorities.entries[0].device.state, "active");
+    assert_eq!(authorities.entries[0].device.delegation_state, "active");
+    let resolved = tokio::time::timeout(Duration::from_secs(5), events.next())
+        .await
+        .expect("Resolved event was not published")
+        .expect("activation lifecycle event stream ended");
+    assert!(resolved.subject.as_str().contains(".Resolved."));
+    assert!(matches!(
+        check_device_activation(&activation).await,
+        Ok(DeviceActivationStatus::Ready(_))
+    ));
+    assert_eq!(
+        operation
+            .wait()
+            .await
+            .expect("observe event-order operation completion")
+            .state,
+        ClientOperationState::Completed,
+    );
+
+    let no_review =
+        provision_device_activation_case(&mut fixture, "device-event-order-none", "none").await;
+    let no_review_user =
+        connect_device_activation_user(&mut fixture, "device-event-order-none").await;
+    let no_review_subject = fixture
+        .runtime
+        .integration_test_descriptor_subject(&format!(
+            "events.v1.Auth.DeviceUserAuthorities.*.{}",
+            no_review.approval.deployment_id,
+        ));
+    let mut no_review_events = observer
+        .subscribe(no_review_subject)
+        .await
+        .expect("subscribe to no-review activation lifecycle events");
+    observer
+        .flush()
+        .await
+        .expect("flush no-review event observer");
+    let no_review_activation = no_review.activation_options(fixture.runtime.trellis_url());
+    let no_review_pending = match check_device_activation(&no_review_activation)
+        .await
+        .expect("start no-review event-order activation")
+    {
+        DeviceActivationStatus::Pending(pending) => pending,
+        DeviceActivationStatus::Ready(_) => panic!("unactivated no-review device was ready"),
+    };
+    let no_review_operation = auth_sdk::AuthClient::new(&no_review_user)
+        .operation()
+        .auth()
+        .device_user_authorities_resolve()
+        .start(&auth_sdk::AuthDeviceUserAuthoritiesResolveInput {
+            confirmation_code: no_review_pending.confirmation_code,
+            flow_id: no_review_pending.review_id,
+        })
+        .await
+        .expect("start no-review event-order activation");
+    for expected in [".Requested.", ".Approved.", ".Resolved."] {
+        let event = tokio::time::timeout(Duration::from_secs(5), no_review_events.next())
+            .await
+            .unwrap_or_else(|_| panic!("{expected} no-review event was not published"))
+            .expect("no-review activation lifecycle event stream ended");
+        assert!(
+            event.subject.as_str().contains(expected),
+            "expected {expected}, received {}",
+            event.subject
+        );
+    }
+    let no_review_caller = fixture.service_handle.caller();
+    let no_review_auth = auth_sdk::AuthClient::new(&no_review_caller).rpc().auth();
+    let authorities = no_review_auth
+        .device_user_authorities_list(&auth_sdk::AuthDeviceUserAuthoritiesListRequest {
+            cursor: None,
+            deployment_id: Some(no_review.approval.deployment_id.clone()),
+            limit: None,
+            principal_id: Some(no_review.principal_id.clone()),
+        })
+        .await
+        .expect("inspect no-review authority at Resolved event");
+    assert_eq!(authorities.entries.len(), 1);
+    assert_eq!(authorities.entries[0].device.state, "active");
+    assert_eq!(authorities.entries[0].device.delegation_state, "active");
+    assert!(matches!(
+        check_device_activation(&no_review_activation).await,
+        Ok(DeviceActivationStatus::Ready(_))
+    ));
+    assert_eq!(
+        no_review_operation
+            .wait()
+            .await
+            .expect("observe no-review event-order operation completion")
+            .state,
+        ClientOperationState::Completed,
+    );
+    assert!(
+        tokio::time::timeout(Duration::from_secs(1), no_review_events.next())
+            .await
+            .is_err(),
+        "no-review activation emitted an unexpected fourth lifecycle event"
+    );
+}
+
+#[tokio::test]
+async fn device_activation_approved_unclaimed_cannot_complete_delegation() {
+    assert_runtime_case_registered(
+        "auth.device-activation-approved-unclaimed-cannot-complete-delegation",
+        "auth",
+        "auth",
+    );
+    let mut fixture = start_fixture(None, false).await;
+    let device =
+        provision_device_activation_case(&mut fixture, "device-approval-before-claim", "required")
+            .await;
+    let trellis_url = fixture.runtime.trellis_url().to_owned();
+    let activation = device.activation_options(&trellis_url);
+    let pending = match check_device_activation(&activation)
+        .await
+        .expect("start approval-before-claim activation")
+    {
+        DeviceActivationStatus::Pending(pending) => pending,
+        DeviceActivationStatus::Ready(_) => panic!("unreviewed device was ready"),
+    };
+    let first_user = connect_device_activation_user(&mut fixture, "device-first-claimant").await;
+    let second_user = connect_device_activation_user(&mut fixture, "device-second-claimant").await;
+
+    let observer = async_nats::ConnectOptions::new()
+        .credentials_file(
+            fixture
+                .runtime
+                .workdir()
+                .join("nats/creds/trellis-auth.creds"),
+        )
+        .await
+        .expect("load activation observer credentials")
+        .connect(fixture.runtime.nats_url())
+        .await
+        .expect("connect activation event observer");
+    let resolved_subject = fixture
+        .runtime
+        .integration_test_descriptor_subject(&format!(
+            "{}.{}",
+            auth_sdk::events::AuthDeviceUserAuthoritiesResolvedEventDescriptor::SUBJECT,
+            device.approval.deployment_id,
+        ));
+    let mut resolved_events = observer
+        .subscribe(resolved_subject)
+        .await
+        .expect("subscribe to resolved activation events");
+    observer
+        .flush()
+        .await
+        .expect("flush activation event observer");
+
+    let service_caller = fixture.service_handle.caller();
+    let auth = auth_sdk::AuthClient::new(&service_caller).rpc().auth();
+    let reviews = auth
+        .device_user_authorities_reviews_list(
+            &auth_sdk::AuthDeviceUserAuthoritiesReviewsListRequest {
+                cursor: None,
+                deployment_id: Some(device.approval.deployment_id.clone()),
+                limit: None,
+                state: Some(auth_sdk::AuthDeviceUserAuthoritiesReviewsListRequestState::Pending),
+            },
+        )
+        .await
+        .expect("list unclaimed activation review");
+    let review = reviews
+        .entries
+        .iter()
+        .find(|review| review.review_id == pending.review_id)
+        .expect("find unclaimed activation review");
+    assert!(review.activated_by_user_principal_id.is_none());
+    let approved = auth
+        .device_user_authorities_reviews_decide(
+            &auth_sdk::AuthDeviceUserAuthoritiesReviewsDecideRequest {
+                decision: auth_sdk::AuthDeviceUserAuthoritiesReviewsDecideRequestDecision::Approve,
+                expected_version: review.version,
+                idempotency_key: "approve-device-before-claim".to_owned(),
+                reason: None,
+                review_id: pending.review_id.clone(),
+            },
+        )
+        .await
+        .expect("approve unclaimed activation review")
+        .review;
+    assert!(approved.activated_by_user_principal_id.is_none());
+    assert!(
+        tokio::time::timeout(Duration::from_millis(300), resolved_events.next())
+            .await
+            .is_err()
+    );
+    match check_device_activation(&activation).await {
+        Ok(DeviceActivationStatus::Pending(current)) => {
+            assert_eq!(current.review_id, pending.review_id)
+        }
+        result => panic!("approved unclaimed activation was not pending: {result:?}"),
+    }
+
+    let operation = auth_sdk::AuthClient::new(&first_user)
+        .operation()
+        .auth()
+        .device_user_authorities_resolve()
+        .start(&auth_sdk::AuthDeviceUserAuthoritiesResolveInput {
+            confirmation_code: pending.confirmation_code.clone(),
+            flow_id: pending.review_id.clone(),
+        })
+        .await
+        .expect("claim approved activation review");
+    assert!(auth_sdk::AuthClient::new(&second_user)
+        .operation()
+        .auth()
+        .device_user_authorities_resolve()
+        .start(&auth_sdk::AuthDeviceUserAuthoritiesResolveInput {
+            confirmation_code: pending.confirmation_code.clone(),
+            flow_id: pending.review_id.clone(),
+        })
+        .await
+        .is_err());
+    tokio::time::timeout(Duration::from_secs(5), resolved_events.next())
+        .await
+        .expect("active resolution event was not published")
+        .expect("resolved activation event stream ended");
+    let session = match check_device_activation(&activation)
+        .await
+        .expect("resolved event must follow ready activation state")
+    {
+        DeviceActivationStatus::Ready(session) => session,
+        DeviceActivationStatus::Pending(_) => panic!("resolved(active) preceded ready state"),
+    };
+    let terminal = operation
+        .wait()
+        .await
+        .expect("observe claimed activation completion");
+    assert_eq!(terminal.state, ClientOperationState::Completed);
+    Caller::connect_device(activation.into_connect_options(session))
+        .await
+        .expect("connect activation completed by the claimant");
+}
+
+#[tokio::test]
+async fn device_activation_expired_review_is_terminal() {
+    assert_runtime_case_registered(
+        "auth.device-activation-expired-review-is-terminal",
+        "auth",
+        "auth",
+    );
+    let mut fixture = start_fixture(None, false).await;
+    let device =
+        provision_device_activation_case(&mut fixture, "device-expiry-after-claim", "required")
+            .await;
+    let observer = async_nats::ConnectOptions::new()
+        .credentials_file(
+            fixture
+                .runtime
+                .workdir()
+                .join("nats/creds/trellis-auth.creds"),
+        )
+        .await
+        .expect("load expiry observer credentials")
+        .connect(fixture.runtime.nats_url())
+        .await
+        .expect("connect expiry event observer");
+    let resolved_subject = fixture
+        .runtime
+        .integration_test_descriptor_subject(&format!(
+            "{}.{}",
+            auth_sdk::events::AuthDeviceUserAuthoritiesResolvedEventDescriptor::SUBJECT,
+            device.approval.deployment_id,
+        ));
+    let mut resolved_events = observer
+        .subscribe(resolved_subject)
+        .await
+        .expect("subscribe to expiry resolution events");
+    observer.flush().await.expect("flush expiry event observer");
+    let sqlite = fixture.runtime.control_plane_sqlite();
+    sqlite
+        .set_activation_review_ttl(&device.approval.deployment_id, Duration::from_millis(1_500))
+        .expect("set activation review TTL");
+    let trellis_url = fixture.runtime.trellis_url().to_owned();
+    let user = connect_device_activation_user(&mut fixture, "device-expiry-user").await;
+    let activation = device.activation_options(&trellis_url);
+    let pending = match check_device_activation(&activation)
+        .await
+        .expect("start expiring activation")
+    {
+        DeviceActivationStatus::Pending(pending) => pending,
+        DeviceActivationStatus::Ready(_) => panic!("unreviewed device was ready"),
+    };
+    let operation = auth_sdk::AuthClient::new(&user)
+        .operation()
+        .auth()
+        .device_user_authorities_resolve()
+        .start(&auth_sdk::AuthDeviceUserAuthoritiesResolveInput {
+            confirmation_code: pending.confirmation_code.clone(),
+            flow_id: pending.review_id.clone(),
+        })
+        .await
+        .expect("claim expiring activation review");
+    sqlite
+        .count_activation_review_reads(&pending.review_id)
+        .expect("count expiring activation review reads");
+    let mut wait = Box::pin(operation.wait());
+    tokio::select! {
+        result = &mut wait => panic!("activation completed before its expiry boundary: {result:?}"),
+        () = tokio::time::sleep(Duration::from_millis(500)) => {}
+    }
+    assert_eq!(
+        sqlite
+            .activation_review_read_count(&pending.review_id)
+            .expect("read pre-expiry observation count"),
+        3,
+        "waiting must register once rather than poll SQLite before expiry",
+    );
+    let terminal = tokio::time::timeout(Duration::from_secs(2), &mut wait)
+        .await
+        .expect("operation wait did not wake at review expiry")
+        .expect("observe expired operation");
+    assert_eq!(terminal.state, ClientOperationState::Completed);
+    assert_eq!(
+        terminal.output.expect("expired output").review.state,
+        auth_sdk::types::AuthDeviceUserAuthoritiesResolveOutputReviewState::Expired,
+    );
+    assert!(
+        sqlite
+            .activation_review_read_count(&pending.review_id)
+            .expect("read terminal expiry observation count")
+            <= 4,
+        "expiry boundary must complete with one terminal reread",
+    );
+    let expired_event = tokio::time::timeout(Duration::from_secs(5), resolved_events.next())
+        .await
+        .expect("Resolved(expired) event was not published")
+        .expect("expiry event stream ended");
+    assert_eq!(
+        serde_json::from_slice::<serde_json::Value>(&expired_event.payload)
+            .expect("decode expiry resolution event")["state"],
+        "expired",
+    );
+
+    let service_caller = fixture.service_handle.caller();
+    let auth = auth_sdk::AuthClient::new(&service_caller).rpc().auth();
+    let reviews = auth
+        .device_user_authorities_reviews_list(
+            &auth_sdk::AuthDeviceUserAuthoritiesReviewsListRequest {
+                cursor: None,
+                deployment_id: Some(device.approval.deployment_id.clone()),
+                limit: None,
+                state: Some(auth_sdk::AuthDeviceUserAuthoritiesReviewsListRequestState::Expired),
+            },
+        )
+        .await
+        .expect("expire and list activation reviews");
+    let expired = reviews
+        .entries
+        .iter()
+        .find(|review| review.review_id == pending.review_id)
+        .expect("find expired claimed review");
+    let expired_version = expired.version;
+    let still_pending = auth
+        .device_user_authorities_reviews_list(
+            &auth_sdk::AuthDeviceUserAuthoritiesReviewsListRequest {
+                cursor: None,
+                deployment_id: Some(device.approval.deployment_id.clone()),
+                limit: None,
+                state: Some(auth_sdk::AuthDeviceUserAuthoritiesReviewsListRequestState::Pending),
+            },
+        )
+        .await
+        .expect("list pending reviews after expiry");
+    assert!(still_pending
+        .entries
+        .iter()
+        .all(|review| review.review_id != pending.review_id));
+    assert!(auth
+        .device_user_authorities_reviews_decide(
+            &auth_sdk::AuthDeviceUserAuthoritiesReviewsDecideRequest {
+                decision: auth_sdk::AuthDeviceUserAuthoritiesReviewsDecideRequestDecision::Approve,
+                expected_version: expired_version,
+                idempotency_key: "approve-expired-device".to_owned(),
+                reason: None,
+                review_id: pending.review_id.clone(),
+            },
+        )
+        .await
+        .is_err());
+    let unchanged = auth
+        .device_user_authorities_reviews_list(
+            &auth_sdk::AuthDeviceUserAuthoritiesReviewsListRequest {
+                cursor: None,
+                deployment_id: Some(device.approval.deployment_id.clone()),
+                limit: None,
+                state: Some(auth_sdk::AuthDeviceUserAuthoritiesReviewsListRequestState::Expired),
+            },
+        )
+        .await
+        .expect("list review after rejected late decision");
+    assert_eq!(
+        unchanged
+            .entries
+            .iter()
+            .find(|review| review.review_id == pending.review_id)
+            .expect("expired review remains present")
+            .version,
+        expired_version,
+    );
+    assert!(Caller::connect_device(device.connect_options(&trellis_url))
+        .await
+        .is_err());
+    match check_device_activation(&activation).await {
+        Ok(DeviceActivationStatus::Pending(replacement)) => {
+            assert_ne!(replacement.review_id, pending.review_id)
+        }
+        result => panic!("expired activation did not create an explicit replacement: {result:?}"),
+    }
+
+    let unclaimed_device =
+        provision_device_activation_case(&mut fixture, "device-expiry-before-claim", "required")
+            .await;
+    sqlite
+        .set_activation_review_ttl(
+            &unclaimed_device.approval.deployment_id,
+            Duration::from_millis(1_500),
+        )
+        .expect("set unclaimed activation review TTL");
+    let unclaimed_activation = unclaimed_device.activation_options(&trellis_url);
+    let unclaimed = match check_device_activation(&unclaimed_activation)
+        .await
+        .expect("start unclaimed expiring activation")
+    {
+        DeviceActivationStatus::Pending(pending) => pending,
+        DeviceActivationStatus::Ready(_) => panic!("unreviewed device was ready"),
+    };
+    let unclaimed_reviews = auth
+        .device_user_authorities_reviews_list(
+            &auth_sdk::AuthDeviceUserAuthoritiesReviewsListRequest {
+                cursor: None,
+                deployment_id: Some(unclaimed_device.approval.deployment_id.clone()),
+                limit: None,
+                state: Some(auth_sdk::AuthDeviceUserAuthoritiesReviewsListRequestState::Pending),
+            },
+        )
+        .await
+        .expect("list unclaimed review before approval");
+    let unclaimed_review = unclaimed_reviews
+        .entries
+        .iter()
+        .find(|review| review.review_id == unclaimed.review_id)
+        .expect("find unclaimed review before approval");
+    auth.device_user_authorities_reviews_decide(
+        &auth_sdk::AuthDeviceUserAuthoritiesReviewsDecideRequest {
+            decision: auth_sdk::AuthDeviceUserAuthoritiesReviewsDecideRequestDecision::Approve,
+            expected_version: unclaimed_review.version,
+            idempotency_key: "approve-expiring-unclaimed-device".to_owned(),
+            reason: None,
+            review_id: unclaimed.review_id.clone(),
+        },
+    )
+    .await
+    .expect("approve unclaimed review before expiry");
+    tokio::time::sleep(Duration::from_millis(1_600)).await;
+    let expired_operation = auth_sdk::AuthClient::new(&user)
+        .operation()
+        .auth()
+        .device_user_authorities_resolve()
+        .start(&auth_sdk::AuthDeviceUserAuthoritiesResolveInput {
+            confirmation_code: unclaimed.confirmation_code,
+            flow_id: unclaimed.review_id,
+        })
+        .await
+        .expect("expired unclaimed review remains observable");
+    let expired_terminal = expired_operation
+        .wait()
+        .await
+        .expect("observe unclaimed expiry");
+    assert_eq!(expired_terminal.state, ClientOperationState::Completed);
+    assert_eq!(
+        expired_terminal
+            .output
+            .expect("unclaimed expired output")
+            .review
+            .state,
+        auth_sdk::types::AuthDeviceUserAuthoritiesResolveOutputReviewState::Expired,
+    );
+}
+
+#[tokio::test]
+async fn device_activation_rejects_invalid_proof_confirmation_and_deployment() {
+    assert_runtime_case_registered("auth.device-activation-proof-scoping", "auth", "auth");
+    let mut fixture = start_fixture(None, false).await;
+    let device = provision_device_activation_case(&mut fixture, "device-proof", "none").await;
+    let trellis_url = fixture.runtime.trellis_url().to_owned();
+    let activation = device.activation_options(&trellis_url);
+
+    assert!(
+        check_device_activation_with_test_proof(&activation, None, true)
+            .await
+            .is_err()
+    );
+    let stale = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("system time after epoch")
+        .as_millis() as i64
+        - 10 * 60_000;
+    assert!(
+        check_device_activation_with_test_proof(&activation, Some(stale), false)
+            .await
+            .is_err()
+    );
+
+    let wrong_deployment = format!("{}-wrong", device.approval.deployment_id);
+    let wrong_activation = DeviceActivationOptions::new(
+        device.connect_options_for_deployment(&trellis_url, &wrong_deployment),
+        &device.identity.activation_key_base64url,
+    );
+    assert!(check_device_activation(&wrong_activation).await.is_err());
+
+    let pending = match check_device_activation(&activation)
+        .await
+        .expect("start valid activation")
+    {
+        DeviceActivationStatus::Pending(pending) => pending,
+        DeviceActivationStatus::Ready(_) => panic!("unactivated device was ready"),
+    };
+    let user = connect_device_activation_user(&mut fixture, "device-proof").await;
+    assert!(auth_sdk::AuthClient::new(&user)
+        .operation()
+        .auth()
+        .device_user_authorities_resolve()
+        .start(&auth_sdk::AuthDeviceUserAuthoritiesResolveInput {
+            confirmation_code: "00000000".to_owned(),
+            flow_id: pending.review_id.clone(),
+        })
+        .await
+        .is_err());
+
+    let service_caller = fixture.service_handle.caller();
+    let reviews = auth_sdk::AuthClient::new(&service_caller)
+        .rpc()
+        .auth()
+        .device_user_authorities_reviews_list(
+            &auth_sdk::AuthDeviceUserAuthoritiesReviewsListRequest {
+                cursor: None,
+                deployment_id: Some(device.approval.deployment_id.clone()),
+                limit: None,
+                state: Some(auth_sdk::AuthDeviceUserAuthoritiesReviewsListRequestState::Pending),
+            },
+        )
+        .await
+        .expect("list unchanged review");
+    let review = reviews
+        .entries
+        .iter()
+        .find(|review| review.review_id == pending.review_id)
+        .expect("find unchanged review");
+    assert!(review.activated_by_user_principal_id.is_none());
+    assert_eq!(review.version, 1);
 }
 
 fn authority_rows(
@@ -202,10 +2979,39 @@ fn binding_rows(
     runtime
         .control_plane_sqlite()
         .query(
-            "SELECT b.principal_id, b.provider_id, b.roles_json, b.authority_version FROM auth_portal_authority_bindings b JOIN auth_sessions s ON s.principal_id = b.principal_id AND s.participant_id = b.participant_id WHERE s.session_id = ?",
+            "SELECT b.principal_id, b.provider_id, b.roles_json, b.effective_policy_digest, b.authority_version FROM auth_portal_authority_bindings b JOIN auth_sessions s ON s.principal_id = b.principal_id AND s.participant_id = b.participant_id WHERE s.session_id = ?",
             [session_id],
         )
         .expect("query trusted portal binding")
+}
+
+fn active_principal_context_capabilities(
+    runtime: &trellis_test::TrellisTestRuntime,
+    session_id: &str,
+) -> Vec<Vec<String>> {
+    runtime
+        .control_plane_sqlite()
+        .query(
+            "SELECT c.signed_context_json FROM auth_authorization_contexts c JOIN auth_sessions s ON s.principal_id = c.principal_id WHERE s.session_id = ? AND c.state = 'active'",
+            [session_id],
+        )
+        .expect("query active principal contexts")
+        .into_iter()
+        .map(|row| {
+            serde_json::from_str::<Value>(
+                row["signed_context_json"]
+                    .as_str()
+                    .expect("signed context JSON"),
+            )
+            .expect("parse signed context")
+            ["capabilities"]
+                .as_array()
+                .expect("context capabilities")
+                .iter()
+                .map(|capability| capability.as_str().expect("capability name").to_owned())
+                .collect()
+        })
+        .collect()
 }
 
 fn portal_policy_version(
@@ -248,6 +3054,196 @@ fn session_count(runtime: &trellis_test::TrellisTestRuntime, session_id: &str) -
         .len()
 }
 
+async fn put_local_portal_eligibility(
+    caller: &trellis_rs::generated::Caller,
+    portal_id: &str,
+    disabled: bool,
+    local_login: bool,
+    providers: Vec<String>,
+) {
+    let auth = auth_sdk::AuthClient::new(caller).rpc().auth();
+    let portal = auth
+        .portals_list(&auth_sdk::AuthPortalsListRequest {
+            cursor: None,
+            disabled: None,
+            limit: Some(100),
+        })
+        .await
+        .expect("list portal for eligibility mutation")
+        .entries
+        .into_iter()
+        .find(|portal| portal.portal_id == portal_id)
+        .expect("find portal for eligibility mutation");
+    auth.portals_put(&auth_sdk::AuthPortalsPutRequest {
+        disabled,
+        display_name: portal.display_name,
+        entry_url: portal.entry_url,
+        expected_version: Some(portal.version),
+        idempotency_key: format!("portal-eligibility-{}", rand::random::<u64>()),
+        login_settings: auth_sdk::AuthPortalsPutRequestLoginSettings {
+            federated_registration: portal.login_settings.federated_registration,
+            local_login,
+            local_registration: portal.login_settings.local_registration,
+            providers: Some(providers),
+        },
+        portal_id: portal_id.to_owned(),
+    })
+    .await
+    .expect("mutate portal eligibility");
+}
+
+fn assert_no_portal_admission_records(
+    runtime: &trellis_test::TrellisTestRuntime,
+    username: &str,
+    participant_id: &str,
+) {
+    let sqlite = runtime.control_plane_sqlite();
+    let principal = sqlite
+        .query(
+            "SELECT principal_id FROM auth_local_credentials WHERE normalized_username = ?",
+            [username],
+        )
+        .expect("query failed-flow principal");
+    assert_eq!(principal.len(), 1, "registration did not create exact user");
+    let principal_id = principal[0]["principal_id"]
+        .as_str()
+        .expect("failed-flow principal ID");
+    for (table, query) in [
+        (
+            "auth_identity_authorities",
+            "SELECT 1 FROM auth_identity_authorities WHERE principal_id = ?1 AND participant_id = ?2",
+        ),
+        (
+            "auth_portal_authority_bindings",
+            "SELECT 1 FROM auth_portal_authority_bindings WHERE principal_id = ?1 AND participant_id = ?2",
+        ),
+        (
+            "auth_authorization_contexts",
+            "SELECT 1 FROM auth_authorization_contexts c JOIN auth_identity_authorities a ON a.authority_id = c.authority_id WHERE c.principal_id = ?1 AND a.participant_id = ?2 AND c.state = 'active'",
+        ),
+        (
+            "auth_sessions",
+            "SELECT 1 FROM auth_sessions WHERE principal_id = ?1 AND participant_id = ?2",
+        ),
+    ] {
+        assert!(
+            sqlite
+                .query(query, [principal_id, participant_id])
+                .expect("query failed-flow admission state")
+                .is_empty(),
+            "failed flow left a record in {table}"
+        );
+    }
+}
+
+async fn assert_local_portal_eligibility_race(
+    fixture: &mut Fixture,
+    portal_id: &str,
+    participant_id: &str,
+    username: &'static str,
+    password: &'static str,
+    eligibility: (bool, bool, Vec<String>),
+    prove_recovery: bool,
+) {
+    let sqlite = fixture.runtime.control_plane_sqlite();
+    sqlite
+        .install_portal_snapshot_barrier(portal_id)
+        .expect("install portal eligibility barrier");
+    sqlite
+        .install_portal_reconciliation_barrier(portal_id)
+        .expect("install portal eligibility worker barrier");
+    sqlite
+        .count_portal_reconciliation_passes(portal_id)
+        .expect("count portal eligibility reconciliation");
+    let mut login_admin = std::mem::replace(&mut fixture.admin, fixture.runtime.admin());
+    let bootstrap_url = fixture.bootstrap_url.clone();
+    let client_contract = fixture.client_contract.clone();
+    let selected_portal_id = portal_id.to_owned();
+    let login = tokio::spawn(async move {
+        let result = login_admin
+            .connect_new_local_user_for_portal_reconnectable(
+                &bootstrap_url,
+                &client_contract,
+                selected_portal_id,
+                username,
+                password,
+            )
+            .await;
+        (login_admin, result)
+    });
+    sqlite
+        .wait_for_portal_snapshot_barrier(portal_id, Duration::from_secs(10))
+        .await
+        .expect("browser selected eligible portal policy");
+    put_local_portal_eligibility(
+        &fixture.service_handle.caller(),
+        portal_id,
+        eligibility.0,
+        eligibility.1,
+        eligibility.2,
+    )
+    .await;
+    sqlite
+        .wait_for_portal_reconciliation_barrier(portal_id, Duration::from_secs(10))
+        .await
+        .expect("keyed worker paused before reading ineligible portal");
+    sqlite
+        .release_portal_reconciliation_barrier(portal_id)
+        .expect("release ineligible portal worker");
+    sqlite
+        .wait_for_portal_reconciliation_pass(portal_id, Duration::from_secs(10))
+        .await
+        .expect("ineligible portal reconciliation drained before binding existed");
+    sqlite
+        .release_portal_snapshot_barrier(portal_id)
+        .expect("resume ineligible portal login");
+    let (login_admin, login_result) = login.await.expect("join ineligible portal login");
+    fixture.admin = login_admin;
+    assert!(login_result.is_err(), "ineligible portal login succeeded");
+    assert_no_portal_admission_records(&fixture.runtime, username, participant_id);
+
+    put_local_portal_eligibility(
+        &fixture.service_handle.caller(),
+        portal_id,
+        false,
+        true,
+        vec!["local".to_owned()],
+    )
+    .await;
+    if !prove_recovery {
+        return;
+    }
+    let (client, reconnect) = fixture
+        .admin
+        .connect_local_user_for_portal_reconnectable(
+            &fixture.bootstrap_url,
+            &fixture.client_contract,
+            username,
+            password,
+        )
+        .await
+        .expect("fresh flow succeeds after portal eligibility is restored");
+    assert_eq!(
+        wait_for_authority(
+            &fixture.runtime,
+            reconnect.session_id(),
+            "accepted",
+            &[fixture.read_capability.as_str()],
+        )
+        .await["state"],
+        "accepted"
+    );
+    assert_eq!(
+        binding_rows(&fixture.runtime, reconnect.session_id()).len(),
+        1
+    );
+    assert_eq!(session_count(&fixture.runtime, reconnect.session_id()), 1);
+    assert!(
+        !active_principal_context_capabilities(&fixture.runtime, reconnect.session_id()).is_empty()
+    );
+    drop(client);
+}
+
 async fn list_connections(
     fixture: &mut Fixture,
     session_id: &str,
@@ -260,19 +3256,24 @@ async fn list_connections(
 }
 
 async fn update_policy(fixture: &mut Fixture, capabilities: Vec<String>) {
+    let portal_id = fixture.portal_id.clone();
+    update_portal_policy(fixture, &portal_id, capabilities).await;
+}
+
+async fn update_portal_policy(fixture: &mut Fixture, portal_id: &str, capabilities: Vec<String>) {
     let participant_id = fixture
         .runtime
         .scoped_contract(&fixture.client_contract)
         .expect("scope trusted portal client")
         .id()
         .to_owned();
-    let version = portal_policy_version(&fixture.runtime, &fixture.portal_id, &participant_id)
+    let version = portal_policy_version(&fixture.runtime, portal_id, &participant_id)
         .expect("trusted portal grant override");
     fixture
         .admin
         .put_portal_grant_override(
             &fixture.bootstrap_url,
-            &fixture.portal_id,
+            portal_id,
             &participant_id,
             Some(version),
             capabilities,
@@ -281,17 +3282,94 @@ async fn update_policy(fixture: &mut Fixture, capabilities: Vec<String>) {
         .expect("update trusted portal policy");
 }
 
-async fn wait_for_context_refresh(client: &Caller) {
-    let deadline = Instant::now() + Duration::from_secs(10);
-    loop {
-        match client.refresh_authorization_context().await {
-            Ok(_) => return,
-            Err(_) if Instant::now() < deadline => {
-                tokio::time::sleep(Duration::from_millis(50)).await;
-            }
-            Err(error) => panic!("authorization context did not refresh: {error}"),
-        }
-    }
+async fn put_portal_policy(
+    caller: &trellis_rs::generated::Caller,
+    portal_id: &str,
+    participant_id: &str,
+    expected_version: Option<i64>,
+    direct_capabilities: Vec<String>,
+) {
+    auth_sdk::AuthClient::new(caller)
+        .rpc()
+        .auth()
+        .portals_grant_overrides_put(&auth_sdk::types::AuthPortalsGrantOverridesPutRequest {
+            capability_group_keys: Vec::new(),
+            direct_capabilities,
+            expected_version,
+            idempotency_key: format!("portal-race-{}", rand::random::<u64>()),
+            participant_id: participant_id.to_owned(),
+            portal_id: portal_id.to_owned(),
+            role_mappings: Vec::new(),
+        })
+        .await
+        .expect("put portal race policy");
+}
+
+async fn put_portal_group_policy(
+    caller: &trellis_rs::generated::Caller,
+    portal_id: &str,
+    participant_id: &str,
+    expected_version: i64,
+    capability_group_keys: Vec<String>,
+) {
+    auth_sdk::AuthClient::new(caller)
+        .rpc()
+        .auth()
+        .portals_grant_overrides_put(&auth_sdk::types::AuthPortalsGrantOverridesPutRequest {
+            capability_group_keys,
+            direct_capabilities: Vec::new(),
+            expected_version: Some(expected_version),
+            idempotency_key: format!("portal-group-race-{}", rand::random::<u64>()),
+            participant_id: participant_id.to_owned(),
+            portal_id: portal_id.to_owned(),
+            role_mappings: Vec::new(),
+        })
+        .await
+        .expect("put portal group policy");
+}
+
+async fn put_race_capability_group(
+    caller: &trellis_rs::generated::Caller,
+    group_key: &str,
+    expected_version: Option<i64>,
+    capabilities: Vec<String>,
+    included_groups: Vec<String>,
+) -> i64 {
+    auth_sdk::AuthClient::new(caller)
+        .rpc()
+        .auth()
+        .capability_groups_put(&auth_sdk::types::AuthCapabilityGroupsPutRequest {
+            capabilities,
+            description: format!("Portal race group {group_key}"),
+            display_name: group_key.to_owned(),
+            expected_version,
+            group_key: group_key.to_owned(),
+            idempotency_key: format!("portal-race-group-{}", rand::random::<u64>()),
+            included_groups,
+        })
+        .await
+        .expect("put portal race capability group")
+        .group
+        .version
+}
+
+async fn remove_portal_policy(
+    caller: &trellis_rs::generated::Caller,
+    portal_id: &str,
+    participant_id: &str,
+    expected_version: i64,
+) {
+    auth_sdk::AuthClient::new(caller)
+        .rpc()
+        .auth()
+        .portals_grant_overrides_remove(&auth_sdk::types::AuthPortalsGrantOverridesRemoveRequest {
+            expected_version,
+            idempotency_key: format!("portal-race-remove-{}", rand::random::<u64>()),
+            participant_id: participant_id.to_owned(),
+            portal_id: portal_id.to_owned(),
+        })
+        .await
+        .expect("remove portal race policy");
 }
 
 async fn wait_for_no_connections(fixture: &mut Fixture, session_id: &str) {
@@ -300,6 +3378,33 @@ async fn wait_for_no_connections(fixture: &mut Fixture, session_id: &str) {
         assert!(
             Instant::now() < deadline,
             "physical connections were not removed"
+        );
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+}
+
+async fn wait_for_reconnect_denied(reconnect: &trellis_test::TrellisTestClientReconnect) {
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        let outcome = match reconnect.connect_bound_only().await {
+            Err(error) => {
+                let message = error.to_string().to_ascii_lowercase();
+                if message.contains("authorization")
+                    || message.contains("revoked")
+                    || message.contains("auth_required")
+                {
+                    return;
+                }
+                format!("error: {error}")
+            }
+            Ok(client) => {
+                drop(client);
+                "connected".to_owned()
+            }
+        };
+        assert!(
+            Instant::now() < deadline,
+            "revoked session continued to reconnect; last outcome: {outcome}"
         );
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
@@ -520,12 +3625,425 @@ async fn portal_policy_reduction_and_expansion_converge() {
     )
     .await;
     assert!(expanded["version"].as_i64() > reduced["version"].as_i64());
-    wait_for_context_refresh(&client).await;
+    assert_eq!(
+        call_value(&client, "expanded").await.unwrap().value,
+        "expanded"
+    );
+    drop(client);
+    wait_for_no_connections(&mut fixture, &session_id).await;
+    let client = reconnect
+        .connect_bound_only()
+        .await
+        .expect("reconnect after expanded policy context is published");
     assert_eq!(
         call_value(&client, "expanded").await.unwrap().value,
         "expanded"
     );
     assert_eq!(session_count(&fixture.runtime, &session_id), 1);
+}
+
+#[tokio::test]
+async fn portal_policy_snapshot_races_are_fenced() {
+    assert_runtime_case_registered("auth.portal-login-policy-snapshot-race", "auth", "auth");
+    let mut fixture = start_fixture(None, false).await;
+    let username_a = "snapshot-race-user-a";
+    let username_b = "snapshot-race-user-b";
+    let password = "snapshot-race-password-123";
+    let tested_portal_id = fixture.portal_id.clone();
+    let participant_id = fixture
+        .runtime
+        .scoped_contract(&fixture.client_contract)
+        .expect("scope trusted portal client")
+        .id()
+        .to_owned();
+    fixture
+        .admin
+        .put_portal_grant_override(
+            &fixture.bootstrap_url,
+            &tested_portal_id,
+            &participant_id,
+            None,
+            vec![fixture.read_capability.clone()],
+        )
+        .await
+        .expect("install policy A");
+
+    assert_local_portal_eligibility_race(
+        &mut fixture,
+        &tested_portal_id,
+        &participant_id,
+        "snapshot-disabled-local-login-user",
+        password,
+        (false, false, vec!["local".to_owned()]),
+        false,
+    )
+    .await;
+    assert_local_portal_eligibility_race(
+        &mut fixture,
+        &tested_portal_id,
+        &participant_id,
+        "snapshot-removed-local-provider-user",
+        password,
+        (false, true, Vec::new()),
+        false,
+    )
+    .await;
+    assert_local_portal_eligibility_race(
+        &mut fixture,
+        &tested_portal_id,
+        &participant_id,
+        "snapshot-disabled-portal-user",
+        password,
+        (true, true, vec!["local".to_owned()]),
+        true,
+    )
+    .await;
+
+    let sqlite = fixture.runtime.control_plane_sqlite();
+    sqlite
+        .install_portal_snapshot_barrier(&tested_portal_id)
+        .expect("install new-binding barrier");
+    sqlite
+        .count_portal_reconciliation_passes(&tested_portal_id)
+        .expect("count new-binding reconciliation");
+    let mut login_admin = std::mem::replace(&mut fixture.admin, fixture.runtime.admin());
+    let bootstrap_url = fixture.bootstrap_url.clone();
+    let client_contract = fixture.client_contract.clone();
+    let portal_id = tested_portal_id.clone();
+    let mut login = tokio::spawn(async move {
+        let result = login_admin
+            .connect_new_local_user_for_portal_reconnectable(
+                &bootstrap_url,
+                &client_contract,
+                portal_id,
+                username_a,
+                password,
+            )
+            .await;
+        (login_admin, result)
+    });
+    tokio::select! {
+        result = sqlite.wait_for_portal_snapshot_barrier(
+            &tested_portal_id,
+            Duration::from_secs(10),
+        ) => result.expect("browser resolved policy A"),
+        result = &mut login => match result {
+            Ok((_admin, Ok(_))) => panic!("login completed before policy barrier"),
+            Ok((_admin, Err(error))) => panic!("login failed before policy barrier: {error}"),
+            Err(error) => panic!("login task failed before policy barrier: {error}"),
+        },
+    }
+    let version = portal_policy_version(&fixture.runtime, &tested_portal_id, &participant_id)
+        .expect("policy A version");
+    remove_portal_policy(
+        &fixture.service_handle.caller(),
+        &tested_portal_id,
+        &participant_id,
+        version,
+    )
+    .await;
+    put_portal_policy(
+        &fixture.service_handle.caller(),
+        &tested_portal_id,
+        &participant_id,
+        None,
+        Vec::new(),
+    )
+    .await;
+    sqlite
+        .wait_for_portal_reconciliation_pass(&tested_portal_id, Duration::from_secs(10))
+        .await
+        .expect("policy B reconciliation drained before binding existed");
+    sqlite
+        .release_portal_snapshot_barrier(&tested_portal_id)
+        .expect("resume new-binding login");
+    let (login_admin, login_result) = login.await.expect("join new-binding login");
+    fixture.admin = login_admin;
+    let (client_a, reconnect_a) = login_result.expect("new-binding login retries with policy B");
+    wait_for_authority(&fixture.runtime, reconnect_a.session_id(), "accepted", &[]).await;
+    assert!(call_value(&client_a, "stale-policy-a").await.is_err());
+
+    sqlite
+        .install_portal_snapshot_barrier(&tested_portal_id)
+        .expect("install override-removal barrier");
+    sqlite
+        .count_portal_reconciliation_passes(&tested_portal_id)
+        .expect("count override-removal reconciliation");
+    let mut login_admin = std::mem::replace(&mut fixture.admin, fixture.runtime.admin());
+    let bootstrap_url = fixture.bootstrap_url.clone();
+    let client_contract = fixture.client_contract.clone();
+    let portal_id = tested_portal_id.clone();
+    let login = tokio::spawn(async move {
+        let result = login_admin
+            .connect_new_local_user_for_portal_reconnectable(
+                &bootstrap_url,
+                &client_contract,
+                portal_id,
+                username_b,
+                password,
+            )
+            .await;
+        (login_admin, result)
+    });
+    sqlite
+        .wait_for_portal_snapshot_barrier(&tested_portal_id, Duration::from_secs(10))
+        .await
+        .expect("browser resolved removable override");
+    let version = portal_policy_version(&fixture.runtime, &tested_portal_id, &participant_id)
+        .expect("current override version");
+    remove_portal_policy(
+        &fixture.service_handle.caller(),
+        &tested_portal_id,
+        &participant_id,
+        version,
+    )
+    .await;
+    sqlite
+        .wait_for_portal_reconciliation_pass(&tested_portal_id, Duration::from_secs(10))
+        .await
+        .expect("override-removal reconciliation drained before binding existed");
+    sqlite
+        .release_portal_snapshot_barrier(&tested_portal_id)
+        .expect("resume override-removal login");
+    let (login_admin, login_result) = login.await.expect("join override-removal login");
+    fixture.admin = login_admin;
+    let (_client_b, reconnect_b) =
+        login_result.expect("ordinary approval completes after override removal");
+    assert!(binding_rows(&fixture.runtime, reconnect_b.session_id()).is_empty());
+
+    put_portal_policy(
+        &fixture.service_handle.caller(),
+        &tested_portal_id,
+        &participant_id,
+        None,
+        vec![fixture.read_capability.clone()],
+    )
+    .await;
+    let (_policy_a_client, policy_a_reconnect) = fixture
+        .admin
+        .connect_local_user_for_portal_reconnectable(
+            &fixture.bootstrap_url,
+            &fixture.client_contract,
+            username_a,
+            password,
+        )
+        .await
+        .expect("restore existing binding under policy A");
+    wait_for_authority(
+        &fixture.runtime,
+        policy_a_reconnect.session_id(),
+        "accepted",
+        &[fixture.read_capability.as_str()],
+    )
+    .await;
+    let policy_a_digest = binding_rows(&fixture.runtime, policy_a_reconnect.session_id())[0]
+        ["effective_policy_digest"]
+        .clone();
+    sqlite
+        .install_portal_snapshot_barrier(&tested_portal_id)
+        .expect("install existing-binding barrier");
+    sqlite
+        .install_portal_reconciliation_barrier(&tested_portal_id)
+        .expect("install existing-binding worker barrier");
+    let mut login_admin = std::mem::replace(&mut fixture.admin, fixture.runtime.admin());
+    let bootstrap_url = fixture.bootstrap_url.clone();
+    let client_contract = fixture.client_contract.clone();
+    let login = tokio::spawn(async move {
+        let result = login_admin
+            .connect_local_user_for_portal_reconnectable(
+                &bootstrap_url,
+                &client_contract,
+                username_a,
+                password,
+            )
+            .await;
+        (login_admin, result)
+    });
+    sqlite
+        .wait_for_portal_snapshot_barrier(&tested_portal_id, Duration::from_secs(10))
+        .await
+        .expect("existing binding resolved policy A");
+    let version = portal_policy_version(&fixture.runtime, &tested_portal_id, &participant_id)
+        .expect("policy A version");
+    put_portal_policy(
+        &fixture.service_handle.caller(),
+        &tested_portal_id,
+        &participant_id,
+        Some(version),
+        Vec::new(),
+    )
+    .await;
+    sqlite
+        .wait_for_portal_reconciliation_barrier(&tested_portal_id, Duration::from_secs(10))
+        .await
+        .expect("keyed worker paused before reading policy B");
+    sqlite
+        .release_portal_snapshot_barrier(&tested_portal_id)
+        .expect("resume existing-binding login");
+    let (login_admin, login_result) = login.await.expect("join existing-binding login");
+    fixture.admin = login_admin;
+    let (reduced_client, reduced_reconnect) =
+        login_result.expect("existing binding retries and commits policy B");
+    let authority = authority_rows(&fixture.runtime, reduced_reconnect.session_id());
+    assert_eq!(authority.len(), 1);
+    assert_eq!(authority[0]["desired_capabilities_json"], "[]");
+    let binding = binding_rows(&fixture.runtime, reduced_reconnect.session_id());
+    assert_eq!(binding.len(), 1);
+    assert_ne!(binding[0]["effective_policy_digest"], policy_a_digest);
+    assert_eq!(binding[0]["authority_version"], authority[0]["version"]);
+    assert!(call_value(&reduced_client, "current-policy-b")
+        .await
+        .is_err());
+    assert!(
+        active_principal_context_capabilities(&fixture.runtime, reduced_reconnect.session_id())
+            .iter()
+            .all(|capabilities| !capabilities.contains(&fixture.read_capability)),
+        "policy reduction left a fresh active policy-A context"
+    );
+    sqlite
+        .release_portal_reconciliation_barrier(&tested_portal_id)
+        .expect("release existing-binding worker");
+
+    let group_g = "portal-snapshot-group-g";
+    let group_h = "portal-snapshot-group-h";
+    assert_eq!(
+        put_race_capability_group(
+            &fixture.service_handle.caller(),
+            group_g,
+            None,
+            Vec::new(),
+            Vec::new(),
+        )
+        .await,
+        1,
+    );
+    let version = portal_policy_version(&fixture.runtime, &tested_portal_id, &participant_id)
+        .expect("policy B version");
+    put_portal_group_policy(
+        &fixture.service_handle.caller(),
+        &tested_portal_id,
+        &participant_id,
+        version,
+        vec![group_g.to_owned()],
+    )
+    .await;
+    sqlite
+        .install_portal_snapshot_barrier(&tested_portal_id)
+        .expect("install transitive-expansion barrier");
+    let mut login_admin = std::mem::replace(&mut fixture.admin, fixture.runtime.admin());
+    let bootstrap_url = fixture.bootstrap_url.clone();
+    let client_contract = fixture.client_contract.clone();
+    let portal_id = tested_portal_id.clone();
+    let login = tokio::spawn(async move {
+        let result = login_admin
+            .connect_new_local_user_for_portal_reconnectable(
+                &bootstrap_url,
+                &client_contract,
+                portal_id,
+                "snapshot-transitive-user",
+                password,
+            )
+            .await;
+        (login_admin, result)
+    });
+    sqlite
+        .wait_for_portal_snapshot_barrier(&tested_portal_id, Duration::from_secs(10))
+        .await
+        .expect("browser captured group G snapshot");
+    assert_eq!(
+        put_race_capability_group(
+            &fixture.service_handle.caller(),
+            group_h,
+            None,
+            vec![fixture.read_capability.clone()],
+            Vec::new(),
+        )
+        .await,
+        1,
+    );
+    assert_eq!(
+        put_race_capability_group(
+            &fixture.service_handle.caller(),
+            group_g,
+            Some(1),
+            Vec::new(),
+            vec![group_h.to_owned()],
+        )
+        .await,
+        2,
+    );
+    sqlite
+        .release_portal_snapshot_barrier(&tested_portal_id)
+        .expect("resume transitive-expansion login");
+    let (login_admin, login_result) = login.await.expect("join transitive-expansion login");
+    fixture.admin = login_admin;
+    let (transitive_client, _) = login_result.expect("transitive group expansion retries");
+    assert_eq!(
+        call_value(&transitive_client, "transitive-current-policy")
+            .await
+            .expect("transitively expanded policy permits read")
+            .value,
+        "transitive-current-policy"
+    );
+
+    sqlite
+        .install_portal_snapshot_barrier(&tested_portal_id)
+        .expect("install direct-new-group barrier");
+    let mut login_admin = std::mem::replace(&mut fixture.admin, fixture.runtime.admin());
+    let bootstrap_url = fixture.bootstrap_url.clone();
+    let client_contract = fixture.client_contract.clone();
+    let portal_id = tested_portal_id.clone();
+    let login = tokio::spawn(async move {
+        let result = login_admin
+            .connect_new_local_user_for_portal_reconnectable(
+                &bootstrap_url,
+                &client_contract,
+                portal_id,
+                "snapshot-direct-group-user",
+                password,
+            )
+            .await;
+        (login_admin, result)
+    });
+    sqlite
+        .wait_for_portal_snapshot_barrier(&tested_portal_id, Duration::from_secs(10))
+        .await
+        .expect("browser captured policy referencing group G");
+    let direct_group = "portal-snapshot-direct-group-h";
+    assert_eq!(
+        put_race_capability_group(
+            &fixture.service_handle.caller(),
+            direct_group,
+            None,
+            vec![fixture.read_capability.clone()],
+            Vec::new(),
+        )
+        .await,
+        1,
+    );
+    let version = portal_policy_version(&fixture.runtime, &tested_portal_id, &participant_id)
+        .expect("group-G policy version");
+    put_portal_group_policy(
+        &fixture.service_handle.caller(),
+        &tested_portal_id,
+        &participant_id,
+        version,
+        vec![direct_group.to_owned()],
+    )
+    .await;
+    sqlite
+        .release_portal_snapshot_barrier(&tested_portal_id)
+        .expect("resume direct-new-group login");
+    let (login_admin, login_result) = login.await.expect("join direct-new-group login");
+    fixture.admin = login_admin;
+    let (direct_client, _) = login_result.expect("direct new-group policy retries");
+    assert_eq!(
+        call_value(&direct_client, "direct-current-policy")
+            .await
+            .expect("direct new-group policy permits read")
+            .value,
+        "direct-current-policy"
+    );
 }
 
 #[tokio::test]

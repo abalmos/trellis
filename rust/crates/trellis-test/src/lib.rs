@@ -203,6 +203,10 @@ pub enum TrellisTestError {
     #[error(transparent)]
     Sqlite(#[from] rusqlite::Error),
 
+    /// An exact integration-test control could not be configured or observed.
+    #[error("integration test control failed: {0}")]
+    IntegrationControl(String),
+
     /// Contract manifest parsing or digesting failed.
     #[error(transparent)]
     Contract(#[from] trellis_rs::contracts::ContractsError),
@@ -631,6 +635,219 @@ impl TrellisControlPlaneSqlite {
         &self.path
     }
 
+    /// Install the exact browser post-policy-resolution barrier for one flow.
+    pub fn install_portal_snapshot_barrier(&self, flow_id: &str) -> Result<(), TrellisTestError> {
+        let connection = self.connection()?;
+        connection.execute_batch(
+            "CREATE TABLE IF NOT EXISTS __trellis_test_portal_snapshot_barriers (
+                    flow_id TEXT PRIMARY KEY,
+                    reached INTEGER NOT NULL DEFAULT 0,
+                    released INTEGER NOT NULL DEFAULT 0
+                );",
+        )?;
+        connection.execute(
+            "INSERT OR REPLACE INTO __trellis_test_portal_snapshot_barriers
+                 (flow_id, reached, released) VALUES (?1, 0, 0)",
+            [flow_id],
+        )?;
+        Ok(())
+    }
+
+    /// Wait until browser admission has resolved the fenced policy snapshot.
+    pub async fn wait_for_portal_snapshot_barrier(
+        &self,
+        flow_id: &str,
+        timeout: Duration,
+    ) -> Result<(), TrellisTestError> {
+        let deadline = tokio::time::Instant::now() + timeout;
+        loop {
+            let reached = self.connection()?.query_row(
+                "SELECT reached FROM __trellis_test_portal_snapshot_barriers
+                     WHERE flow_id = ?1",
+                [flow_id],
+                |row| row.get::<_, bool>(0),
+            )?;
+            if reached {
+                return Ok(());
+            }
+            if tokio::time::Instant::now() >= deadline {
+                return Err(TrellisTestError::IntegrationControl(
+                    "portal snapshot barrier was not reached".to_owned(),
+                ));
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    }
+
+    /// Release one installed browser policy-snapshot barrier.
+    pub fn release_portal_snapshot_barrier(&self, flow_id: &str) -> Result<(), TrellisTestError> {
+        self.connection()?.execute(
+            "UPDATE __trellis_test_portal_snapshot_barriers
+                 SET released = 1 WHERE flow_id = ?1",
+            [flow_id],
+        )?;
+        Ok(())
+    }
+
+    /// Install a barrier before one exact keyed portal reconciliation pass.
+    pub fn install_portal_reconciliation_barrier(
+        &self,
+        portal_id: &str,
+    ) -> Result<(), TrellisTestError> {
+        let connection = self.connection()?;
+        connection.execute_batch(
+            "CREATE TABLE IF NOT EXISTS __trellis_test_portal_reconciliation_barriers (
+                portal_id TEXT PRIMARY KEY,
+                reached INTEGER NOT NULL DEFAULT 0,
+                released INTEGER NOT NULL DEFAULT 0
+            );",
+        )?;
+        connection.execute(
+            "INSERT OR REPLACE INTO __trellis_test_portal_reconciliation_barriers
+             (portal_id, reached, released) VALUES (?1, 0, 0)",
+            [portal_id],
+        )?;
+        Ok(())
+    }
+
+    /// Wait until the keyed worker reaches one portal reconciliation barrier.
+    pub async fn wait_for_portal_reconciliation_barrier(
+        &self,
+        portal_id: &str,
+        timeout: Duration,
+    ) -> Result<(), TrellisTestError> {
+        let deadline = tokio::time::Instant::now() + timeout;
+        loop {
+            let reached = self.connection()?.query_row(
+                "SELECT reached FROM __trellis_test_portal_reconciliation_barriers
+                 WHERE portal_id = ?1",
+                [portal_id],
+                |row| row.get::<_, bool>(0),
+            )?;
+            if reached {
+                return Ok(());
+            }
+            if tokio::time::Instant::now() >= deadline {
+                return Err(TrellisTestError::IntegrationControl(
+                    "portal reconciliation barrier was not reached".to_owned(),
+                ));
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    }
+
+    /// Release one installed keyed portal reconciliation barrier.
+    pub fn release_portal_reconciliation_barrier(
+        &self,
+        portal_id: &str,
+    ) -> Result<(), TrellisTestError> {
+        self.connection()?.execute(
+            "UPDATE __trellis_test_portal_reconciliation_barriers
+             SET released = 1 WHERE portal_id = ?1",
+            [portal_id],
+        )?;
+        Ok(())
+    }
+
+    /// Begin counting completed scoped reconciliation passes for one portal.
+    pub fn count_portal_reconciliation_passes(
+        &self,
+        portal_id: &str,
+    ) -> Result<(), TrellisTestError> {
+        let connection = self.connection()?;
+        connection.execute_batch(
+            "CREATE TABLE IF NOT EXISTS __trellis_test_portal_reconciliation_passes (
+                portal_id TEXT PRIMARY KEY,
+                pass_count INTEGER NOT NULL DEFAULT 0
+            );",
+        )?;
+        connection.execute(
+            "INSERT OR REPLACE INTO __trellis_test_portal_reconciliation_passes
+             (portal_id, pass_count) VALUES (?1, 0)",
+            [portal_id],
+        )?;
+        Ok(())
+    }
+
+    /// Wait for one additional scoped reconciliation pass for a portal.
+    pub async fn wait_for_portal_reconciliation_pass(
+        &self,
+        portal_id: &str,
+        timeout: Duration,
+    ) -> Result<(), TrellisTestError> {
+        let deadline = tokio::time::Instant::now() + timeout;
+        loop {
+            let count = self.connection()?.query_row(
+                "SELECT pass_count FROM __trellis_test_portal_reconciliation_passes
+                 WHERE portal_id = ?1",
+                [portal_id],
+                |row| row.get::<_, u64>(0),
+            )?;
+            if count > 0 {
+                return Ok(());
+            }
+            if tokio::time::Instant::now() >= deadline {
+                return Err(TrellisTestError::IntegrationControl(
+                    "portal reconciliation pass did not complete".to_owned(),
+                ));
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    }
+
+    /// Set one deployment's integration-only activation-review lifetime.
+    pub fn set_activation_review_ttl(
+        &self,
+        deployment_id: &str,
+        ttl: Duration,
+    ) -> Result<(), TrellisTestError> {
+        let ttl_ms = i64::try_from(ttl.as_millis()).map_err(|_| {
+            TrellisTestError::IntegrationControl("activation review TTL is too large".to_owned())
+        })?;
+        let connection = self.connection()?;
+        connection.execute_batch(
+            "CREATE TABLE IF NOT EXISTS __trellis_test_activation_review_ttls (
+                    deployment_id TEXT PRIMARY KEY,
+                    ttl_ms INTEGER NOT NULL CHECK (ttl_ms > 0)
+                );",
+        )?;
+        connection.execute(
+            "INSERT OR REPLACE INTO __trellis_test_activation_review_ttls
+                 (deployment_id, ttl_ms) VALUES (?1, ?2)",
+            rusqlite::params![deployment_id, ttl_ms],
+        )?;
+        Ok(())
+    }
+
+    /// Begin counting authoritative repository reads for one activation review.
+    pub fn count_activation_review_reads(&self, review_id: &str) -> Result<(), TrellisTestError> {
+        let connection = self.connection()?;
+        connection.execute_batch(
+            "CREATE TABLE IF NOT EXISTS __trellis_test_activation_review_reads (
+                    review_id TEXT PRIMARY KEY,
+                    read_count INTEGER NOT NULL DEFAULT 0
+                );",
+        )?;
+        connection.execute(
+            "INSERT OR REPLACE INTO __trellis_test_activation_review_reads
+                 (review_id, read_count) VALUES (?1, 0)",
+            [review_id],
+        )?;
+        Ok(())
+    }
+
+    /// Return the counted authoritative reads for one activation review.
+    pub fn activation_review_read_count(&self, review_id: &str) -> Result<u64, TrellisTestError> {
+        self.connection()?
+            .query_row(
+                "SELECT read_count FROM __trellis_test_activation_review_reads
+                 WHERE review_id = ?1",
+                [review_id],
+                |row| row.get(0),
+            )
+            .map_err(TrellisTestError::from)
+    }
+
     /// Runs a SQL query against the live control-plane database.
     pub fn query<P>(
         &self,
@@ -674,6 +891,77 @@ impl TrellisControlPlaneSqlite {
         let connection = self.connection()?;
         let rows_affected = connection.execute(sql, params)?;
         Ok(TrellisControlPlaneSqliteExecuteResult { rows_affected })
+    }
+
+    /// Arms a target-scoped failure after a user principal write but before its
+    /// aggregate transaction can commit.
+    pub fn fail_user_update_transaction(&self, principal_id: &str) -> Result<(), TrellisTestError> {
+        let connection = self.connection()?;
+        connection.execute_batch(
+            "CREATE TABLE IF NOT EXISTS __trellis_test_user_update_failures (
+                 principal_id TEXT PRIMARY KEY
+             );
+             CREATE TRIGGER IF NOT EXISTS __trellis_test_fail_user_update
+             BEFORE UPDATE ON auth_user_profiles
+             WHEN EXISTS (
+                 SELECT 1 FROM __trellis_test_user_update_failures
+                 WHERE principal_id = NEW.principal_id
+             )
+             BEGIN
+                 SELECT RAISE(ABORT, 'injected integration-test transaction failure');
+             END;",
+        )?;
+        connection.execute(
+            "INSERT OR REPLACE INTO __trellis_test_user_update_failures (principal_id) VALUES (?)",
+            [principal_id],
+        )?;
+        Ok(())
+    }
+
+    /// Clears a target-scoped user aggregate transaction failure.
+    pub fn clear_user_update_transaction_failure(
+        &self,
+        principal_id: &str,
+    ) -> Result<(), TrellisTestError> {
+        self.execute(
+            "DELETE FROM __trellis_test_user_update_failures WHERE principal_id = ?",
+            [principal_id],
+        )?;
+        Ok(())
+    }
+
+    /// Arms one failed dispatch for the next context-revocation action matching
+    /// the exact authorization-context digest.
+    pub fn fail_next_context_revocation_dispatch(
+        &self,
+        context_digest: &str,
+    ) -> Result<(), TrellisTestError> {
+        let connection = self.connection()?;
+        connection.execute_batch(
+            "CREATE TABLE IF NOT EXISTS __trellis_test_context_revocation_failures (
+                 context_digest TEXT PRIMARY KEY
+             );
+             CREATE TABLE IF NOT EXISTS __trellis_test_post_commit_failures (
+                 action_id TEXT PRIMARY KEY
+             );
+             CREATE TRIGGER IF NOT EXISTS __trellis_test_fail_context_revocation
+             AFTER INSERT ON auth_post_commit_actions
+             WHEN NEW.kind = 'context_revoke' AND EXISTS (
+                 SELECT 1 FROM __trellis_test_context_revocation_failures
+                 WHERE instr(NEW.payload_json, context_digest) > 0
+             )
+             BEGIN
+                 INSERT INTO __trellis_test_post_commit_failures (action_id)
+                 VALUES (NEW.action_id);
+                 DELETE FROM __trellis_test_context_revocation_failures
+                 WHERE instr(NEW.payload_json, context_digest) > 0;
+             END;",
+        )?;
+        connection.execute(
+            "INSERT OR REPLACE INTO __trellis_test_context_revocation_failures (context_digest) VALUES (?)",
+            [context_digest],
+        )?;
+        Ok(())
     }
 
     /// Deletes and returns one session row so tests can restore it later.
@@ -1939,6 +2227,45 @@ impl TrellisTestAdmin {
         deployment: Option<&str>,
         mutable_dev: Option<bool>,
     ) -> Result<String, TrellisTestError> {
+        self.create_deployment_of_kind(
+            bootstrap_url,
+            deployment,
+            mutable_dev,
+            auth_sdk::types::AuthDeploymentsCreateRequestKind::Service,
+            None,
+            false,
+        )
+        .await
+    }
+
+    /// Create a device deployment with explicit delegation and review policy.
+    pub async fn create_device_deployment(
+        &mut self,
+        bootstrap_url: &str,
+        deployment: &str,
+        requires_device_delegation: bool,
+        review_mode: &str,
+    ) -> Result<String, TrellisTestError> {
+        self.create_deployment_of_kind(
+            bootstrap_url,
+            Some(deployment),
+            None,
+            auth_sdk::types::AuthDeploymentsCreateRequestKind::Device,
+            Some(review_mode.to_owned()),
+            requires_device_delegation,
+        )
+        .await
+    }
+
+    async fn create_deployment_of_kind(
+        &mut self,
+        bootstrap_url: &str,
+        deployment: Option<&str>,
+        mutable_dev: Option<bool>,
+        kind: auth_sdk::types::AuthDeploymentsCreateRequestKind,
+        review_mode: Option<String>,
+        requires_device_delegation: bool,
+    ) -> Result<String, TrellisTestError> {
         let deployment_name = deployment.unwrap_or(&self.default_deployment);
         let deployment_name = self.integration_test_scope.as_ref().map_or_else(
             || deployment_name.to_string(),
@@ -1948,7 +2275,13 @@ impl TrellisTestAdmin {
         if let Some(deployment_id) = self.created_deployments.get(&deployment_name) {
             return Ok(deployment_id.clone());
         }
-        let request = auth_deployments_create_request_shape(&deployment_name, mutable_dev)?;
+        let request = auth_deployments_create_request_shape(
+            &deployment_name,
+            mutable_dev,
+            kind,
+            review_mode,
+            requires_device_delegation,
+        )?;
         let created: auth_sdk::types::AuthDeploymentsCreateResponse =
             if let Some(proxy) = &self.admin_rpc {
                 proxy.call("authDeploymentsCreate", &request).await?
@@ -1984,6 +2317,30 @@ impl TrellisTestAdmin {
         }
     }
 
+    /// Disable one service instance through `Auth.ServiceInstances.Disable`.
+    pub async fn disable_service_instance(
+        &mut self,
+        bootstrap_url: &str,
+        instance_id: &str,
+        expected_version: i64,
+    ) -> Result<auth_sdk::types::AuthServiceInstancesDisableResponse, TrellisTestError> {
+        let request = auth_sdk::types::AuthServiceInstancesDisableRequest {
+            expected_version,
+            idempotency_key: random_session_seed(),
+            instance_id: instance_id.to_owned(),
+            reason: Some("disabled by Rust integration fixture".to_owned()),
+        };
+        self.admin_rpc = None;
+        self.bootstrap_complete = true;
+        Ok(
+            GeneratedAuthClient::new(self.connect_admin(bootstrap_url).await?)
+                .rpc()
+                .auth()
+                .service_instances_disable(&request)
+                .await?,
+        )
+    }
+
     /// Plan, accept, reconcile, and wait for a service contract authority update.
     pub async fn approve_contract(
         &mut self,
@@ -1995,6 +2352,14 @@ impl TrellisTestAdmin {
         let deployment_name = deployment
             .map(str::to_owned)
             .unwrap_or_else(|| format!("{}-{}", self.default_deployment, &contract.digest[..8]));
+        let deployment_kind = if contract.participant()["kind"] == "device" {
+            auth_sdk::types::AuthDeploymentsCreateRequestKind::Device
+        } else {
+            auth_sdk::types::AuthDeploymentsCreateRequestKind::Service
+        };
+        let review_mode = (deployment_kind
+            == auth_sdk::types::AuthDeploymentsCreateRequestKind::Device)
+            .then(|| "none".to_owned());
         let contract = contract.scoped(self.integration_test_scope.as_ref())?;
         let compiled = build_test_artifacts(&contract, &mut self.api_artifacts)?;
         let participant_artifact =
@@ -2006,7 +2371,14 @@ impl TrellisTestAdmin {
             .collect::<Result<Vec<_>, _>>()?;
         referenced_api_artifacts.push(value_map(&compiled.api_value()?, "API artifact")?);
         let deployment = self
-            .create_deployment(bootstrap_url, Some(&deployment_name), None)
+            .create_deployment_of_kind(
+                bootstrap_url,
+                Some(&deployment_name),
+                None,
+                deployment_kind,
+                review_mode,
+                false,
+            )
             .await?;
         let plan_request = auth_sdk::types::AuthDeploymentAuthorityPlanRequest {
             deployment_id: deployment.clone(),
@@ -2164,6 +2536,92 @@ impl TrellisTestAdmin {
             referenced_api_artifacts,
             deployment_id: deployment,
         })
+    }
+
+    /// Accept one existing deployment-authority update proposal through the public Auth RPC.
+    pub async fn accept_authority_update(
+        &mut self,
+        bootstrap_url: &str,
+        proposal_id: &str,
+        expected_base_authority_version: Option<i64>,
+    ) -> Result<(), TrellisTestError> {
+        let request = auth_sdk::types::AuthDeploymentAuthorityAcceptUpdateRequest {
+            expected_base_authority_version,
+            idempotency_key: random_session_seed(),
+            proposal_id: proposal_id.to_owned(),
+            reason: Some("accepted by Rust integration fixture".to_owned()),
+        };
+        if let Some(proxy) = &self.admin_rpc {
+            let _: serde_json::Value = proxy
+                .call("authDeploymentAuthorityAcceptUpdate", &request)
+                .await?;
+        } else {
+            GeneratedAuthClient::new(self.connect_admin(bootstrap_url).await?)
+                .rpc()
+                .auth()
+                .deployment_authority_accept_update(&request)
+                .await?;
+        }
+        Ok(())
+    }
+
+    /// Accept one existing deployment-authority migration proposal through the public Auth RPC.
+    pub async fn accept_authority_migration(
+        &mut self,
+        bootstrap_url: &str,
+        proposal_id: &str,
+        expected_base_authority_version: Option<i64>,
+    ) -> Result<(), TrellisTestError> {
+        let request = auth_sdk::types::AuthDeploymentAuthorityAcceptMigrationRequest {
+            expected_base_authority_version,
+            idempotency_key: random_session_seed(),
+            proposal_id: proposal_id.to_owned(),
+            reason: Some("accepted by Rust integration fixture".to_owned()),
+        };
+        if let Some(proxy) = &self.admin_rpc {
+            let _: serde_json::Value = proxy
+                .call("authDeploymentAuthorityAcceptMigration", &request)
+                .await?;
+        } else {
+            GeneratedAuthClient::new(self.connect_admin(bootstrap_url).await?)
+                .rpc()
+                .auth()
+                .deployment_authority_accept_migration(&request)
+                .await?;
+        }
+        Ok(())
+    }
+
+    /// Complete a local-password account flow through its public HTTP endpoint.
+    pub async fn complete_local_password_flow(
+        &self,
+        completion_url: &str,
+        password: &str,
+    ) -> Result<(), TrellisTestError> {
+        let flow_id = flow_id_from_url(completion_url).or_else(|_| {
+            reqwest::Url::parse(completion_url)
+                .ok()
+                .and_then(|url| url.path_segments()?.next_back().map(str::to_owned))
+                .filter(|value| !value.is_empty())
+                .ok_or_else(|| TrellisTestError::MissingFlowId(completion_url.to_owned()))
+        })?;
+        let response: Value = post_json_with_origin(
+            &format!(
+                "{}/auth/account-flow/{}/local-password",
+                trim_url(&self.trellis_url),
+                flow_id
+            ),
+            &self.trellis_url,
+            &serde_json::json!({ "password": password }),
+        )
+        .await?;
+        if response.get("status").and_then(Value::as_str) == Some("updated") {
+            Ok(())
+        } else {
+            Err(TrellisTestError::UnexpectedResponse(format!(
+                "password flow returned {response}"
+            )))
+        }
     }
 
     /// Trigger deployment-authority reconciliation for one deployment.
@@ -2397,6 +2855,30 @@ impl TrellisTestAdmin {
         Ok(caller)
     }
 
+    /// Register a local user with a deterministic session seed.
+    pub async fn connect_new_local_user_with_session_seed_reconnectable(
+        &mut self,
+        bootstrap_url: &str,
+        contract: &TrellisTestContract,
+        username: impl Into<String>,
+        password: impl Into<String>,
+        session_seed: impl Into<String>,
+    ) -> Result<(Caller, TrellisTestClientReconnect), TrellisTestError> {
+        self.enable_local_auth(bootstrap_url).await?;
+        self.connect_client_with_registration(
+            bootstrap_url,
+            contract,
+            session_seed.into(),
+            LocalUserAuth::Register(LocalUserRegistration {
+                portal_id: "builtin".to_owned(),
+                username: username.into(),
+                password: password.into(),
+                trusted_capabilities: Vec::new(),
+            }),
+        )
+        .await
+    }
+
     /// Register and connect a local user whose trusted portal grants authority without consent.
     pub async fn connect_new_trusted_local_user_reconnectable(
         &mut self,
@@ -2411,6 +2893,55 @@ impl TrellisTestAdmin {
             bootstrap_url,
             contract,
             random_session_seed(),
+            LocalUserAuth::Register(LocalUserRegistration {
+                portal_id: portal_id.into(),
+                username: username.into(),
+                password: password.into(),
+                trusted_capabilities: direct_capabilities,
+            }),
+        )
+        .await
+    }
+
+    /// Register through an already configured participant portal without changing its policy.
+    pub async fn connect_new_local_user_for_portal_reconnectable(
+        &mut self,
+        bootstrap_url: &str,
+        contract: &TrellisTestContract,
+        portal_id: impl Into<String>,
+        username: impl Into<String>,
+        password: impl Into<String>,
+    ) -> Result<(Caller, TrellisTestClientReconnect), TrellisTestError> {
+        self.connect_client_with_registration(
+            bootstrap_url,
+            contract,
+            random_session_seed(),
+            LocalUserAuth::Register(LocalUserRegistration {
+                portal_id: portal_id.into(),
+                username: username.into(),
+                password: password.into(),
+                trusted_capabilities: Vec::new(),
+            }),
+        )
+        .await
+    }
+
+    /// Register through a trusted portal using a deterministic session seed.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn connect_new_trusted_local_user_with_session_seed_reconnectable(
+        &mut self,
+        bootstrap_url: &str,
+        contract: &TrellisTestContract,
+        portal_id: impl Into<String>,
+        username: impl Into<String>,
+        password: impl Into<String>,
+        direct_capabilities: Vec<String>,
+        session_seed: impl Into<String>,
+    ) -> Result<(Caller, TrellisTestClientReconnect), TrellisTestError> {
+        self.connect_client_with_registration(
+            bootstrap_url,
+            contract,
+            session_seed.into(),
             LocalUserAuth::Register(LocalUserRegistration {
                 portal_id: portal_id.into(),
                 username: username.into(),
@@ -2454,6 +2985,27 @@ impl TrellisTestAdmin {
             bootstrap_url,
             contract,
             random_session_seed(),
+            LocalUserAuth::Login {
+                username: username.into(),
+                password: password.into(),
+            },
+        )
+        .await
+    }
+
+    /// Log in through a participant portal using a deterministic session seed.
+    pub async fn connect_local_user_for_portal_with_session_seed_reconnectable(
+        &mut self,
+        bootstrap_url: &str,
+        contract: &TrellisTestContract,
+        username: impl Into<String>,
+        password: impl Into<String>,
+        session_seed: impl Into<String>,
+    ) -> Result<(Caller, TrellisTestClientReconnect), TrellisTestError> {
+        self.connect_client_with_registration(
+            bootstrap_url,
+            contract,
+            session_seed.into(),
             LocalUserAuth::Login {
                 username: username.into(),
                 password: password.into(),
@@ -2621,14 +3173,16 @@ impl TrellisTestAdmin {
                 )
                 .await?;
             }
-            register_local_user(
+            let response = register_local_user(
                 &self.trellis_url,
                 &flow_id,
                 &registration.username,
                 &registration.password,
             )
             .await?;
-            if registration.trusted_capabilities.is_empty() {
+            if registration.trusted_capabilities.is_empty()
+                && response["state"] == "approval_required"
+            {
                 submit_portal_approval(&self.trellis_url, &flow_id).await?;
             }
         } else {
@@ -2755,9 +3309,47 @@ impl TrellisTestAdmin {
             &reconnect.participant_digest,
             reconnect.integration_test_scope.clone(),
             reconnect.authorization_context_store.clone(),
+            false,
         )
         .await?;
         Ok((client, reconnect))
+    }
+
+    /// Start a signed browser-auth request and return its flow identifier.
+    pub async fn start_browser_auth_flow(
+        &mut self,
+        bootstrap_url: &str,
+        contract: &TrellisTestContract,
+        redirect_to: &str,
+    ) -> Result<String, TrellisTestError> {
+        self.complete_bootstrap(bootstrap_url).await?;
+        let auth = SessionAuth::from_seed_base64url(&random_session_seed())?;
+        let contract = contract.scoped(self.integration_test_scope.as_ref())?;
+        let compiled = build_test_artifacts(&contract, &mut self.api_artifacts)?;
+        let mut referenced_api_artifacts = selected_referenced_apis(&compiled)?
+            .into_values()
+            .map(|api| api.normalized_value().map_err(TrellisTestError::from))
+            .collect::<Result<Vec<_>, _>>()?;
+        referenced_api_artifacts.push(compiled.api_value()?);
+        Ok(start_auth_request(
+            &self.trellis_url,
+            redirect_to,
+            &auth,
+            &compiled,
+            referenced_api_artifacts,
+        )
+        .await?
+        .flow_id)
+    }
+
+    /// Complete local authentication for an already started browser flow.
+    pub async fn complete_local_browser_flow(
+        &self,
+        flow_id: &str,
+        username: &str,
+        password: &str,
+    ) -> Result<Value, TrellisTestError> {
+        perform_local_login(&self.trellis_url, flow_id, username, password).await
     }
 
     /// Set claims returned by the shared live-test OIDC provider.
@@ -2769,6 +3361,108 @@ impl TrellisTestAdmin {
         })?;
         let _: Value = proxy.call("testOidcSetClaims", &claims).await?;
         Ok(())
+    }
+
+    /// Exercise an account-flow OIDC callback and return status, body, and redirect location.
+    pub async fn complete_test_oidc_account_flow(
+        &self,
+        completion_url: &str,
+        provider_id: &str,
+        callback_provider_id: &str,
+        provider_error: bool,
+    ) -> Result<(u16, String, Option<String>), TrellisTestError> {
+        let flow_token = reqwest::Url::parse(completion_url)
+            .map_err(|error| TrellisTestError::UnexpectedResponse(error.to_string()))?
+            .path_segments()
+            .and_then(Iterator::last)
+            .filter(|value| !value.is_empty())
+            .ok_or_else(|| {
+                TrellisTestError::UnexpectedResponse(
+                    "account-flow completion URL omitted flow token".to_owned(),
+                )
+            })?
+            .to_owned();
+        let client = reqwest::Client::builder()
+            .redirect(reqwest::redirect::Policy::none())
+            .no_proxy()
+            .build()?;
+        let started = client
+            .get(format!(
+                "{}/auth/account-flow/{flow_token}/login/{provider_id}",
+                trim_url(&self.trellis_url)
+            ))
+            .send()
+            .await?
+            .error_for_status()?;
+        let cookie = started
+            .headers()
+            .get(reqwest::header::SET_COOKIE)
+            .and_then(|value| value.to_str().ok())
+            .and_then(|value| value.split(';').next())
+            .ok_or_else(|| {
+                TrellisTestError::UnexpectedResponse(
+                    "account-flow OIDC start omitted browser-binding cookie".to_owned(),
+                )
+            })?
+            .to_owned();
+        let authorization_url = started
+            .headers()
+            .get(reqwest::header::LOCATION)
+            .and_then(|value| value.to_str().ok())
+            .ok_or_else(|| {
+                TrellisTestError::UnexpectedResponse(
+                    "account-flow OIDC start omitted authorization redirect".to_owned(),
+                )
+            })?;
+        let state = reqwest::Url::parse(authorization_url)
+            .map_err(|error| TrellisTestError::UnexpectedResponse(error.to_string()))?
+            .query_pairs()
+            .find_map(|(key, value)| (key == "state").then(|| value.into_owned()))
+            .ok_or_else(|| {
+                TrellisTestError::UnexpectedResponse(
+                    "account-flow OIDC authorization URL omitted state".to_owned(),
+                )
+            })?;
+        let callback_url = if provider_error || callback_provider_id != provider_id {
+            let mut callback = reqwest::Url::parse(&format!(
+                "{}/auth/callback/{callback_provider_id}",
+                trim_url(&self.trellis_url)
+            ))
+            .map_err(|error| TrellisTestError::UnexpectedResponse(error.to_string()))?;
+            callback.query_pairs_mut().append_pair("state", &state);
+            if provider_error {
+                callback
+                    .query_pairs_mut()
+                    .append_pair("error", "access_denied");
+            }
+            callback.to_string()
+        } else {
+            client
+                .get(authorization_url)
+                .send()
+                .await?
+                .headers()
+                .get(reqwest::header::LOCATION)
+                .and_then(|value| value.to_str().ok())
+                .ok_or_else(|| {
+                    TrellisTestError::UnexpectedResponse(
+                        "test OIDC provider omitted callback redirect".to_owned(),
+                    )
+                })?
+                .to_owned()
+        };
+        let response = client
+            .get(callback_url)
+            .header(reqwest::header::COOKIE, cookie)
+            .send()
+            .await?;
+        let status = response.status().as_u16();
+        let location = response
+            .headers()
+            .get(reqwest::header::LOCATION)
+            .and_then(|value| value.to_str().ok())
+            .map(str::to_owned);
+        Ok((status, response.text().await?, location))
     }
 
     /// Put one capability group through the public Auth RPC surface.
@@ -2996,6 +3690,7 @@ impl TrellisTestClientReconnect {
             &self.participant_digest,
             self.integration_test_scope.clone(),
             self.authorization_context_store.clone(),
+            true,
         )
         .await
     }
@@ -3033,6 +3728,8 @@ pub struct TrellisTestContract {
     participant: Value,
     referenced_apis: Vec<Value>,
     digest: String,
+    needs_digest: String,
+    api_digest: String,
 }
 
 impl TrellisTestContract {
@@ -3108,6 +3805,18 @@ impl TrellisTestContract {
     #[must_use]
     pub fn digest(&self) -> &str {
         &self.digest
+    }
+
+    /// Return the canonical resolved participant-needs digest.
+    #[must_use]
+    pub fn needs_digest(&self) -> &str {
+        &self.needs_digest
+    }
+
+    /// Return the canonical owned API digest.
+    #[must_use]
+    pub fn api_digest(&self) -> &str {
+        &self.api_digest
     }
 
     /// Return the contract ID from this test source.
@@ -3401,11 +4110,16 @@ fn build_test_contract(
     artifacts: trellis_rs::contracts::ContractArtifacts,
     referenced_apis: Vec<Value>,
 ) -> Result<TrellisTestContract, TrellisTestError> {
+    let digest = artifacts.participant_digest()?;
+    let needs_digest = artifacts.participant_needs_digest()?;
+    let api_digest = artifacts.api_digest()?;
     Ok(TrellisTestContract {
         api: artifacts.api_value()?,
         participant: artifacts.participant_value()?,
         referenced_apis,
-        digest: artifacts.participant_digest()?,
+        digest,
+        needs_digest,
+        api_digest,
     })
 }
 
@@ -3790,8 +4504,8 @@ async fn register_local_user(
     flow_id: &str,
     username: &str,
     password: &str,
-) -> Result<(), TrellisTestError> {
-    let _: Value = post_json_with_origin(
+) -> Result<Value, TrellisTestError> {
+    post_json_with_origin(
         &format!(
             "{}/auth/flow/{}/register/local",
             trim_url(trellis_url),
@@ -3806,8 +4520,7 @@ async fn register_local_user(
             "idempotencyKey": random_session_seed(),
         }),
     )
-    .await?;
-    Ok(())
+    .await
 }
 
 async fn submit_portal_approval(trellis_url: &str, flow_id: &str) -> Result<(), TrellisTestError> {
@@ -3869,21 +4582,39 @@ async fn connect_bound_user(
     participant_digest: &str,
     integration_test_scope: Option<trellis_rs::integration_test_scoping::IntegrationTestScope>,
     authorization_context_store: Arc<trellis_rs::client::MemoryAuthorizationContextStore>,
+    refresh_before_connect: bool,
 ) -> Result<Caller, TrellisTestError> {
     let _ = bound.expires_at;
+    let current =
+        trellis_rs::client::AuthorizationContextStore::load(authorization_context_store.as_ref())?;
+    let bootstrap_jwt = current
+        .as_ref()
+        .and_then(|state| state.routing.as_ref())
+        .map_or_else(
+            || bound.bootstrap_jwt.clone(),
+            |routing| routing.bootstrap_jwt.clone(),
+        );
+    let authorization_context = current
+        .and_then(|state| state.context)
+        .unwrap_or_else(|| bound.authorization_context.clone());
     let options = UserConnectOptions::new(
         &bound.trellis_url,
         &bound.nats_servers,
-        &bound.bootstrap_jwt,
+        &bootstrap_jwt,
         &bound.session_id,
         &bound.inbox_prefix,
         session_seed,
         participant_digest,
-        bound.authorization_context.clone(),
+        authorization_context,
         DEFAULT_ADMIN_RPC_TIMEOUT_MS,
         format!("test-admin:{}", bound.trellis_url),
         authorization_context_store,
     );
+    let options = if refresh_before_connect {
+        options.with_refresh_before_connect()
+    } else {
+        options
+    };
     let options = match integration_test_scope {
         Some(scope) => options.with_integration_test_scope(scope),
         None => options,
@@ -3953,16 +4684,20 @@ async fn wait_for_bootstrap_url(
 fn auth_deployments_create_request_shape(
     deployment: &str,
     _mutable_dev: bool,
+    kind: auth_sdk::types::AuthDeploymentsCreateRequestKind,
+    review_mode: Option<String>,
+    requires_device_delegation: bool,
 ) -> Result<auth_sdk::types::AuthDeploymentsCreateRequest, TrellisTestError> {
-    Ok(serde_json::from_value(json!({
-        "displayName": deployment,
-        "expiresAt": null,
-        "idempotencyKey": random_session_seed(),
-        "kind": "service",
-        "participantId": null,
-        "portalId": null,
-        "requiresDeviceDelegation": false,
-    }))?)
+    Ok(auth_sdk::types::AuthDeploymentsCreateRequest {
+        display_name: deployment.to_owned(),
+        expires_at: None,
+        idempotency_key: random_session_seed(),
+        kind,
+        participant_id: None,
+        portal_id: None,
+        requires_device_delegation,
+        review_mode,
+    })
 }
 
 fn first_admin_bootstrap_body(password: &str) -> Map<String, Value> {
@@ -4221,6 +4956,21 @@ impl TrellisProcess {
         if self.child.try_wait()?.is_some() {
             return Ok(());
         }
+        #[cfg(unix)]
+        {
+            let status = Command::new("kill")
+                .arg("-TERM")
+                .arg(self.child.id().to_string())
+                .status()?;
+            if !status.success() {
+                return Err(TrellisTestError::UnexpectedResponse(format!(
+                    "failed to terminate Trellis process {}: {}",
+                    self.child.id(),
+                    status_text(status)
+                )));
+            }
+        }
+        #[cfg(not(unix))]
         self.child.kill()?;
         let deadline = Instant::now() + shutdown_timeout;
         loop {
@@ -5057,11 +5807,21 @@ mod tests {
 
     #[test]
     fn deployment_create_request_matches_clean_auth_shape() {
-        let value =
-            serde_json::to_value(auth_deployments_create_request_shape("test", false).unwrap())
-                .unwrap();
+        let value = serde_json::to_value(
+            auth_deployments_create_request_shape(
+                "test",
+                false,
+                super::auth_sdk::types::AuthDeploymentsCreateRequestKind::Service,
+                None,
+                false,
+            )
+            .unwrap(),
+        )
+        .unwrap();
         assert_eq!(value["displayName"], json!("test"));
         assert_eq!(value["kind"], json!("service"));
+        assert_eq!(value["reviewMode"], Value::Null);
+        assert_eq!(value["requiresDeviceDelegation"], json!(false));
         assert!(value["idempotencyKey"].as_str().is_some());
     }
 

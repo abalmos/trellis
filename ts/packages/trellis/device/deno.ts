@@ -4,7 +4,7 @@ import { Type } from "typebox";
 import { Value } from "typebox/value";
 import { ulid } from "ulid";
 
-import { deriveDeviceIdentity } from "../auth.ts";
+import { deriveDeviceConfirmationCode, deriveDeviceIdentity } from "../auth.ts";
 import type {
   TrellisDeviceActivatedActivationState,
   TrellisDeviceActivationArgs,
@@ -100,6 +100,8 @@ export type TrellisDeviceNotReadyStatus = {
 export type TrellisDeviceActivationRequiredStatus = {
   status: "activation_required";
   activationUrl: string;
+  /** Device-local code the activating user must confirm in the portal. */
+  confirmationCode: string;
   waitForOnlineApproval(
     opts?: { signal?: AbortSignal },
   ): Promise<TrellisDeviceActivatedStatus>;
@@ -396,6 +398,14 @@ async function createActivationRequiredStatus<
   }
 
   let completedState: TrellisDeviceActivatedActivationState | null = null;
+  const identity = await deriveDeviceIdentity(
+    normalizeRootSecret(args.checkArgs.rootSecret),
+  );
+  const confirmationCode = await deriveDeviceConfirmationCode({
+    activationKey: identity.activationKey,
+    publicIdentityKey: identity.publicIdentityKey,
+    nonce: session.localState.nonce,
+  });
   let completionPromise: Promise<TrellisDeviceActivatedStatus> | null = null;
   const finish = async (
     nextState: () => Promise<TrellisDeviceActivatedActivationState>,
@@ -425,6 +435,7 @@ async function createActivationRequiredStatus<
   return {
     status: "activation_required",
     activationUrl: session.activationUrl,
+    confirmationCode,
     waitForOnlineApproval(opts?: { signal?: AbortSignal }) {
       return finish(() => session.waitForOnlineApproval(opts));
     },

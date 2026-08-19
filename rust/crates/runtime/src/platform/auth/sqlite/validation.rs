@@ -171,6 +171,7 @@ pub(crate) fn post_commit_action_identity_equal(
     right: &PostCommitActionRecord,
 ) -> bool {
     left.action_id == right.action_id
+        && left.predecessor_action_id == right.predecessor_action_id
         && left.kind == right.kind
         && left.payload == right.payload
         && left.created_at == right.created_at

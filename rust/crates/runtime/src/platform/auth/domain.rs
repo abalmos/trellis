@@ -1024,7 +1024,7 @@ pub struct IssuableAuthorizationState {
     pub materialization_version: u64,
 }
 
-/// Stable expected denial and storage-conflict categories.
+/// Authorization-state denial, conflict, and storage categories.
 #[derive(Clone, Debug, Error, Eq, PartialEq)]
 pub enum AuthorizationStateError {
     /// A record violates a durable domain invariant.
@@ -1045,6 +1045,9 @@ pub enum AuthorizationStateError {
     /// The principal is disabled or revoked.
     #[error("principal is inactive")]
     PrincipalInactive,
+    /// The requested provider identity does not exist for the principal.
+    #[error("identity is missing")]
+    IdentityMissing,
     /// The exact participant artifact is missing.
     #[error("participant binding is missing")]
     ParticipantMissing,
@@ -1102,6 +1105,9 @@ pub enum AuthorizationStateError {
     /// A context could not be committed after bounded coherent-snapshot retries.
     #[error("authorization context snapshot changed")]
     ContextSnapshotChanged,
+    /// Trusted-portal policy inputs changed after selection.
+    #[error("portal policy changed")]
+    PortalPolicyChanged,
     /// An optimistic version guard failed.
     #[error("authorization storage conflict")]
     StorageConflict,
@@ -1116,7 +1122,10 @@ impl AuthorizationStateError {
     pub fn is_expected_denial(&self) -> bool {
         !matches!(
             self,
-            Self::InvalidRecord(_) | Self::StorageConflict | Self::Storage(_)
+            Self::InvalidRecord(_)
+                | Self::PortalPolicyChanged
+                | Self::StorageConflict
+                | Self::Storage(_)
         )
     }
 }

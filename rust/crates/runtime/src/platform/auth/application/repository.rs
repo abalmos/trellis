@@ -147,6 +147,8 @@ pub(crate) struct AuthorityProposalDecision {
     pub portal_binding: Option<Option<super::super::PortalAuthorityBindingRecord>>,
     /// Exact portal provenance expected before replacement; outer `None` skips the check.
     pub expected_portal_binding: Option<Option<super::super::PortalAuthorityBindingRecord>>,
+    /// Exact trusted-portal policy versions that must still be current.
+    pub portal_policy_snapshot: Option<super::PortalPolicySnapshot>,
     /// Durable proof claim and replay result.
     pub idempotency: IdempotencyResultRecord,
     /// Deterministic post-commit actions.
@@ -187,7 +189,28 @@ pub(crate) struct ActivationReviewDecision {
     pub reason: Option<String>,
     /// Optional approved delegation replacement; absent on rejection.
     pub delegation: Option<DeviceDelegationRecord>,
+    /// Whether this decision satisfies every requirement for device readiness.
+    pub activate_device: bool,
     /// Durable proof claim and replay result.
+    pub idempotency: IdempotencyResultRecord,
+    /// Deterministic post-commit actions.
+    pub actions: Vec<PostCommitActionRecord>,
+}
+
+/// Atomic user claim of one activation review.
+#[derive(Clone, Debug)]
+pub(crate) struct ActivationReviewClaim {
+    /// Review ID to claim.
+    pub review_id: String,
+    /// Expected review version.
+    pub expected_version: u64,
+    /// Activating user principal.
+    pub activated_by_user_principal_id: String,
+    /// Authoritative server time in Unix milliseconds.
+    pub now: i64,
+    /// Active delegation created when claiming an already approved review.
+    pub delegation: Option<DeviceDelegationRecord>,
+    /// Durable operation result.
     pub idempotency: IdempotencyResultRecord,
     /// Deterministic post-commit actions.
     pub actions: Vec<PostCommitActionRecord>,
@@ -298,6 +321,8 @@ pub(crate) struct DeviceDelegationMutation {
 pub(crate) struct SessionCreation {
     /// New validated session record.
     pub session: SessionRecord,
+    /// Existing user session bound to the same public key, when rebinding.
+    pub previous_session: Option<SessionRecord>,
     /// Optional exact identity authority for a user browser bind.
     pub desired_authority: Option<DesiredAuthorityRecord>,
     /// Required exact runtime binding for service and device sessions.
@@ -560,6 +585,28 @@ pub(crate) trait AccountRepository: Send + Sync {
 /// Persistence contract for login portals, settings, and deterministic routes.
 #[async_trait]
 pub(crate) trait PortalRepository: Send + Sync {
+    /// Block at the exact post-policy-resolution integration-test barrier.
+    #[cfg(feature = "integration-test-hooks")]
+    async fn wait_for_portal_snapshot_test_barrier(
+        &self,
+        flow_id: &str,
+        portal_id: &str,
+    ) -> Result<(), AuthorizationStateError>;
+
+    /// Block one exact keyed portal reconciliation pass in integration tests.
+    #[cfg(feature = "integration-test-hooks")]
+    async fn wait_for_portal_reconciliation_test_barrier(
+        &self,
+        portal_id: &str,
+    ) -> Result<(), AuthorizationStateError>;
+
+    /// Record completion of one exact portal-scoped integration-test pass.
+    #[cfg(feature = "integration-test-hooks")]
+    async fn record_portal_reconciliation_test_pass(
+        &self,
+        portal_ids: &[String],
+    ) -> Result<(), AuthorizationStateError>;
+
     /// List login portals in stable ID order.
     async fn list_login_portals(&self) -> Result<Vec<LoginPortalRecord>, AuthorizationStateError>;
 
@@ -647,6 +694,13 @@ pub(crate) trait SessionRepository: Send + Sync {
 /// Persistence contract for deployment profiles and deployment evidence.
 #[async_trait]
 pub(crate) trait DeploymentRepository: Send + Sync {
+    /// Return an exact deployment-scoped activation-review TTL test override.
+    #[cfg(feature = "integration-test-hooks")]
+    async fn activation_review_test_ttl_ms(
+        &self,
+        deployment_id: &str,
+    ) -> Result<Option<i64>, AuthorizationStateError>;
+
     /// Create a deployment principal and profile atomically.
     async fn create_deployment_profile(
         &self,
@@ -702,6 +756,18 @@ pub(crate) trait ProvisioningRepository: Send + Sync {
         &self,
         review_id: &str,
     ) -> Result<Option<DeviceActivationReviewRecord>, AuthorizationStateError>;
+
+    /// Expire every pending activation review due at `now`.
+    async fn expire_due_activation_reviews(
+        &self,
+        now: i64,
+    ) -> Result<Vec<DeviceActivationReviewRecord>, AuthorizationStateError>;
+
+    /// Claim one activation review for an authenticated user.
+    async fn claim_activation_review(
+        &self,
+        command: ActivationReviewClaim,
+    ) -> Result<IdempotentOutcome<DeviceActivationReviewRecord>, AuthorizationStateError>;
 
     /// List device activation reviews in stable ID order.
     async fn list_activation_reviews(

@@ -8,10 +8,17 @@ pub(super) fn public_rpc_error(_subject: &str, error: &AuthorizationStateError) 
         AuthorizationStateError::InvalidRecord(_) => {
             ("AuthError", "invalid_request", "The request is invalid.")
         }
-        AuthorizationStateError::StorageConflict => (
+        AuthorizationStateError::PortalPolicyChanged | AuthorizationStateError::StorageConflict => {
+            (
+                "AuthError",
+                "conflict",
+                "The request conflicts with current authentication state.",
+            )
+        }
+        AuthorizationStateError::IdentityMissing => (
             "AuthError",
-            "conflict",
-            "The request conflicts with current authentication state.",
+            "identity_not_found",
+            "The requested identity was not found.",
         ),
         AuthorizationStateError::PrincipalMissing
         | AuthorizationStateError::SessionMissing

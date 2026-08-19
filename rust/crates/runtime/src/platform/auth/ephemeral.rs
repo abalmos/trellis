@@ -924,11 +924,24 @@ mod nats {
                 let key = key.map_err(|error| {
                     storage(format!("failed to read connection presence key: {error}"))
                 })?;
-                if let Some(record) = get::<AuthConnectionPresence>(&self.connections, &key).await?
-                {
-                    if session_id.is_none_or(|id| record.session_id == id) {
-                        records.push(record);
+                let entry = self.connections.entry(&key).await.map_err(|error| {
+                    storage(format!(
+                        "failed to read connection presence key {key}: {error}"
+                    ))
+                })?;
+                let Some(entry) = entry.filter(|entry| entry.operation == kv::Operation::Put)
+                else {
+                    continue;
+                };
+                let record = match decode::<AuthConnectionPresence>(&entry.value) {
+                    Ok(record) => record,
+                    Err(error) => {
+                        tracing::warn!(key, error = %error, "skipping malformed connection presence");
+                        continue;
                     }
+                };
+                if session_id.is_none_or(|id| record.session_id == id) {
+                    records.push(record);
                 }
             }
             records.sort_by(|left, right| left.connection_id.cmp(&right.connection_id));

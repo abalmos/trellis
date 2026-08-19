@@ -66,9 +66,13 @@ fn accepted_auth_machine_api_is_preserved() {
     let baseline = normalized_api(include_str!(
         "../../../../../../conformance/baselines/trellis-auth-3ef0aa94.api.json"
     ));
+    let current_source: Value = serde_json::from_str(include_str!("../../../trellis.api.json"))
+        .expect("parse current Auth API");
     let current = normalized_api(include_str!("../../../trellis.api.json"));
-
-    let mut projection = current.clone();
+    let mut projection_source = current_source.clone();
+    projection_source["operations"]["Auth.DeviceUserAuthorities.Resolve"]["cancel"] =
+        Value::Bool(true);
+    let mut projection = normalized_api(&projection_source.to_string());
     let mut policy_schemas = std::collections::BTreeSet::new();
     for rpc_name in AUTH_POLICY_RPCS {
         let rpc = projection["rpc"]
@@ -93,8 +97,107 @@ fn accepted_auth_machine_api_is_preserved() {
     projection["capabilities"]["admin"]["allows"] =
         baseline["capabilities"]["admin"]["allows"].clone();
     projection["consent"] = baseline["consent"].clone();
+    fn remove_review_amendment(value: &mut serde_json::Value) {
+        match value {
+            serde_json::Value::Object(object) => {
+                if let Some(properties) = object
+                    .get_mut("properties")
+                    .and_then(serde_json::Value::as_object_mut)
+                {
+                    properties.remove("reviewMode");
+                    properties.remove("activatedByUserPrincipalId");
+                }
+                if let Some(required) = object
+                    .get_mut("required")
+                    .and_then(serde_json::Value::as_array_mut)
+                {
+                    required.retain(|field| {
+                        !matches!(
+                            field.as_str(),
+                            Some("reviewMode" | "activatedByUserPrincipalId")
+                        )
+                    });
+                }
+                for child in object.values_mut() {
+                    remove_review_amendment(child);
+                }
+            }
+            serde_json::Value::Array(values) => {
+                for child in values {
+                    remove_review_amendment(child);
+                }
+            }
+            _ => {}
+        }
+    }
+    remove_review_amendment(&mut projection);
+    let request = projection["schemas"]["AuthDeviceUserAuthoritiesResolveRequest"]
+        .as_object_mut()
+        .expect("Resolve request schema");
+    request["properties"]
+        .as_object_mut()
+        .expect("Resolve request properties")
+        .remove("confirmationCode");
+    request["required"]
+        .as_array_mut()
+        .expect("Resolve request required fields")
+        .retain(|field| field != "confirmationCode");
+
+    fn restore_removed_confirmation_fields(projection: &mut Value, baseline: &Value) {
+        match (projection, baseline) {
+            (Value::Object(projection), Value::Object(baseline)) => {
+                if let (Some(projection_properties), Some(baseline_properties)) = (
+                    projection
+                        .get_mut("properties")
+                        .and_then(Value::as_object_mut),
+                    baseline.get("properties").and_then(Value::as_object),
+                ) {
+                    if let Some(confirmation_code) = baseline_properties.get("confirmationCode") {
+                        projection_properties
+                            .insert("confirmationCode".to_owned(), confirmation_code.clone());
+                    }
+                }
+                if let (Some(projection_required), Some(baseline_required)) = (
+                    projection.get_mut("required").and_then(Value::as_array_mut),
+                    baseline.get("required").and_then(Value::as_array),
+                ) {
+                    if baseline_required
+                        .iter()
+                        .any(|field| field == "confirmationCode")
+                    {
+                        *projection_required = baseline_required.clone();
+                    }
+                }
+                for (key, child) in projection {
+                    if let Some(baseline_child) = baseline.get(key) {
+                        restore_removed_confirmation_fields(child, baseline_child);
+                    }
+                }
+            }
+            (Value::Array(projection), Value::Array(baseline)) => {
+                for (child, baseline_child) in projection.iter_mut().zip(baseline) {
+                    restore_removed_confirmation_fields(child, baseline_child);
+                }
+            }
+            _ => {}
+        }
+    }
+    restore_removed_confirmation_fields(&mut projection, &baseline);
 
     assert_eq!(projection, baseline);
+    assert_eq!(
+        current["schemas"]["AuthDeploymentsCreateRequest"]["properties"]["reviewMode"]["type"],
+        serde_json::json!(["string", "null"])
+    );
+    assert!(
+        current["schemas"]["AuthDeviceUserAuthoritiesReviewsListResponse"]
+            .to_string()
+            .contains("activatedByUserPrincipalId")
+    );
+    assert_eq!(
+        current_source["operations"]["Auth.DeviceUserAuthorities.Resolve"]["cancel"],
+        serde_json::json!(false)
+    );
     assert_eq!(
         current["schemas"]["AuthSessionsRevokeRequest"]["required"],
         serde_json::json!(["sessionId", "expectedVersion", "reason", "idempotencyKey"])

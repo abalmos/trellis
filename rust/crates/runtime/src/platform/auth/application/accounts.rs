@@ -202,6 +202,7 @@ where
 #[allow(clippy::items_after_test_module)]
 mod tests {
     use super::*;
+    use crate::platform::auth::account::hash_password;
 
     const NOW: i64 = 1_700_000_000_000;
 

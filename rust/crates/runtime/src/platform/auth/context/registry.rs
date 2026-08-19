@@ -17,14 +17,14 @@ pub(super) const MANIFEST_PREFIX: &str = "manifest.";
 pub(super) const REVOCATION_PREFIX: &str = "revocation.";
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(rename_all = "camelCase")]
 struct ManifestPointer {
     generation: u64,
     digest: String,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(rename_all = "camelCase")]
 pub(crate) struct AuthorizationContextRevocationV1 {
     pub(crate) revoked_at: i64,
 }
@@ -671,7 +671,7 @@ mod tests {
     }
 
     #[test]
-    fn manifest_pointer_and_revocation_are_exact() {
+    fn manifest_pointer_and_revocation_are_additively_tolerant() {
         assert_eq!(
             manifest_pointer(7, "digest".to_owned()).unwrap(),
             r#"{"digest":"digest","generation":7}"#
@@ -688,6 +688,13 @@ mod tests {
             "digest": "digest",
             "extra": true
         }))
-        .is_err());
+        .is_ok());
+        assert!(
+            serde_json::from_value::<AuthorizationContextRevocationV1>(json!({
+                "revokedAt": 42,
+                "extra": true
+            }))
+            .is_ok()
+        );
     }
 }

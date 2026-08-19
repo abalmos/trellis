@@ -1,6 +1,9 @@
+use std::collections::BTreeMap;
+
 use async_trait::async_trait;
 use rusqlite::{params, Connection, OptionalExtension};
 use serde_json::json;
+use serde_json::Value;
 
 use super::super::application::repository::{
     AuthorityProposalCreation, AuthorityProposalDecision, IdempotentOutcome,
@@ -99,6 +102,24 @@ impl AuthorityRepository for SqliteAuthorizationStore {
             if let Some(result) = sqlite_idempotency_replay(&transaction, &command.idempotency)? {
                 transaction.commit().map_err(sql_error)?;
                 return Ok(IdempotentOutcome::Replayed(result));
+            }
+            if let Some(deployment_id) = &command.proposal.deployment_id {
+                let current_version = transaction
+                    .query_row(
+                        "SELECT version FROM auth_deployment_authorities WHERE deployment_id = ?1 AND participant_id = ?2",
+                        params![deployment_id, command.proposal.participant_id],
+                        |row| row.get::<_, i64>(0),
+                    )
+                    .optional()
+                    .map_err(sql_error)?;
+                let base_version = command
+                    .proposal
+                    .payload
+                    .get("baseAuthorityVersion")
+                    .and_then(Value::as_i64);
+                if current_version != base_version {
+                    return Err(AuthorizationStateError::StorageConflict);
+                }
             }
             let existing = transaction
                 .query_row(
@@ -222,6 +243,21 @@ impl AuthorityRepository for SqliteAuthorizationStore {
             let transaction = connection.transaction().map_err(sql_error)?;
             if let Some(result) = sqlite_idempotency_replay(&transaction, &command.idempotency)? {
                 return Ok(IdempotentOutcome::Replayed(result));
+            }
+            if let Some(snapshot) = command.portal_policy_snapshot.as_ref() {
+                let Some(DesiredAuthorityRecord::Identity(desired)) =
+                    command.desired_authority.as_ref()
+                else {
+                    return Err(AuthorizationStateError::InvalidRecord(
+                        "portal policy snapshot requires identity authority".to_owned(),
+                    ));
+                };
+                if desired.participant_id != snapshot.participant_id {
+                    return Err(AuthorizationStateError::InvalidRecord(
+                        "portal policy snapshot participant does not match authority".to_owned(),
+                    ));
+                }
+                verify_portal_policy_snapshot(&transaction, snapshot)?;
             }
             let Some(current) = load_authority_proposal(&transaction, &command.proposal_id)?
                 .map(|value| value.0)
@@ -629,6 +665,87 @@ impl AuthorityRepository for SqliteAuthorizationStore {
         })
         .await
     }
+}
+
+fn verify_portal_policy_snapshot(
+    connection: &Connection,
+    snapshot: &super::super::PortalPolicySnapshot,
+) -> Result<(), AuthorizationStateError> {
+    if snapshot.portal_id.is_empty()
+        || snapshot.participant_id.is_empty()
+        || snapshot.policy_version.is_some() != snapshot.policy_fingerprint.is_some()
+        || snapshot.capability_group_versions.len() != snapshot.capability_group_fingerprints.len()
+    {
+        return Err(AuthorizationStateError::InvalidRecord(
+            "portal policy snapshot is malformed".to_owned(),
+        ));
+    }
+    let group_fingerprints = snapshot
+        .capability_group_fingerprints
+        .iter()
+        .cloned()
+        .collect::<BTreeMap<_, _>>();
+    if group_fingerprints.len() != snapshot.capability_group_fingerprints.len()
+        || snapshot
+            .capability_group_versions
+            .windows(2)
+            .any(|pair| pair[0].0 >= pair[1].0)
+        || snapshot
+            .capability_group_fingerprints
+            .windows(2)
+            .any(|pair| pair[0].0 >= pair[1].0)
+        || group_fingerprints.keys().ne(snapshot
+            .capability_group_versions
+            .iter()
+            .map(|(group_key, _)| group_key))
+    {
+        return Err(AuthorizationStateError::InvalidRecord(
+            "portal policy snapshot capability-group evidence is malformed".to_owned(),
+        ));
+    }
+    let Some((portal, settings)) =
+        super::accounts::load_login_portal(connection, &snapshot.portal_id)?
+    else {
+        return Err(AuthorizationStateError::PortalPolicyChanged);
+    };
+    if portal.version != snapshot.portal_version
+        || super::super::policy::policy_record_fingerprint(&portal)? != snapshot.portal_fingerprint
+        || settings.version != snapshot.login_settings_version
+        || super::super::policy::policy_record_fingerprint(&settings)?
+            != snapshot.login_settings_fingerprint
+    {
+        return Err(AuthorizationStateError::PortalPolicyChanged);
+    }
+    let policy = super::policy::load_portal_grant_overrides(
+        connection,
+        Some(&snapshot.portal_id),
+        Some(&snapshot.participant_id),
+    )?
+    .into_iter()
+    .next();
+    match (
+        policy.as_ref(),
+        snapshot.policy_version,
+        snapshot.policy_fingerprint.as_ref(),
+    ) {
+        (None, None, None) => {}
+        (Some(policy), Some(version), Some(fingerprint))
+            if policy.version == version
+                && super::super::policy::policy_record_fingerprint(policy)? == *fingerprint => {}
+        _ => return Err(AuthorizationStateError::PortalPolicyChanged),
+    }
+    for (group_key, version) in &snapshot.capability_group_versions {
+        let Some(group) = super::policy::load_capability_group(connection, group_key)? else {
+            return Err(AuthorizationStateError::PortalPolicyChanged);
+        };
+        if group.version != *version
+            || super::super::policy::policy_record_fingerprint(&group)?
+                != group_fingerprints[group_key]
+        {
+            return Err(AuthorizationStateError::PortalPolicyChanged);
+        }
+    }
+    Ok(())
 }
 
 fn desired_authority_enforceability_equal(

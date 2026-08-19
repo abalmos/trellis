@@ -128,6 +128,16 @@ pub enum DeploymentProfileState {
     Removed,
 }
 
+/// Administrative review policy for device activation.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum DeviceReviewMode {
+    /// An authenticated user may complete activation without an administrator.
+    None,
+    /// A privileged reviewer must approve activation.
+    Required,
+}
+
 /// Product-facing deployment metadata independent of runtime evidence.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -142,6 +152,8 @@ pub struct DeploymentProfileRecord {
     pub participant_id: Option<String>,
     /// Login portal used for device activation.
     pub portal_id: Option<String>,
+    /// Administrative review policy for device activation; absent for services.
+    pub review_mode: Option<DeviceReviewMode>,
     /// Whether device sessions require user delegation.
     pub requires_device_delegation: bool,
     /// Optional deployment expiry in Unix milliseconds.
@@ -422,8 +434,6 @@ pub enum DeviceActivationReviewState {
     Approved,
     /// Rejected by an administrator.
     Rejected,
-    /// Cancelled by the requester.
-    Cancelled,
     /// Expired without a decision.
     Expired,
 }
@@ -448,6 +458,10 @@ pub struct DeviceActivationReviewRecord {
     pub state: DeviceActivationReviewState,
     /// Request time in Unix milliseconds.
     pub requested_at: i64,
+    /// Authoritative server expiry in Unix milliseconds.
+    pub expires_at: i64,
+    /// Required-nullable user who claimed this activation through Resolve.
+    pub activated_by_user_principal_id: Option<String>,
     /// Required-nullable decision time.
     pub decided_at: Option<i64>,
     /// Required-nullable deciding administrator.
@@ -580,6 +594,8 @@ pub enum PostCommitActionKind {
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PostCommitActionRecord {
+    /// Optional action that must be acknowledged before this action is claimable.
+    pub predecessor_action_id: Option<String>,
     /// Deterministic action ID.
     pub action_id: String,
     /// Side-effect kind.
@@ -596,4 +612,56 @@ pub struct PostCommitActionRecord {
     pub claimed_until: Option<i64>,
     /// Required-nullable most recent error.
     pub last_error: Option<String>,
+}
+
+pub(crate) fn activation_review_event_action_id(
+    review_id: &str,
+    event: &str,
+) -> Result<String, AuthorizationStateError> {
+    trellis_protocol::digest_json(&serde_json::json!({
+        "event": event,
+        "reviewId": review_id,
+    }))
+    .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))
+}
+
+pub(crate) fn activation_review_event(
+    review: &DeviceActivationReviewRecord,
+    suffix: &str,
+    event_type: &str,
+    now: i64,
+    fields: Value,
+) -> Result<PostCommitActionRecord, AuthorizationStateError> {
+    let mut payload = serde_json::json!({
+        "eventType": event_type,
+        "eventSubject": format!("events.v1.{event_type}.{}", review.deployment_id),
+        "eventId": format!("evt_{}_{}", review.review_id, suffix),
+        "occurredAt": now,
+        "deploymentId": review.deployment_id,
+        "instanceId": review.instance_id,
+    });
+    payload
+        .as_object_mut()
+        .expect("activation event payload is an object")
+        .extend(
+            fields
+                .as_object()
+                .ok_or_else(|| {
+                    AuthorizationStateError::InvalidRecord(
+                        "activation event fields must be an object".to_owned(),
+                    )
+                })?
+                .clone(),
+        );
+    Ok(PostCommitActionRecord {
+        predecessor_action_id: None,
+        action_id: activation_review_event_action_id(&review.review_id, suffix)?,
+        kind: PostCommitActionKind::Event,
+        payload,
+        created_at: now,
+        attempts: 0,
+        next_attempt_at: now,
+        claimed_until: None,
+        last_error: None,
+    })
 }

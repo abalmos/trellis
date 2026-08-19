@@ -9,7 +9,7 @@ use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::marker::PhantomData;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 use time::format_description::well_known::Rfc3339;
@@ -128,12 +128,13 @@ pub struct DeviceConnectOptions<'a> {
     participant_json: &'a str,
     api_json: &'a str,
     api_digest: &'a str,
-    referenced_api_artifacts: &'a [(&'a str, &'a str)],
+    referenced_api_artifacts: Vec<(&'a str, &'a str)>,
     public_identity_key: &'a str,
     identity_seed_base64url: &'a str,
     session_key_seed_base64url: &'a str,
     timeout_ms: u64,
     authorization_context_store: Arc<dyn AuthorizationContextStore>,
+    activation_bootstrap: Option<ServiceBootstrapResponse>,
     #[cfg(feature = "integration-test-scoping")]
     integration_test_scope: Option<IntegrationTestScope>,
 }
@@ -151,7 +152,7 @@ impl<'a> DeviceConnectOptions<'a> {
         participant_json: &'a str,
         api_json: &'a str,
         api_digest: &'a str,
-        referenced_api_artifacts: &'a [(&'a str, &'a str)],
+        referenced_api_artifacts: &[(&'a str, &'a str)],
         public_identity_key: &'a str,
         identity_seed_base64url: &'a str,
         session_key_seed_base64url: &'a str,
@@ -168,15 +169,26 @@ impl<'a> DeviceConnectOptions<'a> {
             participant_json,
             api_json,
             api_digest,
-            referenced_api_artifacts,
+            referenced_api_artifacts: referenced_api_artifacts.to_vec(),
             public_identity_key,
             identity_seed_base64url,
             session_key_seed_base64url,
             timeout_ms,
             authorization_context_store,
+            activation_bootstrap: None,
             #[cfg(feature = "integration-test-scoping")]
             integration_test_scope: None,
         }
+    }
+
+    /// Return the device public identity key bound to these options.
+    pub fn public_identity_key(&self) -> &str {
+        self.public_identity_key
+    }
+
+    pub(crate) fn activation_bootstrap(mut self, bootstrap: ServiceBootstrapResponse) -> Self {
+        self.activation_bootstrap = Some(bootstrap);
+        self
     }
 
     /// Apply an immutable integration-test contract namespace to this connection.
@@ -318,15 +330,26 @@ struct ServiceBootstrapRequest {
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct ServiceBootstrapResponse {
-    server_now: i64,
+pub(crate) struct ServiceBootstrapResponse {
+    pub(crate) server_now: i64,
     #[serde(skip)]
     server_clock_offset_ms: i64,
-    state: String,
+    pub(crate) state: String,
     session: Option<ServiceBootstrapSession>,
     authorization: Option<Value>,
     nats: Option<ServiceBootstrapNats>,
     authorization_context: Option<AuthorizationContextBundle>,
+    pub(crate) activation: Option<DeviceBootstrapActivation>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct DeviceBootstrapActivation {
+    pub(crate) state: String,
+    pub(crate) activation_url: String,
+    pub(crate) review_id: String,
+    pub(crate) expires_at: i64,
+    pub(crate) retry_after_ms: u64,
 }
 
 #[derive(Debug, Deserialize)]
@@ -387,7 +410,19 @@ struct DeviceBootstrapRequest {
     participant_artifact: Value,
     referenced_api_artifacts: Vec<Value>,
     challenge_digest: Option<String>,
+    confirmation_code: Option<String>,
     proof: Value,
+}
+
+pub(crate) struct DeviceActivationEvidence<'a> {
+    pub(crate) challenge_digest: &'a str,
+    pub(crate) confirmation_code: &'a str,
+}
+
+#[derive(Default)]
+pub(crate) struct DeviceBootstrapProofOverrides {
+    pub(crate) issued_at_ms: Option<i64>,
+    pub(crate) corrupt_signature: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -419,13 +454,9 @@ async fn fetch_service_bootstrap_with_contract(
 ) -> Result<ServiceBootstrapResponse, TrellisClientError> {
     let identity_auth = SessionAuth::from_seed_base64url(opts.provisioned_identity_seed_base64url)?;
     let session_nkey = session_auth.nkey_pair()?.public_key();
-    let issued_at = now_iat_seconds()
-        .checked_mul(1_000)
-        .and_then(|value| i64::try_from(value).ok())
-        .ok_or_else(|| TrellisClientError::Bootstrap("bootstrap timestamp overflow".into()))?;
-    let mut request = ServiceBootstrapRequest {
-        request_id: new_request_id(),
-        issued_at,
+    let request = ServiceBootstrapRequest {
+        request_id: String::new(),
+        issued_at: 0,
         deployment_id: opts.deployment_id.to_owned(),
         instance_id: opts.instance_id.to_owned(),
         provisioned_identity_key_id: identity_auth.key_id(),
@@ -443,24 +474,10 @@ async fn fetch_service_bootstrap_with_contract(
             "signature": ""
         }),
     };
-    let request_digest = session_proof_request_digest_v1(&serde_json::to_value(&request)?)
-        .map_err(|error| TrellisClientError::Bootstrap(error.to_string()))?;
-    let proof_input = SessionProofInputV1::service_bootstrap(
-        request.request_id.clone(),
-        request.issued_at,
-        request.deployment_id.clone(),
-        request.instance_id.clone(),
-        request.provisioned_identity_key_id.clone(),
-        request.new_session_public_key.clone(),
-        session_nkey,
-        request.participant_id.clone(),
-        request.participant_artifact_digest.clone(),
-        request_digest,
-    )
-    .map_err(|error| TrellisClientError::Bootstrap(error.to_string()))?;
-    request.proof = serde_json::to_value(identity_auth.sign_session_proof(&proof_input)?)?;
     fetch_service_bootstrap_inner(
-        &request,
+        request,
+        &identity_auth,
+        &session_nkey,
         &ServiceBootstrapFetchOptions {
             trellis_url: opts.trellis_url,
             timeout_ms: opts.timeout_ms,
@@ -472,7 +489,9 @@ async fn fetch_service_bootstrap_with_contract(
 }
 
 async fn fetch_service_bootstrap_inner(
-    request: &ServiceBootstrapRequest,
+    mut request: ServiceBootstrapRequest,
+    identity_auth: &SessionAuth,
+    session_nkey: &str,
     opts: &ServiceBootstrapFetchOptions<'_>,
 ) -> Result<ServiceBootstrapResponse, TrellisClientError> {
     let mut url = reqwest::Url::parse(opts.trellis_url)
@@ -489,10 +508,35 @@ async fn fetch_service_bootstrap_inner(
         tokio::time::Instant::now() + std::time::Duration::from_millis(timeout_ms)
     });
     loop {
+        request.request_id = new_request_id();
+        request.issued_at = now_iat_seconds()
+            .checked_mul(1_000)
+            .and_then(|value| i64::try_from(value).ok())
+            .ok_or_else(|| TrellisClientError::Bootstrap("bootstrap timestamp overflow".into()))?;
+        request.proof = serde_json::json!({
+            "format": "trellis.session-proof.v1",
+            "signature": ""
+        });
+        let request_digest = session_proof_request_digest_v1(&serde_json::to_value(&request)?)
+            .map_err(|error| TrellisClientError::Bootstrap(error.to_string()))?;
+        let proof_input = SessionProofInputV1::service_bootstrap(
+            request.request_id.clone(),
+            request.issued_at,
+            request.deployment_id.clone(),
+            request.instance_id.clone(),
+            request.provisioned_identity_key_id.clone(),
+            request.new_session_public_key.clone(),
+            session_nkey.to_owned(),
+            request.participant_id.clone(),
+            request.participant_artifact_digest.clone(),
+            request_digest,
+        )
+        .map_err(|error| TrellisClientError::Bootstrap(error.to_string()))?;
+        request.proof = serde_json::to_value(identity_auth.sign_session_proof(&proof_input)?)?;
         let request_started_at = now_context_millis()?;
         let response = client
             .post(url.clone())
-            .json(request)
+            .json(&request)
             .send()
             .await
             .map_err(|error| TrellisClientError::Bootstrap(error.to_string()))?;
@@ -503,6 +547,22 @@ async fn fetch_service_bootstrap_inner(
             .map_err(|error| TrellisClientError::Bootstrap(error.to_string()))?;
         let response_received_at = now_context_millis()?;
         if !status.is_success() {
+            if status == reqwest::StatusCode::CONFLICT && body == r#"{"error":{"code":"conflict"}}"# {
+                let delay =
+                    std::time::Duration::from_millis(opts.retry_delay_ms.unwrap_or(1).max(1));
+                if let Some(deadline) = authority_pending_deadline {
+                    let now = tokio::time::Instant::now();
+                    if now >= deadline {
+                        return Err(TrellisClientError::Bootstrap(
+                            "timed out waiting for service deployment authority".into(),
+                        ));
+                    }
+                    tokio::time::sleep(delay.min(deadline.saturating_duration_since(now))).await;
+                } else {
+                    tokio::time::sleep(delay).await;
+                }
+                continue;
+            }
             return Err(TrellisClientError::BootstrapHttp {
                 status: status.as_u16(),
                 body,
@@ -546,6 +606,8 @@ async fn fetch_device_bootstrap(
     identity_auth: &SessionAuth,
     session_auth: &SessionAuth,
     opts: &DeviceConnectOptions<'_>,
+    activation: Option<DeviceActivationEvidence<'_>>,
+    proof_overrides: DeviceBootstrapProofOverrides,
 ) -> Result<ServiceBootstrapResponse, TrellisClientError> {
     let mut url = reqwest::Url::parse(opts.trellis_url)
         .map_err(|error| TrellisClientError::Bootstrap(error.to_string()))?;
@@ -558,10 +620,13 @@ async fn fetch_device_bootstrap(
         .build()
         .map_err(|error| TrellisClientError::Bootstrap(error.to_string()))?;
     let request_id = new_request_id();
-    let issued_at = i64::try_from(now_iat_seconds())
-        .ok()
-        .and_then(|value| value.checked_mul(1_000))
-        .ok_or_else(|| TrellisClientError::Bootstrap("device timestamp overflow".into()))?;
+    let issued_at = match proof_overrides.issued_at_ms {
+        Some(issued_at) => issued_at,
+        None => i64::try_from(now_iat_seconds())
+            .ok()
+            .and_then(|value| value.checked_mul(1_000))
+            .ok_or_else(|| TrellisClientError::Bootstrap("device timestamp overflow".into()))?,
+    };
     let session_nkey = session_auth.nkey_pair()?.public_key();
     let participant_artifact: Value = serde_json::from_str(opts.participant_json)?;
     let parsed_participant = trellis_protocol::parse_participant_v1(&participant_artifact)
@@ -641,8 +706,16 @@ async fn fetch_device_bootstrap(
         referenced_api_artifacts: std::iter::once(api_artifact)
             .chain(referenced_api_artifacts)
             .collect(),
-        challenge_digest: None,
-        proof: Value::Null,
+        challenge_digest: activation
+            .as_ref()
+            .map(|activation| activation.challenge_digest.to_owned()),
+        confirmation_code: activation
+            .as_ref()
+            .map(|activation| activation.confirmation_code.to_owned()),
+        proof: serde_json::json!({
+            "format": trellis_protocol::SESSION_PROOF_FORMAT_V1,
+            "signature": "",
+        }),
     })?;
     let request_digest = trellis_protocol::session_proof_request_digest_v1(&request)
         .map_err(|error| TrellisClientError::Bootstrap(error.to_string()))?;
@@ -656,11 +729,16 @@ async fn fetch_device_bootstrap(
         session_nkey,
         opts.participant_id,
         opts.participant_digest,
-        None,
+        activation
+            .as_ref()
+            .map(|activation| activation.challenge_digest.to_owned()),
         request_digest,
     )
     .map_err(|error| TrellisClientError::Bootstrap(error.to_string()))?;
     request["proof"] = serde_json::to_value(identity_auth.sign_session_proof(&input)?)?;
+    if proof_overrides.corrupt_signature {
+        request["proof"]["signature"] = Value::String("invalid".to_owned());
+    }
     let request_started_at = now_context_millis()?;
     let response = client
         .post(url)
@@ -690,6 +768,53 @@ async fn fetch_device_bootstrap(
         .checked_sub(midpoint)
         .ok_or_else(|| TrellisClientError::Bootstrap("device bootstrap time overflow".into()))?;
     Ok(response)
+}
+
+pub(crate) async fn fetch_device_activation(
+    opts: &DeviceConnectOptions<'_>,
+    challenge_digest: &str,
+    confirmation_code: &str,
+) -> Result<ServiceBootstrapResponse, TrellisClientError> {
+    let identity_auth = SessionAuth::from_seed_base64url(opts.identity_seed_base64url)?;
+    if identity_auth.session_key != opts.public_identity_key {
+        return Err(TrellisClientError::Bootstrap(
+            "device public identity key does not match identity seed".into(),
+        ));
+    }
+    let session_auth = SessionAuth::from_seed_base64url(opts.session_key_seed_base64url)?;
+    fetch_device_bootstrap(
+        &identity_auth,
+        &session_auth,
+        opts,
+        Some(DeviceActivationEvidence {
+            challenge_digest,
+            confirmation_code,
+        }),
+        DeviceBootstrapProofOverrides::default(),
+    )
+    .await
+}
+
+#[cfg(feature = "integration-test-scoping")]
+pub(crate) async fn fetch_device_activation_with_test_proof(
+    opts: &DeviceConnectOptions<'_>,
+    challenge_digest: &str,
+    confirmation_code: &str,
+    proof_overrides: DeviceBootstrapProofOverrides,
+) -> Result<ServiceBootstrapResponse, TrellisClientError> {
+    let identity_auth = SessionAuth::from_seed_base64url(opts.identity_seed_base64url)?;
+    let session_auth = SessionAuth::from_seed_base64url(opts.session_key_seed_base64url)?;
+    fetch_device_bootstrap(
+        &identity_auth,
+        &session_auth,
+        opts,
+        Some(DeviceActivationEvidence {
+            challenge_digest,
+            confirmation_code,
+        }),
+        proof_overrides,
+    )
+    .await
 }
 
 fn now_rfc3339() -> String {
@@ -1002,6 +1127,7 @@ async fn connect_bootstrapped_service(
     let key_pair = std::sync::Arc::new(callback_auth.nkey_pair()?);
     let session_nkey = key_pair.public_key();
     let callback_authorization_contexts = authorization_contexts.clone();
+    let reauth = Arc::new(AtomicBool::new(false));
     let health_session_key = auth.session_key.clone();
 
     let nats = ConnectOptions::with_auth_callback(move |nonce| {
@@ -1009,8 +1135,10 @@ async fn connect_bootstrapped_service(
         let key_pair = key_pair.clone();
         let session_nkey = session_nkey.clone();
         let authorization_contexts = callback_authorization_contexts.clone();
+        let reauth = reauth.clone();
         async move {
-            if authorization_contexts.routing_jwt().is_err()
+            if reauth.swap(true, Ordering::AcqRel)
+                || authorization_contexts.routing_jwt().is_err()
                 || authorization_contexts.context_digest().is_err()
             {
                 authorization_contexts
@@ -1114,6 +1242,7 @@ pub struct UserConnectOptions<'a> {
     timeout_ms: u64,
     authorization_context_binding: String,
     authorization_context_store: Arc<dyn AuthorizationContextStore>,
+    refresh_before_connect: bool,
     #[cfg(feature = "integration-test-scoping")]
     integration_test_scope: Option<IntegrationTestScope>,
 }
@@ -1146,9 +1275,16 @@ impl<'a> UserConnectOptions<'a> {
             timeout_ms,
             authorization_context_binding: authorization_context_binding.into(),
             authorization_context_store,
+            refresh_before_connect: false,
             #[cfg(feature = "integration-test-scoping")]
             integration_test_scope: None,
         }
+    }
+
+    /// Refresh proof-bound authorization material before the first NATS CONNECT.
+    pub fn with_refresh_before_connect(mut self) -> Self {
+        self.refresh_before_connect = true;
+        self
     }
 
     /// Apply an immutable integration-test contract namespace to this connection.
@@ -1339,7 +1475,7 @@ impl TrellisClient {
 
     /// Connect an activated device using refreshed auth-owned connect info.
     pub async fn connect_device(
-        opts: DeviceConnectOptions<'_>,
+        mut opts: DeviceConnectOptions<'_>,
     ) -> Result<Self, TrellisClientError> {
         let identity_auth = SessionAuth::from_seed_base64url(opts.identity_seed_base64url)?;
         if identity_auth.session_key != opts.public_identity_key {
@@ -1348,7 +1484,19 @@ impl TrellisClient {
             ));
         }
         let session_auth = SessionAuth::from_seed_base64url(opts.session_key_seed_base64url)?;
-        let response = fetch_device_bootstrap(&identity_auth, &session_auth, &opts).await?;
+        let response = match opts.activation_bootstrap.take() {
+            Some(response) => response,
+            None => {
+                fetch_device_bootstrap(
+                    &identity_auth,
+                    &session_auth,
+                    &opts,
+                    None,
+                    DeviceBootstrapProofOverrides::default(),
+                )
+                .await?
+            }
+        };
         if response.state != "ready" {
             return Err(TrellisClientError::Bootstrap(format!(
                 "unexpected device bootstrap state '{}'",
@@ -1457,14 +1605,17 @@ impl TrellisClient {
             ));
         }
         let callback_authorization_contexts = authorization_contexts.clone();
+        let reauth = Arc::new(AtomicBool::new(opts.refresh_before_connect));
 
         let nats = ConnectOptions::with_auth_callback(move |nonce| {
             let auth = callback_auth.clone();
             let key_pair = key_pair.clone();
             let session_nkey = session_nkey.clone();
             let authorization_contexts = callback_authorization_contexts.clone();
+            let reauth = reauth.clone();
             async move {
-                if authorization_contexts.routing_jwt().is_err()
+                if reauth.swap(true, Ordering::AcqRel)
+                    || authorization_contexts.routing_jwt().is_err()
                     || authorization_contexts.context_digest().is_err()
                 {
                     authorization_contexts

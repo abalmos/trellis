@@ -49,7 +49,6 @@ export {
   buildDeviceActivationPayload,
   deriveDeviceConfirmationCode,
   deriveDeviceIdentity,
-  startDeviceActivationRequest,
   waitForDeviceActivation,
 } from "./device_activation.ts";
 export {

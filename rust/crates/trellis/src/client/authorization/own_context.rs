@@ -1,6 +1,6 @@
 use std::sync::{
     atomic::{AtomicI64, Ordering},
-    Arc, RwLock,
+    Arc, Mutex, RwLock,
 };
 
 use serde_json::Value;
@@ -30,7 +30,9 @@ pub struct AuthorizationContextCache {
     state: Arc<RwLock<CachedAuthorizationState>>,
     clock_offset_ms: Arc<AtomicI64>,
     update: Arc<tokio::sync::Mutex<()>>,
+    refresh: Arc<tokio::sync::Mutex<()>>,
     refresh_requested: Arc<tokio::sync::Notify>,
+    refresh_requested_digest: Arc<Mutex<Option<Option<String>>>>,
 }
 
 impl AuthorizationContextCache {
@@ -53,7 +55,9 @@ impl AuthorizationContextCache {
             state: Arc::new(RwLock::new(CachedAuthorizationState::default())),
             clock_offset_ms: Arc::new(AtomicI64::new(0)),
             update: Arc::new(tokio::sync::Mutex::new(())),
+            refresh: Arc::new(tokio::sync::Mutex::new(())),
             refresh_requested: Arc::new(tokio::sync::Notify::new()),
+            refresh_requested_digest: Arc::new(Mutex::new(None)),
         })
     }
 
@@ -332,6 +336,10 @@ impl AuthorizationContextCache {
         super::refresh::refresh(self, auth).await
     }
 
+    pub(crate) async fn lock_refresh(&self) -> tokio::sync::MutexGuard<'_, ()> {
+        self.refresh.lock().await
+    }
+
     pub(crate) async fn advance_manifest_floor(
         &self,
         generation: u64,
@@ -366,11 +374,19 @@ impl AuthorizationContextCache {
     }
 
     pub(crate) fn request_refresh(&self) {
-        self.refresh_requested.notify_one();
+        if let Ok(mut requested) = self.refresh_requested_digest.lock() {
+            *requested = Some(self.context_digest().ok());
+            self.refresh_requested.notify_one();
+        }
     }
 
-    pub(crate) async fn wait_refresh_request(&self) {
+    pub(crate) async fn wait_refresh_request(&self) -> Option<String> {
         self.refresh_requested.notified().await;
+        self.refresh_requested_digest
+            .lock()
+            .ok()
+            .and_then(|mut requested| requested.take())
+            .flatten()
     }
 
     pub(crate) fn refresh_delay(&self) -> Result<std::time::Duration, TrellisClientError> {

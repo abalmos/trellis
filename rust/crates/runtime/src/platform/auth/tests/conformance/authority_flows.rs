@@ -33,6 +33,7 @@ pub(super) async fn exercise_authority_flows(
         expires_at: NOW + 1_000,
     };
     let action = |byte: u8, event: &str| PostCommitActionRecord {
+        predecessor_action_id: None,
         action_id: digest(byte),
         kind: PostCommitActionKind::Event,
         payload: json!({ "event": event }),
@@ -93,7 +94,8 @@ pub(super) async fn exercise_authority_flows(
             idempotency: proof(68, "authority-proposal.create"),
             actions: Vec::new(),
         })
-        .await?;
+        .await
+        .map_err(|error| format!("create initial authority proposal: {error}"))?;
     let mut equivalent_proposal = proposal.clone();
     equivalent_proposal.proposal_id = "proposal_equivalent".to_owned();
     equivalent_proposal.created_at += 1;
@@ -131,6 +133,7 @@ pub(super) async fn exercise_authority_flows(
             idempotency: proof(183, "authority-proposal.reject"),
             portal_binding: None,
             expected_portal_binding: None,
+            portal_policy_snapshot: None,
             actions: Vec::new(),
         })
         .await?;
@@ -245,16 +248,21 @@ pub(super) async fn exercise_authority_flows(
         idempotency: proposal_proof,
         portal_binding: None,
         expected_portal_binding: None,
+        portal_policy_snapshot: None,
         actions: vec![action(62, "authority.accepted")],
     };
     assert!(matches!(
         store
             .decide_authority_proposal(decision_command.clone())
-            .await?,
+            .await
+            .map_err(|error| format!("accept authority proposal: {error}"))?,
         IdempotentOutcome::Applied(_)
     ));
     assert!(matches!(
-        store.decide_authority_proposal(decision_command).await?,
+        store
+            .decide_authority_proposal(decision_command)
+            .await
+            .map_err(|error| format!("replay authority proposal acceptance: {error}"))?,
         IdempotentOutcome::Replayed(_)
     ));
     assert_eq!(
@@ -313,7 +321,8 @@ pub(super) async fn exercise_authority_flows(
             idempotency: proof(240, "authority-proposal.create"),
             actions: Vec::new(),
         })
-        .await?;
+        .await
+        .map_err(|error| format!("create wrong-base proposal: {error}"))?;
     let mut wrong_expected_desired = desired.clone();
     wrong_expected_desired.version = 2;
     wrong_expected_desired.updated_at = NOW + 7;
@@ -337,6 +346,7 @@ pub(super) async fn exercise_authority_flows(
                 deployment: None,
                 portal_binding: None,
                 expected_portal_binding: None,
+                portal_policy_snapshot: None,
                 idempotency: proof(241, "authority-proposal.accept-wrong-base"),
                 actions: Vec::new(),
             })
@@ -348,64 +358,16 @@ pub(super) async fn exercise_authority_flows(
     stale_initial.proposal_id = "proposal_stale_initial".to_owned();
     stale_initial.created_at = NOW + 7;
     stale_initial.expires_at = Some(NOW + 100);
-    store
-        .create_authority_proposal(AuthorityProposalCreation {
-            proposal: stale_initial.clone(),
-            idempotency: proof(186, "authority-proposal.create"),
-            actions: Vec::new(),
-        })
-        .await?;
-    let mut stale_desired = desired.clone();
-    stale_desired.version = 2;
-    stale_desired.updated_at = NOW + 7;
-    stale_desired
-        .desired_capabilities
-        .push("changed-authority".to_owned());
     assert_eq!(
         store
-            .decide_authority_proposal(AuthorityProposalDecision {
-                proposal_id: stale_initial.proposal_id.clone(),
-                expected_version: 1,
-                expected_base_authority_version: Some(None),
-                decision: AuthorityDecisionRecord {
-                    proposal_id: stale_initial.proposal_id.clone(),
-                    outcome: AuthorityDecisionOutcome::Accepted,
-                    decided_by: admin_id.clone(),
-                    reason: None,
-                    decided_at: NOW + 7,
-                    decision_digest: digest(91),
-                },
-                desired_authority: Some(DesiredAuthorityRecord::Deployment(stale_desired)),
-                deployment: None,
-                portal_binding: None,
-                expected_portal_binding: None,
-                idempotency: proof(187, "authority-proposal.accept-stale"),
+            .create_authority_proposal(AuthorityProposalCreation {
+                proposal: stale_initial,
+                idempotency: proof(186, "authority-proposal.create"),
                 actions: Vec::new(),
             })
             .await,
         Err(AuthorizationStateError::StorageConflict)
     );
-    store
-        .decide_authority_proposal(AuthorityProposalDecision {
-            proposal_id: stale_initial.proposal_id.clone(),
-            expected_version: 1,
-            expected_base_authority_version: None,
-            decision: AuthorityDecisionRecord {
-                proposal_id: stale_initial.proposal_id,
-                outcome: AuthorityDecisionOutcome::Rejected,
-                decided_by: admin_id.clone(),
-                reason: Some("stale initial generation".to_owned()),
-                decided_at: NOW + 8,
-                decision_digest: digest(92),
-            },
-            desired_authority: None,
-            deployment: None,
-            idempotency: proof(188, "authority-proposal.reject-stale"),
-            portal_binding: None,
-            expected_portal_binding: None,
-            actions: Vec::new(),
-        })
-        .await?;
 
     let mut noop_proposal = superseded_proposal.clone();
     noop_proposal.proposal_id = "proposal_accepted_noop".to_owned();
@@ -446,6 +408,7 @@ pub(super) async fn exercise_authority_flows(
             idempotency: proof(245, "authority-proposal.accept-noop"),
             portal_binding: None,
             expected_portal_binding: None,
+            portal_policy_snapshot: None,
             actions: Vec::new(),
         })
         .await?;
@@ -605,6 +568,8 @@ pub(super) async fn exercise_authority_flows(
         payload: json!({ "device": "request" }),
         state: DeviceActivationReviewState::Pending,
         requested_at: NOW,
+        expires_at: NOW + 1_000,
+        activated_by_user_principal_id: None,
         decided_at: None,
         decided_by: None,
         reason: None,
@@ -616,7 +581,8 @@ pub(super) async fn exercise_authority_flows(
             idempotency: proof(72, "activation-review.create"),
             actions: Vec::new(),
         })
-        .await?;
+        .await
+        .map_err(|error| format!("create activation review: {error}"))?;
     let review_proof = proof(64, "activation-review.decide");
     let review_action = action(63, "device.approved");
     let approved_device = DeviceRecord {
@@ -635,10 +601,12 @@ pub(super) async fn exercise_authority_flows(
                 decided_by: admin_id,
                 reason: None,
                 delegation: None,
+                activate_device: true,
                 idempotency: review_proof.clone(),
                 actions: vec![review_action],
             })
-            .await?,
+            .await
+            .map_err(|error| format!("decide activation review: {error}"))?,
         IdempotentOutcome::Applied(_)
     ));
     assert_eq!(

@@ -24,7 +24,6 @@ import {
   type DeviceActivationTransport,
   encodeDeviceActivationPayload,
   parseDeviceActivationPayload,
-  startDeviceActivationRequest,
   verifyDeviceConfirmationCode,
   waitForDeviceActivation,
 } from "./device_activation.ts";
@@ -48,46 +47,6 @@ Deno.test("device activation payload helpers round-trip encoded payloads", async
 
   const encoded = encodeDeviceActivationPayload(payload);
   assertEquals(parseDeviceActivationPayload(encoded), payload);
-});
-
-Deno.test("device activation start requests return short flow URLs", async () => {
-  const originalFetch = globalThis.fetch;
-  try {
-    globalThis.fetch = ((_input, _init) =>
-      Promise.resolve(
-        new Response(
-          JSON.stringify({
-            flowId: "flow_123",
-            instanceId: "dev_123",
-            deploymentId: "reader.default",
-            activationUrl:
-              "https://trellis.example.com/_trellis/portal/devices/activate?flowId=flow_123",
-          }),
-          {
-            status: 200,
-            headers: { "Content-Type": "application/json" },
-          },
-        ),
-      )) as typeof fetch;
-
-    const identity = await deriveDeviceIdentity(new Uint8Array(32).fill(7));
-    const payload = await buildDeviceActivationPayload({
-      activationKey: identity.activationKey,
-      publicIdentityKey: identity.publicIdentityKey,
-      nonce: "nonce_123",
-    });
-    const response = await startDeviceActivationRequest({
-      trellisUrl: "https://trellis.example.com/base",
-      payload,
-    });
-    assertEquals(response.flowId, "flow_123");
-    assertEquals(
-      response.activationUrl,
-      "https://trellis.example.com/_trellis/portal/devices/activate?flowId=flow_123",
-    );
-  } finally {
-    globalThis.fetch = originalFetch;
-  }
 });
 
 Deno.test("device activation helpers verify confirmation codes", async () => {
@@ -128,14 +87,16 @@ function bootstrapWaitArgs(
 }
 
 function activationPendingBody(): Record<string, unknown> {
+  const serverNow = Date.now();
   return {
     state: "activation_pending",
-    serverNow: Date.now(),
+    serverNow,
     activation: {
       state: "pending",
       reviewId: "dar_123",
       activationUrl:
         "https://trellis.example.com/_trellis/portal/devices/activate?flowId=dar_123",
+      expiresAt: serverNow + 1_000,
       retryAfterMs: 5,
     },
   };
@@ -283,6 +244,46 @@ Deno.test("device activation wait retries transient fetch failures", async () =>
       pollIntervalMs: 0,
     });
 
+    assertEquals(calls, 2);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+Deno.test("device activation wait reports an explicit replacement review", async () => {
+  const originalFetch = globalThis.fetch;
+  const identity = await deriveDeviceIdentity(new Uint8Array(32).fill(10));
+  const waitArgs = bootstrapWaitArgs(identity);
+  let calls = 0;
+
+  try {
+    globalThis.fetch =
+      ((_input: URL | Request | string, _init?: RequestInit) => {
+        calls += 1;
+        const serverNow = Date.now();
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              state: "activation_pending",
+              serverNow,
+              activation: {
+                state: "pending",
+                reviewId: calls === 1 ? "dar_123" : "dar_replacement",
+                activationUrl: "https://trellis.example.com/devices/activate",
+                expiresAt: serverNow + 1_000,
+                retryAfterMs: 0,
+              },
+            }),
+            { status: 200, headers: { "Content-Type": "application/json" } },
+          ),
+        );
+      }) as typeof fetch;
+
+    await assertRejects(
+      () => waitForDeviceActivation({ ...waitArgs, pollIntervalMs: 0 }),
+      Error,
+      "device activation review expired",
+    );
     assertEquals(calls, 2);
   } finally {
     globalThis.fetch = originalFetch;
@@ -449,6 +450,7 @@ Deno.test("device activation client wrappers hide method strings", async () => {
   const client = createDeviceActivationClient(transport);
 
   const activation = await client.resolveDeviceUserAuthorities({
+    confirmationCode: "ABCDEFGH",
     flowId: "flow_123",
   });
   assertEquals(activation.id, "op_123");

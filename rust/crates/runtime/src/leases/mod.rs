@@ -108,7 +108,8 @@ impl LeaseManager {
     /// This performs one compare-and-update operation against the backing KV
     /// entry. Callers that need continuous ownership should schedule renewals
     /// before [`LeaseManager::ttl`] expires and keep the guard returned by each
-    /// successful renewal.
+    /// successful renewal. If the update result is ambiguous, the current entry
+    /// must still prove ownership before its revision is adopted.
     pub async fn renew(&self, guard: &mut LeaseGuard) -> Result<(), LeaseError> {
         let store = self.store()?;
         let key = guard.key.clone();
@@ -123,6 +124,50 @@ impl LeaseManager {
             Ok(revision) => {
                 guard.current_revision = revision;
                 Ok(())
+            }
+            Err(error)
+                if matches!(
+                    error.kind(),
+                    kv::UpdateErrorKind::TimedOut | kv::UpdateErrorKind::WrongLastRevision
+                ) =>
+            {
+                let update_error = error.to_string();
+                match store.entry(key.value.clone()).await {
+                    Ok(Some(entry))
+                        if entry.operation == kv::Operation::Put
+                            && entry.value.as_ref() == self.owner_id.as_bytes()
+                            && entry.revision > guard.current_revision =>
+                    {
+                        guard.current_revision = entry.revision;
+                        Ok(())
+                    }
+                    Ok(Some(entry))
+                        if entry.operation == kv::Operation::Put
+                            && entry.value.as_ref() == self.owner_id.as_bytes() =>
+                    {
+                        Err(LeaseError::Backend {
+                            key: Some(key),
+                            operation: "renew",
+                            message: format!(
+                                "ambiguous update ({update_error}) did not advance the lease revision"
+                            ),
+                        })
+                    }
+                    Ok(Some(entry))
+                        if matches!(entry.operation, kv::Operation::Delete | kv::Operation::Purge) =>
+                    {
+                        Err(LeaseError::NotHeld { key })
+                    }
+                    Ok(Some(_)) => Err(LeaseError::Stale { key }),
+                    Ok(None) => Err(LeaseError::NotHeld { key }),
+                    Err(inspect_error) => Err(LeaseError::Backend {
+                        key: Some(key),
+                        operation: "renew",
+                        message: format!(
+                            "ambiguous update ({update_error}); failed to inspect current lease entry: {inspect_error}"
+                        ),
+                    }),
+                }
             }
             Err(error) => Err(classify_revision_error(store, key, "renew", error).await),
         }

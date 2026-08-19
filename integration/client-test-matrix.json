@@ -49,16 +49,16 @@
       }
     },
     {
-      "id": "state.typescript-device-rust-owner",
+      "id": "state.activated-devices-rust-owner",
       "fixture": "state",
-      "title": "Activated TypeScript devices use State owned by the Rust Platform",
+      "title": "Activated TypeScript and Rust devices connect to the Rust Platform",
       "coverage": [
         "state-parity",
         "cross-runtime-state",
         "auth-protocol-matrix",
         "device-activation"
       ],
-      "description": "Two real activated TypeScript devices use value and map State through the Rust Platform owner, retain isolated namespaces across reconnect, and are inspectable through exact device Admin targets.",
+      "description": "The TypeScript client activates two devices and exercises isolated State; the Rust client activates a device, retains ready bootstrap evidence through connect, projects its device session and authority, and proves revocation denial.",
       "scenario": {
         "participants": [
           {
@@ -92,15 +92,20 @@
         ]
       },
       "completion": {
-        "typescript": "implemented"
+        "typescript": "implemented",
+        "rust": "implemented"
       },
       "classification": "shared",
       "implementations": {
         "typescript": {
-          "id": "state.typescript-device-rust-owner",
+          "id": "state.activated-devices-rust-owner",
           "file": "state/typescript_device_rust_owner.integration_test.ts",
-          "testName": "state.typescript-device-rust-owner uses activated device State facades",
+          "testName": "state.activated-devices-rust-owner uses activated device clients",
           "runtime": "live-trellis"
+        },
+        "rust": {
+          "module": "auth",
+          "function": "rust_device_activation_client_reaches_rust_owner"
         }
       }
     },
@@ -2454,6 +2459,56 @@
         "rust": {
           "module": "resources",
           "function": "resources_service_kv_stale_revision_rejected"
+        }
+      }
+    },
+    {
+      "id": "outbox.typescript-sql-commit-rollback",
+      "fixture": "outbox",
+      "title": "TypeScript SQL outbox dispatches committed events and jobs only",
+      "coverage": [
+        "typescript-service-outbox",
+        "cross-runtime-events",
+        "cross-runtime-jobs",
+        "transaction-rollback"
+      ],
+      "description": "A TypeScript service uses its public caller-owned SQLite outbox against the Rust Platform owner, dispatching every committed event and job once while a rolled-back transaction persists and publishes nothing.",
+      "scenario": {
+        "participants": [
+          {
+            "name": "service",
+            "kind": "service",
+            "contract": "SQL outbox event and job contract"
+          },
+          {
+            "name": "event capture",
+            "kind": "app",
+            "contract": "SQL outbox event subscriber"
+          }
+        ],
+        "given": [
+          "a connected TypeScript service bound to caller-owned SQLite outbox tables"
+        ],
+        "when": [
+          "one transaction commits two events and one job submission and another transaction rolls back an event"
+        ],
+        "then": [
+          "both committed events are published exactly once",
+          "the committed job is accepted by the live Jobs runtime",
+          "the rolled-back business row and outbox row are absent",
+          "all three committed outbox records are durably marked dispatched"
+        ]
+      },
+      "completion": {
+        "typescript": "implemented"
+      },
+      "classification": "shared",
+      "implementations": {
+        "typescript": {
+          "id": "outbox.typescript-sql-commit-rollback",
+          "file": "outbox/sql_outbox_commit_rollback.integration_test.ts",
+          "testName": "outbox.typescript-sql-commit-rollback dispatches committed records and nothing rolled back",
+          "runtime": "live-trellis"
         }
       }
     }

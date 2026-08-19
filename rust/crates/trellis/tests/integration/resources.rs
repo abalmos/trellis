@@ -78,9 +78,9 @@ const RESOURCES_SERVICE_PARTICIPANT_JSON: &str = r#"{
   }
 }"#;
 
-struct ResourcesServiceContract;
+pub(super) struct ResourcesServiceContract;
 
-fn resources_service_contract() -> trellis_test::TrellisTestContract {
+pub(super) fn resources_service_contract() -> trellis_test::TrellisTestContract {
     let api: Value = serde_json::from_str(RESOURCES_SERVICE_API_SOURCE_JSON)
         .expect("parse resources service API");
     let api_digest = trellis_rs::contracts::ApiBuilder::new(api)

@@ -717,6 +717,9 @@ impl ServiceHandle {
                 let manager = cancel_manager.clone();
                 Box::pin(async move {
                     let current = state.lock().await.clone();
+                    if crate::jobs::projection::is_terminal(current.state) {
+                        return JobSnapshot::try_from(current);
+                    }
                     manager
                         .cancel(&current)
                         .await

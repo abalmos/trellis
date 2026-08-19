@@ -396,7 +396,11 @@ pub(crate) fn validate_activation_decision_changes(
 ) -> Result<(), super::super::AuthorizationStateError> {
     match command.state {
         DeviceActivationReviewState::Approved => {}
-        DeviceActivationReviewState::Rejected if command.delegation.is_none() => return Ok(()),
+        DeviceActivationReviewState::Rejected
+            if command.delegation.is_none() && !command.activate_device =>
+        {
+            return Ok(());
+        }
         _ => {
             return Err(super::super::AuthorizationStateError::InvalidRecord(
                 "activation rejection forbids delegation changes".to_owned(),
@@ -439,7 +443,14 @@ pub(crate) fn validate_activation_review(
     require_nonempty("instanceId", &review.instance_id)?;
     require_digest("requestDigest", &review.request_digest)?;
     require_protocol_timestamp("requestedAt", review.requested_at)?;
+    require_protocol_timestamp("expiresAt", review.expires_at)?;
+    if review.expires_at < review.requested_at {
+        return Err(super::super::AuthorizationStateError::InvalidRecord(
+            "activation review expiry precedes its request".to_owned(),
+        ));
+    }
     if review.state != DeviceActivationReviewState::Pending
+        || review.activated_by_user_principal_id.is_some()
         || review.decided_at.is_some()
         || review.decided_by.is_some()
         || review.reason.is_some()
@@ -491,6 +502,14 @@ pub(crate) fn validate_post_commit_action(
     action: &PostCommitActionRecord,
 ) -> Result<(), super::super::AuthorizationStateError> {
     require_digest("actionId", &action.action_id)?;
+    if let Some(predecessor_action_id) = &action.predecessor_action_id {
+        require_digest("predecessorActionId", predecessor_action_id)?;
+        if predecessor_action_id == &action.action_id {
+            return Err(super::super::AuthorizationStateError::InvalidRecord(
+                "post-commit action cannot depend on itself".to_owned(),
+            ));
+        }
+    }
     require_protocol_timestamp("createdAt", action.created_at)?;
     require_protocol_timestamp("nextAttemptAt", action.next_attempt_at)?;
     if let Some(claimed_until) = action.claimed_until {

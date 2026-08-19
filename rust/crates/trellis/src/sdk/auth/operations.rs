@@ -23,7 +23,7 @@ impl OperationDescriptor for AuthDeviceUserAuthoritiesResolveOperation {
     const OBSERVE_CAPABILITIES: &'static [&'static str] = &[];
     const CANCEL_CAPABILITIES: &'static [&'static str] = &[];
     const CONTROL_CAPABILITIES: &'static [&'static str] = &[];
-    const CANCELABLE: bool = true;
+    const CANCELABLE: bool = false;
 }
 /// Errors declared by `Auth.DeviceUserAuthorities.Resolve`.
 #[derive(Debug, Clone, PartialEq)]

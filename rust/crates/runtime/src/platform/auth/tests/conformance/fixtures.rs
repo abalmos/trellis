@@ -193,6 +193,7 @@ pub(super) fn test_session_creation(
     SessionCreation {
         idempotency: test_session_idempotency(&scope, &session.principal_id, session.created_at),
         session,
+        previous_session: None,
         desired_authority,
         runtime_binding,
         actions: Vec::new(),
@@ -218,6 +219,7 @@ pub(super) fn test_session_revocation(
         ),
         actions: vec![
             PostCommitActionRecord {
+                predecessor_action_id: None,
                 action_id: event_id,
                 kind: PostCommitActionKind::Event,
                 payload: json!({ "sessionId": session.session_id }),
@@ -228,6 +230,7 @@ pub(super) fn test_session_revocation(
                 last_error: None,
             },
             PostCommitActionRecord {
+                predecessor_action_id: None,
                 action_id: kick_id,
                 kind: PostCommitActionKind::Kick,
                 payload: json!({ "sessionId": session.session_id }),

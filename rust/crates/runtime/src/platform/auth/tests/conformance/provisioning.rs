@@ -375,6 +375,8 @@ pub(super) async fn exercise_deployed_principals(
         payload: Value::Null,
         state: DeviceActivationReviewState::Pending,
         requested_at: NOW,
+        expires_at: NOW + 1_000,
+        activated_by_user_principal_id: None,
         decided_at: None,
         decided_by: None,
         reason: None,
@@ -402,6 +404,7 @@ pub(super) async fn exercise_deployed_principals(
                 state: DeviceDelegationState::Active,
                 expires_at: Some(NOW + 700),
             }),
+            activate_device: true,
             idempotency: proof(62, "device.review.decide"),
             actions: Vec::new(),
         })

@@ -22,6 +22,39 @@ use super::SqliteAuthorizationStore;
 
 #[async_trait]
 impl DeploymentRepository for SqliteAuthorizationStore {
+    #[cfg(feature = "integration-test-hooks")]
+    async fn activation_review_test_ttl_ms(
+        &self,
+        deployment_id: &str,
+    ) -> Result<Option<i64>, AuthorizationStateError> {
+        let deployment_id = deployment_id.to_owned();
+        self.run_read(move |connection| {
+            let exists = connection
+                .query_row(
+                    "SELECT EXISTS(SELECT 1 FROM sqlite_master
+                     WHERE type = 'table'
+                       AND name = '__trellis_test_activation_review_ttls')",
+                    [],
+                    |row| row.get::<_, bool>(0),
+                )
+                .map_err(sql_error)?;
+            if !exists {
+                return Ok(None);
+            }
+            connection
+                .query_row(
+                    "SELECT ttl_ms
+                     FROM __trellis_test_activation_review_ttls
+                     WHERE deployment_id = ?1",
+                    params![deployment_id],
+                    |row| row.get(0),
+                )
+                .optional()
+                .map_err(sql_error)
+        })
+        .await
+    }
+
     async fn create_deployment_profile(
         &self,
         command: DeploymentProfileCreation,
@@ -68,7 +101,7 @@ impl DeploymentRepository for SqliteAuthorizationStore {
             let mut statement = connection
                 .prepare(
                     "SELECT deployment_id, kind, display_name, participant_id, portal_id,
-                            requires_device_delegation, expires_at, state, created_at,
+                            review_mode, requires_device_delegation, expires_at, state, created_at,
                             updated_at, version
                      FROM auth_deployment_profiles ORDER BY deployment_id",
                 )
@@ -105,13 +138,14 @@ impl DeploymentRepository for SqliteAuthorizationStore {
                 .execute(
                     "UPDATE auth_deployment_profiles
                      SET display_name = ?1, participant_id = ?2, portal_id = ?3,
-                         requires_device_delegation = ?4, expires_at = ?5, state = ?6,
-                         updated_at = ?7, version = ?8
-                     WHERE deployment_id = ?9 AND version = ?10",
+                          review_mode = ?4, requires_device_delegation = ?5, expires_at = ?6,
+                          state = ?7, updated_at = ?8, version = ?9
+                      WHERE deployment_id = ?10 AND version = ?11",
                     params![
                         command.profile.display_name,
                         command.profile.participant_id,
                         command.profile.portal_id,
+                        command.profile.review_mode.map(encode_enum).transpose()?,
                         command.profile.requires_device_delegation,
                         command.profile.expires_at,
                         encode_enum(command.profile.state)?,
@@ -195,15 +229,16 @@ pub(in crate::platform::auth) fn insert_deployment_profile(
     connection
         .execute(
             "INSERT INTO auth_deployment_profiles
-         (deployment_id, kind, display_name, participant_id, portal_id,
-          requires_device_delegation, expires_at, state, created_at, updated_at, version)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+          (deployment_id, kind, display_name, participant_id, portal_id, review_mode,
+           requires_device_delegation, expires_at, state, created_at, updated_at, version)
+          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
             params![
                 profile.deployment_id,
                 encode_enum(profile.kind)?,
                 profile.display_name,
                 profile.participant_id,
                 profile.portal_id,
+                profile.review_mode.map(encode_enum).transpose()?,
                 profile.requires_device_delegation,
                 profile.expires_at,
                 encode_enum(profile.state)?,
@@ -270,7 +305,7 @@ pub(in crate::platform::auth) fn load_deployment_profile(
     connection
         .query_row(
             "SELECT deployment_id, kind, display_name, participant_id, portal_id,
-                requires_device_delegation, expires_at, state, created_at, updated_at, version
+                review_mode, requires_device_delegation, expires_at, state, created_at, updated_at, version
          FROM auth_deployment_profiles WHERE deployment_id = ?1",
             [deployment_id],
             decode_deployment_profile,
@@ -288,11 +323,15 @@ pub(in crate::platform::auth) fn decode_deployment_profile(
         display_name: row.get(2)?,
         participant_id: row.get(3)?,
         portal_id: row.get(4)?,
-        requires_device_delegation: row.get(5)?,
-        expires_at: row.get(6)?,
-        state: decode_enum(row.get(7)?)?,
-        created_at: row.get(8)?,
-        updated_at: row.get(9)?,
-        version: from_sql_version(row.get(10)?)?,
+        review_mode: row
+            .get::<_, Option<String>>(5)?
+            .map(decode_enum)
+            .transpose()?,
+        requires_device_delegation: row.get(6)?,
+        expires_at: row.get(7)?,
+        state: decode_enum(row.get(8)?)?,
+        created_at: row.get(9)?,
+        updated_at: row.get(10)?,
+        version: from_sql_version(row.get(11)?)?,
     })
 }

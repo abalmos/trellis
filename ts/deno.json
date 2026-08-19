@@ -38,6 +38,7 @@
     "trellis-generate": "deno run -A @qlever-llc/trellis/generate"
   },
   "imports": {
+    "@libsql/client": "npm:@libsql/client@^0.15.15",
     "@noble/hashes/sha256": "npm:@noble/hashes@1.8.0/sha256",
     "@hono/hono": "jsr:@hono/hono@^4.12.15",
     "@nats-io/jetstream": "npm:@nats-io/jetstream@^3.3.1",

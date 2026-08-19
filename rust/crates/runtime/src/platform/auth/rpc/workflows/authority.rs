@@ -18,9 +18,23 @@ pub(super) async fn dispatch(
             processor.authority_plans_list(payload).await
         }
         "rpc.v1.Auth.DeploymentAuthority.Plans.Get" => processor.authority_plans_get(payload).await,
-        "rpc.v1.Auth.DeploymentAuthority.AcceptUpdate"
-        | "rpc.v1.Auth.DeploymentAuthority.AcceptMigration" => {
-            processor.authority_accept(payload, &caller).await
+        "rpc.v1.Auth.DeploymentAuthority.AcceptUpdate" => {
+            processor
+                .authority_accept(
+                    payload,
+                    &caller,
+                    crate::platform::auth::AuthorityProposalKind::Update,
+                )
+                .await
+        }
+        "rpc.v1.Auth.DeploymentAuthority.AcceptMigration" => {
+            processor
+                .authority_accept(
+                    payload,
+                    &caller,
+                    crate::platform::auth::AuthorityProposalKind::Migration,
+                )
+                .await
         }
         "rpc.v1.Auth.DeploymentAuthority.Reject" => {
             processor.authority_reject(payload, &caller).await

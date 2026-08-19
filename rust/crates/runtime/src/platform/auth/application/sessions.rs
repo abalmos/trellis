@@ -57,7 +57,6 @@ where
         &self,
         mut input: CreateSessionInput,
     ) -> Result<IdempotentOutcome<SessionRecord>, AuthorizationStateError> {
-        super::validation::validate_idempotency_and_actions(&input.idempotency, &input.actions)?;
         super::super::domain::require_protocol_timestamp("createdAt", input.created_at)?;
         let expires_at = u64::try_from(input.created_at)
             .ok()
@@ -67,7 +66,15 @@ where
                 AuthorizationStateError::InvalidRecord("session expiry overflow".to_owned())
             })? as i64;
         let session_id = format!("ses_{}", Ulid::new());
-        let session = SessionRecord::from_new(NewSession {
+        let previous_session = if input.principal_kind == PrincipalKind::User {
+            self.repository
+                .get_session_by_public_key(&input.session_public_key)
+                .await?
+                .filter(|session| session.principal_kind == PrincipalKind::User)
+        } else {
+            None
+        };
+        let mut session = SessionRecord::from_new(NewSession {
             session_id: session_id.clone(),
             principal_id: input.principal_id,
             principal_kind: input.principal_kind,
@@ -80,7 +87,43 @@ where
             created_at: input.created_at,
             expires_at: Some(expires_at),
         })?;
-        super::super::authority::validate_session(&session)?;
+        if let Some(previous) = &previous_session {
+            if previous.principal_id == session.principal_id
+                && previous.participant_id == session.participant_id
+            {
+                session.session_id.clone_from(&previous.session_id);
+                session.inbox_prefix.clone_from(&previous.inbox_prefix);
+                session.created_at = previous.created_at;
+                session.version = previous.version.checked_add(1).ok_or_else(|| {
+                    AuthorizationStateError::Storage("session version overflow".to_owned())
+                })?;
+            }
+            input.actions.push(PostCommitActionRecord {
+                predecessor_action_id: None,
+                action_id: trellis_protocol::digest_json(&json!({
+                    "kind": "kick",
+                    "scopeKey": &input.idempotency.scope_key,
+                    "sessionId": &previous.session_id,
+                }))
+                .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?,
+                kind: PostCommitActionKind::Kick,
+                payload: json!({ "sessionId": &previous.session_id }),
+                created_at: input.created_at,
+                attempts: 0,
+                next_attempt_at: input.created_at,
+                claimed_until: None,
+                last_error: None,
+            });
+        }
+        super::validation::validate_idempotency_and_actions(&input.idempotency, &input.actions)?;
+        if previous_session
+            .as_ref()
+            .is_some_and(|previous| previous.session_id == session.session_id)
+        {
+            super::super::authority::validate_persisted_session(&session)?;
+        } else {
+            super::super::authority::validate_session(&session)?;
+        }
         let runtime_binding = match (input.deployment_id, input.instance_id) {
             (None, None) => None,
             (Some(deployment_id), Some(instance_id)) => Some(SessionRuntimeBinding {
@@ -105,6 +148,7 @@ where
             .repository
             .create_session(SessionCreation {
                 session: session.clone(),
+                previous_session,
                 desired_authority: input.desired_authority,
                 runtime_binding,
                 idempotency: input.idempotency,

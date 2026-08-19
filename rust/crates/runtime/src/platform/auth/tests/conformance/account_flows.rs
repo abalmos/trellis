@@ -29,6 +29,7 @@ pub(super) async fn exercise_account_flows(
         expires_at: NOW + 1_000,
     };
     let action = |byte: u8, event: &str| PostCommitActionRecord {
+        predecessor_action_id: None,
         action_id: digest(byte),
         kind: PostCommitActionKind::Event,
         payload: json!({ "event": event }),
@@ -475,6 +476,7 @@ pub(super) async fn exercise_account_flows(
     store
         .create_session(SessionCreation {
             session: current_session.clone(),
+            previous_session: None,
             desired_authority: Some(DesiredAuthorityRecord::Identity(authority)),
             runtime_binding: None,
             idempotency: proof(201, "password.session.current"),
@@ -485,6 +487,7 @@ pub(super) async fn exercise_account_flows(
     store
         .create_session(SessionCreation {
             session: sibling_session.clone(),
+            previous_session: None,
             desired_authority: None,
             runtime_binding: None,
             idempotency: proof(202, "password.session.sibling"),

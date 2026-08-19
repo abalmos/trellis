@@ -313,52 +313,6 @@ export function parseDeviceActivationPayload(
   return parsed;
 }
 
-export async function startDeviceActivationRequest(args: {
-  trellisUrl: string;
-  payload: DeviceActivationPayload;
-}): Promise<
-  {
-    flowId: string;
-    instanceId: string;
-    deploymentId: string;
-    activationUrl: string;
-  }
-> {
-  const response = await fetch(
-    new URL("/auth/devices/activate/requests", args.trellisUrl),
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ payload: args.payload }),
-    },
-  );
-  if (!response.ok) {
-    const detail = await responseErrorDetail(response);
-    throw new Error(
-      `Device activation request failed: ${response.status}${
-        detail ? ` ${detail}` : ""
-      }`,
-    );
-  }
-
-  const parsed = await response.json() as Record<string, unknown>;
-  if (
-    typeof parsed.flowId !== "string" ||
-    typeof parsed.instanceId !== "string" ||
-    typeof parsed.deploymentId !== "string" ||
-    typeof parsed.activationUrl !== "string"
-  ) {
-    throw new Error("Device activation request returned an invalid response");
-  }
-
-  return {
-    flowId: parsed.flowId,
-    instanceId: parsed.instanceId,
-    deploymentId: parsed.deploymentId,
-    activationUrl: parsed.activationUrl,
-  };
-}
-
 export async function deriveDeviceConfirmationCode(input: {
   activationKey: Uint8Array | string;
   publicIdentityKey: string;
@@ -421,7 +375,12 @@ export async function waitForDeviceActivation(args: {
     publicIdentityKey: args.publicIdentityKey,
     nonce,
   });
+  let reviewId: string | undefined;
+  let reviewDeadline: number | undefined;
   while (true) {
+    if (reviewDeadline !== undefined && performance.now() >= reviewDeadline) {
+      throw new Error("device activation review expired");
+    }
     const requestId = ulid();
     const issuedAt = Date.now();
     const identityAuth = await createAuth({
@@ -511,10 +470,33 @@ export async function waitForDeviceActivation(args: {
         unknown
       >
       | null;
+    const currentReviewId = activation?.reviewId;
+    const serverNow = Reflect.get(body, "serverNow");
+    const expiresAt = activation?.expiresAt;
+    if (
+      typeof currentReviewId !== "string" ||
+      typeof serverNow !== "number" ||
+      typeof expiresAt !== "number"
+    ) {
+      throw new Error("Invalid pending device activation response");
+    }
+    if (reviewId !== undefined && currentReviewId !== reviewId) {
+      throw new Error("device activation review expired");
+    }
+    if (reviewId === undefined) {
+      reviewId = currentReviewId;
+      reviewDeadline = performance.now() + Math.max(0, expiresAt - serverNow);
+    }
     const retryAfterMs = typeof activation?.retryAfterMs === "number"
       ? activation.retryAfterMs
       : pollIntervalMs;
-    await sleep(Math.max(pollIntervalMs, retryAfterMs), args.signal);
+    await sleep(
+      Math.min(
+        Math.max(pollIntervalMs, retryAfterMs),
+        Math.max(0, (reviewDeadline ?? performance.now()) - performance.now()),
+      ),
+      args.signal,
+    );
   }
 }
 

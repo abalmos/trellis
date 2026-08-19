@@ -6,8 +6,89 @@ use trellis_protocol::GrantSetV1;
 
 use super::{
     ephemeral::BrowserConsentProposal, AuthorizationStateError, CapabilityGroupRecord,
-    ParticipantBindingRecord, PortalGrantOverrideRecord,
+    LoginPortalRecord, LoginSettingsRecord, ParticipantBindingRecord, PortalGrantOverrideRecord,
+    PortalPolicySnapshot,
 };
+
+pub(crate) fn portal_allows_authenticated_provider(
+    portal: &LoginPortalRecord,
+    settings: &LoginSettingsRecord,
+    provider_id: &str,
+) -> bool {
+    !portal.disabled
+        && !portal.removed
+        && portal.provider_ids.iter().any(|id| id == provider_id)
+        && (provider_id != "local" || settings.local_login_enabled)
+}
+
+pub(crate) fn portal_policy_snapshot(
+    portal: &LoginPortalRecord,
+    settings: &LoginSettingsRecord,
+    participant_id: &str,
+    policy: Option<&PortalGrantOverrideRecord>,
+    groups: &BTreeMap<String, CapabilityGroupRecord>,
+) -> Result<PortalPolicySnapshot, AuthorizationStateError> {
+    if settings.portal_id != portal.portal_id
+        || policy.is_some_and(|policy| {
+            policy.portal_id != portal.portal_id || policy.participant_id != participant_id
+        })
+    {
+        return Err(AuthorizationStateError::InvalidRecord(
+            "portal policy snapshot inputs disagree".to_owned(),
+        ));
+    }
+    let mut pending = policy
+        .into_iter()
+        .flat_map(|policy| {
+            policy
+                .capability_group_keys
+                .iter()
+                .chain(
+                    policy
+                        .role_mappings
+                        .iter()
+                        .flat_map(|mapping| mapping.capability_group_keys.iter()),
+                )
+                .cloned()
+        })
+        .collect::<Vec<_>>();
+    let mut versions = BTreeMap::new();
+    let mut fingerprints = BTreeMap::new();
+    while let Some(group_key) = pending.pop() {
+        if versions.contains_key(&group_key) {
+            continue;
+        }
+        let group = groups.get(&group_key).ok_or_else(|| {
+            AuthorizationStateError::InvalidRecord(format!(
+                "portal policy references missing capability group {group_key}"
+            ))
+        })?;
+        versions.insert(group_key, group.version);
+        fingerprints.insert(group.group_key.clone(), policy_record_fingerprint(group)?);
+        pending.extend(group.included_groups.iter().cloned());
+    }
+    Ok(PortalPolicySnapshot {
+        portal_id: portal.portal_id.clone(),
+        portal_version: portal.version,
+        portal_fingerprint: policy_record_fingerprint(portal)?,
+        login_settings_version: settings.version,
+        login_settings_fingerprint: policy_record_fingerprint(settings)?,
+        participant_id: participant_id.to_owned(),
+        policy_version: policy.map(|policy| policy.version),
+        policy_fingerprint: policy.map(policy_record_fingerprint).transpose()?,
+        capability_group_versions: versions.into_iter().collect(),
+        capability_group_fingerprints: fingerprints.into_iter().collect(),
+    })
+}
+
+pub(super) fn policy_record_fingerprint<T: Serialize>(
+    record: &T,
+) -> Result<String, AuthorizationStateError> {
+    let value = serde_json::to_value(record)
+        .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
+    trellis_protocol::digest_json(&value)
+        .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))
+}
 
 pub(crate) fn browser_consent_proposal(
     binding: &ParticipantBindingRecord,

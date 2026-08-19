@@ -3274,7 +3274,6 @@ export const AuthDeviceUserAuthoritiesResolve = operationAction(
         fromSerializable: Types.ValidationError.fromSerializable,
       },
     ] as const,
-    cancel: true,
   },
   "AuthDeviceUserAuthoritiesResolve",
   ACTION_SOURCE,

@@ -39,7 +39,69 @@ impl SessionRepository for SqliteAuthorizationStore {
             if let Some(result) = sqlite_idempotency_replay(&transaction, &command.idempotency)? {
                 return Ok(IdempotentOutcome::Replayed(result));
             }
-            insert_sql_session(&transaction, &command.session)?;
+            if let Some(previous) = &command.previous_session {
+                if load_session(&transaction, &previous.session_id)?.as_ref() != Some(previous)
+                    || previous.session_public_key != command.session.session_public_key
+                {
+                    return Err(AuthorizationStateError::StorageConflict);
+                }
+                revoke_sql_contexts(
+                    &transaction,
+                    &AuthorizationContextSelector::Session(previous.session_id.clone()),
+                    AuthorizationContextRevocationReason::SessionRevoked,
+                    command.session.last_seen_at.div_euclid(1_000),
+                )?;
+                if previous.session_id == command.session.session_id {
+                    let changed = transaction
+                        .execute(
+                            "UPDATE auth_sessions SET
+                                participant_kind = ?1,
+                                participant_artifact_digest = ?2,
+                                participant_needs_digest = ?3,
+                                state = ?4,
+                                last_seen_at = ?5,
+                                expires_at = ?6,
+                                revoked_at = ?7,
+                                version = ?8
+                             WHERE session_id = ?9 AND version = ?10",
+                            params![
+                                encode_enum(command.session.participant_kind)?,
+                                command.session.participant_artifact_digest,
+                                command.session.participant_needs_digest,
+                                encode_enum(command.session.state)?,
+                                command.session.last_seen_at,
+                                command.session.expires_at,
+                                command.session.revoked_at,
+                                to_sql_version(command.session.version)?,
+                                previous.session_id,
+                                to_sql_version(previous.version)?,
+                            ],
+                        )
+                        .map_err(map_write_error)?;
+                    if changed != 1 {
+                        return Err(AuthorizationStateError::StorageConflict);
+                    }
+                } else {
+                    transaction
+                        .execute(
+                            "DELETE FROM auth_authorization_contexts WHERE session_id = ?1",
+                            [&previous.session_id],
+                        )
+                        .map_err(map_write_error)?;
+                    let changed = transaction
+                        .execute(
+                            "DELETE FROM auth_sessions WHERE session_id = ?1 AND version = ?2",
+                            params![previous.session_id, to_sql_version(previous.version)?],
+                        )
+                        .map_err(map_write_error)?;
+                    if changed != 1 {
+                        return Err(AuthorizationStateError::StorageConflict);
+                    }
+                    insert_sql_session(&transaction, &command.session)?;
+                }
+            } else {
+                insert_sql_session(&transaction, &command.session)?;
+            }
             match command.session.principal_kind {
                 PrincipalKind::User => {
                     if command.runtime_binding.is_some() {

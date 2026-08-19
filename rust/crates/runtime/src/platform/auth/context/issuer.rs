@@ -61,6 +61,20 @@ impl AuthorizationContextService {
         context: &trellis_protocol::VerifiedAuthorizationContextV1,
     ) -> Result<TransportPermissions, AuthorizationStateError> {
         let signed = &context.signed_context().unsigned;
+        let durable = self
+            .repository
+            .get_context_by_digest(context.context_digest())
+            .await?
+            .ok_or_else(|| {
+                AuthorizationStateError::InvalidRecord(
+                    "authorization context is missing from durable state".to_owned(),
+                )
+            })?;
+        if durable.state != AuthorizationContextState::Active {
+            return Err(AuthorizationStateError::InvalidRecord(
+                "authorization context is not active in durable state".to_owned(),
+            ));
+        }
         let binding = self
             .repository
             .get_participant_binding(&signed.participant.id, &signed.participant.artifact_digest)

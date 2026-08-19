@@ -221,6 +221,46 @@ async fn runtime_singleton_ownership_lifecycle() {
         RuntimeProcess::start(&runtime, "all", &all_runtime_config, "all-runtime");
     all_runtime.wait_ready().await;
     assert_jobs_owner_consumers(&client).await;
+    let (same_owner_revision, same_owner_value) =
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                let jobs_entry = leases
+                    .entry("jobs.owner")
+                    .await
+                    .expect("inspect all-mode Jobs lease")
+                    .expect("all-mode Jobs lease exists");
+                match leases
+                    .update("jobs.owner", jobs_entry.value.clone(), jobs_entry.revision)
+                    .await
+                {
+                    Ok(revision) => break (revision, jobs_entry.value),
+                    Err(error) if error.kind() == kv::UpdateErrorKind::WrongLastRevision => {}
+                    Err(error) => panic!("advance all-mode Jobs lease revision: {error}"),
+                }
+            }
+        })
+        .await
+        .expect("advance all-mode Jobs lease revision before timeout");
+    tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            assert!(
+                all_runtime.is_ready().await,
+                "all-mode runtime rejected its own current lease revision: {}",
+                all_runtime.stderr()
+            );
+            let jobs_entry = leases
+                .entry("jobs.owner")
+                .await
+                .expect("inspect reconciled all-mode Jobs lease")
+                .expect("reconciled all-mode Jobs lease exists");
+            if jobs_entry.value == same_owner_value && jobs_entry.revision > same_owner_revision {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    })
+    .await
+    .expect("runtime renews after adopting its current lease revision");
     let manipulated_revision = tokio::time::timeout(Duration::from_secs(5), async {
         loop {
             let jobs_entry = leases

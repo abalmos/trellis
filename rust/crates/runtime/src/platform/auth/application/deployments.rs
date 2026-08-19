@@ -80,6 +80,8 @@ pub struct EnrollDeviceIdentityInput {
 /// Device activation-review request input.
 #[derive(Clone, Debug)]
 pub struct CreateActivationReviewInput {
+    /// Stable activation review ID.
+    pub review_id: String,
     /// Stable device principal ID.
     pub principal_id: String,
     /// Stable deployment ID.
@@ -92,6 +94,8 @@ pub struct CreateActivationReviewInput {
     pub payload: serde_json::Value,
     /// Request time in Unix milliseconds.
     pub requested_at: i64,
+    /// Authoritative review expiry in Unix milliseconds.
+    pub expires_at: i64,
     /// Durable proof claim; its result is replaced with the review ID.
     pub idempotency: IdempotencyResultRecord,
     /// Deterministic post-commit actions.
@@ -113,9 +117,30 @@ pub struct DecideActivationReviewInput {
     pub reason: Option<String>,
     /// Optional approved delegation.
     pub delegation: Option<DeviceDelegationRecord>,
+    /// Whether this decision satisfies every requirement for device readiness.
+    pub activate_device: bool,
     /// Decision time in Unix milliseconds.
     pub decided_at: i64,
     /// Durable proof claim; its result is replaced with the review outcome.
+    pub idempotency: IdempotencyResultRecord,
+    /// Deterministic post-commit actions.
+    pub actions: Vec<PostCommitActionRecord>,
+}
+
+/// Authenticated user activation-review claim input.
+#[derive(Clone, Debug)]
+pub struct ClaimActivationReviewInput {
+    /// Stable review ID.
+    pub review_id: String,
+    /// Expected review version.
+    pub expected_version: u64,
+    /// Activating user principal.
+    pub activated_by_user_principal_id: String,
+    /// Authoritative server time in Unix milliseconds.
+    pub now: i64,
+    /// Active delegation created when claiming an already approved review.
+    pub delegation: Option<DeviceDelegationRecord>,
+    /// Durable operation result.
     pub idempotency: IdempotencyResultRecord,
     /// Deterministic post-commit actions.
     pub actions: Vec<PostCommitActionRecord>,
@@ -395,9 +420,8 @@ where
     ) -> Result<IdempotentOutcome<DeviceActivationReviewRecord>, AuthorizationStateError> {
         super::validation::validate_idempotency_and_actions(&input.idempotency, &input.actions)?;
         super::super::domain::require_protocol_timestamp("requestedAt", input.requested_at)?;
-        let review_id = format!("dar_{}", Ulid::new());
         let review = DeviceActivationReviewRecord {
-            review_id: review_id.clone(),
+            review_id: input.review_id.clone(),
             principal_id: input.principal_id,
             deployment_id: input.deployment_id,
             instance_id: input.instance_id,
@@ -405,20 +429,70 @@ where
             payload: input.payload,
             state: DeviceActivationReviewState::Pending,
             requested_at: input.requested_at,
+            expires_at: input.expires_at,
+            activated_by_user_principal_id: None,
             decided_at: None,
             decided_by: None,
             reason: None,
             version: 1,
         };
         super::validation::validate_activation_review(&review)?;
-        input.idempotency.result = json!({ "reviewId": review_id });
-        self.repository
+        input.idempotency.result = json!({ "reviewId": input.review_id });
+        let outcome = self
+            .repository
             .create_activation_review(ActivationReviewCreation {
                 review,
                 idempotency: input.idempotency,
                 actions: input.actions,
             })
-            .await
+            .await?;
+        if let IdempotentOutcome::Applied(review) = &outcome {
+            self.activation_reviews.notify(&review.review_id).await;
+        }
+        Ok(outcome)
+    }
+
+    /// Expire every pending activation review due at the supplied server time.
+    pub(crate) async fn expire_due_activation_reviews(
+        &self,
+        now: i64,
+    ) -> Result<Vec<DeviceActivationReviewRecord>, AuthorizationStateError> {
+        super::super::domain::require_protocol_timestamp("now", now)?;
+        let reviews = self.repository.expire_due_activation_reviews(now).await?;
+        for review in &reviews {
+            self.activation_reviews.notify(&review.review_id).await;
+        }
+        Ok(reviews)
+    }
+
+    /// Claim one activation review for an authenticated user.
+    pub(crate) async fn claim_activation_review(
+        &self,
+        mut input: ClaimActivationReviewInput,
+    ) -> Result<IdempotentOutcome<DeviceActivationReviewRecord>, AuthorizationStateError> {
+        super::validation::validate_idempotency_and_actions(&input.idempotency, &input.actions)?;
+        if input.review_id.is_empty() || input.activated_by_user_principal_id.is_empty() {
+            return Err(AuthorizationStateError::InvalidRecord(
+                "activation review claim identifiers must be non-empty".to_owned(),
+            ));
+        }
+        input.idempotency.result = json!({ "reviewId": input.review_id });
+        let outcome = self
+            .repository
+            .claim_activation_review(ActivationReviewClaim {
+                review_id: input.review_id,
+                expected_version: input.expected_version,
+                activated_by_user_principal_id: input.activated_by_user_principal_id,
+                now: input.now,
+                delegation: input.delegation,
+                idempotency: input.idempotency,
+                actions: input.actions,
+            })
+            .await?;
+        if let IdempotentOutcome::Applied(review) = &outcome {
+            self.activation_reviews.notify(&review.review_id).await;
+        }
+        Ok(outcome)
     }
 
     /// Decide a device activation review and apply approved device state.
@@ -445,6 +519,7 @@ where
             decided_by: input.decided_by.clone(),
             reason: input.reason.clone(),
             delegation: input.delegation.clone(),
+            activate_device: input.activate_device,
             idempotency: input.idempotency.clone(),
             actions: input.actions.clone(),
         };
@@ -453,7 +528,8 @@ where
             "reviewId": input.review_id,
             "state": input.state,
         });
-        self.repository
+        let outcome = self
+            .repository
             .decide_activation_review(ActivationReviewDecision {
                 review_id: input.review_id,
                 expected_version: input.expected_version,
@@ -462,9 +538,14 @@ where
                 decided_by: input.decided_by,
                 reason: input.reason,
                 delegation: input.delegation,
+                activate_device: input.activate_device,
                 idempotency: input.idempotency,
                 actions: input.actions,
             })
-            .await
+            .await?;
+        if let IdempotentOutcome::Applied(review) = &outcome {
+            self.activation_reviews.notify(&review.review_id).await;
+        }
+        Ok(outcome)
     }
 }

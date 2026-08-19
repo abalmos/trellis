@@ -1,5 +1,6 @@
 use async_nats::jetstream;
 use bytes::Bytes;
+use futures_util::{stream, StreamExt};
 use serde_json::Value;
 use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
@@ -51,53 +52,91 @@ impl AuthPostCommitRuntime {
 
     pub(crate) async fn run(self, stop: StopHandle) -> Result<(), RuntimeError> {
         loop {
-            tokio::select! {
+            let dispatched = tokio::select! {
                 () = stop.stopped() => return Ok(()),
                 result = self.dispatch_ready() => result
                     .map_err(|error| RuntimeError::Platform(error.to_string()))?,
-            }
-            tokio::select! {
-                () = stop.stopped() => return Ok(()),
-                () = tokio::time::sleep(std::time::Duration::from_millis(IDLE_POLL_MS)) => {}
+            };
+            if dispatched == 0 {
+                tokio::select! {
+                    () = stop.stopped() => return Ok(()),
+                    () = tokio::time::sleep(std::time::Duration::from_millis(IDLE_POLL_MS)) => {}
+                }
             }
         }
     }
 
-    async fn dispatch_ready(&self) -> Result<(), AuthorizationStateError> {
+    async fn dispatch_ready(&self) -> Result<usize, AuthorizationStateError> {
         let now = now_millis()?;
-        for action in self
+        let actions = self
             .repository
             .list_ready_post_commit_actions(now, BATCH_SIZE)
-            .await?
-        {
-            let claimed_until = now.saturating_add(CLAIM_DURATION_MS);
-            let Some(action) = self
-                .repository
-                .claim_post_commit_action(&action.action_id, now, claimed_until)
-                .await?
-            else {
-                continue;
-            };
-            match self.dispatch(&action).await {
-                Ok(()) => {
-                    self.repository
-                        .acknowledge_post_commit_action(&action.action_id, claimed_until)
-                        .await?;
-                }
-                Err(error) => {
-                    let delay = retry_delay_ms(action.attempts);
-                    self.repository
-                        .fail_post_commit_action(
-                            &action.action_id,
-                            claimed_until,
-                            now.saturating_add(delay),
-                            error.to_string(),
-                        )
-                        .await?;
-                }
+            .await?;
+        let action_count = actions.len();
+        let mut dispatches = stream::iter(actions)
+            .map(|action| self.dispatch_action(action, now))
+            .buffer_unordered(16);
+        let mut first_error = None;
+        while let Some(result) = dispatches.next().await {
+            if let Err(error) = result {
+                first_error.get_or_insert(error);
             }
         }
-        Ok(())
+        if let Some(error) = first_error {
+            return Err(error);
+        }
+        Ok(action_count)
+    }
+
+    async fn dispatch_action(
+        &self,
+        action: PostCommitActionRecord,
+        now: i64,
+    ) -> Result<(), AuthorizationStateError> {
+        let claimed_until = now.saturating_add(CLAIM_DURATION_MS);
+        let Some(action) = self
+            .repository
+            .claim_post_commit_action(&action.action_id, now, claimed_until)
+            .await?
+        else {
+            return Ok(());
+        };
+        #[cfg(feature = "integration-test-hooks")]
+        if self
+            .repository
+            .consume_test_post_commit_failure(&action.action_id)
+            .await?
+        {
+            let delay = retry_delay_ms(action.attempts);
+            self.repository
+                .fail_post_commit_action(
+                    &action.action_id,
+                    claimed_until,
+                    now.saturating_add(delay),
+                    "injected integration-test dispatch failure".to_owned(),
+                )
+                .await?;
+            return Ok(());
+        }
+        match self.dispatch(&action).await {
+            Ok(()) => {
+                self.repository
+                    .acknowledge_post_commit_action(&action.action_id, claimed_until)
+                    .await
+            }
+            Err(error) => {
+                let delay = retry_delay_ms(action.attempts);
+                self.repository
+                    .fail_post_commit_action(
+                        &action.action_id,
+                        claimed_until,
+                        now.saturating_add(delay),
+                        error.to_string(),
+                    )
+                    .await
+                    .map(|_| ())
+            }
+        }
     }
 
     async fn dispatch(

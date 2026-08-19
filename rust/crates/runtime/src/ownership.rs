@@ -11,8 +11,8 @@
 //! an absolute cadence anchored to acquisition verification rather than allowing
 //! work duration to drift the schedule.
 //!
-//! Stale revisions, ambiguous renewal results, and timeouts are fatal ownership
-//! loss. The supervisor prioritizes confirmed loss over ordinary shutdown,
+//! Stale revisions, unresolved ambiguous renewal results, and timeouts are fatal
+//! ownership loss. The supervisor prioritizes confirmed loss over ordinary shutdown,
 //! immediately aborts owner tasks, and reserves cooperative shutdown for signals
 //! and clean exits. Normal shutdown stops renewal, releases current revisions,
 //! and flushes NATS in bounded order.
@@ -261,13 +261,22 @@ async fn renew_round(
             .await
             .map_err(|source| map_renewal_error(group, key, owner_id, source))
     });
-    match complete_renewal_round(renewals, manager.renew).await {
+    match complete_renewal_round(
+        renewals,
+        renewal_round_timeout(owner_id, manager.renew, manager.ttl),
+    )
+    .await
+    {
         Ok(()) => Ok(()),
         Err(RenewalRoundFailure::Operation(error)) => Err(error),
         Err(RenewalRoundFailure::Timeout) => Err(RuntimeError::OwnerRenewalRoundTimeout {
             owner_id: owner_id.to_owned(),
         }),
     }
+}
+
+fn renewal_round_timeout(owner_id: &str, renew: Duration, ttl: Duration) -> Duration {
+    ttl.saturating_sub(renew + renewal_jitter(owner_id, renew, ttl))
 }
 
 #[derive(Debug)]
@@ -551,9 +560,11 @@ mod tests {
     fn first_renewal_failure_detection_precedes_lease_expiry_at_boundary() {
         let renew = Duration::from_secs(5);
         let ttl = renew * 3;
-        let maximum_jitter = renew / 5;
+        let jitter = renewal_jitter("owner-1", renew, ttl);
+        let timeout = renewal_round_timeout("owner-1", renew, ttl);
 
-        assert!(renew + maximum_jitter + renew < ttl);
+        assert!(timeout > renew);
+        assert_eq!(renew + jitter + timeout, ttl);
     }
 
     #[test]

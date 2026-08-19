@@ -268,6 +268,7 @@ pub(super) async fn exercise_store(
     })?;
     assert_ne!(session.session_key_id, session.session_public_key);
     let creation_action = PostCommitActionRecord {
+        predecessor_action_id: None,
         action_id: test_digest("session.create.action:ses_01"),
         kind: PostCommitActionKind::Event,
         payload: json!({ "sessionId": session.session_id }),
@@ -317,6 +318,7 @@ pub(super) async fn exercise_store(
     })?;
     let mut rollback_creation = test_session_creation(rollback_session.clone(), None, None);
     rollback_creation.actions.push(PostCommitActionRecord {
+        predecessor_action_id: None,
         payload: json!({ "different": true }),
         ..creation_action
     });
@@ -481,8 +483,10 @@ pub(super) async fn exercise_store(
             .version,
         2
     );
-    let ready_actions = store.list_ready_post_commit_actions(NOW + 60, 100).await?;
-    for expected in &revocation.actions {
+    for (index, expected) in revocation.actions.iter().enumerate() {
+        let now = NOW + 60 + i64::try_from(index)?;
+        let claimed_until = now + 100;
+        let ready_actions = store.list_ready_post_commit_actions(now, 100).await?;
         assert_eq!(
             ready_actions
                 .iter()
@@ -490,6 +494,38 @@ pub(super) async fn exercise_store(
                 .count(),
             1
         );
+        store
+            .claim_post_commit_action(&expected.action_id, now, claimed_until)
+            .await?
+            .ok_or("ordered post-commit action was not claimable")?;
+        if index == 0 && revocation.actions.len() > 1 {
+            store
+                .fail_post_commit_action(
+                    &expected.action_id,
+                    claimed_until,
+                    now + 10,
+                    "ordered retry".to_owned(),
+                )
+                .await?;
+            let blocked = store.list_ready_post_commit_actions(now + 1, 100).await?;
+            assert!(!blocked
+                .iter()
+                .any(|action| { action.action_id == revocation.actions[index + 1].action_id }));
+            store
+                .claim_post_commit_action(&expected.action_id, now + 10, claimed_until + 10)
+                .await?
+                .ok_or("ordered post-commit action was not retryable")?;
+        }
+        store
+            .acknowledge_post_commit_action(
+                &expected.action_id,
+                if index == 0 && revocation.actions.len() > 1 {
+                    claimed_until + 10
+                } else {
+                    claimed_until
+                },
+            )
+            .await?;
     }
     assert_eq!(
         store

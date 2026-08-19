@@ -1505,6 +1505,7 @@ export const AuthDevicesRemoveResponseSchema = Type.Object({
 
 export const AuthResolveDeviceUserAuthoritiesSchema = Type.Object({
   flowId: Type.String({ minLength: 1 }),
+  confirmationCode: Type.String({ minLength: 1 }),
 });
 export const AuthResolveDeviceUserAuthoritiesProgressSchema = Type.Object({
   status: Type.Literal("pending_review"),

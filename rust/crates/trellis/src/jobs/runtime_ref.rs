@@ -33,21 +33,30 @@ impl NatsJobWaiter {
     /// Wait until the given job reaches a terminal lifecycle state.
     pub async fn wait_for_terminal(&self, seed: Job) -> Result<Job, JobsError> {
         let subject = format!("{}.{}.*", self.queue.publish_prefix, seed.id);
-        let mut subscriber = self
-            .nats
-            .subscribe(subject.clone())
-            .await
-            .map_err(|error| jobs_message(format!("job lifecycle subscribe failed: {error}")))?;
-
+        let mut subscriber =
+            self.nats.subscribe(subject).await.map_err(|error| {
+                jobs_message(format!("job lifecycle subscribe failed: {error}"))
+            })?;
+        self.nats.flush().await.map_err(|error| {
+            jobs_message(format!("job lifecycle subscribe flush failed: {error}"))
+        })?;
         let jetstream = jetstream::new(self.nats.clone());
         let lifecycle_stream = jetstream
             .get_stream_no_info(JOBS_STREAM)
             .await
             .map_err(|error| jobs_message(format!("open jobs lifecycle stream failed: {error}")))?;
 
-        let mut current = latest_job_from_lifecycle(&lifecycle_stream, &subject, seed).await?;
-        if is_terminal(current.state) {
-            return Ok(current);
+        let mut current = seed;
+        if let Some(message) =
+            latest_terminal_message(&lifecycle_stream, &self.queue.publish_prefix, &current.id)
+                .await?
+        {
+            let event: JobEvent = serde_json::from_slice(&message.payload)
+                .map_err(|error| jobs_message(format!("decode job lifecycle event: {error}")))?;
+            current = apply_lifecycle_event(&current, &event);
+            if is_terminal(current.state) {
+                return Ok(current);
+            }
         }
 
         let timeout_job_id = current.id.clone();
@@ -256,6 +265,36 @@ async fn latest_job_from_lifecycle(
     let event: JobEvent = serde_json::from_slice(&latest.payload)
         .map_err(|error| jobs_message(format!("decode latest job lifecycle event: {error}")))?;
     Ok(apply_lifecycle_event(&seed, &event))
+}
+
+async fn latest_terminal_message(
+    lifecycle_stream: &stream::Stream<()>,
+    publish_prefix: &str,
+    job_id: &str,
+) -> Result<Option<async_nats::jetstream::message::StreamMessage>, JobsError> {
+    let mut latest = None;
+    for event_type in [
+        JobEventType::Completed,
+        JobEventType::Failed,
+        JobEventType::Cancelled,
+        JobEventType::Expired,
+        JobEventType::Skipped,
+        JobEventType::Stale,
+        JobEventType::Dead,
+        JobEventType::Dismissed,
+    ] {
+        let subject = format!("{publish_prefix}.{job_id}.{}", event_type.as_token());
+        if let Some(message) = latest_lifecycle_message(lifecycle_stream, &subject).await? {
+            if latest.as_ref().is_none_or(
+                |latest: &async_nats::jetstream::message::StreamMessage| {
+                    message.sequence > latest.sequence
+                },
+            ) {
+                latest = Some(message);
+            }
+        }
+    }
+    Ok(latest)
 }
 
 async fn latest_lifecycle_message(

@@ -302,7 +302,7 @@
   "implements": {
     "auth": {
       "api": "trellis.auth@v1",
-      "apiDigest": "WtzvXn97fugvnlNNtvaLGl__oGbVl77GhFKBQYjkG64"
+      "apiDigest": "Fs_nA37wXgMpLRfB7IyYDhIEDUdSl3PdNp6ehnXcV1A"
     }
   },
   "uses": {

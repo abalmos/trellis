@@ -287,6 +287,8 @@ export async function buildRuntimeBinaries(): Promise<Record<string, string>> {
       "-p",
       "trellis-cli",
       "--bins",
+      "--features",
+      "trellis-runtime/integration-test-hooks",
       "--message-format=json",
     ],
     cwd: repoRoot,

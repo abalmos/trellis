@@ -1,5 +1,7 @@
 use super::super::{AuthorizationContextBundle, AuthorizationContextIssueRequest};
 use super::*;
+use crate::platform::auth::{DeviceActivationReviewState, DeviceReviewMode};
+use ulid::Ulid;
 
 const DEVICE_ACTIVATION_REVIEW_TTL_MS: i64 = 15 * 60_000;
 
@@ -128,6 +130,7 @@ struct BootstrapActivation {
     state: &'static str,
     review_id: String,
     activation_url: String,
+    expires_at: i64,
     /// Suggested device retry delay for the proof-bound bootstrap flow.
     retry_after_ms: u64,
 }
@@ -462,7 +465,7 @@ where
             .get_device(&identity.principal_id, &input.deployment_id)
             .await?
             .ok_or_else(|| HttpError::unauthorized("device_not_found"))?;
-        if matches!(device.state, DeviceState::Pending | DeviceState::Disabled) {
+        if device.state == DeviceState::Pending {
             let challenge_digest = input
                 .challenge_digest
                 .clone()
@@ -480,43 +483,122 @@ where
                     "invalid_activation_confirmation_code",
                 ));
             }
-            let expires_at = now
-                .checked_add(DEVICE_ACTIVATION_REVIEW_TTL_MS)
-                .ok_or_else(|| HttpError::internal("device_activation_expiry_overflow"))?;
-            let review = state
+            #[cfg(feature = "integration-test-hooks")]
+            let review_ttl_ms = state
                 .service
-                .create_activation_review(CreateActivationReviewInput {
-                    principal_id: identity.principal_id.clone(),
-                    deployment_id: input.deployment_id.clone(),
-                    instance_id: input.instance_id.clone(),
-                    request_digest: challenge_digest,
-                    payload: json!({
-                        "source": "device_bootstrap",
-                        "publicIdentityKey": input.identity_public_key.clone(),
-                        "participantId": input.participant_id.clone(),
-                        "contractDigest": input.participant_artifact_digest.clone(),
-                        "confirmationCode": confirmation_code,
-                        "expiresAt": expires_at,
-                    }),
-                    requested_at: now,
-                    idempotency: idempotency(
-                        &input.identity_key_id,
-                        "device.activation.request",
-                        &proof_signer_key_id,
-                        &proof_request_id,
-                        &input.request_digest,
-                        now,
-                    )?,
-                    actions: Vec::new(),
-                })
-                .await?;
-            let review_id = match review {
-                IdempotentOutcome::Applied(review) => review.review_id,
-                IdempotentOutcome::Replayed(value) => value
-                    .get("reviewId")
-                    .and_then(Value::as_str)
-                    .ok_or_else(|| HttpError::internal("invalid_activation_replay"))?
-                    .to_owned(),
+                .repository()
+                .activation_review_test_ttl_ms(&input.deployment_id)
+                .await?
+                .unwrap_or(DEVICE_ACTIVATION_REVIEW_TTL_MS);
+            #[cfg(not(feature = "integration-test-hooks"))]
+            let review_ttl_ms = DEVICE_ACTIVATION_REVIEW_TTL_MS;
+            let expires_at = now
+                .checked_add(review_ttl_ms)
+                .ok_or_else(|| HttpError::internal("device_activation_expiry_overflow"))?;
+            let profile = state
+                .service
+                .repository()
+                .get_deployment_profile(&input.deployment_id)
+                .await?
+                .ok_or_else(|| HttpError::unauthorized("deployment_not_found"))?;
+            state.service.expire_due_activation_reviews(now).await?;
+            let reviews = state.service.repository().list_activation_reviews().await?;
+            if reviews.iter().any(|review| {
+                review.principal_id == identity.principal_id
+                    && review.deployment_id == input.deployment_id
+                    && review.instance_id == input.instance_id
+                    && review.state == DeviceActivationReviewState::Rejected
+            }) {
+                return Ok(bootstrap_state(now, "authority_rejected", None));
+            }
+            let existing_review = reviews.into_iter().find(|review| {
+                review.principal_id == identity.principal_id
+                    && review.deployment_id == input.deployment_id
+                    && review.instance_id == input.instance_id
+                    && matches!(
+                        review.state,
+                        DeviceActivationReviewState::Pending
+                            | DeviceActivationReviewState::Approved
+                    )
+                    && review.expires_at > now
+            });
+            let (review_id, review_expires_at) = if let Some(review) = existing_review {
+                (review.review_id, review.expires_at)
+            } else {
+                let review_id = format!("dar_{}", Ulid::new());
+                let review_requested_action_id =
+                    crate::platform::auth::activation_review_event_action_id(
+                        &review_id,
+                        "review-requested",
+                    )?;
+                let actions = (profile.review_mode == Some(DeviceReviewMode::Required))
+                    .then(|| PostCommitActionRecord {
+                        predecessor_action_id: None,
+                        action_id: review_requested_action_id,
+                        kind: PostCommitActionKind::Event,
+                        payload: json!({
+                            "eventType": "Auth.DeviceUserAuthorities.ReviewRequested",
+                            "eventSubject": format!(
+                                "events.v1.Auth.DeviceUserAuthorities.ReviewRequested.{}",
+                                input.deployment_id,
+                            ),
+                            "eventId": format!(
+                                "evt_{}",
+                                digest_parts(&[&review_id, "review-requested"]),
+                            ),
+                            "occurredAt": now,
+                            "reviewId": review_id,
+                            "deploymentId": input.deployment_id,
+                            "instanceId": input.instance_id,
+                            "requestedAt": now,
+                            "expiresAt": expires_at,
+                        }),
+                        created_at: now,
+                        attempts: 0,
+                        next_attempt_at: now,
+                        claimed_until: None,
+                        last_error: None,
+                    })
+                    .into_iter()
+                    .collect();
+                let review = state
+                    .service
+                    .create_activation_review(CreateActivationReviewInput {
+                        review_id,
+                        principal_id: identity.principal_id.clone(),
+                        deployment_id: input.deployment_id.clone(),
+                        instance_id: input.instance_id.clone(),
+                        request_digest: challenge_digest,
+                        payload: json!({
+                            "source": "device_bootstrap",
+                            "publicIdentityKey": input.identity_public_key.clone(),
+                            "participantId": input.participant_id.clone(),
+                            "contractDigest": input.participant_artifact_digest.clone(),
+                            "confirmationCode": confirmation_code,
+                            "expiresAt": expires_at,
+                        }),
+                        requested_at: now,
+                        expires_at,
+                        idempotency: idempotency(
+                            &input.identity_key_id,
+                            "device.activation.request",
+                            &proof_signer_key_id,
+                            &proof_request_id,
+                            &input.request_digest,
+                            now,
+                        )?,
+                        actions,
+                    })
+                    .await?;
+                let review_id = match review {
+                    IdempotentOutcome::Applied(review) => review.review_id,
+                    IdempotentOutcome::Replayed(value) => value
+                        .get("reviewId")
+                        .and_then(Value::as_str)
+                        .ok_or_else(|| HttpError::internal("invalid_activation_replay"))?
+                        .to_owned(),
+                };
+                (review_id, expires_at)
             };
             let portal = super::browser::select_device_portal(
                 state.service.repository(),
@@ -539,12 +621,33 @@ where
                         &review_id,
                     )?,
                     review_id,
+                    expires_at: review_expires_at,
                     retry_after_ms: 1_000,
                 }),
                 proposal: None,
             });
         } else if device.state != DeviceState::Active {
-            return Err(HttpError::unauthorized("device_inactive"));
+            let rejected = state
+                .service
+                .repository()
+                .list_activation_reviews()
+                .await?
+                .into_iter()
+                .any(|review| {
+                    review.principal_id == identity.principal_id
+                        && review.deployment_id == input.deployment_id
+                        && review.instance_id == input.instance_id
+                        && review.state == DeviceActivationReviewState::Rejected
+                });
+            return Ok(bootstrap_state(
+                now,
+                if rejected {
+                    "authority_rejected"
+                } else {
+                    "disabled"
+                },
+                None,
+            ));
         } else {
             None
         }

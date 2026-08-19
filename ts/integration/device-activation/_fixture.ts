@@ -5,10 +5,10 @@ import {
   defineDeviceContract,
 } from "@qlever-llc/trellis";
 import {
+  deriveDeviceConfirmationCode,
   deriveDeviceIdentity,
   waitForDeviceActivation,
 } from "@qlever-llc/trellis/auth";
-import { assertOperationCompleted } from "@qlever-llc/trellis-test";
 import * as trellisAuth from "@qlever-llc/trellis/sdk/auth";
 import { nativeProtocolPresentation } from "../../packages/trellis/contract_support/protocol_artifacts.ts";
 import type { LiveTrellisRuntime } from "../_support/runtime.ts";
@@ -212,6 +212,10 @@ export function createDeviceActivationFixture(caseId: string) {
       trellisAuth.AuthDeviceUserAuthoritiesRevoke,
       trellisAuth.AuthDeviceUserAuthoritiesReviewsDecide,
       trellisAuth.AuthDeviceUserAuthoritiesReviewsList,
+      trellisAuth.AuthDeviceUserAuthoritiesReviewRequested.subscribe,
+      trellisAuth.AuthDeviceUserAuthoritiesRequested.subscribe,
+      trellisAuth.AuthDeviceUserAuthoritiesApproved.subscribe,
+      trellisAuth.AuthDeviceUserAuthoritiesResolved.subscribe,
       trellisAuth.AuthConnectionsList,
       trellisAuth.AuthServiceInstancesList,
       trellisAuth.AuthSessionsList,
@@ -238,6 +242,7 @@ export function createDeviceActivationFixture(caseId: string) {
 
   async function setupDeviceDeployment(
     runtime: LiveTrellisRuntime,
+    reviewMode: "none" | "required" = "none",
   ) {
     const admin = await runtime.connectClient({
       name: caseScopedName("device-activation-fixture-admin", caseId),
@@ -256,6 +261,7 @@ export function createDeviceActivationFixture(caseId: string) {
       participantId: deviceContract.CONTRACT_ID,
       portalId: null,
       requiresDeviceDelegation: false,
+      reviewMode,
     }).orThrow();
     const deploymentId = deployment.deployment.deploymentId;
     await approveDeviceContract(admin, deploymentId);
@@ -294,6 +300,12 @@ export function createDeviceActivationFixture(caseId: string) {
     identity: Awaited<ReturnType<typeof deriveDeviceIdentity>>,
     instanceId: string,
   ) {
+    const nonce = crypto.randomUUID();
+    const confirmationCode = await deriveDeviceConfirmationCode({
+      activationKey: identity.activationKey,
+      publicIdentityKey: identity.publicIdentityKey,
+      nonce,
+    });
     const controller = new AbortController();
     const bootstrap = waitForDeviceActivation({
       trellisUrl: runtime.trellisUrl,
@@ -306,6 +318,7 @@ export function createDeviceActivationFixture(caseId: string) {
       participantId: deviceContract.CONTRACT_ID,
       participantArtifactDigest: deviceContract.CONTRACT_DIGEST,
       participantNeedsDigest: deviceContract.PARTICIPANT_NEEDS_DIGEST,
+      nonce,
       signal: controller.signal,
       pollIntervalMs: 25,
     });
@@ -324,32 +337,7 @@ export function createDeviceActivationFixture(caseId: string) {
     controller.abort();
     await bootstrap.catch(() => undefined);
 
-    return { flowId: review.reviewId };
-  }
-
-  async function setupResolveActivation(
-    admin: DeviceActivationAdmin,
-    flowId: string,
-    deploymentId: string,
-    instanceId: string,
-  ) {
-    const activationRef = await admin.authDeviceUserAuthoritiesResolve({
-      flowId,
-    })
-      .start()
-      .orThrow();
-    const terminal = await assertOperationCompleted(activationRef);
-    if (
-      terminal.output === undefined ||
-      terminal.output.device.deploymentId !== deploymentId ||
-      terminal.output.device.instanceId !== instanceId ||
-      terminal.output.device.state !== "active"
-    ) {
-      throw new Error(
-        "device activation resolve completed without activated output",
-      );
-    }
-    return terminal;
+    return { confirmationCode, flowId: review.reviewId };
   }
 
   async function approveDeviceContract(
@@ -370,18 +358,18 @@ export function createDeviceActivationFixture(caseId: string) {
       }).orThrow(),
     );
 
-    const accepted = planned.proposal.classification === "update"
-      ? await admin.authDeploymentAuthorityAcceptUpdate({
-        expectedBaseAuthorityVersion: planned.proposal.baseAuthorityVersion,
-        idempotencyKey: crypto.randomUUID(),
-        proposalId: planned.proposal.proposalId,
-        reason: null,
-      }).orThrow()
-      : await admin.authDeploymentAuthorityAcceptMigration({
+    const accepted = planned.proposal.classification === "migration"
+      ? await admin.authDeploymentAuthorityAcceptMigration({
         expectedBaseAuthorityVersion: planned.proposal.baseAuthorityVersion,
         idempotencyKey: crypto.randomUUID(),
         proposalId: planned.proposal.proposalId,
         reason: "Approved by isolated device activation integration test.",
+      }).orThrow()
+      : await admin.authDeploymentAuthorityAcceptUpdate({
+        expectedBaseAuthorityVersion: planned.proposal.baseAuthorityVersion,
+        idempotencyKey: crypto.randomUUID(),
+        proposalId: planned.proposal.proposalId,
+        reason: null,
       }).orThrow();
 
     const authority = await admin.authDeploymentAuthorityGet({
@@ -437,6 +425,5 @@ export function createDeviceActivationFixture(caseId: string) {
     setupDeviceDeployment,
     setupProvisionedDevice,
     setupActivationRequest,
-    setupResolveActivation,
   };
 }

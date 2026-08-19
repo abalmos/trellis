@@ -24,26 +24,27 @@ use trellis_rs::service::Router;
 use ulid::Ulid;
 
 use super::{
-    ensure_authority_dependencies, ensure_deployment_resources, validate_connection_kick_response,
-    AccountFlowKind, AccountRepository, AuthConnectionPresence, AuthEphemeralRepository,
-    AuthService, AuthorityDecision, AuthorityDecisionOutcome, AuthorityDecisionRecord,
-    AuthorityEvidenceRepository, AuthorityKind, AuthorityProposalKind, AuthorityProposalRecord,
-    AuthorityProposalState, AuthorityRepository, AuthorityState, AuthorityTarget,
-    AuthorizationStateError, CapabilityGroupRecord, ContextRepository, CreateAccountFlowInput,
-    CreateAuthorityProposalInput, CreateUserInput, DecideActivationReviewInput,
-    DecideAuthorityProposalInput, DeploymentAuthorityRecord, DeploymentProfileCreation,
-    DeploymentProfileMutation, DeploymentProfileRecord, DeploymentProfileState,
-    DeploymentRepository, DesiredAuthorityRecord, DeviceActivationReviewRecord,
-    DeviceActivationReviewState, DeviceDelegationMutation, DeviceDelegationRecord,
-    DeviceDelegationState, IdempotencyResultRecord, IdempotentOutcome, IdentityAuthorityRecord,
-    LoginPortalMutation, LoginPortalRecord, LoginSettingsRecord, NatsAuthEphemeralRepository,
-    OutboxRepository, PortalGrantOverrideRecord, PortalPolicyReconciliationHandle,
-    PortalRepository, PortalRoleMapping, PortalRouteMutation, PortalRouteRecord,
-    PortalRouteRemoval, PostCommitActionKind, PostCommitActionRecord, PrincipalKind,
-    PrincipalState, ProviderIdentityUnlink, ProvisionDeviceInput, ProvisionServiceIdentityInput,
-    ProvisionedIdentityKind, ProvisionedIdentityRecord, ProvisionedIdentityState,
-    ProvisionedInstanceMutation, ProvisioningRepository, RuntimeInstanceState, SessionRecord,
-    SessionRepository, SqliteAuthorizationStore, UpdateUserInput, UserAccount,
+    activation_review_event_action_id, ensure_authority_dependencies, ensure_deployment_resources,
+    validate_connection_kick_response, AccountFlowKind, AccountRepository, AuthConnectionPresence,
+    AuthEphemeralRepository, AuthService, AuthorityDecision, AuthorityDecisionOutcome,
+    AuthorityDecisionRecord, AuthorityEvidenceRepository, AuthorityKind, AuthorityProposalKind,
+    AuthorityProposalRecord, AuthorityProposalState, AuthorityRepository, AuthorityState,
+    AuthorityTarget, AuthorizationStateError, CapabilityGroupRecord, ContextRepository,
+    CreateAccountFlowInput, CreateAuthorityProposalInput, CreateUserInput,
+    DecideActivationReviewInput, DecideAuthorityProposalInput, DeploymentAuthorityRecord,
+    DeploymentProfileCreation, DeploymentProfileMutation, DeploymentProfileRecord,
+    DeploymentProfileState, DeploymentRepository, DesiredAuthorityRecord,
+    DeviceActivationReviewRecord, DeviceActivationReviewState, DeviceDelegationMutation,
+    DeviceDelegationRecord, DeviceDelegationState, DeviceReviewMode, IdempotencyResultRecord,
+    IdempotentOutcome, IdentityAuthorityRecord, LoginPortalMutation, LoginPortalRecord,
+    LoginSettingsRecord, NatsAuthEphemeralRepository, OutboxRepository, PortalGrantOverrideRecord,
+    PortalPolicyReconciliationHandle, PortalRepository, PortalRoleMapping, PortalRouteMutation,
+    PortalRouteRecord, PortalRouteRemoval, PostCommitActionKind, PostCommitActionRecord,
+    PrincipalKind, PrincipalState, ProviderIdentityUnlink, ProvisionDeviceInput,
+    ProvisionServiceIdentityInput, ProvisionedIdentityKind, ProvisionedIdentityRecord,
+    ProvisionedIdentityState, ProvisionedInstanceMutation, ProvisioningRepository,
+    RuntimeInstanceState, SessionRecord, SessionRepository, SqliteAuthorizationStore,
+    UpdateUserInput, UserAccount,
 };
 use crate::shutdown::StopHandle;
 use crate::supervisor::RuntimeError;
@@ -272,6 +273,22 @@ impl AuthRpcProcessor {
                 ));
             }
         };
+        let review_mode = match (kind, nullable_string(&input, "reviewMode")?.as_deref()) {
+            (PrincipalKind::Device, Some("none")) => Some(DeviceReviewMode::None),
+            (PrincipalKind::Device, Some("required")) => Some(DeviceReviewMode::Required),
+            (PrincipalKind::Service, None) => None,
+            (PrincipalKind::Device, _) => {
+                return Err(AuthorizationStateError::InvalidRecord(
+                    "device deployment reviewMode must be none or required".to_owned(),
+                ));
+            }
+            (PrincipalKind::Service, _) => {
+                return Err(AuthorizationStateError::InvalidRecord(
+                    "service deployment reviewMode must be null".to_owned(),
+                ));
+            }
+            (PrincipalKind::User, _) => unreachable!("deployment kind excludes users"),
+        };
         let now = now_millis()?;
         let deployment_id = format!("dep_{}", Ulid::new());
         let profile = DeploymentProfileRecord {
@@ -280,6 +297,7 @@ impl AuthRpcProcessor {
             display_name: required_string(&input, "displayName")?.to_owned(),
             participant_id: nullable_string(&input, "participantId")?,
             portal_id: nullable_string(&input, "portalId")?,
+            review_mode,
             requires_device_delegation: required_bool(&input, "requiresDeviceDelegation")?,
             expires_at: input.get("expiresAt").and_then(Value::as_i64),
             state: DeploymentProfileState::Active,
@@ -322,7 +340,7 @@ impl AuthRpcProcessor {
         let mut entries = Vec::new();
         for profile in self.service.repository().list_deployment_profiles().await? {
             if kind.is_some_and(|value| enum_string(profile.kind) != value)
-                || state.is_some_and(|value| enum_string(profile.state) != value)
+                || state.is_some_and(|value| deployment_state_wire(profile.state) != value)
             {
                 continue;
             }
@@ -362,6 +380,7 @@ impl AuthRpcProcessor {
         let idempotency_key = required_string(&input, "idempotencyKey")?;
         let actions = (state != DeploymentProfileState::Active)
             .then(|| PostCommitActionRecord {
+                predecessor_action_id: None,
                 action_id: digest_parts(&[deployment_id, idempotency_key, "kick"]),
                 kind: PostCommitActionKind::Kick,
                 payload: json!({ "deploymentId": deployment_id }),
@@ -392,7 +411,7 @@ impl AuthRpcProcessor {
             "deployment": self.deployment_value(profile.clone()).await?,
             "mutation": {
                 "resourceId": deployment_id,
-                "state": state,
+                "state": deployment_state_wire(state),
                 "version": profile.version,
                 "changed": true,
             }
@@ -413,9 +432,10 @@ impl AuthRpcProcessor {
             "deploymentId": profile.deployment_id,
             "kind": profile.kind,
             "displayName": profile.display_name,
-            "state": profile.state,
+            "state": deployment_state_wire(profile.state),
             "participantId": profile.participant_id,
             "expiresAt": profile.expires_at,
+            "reviewMode": profile.review_mode,
             "requiresDeviceDelegation": profile.requires_device_delegation,
             "portalId": profile.portal_id,
             "createdAt": profile.created_at,
@@ -919,6 +939,7 @@ impl AuthRpcProcessor {
                 )?,
                 actions: (target != RuntimeInstanceState::Active)
                     .then(|| PostCommitActionRecord {
+                        predecessor_action_id: None,
                         action_id: digest_parts(&[instance_id, idempotency_key, "kick"]),
                         kind: PostCommitActionKind::Kick,
                         payload: json!({ "principalId": instance.principal_id }),
@@ -1116,6 +1137,7 @@ impl AuthRpcProcessor {
             .ok_or(AuthorizationStateError::StorageConflict)?;
         let idempotency_key = required_string(&input, "idempotencyKey")?;
         let action = |kind, suffix: &str, payload| PostCommitActionRecord {
+            predecessor_action_id: None,
             action_id: digest_parts(&[
                 "Auth.DeviceUserAuthorities.Revoke",
                 idempotency_key,
@@ -1198,6 +1220,9 @@ impl AuthRpcProcessor {
     ) -> Result<Value, AuthorizationStateError> {
         let input: Value = serde_json::from_slice(payload)
             .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
+        self.service
+            .expire_due_activation_reviews(now_millis()?)
+            .await?;
         let entries = self
             .service
             .repository()
@@ -1224,8 +1249,19 @@ impl AuthRpcProcessor {
         payload: &[u8],
         caller: &ValidatedRequest,
     ) -> Result<Value, AuthorizationStateError> {
+        if !caller
+            .capabilities
+            .iter()
+            .any(|value| value == "admin" || value == "trellis.auth::device.review")
+        {
+            return Err(AuthorizationStateError::InvalidRecord(
+                "caller lacks administrative review authority".to_owned(),
+            ));
+        }
         let input: Value = serde_json::from_slice(payload)
             .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
+        let now = now_millis()?;
+        self.service.expire_due_activation_reviews(now).await?;
         let review_id = required_string(&input, "reviewId")?;
         let review = self
             .service
@@ -1248,7 +1284,92 @@ impl AuthRpcProcessor {
             .get_deployment_profile(&review.deployment_id)
             .await?
             .ok_or(AuthorizationStateError::StorageConflict)?;
-        let now = now_millis()?;
+        if profile.review_mode != Some(DeviceReviewMode::Required) {
+            return Err(AuthorizationStateError::InvalidRecord(
+                "deployment does not require administrative device review".to_owned(),
+            ));
+        }
+        let event_suffix = if state == DeviceActivationReviewState::Approved {
+            "approved"
+        } else {
+            "resolved"
+        };
+        let event_payload = if state == DeviceActivationReviewState::Approved {
+            json!({
+                "eventType": "Auth.DeviceUserAuthorities.Approved",
+                "eventSubject": format!(
+                    "events.v1.Auth.DeviceUserAuthorities.Approved.{}",
+                    review.deployment_id,
+                ),
+                "eventId": format!("evt_{}", digest_parts(&[review_id, event_suffix])),
+                "occurredAt": now,
+                "deploymentId": review.deployment_id,
+                "instanceId": review.instance_id,
+                "approvedBy": caller.principal_id,
+                "approvedAt": now,
+            })
+        } else {
+            json!({
+                "eventType": "Auth.DeviceUserAuthorities.Resolved",
+                "eventSubject": format!(
+                    "events.v1.Auth.DeviceUserAuthorities.Resolved.{}",
+                    review.deployment_id,
+                ),
+                "eventId": format!("evt_{}", digest_parts(&[review_id, event_suffix])),
+                "occurredAt": now,
+                "deploymentId": review.deployment_id,
+                "instanceId": review.instance_id,
+                "state": "rejected",
+            })
+        };
+        let mut actions = vec![PostCommitActionRecord {
+            predecessor_action_id: Some(activation_review_event_action_id(
+                review_id,
+                if review.activated_by_user_principal_id.is_some() {
+                    "requested"
+                } else {
+                    "review-requested"
+                },
+            )?),
+            action_id: activation_review_event_action_id(review_id, event_suffix)?,
+            kind: PostCommitActionKind::Event,
+            payload: event_payload,
+            created_at: now,
+            attempts: 0,
+            next_attempt_at: now,
+            claimed_until: None,
+            last_error: None,
+        }];
+        let activation_ready = state == DeviceActivationReviewState::Approved
+            && (!profile.requires_device_delegation
+                || review.activated_by_user_principal_id.is_some());
+        if activation_ready {
+            actions.push(PostCommitActionRecord {
+                predecessor_action_id: Some(activation_review_event_action_id(
+                    review_id,
+                    event_suffix,
+                )?),
+                action_id: activation_review_event_action_id(review_id, "resolved")?,
+                kind: PostCommitActionKind::Event,
+                payload: json!({
+                    "eventType": "Auth.DeviceUserAuthorities.Resolved",
+                    "eventSubject": format!(
+                        "events.v1.Auth.DeviceUserAuthorities.Resolved.{}",
+                        review.deployment_id,
+                    ),
+                    "eventId": format!("evt_{}", digest_parts(&[review_id, "resolved"])),
+                    "occurredAt": now,
+                    "deploymentId": review.deployment_id,
+                    "instanceId": review.instance_id,
+                    "state": "active",
+                }),
+                created_at: now,
+                attempts: 0,
+                next_attempt_at: now,
+                claimed_until: None,
+                last_error: None,
+            });
+        }
         let outcome = self
             .service
             .decide_activation_review(DecideActivationReviewInput {
@@ -1258,14 +1379,16 @@ impl AuthRpcProcessor {
                 decided_by: caller.principal_id.clone(),
                 reason: nullable_string(&input, "reason")?,
                 delegation: (state == DeviceActivationReviewState::Approved
-                    && profile.requires_device_delegation)
-                    .then(|| DeviceDelegationRecord {
-                        principal_id: review.principal_id.clone(),
-                        deployment_id: review.deployment_id.clone(),
-                        required: true,
-                        state: DeviceDelegationState::Missing,
-                        expires_at: None,
-                    }),
+                    && profile.requires_device_delegation
+                    && review.activated_by_user_principal_id.is_some())
+                .then(|| DeviceDelegationRecord {
+                    principal_id: review.principal_id.clone(),
+                    deployment_id: review.deployment_id.clone(),
+                    required: true,
+                    state: DeviceDelegationState::Active,
+                    expires_at: None,
+                }),
+                activate_device: activation_ready,
                 decided_at: now,
                 idempotency: rpc_idempotency(
                     "Auth.DeviceUserAuthorities.Reviews.Decide",
@@ -1274,31 +1397,7 @@ impl AuthRpcProcessor {
                     &input,
                     now,
                 )?,
-                actions: vec![PostCommitActionRecord {
-                    action_id: digest_parts(&[
-                        review_id,
-                        required_string(&input, "idempotencyKey")?,
-                        "event",
-                    ]),
-                    kind: PostCommitActionKind::Event,
-                    payload: json!({
-                        "eventType": "Auth.DeviceUserAuthorities.Resolved",
-                        "eventSubject": format!(
-                            "events.v1.Auth.DeviceUserAuthorities.Resolved.{}",
-                            review.deployment_id,
-                        ),
-                        "eventId": format!("evt_{}", digest_parts(&[review_id, "resolved"])),
-                        "occurredAt": now,
-                        "deploymentId": review.deployment_id,
-                        "instanceId": review.instance_id,
-                        "state": state,
-                    }),
-                    created_at: now,
-                    attempts: 0,
-                    next_attempt_at: now,
-                    claimed_until: None,
-                    last_error: None,
-                }],
+                actions,
             })
             .await?;
         let review = match outcome {
@@ -1403,6 +1502,20 @@ impl AuthRpcProcessor {
             optional_string_array(&input, "includedGroups")?.unwrap_or_default();
         included_groups.sort();
         included_groups.dedup();
+        for included_group in &included_groups {
+            if included_group == key
+                || self
+                    .service
+                    .repository()
+                    .get_capability_group(included_group)
+                    .await?
+                    .is_none()
+            {
+                return Err(AuthorizationStateError::InvalidRecord(format!(
+                    "unknown included capability group '{included_group}'"
+                )));
+            }
+        }
         let semantic_changed = current.as_ref().is_none_or(|group| {
             group.capabilities != capabilities || group.included_groups != included_groups
         });
@@ -1432,7 +1545,7 @@ impl AuthRpcProcessor {
             )
             .await?;
         if semantic_changed {
-            self.portal_reconciliation.notify();
+            self.portal_reconciliation.notify_all();
         }
         let group = match outcome {
             IdempotentOutcome::Applied(group) => serde_json::to_value(group),
@@ -1471,7 +1584,7 @@ impl AuthRpcProcessor {
                 )?,
             )
             .await?;
-        self.portal_reconciliation.notify();
+        self.portal_reconciliation.notify_all();
         let success = match outcome {
             IdempotentOutcome::Applied(success) => success,
             IdempotentOutcome::Replayed(success) => success.as_bool().ok_or_else(|| {
@@ -1654,7 +1767,7 @@ impl AuthRpcProcessor {
                 )?,
             )
             .await?;
-        self.portal_reconciliation.notify();
+        self.portal_reconciliation.notify_portal(portal_id).await;
         let policy = match outcome {
             IdempotentOutcome::Applied(policy) => serde_json::to_value(policy),
             IdempotentOutcome::Replayed(policy) => Ok(policy),
@@ -1687,7 +1800,9 @@ impl AuthRpcProcessor {
                 )?,
             )
             .await?;
-        self.portal_reconciliation.notify();
+        self.portal_reconciliation
+            .notify_portal(required_string(&input, "portalId")?)
+            .await;
         let removed: Option<super::PortalGrantOverrideRecord> = match outcome {
             IdempotentOutcome::Applied(policy) => policy,
             IdempotentOutcome::Replayed(policy) => serde_json::from_value(policy)
@@ -1829,6 +1944,7 @@ impl AuthRpcProcessor {
                 )?,
                 portal_binding: Some(None),
                 expected_portal_binding: None,
+                portal_policy_snapshot: None,
                 actions: Vec::new(),
             })
             .await?;
@@ -2029,6 +2145,7 @@ impl AuthRpcProcessor {
         &self,
         payload: &[u8],
         caller: &ValidatedRequest,
+        expected_kind: AuthorityProposalKind,
     ) -> Result<Value, AuthorizationStateError> {
         let input: Value = serde_json::from_slice(payload)
             .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
@@ -2049,6 +2166,23 @@ impl AuthRpcProcessor {
             return Err(AuthorizationStateError::InvalidRecord(
                 "proposal is not deployment authority".to_owned(),
             ));
+        }
+        let classification_matches = match expected_kind {
+            AuthorityProposalKind::Update => matches!(
+                proposal.proposal_kind,
+                AuthorityProposalKind::Initial | AuthorityProposalKind::Update
+            ),
+            AuthorityProposalKind::Migration => {
+                proposal.proposal_kind == AuthorityProposalKind::Migration
+            }
+            AuthorityProposalKind::Initial => false,
+        };
+        if !classification_matches {
+            return Err(AuthorizationStateError::InvalidRecord(format!(
+                "proposal classification is {}, expected {}",
+                enum_string(proposal.proposal_kind),
+                enum_string(expected_kind)
+            )));
         }
         let current = self
             .service
@@ -2152,6 +2286,7 @@ impl AuthRpcProcessor {
                 )?,
                 portal_binding: None,
                 expected_portal_binding: None,
+                portal_policy_snapshot: None,
                 actions: Vec::new(),
             })
             .await?;
@@ -2243,6 +2378,7 @@ impl AuthRpcProcessor {
                 )?,
                 portal_binding: None,
                 expected_portal_binding: None,
+                portal_policy_snapshot: None,
                 actions: Vec::new(),
             })
             .await?;
@@ -2272,6 +2408,9 @@ impl AuthRpcProcessor {
                 .get_user_account(&validated.principal_id)
                 .await?
                 .ok_or(AuthorizationStateError::PrincipalMissing)?;
+            if principal.state != PrincipalState::Active {
+                return Err(AuthorizationStateError::PrincipalInactive);
+            }
             let mut value = user_value(UserAccount { principal, profile });
             value["capabilities"] = json!(validated.capabilities);
             Some(value)
@@ -2426,7 +2565,7 @@ impl AuthRpcProcessor {
                 actions: Vec::new(),
             })
             .await?;
-        self.portal_reconciliation.notify();
+        self.portal_reconciliation.notify_portal(portal_id).await;
         let (portal, settings) = self
             .service
             .repository()
@@ -2479,7 +2618,7 @@ impl AuthRpcProcessor {
                 actions: Vec::new(),
             })
             .await?;
-        self.portal_reconciliation.notify();
+        self.portal_reconciliation.notify_portal(portal_id).await;
         Ok(json!({ "removed": true }))
     }
 
@@ -2593,7 +2732,7 @@ impl AuthRpcProcessor {
                 actions: Vec::new(),
             })
             .await?;
-        self.portal_reconciliation.notify();
+        self.portal_reconciliation.notify_portal(portal_id).await;
         let (portal, settings) = self
             .service
             .repository()
@@ -2619,13 +2758,11 @@ impl AuthRpcProcessor {
             .get("routeId")
             .and_then(Value::as_str)
             .map_or_else(|| format!("ptr_{}", Ulid::new()), str::to_owned);
-        let current = self
-            .service
-            .repository()
-            .list_portal_routes()
-            .await?
-            .into_iter()
-            .find(|route| route.route_id == route_id);
+        let routes = self.service.repository().list_portal_routes().await?;
+        let current = routes
+            .iter()
+            .find(|route| route.route_id == route_id)
+            .cloned();
         if current.as_ref().map(|route| route.version) != expected_version {
             return Err(AuthorizationStateError::StorageConflict);
         }
@@ -2641,6 +2778,15 @@ impl AuthRpcProcessor {
             updated_at: now,
             version: expected_version.map_or(1, |version| version + 1),
         };
+        if routes.iter().any(|existing| {
+            existing.route_id != route.route_id
+                && existing.participant_id == route.participant_id
+                && existing.origin == route.origin
+                && existing.deployment_id == route.deployment_id
+                && existing.priority == route.priority
+        }) {
+            return Err(AuthorizationStateError::StorageConflict);
+        }
         self.service
             .repository()
             .put_portal_route(PortalRouteMutation {
@@ -2781,6 +2927,7 @@ impl AuthRpcProcessor {
         let request_digest = trellis_protocol::digest_json(&input)
             .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
         let action = |kind, suffix: &str, payload| PostCommitActionRecord {
+            predecessor_action_id: None,
             action_id: digest_parts(&[session_id, idempotency_key, suffix]),
             kind,
             payload,
@@ -2954,6 +3101,7 @@ impl AuthRpcProcessor {
             .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
         let now = now_millis()?;
         let action = PostCommitActionRecord {
+            predecessor_action_id: None,
             action_id: digest_parts(&[
                 "Auth.Users.Password.Change",
                 &caller.principal_id,
@@ -3404,10 +3552,11 @@ fn activation_review_value(review: DeviceActivationReviewRecord) -> Value {
         "deploymentId": review.deployment_id,
         "instanceId": review.instance_id,
         "devicePrincipalId": review.principal_id,
+        "activatedByUserPrincipalId": review.activated_by_user_principal_id,
         "state": review.state,
         "confirmationCode": review.payload.get("confirmationCode"),
         "requestedAt": review.requested_at,
-        "expiresAt": review.payload.get("expiresAt"),
+        "expiresAt": review.expires_at,
         "decidedAt": review.decided_at,
         "decidedBy": review.decided_by,
         "reason": review.reason,
@@ -3536,6 +3685,14 @@ fn enum_string(value: impl serde::Serialize) -> String {
         .ok()
         .and_then(|value| value.as_str().map(str::to_owned))
         .unwrap_or_default()
+}
+
+fn deployment_state_wire(state: DeploymentProfileState) -> &'static str {
+    match state {
+        DeploymentProfileState::Active => "active",
+        DeploymentProfileState::Disabled => "disabled",
+        DeploymentProfileState::Removed => "revoked",
+    }
 }
 
 fn paginate_values(entries: Vec<Value>, input: &Value) -> Value {

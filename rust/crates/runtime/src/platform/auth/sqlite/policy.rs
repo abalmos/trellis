@@ -281,7 +281,7 @@ impl SqliteAuthorizationStore {
     }
 }
 
-fn load_capability_groups(
+pub(super) fn load_capability_groups(
     connection: &Connection,
 ) -> Result<Vec<CapabilityGroupRecord>, AuthorizationStateError> {
     let mut statement = connection
@@ -299,7 +299,7 @@ fn load_capability_groups(
     Ok(records)
 }
 
-fn load_capability_group(
+pub(super) fn load_capability_group(
     connection: &Connection,
     group_key: &str,
 ) -> Result<Option<CapabilityGroupRecord>, AuthorizationStateError> {
@@ -328,7 +328,7 @@ fn decode_capability_group(row: &rusqlite::Row<'_>) -> rusqlite::Result<Capabili
     })
 }
 
-fn load_portal_grant_overrides(
+pub(super) fn load_portal_grant_overrides(
     connection: &Connection,
     portal_id: Option<&str>,
     participant_id: Option<&str>,

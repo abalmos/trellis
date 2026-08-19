@@ -41,6 +41,11 @@ pub(crate) async fn refresh(
     cache: &AuthorizationContextCache,
     auth: &SessionAuth,
 ) -> Result<(), TrellisClientError> {
+    let observed_digest = cache.context_digest().ok();
+    let _refresh = cache.lock_refresh().await;
+    if observed_digest != cache.context_digest().ok() {
+        return Ok(());
+    }
     let now = cache.corrected_now_seconds()?;
     let state = cache.state_snapshot()?;
     let session = state
@@ -142,9 +147,12 @@ pub(crate) fn spawn_authorization_context_refresh_task(
                     return;
                 }
             };
-            tokio::select! {
-                () = tokio::time::sleep(delay) => {}
-                () = contexts.wait_refresh_request() => {}
+            let requested_digest = tokio::select! {
+                () = tokio::time::sleep(delay) => None,
+                digest = contexts.wait_refresh_request() => Some(digest),
+            };
+            if requested_digest.is_some_and(|digest| contexts.context_digest().ok() != digest) {
+                continue;
             }
             match refresh(&contexts, &auth).await {
                 Ok(()) => {}

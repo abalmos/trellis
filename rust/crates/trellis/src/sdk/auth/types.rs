@@ -6250,6 +6250,9 @@ pub struct AuthDeploymentsCreateRequest {
     /// The `requiresDeviceDelegation` wire field.
     #[serde(rename = "requiresDeviceDelegation")]
     pub requires_device_delegation: bool,
+    /// The `reviewMode` wire field.
+    #[serde(rename = "reviewMode")]
+    pub review_mode: Option<String>,
 }
 /// Generated schema type `AuthDeploymentsCreateResponseDeploymentKind`.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -6362,6 +6365,9 @@ pub struct AuthDeploymentsCreateResponseDeployment {
     /// The `requiresDeviceDelegation` wire field.
     #[serde(rename = "requiresDeviceDelegation")]
     pub requires_device_delegation: bool,
+    /// The `reviewMode` wire field.
+    #[serde(rename = "reviewMode")]
+    pub review_mode: Option<String>,
     /// The `revokedAt` wire field.
     #[serde(rename = "revokedAt")]
     pub revoked_at: Option<i64>,
@@ -6505,6 +6511,9 @@ pub struct AuthDeploymentsDisableResponseDeployment {
     /// The `requiresDeviceDelegation` wire field.
     #[serde(rename = "requiresDeviceDelegation")]
     pub requires_device_delegation: bool,
+    /// The `reviewMode` wire field.
+    #[serde(rename = "reviewMode")]
+    pub review_mode: Option<String>,
     /// The `revokedAt` wire field.
     #[serde(rename = "revokedAt")]
     pub revoked_at: Option<i64>,
@@ -6663,6 +6672,9 @@ pub struct AuthDeploymentsEnableResponseDeployment {
     /// The `requiresDeviceDelegation` wire field.
     #[serde(rename = "requiresDeviceDelegation")]
     pub requires_device_delegation: bool,
+    /// The `reviewMode` wire field.
+    #[serde(rename = "reviewMode")]
+    pub review_mode: Option<String>,
     /// The `revokedAt` wire field.
     #[serde(rename = "revokedAt")]
     pub revoked_at: Option<i64>,
@@ -6904,6 +6916,9 @@ pub struct AuthDeploymentsListResponseEntriesItem {
     /// The `requiresDeviceDelegation` wire field.
     #[serde(rename = "requiresDeviceDelegation")]
     pub requires_device_delegation: bool,
+    /// The `reviewMode` wire field.
+    #[serde(rename = "reviewMode")]
+    pub review_mode: Option<String>,
     /// The `revokedAt` wire field.
     #[serde(rename = "revokedAt")]
     pub revoked_at: Option<i64>,
@@ -7050,6 +7065,9 @@ pub struct AuthDeploymentsRemoveResponseDeployment {
     /// The `requiresDeviceDelegation` wire field.
     #[serde(rename = "requiresDeviceDelegation")]
     pub requires_device_delegation: bool,
+    /// The `reviewMode` wire field.
+    #[serde(rename = "reviewMode")]
+    pub review_mode: Option<String>,
     /// The `revokedAt` wire field.
     #[serde(rename = "revokedAt")]
     pub revoked_at: Option<i64>,
@@ -7421,6 +7439,9 @@ impl PartialEq<AuthDeviceUserAuthoritiesReviewsDecideResponseReviewState> for &s
 /// Generated schema type `AuthDeviceUserAuthoritiesReviewsDecideResponseReview`.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct AuthDeviceUserAuthoritiesReviewsDecideResponseReview {
+    /// The `activatedByUserPrincipalId` wire field.
+    #[serde(rename = "activatedByUserPrincipalId")]
+    pub activated_by_user_principal_id: Option<String>,
     /// The `confirmationCode` wire field.
     #[serde(rename = "confirmationCode")]
     pub confirmation_code: String,
@@ -7583,6 +7604,9 @@ impl PartialEq<AuthDeviceUserAuthoritiesReviewsListResponseEntriesItemState> for
 /// Generated schema type `AuthDeviceUserAuthoritiesReviewsListResponseEntriesItem`.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct AuthDeviceUserAuthoritiesReviewsListResponseEntriesItem {
+    /// The `activatedByUserPrincipalId` wire field.
+    #[serde(rename = "activatedByUserPrincipalId")]
+    pub activated_by_user_principal_id: Option<String>,
     /// The `confirmationCode` wire field.
     #[serde(rename = "confirmationCode")]
     pub confirmation_code: String,
@@ -13585,6 +13609,9 @@ pub struct AuthUsersUpdateResponse {
 /// Generated schema type `AuthDeviceUserAuthoritiesResolveInput`.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct AuthDeviceUserAuthoritiesResolveInput {
+    /// The `confirmationCode` wire field.
+    #[serde(rename = "confirmationCode")]
+    pub confirmation_code: String,
     /// The `flowId` wire field.
     #[serde(rename = "flowId")]
     pub flow_id: String,
@@ -13879,9 +13906,9 @@ impl PartialEq<AuthDeviceUserAuthoritiesResolveOutputReviewState> for &str {
 /// Generated schema type `AuthDeviceUserAuthoritiesResolveOutputReview`.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct AuthDeviceUserAuthoritiesResolveOutputReview {
-    /// The `confirmationCode` wire field.
-    #[serde(rename = "confirmationCode")]
-    pub confirmation_code: String,
+    /// The `activatedByUserPrincipalId` wire field.
+    #[serde(rename = "activatedByUserPrincipalId")]
+    pub activated_by_user_principal_id: Option<String>,
     /// The `decidedAt` wire field.
     #[serde(rename = "decidedAt")]
     pub decided_at: Option<i64>,

@@ -87,6 +87,8 @@ pub struct DecideAuthorityProposalInput {
     pub portal_binding: Option<Option<super::super::PortalAuthorityBindingRecord>>,
     /// Exact portal provenance expected before replacement; outer `None` skips the check.
     pub expected_portal_binding: Option<Option<super::super::PortalAuthorityBindingRecord>>,
+    /// Exact trusted-portal policy versions that must remain current.
+    pub portal_policy_snapshot: Option<PortalPolicySnapshot>,
     /// Decision time in Unix milliseconds.
     pub decided_at: i64,
     /// Durable proof claim; its result is replaced with the terminal decision.
@@ -102,6 +104,21 @@ pub(crate) struct PortalAuthoritySource {
     pub provider_id: String,
     pub roles: Vec<String>,
     pub effective_policy_digest: String,
+}
+
+/// Internal version fence for one trusted-portal policy decision.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct PortalPolicySnapshot {
+    pub portal_id: String,
+    pub portal_version: u64,
+    pub portal_fingerprint: String,
+    pub login_settings_version: u64,
+    pub login_settings_fingerprint: String,
+    pub participant_id: String,
+    pub policy_version: Option<u64>,
+    pub policy_fingerprint: Option<String>,
+    pub capability_group_versions: Vec<(String, u64)>,
+    pub capability_group_fingerprints: Vec<(String, String)>,
 }
 
 #[derive(Clone, Debug)]
@@ -129,6 +146,7 @@ pub(crate) struct ApplyIdentityAuthoritySelectionInput {
     pub decided_by: String,
     pub source_payload: Value,
     pub portal_binding: PortalBindingMutation,
+    pub portal_policy_snapshot: Option<PortalPolicySnapshot>,
     pub decided_at: i64,
     pub expires_at: Option<i64>,
     pub proposal_idempotency: IdempotencyResultRecord,
@@ -232,6 +250,23 @@ where
     pub(crate) async fn apply_identity_authority_selection(
         &self,
         input: ApplyIdentityAuthoritySelectionInput,
+    ) -> Result<IdentityAuthorityRecord, AuthorizationStateError> {
+        self.apply_identity_authority_selection_inner(input, true)
+            .await
+    }
+
+    pub(crate) async fn commit_identity_authority_selection(
+        &self,
+        input: ApplyIdentityAuthoritySelectionInput,
+    ) -> Result<IdentityAuthorityRecord, AuthorizationStateError> {
+        self.apply_identity_authority_selection_inner(input, false)
+            .await
+    }
+
+    async fn apply_identity_authority_selection_inner(
+        &self,
+        input: ApplyIdentityAuthoritySelectionInput,
+        materialize: bool,
     ) -> Result<IdentityAuthorityRecord, AuthorizationStateError> {
         let current = self
             .repository
@@ -378,16 +413,18 @@ where
                 desired_authority: Some(DesiredAuthorityRecord::Identity(desired.clone())),
                 portal_binding,
                 expected_portal_binding,
+                portal_policy_snapshot: input.portal_policy_snapshot,
                 decided_at: input.decided_at,
                 idempotency: input.decision_idempotency,
                 actions: Vec::new(),
             })
             .await;
-        if !matches!(
-            decision,
-            Ok(_) | Err(AuthorizationStateError::StorageConflict)
-        ) {
-            decision?;
+        match decision {
+            Ok(_) | Err(AuthorizationStateError::StorageConflict) => {}
+            Err(AuthorizationStateError::PortalPolicyChanged) => {
+                return Err(AuthorizationStateError::PortalPolicyChanged);
+            }
+            Err(error) => return Err(error),
         }
         let durable = self
             .repository
@@ -426,6 +463,9 @@ where
             if !postcondition_holds {
                 return Err(AuthorizationStateError::StorageConflict);
             }
+        }
+        if !materialize {
+            return Ok(durable);
         }
         let binding = self
             .repository
@@ -741,6 +781,7 @@ where
                 deployment,
                 portal_binding: input.portal_binding,
                 expected_portal_binding: input.expected_portal_binding,
+                portal_policy_snapshot: input.portal_policy_snapshot,
                 idempotency: input.idempotency,
                 actions: input.actions,
             })

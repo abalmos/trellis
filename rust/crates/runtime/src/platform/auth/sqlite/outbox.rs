@@ -55,10 +55,17 @@ impl OutboxRepository for SqliteAuthorizationStore {
         self.run_read(move |connection| {
             let mut statement = connection
                 .prepare(
-                    "SELECT action_id, kind, payload_json, created_at, attempts, next_attempt_at, claimed_until, last_error
-                 FROM auth_post_commit_actions
-                 WHERE next_attempt_at <= ?1 AND (claimed_until IS NULL OR claimed_until <= ?1)
-                 ORDER BY next_attempt_at, action_id LIMIT ?2",
+                    "SELECT action.action_id, action.kind, action.payload_json, action.created_at,
+                            action.attempts, action.next_attempt_at, action.claimed_until,
+                            action.last_error, action.predecessor_action_id
+                     FROM auth_post_commit_actions AS action
+                     WHERE action.next_attempt_at <= ?1
+                       AND (action.claimed_until IS NULL OR action.claimed_until <= ?1)
+                       AND (action.predecessor_action_id IS NULL OR NOT EXISTS (
+                           SELECT 1 FROM auth_post_commit_actions AS predecessor
+                           WHERE predecessor.action_id = action.predecessor_action_id
+                       ))
+                     ORDER BY action.next_attempt_at, action.rowid LIMIT ?2",
                 )
                 .map_err(sql_error)?;
             let actions = statement
@@ -273,12 +280,17 @@ pub(in crate::platform::auth) fn insert_sql_idempotency_and_actions(
         ],
     )
     .map_err(map_write_error)?;
+    let mut predecessor_action_id: Option<&str> = None;
     for action in actions {
+        let action_predecessor_id = action
+            .predecessor_action_id
+            .as_deref()
+            .or(predecessor_action_id);
         if load_post_commit_action(connection, &action.action_id)?.is_none() {
             connection
             .execute(
-                "INSERT INTO auth_post_commit_actions (action_id, kind, payload_json, created_at, attempts, next_attempt_at, claimed_until, last_error)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                "INSERT INTO auth_post_commit_actions (action_id, kind, payload_json, created_at, attempts, next_attempt_at, claimed_until, last_error, predecessor_action_id)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
                 params![
                     action.action_id,
                     encode_enum(action.kind)?,
@@ -287,11 +299,13 @@ pub(in crate::platform::auth) fn insert_sql_idempotency_and_actions(
                     i64::from(action.attempts),
                     action.next_attempt_at,
                     action.claimed_until,
-                    action.last_error
+                    action.last_error,
+                    action_predecessor_id,
                 ],
             )
             .map_err(map_write_error)?;
         }
+        predecessor_action_id = Some(&action.action_id);
     }
     Ok(())
 }
@@ -327,6 +341,7 @@ pub(in crate::platform::auth) fn decode_post_commit_action(
     row: &rusqlite::Row<'_>,
 ) -> rusqlite::Result<PostCommitActionRecord> {
     Ok(PostCommitActionRecord {
+        predecessor_action_id: row.get(8)?,
         action_id: row.get(0)?,
         kind: decode_enum(row.get(1)?)?,
         payload: decode_json(row.get(2)?)?,
@@ -344,7 +359,7 @@ pub(in crate::platform::auth) fn load_post_commit_action(
 ) -> Result<Option<PostCommitActionRecord>, AuthorizationStateError> {
     connection
     .query_row(
-        "SELECT action_id, kind, payload_json, created_at, attempts, next_attempt_at, claimed_until, last_error FROM auth_post_commit_actions WHERE action_id = ?1",
+        "SELECT action_id, kind, payload_json, created_at, attempts, next_attempt_at, claimed_until, last_error, predecessor_action_id FROM auth_post_commit_actions WHERE action_id = ?1",
         [action_id],
         decode_post_commit_action,
     )

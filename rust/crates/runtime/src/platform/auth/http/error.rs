@@ -82,7 +82,8 @@ impl From<AuthorizationStateError> for HttpError {
         tracing::warn!(%error, "auth HTTP domain operation failed");
         match error {
             AuthorizationStateError::InvalidRecord(_) => Self::bad_request("invalid_request"),
-            AuthorizationStateError::StorageConflict => Self::conflict("conflict"),
+            AuthorizationStateError::PortalPolicyChanged
+            | AuthorizationStateError::StorageConflict => Self::conflict("conflict"),
             AuthorizationStateError::PrincipalMissing
             | AuthorizationStateError::SessionMissing
             | AuthorizationStateError::AuthorityMissing => Self::not_found("not_found"),

@@ -599,9 +599,12 @@ where
         entry: &JobKeyQueuedEntry,
         reason: &str,
     ) -> Result<(), JobManagerError<P::Error>> {
-        let Some(context) = entry.context.as_ref() else {
-            return Ok(());
-        };
+        let context = entry.context.as_ref().ok_or_else(|| {
+            JobManagerError::KeyCoordinator(format!(
+                "queued job '{}' is missing lifecycle context",
+                entry.job_id
+            ))
+        })?;
         let event = skipped_event(
             &self.inner.bindings.service_name,
             &queue.queue_type,

@@ -60,21 +60,22 @@ use super::ephemeral::{
     BrowserConsentProposal, BROWSER_FLOW_FORMAT,
 };
 use super::{
-    resolve_portal_authority_selection, AccountFlowState, AccountRepository,
-    ApplyIdentityAuthoritySelectionInput, AuthService, AuthorityEvidenceRepository,
-    AuthorityEvidenceScope, AuthorityKind, AuthorityProposalKind, AuthorityProposalRecord,
-    AuthorityProposalState, AuthorityRepository, AuthorityState, AuthorityTarget,
-    AuthorizationStateError, CompleteIdentityLinkInput, CompletePasswordResetInput,
-    ContextRepository, CreateActivationReviewInput, CreateFederatedUserInput, CreateLocalUserInput,
-    CreateSessionInput, DeploymentRepository, DesiredAuthorityRecord, DeviceState,
-    EnrollDeviceIdentityInput, FirstAdminFederatedRegistration, FirstAdminRegistration,
-    IdempotencyResultRecord, IdempotentOutcome, LocalAuthentication, LoginPortalRecord,
-    LoginSettingsRecord, OutboxRepository, ParticipantBindingRecord, ParticipantBindingState,
-    PortalAuthoritySource, PortalBindingMutation, PortalRepository, PostCommitActionKind,
-    PostCommitActionRecord, PresentDeploymentAuthorityInput, PrincipalKind,
-    ProviderLoginAttributes, ProvisionedIdentityKind, ProvisionedIdentityState,
-    ProvisioningRepository, ResourceBindingEvidence, ResourceProviderIdentity,
-    RuntimeInstanceState, SessionRecord, SessionRepository,
+    portal_policy_snapshot, resolve_portal_authority_selection, AccountFlowState,
+    AccountRepository, ApplyIdentityAuthoritySelectionInput, AuthService,
+    AuthorityEvidenceRepository, AuthorityEvidenceScope, AuthorityKind, AuthorityProposalKind,
+    AuthorityProposalRecord, AuthorityProposalState, AuthorityRepository, AuthorityState,
+    AuthorityTarget, AuthorizationStateError, CompleteIdentityLinkInput,
+    CompletePasswordResetInput, ContextRepository, CreateActivationReviewInput,
+    CreateFederatedUserInput, CreateLocalUserInput, CreateSessionInput, DeploymentRepository,
+    DesiredAuthorityRecord, DeviceState, EnrollDeviceIdentityInput,
+    FirstAdminFederatedRegistration, FirstAdminRegistration, IdempotencyResultRecord,
+    IdempotentOutcome, LocalAuthentication, LoginPortalRecord, LoginSettingsRecord,
+    OutboxRepository, ParticipantBindingRecord, ParticipantBindingState, PortalAuthoritySource,
+    PortalBindingMutation, PortalRepository, PostCommitActionKind, PostCommitActionRecord,
+    PresentDeploymentAuthorityInput, PrincipalKind, ProviderLoginAttributes,
+    ProvisionedIdentityKind, ProvisionedIdentityState, ProvisioningRepository,
+    ResourceBindingEvidence, ResourceProviderIdentity, RuntimeInstanceState, SessionRecord,
+    SessionRepository,
 };
 
 const FLOW_TTL_MS: i64 = 15 * 60_000;
@@ -507,6 +508,7 @@ fn session_revocation_actions(
     ]
     .into_iter()
     .map(|(kind, suffix)| PostCommitActionRecord {
+        predecessor_action_id: None,
         action_id: digest_parts(&[scope, request_id, suffix]),
         kind,
         payload: payload.clone(),

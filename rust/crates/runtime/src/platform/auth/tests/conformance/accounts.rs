@@ -26,6 +26,7 @@ pub(super) async fn exercise_accounts(
         expires_at: NOW + 1_000,
     };
     let action = |byte: u8, event: &str| PostCommitActionRecord {
+        predecessor_action_id: None,
         action_id: digest(byte),
         kind: PostCommitActionKind::Event,
         payload: json!({ "event": event }),
@@ -52,6 +53,7 @@ pub(super) async fn exercise_accounts(
         participant_id: None,
         portal_id: None,
         requires_device_delegation: false,
+        review_mode: None,
         expires_at: None,
         state: DeploymentProfileState::Active,
         created_at: NOW,

@@ -3,6 +3,7 @@
 mod browser_login;
 mod client;
 mod device_activation;
+mod device_identity;
 mod error;
 mod models;
 mod protocol;
@@ -15,21 +16,19 @@ pub use browser_login::{
     generate_session_keypair, start_admin_reauth, start_agent_login,
 };
 pub use client::{connect_admin_client_async, session_public_key};
+#[cfg(feature = "integration-test-scoping")]
+#[doc(hidden)]
+pub use device_activation::check_device_activation_with_test_proof;
 pub use device_activation::{
-    build_device_activation_payload, build_device_wait_proof_input,
-    derive_device_confirmation_code, derive_device_identity, derive_device_qr_mac,
-    encode_device_activation_payload, get_device_connect_info, parse_device_activation_payload,
-    sign_device_wait_request, start_device_activation_request, verify_device_confirmation_code,
-    DeviceActivationLocalState, DeviceActivationSession, DeviceActivationSessionBuilder,
-    DeviceActivationStartResponse, DeviceActivationStatus,
+    check_device_activation, derive_device_confirmation_code, wait_for_device_activation,
+    DeviceActivationError, DeviceActivationOptions, DeviceActivationPending,
+    DeviceActivationSession, DeviceActivationStatus,
 };
+pub use device_identity::derive_device_identity;
 pub use error::TrellisAuthError;
 pub use models::{
     AdminLoginOutcome, AdminReauthOutcome, AdminSessionState, AgentLoginChallenge, BoundSession,
-    DeviceActivationPayload, DeviceActivationWaitRequest, DeviceConnectInfo, DeviceConnectInfoAuth,
-    DeviceConnectInfoAuthMode, DeviceConnectInfoNativeTransport, DeviceConnectInfoRequest,
-    DeviceConnectInfoResponse, DeviceConnectInfoSentinel, DeviceConnectInfoTransport,
-    DeviceConnectInfoTransports, DeviceIdentity, GetDeviceConnectInfoOpts, StartAgentLoginOpts,
+    DeviceIdentity, StartAgentLoginOpts,
 };
 pub use protocol::AuthenticatedUser;
 pub use session_store::{clear_admin_session, load_admin_session, save_admin_session};

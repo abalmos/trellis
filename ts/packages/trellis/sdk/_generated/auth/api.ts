@@ -2,7 +2,7 @@
 
 export const API_ID = "trellis.auth@v1" as const;
 export const API_DIGEST =
-  "WtzvXn97fugvnlNNtvaLGl__oGbVl77GhFKBQYjkG64" as const;
+  "Fs_nA37wXgMpLRfB7IyYDhIEDUdSl3PdNp6ehnXcV1A" as const;
 export const API = {
   "capabilities": {
     "admin": {
@@ -701,7 +701,6 @@ export const API = {
   "id": "trellis.auth@v1",
   "operations": {
     "Auth.DeviceUserAuthorities.Resolve": {
-      "cancel": true,
       "docs": {
         "markdown":
           "Resolve bounded device activation and delegation without busy-polling storage.\n",
@@ -4689,12 +4688,17 @@ export const API = {
         "participantId": { "type": ["string", "null"] },
         "portalId": { "type": ["string", "null"] },
         "requiresDeviceDelegation": { "type": "boolean" },
+        "reviewMode": {
+          "enum": ["none", "required", null],
+          "type": ["string", "null"],
+        },
       },
       "required": [
         "kind",
         "displayName",
         "participantId",
         "expiresAt",
+        "reviewMode",
         "requiresDeviceDelegation",
         "portalId",
         "idempotencyKey",
@@ -4726,6 +4730,10 @@ export const API = {
             "participantId": { "type": ["string", "null"] },
             "portalId": { "type": ["string", "null"] },
             "requiresDeviceDelegation": { "type": "boolean" },
+            "reviewMode": {
+              "enum": ["none", "required", null],
+              "type": ["string", "null"],
+            },
             "revokedAt": {
               "maximum": 9007199254740991,
               "minimum": 0,
@@ -4750,6 +4758,7 @@ export const API = {
             "state",
             "participantId",
             "expiresAt",
+            "reviewMode",
             "requiresDeviceDelegation",
             "portalId",
             "createdAt",
@@ -4808,6 +4817,10 @@ export const API = {
             "participantId": { "type": ["string", "null"] },
             "portalId": { "type": ["string", "null"] },
             "requiresDeviceDelegation": { "type": "boolean" },
+            "reviewMode": {
+              "enum": ["none", "required", null],
+              "type": ["string", "null"],
+            },
             "revokedAt": {
               "maximum": 9007199254740991,
               "minimum": 0,
@@ -4832,6 +4845,7 @@ export const API = {
             "state",
             "participantId",
             "expiresAt",
+            "reviewMode",
             "requiresDeviceDelegation",
             "portalId",
             "createdAt",
@@ -4904,6 +4918,10 @@ export const API = {
             "participantId": { "type": ["string", "null"] },
             "portalId": { "type": ["string", "null"] },
             "requiresDeviceDelegation": { "type": "boolean" },
+            "reviewMode": {
+              "enum": ["none", "required", null],
+              "type": ["string", "null"],
+            },
             "revokedAt": {
               "maximum": 9007199254740991,
               "minimum": 0,
@@ -4928,6 +4946,7 @@ export const API = {
             "state",
             "participantId",
             "expiresAt",
+            "reviewMode",
             "requiresDeviceDelegation",
             "portalId",
             "createdAt",
@@ -4992,6 +5011,10 @@ export const API = {
               "participantId": { "type": ["string", "null"] },
               "portalId": { "type": ["string", "null"] },
               "requiresDeviceDelegation": { "type": "boolean" },
+              "reviewMode": {
+                "enum": ["none", "required", null],
+                "type": ["string", "null"],
+              },
               "revokedAt": {
                 "maximum": 9007199254740991,
                 "minimum": 0,
@@ -5016,6 +5039,7 @@ export const API = {
               "state",
               "participantId",
               "expiresAt",
+              "reviewMode",
               "requiresDeviceDelegation",
               "portalId",
               "createdAt",
@@ -5077,6 +5101,10 @@ export const API = {
             "participantId": { "type": ["string", "null"] },
             "portalId": { "type": ["string", "null"] },
             "requiresDeviceDelegation": { "type": "boolean" },
+            "reviewMode": {
+              "enum": ["none", "required", null],
+              "type": ["string", "null"],
+            },
             "revokedAt": {
               "maximum": 9007199254740991,
               "minimum": 0,
@@ -5101,6 +5129,7 @@ export const API = {
             "state",
             "participantId",
             "expiresAt",
+            "reviewMode",
             "requiresDeviceDelegation",
             "portalId",
             "createdAt",
@@ -5654,8 +5683,11 @@ export const API = {
       "type": "object",
     },
     "AuthDeviceUserAuthoritiesResolveRequest": {
-      "properties": { "flowId": { "minLength": 1, "type": "string" } },
-      "required": ["flowId"],
+      "properties": {
+        "confirmationCode": { "minLength": 1, "type": "string" },
+        "flowId": { "minLength": 1, "type": "string" },
+      },
+      "required": ["flowId", "confirmationCode"],
       "type": "object",
     },
     "AuthDeviceUserAuthoritiesResolveResponse": {
@@ -6059,7 +6091,7 @@ export const API = {
         },
         "review": {
           "properties": {
-            "confirmationCode": { "minLength": 1, "type": "string" },
+            "activatedByUserPrincipalId": { "type": ["string", "null"] },
             "decidedAt": {
               "maximum": 9007199254740991,
               "minimum": 0,
@@ -6095,8 +6127,8 @@ export const API = {
             "deploymentId",
             "instanceId",
             "devicePrincipalId",
+            "activatedByUserPrincipalId",
             "state",
-            "confirmationCode",
             "requestedAt",
             "expiresAt",
             "decidedAt",
@@ -6177,6 +6209,7 @@ export const API = {
       "properties": {
         "review": {
           "properties": {
+            "activatedByUserPrincipalId": { "type": ["string", "null"] },
             "confirmationCode": { "minLength": 1, "type": "string" },
             "decidedAt": {
               "maximum": 9007199254740991,
@@ -6213,6 +6246,7 @@ export const API = {
             "deploymentId",
             "instanceId",
             "devicePrincipalId",
+            "activatedByUserPrincipalId",
             "state",
             "confirmationCode",
             "requestedAt",
@@ -6245,6 +6279,7 @@ export const API = {
         "entries": {
           "items": {
             "properties": {
+              "activatedByUserPrincipalId": { "type": ["string", "null"] },
               "confirmationCode": { "minLength": 1, "type": "string" },
               "decidedAt": {
                 "maximum": 9007199254740991,
@@ -6287,6 +6322,7 @@ export const API = {
               "deploymentId",
               "instanceId",
               "devicePrincipalId",
+              "activatedByUserPrincipalId",
               "state",
               "confirmationCode",
               "requestedAt",

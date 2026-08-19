@@ -2572,6 +2572,7 @@
       "jsr:@std/collections@^1.1.7",
       "jsr:@std/fs@^1.0.23",
       "jsr:@std/path@^1.1.4",
+      "npm:@libsql/client@~0.15.15",
       "npm:@nats-io/jetstream@^3.3.1",
       "npm:@nats-io/jwt@^0.0.10-5",
       "npm:@nats-io/kv@^3.3.1",

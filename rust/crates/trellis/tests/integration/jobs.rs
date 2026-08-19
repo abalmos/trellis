@@ -316,9 +316,13 @@ struct JobsFixture {
     bootstrap_url: String,
     worker_host: trellis_rs::jobs::WorkerHostHandle,
     service_task: AbortOnDrop<Result<(), trellis_rs::service::ServiceRuntimeError>>,
+    service_handle: trellis_rs::service::ServiceHandle,
     client: Arc<trellis_rs::generated::Caller>,
     manager: JobManager<NatsJobEventPublisher, TrellisJobMetaSource>,
     keyed_waiter: NatsJobWaiter,
+    coalesce_waiter: NatsJobWaiter,
+    replace_waiter: NatsJobWaiter,
+    cancel_waiter: NatsJobWaiter,
     update_waiter: NatsJobWaiter,
     update_release: Arc<tokio::sync::Notify>,
     jobs_worker_runtime: trellis_rs::jobs::TestJobsWorkerRuntime,
@@ -364,7 +368,10 @@ async fn setup_jobs_fixture() -> JobsFixture {
             "processDocument": {"payload": {"schema": "JobPayload"}, "update": {"schema": "JobUpdate"}, "result": {"schema": "JobResult"}, "progress": true, "logs": true},
             "longProcessDocument": {"payload": {"schema": "LongJobPayload"}, "result": {"schema": "JobResult"}},
             "failingProcessDocument": {"payload": {"schema": "FailingJobPayload"}, "result": {"schema": "JobResult"}, "maxDeliver": 2, "backoffMs": [0]},
-            "keyedProcessDocument": {"payload": {"schema": "KeyedJobPayload"}, "result": {"schema": "KeyedJobResult"}, "keyConcurrency": {"key": ["/groupKey"], "maxActive": 1, "heartbeatIntervalMs": 1000, "heartbeatTtlMs": 10000, "stalePolicy": "fail-stale"}, "queue": {"maxQueuedPerKey": 1, "whenFull": "reject"}}
+            "keyedProcessDocument": {"payload": {"schema": "KeyedJobPayload"}, "result": {"schema": "KeyedJobResult"}, "keyConcurrency": {"key": ["/groupKey"], "maxActive": 1, "heartbeatIntervalMs": 1000, "heartbeatTtlMs": 10000, "stalePolicy": "fail-stale"}, "queue": {"maxQueuedPerKey": 1, "whenFull": "reject"}},
+            "coalesceKeyedProcessDocument": {"payload": {"schema": "KeyedJobPayload"}, "result": {"schema": "KeyedJobResult"}, "keyConcurrency": {"key": ["/groupKey"], "maxActive": 1, "heartbeatIntervalMs": 1000, "heartbeatTtlMs": 10000, "stalePolicy": "fail-stale"}, "queue": {"maxQueuedPerKey": 1, "whenFull": "coalesce"}},
+            "replaceKeyedProcessDocument": {"payload": {"schema": "KeyedJobPayload"}, "result": {"schema": "KeyedJobResult"}, "keyConcurrency": {"key": ["/groupKey"], "maxActive": 1, "heartbeatIntervalMs": 1000, "heartbeatTtlMs": 10000, "stalePolicy": "fail-stale"}, "queue": {"maxQueuedPerKey": 1, "whenFull": "replace-oldest"}},
+            "cancelKeyedProcessDocument": {"payload": {"schema": "KeyedJobPayload"}, "result": {"schema": "KeyedJobResult"}, "keyConcurrency": {"key": ["/groupKey"], "maxActive": 1, "heartbeatIntervalMs": 1000, "heartbeatTtlMs": 10000, "stalePolicy": "fail-stale"}, "queue": {"maxQueuedPerKey": 1, "whenFull": "reject"}}
         }
     });
     participant["schemas"] = api.normalized_value().expect("normalize jobs API")["schemas"].clone();
@@ -435,6 +442,21 @@ async fn setup_jobs_fixture() -> JobsFixture {
         .clone();
     let keyed_waiter =
         NatsJobWaiter::new(nats.clone(), keyed_queue_binding, Duration::from_secs(5));
+    let coalesce_waiter = NatsJobWaiter::new(
+        nats.clone(),
+        jobs_runtime.jobs.queues["coalesceKeyedProcessDocument"].clone(),
+        Duration::from_secs(5),
+    );
+    let replace_waiter = NatsJobWaiter::new(
+        nats.clone(),
+        jobs_runtime.jobs.queues["replaceKeyedProcessDocument"].clone(),
+        Duration::from_secs(5),
+    );
+    let cancel_waiter = NatsJobWaiter::new(
+        nats.clone(),
+        jobs_runtime.jobs.queues["cancelKeyedProcessDocument"].clone(),
+        Duration::from_secs(5),
+    );
     let long_waiter = NatsJobWaiter::new(nats.clone(), long_queue_binding, Duration::from_secs(5));
     let keyed_run_state = Arc::new(KeyedJobRunState::default());
     let long_started = Arc::new(tokio::sync::Notify::new());
@@ -548,6 +570,7 @@ async fn setup_jobs_fixture() -> JobsFixture {
         }
     });
 
+    let service_handle = service.generated_handle();
     let service_task = AbortOnDrop::new(tokio::spawn(async move { service.run().await }));
 
     let worker_keyed_run_state = Arc::clone(&keyed_run_state);
@@ -564,7 +587,9 @@ async fn setup_jobs_fixture() -> JobsFixture {
                 let failing_attempts = Arc::clone(&worker_failing_attempts);
                 let update_release = Arc::clone(&worker_update_release);
                 async move {
-                    if active_job.job().job_type == "keyedProcessDocument" {
+                    if active_job.job().job_type == "keyedProcessDocument"
+                        || active_job.job().job_type.ends_with("KeyedProcessDocument")
+                    {
                         let payload: KeyedJobPayload =
                             serde_json::from_value(active_job.job().payload.clone())
                                 .map_err(|error| JobProcessError::failed(error.to_string()))?;
@@ -572,7 +597,7 @@ async fn setup_jobs_fixture() -> JobsFixture {
                             let mut started = keyed_run_state.started.lock().await;
                             started.push(payload.sequence);
                         }
-                        if payload.sequence == 1 {
+                        if payload.sequence % 10 == 1 {
                             keyed_run_state.first_started.notify_one();
                             keyed_run_state.release_first.notified().await;
                         } else if payload.sequence == 99 {
@@ -664,7 +689,12 @@ async fn setup_jobs_fixture() -> JobsFixture {
                 }
             },
             WorkerHostOptions {
-                queue_concurrency: BTreeMap::from([("keyedProcessDocument".to_string(), 2)]),
+                queue_concurrency: BTreeMap::from([
+                    ("keyedProcessDocument".to_string(), 2),
+                    ("coalesceKeyedProcessDocument".to_string(), 2),
+                    ("replaceKeyedProcessDocument".to_string(), 2),
+                    ("cancelKeyedProcessDocument".to_string(), 2),
+                ]),
                 ..WorkerHostOptions::default()
             },
         )
@@ -684,9 +714,13 @@ async fn setup_jobs_fixture() -> JobsFixture {
         bootstrap_url,
         worker_host,
         service_task,
+        service_handle,
         client,
         manager,
         keyed_waiter: fixture_keyed_waiter,
+        coalesce_waiter,
+        replace_waiter,
+        cancel_waiter,
         update_waiter,
         update_release,
         jobs_worker_runtime,
@@ -963,6 +997,387 @@ async fn jobs_keyed_jobs_reject_queue_full() {
     assert_eq!(first_terminal.state, JobState::Completed);
     assert_eq!(second_terminal.state, JobState::Completed);
     assert_eq!(*fixture.keyed_run_state.completed.lock().await, vec![1, 2]);
+
+    fixture.stop().await;
+}
+
+#[tokio::test]
+async fn jobs_keyed_jobs_queue_policies_live() {
+    assert_runtime_case_registered("jobs.keyed-jobs-queue-policies-live", "jobs", "jobs");
+
+    let fixture = setup_jobs_fixture().await;
+
+    let coalesce_key = "coalesce-key";
+    let coalesce_first = fixture
+        .manager
+        .create(
+            "coalesceKeyedProcessDocument",
+            KeyedJobPayload {
+                document_id: "doc-coalesce-1".to_string(),
+                group_key: coalesce_key.to_string(),
+                sequence: 11,
+            },
+        )
+        .await
+        .expect("create active coalesce job");
+    fixture.keyed_run_state.first_started.notified().await;
+    let coalesce_second = match fixture
+        .manager
+        .submit(
+            "coalesceKeyedProcessDocument",
+            KeyedJobPayload {
+                document_id: "doc-coalesce-2".to_string(),
+                group_key: coalesce_key.to_string(),
+                sequence: 12,
+            },
+        )
+        .await
+        .expect("submit queued coalesce job")
+    {
+        JobSubmitOutcome::Accepted { job, .. } => job,
+        other => panic!("expected queued coalesce job accepted, got {other:?}"),
+    };
+    match fixture
+        .manager
+        .submit(
+            "coalesceKeyedProcessDocument",
+            KeyedJobPayload {
+                document_id: "doc-coalesce-3".to_string(),
+                group_key: coalesce_key.to_string(),
+                sequence: 13,
+            },
+        )
+        .await
+        .expect("submit full coalesce job")
+    {
+        JobSubmitOutcome::Coalesced {
+            existing_job_id, ..
+        } => assert_eq!(existing_job_id, coalesce_second.id),
+        other => panic!("expected coalesced job, got {other:?}"),
+    }
+    fixture
+        .keyed_run_state
+        .released
+        .store(true, std::sync::atomic::Ordering::SeqCst);
+    fixture.keyed_run_state.release_first.notify_waiters();
+    assert_eq!(
+        fixture
+            .coalesce_waiter
+            .wait_for_terminal(coalesce_first)
+            .await
+            .expect("active coalesce job completes")
+            .state,
+        JobState::Completed
+    );
+    assert_eq!(
+        fixture
+            .coalesce_waiter
+            .wait_for_terminal(coalesce_second)
+            .await
+            .expect("queued coalesce job completes")
+            .state,
+        JobState::Completed
+    );
+    assert_eq!(
+        *fixture.keyed_run_state.completed.lock().await,
+        vec![11, 12]
+    );
+
+    fixture.keyed_run_state.started.lock().await.clear();
+    fixture.keyed_run_state.completed.lock().await.clear();
+    fixture
+        .keyed_run_state
+        .released
+        .store(false, std::sync::atomic::Ordering::SeqCst);
+    let replace_key = "replace-key";
+    let replace_first = fixture
+        .manager
+        .create(
+            "replaceKeyedProcessDocument",
+            KeyedJobPayload {
+                document_id: "doc-replace-1".to_string(),
+                group_key: replace_key.to_string(),
+                sequence: 21,
+            },
+        )
+        .await
+        .expect("create active replace job");
+    fixture.keyed_run_state.first_started.notified().await;
+    let replace_second = match fixture
+        .manager
+        .submit(
+            "replaceKeyedProcessDocument",
+            KeyedJobPayload {
+                document_id: "doc-replace-2".to_string(),
+                group_key: replace_key.to_string(),
+                sequence: 22,
+            },
+        )
+        .await
+        .expect("submit queued replace job")
+    {
+        JobSubmitOutcome::Accepted { job, .. } => job,
+        other => panic!("expected queued replace job accepted, got {other:?}"),
+    };
+    let replace_third = match fixture
+        .manager
+        .submit(
+            "replaceKeyedProcessDocument",
+            KeyedJobPayload {
+                document_id: "doc-replace-3".to_string(),
+                group_key: replace_key.to_string(),
+                sequence: 23,
+            },
+        )
+        .await
+        .expect("submit replacement job")
+    {
+        JobSubmitOutcome::Replaced {
+            replaced_job_id,
+            job,
+            ..
+        } => {
+            assert_eq!(replaced_job_id, replace_second.id);
+            job
+        }
+        other => panic!("expected replaced job, got {other:?}"),
+    };
+    assert_eq!(
+        fixture
+            .replace_waiter
+            .wait_for_terminal(replace_second)
+            .await
+            .expect("replaced queued job becomes terminal")
+            .state,
+        JobState::Skipped
+    );
+    fixture
+        .keyed_run_state
+        .released
+        .store(true, std::sync::atomic::Ordering::SeqCst);
+    fixture.keyed_run_state.release_first.notify_waiters();
+    assert_eq!(
+        fixture
+            .replace_waiter
+            .wait_for_terminal(replace_first)
+            .await
+            .expect("active replace job completes")
+            .state,
+        JobState::Completed
+    );
+    assert_eq!(
+        fixture
+            .replace_waiter
+            .wait_for_terminal(replace_third)
+            .await
+            .expect("replacement job completes")
+            .state,
+        JobState::Completed
+    );
+    assert_eq!(
+        *fixture.keyed_run_state.completed.lock().await,
+        vec![21, 23]
+    );
+
+    fixture.keyed_run_state.started.lock().await.clear();
+    fixture.keyed_run_state.completed.lock().await.clear();
+    fixture
+        .keyed_run_state
+        .released
+        .store(false, std::sync::atomic::Ordering::SeqCst);
+    let cancel_key = "cancel-key";
+    let cancel_first = fixture
+        .manager
+        .create(
+            "cancelKeyedProcessDocument",
+            KeyedJobPayload {
+                document_id: "doc-cancel-1".to_string(),
+                group_key: cancel_key.to_string(),
+                sequence: 31,
+            },
+        )
+        .await
+        .expect("create active cancel job");
+    fixture.keyed_run_state.first_started.notified().await;
+    let cancel_second = match fixture
+        .manager
+        .submit(
+            "cancelKeyedProcessDocument",
+            KeyedJobPayload {
+                document_id: "doc-cancel-2".to_string(),
+                group_key: cancel_key.to_string(),
+                sequence: 32,
+            },
+        )
+        .await
+        .expect("submit queued cancel job")
+    {
+        JobSubmitOutcome::Accepted { job, .. } => job,
+        other => panic!("expected queued cancel job accepted, got {other:?}"),
+    };
+    fixture
+        .manager
+        .cancel(&cancel_second)
+        .await
+        .expect("cancel queued keyed job");
+    assert_eq!(
+        fixture
+            .cancel_waiter
+            .wait_for_terminal(cancel_second)
+            .await
+            .expect("cancelled queued job becomes terminal")
+            .state,
+        JobState::Cancelled
+    );
+    let cancel_third = match fixture
+        .manager
+        .submit(
+            "cancelKeyedProcessDocument",
+            KeyedJobPayload {
+                document_id: "doc-cancel-3".to_string(),
+                group_key: cancel_key.to_string(),
+                sequence: 33,
+            },
+        )
+        .await
+        .expect("submit after queued cancellation")
+    {
+        JobSubmitOutcome::Accepted { job, .. } => job,
+        other => panic!("expected post-cancel job accepted, got {other:?}"),
+    };
+    fixture
+        .keyed_run_state
+        .released
+        .store(true, std::sync::atomic::Ordering::SeqCst);
+    fixture.keyed_run_state.release_first.notify_waiters();
+    assert_eq!(
+        fixture
+            .cancel_waiter
+            .wait_for_terminal(cancel_first)
+            .await
+            .expect("active cancel-policy job completes")
+            .state,
+        JobState::Completed
+    );
+    assert_eq!(
+        fixture
+            .cancel_waiter
+            .wait_for_terminal(cancel_third)
+            .await
+            .expect("post-cancel job completes")
+            .state,
+        JobState::Completed
+    );
+    assert_eq!(
+        *fixture.keyed_run_state.completed.lock().await,
+        vec![31, 33]
+    );
+
+    fixture.stop().await;
+}
+
+#[tokio::test]
+async fn jobs_terminal_local_job_edges_and_admin_rpcs() {
+    assert_runtime_case_registered(
+        "jobs.terminal-local-job-edges-and-admin-rpcs",
+        "jobs",
+        "jobs",
+    );
+
+    let mut fixture = setup_jobs_fixture().await;
+    let job = fixture
+        .service_handle
+        .generated_submit_job::<ProcessDocumentJob>(JobPayload {
+            document_id: "doc-terminal-admin".to_string(),
+        })
+        .await
+        .expect("submit typed service-local job");
+    let job_id = job.identity().id.clone();
+    let terminal = job.wait().await.expect("wait for service-local job");
+    assert_eq!(terminal.state, JobState::Completed);
+    assert_eq!(
+        terminal.result.expect("completed job result").document_id,
+        "doc-terminal-admin"
+    );
+    assert_eq!(
+        job.get()
+            .await
+            .expect("get terminal service-local job")
+            .state,
+        JobState::Completed
+    );
+    assert_eq!(
+        job.cancel()
+            .await
+            .expect("cancel terminal service-local job")
+            .state,
+        JobState::Completed
+    );
+
+    let admin_contract = jobs_admin_client_contract().expect("build Jobs admin contract");
+    let admin_participant_id = fixture
+        .runtime
+        .scoped_contract(&admin_contract)
+        .expect("scope Jobs admin contract")
+        .id()
+        .to_owned();
+    fixture
+        .admin
+        .put_test_login_portal(
+            &fixture.bootstrap_url,
+            "jobs-admin-mutating",
+            &admin_participant_id,
+            vec!["local".to_string()],
+        )
+        .await
+        .expect("create Jobs admin test portal");
+    let (admin_client, _) = fixture
+        .admin
+        .connect_new_trusted_local_user_reconnectable(
+            &fixture.bootstrap_url,
+            &admin_contract,
+            "jobs-admin-mutating",
+            "jobs-admin-mutating",
+            "JobsAdminMutatingPassword-1",
+            vec![
+                "trellis.jobs::admin.read".to_string(),
+                "trellis.jobs::admin.mutate".to_string(),
+            ],
+        )
+        .await
+        .expect("connect mutating Jobs admin client");
+    let admin_caller = crate::generated_caller(&admin_client);
+    let jobs_admin = trellis_rs::sdk::jobs::JobsClient::new(admin_caller);
+    let listed = wait_for_admin_job(
+        &jobs_admin,
+        &job_id,
+        trellis_rs::sdk::jobs::types::JobsQueryResponseEntriesItemState::Completed,
+    )
+    .await;
+    assert_eq!(listed.id, job_id);
+    let inspected = jobs_admin
+        .rpc()
+        .jobs()
+        .inspect(&trellis_rs::sdk::jobs::types::JobsInspectRequest { id: job_id.clone() })
+        .await
+        .expect("inspect terminal job through generated Jobs RPC");
+    assert_eq!(
+        inspected.job.state,
+        trellis_rs::sdk::jobs::types::JobsInspectResponseJobState::Completed
+    );
+    let cancelled = jobs_admin
+        .rpc()
+        .jobs()
+        .cancel(&trellis_rs::sdk::jobs::types::JobsCancelRequest {
+            id: job_id,
+            reason: Some("terminal idempotency check".to_string()),
+        })
+        .await
+        .expect("cancel terminal job through generated Jobs RPC");
+    assert_eq!(
+        cancelled.job.state,
+        trellis_rs::sdk::jobs::types::JobsCancelResponseJobState::Completed
+    );
 
     fixture.stop().await;
 }
@@ -1335,6 +1750,19 @@ async fn wait_for_admin_dlq_job(
     jobs_admin: &trellis_rs::sdk::jobs::JobsClient<'_>,
     job_id: &str,
 ) -> trellis_rs::sdk::jobs::types::JobsQueryResponseEntriesItem {
+    wait_for_admin_job(
+        jobs_admin,
+        job_id,
+        trellis_rs::sdk::jobs::types::JobsQueryResponseEntriesItemState::Dead,
+    )
+    .await
+}
+
+async fn wait_for_admin_job(
+    jobs_admin: &trellis_rs::sdk::jobs::JobsClient<'_>,
+    job_id: &str,
+    state: trellis_rs::sdk::jobs::types::JobsQueryResponseEntriesItemState,
+) -> trellis_rs::sdk::jobs::types::JobsQueryResponseEntriesItem {
     let deadline = tokio::time::Instant::now() + Duration::from_secs(60);
     loop {
         let page = match jobs_admin
@@ -1347,7 +1775,7 @@ async fn wait_for_admin_dlq_job(
                 search: None,
                 service: None,
                 sort: None,
-                state: Some(vec![crate::wire("dead")]),
+                state: Some(vec![crate::wire(state.as_str())]),
                 trigger: None,
                 r#type: None,
                 offset: None,
@@ -1371,7 +1799,7 @@ async fn wait_for_admin_dlq_job(
         }
         assert!(
             tokio::time::Instant::now() < deadline,
-            "Jobs.Query did not return dead job {job_id} before timeout"
+            "Jobs.Query did not return {state:?} job {job_id} before timeout"
         );
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
@@ -1401,18 +1829,22 @@ fn jobs_admin_client_contract(
     let manifest = trellis_rs::contracts::ContractBuilder::authoring(
         JOBS_ADMIN_CLIENT_ID,
         "Trellis Integration Jobs Admin Client",
-        "Uses Jobs admin ListServices for worker-presence coverage.",
+        "Uses generated Jobs admin RPCs for live acceptance coverage.",
         trellis_rs::contracts::ContractKind::App,
     )
     .use_ref(
         "jobs",
         trellis_rs::contracts::use_contract(trellis_rs::sdk::jobs::API_ID).with_rpc_call([
+            "Jobs.Cancel",
+            "Jobs.DismissDLQ",
             "Jobs.GetKey",
             "Jobs.Inspect",
             "Jobs.ListDLQ",
             "Jobs.ListServices",
             "Jobs.Metrics",
             "Jobs.Query",
+            "Jobs.ReplayDLQ",
+            "Jobs.Retry",
         ]),
     );
 

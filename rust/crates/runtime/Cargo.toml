@@ -14,6 +14,7 @@ name = "trellis_runtime"
 default = ["sqlite-storage", "nats-leases"]
 sqlite-storage = ["dep:rusqlite", "dep:refinery"]
 nats-leases = ["dep:async-nats", "dep:bytes"]
+integration-test-hooks = []
 
 [lints]
 workspace = true

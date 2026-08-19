@@ -1,5 +1,6 @@
 use super::super::*;
 use super::local::BrowserFlowResponse;
+use crate::platform::auth::policy::portal_allows_authenticated_provider;
 use crate::platform::auth::MaterializationState;
 
 #[derive(Deserialize, Serialize)]
@@ -109,6 +110,7 @@ where
                 "selectedOptionalBundles": selected_optional_bundles,
             }),
             portal_binding: PortalBindingMutation::Clear,
+            portal_policy_snapshot: None,
             decided_at: now,
             expires_at: None,
             proposal_idempotency: idempotency(
@@ -217,14 +219,6 @@ where
         + 'static,
     E: AuthEphemeralRepository + Clone,
 {
-    let Some(policy) = state
-        .service
-        .repository()
-        .get_portal_grant_override(&flow.portal_id, &flow.participant_id)
-        .await?
-    else {
-        return Ok(None);
-    };
     let binding = state
         .service
         .repository()
@@ -235,23 +229,6 @@ where
     if consent != flow.consent {
         return Err(HttpError::conflict("consent_view_changed"));
     }
-    let groups = state
-        .service
-        .repository()
-        .list_capability_groups()
-        .await?
-        .into_iter()
-        .map(|group| (group.group_key.clone(), group))
-        .collect();
-    let selection = resolve_portal_authority_selection(&policy, &groups, &consent, &attributes)?;
-    if selection.capabilities.iter().any(|capability| {
-        capability
-            .rsplit_once("::")
-            .is_some_and(|(_, name)| matches!(name, "admin" | "provision" | "activate"))
-    }) && flow.participant_id != "trellis-platform-administration"
-    {
-        return Err(HttpError::forbidden("reserved_capability"));
-    }
     let principal_id = flow
         .principal_id
         .clone()
@@ -260,55 +237,141 @@ where
         "sessionPublicKey",
         &flow.session_public_key,
     )?;
-    let request_value = json!({
-        "flowId": flow.flow_id, "portalId": flow.portal_id,
-        "participantId": flow.participant_id, "providerId": attributes.provider_id,
-        "roles": attributes.roles, "effectivePolicyDigest": selection.effective_policy_digest,
-    });
-    let request_digest = trellis_protocol::digest_json(&request_value)
-        .map_err(|_| HttpError::internal("portal_policy_digest"))?;
-    let durable = state
-        .service
-        .apply_identity_authority_selection(ApplyIdentityAuthoritySelectionInput {
-            principal_id: principal_id.clone(),
-            participant_id: flow.participant_id.clone(),
-            participant_artifact_digest: flow.participant_artifact_digest.clone(),
-            participant_needs_digest: flow.participant_needs_digest.clone(),
-            grant_set: selection.grant_set,
-            capabilities: selection.capabilities,
-            state: AuthorityState::Accepted,
-            decided_by: flow.session_public_key.clone(),
-            source_payload: json!({
-                "source": "trusted_portal", "flowId": flow.flow_id,
-                "portalId": flow.portal_id, "providerId": attributes.provider_id,
+    let durable = 'policy: {
+        for attempt in 0..3 {
+            let Some((portal, settings)) = state
+                .service
+                .repository()
+                .get_login_portal(&flow.portal_id)
+                .await?
+            else {
+                return Err(HttpError::gone("portal_unavailable"));
+            };
+            if portal.removed {
+                return Err(HttpError::gone("portal_unavailable"));
+            }
+            if !portal_allows_authenticated_provider(&portal, &settings, &attributes.provider_id) {
+                return Err(HttpError::forbidden(if portal.disabled {
+                    "portal_disabled"
+                } else if attributes.provider_id == "local" && !settings.local_login_enabled {
+                    "local_login_disabled"
+                } else {
+                    "provider_not_allowed"
+                }));
+            }
+            if attributes.provider_id != "local"
+                && !state.oidc_providers.contains_key(&attributes.provider_id)
+            {
+                return Err(HttpError::not_found("provider_not_found"));
+            }
+            let Some(policy) = state
+                .service
+                .repository()
+                .get_portal_grant_override(&flow.portal_id, &flow.participant_id)
+                .await?
+            else {
+                return Ok(None);
+            };
+            let groups = state
+                .service
+                .repository()
+                .list_capability_groups()
+                .await?
+                .into_iter()
+                .map(|group| (group.group_key.clone(), group))
+                .collect();
+            let snapshot = portal_policy_snapshot(
+                &portal,
+                &settings,
+                &flow.participant_id,
+                Some(&policy),
+                &groups,
+            )?;
+            #[cfg(feature = "integration-test-hooks")]
+            state
+                .service
+                .repository()
+                .wait_for_portal_snapshot_test_barrier(&flow.flow_id, &portal.portal_id)
+                .await?;
+            let selection =
+                resolve_portal_authority_selection(&policy, &groups, &consent, &attributes)?;
+            if selection.capabilities.iter().any(|capability| {
+                capability
+                    .rsplit_once("::")
+                    .is_some_and(|(_, name)| matches!(name, "admin" | "provision" | "activate"))
+            }) && flow.participant_id != "trellis-platform-administration"
+            {
+                return Err(HttpError::forbidden("reserved_capability"));
+            }
+            let request_digest = trellis_protocol::digest_json(&json!({
+                "flowId": flow.flow_id,
+                "portalId": flow.portal_id,
+                "portalVersion": snapshot.portal_version,
+                "loginSettingsVersion": snapshot.login_settings_version,
+                "participantId": flow.participant_id,
+                "policyVersion": snapshot.policy_version,
+                "capabilityGroupVersions": snapshot.capability_group_versions,
+                "providerId": attributes.provider_id,
+                "roles": attributes.roles,
                 "effectivePolicyDigest": selection.effective_policy_digest,
-            }),
-            portal_binding: PortalBindingMutation::Set(PortalAuthoritySource {
-                portal_id: flow.portal_id.clone(),
-                provider_id: attributes.provider_id,
-                roles: attributes.roles,
-                effective_policy_digest: selection.effective_policy_digest,
-            }),
-            decided_at: now,
-            expires_at: None,
-            proposal_idempotency: idempotency(
-                &flow.flow_id,
-                "portal.authority.propose",
-                &signer_id,
-                &flow.flow_id,
-                &request_digest,
-                now,
-            )?,
-            decision_idempotency: idempotency(
-                &flow.flow_id,
-                "portal.authority.accept",
-                &signer_id,
-                &flow.flow_id,
-                &request_digest,
-                now,
-            )?,
-        })
-        .await?;
+            }))
+            .map_err(|_| HttpError::internal("portal_policy_digest"))?;
+            let policy_idempotency_key = format!("{}:{request_digest}", flow.flow_id);
+            let result = state
+                .service
+                .apply_identity_authority_selection(ApplyIdentityAuthoritySelectionInput {
+                    principal_id: principal_id.clone(),
+                    participant_id: flow.participant_id.clone(),
+                    participant_artifact_digest: flow.participant_artifact_digest.clone(),
+                    participant_needs_digest: flow.participant_needs_digest.clone(),
+                    grant_set: selection.grant_set,
+                    capabilities: selection.capabilities,
+                    state: AuthorityState::Accepted,
+                    decided_by: flow.session_public_key.clone(),
+                    source_payload: json!({
+                        "source": "trusted_portal", "flowId": flow.flow_id,
+                        "portalId": flow.portal_id, "providerId": attributes.provider_id,
+                        "effectivePolicyDigest": selection.effective_policy_digest,
+                    }),
+                    portal_binding: PortalBindingMutation::Set(PortalAuthoritySource {
+                        portal_id: flow.portal_id.clone(),
+                        provider_id: attributes.provider_id.clone(),
+                        roles: attributes.roles.clone(),
+                        effective_policy_digest: selection.effective_policy_digest,
+                    }),
+                    portal_policy_snapshot: Some(snapshot),
+                    decided_at: now,
+                    expires_at: None,
+                    proposal_idempotency: idempotency(
+                        &policy_idempotency_key,
+                        "portal.authority.propose",
+                        &signer_id,
+                        &policy_idempotency_key,
+                        &request_digest,
+                        now,
+                    )?,
+                    decision_idempotency: idempotency(
+                        &flow.flow_id,
+                        "portal.authority.accept",
+                        &signer_id,
+                        &flow.flow_id,
+                        &request_digest,
+                        now,
+                    )?,
+                })
+                .await;
+            match result {
+                Ok(durable) => break 'policy durable,
+                Err(AuthorizationStateError::PortalPolicyChanged) if attempt < 2 => continue,
+                Err(AuthorizationStateError::PortalPolicyChanged) => {
+                    return Err(HttpError::conflict("portal_policy_changed"));
+                }
+                Err(AuthorizationStateError::StorageConflict) if attempt < 2 => continue,
+                Err(error) => return Err(error.into()),
+            }
+        }
+        unreachable!("bounded portal policy retries return or break")
+    };
     let durable_record = DesiredAuthorityRecord::Identity(durable);
     flow.state = AuthBrowserFlowState::Approved;
     flow.durable_result_digest = Some(

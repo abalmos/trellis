@@ -123,6 +123,14 @@ pub(crate) async fn start(context: &RuntimeContext) -> Result<SubsystemHandle, R
     let post_commit_nats = context.trellis_nats.clone();
     let rpc_system_nats = system_nats.clone();
     let post_commit_system_nats = system_nats.clone();
+    let auth_service = AuthService::new(auth_store.clone(), AuthServiceConfig::default())
+        .map_err(|error| RuntimeError::Platform(error.to_string()))?;
+    let (portal_reconciliation, portal_reconciliation_worker) =
+        portal_policy_reconciliation(auth_service.clone(), reconciliation.clone());
+    portal_reconciliation_worker
+        .reconcile_startup()
+        .await
+        .map_err(|error| RuntimeError::Platform(error.to_string()))?;
     let callout_runtime = AuthCallout::start(
         auth_nats,
         system_nats,
@@ -137,10 +145,6 @@ pub(crate) async fn start(context: &RuntimeContext) -> Result<SubsystemHandle, R
     )
     .await
     .map_err(|error| RuntimeError::Platform(error.to_string()))?;
-    let auth_service = AuthService::new(auth_store.clone(), AuthServiceConfig::default())
-        .map_err(|error| RuntimeError::Platform(error.to_string()))?;
-    let (portal_reconciliation, portal_reconciliation_worker) =
-        portal_policy_reconciliation(auth_service.clone());
     let (auth_event_session, auth_operation_session) =
         ensure_auth_event_session(&auth_service, &authorization, &auth_participant, now).await?;
     let event_session = auth_service

@@ -43,8 +43,12 @@ pub(crate) use authorization::inject_own_verified_for_test;
 #[cfg(feature = "integration-test-scoping")]
 #[doc(hidden)]
 pub use client::connect_captured_user_admission;
+pub(crate) use client::fetch_device_activation;
+pub(crate) use client::ServiceBootstrapResponse;
 pub(crate) use client::ServiceConnectWithContractOptions;
 pub(crate) use client::TrellisClient;
+#[cfg(feature = "integration-test-scoping")]
+pub(crate) use client::{fetch_device_activation_with_test_proof, DeviceBootstrapProofOverrides};
 pub use client::{
     DeviceConnectOptions, EventMessage, EventReplayPolicy, EventSubscribeOptions,
     EventSubscriptionMode, UserConnectOptions,

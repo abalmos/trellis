@@ -17,10 +17,20 @@ pub(super) mod companion {
     pub(super) async fn exercise_companion_repositories(
         store: SqliteAuthorizationStore,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        super::accounts::exercise_accounts(store.clone()).await?;
-        super::portals::exercise_portals(store.clone()).await?;
-        super::account_flows::exercise_account_flows(store.clone()).await?;
-        super::companion_provisioning::exercise_provisioning(store.clone()).await?;
-        super::authority_flows::exercise_authority_flows(store).await
+        super::accounts::exercise_accounts(store.clone())
+            .await
+            .map_err(|error| format!("accounts: {error}"))?;
+        super::portals::exercise_portals(store.clone())
+            .await
+            .map_err(|error| format!("portals: {error}"))?;
+        super::account_flows::exercise_account_flows(store.clone())
+            .await
+            .map_err(|error| format!("account flows: {error}"))?;
+        super::companion_provisioning::exercise_provisioning(store.clone())
+            .await
+            .map_err(|error| format!("provisioning: {error}"))?;
+        super::authority_flows::exercise_authority_flows(store)
+            .await
+            .map_err(|error| format!("authority flows: {error}").into())
     }
 }
