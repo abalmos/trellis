@@ -4,6 +4,8 @@ on:
   push:
     branches:
       - agent/rs-auth-cleanup-runner
+    paths:
+      - .github/workflows/auth-cleanup-runner.yml
 
 permissions:
   contents: write
@@ -104,7 +106,7 @@ jobs:
       - name: Compile Rust integration tests
         run: cargo test --manifest-path rust/Cargo.toml -p trellis-rs --test integration --no-run
 
-      - name: Commit to rs if it has not moved
+      - name: Commit to rs if validation passed
         shell: bash
         run: |
           set -euo pipefail
@@ -119,3 +121,21 @@ jobs:
           git diff --cached --check
           git commit -m "Remove synthetic Auth failure injection"
           git push origin HEAD:refs/heads/rs
+
+      - name: Record validation result
+        if: always()
+        shell: bash
+        env:
+          VALIDATION_STATUS: ${{ job.status }}
+        run: |
+          set -euo pipefail
+          git fetch origin agent/rs-auth-cleanup-runner
+          git worktree add --detach /tmp/validation-result origin/agent/rs-auth-cleanup-runner
+          cd /tmp/validation-result
+          git switch -C agent/rs-auth-cleanup-runner
+          git config user.name "trellis-cleanup-bot"
+          git config user.email "trellis-cleanup-bot@users.noreply.github.com"
+          printf '%s\n' "$VALIDATION_STATUS" > .validation-result
+          git add .validation-result
+          git commit -m "Record Auth cleanup validation: $VALIDATION_STATUS" || exit 0
+          git push origin HEAD:refs/heads/agent/rs-auth-cleanup-runner
