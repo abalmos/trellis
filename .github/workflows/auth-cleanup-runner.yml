@@ -1,0 +1,121 @@
+name: Auth cleanup runner
+
+on:
+  push:
+    branches:
+      - agent/rs-auth-cleanup-runner
+
+permissions:
+  contents: write
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out current rs
+        uses: actions/checkout@v4
+        with:
+          ref: rs
+          fetch-depth: 0
+
+      - name: Verify cleanup inputs are unchanged
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git hash-object integration/rust-runtime-test-matrix.json)" = "9da08abb8b5259b48f2c4ee96355700511a27d8c"
+          test "$(git hash-object rust/crates/trellis-test/src/lib.rs)" = "a3df554bc406f95843e2ff6116325aff906b1028"
+          test "$(git hash-object rust/crates/runtime/src/platform/auth/sqlite/common.rs)" = "8f8e61578a8c5155cef9c1c832b219b38e655b45"
+          test "$(git hash-object rust/crates/runtime/src/platform/auth_post_commit.rs)" = "7beccd12c9173105e1d52eb1bdaf937d580769e8"
+          test "$(git hash-object rust/crates/trellis/tests/integration/auth.rs)" = "f376209b417948ff79ad47c0a1831fddf6f018e5"
+
+      - name: Delete synthetic Auth failure machinery
+        shell: python
+        run: |
+          from pathlib import Path
+          import json
+          import re
+
+          def replace_once(path: str, pattern: str, replacement: str) -> None:
+              file = Path(path)
+              source = file.read_text()
+              updated, count = re.subn(pattern, replacement, source, count=1, flags=re.S)
+              if count != 1:
+                  raise SystemExit(f"expected one cleanup match in {path}, got {count}")
+              file.write_text(updated)
+
+          replace_once(
+              "integration/rust-runtime-test-matrix.json",
+              r',\n    \{\n      "id": "auth\.transaction-failure-rolls-back-state-idempotency-and-actions".*?\n    \},\n    \{\n      "id": "auth\.post-commit-failure-retries-committed-context-revocation-once".*?\n    \}\n  \]\n\}\n$',
+              "\n  ]\n}\n",
+          )
+          json.loads(Path("integration/rust-runtime-test-matrix.json").read_text())
+
+          replace_once(
+              "rust/crates/trellis-test/src/lib.rs",
+              r'    /// Arms a target-scoped failure after a user principal write but before its\n.*?(?=    /// Deletes and returns one session row so tests can restore it later\.)',
+              "",
+          )
+          replace_once(
+              "rust/crates/runtime/src/platform/auth/sqlite/common.rs",
+              r'    #\[cfg\(feature = "integration-test-hooks"\)\]\n    pub\(crate\) async fn consume_test_post_commit_failure\(.*?(?=    pub\(crate\) fn open\()',
+              "",
+          )
+          replace_once(
+              "rust/crates/runtime/src/platform/auth_post_commit.rs",
+              r'        #\[cfg\(feature = "integration-test-hooks"\)\]\n        if self\n.*?(?=        match self\.dispatch\(&action\)\.await \{)',
+              "",
+          )
+          replace_once(
+              "rust/crates/trellis/tests/integration/auth.rs",
+              r'#\[tokio::test\]\nasync fn auth_transaction_failure_rolls_back_state_idempotency_and_actions\(\) \{.*?(?=#\[tokio::test\]\nasync fn portal_route_selection_and_policy_drive_browser_flow\(\))',
+              "",
+          )
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Format changed Rust
+        run: cargo fmt --manifest-path rust/Cargo.toml --all
+
+      - name: Verify deletion scope
+        shell: bash
+        run: |
+          set -euo pipefail
+          if rg -n 'fail_user_update_transaction|clear_user_update_transaction_failure|fail_next_context_revocation_dispatch|consume_test_post_commit_failure|auth_transaction_failure_rolls_back_state_idempotency_and_actions|auth_post_commit_failure_retries_committed_context_revocation_once|__trellis_test_post_commit_failures|injected integration-test dispatch failure' \
+            integration/rust-runtime-test-matrix.json \
+            rust/crates/trellis-test/src/lib.rs \
+            rust/crates/runtime/src/platform/auth/sqlite/common.rs \
+            rust/crates/runtime/src/platform/auth_post_commit.rs \
+            rust/crates/trellis/tests/integration/auth.rs; then
+            echo "obsolete synthetic Auth failure machinery remains" >&2
+            exit 1
+          fi
+          expected="integration/rust-runtime-test-matrix.json
+          rust/crates/runtime/src/platform/auth/sqlite/common.rs
+          rust/crates/runtime/src/platform/auth_post_commit.rs
+          rust/crates/trellis-test/src/lib.rs
+          rust/crates/trellis/tests/integration/auth.rs"
+          actual="$(git diff --name-only | sort)"
+          test "$actual" = "$expected"
+
+      - name: Test real Auth SQLite rollback
+        run: cargo test --manifest-path rust/Cargo.toml -p trellis-runtime rollback_tests:: --lib
+
+      - name: Compile Rust integration tests
+        run: cargo test --manifest-path rust/Cargo.toml -p trellis-rs --test integration --no-run
+
+      - name: Commit to rs if it has not moved
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "trellis-cleanup-bot"
+          git config user.email "trellis-cleanup-bot@users.noreply.github.com"
+          git add -- \
+            integration/rust-runtime-test-matrix.json \
+            rust/crates/trellis-test/src/lib.rs \
+            rust/crates/runtime/src/platform/auth/sqlite/common.rs \
+            rust/crates/runtime/src/platform/auth_post_commit.rs \
+            rust/crates/trellis/tests/integration/auth.rs
+          git diff --cached --check
+          git commit -m "Remove synthetic Auth failure injection"
+          git push origin HEAD:refs/heads/rs
