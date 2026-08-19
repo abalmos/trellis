@@ -14,6 +14,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: rs
       - uses: actions/upload-artifact@v4
         with:
           name: rs-source-export
@@ -23,3 +25,7 @@ jobs:
             rust/crates/runtime/src/platform/auth/sqlite/common.rs
             rust/crates/runtime/src/platform/auth_post_commit.rs
             rust/crates/trellis/tests/integration/auth.rs
+            rust/crates/trellis/src/service/runtime_facade.rs
+            rust/crates/trellis/src/client/authorization/provider_cache.rs
+            rust/crates/trellis/src/jobs/runtime_ref.rs
+            rust/crates/trellis/src/jobs/manager.rs
