@@ -182,16 +182,10 @@ pub(super) fn lane_command_specs(lane: ReleaseLane, keep_workdir: bool) -> Vec<C
                 "cargo",
                 ["test", "--manifest-path", "rust/xtask/Cargo.toml"],
             ),
-            CommandSpec::new(
-                "cargo",
-                ["test", "--manifest-path", "xtask/Cargo.toml"],
-            ),
+            CommandSpec::new("cargo", ["test", "--manifest-path", "xtask/Cargo.toml"]),
         ],
         ReleaseLane::TypeScript => vec![
-            CommandSpec::new(
-                "deno",
-                ["task", "-c", "ts/deno.json", "packages:build:npm"],
-            ),
+            CommandSpec::new("deno", ["task", "-c", "ts/deno.json", "packages:build:npm"]),
             CommandSpec::new(
                 "deno",
                 ["task", "-c", "ts/deno.json", "test:prepared:result"],
@@ -202,21 +196,11 @@ pub(super) fn lane_command_specs(lane: ReleaseLane, keep_workdir: bool) -> Vec<C
             ),
             CommandSpec::new(
                 "deno",
-                [
-                    "task",
-                    "-c",
-                    "ts/deno.json",
-                    "test:prepared:trellis-svelte",
-                ],
+                ["task", "-c", "ts/deno.json", "test:prepared:trellis-svelte"],
             ),
             CommandSpec::new(
                 "deno",
-                [
-                    "task",
-                    "-c",
-                    "ts/deno.json",
-                    "test:prepared:trellis-test",
-                ],
+                ["task", "-c", "ts/deno.json", "test:prepared:trellis-test"],
             ),
             CommandSpec::new(
                 "deno",
@@ -258,7 +242,10 @@ pub(super) fn lane_command_specs(lane: ReleaseLane, keep_workdir: bool) -> Vec<C
                 INTEGRATION_LIVE_ARTIFACTS_MANIFEST,
             ];
             if keep_workdir {
-                let mut args = vec!["TRELLIS_TEST_KEEP_WORKDIR=1".to_string(), "deno".to_string()];
+                let mut args = vec![
+                    "TRELLIS_TEST_KEEP_WORKDIR=1".to_string(),
+                    "deno".to_string(),
+                ];
                 args.extend(live.into_iter().map(str::to_string));
                 vec![CommandSpec::new("env", args)]
             } else {
