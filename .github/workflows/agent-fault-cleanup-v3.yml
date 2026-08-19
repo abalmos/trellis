@@ -1,0 +1,125 @@
+name: Agent fault cleanup v3
+
+on:
+  push:
+    branches:
+      - agent/rs-fault-cleanup
+
+permissions:
+  contents: write
+
+jobs:
+  edit:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/rs-fault-cleanup
+          fetch-depth: 0
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Edit, format, compile, and report
+        shell: bash
+        run: |
+          set +e
+          {
+            set -euo pipefail
+            python3 <<'PY'
+          from pathlib import Path
+          import json
+
+          def exact(text, old, new='', count=1):
+              actual = text.count(old)
+              if actual != count:
+                  raise RuntimeError(f"expected {count} occurrence(s), found {actual}: {old[:100]!r}")
+              return text.replace(old, new)
+
+          provider_path = Path('rust/crates/trellis/src/client/authorization/provider_cache.rs')
+          provider = provider_path.read_text()
+          provider = exact(provider, '#[cfg(feature = "integration-test-scoping")]\nuse std::sync::atomic::AtomicBool;\n')
+          provider = exact(provider, '    #[cfg(feature = "integration-test-scoping")]\n    fail_next_context_read: Arc<AtomicBool>,\n    #[cfg(feature = "integration-test-scoping")]\n    fail_next_readiness_check: Arc<AtomicBool>,\n')
+          provider = exact(provider, '            #[cfg(feature = "integration-test-scoping")]\n            fail_next_context_read: Arc::new(AtomicBool::new(false)),\n            #[cfg(feature = "integration-test-scoping")]\n            fail_next_readiness_check: Arc::new(AtomicBool::new(false)),\n', count=3)
+          start = provider.index('    /// Fail the next exact context registry read for live redelivery coverage.')
+          end = provider.index('    fn set_healthy', start)
+          provider = provider[:start] + provider[end:]
+          provider = exact(provider, '        #[cfg(feature = "integration-test-scoping")]\n        if self.fail_next_context_read.swap(false, Ordering::Relaxed) {\n            return Err(TrellisClientError::NatsRequest(\n                "injected authorization context read failure".into(),\n            ));\n        }\n')
+          provider_path.write_text(provider)
+
+          validator_path = Path('rust/crates/trellis/src/service/local_validator.rs')
+          validator = validator_path.read_text()
+          validator = exact(validator, '        #[cfg(feature = "integration-test-scoping")]\n        if provider.integration_test_take_readiness_failure() {\n            return Err(EventVerificationFailure::retryable(format!(\n                "local authorization context unavailable for {subject}"\n            )));\n        }\n')
+          validator_path.write_text(validator)
+
+          events_path = Path('rust/crates/trellis/tests/integration/event_consumers.rs')
+          events = events_path.read_text()
+          events = exact(events, 'event_consumers_authorization_failures_redeliver_or_term', 'event_consumers_invalid_authorization_proof_terms_event')
+          events = exact(events, 'event-consumers.authorization-failures-redeliver-or-term', 'event-consumers.invalid-authorization-proof-terms-event')
+          events = exact(events, '    let provider = consumer.integration_test_authorization_provider();\n')
+          function_start = events.index('async fn event_consumers_invalid_authorization_proof_terms_event()')
+          next_test = events.index('\n#[tokio::test]', function_start)
+          block = events[function_start:next_test]
+          first = block.index('    let publisher = admin\n        .connect_client(&bootstrap_url, &publisher_contract())\n        .await\n        .expect("connect first event publisher");')
+          second = block.index('    let publisher = admin\n        .connect_client(&bootstrap_url, &publisher_contract())\n        .await\n        .expect("connect second event publisher");')
+          block = block[:first] + block[second:]
+          block = exact(block, '    provider.integration_test_fail_next_context_read();\n')
+          block = exact(block, '    assert_eq!(observed.lock().await.len(), 2);', '    assert_eq!(observed.lock().await.len(), 1);')
+          events = events[:function_start] + block + events[next_test:]
+          events_path.write_text(events)
+
+          matrix_path = Path('integration/rust-runtime-test-matrix.json')
+          matrix = json.loads(matrix_path.read_text())
+          old_id = 'event-consumers.authorization-failures-redeliver-or-term'
+          cases = [c for c in matrix['cases'] if c.get('id') == old_id]
+          if len(cases) != 1:
+              raise RuntimeError(f'expected one {old_id} matrix case, found {len(cases)}')
+          case = cases[0]
+          case['id'] = 'event-consumers.invalid-authorization-proof-terms-event'
+          case['title'] = 'Invalid authorization proofs terminate durable events'
+          case['description'] = 'A durable event carrying an invalid authorization proof is permanently terminated without invoking the handler.'
+          if isinstance(case.get('coverage'), list):
+              case['coverage'] = ['authorization', 'term']
+
+          def walk(v):
+              if isinstance(v, dict): return {k: walk(x) for k, x in v.items()}
+              if isinstance(v, list): return [walk(x) for x in v]
+              if v == 'event_consumers_authorization_failures_redeliver_or_term':
+                  return 'event_consumers_invalid_authorization_proof_terms_event'
+              return v
+          matrix = walk(matrix)
+          matrix_path.write_text(json.dumps(matrix, indent=2) + '\n')
+
+          for path in [provider_path, validator_path, events_path]:
+              text = path.read_text()
+              for forbidden in ('fail_next_context_read', 'fail_next_readiness', 'injected authorization context read failure'):
+                  if forbidden in text:
+                      raise RuntimeError(f'{forbidden!r} remains in {path}')
+          PY
+            rustfmt --edition 2021 \
+              rust/crates/trellis/src/client/authorization/provider_cache.rs \
+              rust/crates/trellis/src/service/local_validator.rs \
+              rust/crates/trellis/tests/integration/event_consumers.rs
+            cargo run --manifest-path rust/tools/generate/Cargo.toml -- prepare --no-npm .
+            cargo check --manifest-path rust/Cargo.toml -p trellis-rs --all-targets --features integration-test-scoping
+            git diff --check
+          } > .agent-fault-cleanup.log 2>&1
+          status=$?
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if [ "$status" -ne 0 ]; then
+            git add .agent-fault-cleanup.log
+            git commit -m "Record provider fault cleanup validation failure"
+            git push origin HEAD:agent/rs-fault-cleanup
+            cat .agent-fault-cleanup.log
+            exit "$status"
+          fi
+
+          git rm -f .github/workflows/agent-fault-cleanup.yml \
+            .github/workflows/agent-fault-cleanup-v2.yml \
+            .github/workflows/agent-fault-cleanup-v3.yml
+          rm -f .agent-validation-trigger .agent-fault-cleanup.log
+          git add -A
+          git commit -m "Remove synthetic provider fault injection"
+          git push origin HEAD:agent/rs-fault-cleanup
