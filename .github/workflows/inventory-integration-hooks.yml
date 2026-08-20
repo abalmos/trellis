@@ -1,0 +1,41 @@
+name: Inventory integration test hooks
+
+on:
+  push:
+    branches:
+      - agent/inventory-integration-hooks-v1
+
+permissions:
+  contents: write
+
+jobs:
+  inventory:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Inventory hooks
+        shell: bash
+        run: |
+          {
+            echo '# remaining integration/test-boundary inventory'
+            echo
+            echo '## integration-test-hooks feature references'
+            git grep -n -E 'integration-test-hooks' -- rust integration .github || true
+            echo
+            echo '## runtime cfg/test hook symbols'
+            git grep -n -E 'cfg\(feature = "integration-test-hooks"\)|portal_test_|test_[A-Za-z0-9_]*barrier|integration_test_[A-Za-z0-9_]+' -- rust/crates/runtime rust/crates/trellis rust/crates/trellis-test || true
+            echo
+            echo '## runtime-internals feature references'
+            git grep -n -E 'runtime-internals|runtime_[A-Za-z0-9_]+' -- rust/crates/runtime rust/crates/trellis || true
+            echo
+            echo '## integration-test-scoping feature references'
+            git grep -n -E 'integration-test-scoping|IntegrationTestScope' -- rust/crates/trellis rust/crates/trellis-test || true
+          } > .integration-hooks-inventory
+          git config user.name trellis-validation
+          git config user.email actions@users.noreply.github.com
+          git add .integration-hooks-inventory
+          git commit -m 'Record integration hook inventory'
+          git push --force origin HEAD:refs/heads/agent/result-integration-hooks-inventory-v1
