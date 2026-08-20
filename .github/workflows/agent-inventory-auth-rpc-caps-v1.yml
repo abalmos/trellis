@@ -1,0 +1,43 @@
+name: Inventory Auth RPC capability metadata
+
+on:
+  push:
+    branches: [agent/inventory-auth-rpc-caps-v1]
+
+permissions:
+  contents: write
+
+jobs:
+  inventory:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Extract RPC metadata from checked-in Auth API
+        shell: python
+        run: |
+          import json
+          from pathlib import Path
+          api = json.loads(Path('rust/crates/runtime/trellis.api.json').read_text())
+          result = {}
+          for name, rpc in api['rpc'].items():
+              hits = []
+              def walk(value, path=''):
+                  if isinstance(value, dict):
+                      for key, child in value.items():
+                          walk(child, f'{path}.{key}' if path else key)
+                  elif isinstance(value, list):
+                      for index, child in enumerate(value):
+                          walk(child, f'{path}[{index}]')
+                  elif value == 'admin':
+                      hits.append(path)
+              walk(rpc)
+              result[name] = {'version': rpc.get('version'), 'adminPaths': hits, 'keys': sorted(rpc.keys())}
+          Path('auth-rpc-capability-inventory.json').write_text(json.dumps(result, indent=2, sort_keys=True) + '\n')
+      - name: Publish inventory branch
+        run: |
+          git config user.name trellis-validation
+          git config user.email actions@users.noreply.github.com
+          git add auth-rpc-capability-inventory.json
+          git commit -m 'Record Auth RPC capability inventory'
+          git push --force origin HEAD:refs/heads/agent/result-auth-rpc-caps-v1
