@@ -1,0 +1,142 @@
+name: Agent proof v1 clean break
+
+on:
+  push:
+    branches:
+      - agent/rs-proof-v1-cleanbreak
+
+permissions:
+  contents: write
+
+env:
+  DENO_VERSION: 2.9.4
+  CARGO_TERM_COLOR: always
+
+jobs:
+  transform-validate-commit:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Set up Deno
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: ${{ env.DENO_VERSION }}
+
+      - name: Rename unpublished proof implementation and wire domains
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import subprocess
+
+          replacements = {
+              "AUTHORIZATION_REQUEST_PROOF_DOMAIN_V2": "AUTHORIZATION_REQUEST_PROOF_DOMAIN_V1",
+              "AUTHORIZATION_EVENT_PROOF_DOMAIN_V2": "AUTHORIZATION_EVENT_PROOF_DOMAIN_V1",
+              "AuthorizationRequestProofInputV2": "AuthorizationRequestProofInput",
+              "AuthorizationRequestProofV2": "AuthorizationRequestProof",
+              "AuthorizationEventProofInputV2": "AuthorizationEventProofInput",
+              "AuthorizationEventProofV2": "AuthorizationEventProof",
+              "AuthorizationEventPublisherV2": "AuthorizationEventPublisher",
+              "VerifiedAuthorizationRequestV2": "VerifiedAuthorizationRequest",
+              "VerifiedAuthorizationEventV2": "VerifiedAuthorizationEvent",
+              "build_authorization_request_proof_input_v2": "build_authorization_request_proof_input",
+              "build_authorization_event_proof_input_v2": "build_authorization_event_proof_input",
+              "sign_authorization_request_v2": "sign_authorization_request",
+              "sign_authorization_event_v2": "sign_authorization_event",
+              "verify_authorization_request_v2": "verify_authorization_request",
+              "verify_authorization_event_v2": "verify_authorization_event",
+              "create_request_proof_v2": "create_request_proof",
+              "create_event_proof_v2": "create_event_proof",
+              "verify_event_proof_v2": "verify_event_proof",
+              "verify_v2_signature": "verify_signature",
+              "trellis.authorization-request-proof.v2": "trellis.authorization-request-proof.v1",
+              "trellis.authorization-event-proof.v2": "trellis.authorization-event-proof.v1",
+              "context-bound v2 `proof`": "context-bound `proof`",
+              "context-bound v2 event proof": "context-bound event proof",
+              "v2 request proof": "request proof",
+              "v2 event proof": "event proof",
+          }
+
+          paths = subprocess.check_output(["git", "ls-files", "-z"]).split(b"\0")
+          changed = []
+          for raw in paths:
+              if not raw:
+                  continue
+              path = Path(raw.decode())
+              try:
+                  text = path.read_text()
+              except (UnicodeDecodeError, OSError):
+                  continue
+              original = text
+              for old, new in replacements.items():
+                  text = text.replace(old, new)
+              if text != original:
+                  path.write_text(text)
+                  changed.append(str(path))
+
+          core = Path("rust/crates/trellis/src/client/authorization/core.rs")
+          text = core.read_text()
+          text = text.replace(
+              "PermissionAtomV1, ProtocolError, VerifiedAuthorizationContextV1, VerifiedAuthorizationEvent,\n    VerifiedAuthorizationRequest,",
+              "PermissionAtomV1, ProtocolError, VerifiedAuthorizationContextV1,\n    VerifiedAuthorizationEvent as ProtocolVerifiedAuthorizationEvent,\n    VerifiedAuthorizationRequest as ProtocolVerifiedAuthorizationRequest,",
+          )
+          text = text.replace(
+              "    request: VerifiedAuthorizationRequest,",
+              "    request: ProtocolVerifiedAuthorizationRequest,",
+          )
+          text = text.replace(
+              "    event: VerifiedAuthorizationEvent,",
+              "    event: ProtocolVerifiedAuthorizationEvent,",
+          )
+          core.write_text(text)
+
+          print("changed files:")
+          for path in changed:
+              print(path)
+          PY
+
+      - name: Format Rust
+        run: cargo fmt --manifest-path rust/Cargo.toml --all
+
+      - name: Prepare generated artifacts
+        run: cargo run --manifest-path rust/tools/generate/Cargo.toml -- prepare --no-npm .
+
+      - name: Build embedded portal
+        run: deno task -c ts/portals/login/deno.json build:embedded
+
+      - name: Check production Rust
+        run: cargo clippy --manifest-path rust/Cargo.toml --workspace --all-targets -- -D warnings
+
+      - name: Test Rust libraries
+        run: cargo test --manifest-path rust/Cargo.toml --workspace --lib
+
+      - name: Check TypeScript
+        run: >-
+          deno check -c ts/deno.json
+          ts/packages/trellis/index.ts
+          ts/packages/trellis-svelte/src/index.ts
+          ts/packages/trellis-test/index.ts
+
+      - name: Ensure V2 proof history is gone
+        shell: bash
+        run: |
+          if git grep -n -E 'Authorization(Request|Event).*V2|authorization_(request|event).*_v2|proof\.v2|proof_v2|PROOF_DOMAIN_V2' -- ':!CLEANUP.md'; then
+            echo "unpublished V2 proof history remains" >&2
+            exit 1
+          fi
+
+      - name: Commit validated proof clean break
+        shell: bash
+        run: |
+          git config user.name "trellis-cleanup-agent"
+          git config user.email "actions@users.noreply.github.com"
+          git add -- ':!.github/workflows/agent-proof-v1-cleanbreak.yml' ':!.github/agent-proof-v1-trigger'
+          git commit -m "Make authorization proofs first-public v1"
+          git push
