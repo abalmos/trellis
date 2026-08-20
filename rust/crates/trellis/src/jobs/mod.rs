@@ -66,10 +66,6 @@ pub type NatsJobEventPublisher = TrellisJobEventPublisher;
 
 #[doc(hidden)]
 pub mod internal {
-    use std::sync::Arc;
-
-    use futures_util::future::BoxFuture;
-
     pub use super::runtime_worker::{
         process_work_payload, process_work_payload_with_context,
         process_work_payload_with_context_and_heartbeat, start_worker_host_from_binding,
@@ -87,56 +83,7 @@ pub mod internal {
     {
         let payload = serde_json::from_value(active.job().payload.clone())
             .map_err(super::JobsError::DecodePayload)?;
-        let context = active.context().clone();
-        let state = active.job().state;
-        let tries = active.job().tries;
-        let cancellation = active.cancellation_token();
-        let active = Arc::new(active);
-        let heartbeat_active = Arc::clone(&active);
-        let progress_active = Arc::clone(&active);
-        let log_active = Arc::clone(&active);
-        Ok(super::ActiveJob::new(
-            context,
-            payload,
-            state,
-            tries,
-            cancellation,
-            move || {
-                let active = Arc::clone(&heartbeat_active);
-                Box::pin(async move {
-                    active
-                        .heartbeat()
-                        .await
-                        .map_err(|error| jobs_message(error.to_string()))
-                }) as BoxFuture<'static, _>
-            },
-            move |progress| {
-                let active = Arc::clone(&progress_active);
-                Box::pin(async move {
-                    active
-                        .update_progress(
-                            progress.current.unwrap_or_default(),
-                            progress.total.unwrap_or_default(),
-                            progress.message,
-                        )
-                        .await
-                        .map_err(|error| jobs_message(error.to_string()))
-                }) as BoxFuture<'static, _>
-            },
-            move |entry| {
-                let active = Arc::clone(&log_active);
-                Box::pin(async move {
-                    active
-                        .log(entry.level, entry.message)
-                        .await
-                        .map_err(|error| jobs_message(error.to_string()))
-                }) as BoxFuture<'static, _>
-            },
-        ))
-    }
-
-    fn jobs_message(message: String) -> super::JobsError {
-        super::JobsError::Message { message }
+        Ok(super::ActiveJob::from_runtime(payload, active))
     }
 }
 

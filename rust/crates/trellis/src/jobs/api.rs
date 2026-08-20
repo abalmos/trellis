@@ -6,13 +6,12 @@ use futures_util::future::BoxFuture;
 use serde::{de::DeserializeOwned, Serialize};
 use serde_json::Value;
 
-use crate::jobs::runtime_worker::JobCancellationToken;
+use crate::jobs::active_job::ActiveJob as RuntimeActiveJob;
+use crate::jobs::manager::TrellisJobMetaSource;
 use crate::jobs::types::{Job, JobContext, JobLogEntry, JobProgress, JobState};
+use crate::jobs::TrellisJobEventPublisher;
 
-type HeartbeatFn = Arc<dyn Fn() -> BoxFuture<'static, Result<(), JobsError>> + Send + Sync>;
-type ProgressFn =
-    Arc<dyn Fn(JobProgress) -> BoxFuture<'static, Result<(), JobsError>> + Send + Sync>;
-type LogFn = Arc<dyn Fn(JobLogEntry) -> BoxFuture<'static, Result<(), JobsError>> + Send + Sync>;
+pub(super) type RuntimeJob = RuntimeActiveJob<TrellisJobEventPublisher, TrellisJobMetaSource>;
 
 /// Errors returned by the typed jobs API.
 #[derive(Debug, thiserror::Error)]
@@ -273,14 +272,8 @@ pub type TerminalJob<TPayload, TResult> = JobSnapshot<TPayload, TResult>;
 
 /// Typed active-job handle.
 pub struct ActiveJob<TPayload, TResult> {
-    context: JobContext,
     payload: TPayload,
-    state: JobState,
-    tries: u64,
-    cancellation: JobCancellationToken,
-    heartbeat: HeartbeatFn,
-    progress: ProgressFn,
-    log: LogFn,
+    runtime: RuntimeJob,
     _result: PhantomData<TResult>,
 }
 
@@ -288,9 +281,9 @@ impl<TPayload, TResult> std::fmt::Debug for ActiveJob<TPayload, TResult> {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter
             .debug_struct("ActiveJob")
-            .field("context", &self.context)
-            .field("state", &self.state)
-            .field("tries", &self.tries)
+            .field("context", self.runtime.context())
+            .field("state", &self.runtime.job().state)
+            .field("tries", &self.runtime.job().tries)
             .finish_non_exhaustive()
     }
 }
@@ -300,33 +293,10 @@ where
     TPayload: Send + Sync + 'static,
     TResult: Send + Sync + 'static,
 {
-    #[doc = concat!("Trellis API operation `", stringify!(new), "`.")]
-    #[expect(
-        clippy::too_many_arguments,
-        reason = "an active job owns each independently callable runtime hook"
-    )]
-    pub fn new(
-        context: JobContext,
-        payload: TPayload,
-        state: JobState,
-        tries: u64,
-        cancellation: JobCancellationToken,
-        heartbeat: impl Fn() -> BoxFuture<'static, Result<(), JobsError>> + Send + Sync + 'static,
-        progress: impl Fn(JobProgress) -> BoxFuture<'static, Result<(), JobsError>>
-            + Send
-            + Sync
-            + 'static,
-        log: impl Fn(JobLogEntry) -> BoxFuture<'static, Result<(), JobsError>> + Send + Sync + 'static,
-    ) -> Self {
+    pub(super) fn from_runtime(payload: TPayload, runtime: RuntimeJob) -> Self {
         Self {
-            context,
             payload,
-            state,
-            tries,
-            cancellation,
-            heartbeat: Arc::new(heartbeat),
-            progress: Arc::new(progress),
-            log: Arc::new(log),
+            runtime,
             _result: PhantomData,
         }
     }
@@ -338,22 +308,22 @@ where
 
     #[doc = concat!("Trellis API operation `", stringify!(context), "`.")]
     pub fn context(&self) -> &JobContext {
-        &self.context
+        self.runtime.context()
     }
 
     #[doc = concat!("Trellis API operation `", stringify!(state), "`.")]
     pub fn state(&self) -> JobState {
-        self.state
+        self.runtime.job().state
     }
 
     #[doc = concat!("Trellis API operation `", stringify!(tries), "`.")]
     pub fn tries(&self) -> u64 {
-        self.tries
+        self.runtime.job().tries
     }
 
     #[doc = concat!("Trellis API operation `", stringify!(redelivery_count), "`.")]
     pub fn redelivery_count(&self) -> u64 {
-        self.tries.saturating_sub(1)
+        self.tries().saturating_sub(1)
     }
 
     #[doc = concat!("Trellis API operation `", stringify!(is_redelivery), "`.")]
@@ -363,22 +333,38 @@ where
 
     #[doc = concat!("Trellis API operation `", stringify!(is_cancelled), "`.")]
     pub fn is_cancelled(&self) -> bool {
-        self.cancellation.is_cancelled()
+        self.runtime.is_cancelled()
     }
 
     #[doc = concat!("Asynchronous Trellis API operation `", stringify!(heartbeat), "`.")]
     pub async fn heartbeat(&self) -> Result<(), JobsError> {
-        (self.heartbeat)().await
+        self.runtime.heartbeat().await.map_err(jobs_message)
     }
 
     #[doc = concat!("Asynchronous Trellis API operation `", stringify!(progress), "`.")]
     pub async fn progress(&self, value: JobProgress) -> Result<(), JobsError> {
-        (self.progress)(value).await
+        self.runtime
+            .update_progress(
+                value.current.unwrap_or_default(),
+                value.total.unwrap_or_default(),
+                value.message,
+            )
+            .await
+            .map_err(jobs_message)
     }
 
     #[doc = concat!("Asynchronous Trellis API operation `", stringify!(log), "`.")]
     pub async fn log(&self, entry: JobLogEntry) -> Result<(), JobsError> {
-        (self.log)(entry).await
+        self.runtime
+            .log(entry.level, entry.message)
+            .await
+            .map_err(jobs_message)
+    }
+}
+
+fn jobs_message(error: impl ToString) -> JobsError {
+    JobsError::Message {
+        message: error.to_string(),
     }
 }
 
