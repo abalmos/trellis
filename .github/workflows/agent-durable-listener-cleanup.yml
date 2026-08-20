@@ -1,0 +1,255 @@
+name: Agent durable listener cleanup
+
+on:
+  push:
+    branches:
+      - agent/rs-durable-listener-sync-cleanup
+
+permissions:
+  contents: write
+
+jobs:
+  edit-test-commit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Make listener cleanup synchronous
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path("rust/crates/trellis/src/service/runtime_facade.rs")
+          text = path.read_text()
+
+          def replace(old: str, new: str, expected: int = 1) -> None:
+              global text
+              actual = text.count(old)
+              if actual != expected:
+                  raise SystemExit(f"expected {expected} occurrences, found {actual}: {old[:100]!r}")
+              text = text.replace(old, new)
+
+          replace("use tokio::sync::Mutex;\n", "")
+          replace(
+              "type SharedDurableEventListeners =\n    Arc<Mutex<BTreeMap<DurableEventListenerKey, SharedDurableEventListener>>>;",
+              "type SharedDurableEventListeners =\n    Arc<StdMutex<BTreeMap<DurableEventListenerKey, SharedDurableEventListener>>>;",
+          )
+          listener_struct = '''struct SharedDurableEventListener {
+              expected_subjects: BTreeSet<String>,
+              handlers: BTreeMap<String, BTreeMap<u64, SharedEventHandler>>,
+              concurrency: u32,
+              pull_abort_handles: Vec<AbortHandle>,
+          }
+          '''
+          replace(
+              listener_struct,
+              listener_struct + '''
+          fn lock_event_listeners(
+              event_listeners: &SharedDurableEventListeners,
+          ) -> std::sync::MutexGuard<'_, BTreeMap<DurableEventListenerKey, SharedDurableEventListener>> {
+              event_listeners
+                  .lock()
+                  .unwrap_or_else(std::sync::PoisonError::into_inner)
+          }
+          ''',
+          )
+          replace(
+              "        spawn_service_event_listeners_cleanup(Arc::clone(&self.event_listeners));",
+              "        remove_service_event_listeners(&self.event_listeners);",
+          )
+          replace(
+              "                spawn_service_event_listener_cleanup(registration);",
+              "                remove_service_event_listener_registration(registration);",
+              expected=2,
+          )
+          replace(
+              "    let mut listeners = event_listeners.lock().await;",
+              "    let mut listeners = lock_event_listeners(&event_listeners);",
+          )
+          old_cleanup = '''async fn remove_service_event_listener_registration(
+              registration: ServiceEventListenerRegistration,
+          ) {
+              let mut listeners = registration.event_listeners.lock().await;
+              let Some(listener) = listeners.get_mut(&registration.key) else {
+                  return;
+              };
+              if let Some(handlers) = listener.handlers.get_mut(&registration.subject) {
+                  handlers.remove(&registration.handler_id);
+                  if handlers.is_empty() {
+                      listener.handlers.remove(&registration.subject);
+                  }
+              }
+              if listener.handlers.values().all(BTreeMap::is_empty) {
+                  let listener = listeners.remove(&registration.key);
+                  if let Some(listener) = listener {
+                      for handle in listener.pull_abort_handles {
+                          handle.abort();
+                      }
+                  }
+              }
+          }
+
+          fn spawn_service_event_listener_cleanup(registration: ServiceEventListenerRegistration) {
+              if let Ok(handle) = tokio::runtime::Handle::try_current() {
+                  handle.spawn(remove_service_event_listener_registration(registration));
+              }
+          }
+
+          async fn remove_service_event_listeners(event_listeners: SharedDurableEventListeners) {
+              let listeners = std::mem::take(&mut *event_listeners.lock().await);
+              for (_, listener) in listeners {
+                  for handle in listener.pull_abort_handles {
+                      handle.abort();
+                  }
+              }
+          }
+          '''
+          new_cleanup = '''fn remove_service_event_listener_registration(
+              registration: ServiceEventListenerRegistration,
+          ) {
+              let mut listeners = lock_event_listeners(&registration.event_listeners);
+              let Some(listener) = listeners.get_mut(&registration.key) else {
+                  return;
+              };
+              if let Some(handlers) = listener.handlers.get_mut(&registration.subject) {
+                  handlers.remove(&registration.handler_id);
+                  if handlers.is_empty() {
+                      listener.handlers.remove(&registration.subject);
+                  }
+              }
+              if listener.handlers.values().all(BTreeMap::is_empty) {
+                  let listener = listeners.remove(&registration.key);
+                  if let Some(listener) = listener {
+                      for handle in listener.pull_abort_handles {
+                          handle.abort();
+                      }
+                  }
+              }
+          }
+
+          fn remove_service_event_listeners(event_listeners: &SharedDurableEventListeners) {
+              let listeners = std::mem::take(&mut *lock_event_listeners(event_listeners));
+              for (_, listener) in listeners {
+                  for handle in listener.pull_abort_handles {
+                      handle.abort();
+                  }
+              }
+          }
+          '''
+          replace(old_cleanup, new_cleanup)
+          replace(
+              "durable_listener_ready(&event_listeners, &key).await",
+              "durable_listener_ready(&event_listeners, &key)",
+              expected=4,
+          )
+          replace(
+              '''            let handlers = event_listeners
+                  .lock()
+                  .await
+                  .get(&key)
+                  .and_then(|listener| listener.handlers.get(message.subject()).cloned())
+                  .unwrap_or_default();''',
+              '''            let handlers = lock_event_listeners(&event_listeners)
+                  .get(&key)
+                  .and_then(|listener| listener.handlers.get(message.subject()).cloned())
+                  .unwrap_or_default();''',
+          )
+          old_ready = '''fn spawn_service_event_listeners_cleanup(event_listeners: SharedDurableEventListeners) {
+              if let Ok(handle) = tokio::runtime::Handle::try_current() {
+                  handle.spawn(remove_service_event_listeners(event_listeners));
+              }
+          }
+
+          async fn durable_listener_ready(
+              event_listeners: &SharedDurableEventListeners,
+              key: &DurableEventListenerKey,
+          ) -> bool {
+              event_listeners
+                  .lock()
+                  .await
+                  .get(key)
+                  .map(|listener| {
+                      listener
+                          .expected_subjects
+                          .iter()
+                          .all(|subject| listener.handlers.contains_key(subject))
+                  })
+                  .unwrap_or(false)
+          }
+          '''
+          new_ready = '''fn durable_listener_ready(
+              event_listeners: &SharedDurableEventListeners,
+              key: &DurableEventListenerKey,
+          ) -> bool {
+              lock_event_listeners(event_listeners)
+                  .get(key)
+                  .map(|listener| {
+                      listener
+                          .expected_subjects
+                          .iter()
+                          .all(|subject| listener.handlers.contains_key(subject))
+                  })
+                  .unwrap_or(false)
+          }
+          '''
+          replace(old_ready, new_ready)
+          marker = '''    #[test]
+              fn durable_event_listener_concurrency_defaults_to_one() {
+                  assert_eq!(ServiceEventListenOptions::default().concurrency, 1);
+              }
+          '''
+          replace(
+              marker,
+              marker + '''
+              #[test]
+              fn durable_event_listener_registry_cleanup_does_not_need_tokio_runtime() {
+                  let listeners = SharedDurableEventListeners::default();
+                  lock_event_listeners(&listeners).insert(
+                      DurableEventListenerKey {
+                          stream: "trellis".to_string(),
+                          durable_name: "consumer".to_string(),
+                      },
+                      SharedDurableEventListener {
+                          expected_subjects: BTreeSet::new(),
+                          handlers: BTreeMap::new(),
+                          concurrency: 1,
+                          pull_abort_handles: Vec::new(),
+                      },
+                  );
+
+                  drop(ServiceEventListenerRegistryCleanup::new(Arc::clone(&listeners)));
+
+                  assert!(lock_event_listeners(&listeners).is_empty());
+              }
+          ''',
+          )
+
+          path.write_text(text)
+          PY
+
+      - name: Format check
+        run: cargo fmt --manifest-path rust/Cargo.toml --all -- --check
+
+      - name: Check trellis-rs
+        run: cargo check --manifest-path rust/Cargo.toml -p trellis-rs --all-targets
+
+      - name: Clippy trellis-rs
+        run: cargo clippy --manifest-path rust/Cargo.toml -p trellis-rs --all-targets -- -D warnings
+
+      - name: Test synchronous listener cleanup
+        run: cargo test --manifest-path rust/Cargo.toml -p trellis-rs durable_event_listener_registry_cleanup_does_not_need_tokio_runtime --lib
+
+      - name: Commit validated change
+        shell: bash
+        run: |
+          git config user.name "trellis-cleanup-agent"
+          git config user.email "actions@users.noreply.github.com"
+          git add -- rust/crates/trellis/src/service/runtime_facade.rs
+          git commit -m "Make durable listener cleanup synchronous"
+          git push
