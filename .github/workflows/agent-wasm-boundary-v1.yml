@@ -1,0 +1,160 @@
+name: Validate WASM boundary cleanup
+
+on:
+  push:
+    branches:
+      - agent/wasm-boundary-v1
+
+permissions:
+  contents: write
+
+concurrency:
+  group: agent-wasm-boundary-v1
+  cancel-in-progress: true
+
+env:
+  BASE_SHA: 20b69d162c512ed4b6a335a3cc31feb465151ecc
+  CARGO_TERM_COLOR: always
+  DENO_VERSION: 2.9.4
+
+jobs:
+  validate:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Preserve transform and publish run id
+        shell: bash
+        run: |
+          cp scripts/agent_wasm_boundary.py /tmp/agent_wasm_boundary.py
+          cp scripts/agent_wasm_boundary_fix.py /tmp/agent_wasm_boundary_fix.py
+          git config user.name trellis-validation
+          git config user.email actions@users.noreply.github.com
+          printf '%s\n' '${{ github.run_id }}' > .validation-running
+          git add .validation-running
+          git commit -m 'Record WASM boundary validation run'
+          git push --force origin HEAD:refs/heads/agent/running-wasm-boundary-v1
+          git reset --hard "$BASE_SHA"
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Set up Deno
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: ${{ env.DENO_VERSION }}
+
+      - name: Apply WASM/proof cleanup
+        run: |
+          python /tmp/agent_wasm_boundary.py
+          python /tmp/agent_wasm_boundary_fix.py
+
+      - name: Prepare SDKs and embedded portal without WASM
+        run: cargo run --manifest-path rust/xtask/Cargo.toml -- prepare
+
+      - name: Require generic prepare to leave WASM unbuilt
+        shell: bash
+        run: |
+          test ! -e ts/packages/trellis/auth/protocol_wasm/trellis_protocol_wasm.js
+          test ! -e ts/packages/trellis/auth/protocol_wasm/trellis_protocol_wasm_bg.wasm
+          test ! -e ts/packages/trellis/auth/protocol_wasm/trellis_protocol_wasm_bytes.ts
+
+      - name: Build focused protocol WASM artifact
+        run: cargo run --manifest-path rust/xtask/Cargo.toml -- protocol-wasm
+
+      - name: Require generated WASM to stay ignored
+        shell: bash
+        run: |
+          test -f ts/packages/trellis/auth/protocol_wasm/trellis_protocol_wasm.js
+          test -f ts/packages/trellis/auth/protocol_wasm/trellis_protocol_wasm_bg.wasm
+          test -f ts/packages/trellis/auth/protocol_wasm/trellis_protocol_wasm_bytes.ts
+          git check-ignore -q ts/packages/trellis/auth/protocol_wasm/trellis_protocol_wasm.js
+          git check-ignore -q ts/packages/trellis/auth/protocol_wasm/trellis_protocol_wasm_bg.wasm
+          git check-ignore -q ts/packages/trellis/auth/protocol_wasm/trellis_protocol_wasm_bytes.ts
+
+      - name: Format changed source
+        run: |
+          cargo fmt --manifest-path rust/Cargo.toml --all
+          cargo fmt --manifest-path rust/xtask/Cargo.toml
+          deno fmt -c ts/deno.json \
+            ts/deno.json \
+            ts/packages/trellis/deno.json \
+            ts/packages/trellis/auth/protocol_wasm.ts \
+            ts/packages/trellis/auth/authorization/provider_cache.ts \
+            ts/packages/trellis/auth/conformance_test.ts
+
+      - name: Check patch hygiene
+        run: git diff --check
+
+      - name: Lint Rust workspace
+        run: cargo clippy --manifest-path rust/Cargo.toml --workspace --all-targets -- -D warnings
+
+      - name: Test Rust libraries
+        run: cargo test --manifest-path rust/Cargo.toml --workspace --lib
+
+      - name: Test xtask
+        run: cargo test --manifest-path rust/xtask/Cargo.toml
+
+      - name: Check TypeScript packages
+        run: >-
+          deno check -c ts/deno.json
+          ts/packages/trellis/index.ts
+          ts/packages/trellis-svelte/src/index.ts
+          ts/packages/trellis-svelte/src/context.svelte.ts
+          ts/packages/trellis-test/index.ts
+
+      - name: Test authorization conformance and repeated handle path
+        run: >-
+          deno test -A -c ts/deno.json
+          ts/packages/trellis/auth/conformance_test.ts
+          ts/packages/trellis/auth/session_auth_test.ts
+          ts/packages/trellis/auth/authorization_context_test.ts
+
+      - name: Build npm package with generated WASM
+        run: deno task -c ts/packages/trellis/deno.json build:npm
+
+      - name: Smoke npm artifact
+        run: >-
+          deno test -A -c ts/deno.json
+          ts/packages/trellis/tests/npm_artifact_smoke_test.ts
+          ts/packages/trellis/tests/publishing_targets_test.ts
+
+      - name: Require first-public proof surface
+        shell: bash
+        run: |
+          if git grep -n -E 'Authorization(Request|Event)[A-Za-z0-9_]*V2|AuthorizationProvider(Request|Event)V2|VerifyAuthorization(Request|Event)V2|verifyAuthorization(Request|Event)V2|verify(Request|Event)V2|authorization_(request|event)[A-Za-z0-9_]*_v2|(request|event)_proof_v2|proof\.v2|PROOF_DOMAIN_V2|request-proof v2|event-proof v2' -- ':!CLEANUP.md'; then
+            echo 'unpublished V2 authorization proof history remains' >&2
+            exit 1
+          fi
+          if grep -R -n -E 'verify_authorization_(request|event)_v2|proof\.v2|PROOF_DOMAIN_V2' ts/packages/trellis/auth/protocol_wasm; then
+            echo 'generated protocol WASM still exposes V2 proof history' >&2
+            exit 1
+          fi
+
+      - name: Commit validated source only
+        shell: bash
+        run: |
+          git add -u
+          git diff --cached --check
+          git status --short
+          git commit -m 'Make TS authorization WASM context-cached and build-only'
+          git push --force origin HEAD:refs/heads/agent/result-wasm-boundary-v1
+
+      - name: Publish failure run id
+        if: failure()
+        shell: bash
+        run: |
+          git reset --hard "$BASE_SHA"
+          git config user.name trellis-validation
+          git config user.email actions@users.noreply.github.com
+          printf '%s\n' '${{ github.run_id }}' > .validation-failed
+          git add .validation-failed
+          git commit -m 'Record failed WASM boundary validation'
+          git push --force origin HEAD:refs/heads/agent/failed-wasm-boundary-v1
