@@ -100,8 +100,8 @@ where
 }
 
 fn run_prepare() -> Result<()> {
-    generate_protocol_wasm()?;
     run_generate_prepare(&[])?;
+    generate_protocol_wasm()?;
     build_embedded_login_portal()?;
     Ok(())
 }
