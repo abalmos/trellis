@@ -36,7 +36,7 @@ cargo test --manifest-path rust/Cargo.toml -p trellis-rs --lib
 cargo test --manifest-path rust/Cargo.toml -p trellis-rs --test integration --no-run
 
 deno run -A -c ts/deno.json rust/crates/trellis-test/integration_runner.ts \
-  event_consumers_invalid_authorization_proof_terms --exact
+  event_consumers::event_consumers_invalid_authorization_proof_terms --exact
 
 git config user.name "trellis-validation"
 git config user.email "actions@users.noreply.github.com"
@@ -45,4 +45,4 @@ git add integration/rust-runtime-test-matrix.json \
   rust/crates/trellis/src/service/local_validator.rs \
   rust/crates/trellis/tests/integration/event_consumers.rs
 git commit -m "Remove provider Auth fault injection"
-git push --force origin HEAD:refs/heads/agent/result-provider-fault-cleanup-v1
+git push --force origin HEAD:refs/heads/agent/result-provider-fault-cleanup-v2
