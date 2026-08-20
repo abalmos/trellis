@@ -62,7 +62,7 @@ Validation:
 
 - [x] Give each runtime lease one owner task; remove the shared `Arc<Vec<Mutex<HeldLease>>>` renewal model.
 - [x] Fix the durable listener concurrent first-registration race by making check/create/spawn/insert one registry critical section (`09125056`).
-- [ ] Make durable-listener teardown/drop ownership deterministic and simple; do not depend on ad-hoc runtime availability if it can be avoided.
+- [x] Make durable-listener teardown/drop ownership deterministic and simple; cleanup no longer depends on a Tokio runtime being available (`ed1a40c`).
 - [x] Consolidate authorization provider state behind one coherent synchronous state lock so trust root, policy floor, manifest, verified-context retention, revocations, and provider health transition together (`3859764b`).
 - [x] Keep per-digest context singleflight separate; normal cache reads remain direct and are not actorized.
 - [x] Simplify `JobRef` to immutable seed plus concrete waiter/manager state and remove boxed callback backends. `NatsJobWaiter::get` now projects the complete durable per-job lifecycle so accumulated progress/logs and legal transitions no longer depend on a mutable cached snapshot (`73ad6df2`).
@@ -122,6 +122,7 @@ Validation:
 - `581fb43e` — test Auth rollback with a real SQLite failure.
 - `cb0955fe` — remove Jobs active-job callback adapter.
 - `09125056` — make durable listener registration atomic.
+- `ed1a40c` — make durable listener teardown/drop deterministic without runtime-dependent cleanup tasks.
 - `6e8fa721` — prepare the embedded portal once in `Check` with generated SDK artifacts.
 - `86e6c95b` — assert the real rollback through the typed Auth storage-conflict boundary.
 - `e6615be3` — remove synthetic Auth transaction/post-commit failure injection and its live cases.
@@ -133,7 +134,6 @@ Validation:
 
 ## Immediate next work
 
-1. Make durable-listener teardown/drop deterministic.
-2. Do the first-public `v1` proof cleanup.
-3. Continue production/test-boundary and runtime-composition cleanup.
-4. Finish release-only gate cleanup and record final timing baseline.
+1. Do the first-public `v1` proof cleanup.
+2. Continue production/test-boundary and runtime-composition cleanup.
+3. Finish release-only gate cleanup and record final timing baseline.
