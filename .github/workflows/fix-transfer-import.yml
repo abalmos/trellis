@@ -1,0 +1,57 @@
+name: Validate transfer import baseline fix
+
+on:
+  push:
+    branches:
+      - agent/fix-transfer-import-v1
+
+permissions:
+  contents: write
+
+env:
+  BASE_SHA: ed1a40c31f0def517635dadbe679c86a57b5f088
+  CARGO_TERM_COLOR: always
+
+jobs:
+  validate:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - run: git reset --hard "$BASE_SHA"
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: 2.9.4
+      - name: Fix stale transfer import
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('rust/crates/trellis/src/client/transfer.rs')
+          source = path.read_text()
+          old = 'use crate::client::client::signed_headers;'
+          assert source.count(old) == 1
+          path.write_text(source.replace(old, 'use crate::client::connection::signed_headers;'))
+          PY
+      - name: Prepare generated artifacts
+        run: cargo run --manifest-path rust/tools/generate/Cargo.toml -- prepare --no-npm .
+      - name: Build embedded portal
+        run: deno task -c ts/portals/login/deno.json build:embedded
+      - name: Format
+        run: cargo fmt --manifest-path rust/Cargo.toml --all
+      - name: Check
+        run: cargo check --manifest-path rust/Cargo.toml -p trellis-rs --all-targets
+      - name: Clippy
+        run: cargo clippy --manifest-path rust/Cargo.toml -p trellis-rs --all-targets -- -D warnings
+      - name: Publish validated result
+        run: |
+          git diff --check
+          test "$(git diff --name-only)" = 'rust/crates/trellis/src/client/transfer.rs'
+          git config user.name trellis-validation
+          git config user.email actions@users.noreply.github.com
+          git add rust/crates/trellis/src/client/transfer.rs
+          git commit -m 'Fix transfer signed-header import'
+          git push --force origin HEAD:refs/heads/agent/result-transfer-import-v1
