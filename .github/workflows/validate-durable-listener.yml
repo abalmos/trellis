@@ -25,7 +25,7 @@ jobs:
         run: |
           cp .github/scripts/remove_auth_fault_injection.py /tmp/remove_auth_fault_injection.py
           cp .github/scripts/validate_auth_fault_cleanup.sh /tmp/validate_auth_fault_cleanup.sh
-          git reset --hard 09125056c5310e9957fc62738767d2f22192db17
+          git reset --hard 6e8fa7216a54be848a4eaad06fdd0bc63e21120d
 
       - name: Publish running run id
         run: |
@@ -34,8 +34,8 @@ jobs:
           printf '%s\n' '${{ github.run_id }}' > .validation-running
           git add .validation-running
           git commit -m "Record Auth cleanup validation run"
-          git push --force origin HEAD:refs/heads/agent/running-auth-fault-cleanup-v3
-          git reset --hard 09125056c5310e9957fc62738767d2f22192db17
+          git push --force origin HEAD:refs/heads/agent/running-auth-fault-cleanup-v4
+          git reset --hard 6e8fa7216a54be848a4eaad06fdd0bc63e21120d
 
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
@@ -49,7 +49,6 @@ jobs:
         uses: swatinem/rust-cache@v2
         with:
           workspaces: |
-            rust -> target
             rust/tools/generate -> target
 
       - name: Validate Auth cleanup
@@ -58,10 +57,10 @@ jobs:
       - name: Publish failure run id
         if: failure()
         run: |
-          git reset --hard 09125056c5310e9957fc62738767d2f22192db17
+          git reset --hard 6e8fa7216a54be848a4eaad06fdd0bc63e21120d
           git config user.name "trellis-validation"
           git config user.email "actions@users.noreply.github.com"
           printf '%s\n' '${{ github.run_id }}' > .validation-failed
           git add .validation-failed
           git commit -m "Record failed Auth cleanup validation"
-          git push --force origin HEAD:refs/heads/agent/failed-auth-fault-cleanup-v3
+          git push --force origin HEAD:refs/heads/agent/failed-auth-fault-cleanup-v4
