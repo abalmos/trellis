@@ -1,0 +1,44 @@
+name: Inventory generated Auth RPC capabilities
+
+on:
+  push:
+    branches: [agent/inventory-generated-auth-rpc-caps-v1]
+
+permissions:
+  contents: write
+
+jobs:
+  inventory:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: 2.9.4
+      - name: Generate SDKs
+        run: cargo run --manifest-path rust/tools/generate/Cargo.toml -- prepare --no-npm .
+      - name: Extract generated Auth capability contexts
+        shell: python
+        run: |
+          from pathlib import Path
+          out = []
+          root = Path('generated/packages/cargo/auth/src')
+          for path in sorted(root.rglob('*.rs')):
+              lines = path.read_text().splitlines()
+              for index, line in enumerate(lines):
+                  if 'CALLER_CAPABILITIES' in line:
+                      out.append(f'=== {path}:{index + 1} ===')
+                      out.extend(lines[max(0, index - 18):index + 3])
+                      out.append('')
+          if not out:
+              raise SystemExit('no CALLER_CAPABILITIES found')
+          Path('generated-auth-rpc-capabilities.txt').write_text('\n'.join(out) + '\n')
+      - name: Publish inventory
+        run: |
+          git config user.name trellis-validation
+          git config user.email actions@users.noreply.github.com
+          git add generated-auth-rpc-capabilities.txt
+          git commit -m 'Record generated Auth RPC capability contexts'
+          git push --force origin HEAD:refs/heads/agent/result-generated-auth-rpc-caps-v1
