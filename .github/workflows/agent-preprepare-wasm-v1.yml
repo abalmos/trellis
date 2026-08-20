@@ -1,0 +1,83 @@
+name: Validate clean pre-prepare WASM bootstrap
+
+on:
+  push:
+    branches: [agent/validate-preprepare-wasm-v1]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: agent-preprepare-wasm-v1
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Publish run id
+        shell: bash
+        run: |
+          git config user.name trellis-validation
+          git config user.email actions@users.noreply.github.com
+          printf '%s\n' '${{ github.run_id }}' > .validation-running
+          git add .validation-running
+          git commit -m 'Record pre-prepare WASM validation run'
+          git push --force origin HEAD:refs/heads/agent/running-preprepare-wasm-v1
+          git reset --hard "$GITHUB_SHA"
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - name: Localize generated SDK dependency
+        shell: python
+        run: |
+          from pathlib import Path
+          root = Path('rust/Cargo.toml')
+          text = root.read_text()
+          for line in [
+              'trellis-sdk-auth = { path = "../generated/packages/cargo/auth", version = "0.12.0" }\n',
+              'trellis-sdk-core = { path = "../generated/packages/cargo/trellis-core", version = "0.12.0" }\n',
+              'trellis-sdk-health = { path = "../generated/packages/cargo/health", version = "0.12.0" }\n',
+              'trellis-sdk-jobs = { path = "../generated/packages/cargo/jobs", version = "0.12.0" }\n',
+              'trellis-sdk-state = { path = "../generated/packages/cargo/state", version = "0.12.0" }\n',
+          ]:
+              if text.count(line) != 1:
+                  raise SystemExit(f'missing workspace dependency: {line!r}')
+              text = text.replace(line, '')
+          root.write_text(text)
+
+          runtime = Path('rust/crates/runtime/Cargo.toml')
+          text = runtime.read_text()
+          old = 'trellis-sdk-auth.workspace = true\n'
+          new = 'trellis-sdk-auth = { path = "../../../generated/packages/cargo/auth", version = "0.12.0" }\n'
+          if text.count(old) != 1:
+              raise SystemExit('runtime auth SDK dependency changed')
+          runtime.write_text(text.replace(old, new, 1))
+      - name: Remove generated tree
+        run: rm -rf generated
+      - name: Build protocol WASM before prepare
+        run: cargo check --manifest-path rust/Cargo.toml -p trellis-protocol-wasm --target wasm32-unknown-unknown
+      - name: Publish result
+        shell: bash
+        run: |
+          git config user.name trellis-validation
+          git config user.email actions@users.noreply.github.com
+          git add rust/Cargo.toml rust/crates/runtime/Cargo.toml
+          git commit -m 'Localize generated Rust SDK dependency'
+          git push --force origin HEAD:refs/heads/agent/result-preprepare-wasm-v1
+      - name: Publish failure run id
+        if: failure()
+        shell: bash
+        run: |
+          git reset --hard "$GITHUB_SHA"
+          git config user.name trellis-validation
+          git config user.email actions@users.noreply.github.com
+          printf '%s\n' '${{ github.run_id }}' > .validation-failed
+          git add .validation-failed
+          git commit -m 'Record failed pre-prepare WASM validation'
+          git push --force origin HEAD:refs/heads/agent/failed-preprepare-wasm-v1
