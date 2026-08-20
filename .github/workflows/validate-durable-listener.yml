@@ -19,7 +19,7 @@ jobs:
       - name: Check out exact rs base
         uses: actions/checkout@v4
         with:
-          ref: cb0955fe194f988867b362a2614a15b8f8ce7a1d
+          ref: 2e7c471612f1100c5a6b43e0426a2e4416435188
           fetch-depth: 0
 
       - name: Publish running run id
@@ -30,10 +30,15 @@ jobs:
           git add .validation-running
           git commit -m "Record durable listener validation run"
           git push --force origin HEAD:refs/heads/agent/running-durable-listener-v2
-          git reset --hard cb0955fe194f988867b362a2614a15b8f8ce7a1d
+          git reset --hard 2e7c471612f1100c5a6b43e0426a2e4416435188
 
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
+
+      - name: Set up Deno
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: 2.9.4
 
       - name: Prepare generated SDKs
         run: cargo run --manifest-path rust/tools/generate/Cargo.toml -- prepare --no-npm .
@@ -111,7 +116,7 @@ jobs:
       - name: Publish failure run id
         if: failure()
         run: |
-          git reset --hard cb0955fe194f988867b362a2614a15b8f8ce7a1d
+          git reset --hard 2e7c471612f1100c5a6b43e0426a2e4416435188
           git config user.name "trellis-validation"
           git config user.email "actions@users.noreply.github.com"
           printf '%s\n' '${{ github.run_id }}' > .validation-failed
