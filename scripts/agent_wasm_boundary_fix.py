@@ -34,7 +34,7 @@ if start < 0 or end < 0:
 text = text[:start] + text[end:]
 p.write_text(text)
 
-# Fix generated TypeScript class syntax: private #fields cannot be constructor parameter properties.
+# Fix generated TypeScript class syntax and pass large payloads through wasm-bindgen bytes, not JSON arrays.
 p = Path("ts/packages/trellis/auth/protocol_wasm.ts")
 text = p.read_text()
 old = '''export class AuthorizationContextVerifierWasm {
@@ -57,9 +57,47 @@ new = '''export class AuthorizationContextVerifierWasm {
 '''
 if text.count(old) != 1:
     raise RuntimeError("generated AuthorizationContextVerifierWasm constructor changed")
-p.write_text(text.replace(old, new, 1))
+text = text.replace(old, new, 1)
+text = text.replace(
+    "  verify_request(inputJson: string): string;\n  verify_event(inputJson: string): string;",
+    "  verify_request(inputJson: string, payload: Uint8Array): string;\n  verify_event(inputJson: string, payload: Uint8Array): string;",
+)
+text = text.replace(
+    '''    const result = JSON.parse(
+      this.#handle.verify_request(JSON.stringify({
+        ...args,
+        policy: wasmVerificationPolicy(args.policy),
+        payload: Array.from(args.payload),
+      })),
+    ) as ProofVerificationResult;''',
+    '''    const { payload, ...input } = args;
+    const result = JSON.parse(
+      this.#handle.verify_request(
+        JSON.stringify({ ...input, policy: wasmVerificationPolicy(args.policy) }),
+        payload,
+      ),
+    ) as ProofVerificationResult;''',
+)
+text = text.replace(
+    '''    const result = JSON.parse(
+      this.#handle.verify_event(JSON.stringify({
+        ...args,
+        policy: wasmVerificationPolicy(args.policy),
+        payload: Array.from(args.payload),
+      })),
+    ) as ProofVerificationResult;''',
+    '''    const { payload, ...input } = args;
+    const result = JSON.parse(
+      this.#handle.verify_event(
+        JSON.stringify({ ...input, policy: wasmVerificationPolicy(args.policy) }),
+        payload,
+      ),
+    ) as ProofVerificationResult;''',
+)
+p.write_text(text)
 
 # The free WASM verifier exports are gone, so the Rust protocol functions no longer need local aliases.
+# Message payloads cross wasm-bindgen directly as &[u8] instead of JSON Vec<u8> fields.
 p = Path("rust/crates/protocol-wasm/src/lib.rs")
 text = p.read_text()
 text = text.replace(
@@ -67,6 +105,33 @@ text = text.replace(
     "    verify_authorization_event, verify_authorization_request,",
 )
 text = text.replace("    AuthorizationEventPublisher, ", "")
+text = text.replace("    payload: Vec<u8>,\n", "", 2)
+text = text.replace(
+    "    pub fn verify_request(&self, request_json: &str) -> String {",
+    "    pub fn verify_request(&self, request_json: &str, payload: &[u8]) -> String {",
+)
+text = text.replace(
+    "        request_result(&self.context, input)",
+    "        request_result(&self.context, input, payload)",
+)
+text = text.replace(
+    "    pub fn verify_event(&self, event_json: &str) -> String {",
+    "    pub fn verify_event(&self, event_json: &str, payload: &[u8]) -> String {",
+)
+text = text.replace(
+    "        event_result(&self.context, input)",
+    "        event_result(&self.context, input, payload)",
+)
+text = text.replace(
+    "    input: WireAuthorizationRequest,\n) -> String {",
+    "    input: WireAuthorizationRequest,\n    payload: &[u8],\n) -> String {",
+)
+text = text.replace("        &input.payload,\n", "        payload,\n", 1)
+text = text.replace(
+    "    input: WireAuthorizationEvent,\n) -> String {",
+    "    input: WireAuthorizationEvent,\n    payload: &[u8],\n) -> String {",
+)
+text = text.replace("        &input.payload,\n", "        payload,\n", 1)
 p.write_text(text)
 
 subprocess.run(
