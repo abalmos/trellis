@@ -44,6 +44,9 @@ jobs:
       - name: Generate SDKs
         run: cargo run --manifest-path rust/tools/generate/Cargo.toml -- prepare --no-npm .
 
+      - name: Build embedded portal
+        run: deno task -c ts/portals/login/deno.json build:embedded
+
       - name: Inspect generated artifact drift
         id: current
         shell: bash
@@ -55,11 +58,13 @@ jobs:
             git diff --stat
           fi
 
-      - name: Upload generated artifacts
+      - name: Upload prepared artifacts
         uses: actions/upload-artifact@v4
         with:
           name: check-generated
-          path: generated
+          path: |
+            generated
+            rust/crates/runtime/generated/portal
           retention-days: 1
 
   generated:
@@ -80,11 +85,11 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
-      - name: Download generated artifacts
+      - name: Download prepared artifacts
         uses: actions/download-artifact@v4
         with:
           name: check-generated
-          path: generated
+          path: .
 
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
@@ -129,11 +134,11 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
-      - name: Download generated artifacts
+      - name: Download prepared artifacts
         uses: actions/download-artifact@v4
         with:
           name: check-generated
-          path: generated
+          path: .
 
       - name: Set up Deno
         uses: denoland/setup-deno@v2
@@ -162,11 +167,11 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
-      - name: Download generated artifacts
+      - name: Download prepared artifacts
         uses: actions/download-artifact@v4
         with:
           name: check-generated
-          path: generated
+          path: .
 
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
