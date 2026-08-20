@@ -1,0 +1,65 @@
+name: Validate listener teardown
+
+on:
+  push:
+    branches:
+      - agent/validate-listener-teardown-v1
+
+permissions:
+  contents: write
+
+concurrency:
+  group: validate-listener-teardown-v1
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out validator branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Reset to exact rs base
+        run: |
+          cp .github/scripts/simplify_listener_teardown.py /tmp/simplify_listener_teardown.py
+          cp .github/scripts/validate_listener_teardown.sh /tmp/validate_listener_teardown.sh
+          git reset --hard 139815e0a417c493e46943f0a230d0fa750ef7c8
+
+      - name: Publish running run id
+        run: |
+          git config user.name "trellis-validation"
+          git config user.email "actions@users.noreply.github.com"
+          printf '%s\n' '${{ github.run_id }}' > .validation-running
+          git add .validation-running
+          git commit -m "Record listener teardown validation run"
+          git push --force origin HEAD:refs/heads/agent/running-listener-teardown-v1
+          git reset --hard 139815e0a417c493e46943f0a230d0fa750ef7c8
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Set up Deno
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: 2.9.4
+
+      - name: Cache generator build
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: rust/tools/generate -> target
+
+      - name: Validate listener teardown
+        run: bash /tmp/validate_listener_teardown.sh
+
+      - name: Publish failure run id
+        if: failure()
+        run: |
+          git reset --hard 139815e0a417c493e46943f0a230d0fa750ef7c8
+          git config user.name "trellis-validation"
+          git config user.email "actions@users.noreply.github.com"
+          printf '%s\n' '${{ github.run_id }}' > .validation-failed
+          git add .validation-failed
+          git commit -m "Record failed listener teardown validation"
+          git push --force origin HEAD:refs/heads/agent/failed-listener-teardown-v1
