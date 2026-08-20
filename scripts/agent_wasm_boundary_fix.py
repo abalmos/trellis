@@ -32,6 +32,31 @@ end = text.find("  #policyFor(\n", start)
 if start < 0 or end < 0:
     raise RuntimeError("generated policyForDigest block not found")
 text = text[:start] + text[end:]
+
+# Opaque WASM handles follow the same cache lifecycle as their verified contexts.
+old = '''    for (const [digest, entry] of this.#contexts) {
+      if (entry.retainedUntil <= now) this.#contexts.delete(digest);
+    }'''
+new = '''    for (const [digest, entry] of this.#contexts) {
+      if (entry.retainedUntil <= now) {
+        entry.verifier?.free();
+        this.#contexts.delete(digest);
+      }
+    }'''
+if text.count(old) != 1:
+    raise RuntimeError("expired-context eviction block changed")
+text = text.replace(old, new, 1)
+old = '''      for (const entry of this.#contexts.values()) {
+        entry.verified = undefined;
+      }'''
+new = '''      for (const entry of this.#contexts.values()) {
+        entry.verifier?.free();
+        entry.verifier = undefined;
+        entry.verified = undefined;
+      }'''
+if text.count(old) != 1:
+    raise RuntimeError("trust-floor invalidation block changed")
+text = text.replace(old, new, 1)
 p.write_text(text)
 
 # Fix generated TypeScript class syntax and pass large payloads through wasm-bindgen bytes, not JSON arrays.
@@ -62,6 +87,23 @@ text = text.replace(
     "  verify_request(inputJson: string): string;\n  verify_event(inputJson: string): string;",
     "  verify_request(inputJson: string, payload: Uint8Array): string;\n  verify_event(inputJson: string, payload: Uint8Array): string;",
 )
+constructor_end = '''  ) {
+    this.#handle = handle;
+  }
+
+  verifyRequest'''
+replacement = '''  ) {
+    this.#handle = handle;
+  }
+
+  free(): void {
+    this.#handle.free();
+  }
+
+  verifyRequest'''
+if text.count(constructor_end) != 1:
+    raise RuntimeError("AuthorizationContextVerifierWasm method anchor changed")
+text = text.replace(constructor_end, replacement, 1)
 text = text.replace(
     '''    const result = JSON.parse(
       this.#handle.verify_request(JSON.stringify({
