@@ -7,11 +7,7 @@
 
 mod auth;
 mod authorization;
-#[expect(
-    clippy::module_inception,
-    reason = "the public client module keeps its core implementation in client.rs"
-)]
-mod client;
+mod connection;
 mod descriptor;
 mod error;
 mod events;
@@ -42,14 +38,14 @@ pub use authorization::{RuntimeAuthorizationIoCounters, RuntimeAuthorizationTrus
 pub(crate) use authorization::inject_own_verified_for_test;
 #[cfg(feature = "integration-test-scoping")]
 #[doc(hidden)]
-pub use client::connect_captured_user_admission;
-pub(crate) use client::fetch_device_activation;
-pub(crate) use client::ServiceBootstrapResponse;
-pub(crate) use client::ServiceConnectWithContractOptions;
-pub(crate) use client::TrellisClient;
+pub use connection::connect_captured_user_admission;
+pub(crate) use connection::fetch_device_activation;
+pub(crate) use connection::ServiceBootstrapResponse;
+pub(crate) use connection::ServiceConnectWithContractOptions;
+pub(crate) use connection::TrellisClient;
 #[cfg(feature = "integration-test-scoping")]
-pub(crate) use client::{fetch_device_activation_with_test_proof, DeviceBootstrapProofOverrides};
-pub use client::{
+pub(crate) use connection::{fetch_device_activation_with_test_proof, DeviceBootstrapProofOverrides};
+pub use connection::{
     DeviceConnectOptions, EventMessage, EventReplayPolicy, EventSubscribeOptions,
     EventSubscriptionMode, UserConnectOptions,
 };
