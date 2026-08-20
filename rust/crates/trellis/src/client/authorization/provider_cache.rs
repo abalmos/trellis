@@ -1,6 +1,4 @@
 use std::collections::HashMap;
-#[cfg(feature = "integration-test-scoping")]
-use std::sync::atomic::AtomicBool;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::Duration;
@@ -93,10 +91,6 @@ pub struct AuthorizationProviderCache {
     revocations: Arc<RwLock<HashMap<String, i64>>>,
     in_flight: Arc<Mutex<HashMap<String, Arc<PendingContext>>>>,
     context_resolves: Arc<AtomicU64>,
-    #[cfg(feature = "integration-test-scoping")]
-    fail_next_context_read: Arc<AtomicBool>,
-    #[cfg(feature = "integration-test-scoping")]
-    fail_next_readiness_check: Arc<AtomicBool>,
     health: Arc<RwLock<AuthorizationProviderCacheHealth>>,
     ready: Arc<tokio::sync::Notify>,
 }
@@ -121,10 +115,6 @@ impl AuthorizationProviderCache {
             revocations: Arc::new(RwLock::new(HashMap::new())),
             in_flight: Arc::new(Mutex::new(HashMap::new())),
             context_resolves: Arc::new(AtomicU64::new(0)),
-            #[cfg(feature = "integration-test-scoping")]
-            fail_next_context_read: Arc::new(AtomicBool::new(false)),
-            #[cfg(feature = "integration-test-scoping")]
-            fail_next_readiness_check: Arc::new(AtomicBool::new(false)),
             health: Arc::new(RwLock::new(AuthorizationProviderCacheHealth {
                 manifest_revision: 0,
                 revocation_revision: 0,
@@ -161,10 +151,6 @@ impl AuthorizationProviderCache {
             revocations: Arc::new(RwLock::new(HashMap::new())),
             in_flight: Arc::new(Mutex::new(HashMap::new())),
             context_resolves: Arc::new(AtomicU64::new(0)),
-            #[cfg(feature = "integration-test-scoping")]
-            fail_next_context_read: Arc::new(AtomicBool::new(false)),
-            #[cfg(feature = "integration-test-scoping")]
-            fail_next_readiness_check: Arc::new(AtomicBool::new(false)),
             health: Arc::new(RwLock::new(AuthorizationProviderCacheHealth {
                 manifest_revision: 0,
                 revocation_revision: 0,
@@ -210,10 +196,6 @@ impl AuthorizationProviderCache {
             revocations: Arc::new(RwLock::new(HashMap::new())),
             in_flight: Arc::new(Mutex::new(HashMap::new())),
             context_resolves: Arc::new(AtomicU64::new(0)),
-            #[cfg(feature = "integration-test-scoping")]
-            fail_next_context_read: Arc::new(AtomicBool::new(false)),
-            #[cfg(feature = "integration-test-scoping")]
-            fail_next_readiness_check: Arc::new(AtomicBool::new(false)),
             health: Arc::new(RwLock::new(AuthorizationProviderCacheHealth {
                 manifest_revision: 0,
                 revocation_revision: 0,
@@ -534,27 +516,6 @@ impl AuthorizationProviderCache {
     #[must_use]
     pub fn integration_test_provider_ready(&self) -> bool {
         self.health().map(|health| health.healthy).unwrap_or(false)
-    }
-
-    /// Fail the next exact context registry read for live redelivery coverage.
-    #[cfg(feature = "integration-test-scoping")]
-    #[doc(hidden)]
-    pub fn integration_test_fail_next_context_read(&self) {
-        self.fail_next_context_read.store(true, Ordering::Relaxed);
-    }
-
-    /// Fail the next provider readiness check for live redelivery coverage.
-    #[cfg(feature = "integration-test-scoping")]
-    #[doc(hidden)]
-    pub fn integration_test_fail_next_readiness_check(&self) {
-        self.fail_next_readiness_check
-            .store(true, Ordering::Relaxed);
-    }
-
-    #[cfg(feature = "integration-test-scoping")]
-    pub(crate) fn integration_test_take_readiness_failure(&self) -> bool {
-        self.fail_next_readiness_check
-            .swap(false, Ordering::Relaxed)
     }
 
     fn set_healthy(&self, healthy: bool) {
@@ -1109,12 +1070,6 @@ impl AuthorizationProviderCache {
         };
         self.sync_trust_material()?;
         self.context_resolves.fetch_add(1, Ordering::Relaxed);
-        #[cfg(feature = "integration-test-scoping")]
-        if self.fail_next_context_read.swap(false, Ordering::Relaxed) {
-            return Err(TrellisClientError::NatsRequest(
-                "injected authorization context read failure".into(),
-            ));
-        }
         let value = registry.get_context(digest).await?.ok_or_else(|| {
             TrellisClientError::Bootstrap(
                 "authorization context is missing from the registry".into(),

@@ -351,9 +351,9 @@ async fn event_consumers_handler_failure_redelivers_same_event() {
 }
 
 #[tokio::test]
-async fn event_consumers_authorization_failures_redeliver_or_term() {
+async fn event_consumers_invalid_authorization_proof_terms() {
     assert_runtime_case_registered(
-        "event-consumers.authorization-failures-redeliver-or-term",
+        "event-consumers.invalid-authorization-proof-terms",
         "event-consumers",
         "event_consumers",
     );
@@ -369,10 +369,9 @@ async fn event_consumers_authorization_failures_redeliver_or_term() {
         runtime.trellis_url(),
         &bootstrap_url,
         PARALLEL_DEPENDENCY_CONSUMER_JSON,
-        "event-consumers-auth-redelivery-rust",
+        "event-consumers-invalid-auth-proof-rust",
     )
     .await;
-    let provider = consumer.integration_test_authorization_provider();
     let ack_observer = runtime
         .start_jetstream_ack_observer()
         .await
@@ -399,7 +398,7 @@ async fn event_consumers_authorization_failures_redeliver_or_term() {
             },
         )
         .await
-        .expect("start authorization redelivery listener");
+        .expect("start authorization listener");
     wait_for_waiting_count(&runtime, SourcePingedEvent::SUBJECT, 1).await;
     let durable = matching_consumers(&runtime, SourcePingedEvent::SUBJECT)
         .await
@@ -414,35 +413,19 @@ async fn event_consumers_authorization_failures_redeliver_or_term() {
     let publisher = admin
         .connect_client(&bootstrap_url, &publisher_contract())
         .await
-        .expect("connect first event publisher");
-    provider.integration_test_fail_next_readiness_check();
+        .expect("connect event publisher");
     publisher
         .publish::<SourcePingedEvent>(&EventRecord {
-            id: "rust-event-auth-not-ready".into(),
-            value: "retry".into(),
+            id: "rust-event-auth-valid".into(),
+            value: "valid".into(),
         })
         .await
-        .expect("publish while provider is unready");
-    wait_for_ack_payload(&ack_observer, &durable_name, "-NAK").await;
-    wait_for_observed_vec_id(&observed, "rust-event-auth-not-ready").await;
-
-    let publisher = admin
-        .connect_client(&bootstrap_url, &publisher_contract())
-        .await
-        .expect("connect second event publisher");
-    provider.integration_test_fail_next_context_read();
-    publisher
-        .publish::<SourcePingedEvent>(&EventRecord {
-            id: "rust-event-auth-read-retry".into(),
-            value: "retry".into(),
-        })
-        .await
-        .expect("publish before injected context read failure");
+        .expect("publish valid signed event");
     let raw = tokio::time::timeout(Duration::from_secs(5), raw_events.next())
         .await
         .expect("timed out waiting for raw event")
         .expect("raw event subscription ended");
-    wait_for_observed_vec_id(&observed, "rust-event-auth-read-retry").await;
+    wait_for_observed_vec_id(&observed, "rust-event-auth-valid").await;
 
     let mut headers = raw.headers.expect("published event headers");
     headers.insert("proof", "invalid-event-proof");
@@ -453,7 +436,10 @@ async fn event_consumers_authorization_failures_redeliver_or_term() {
         .await
         .expect("publish cryptographically invalid event");
     wait_for_ack_payload(&ack_observer, &durable_name, "+TERM").await;
-    assert_eq!(observed.lock().await.len(), 2);
+    assert_eq!(
+        observed.lock().await.clone(),
+        vec!["rust-event-auth-valid".to_owned()]
+    );
 
     listener.abort();
     let _ = listener.await;

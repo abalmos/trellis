@@ -241,12 +241,6 @@ impl LocalAuthVerifier {
                 "local authorization context unavailable for {subject}"
             )));
         };
-        #[cfg(feature = "integration-test-scoping")]
-        if provider.integration_test_take_readiness_failure() {
-            return Err(EventVerificationFailure::retryable(format!(
-                "local authorization context unavailable for {subject}"
-            )));
-        }
         if !provider
             .health()
             .map(|health| health.healthy)

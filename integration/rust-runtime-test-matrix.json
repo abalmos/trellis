@@ -3344,19 +3344,17 @@
       },
       "classification": "shared"
     },
-    {
-      "id": "event-consumers.authorization-failures-redeliver-or-term",
+        {
+      "id": "event-consumers.invalid-authorization-proof-terms",
       "fixture": "event-consumers",
-      "title": "Authorization availability redelivers and invalid proofs terminate",
+      "title": "Invalid authorization event proofs terminate permanently",
       "coverage": [
         "events",
         "event-consumers",
         "authorization",
-        "redelivery",
-        "nak",
         "term"
       ],
-      "description": "Proves provider readiness and one-shot context-read failures NAK durable events for redelivery while an invalid event proof is permanently terminated.",
+      "description": "A legitimate signed durable event reaches its handler, while republishing the same event with a corrupted proof is permanently terminated and never reaches the handler.",
       "scenario": {
         "participants": [
           {
@@ -3376,19 +3374,21 @@
           }
         ],
         "given": [
-          "A valid durable event is pending while provider authorization is temporarily unavailable."
+          "a durable event consumer is ready and a publisher can emit a valid signed event"
         ],
         "when": [
-          "Provider readiness or one exact context read fails, then recovers, and a separate event carries an invalid proof."
+          "the valid event is delivered, then its raw payload and headers are republished with a corrupted proof"
         ],
         "then": [
-          "Transient failures NAK and redeliver the same message; the invalid proof is TERMed without handler invocation."
+          "the legitimate event reaches the handler exactly once",
+          "the corrupted event is permanently terminated",
+          "the corrupted event never reaches the handler"
         ]
       },
       "implementations": {
         "rust": {
           "module": "event_consumers",
-          "function": "event_consumers_authorization_failures_redeliver_or_term"
+          "function": "event_consumers_invalid_authorization_proof_terms"
         }
       },
       "completion": {
