@@ -42,9 +42,8 @@ use crate::client::{
 #[cfg(feature = "integration-test-scoping")]
 use crate::integration_test_scoping::IntegrationTestScope;
 use crate::jobs::{
-    start_worker_host_from_client, JobDescriptor, JobIdentity, JobManager, JobProcessError, JobRef,
-    JobSnapshot, JobsError, TrellisJobEventPublisher, TrellisJobMetaSource, WorkerHostHandle,
-    WorkerHostOptions,
+    start_worker_host_from_client, JobDescriptor, JobManager, JobProcessError, JobRef, JobsError,
+    TrellisJobEventPublisher, TrellisJobMetaSource, WorkerHostHandle, WorkerHostOptions,
 };
 use crate::service::local_validator::LocalAuthVerifier;
 
@@ -679,59 +678,7 @@ impl ServiceHandle {
             queue,
             Duration::from_secs(30),
         );
-        let state = Arc::new(Mutex::new(job.clone()));
-        let identity = JobIdentity::from(&job);
-
-        let get_state = Arc::clone(&state);
-        let get_waiter = waiter.clone();
-        let wait_state = Arc::clone(&state);
-        let wait_waiter = waiter.clone();
-        let cancel_state = Arc::clone(&state);
-        let cancel_waiter = waiter;
-        let cancel_manager = manager;
-        Ok(JobRef::new(
-            identity,
-            move || {
-                let state = Arc::clone(&get_state);
-                let waiter = get_waiter.clone();
-                Box::pin(async move {
-                    let current = state.lock().await.clone();
-                    let current = waiter.get(current).await?;
-                    *state.lock().await = current.clone();
-                    JobSnapshot::try_from(current)
-                })
-            },
-            move || {
-                let state = Arc::clone(&wait_state);
-                let waiter = wait_waiter.clone();
-                Box::pin(async move {
-                    let current = state.lock().await.clone();
-                    let current = waiter.wait_for_terminal(current).await?;
-                    *state.lock().await = current.clone();
-                    JobSnapshot::try_from(current)
-                })
-            },
-            move || {
-                let state = Arc::clone(&cancel_state);
-                let waiter = cancel_waiter.clone();
-                let manager = cancel_manager.clone();
-                Box::pin(async move {
-                    let current = state.lock().await.clone();
-                    if crate::jobs::projection::is_terminal(current.state) {
-                        return JobSnapshot::try_from(current);
-                    }
-                    manager
-                        .cancel(&current)
-                        .await
-                        .map_err(|error| JobsError::Message {
-                            message: error.to_string(),
-                        })?;
-                    let current = waiter.get(current).await?;
-                    *state.lock().await = current.clone();
-                    JobSnapshot::try_from(current)
-                })
-            },
-        ))
+        Ok(JobRef::from_runtime(job, waiter, manager))
     }
 
     /// Start a descriptor-backed event listener.
