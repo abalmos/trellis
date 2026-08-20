@@ -65,7 +65,7 @@ Validation:
 - [ ] Make durable-listener teardown/drop ownership deterministic and simple; do not depend on ad-hoc runtime availability if it can be avoided.
 - [ ] Consolidate coherent authorization provider trust state instead of independent root/policy/manifest/health locks where those values must move together.
 - [ ] Keep per-digest context singleflight; do not actorize normal cache reads.
-- [ ] Simplify `JobRef` to immutable identity/seed plus concrete Jobs client/waiter/manager state; remove boxed callback backends. Before deleting the cache, make `NatsJobWaiter::get` project the complete durable per-job lifecycle so accumulated progress/logs and legal transitions do not depend on the old mutable snapshot.
+- [x] Simplify `JobRef` to immutable seed plus concrete waiter/manager state and remove boxed callback backends. `NatsJobWaiter::get` now projects the complete durable per-job lifecycle so accumulated progress/logs and legal transitions no longer depend on a mutable cached snapshot (`73ad6df2`).
 
 ## 5. Runtime composition
 
@@ -84,11 +84,14 @@ Validation:
 ## 7. Jobs and constructors
 
 - [x] Remove the typed `ActiveJob` heartbeat/progress/log callback adapter, duplicated active-job state, and its eight-argument constructor (`cb0955fe`).
-- [ ] Remove `JobRef`'s `Arc<dyn Fn>` get/wait/cancel backend and use concrete Jobs objects directly; make the durable waiter projection complete first so this is a correctness improvement rather than just a structural change.
+- [x] Remove `JobRef`'s `Arc<dyn Fn>` get/wait/cancel backend and mutable snapshot cache; use immutable seed + concrete `NatsJobWaiter` + concrete `JobManager`, with complete durable lifecycle projection (`73ad6df2`).
 - [ ] Collapse the remaining Jobs function/wrapper ladder to one implementation plus a small cohesive execution context/hooks where needed.
 - [ ] Remove duplicate contract metadata from `ServiceConnectOptions` / generated service contract evidence; generated contract evidence must have one source of truth.
 - [ ] Apply the same constructor simplification to device connection paths where equivalent duplication exists.
 - [ ] Collapse combinatorial operation-registration callback variants to one provider interface; generated code adapts to it.
+
+Validation:
+- Actions run `32331902316` validated the JobRef packet: format/check/Clippy/library/integration compilation passed, and the focused live `jobs_terminal_local_job_edges_and_admin_rpcs` case verified `wait()`, stateless durable `get()` including progress/log reconstruction, and terminal `cancel()`.
 
 ## 8. Names and lint causes
 
@@ -119,13 +122,13 @@ Validation:
 - `86e6c95b` — assert the real rollback through the typed Auth storage-conflict boundary.
 - `e6615be3` — remove synthetic Auth transaction/post-commit failure injection and its live cases.
 - `00c9f48f` — remove provider Auth fault injection and retain a real invalid-proof `TERM` live boundary.
+- `73ad6df2` — remove JobRef callback/cache state and reconstruct snapshots from the durable lifecycle.
 - CI/release simplification also includes adaptive concurrency, stale-governance deletion, release-DAG deletion, generated-artifact fixes, and one-generation `Check` preparation; use `git log rs` for the exact intermediate commit chain.
 
 ## Immediate next work
 
-1. Finish and land the `JobRef` concrete-state refactor with complete durable lifecycle projection.
-2. Consolidate authorization provider trust state.
-3. Make durable-listener teardown/drop deterministic.
-4. Do the first-public `v1` proof cleanup.
-5. Continue production/test-boundary and runtime-composition cleanup.
-6. Finish release-only gate cleanup and record final timing baseline.
+1. Consolidate authorization provider trust state.
+2. Make durable-listener teardown/drop deterministic.
+3. Do the first-public `v1` proof cleanup.
+4. Continue production/test-boundary and runtime-composition cleanup.
+5. Finish release-only gate cleanup and record final timing baseline.
