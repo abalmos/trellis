@@ -1,0 +1,73 @@
+name: Validate generated artifact sync
+
+on:
+  push:
+    branches:
+      - agent/validate-generated-sync-v1
+
+permissions:
+  contents: write
+
+concurrency:
+  group: validate-generated-sync-v1
+  cancel-in-progress: true
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out exact rs base
+        uses: actions/checkout@v4
+        with:
+          ref: 2e7c471612f1100c5a6b43e0426a2e4416435188
+          fetch-depth: 0
+
+      - name: Publish running run id
+        run: |
+          git config user.name "trellis-validation"
+          git config user.email "actions@users.noreply.github.com"
+          printf '%s\n' '${{ github.run_id }}' > .validation-running
+          git add .validation-running
+          git commit -m "Record generated sync validation run"
+          git push --force origin HEAD:refs/heads/agent/running-generated-sync-v1
+          git reset --hard 2e7c471612f1100c5a6b43e0426a2e4416435188
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Set up Deno
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: 2.9.4
+
+      - name: Prepare generated SDKs
+        run: cargo run --manifest-path rust/tools/generate/Cargo.toml -- prepare --no-npm .
+
+      - name: Validate generated-only diff
+        run: |
+          git diff --check
+          test -n "$(git diff --name-only)"
+          if git diff --name-only | grep -v '^generated/'; then
+            echo 'prepare changed files outside generated/' >&2
+            exit 1
+          fi
+          git diff --stat
+
+      - name: Publish generated result
+        run: |
+          git config user.name "trellis-validation"
+          git config user.email "actions@users.noreply.github.com"
+          git add generated
+          git commit -m "Refresh generated contract artifacts"
+          git push --force origin HEAD:refs/heads/agent/result-generated-sync-v1
+
+      - name: Publish failure run id
+        if: failure()
+        run: |
+          git reset --hard 2e7c471612f1100c5a6b43e0426a2e4416435188
+          git config user.name "trellis-validation"
+          git config user.email "actions@users.noreply.github.com"
+          printf '%s\n' '${{ github.run_id }}' > .validation-failed
+          git add .validation-failed
+          git commit -m "Record failed generated sync validation"
+          git push --force origin HEAD:refs/heads/agent/failed-generated-sync-v1
