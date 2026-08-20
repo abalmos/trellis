@@ -1,4 +1,5 @@
 from pathlib import Path
+import subprocess
 
 p = Path("ts/packages/trellis/auth/authorization/provider_cache.ts")
 text = p.read_text()
@@ -32,3 +33,16 @@ if start < 0 or end < 0:
     raise RuntimeError("generated policyForDigest block not found")
 text = text[:start] + text[end:]
 p.write_text(text)
+
+subprocess.run(
+    [
+        "git",
+        "rm",
+        "--cached",
+        "--ignore-unmatch",
+        "ts/packages/trellis/auth/protocol_wasm/trellis_protocol_wasm.js",
+        "ts/packages/trellis/auth/protocol_wasm/trellis_protocol_wasm_bg.wasm",
+        "ts/packages/trellis/auth/protocol_wasm/trellis_protocol_wasm_bytes.ts",
+    ],
+    check=True,
+)
