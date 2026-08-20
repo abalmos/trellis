@@ -11,7 +11,7 @@ permissions:
 env:
   DENO_VERSION: 2.9.4
   CARGO_TERM_COLOR: always
-  BASE_SHA: 914aa0c72aeee1584243b5d93f5496c23d684248
+  BASE_SHA: fdfa70180a3da1aedc3c117c17c1cfaffba98d61
 
 jobs:
   transform-validate-commit:
