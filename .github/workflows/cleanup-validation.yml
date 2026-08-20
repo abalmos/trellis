@@ -1,0 +1,537 @@
+name: Cleanup validation
+
+on:
+  push:
+    branches:
+      - agent/rs-auth-cleanup-runner
+    paths:
+      - .github/workflows/cleanup-validation.yml
+
+permissions:
+  contents: write
+
+env:
+  DENO_VERSION: 2.9.4
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out current rs
+        uses: actions/checkout@v4
+        with:
+          ref: rs
+          fetch-depth: 0
+
+      - name: Verify exact inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git hash-object integration/rust-runtime-test-matrix.json)" = "9da08abb8b5259b48f2c4ee96355700511a27d8c"
+          test "$(git hash-object rust/crates/trellis-test/src/lib.rs)" = "a3df554bc406f95843e2ff6116325aff906b1028"
+          test "$(git hash-object rust/crates/runtime/src/platform/auth/sqlite/common.rs)" = "8f8e61578a8c5155cef9c1c832b219b38e655b45"
+          test "$(git hash-object rust/crates/runtime/src/platform/auth_post_commit.rs)" = "7beccd12c9173105e1d52eb1bdaf937d580769e8"
+          test "$(git hash-object rust/crates/trellis/tests/integration/auth.rs)" = "f376209b417948ff79ad47c0a1831fddf6f018e5"
+          test "$(git hash-object rust/crates/trellis/src/client/authorization/provider_cache.rs)" = "68ffe0554518a34319018c56fe924a360d196084"
+          test "$(git hash-object rust/crates/trellis/src/service/local_validator.rs)" = "ed01c59fdba48ec689e5e3636331e8650912b1c1"
+          test "$(git hash-object rust/crates/trellis/src/service/runtime_facade.rs)" = "40aeaecbf80c971336885aea8a11b667bda452ca"
+          test "$(git hash-object rust/crates/trellis/tests/integration/event_consumers.rs)" = "77f2cd1a3dc53c59ea8498129fb688d956561b8a"
+
+      - name: Apply cleanup
+        shell: python
+        run: |
+          from pathlib import Path
+          import json
+          import re
+
+          def replace_once(path: str, old: str, new: str = "") -> None:
+              p = Path(path)
+              source = p.read_text()
+              count = source.count(old)
+              if count != 1:
+                  raise SystemExit(f"{path}: expected one exact match, got {count}")
+              p.write_text(source.replace(old, new, 1))
+
+          def regex_once(path: str, pattern: str, replacement: str = "") -> None:
+              p = Path(path)
+              source = p.read_text()
+              updated, count = re.subn(pattern, replacement, source, count=1, flags=re.S)
+              if count != 1:
+                  raise SystemExit(f"{path}: expected one regex match, got {count}")
+              p.write_text(updated)
+
+          # The real SQLite rollback test replaces both synthetic Auth failure cases.
+          matrix = "integration/rust-runtime-test-matrix.json"
+          regex_once(
+              matrix,
+              r',\n    \{\n      "id": "auth\.transaction-failure-rolls-back-state-idempotency-and-actions".*?\n    \},\n    \{\n      "id": "auth\.post-commit-failure-retries-committed-context-revocation-once".*?\n    \}\n  \]\n\}\n$',
+              "\n  ]\n}\n",
+          )
+          replace_once(matrix,
+              '"id": "event-consumers.authorization-failures-redeliver-or-term"',
+              '"id": "event-consumers.invalid-authorization-proof-is-terminated"')
+          replace_once(matrix,
+              '"title": "Authorization availability redelivers and invalid proofs terminate"',
+              '"title": "Invalid event authorization proof is terminated"')
+          replace_once(matrix,
+              '"coverage": [\n        "events",\n        "event-consumers",\n        "authorization",\n        "redelivery",\n        "nak",\n        "term"\n      ]',
+              '"coverage": [\n        "events",\n        "event-consumers",\n        "authorization",\n        "term"\n      ]')
+          replace_once(matrix,
+              '"description": "Proves provider readiness and one-shot context-read failures NAK durable events for redelivery while an invalid event proof is permanently terminated."',
+              '"description": "A valid signed event copied with a corrupt authorization proof is permanently terminated without invoking the durable handler."')
+          replace_once(matrix,
+              '"A valid durable event is pending while provider authorization is temporarily unavailable."',
+              '"A valid signed durable event is observable on the real Trellis event subject."')
+          replace_once(matrix,
+              '"Provider readiness or one exact context read fails, then recovers, and a separate event carries an invalid proof."',
+              '"The same event payload is republished with a new event id and a cryptographically invalid proof."')
+          replace_once(matrix,
+              '"Transient failures NAK and redeliver the same message; the invalid proof is TERMed without handler invocation."',
+              '"JetStream permanently terminates the invalid delivery and the service handler is not invoked for it."')
+          replace_once(matrix,
+              '"function": "event_consumers_authorization_failures_redeliver_or_term"',
+              '"function": "event_consumers_invalid_authorization_proof_is_terminated"')
+          json.loads(Path(matrix).read_text())
+
+          regex_once(
+              "rust/crates/trellis-test/src/lib.rs",
+              r'    /// Arms a target-scoped failure after a user principal write but before its\n.*?(?=    /// Deletes and returns one session row so tests can restore it later\.)',
+          )
+          regex_once(
+              "rust/crates/runtime/src/platform/auth/sqlite/common.rs",
+              r'    #\[cfg\(feature = "integration-test-hooks"\)\]\n    pub\(crate\) async fn consume_test_post_commit_failure\(.*?(?=    pub\(crate\) fn open\()',
+          )
+          regex_once(
+              "rust/crates/runtime/src/platform/auth_post_commit.rs",
+              r'        #\[cfg\(feature = "integration-test-hooks"\)\]\n        if self\n.*?(?=        match self\.dispatch\(&action\)\.await \{)',
+          )
+          regex_once(
+              "rust/crates/trellis/tests/integration/auth.rs",
+              r'#\[tokio::test\]\nasync fn auth_transaction_failure_rolls_back_state_idempotency_and_actions\(\) \{.*?(?=#\[tokio::test\]\nasync fn portal_route_selection_and_policy_drive_browser_flow\(\))',
+          )
+
+          # Delete one-shot provider/readiness failures; real infrastructure failures still retry.
+          provider = "rust/crates/trellis/src/client/authorization/provider_cache.rs"
+          replace_once(provider,
+              '#[cfg(feature = "integration-test-scoping")]\nuse std::sync::atomic::AtomicBool;\n')
+          replace_once(provider,
+              '    #[cfg(feature = "integration-test-scoping")]\n    fail_next_context_read: Arc<AtomicBool>,\n    #[cfg(feature = "integration-test-scoping")]\n    fail_next_readiness_check: Arc<AtomicBool>,\n')
+          init = '            #[cfg(feature = "integration-test-scoping")]\n            fail_next_context_read: Arc::new(AtomicBool::new(false)),\n            #[cfg(feature = "integration-test-scoping")]\n            fail_next_readiness_check: Arc::new(AtomicBool::new(false)),\n'
+          p = Path(provider)
+          source = p.read_text()
+          if source.count(init) != 3:
+              raise SystemExit(f"provider initializers: expected 3, got {source.count(init)}")
+          p.write_text(source.replace(init, ""))
+          regex_once(provider,
+              r'    /// Fail the next exact context registry read for live redelivery coverage\.\n    #\[cfg\(feature = "integration-test-scoping"\)\].*?(?=    fn set_healthy\(&self, healthy: bool\))')
+          regex_once(provider,
+              r'        #\[cfg\(feature = "integration-test-scoping"\)\]\n        if self\.fail_next_context_read\.swap\(false, Ordering::Relaxed\) \{.*?\n        \}\n')
+
+          local_validator = "rust/crates/trellis/src/service/local_validator.rs"
+          regex_once(local_validator,
+              r'        #\[cfg\(feature = "integration-test-scoping"\)\]\n        if provider\.integration_test_take_readiness_failure\(\) \{.*?\n        \}\n')
+
+          events = "rust/crates/trellis/tests/integration/event_consumers.rs"
+          regex_once(events,
+              r'#\[tokio::test\]\nasync fn event_consumers_authorization_failures_redeliver_or_term\(\) \{.*?\n\}\n\n(?=async fn wait_for_observed_vec_id)',
+              '''#[tokio::test]
+          async fn event_consumers_invalid_authorization_proof_is_terminated() {
+              assert_runtime_case_registered(
+                  "event-consumers.invalid-authorization-proof-is-terminated",
+                  "event-consumers",
+                  "event_consumers",
+              );
+
+              let (runtime, bootstrap_url, mut admin) = start_runtime().await;
+              let source_contract = test_contract(SOURCE_API_SOURCE_JSON);
+              admin
+                  .provision_service_instance(&bootstrap_url, &source_contract, Some("source"), None)
+                  .await
+                  .expect("approve source contract");
+              let consumer = connect_consumer(
+                  &mut admin,
+                  runtime.trellis_url(),
+                  &bootstrap_url,
+                  PARALLEL_DEPENDENCY_CONSUMER_JSON,
+                  "event-consumers-auth-proof-rust",
+              )
+              .await;
+              let ack_observer = runtime
+                  .start_jetstream_ack_observer()
+                  .await
+                  .expect("start JetStream ACK observer");
+              let observed = Arc::new(Mutex::new(Vec::<String>::new()));
+              let listener = consumer
+                  .listen_event_with_api_id::<SourcePingedEvent, _, _>(
+                      SOURCE_CONTRACT_ID,
+                      {
+                          let observed = Arc::clone(&observed);
+                          move |event, _context| {
+                              let observed = Arc::clone(&observed);
+                              async move {
+                                  observed.lock().await.push(event.id);
+                                  Ok(())
+                              }
+                          }
+                      },
+                      ServiceEventListenOptions {
+                          mode: ServiceEventListenerMode::Durable,
+                          group: Some("ingest".to_owned()),
+                          durable_name: None,
+                          concurrency: 1,
+                      },
+                  )
+                  .await
+                  .expect("start authorization proof listener");
+              wait_for_waiting_count(&runtime, SourcePingedEvent::SUBJECT, 1).await;
+              let durable = matching_consumers(&runtime, SourcePingedEvent::SUBJECT)
+                  .await
+                  .remove(0);
+              let durable_name = consumer_name(&durable).to_owned();
+              let mut raw_events = consumer
+                  .integration_test_nats()
+                  .subscribe(durable.filter_subjects[0].clone())
+                  .await
+                  .expect("subscribe to raw test events");
+
+              let publisher = admin
+                  .connect_client(&bootstrap_url, &publisher_contract())
+                  .await
+                  .expect("connect event publisher");
+              publisher
+                  .publish::<SourcePingedEvent>(&EventRecord {
+                      id: "rust-event-auth-valid".into(),
+                      value: "valid".into(),
+                  })
+                  .await
+                  .expect("publish valid event");
+              let raw = tokio::time::timeout(Duration::from_secs(5), raw_events.next())
+                  .await
+                  .expect("timed out waiting for raw event")
+                  .expect("raw event subscription ended");
+              wait_for_observed_vec_id(&observed, "rust-event-auth-valid").await;
+
+              let mut headers = raw.headers.expect("published event headers");
+              headers.insert("proof", "invalid-event-proof");
+              headers.insert("Nats-Msg-Id", format!("evt_invalid_{}", ulid::Ulid::new()));
+              publisher
+                  .integration_test_nats()
+                  .publish_with_headers(raw.subject, headers, raw.payload)
+                  .await
+                  .expect("publish cryptographically invalid event");
+              wait_for_ack_payload(&ack_observer, &durable_name, "+TERM").await;
+              assert_eq!(
+                  observed.lock().await.as_slice(),
+                  &["rust-event-auth-valid".to_owned()]
+              );
+
+              listener.abort();
+              let _ = listener.await;
+              ack_observer.stop().await;
+          }
+
+          ''')
+
+          # Durable group registration is one tiny synchronous ownership critical section.
+          facade = "rust/crates/trellis/src/service/runtime_facade.rs"
+          replace_once(facade,
+              'type SharedDurableEventListeners =\n    Arc<Mutex<BTreeMap<DurableEventListenerKey, SharedDurableEventListener>>>;',
+              'type SharedDurableEventListeners =\n    Arc<StdMutex<BTreeMap<DurableEventListenerKey, SharedDurableEventListener>>>;')
+          replace_once(facade,
+              '        spawn_service_event_listeners_cleanup(Arc::clone(&self.event_listeners));',
+              '        remove_service_event_listeners(&self.event_listeners);')
+          p = Path(facade)
+          source = p.read_text()
+          cleanup_call = '                spawn_service_event_listener_cleanup(registration);'
+          if source.count(cleanup_call) != 2:
+              raise SystemExit(f"listener cleanup calls: expected 2, got {source.count(cleanup_call)}")
+          p.write_text(source.replace(cleanup_call, '                remove_service_event_listener_registration(registration);'))
+          regex_once(facade,
+              r'    \{\n        let mut listeners = event_listeners\.lock\(\)\.await;\n        if let Some\(listener\) = listeners\.get_mut\(&key\) \{.*?\n        \}\n    \}\n\n    let subscribe_options = EventSubscribeOptions \{.*?\n    event_listeners\.lock\(\)\.await\.insert\(\n        key\.clone\(\),\n        SharedDurableEventListener \{.*?\n        \},\n    \);',
+              '''    let mut listeners = event_listeners
+              .lock()
+              .unwrap_or_else(std::sync::PoisonError::into_inner);
+          if let Some(listener) = listeners.get_mut(&key) {
+              validate_event_listener_concurrency(
+                  context.group.as_deref().expect("durable listener group"),
+                  binding.ordering,
+                  options.concurrency,
+                  Some(listener.concurrency),
+              )?;
+              listener
+                  .handlers
+                  .entry(subject.clone())
+                  .or_default()
+                  .insert(handler_id, handler);
+              return Ok(ServiceEventListenerHandle::new(
+                  tokio::spawn(async { futures_util::future::pending().await }),
+                  Some(ServiceEventListenerRegistration {
+                      event_listeners: Arc::clone(&event_listeners),
+                      key,
+                      subject,
+                      handler_id,
+                  }),
+              ));
+          }
+
+          let subscribe_options = EventSubscribeOptions {
+              stream: Some(binding.stream.clone()),
+              mode: EventSubscriptionMode::Durable,
+              replay: EventReplayPolicy::New,
+              durable_name: Some(binding.consumer_name.clone()),
+          };
+          let pull_abort_handles = (0..options.concurrency)
+              .map(|_| {
+                  tokio::spawn(run_durable_event_pull_loop::<D>(
+                      Arc::clone(client),
+                      auth.clone(),
+                      event_api_id.clone(),
+                      event_name.clone(),
+                      publish_capabilities.clone(),
+                      Arc::clone(&event_listeners),
+                      key.clone(),
+                      subscribe_options.clone(),
+                      context.clone(),
+                  ))
+                  .abort_handle()
+              })
+              .collect();
+          listeners.insert(
+              key.clone(),
+              SharedDurableEventListener {
+                  expected_subjects: binding.filter_subjects.iter().cloned().collect(),
+                  handlers: BTreeMap::from([(
+                      subject.clone(),
+                      BTreeMap::from([(handler_id, handler)]),
+                  )]),
+                  concurrency: options.concurrency,
+                  pull_abort_handles,
+              },
+          );
+          drop(listeners);''')
+          regex_once(facade,
+              r'async fn remove_service_event_listener_registration\(\n    registration: ServiceEventListenerRegistration,\n\) \{\n    let mut listeners = registration\.event_listeners\.lock\(\)\.await;(?P<body>.*?)\n\}\n\nfn spawn_service_event_listener_cleanup\(registration: ServiceEventListenerRegistration\) \{.*?\n\}\n\nasync fn remove_service_event_listeners\(event_listeners: SharedDurableEventListeners\) \{\n    let listeners = std::mem::take\(&mut \*event_listeners\.lock\(\)\.await\);(?P<tail>.*?)\n\}',
+              '''fn remove_service_event_listener_registration(registration: ServiceEventListenerRegistration) {
+              let mut listeners = registration
+                  .event_listeners
+                  .lock()
+                  .unwrap_or_else(std::sync::PoisonError::into_inner);\g<body>
+          }
+
+          fn remove_service_event_listeners(event_listeners: &SharedDurableEventListeners) {
+              let listeners = std::mem::take(
+                  &mut *event_listeners
+                      .lock()
+                      .unwrap_or_else(std::sync::PoisonError::into_inner),
+              );\g<tail>
+          }''')
+          p = Path(facade)
+          source = p.read_text()
+          source = source.replace('durable_listener_ready(&event_listeners, &key).await', 'durable_listener_ready(&event_listeners, &key)')
+          source = source.replace('.lock()\n                .await\n                .get(&key)', '.lock()\n                .unwrap_or_else(std::sync::PoisonError::into_inner)\n                .get(&key)')
+          source, count = re.subn(r'fn spawn_service_event_listeners_cleanup\(event_listeners: SharedDurableEventListeners\) \{.*?\n\}\n\nasync fn durable_listener_ready\(', 'fn durable_listener_ready(', source, count=1, flags=re.S)
+          if count != 1:
+              raise SystemExit("listener final cleanup block not found")
+          source = source.replace('.lock()\n        .await\n        .get(key)', '.lock()\n        .unwrap_or_else(std::sync::PoisonError::into_inner)\n        .get(key)')
+          p.write_text(source)
+
+          # Force simultaneous first registrations so the old unlock/spawn/insert race is deterministic.
+          replace_once(events,
+              'use tokio::sync::{oneshot, Mutex, Notify};',
+              'use tokio::sync::{oneshot, Barrier, Mutex, Notify};')
+          regex_once(events,
+              r'#\[tokio::test\]\nasync fn event_consumers_duplicate_handlers_share_single_group_waiter\(\) \{.*?\n\}\n\n(?=#\[tokio::test\]\nasync fn event_consumers_self_owned_durable_consumer_receives_self_published_event)',
+              '''#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+          async fn event_consumers_duplicate_handlers_share_single_group_waiter() {
+              assert_runtime_case_registered(
+                  "event-consumers.duplicate-handlers-share-single-group-waiter",
+                  "event-consumers",
+                  "event_consumers",
+              );
+
+              let (runtime, bootstrap_url, mut admin) = start_runtime().await;
+              let source_contract = test_contract(SOURCE_API_SOURCE_JSON);
+              admin
+                  .provision_service_instance(&bootstrap_url, &source_contract, Some("source"), None)
+                  .await
+                  .expect("approve source contract");
+              let consumer = connect_consumer(
+                  &mut admin,
+                  runtime.trellis_url(),
+                  &bootstrap_url,
+                  DEPENDENCY_CONSUMER_JSON,
+                  "event-consumers-dependency-rust",
+              )
+              .await;
+
+              const HANDLER_COUNT: usize = 8;
+              let observed = Arc::new(Mutex::new(Vec::<String>::new()));
+              let barrier = Arc::new(Barrier::new(HANDLER_COUNT + 1));
+              let service = consumer.generated_handle();
+              let mut registrations = Vec::with_capacity(HANDLER_COUNT);
+              for index in 0..HANDLER_COUNT {
+                  let service = service.clone();
+                  let observed = Arc::clone(&observed);
+                  let barrier = Arc::clone(&barrier);
+                  registrations.push(tokio::spawn(async move {
+                      barrier.wait().await;
+                      service
+                          .listen_event_with_api_id::<SourcePingedEvent, _, _>(
+                              SOURCE_CONTRACT_ID,
+                              move |event, context| {
+                                  let observed = Arc::clone(&observed);
+                                  async move {
+                                      assert_eq!(context.group.as_deref(), Some("ingest"));
+                                      observed.lock().await.push(format!("{index}:{}", event.id));
+                                      Ok(())
+                                  }
+                              },
+                              ServiceEventListenOptions {
+                                  mode: ServiceEventListenerMode::Durable,
+                                  group: Some("ingest".to_owned()),
+                                  durable_name: None,
+                                  concurrency: 1,
+                              },
+                          )
+                          .await
+                          .expect("start concurrent duplicate listener")
+                  }));
+              }
+              barrier.wait().await;
+
+              let mut listeners = Vec::with_capacity(HANDLER_COUNT);
+              for registration in registrations {
+                  listeners.push(registration.await.expect("duplicate registration task"));
+              }
+              wait_for_waiting_count(&runtime, SourcePingedEvent::SUBJECT, 1).await;
+
+              let publisher = admin
+                  .connect_client(&bootstrap_url, &publisher_contract())
+                  .await
+                  .expect("connect event publisher client");
+              publisher
+                  .publish::<SourcePingedEvent>(&EventRecord {
+                      id: "rust-event-consumers-duplicate".to_owned(),
+                      value: "duplicate".to_owned(),
+                  })
+                  .await
+                  .expect("publish source event");
+
+              wait_for_duplicate_observed(&observed, "rust-event-consumers-duplicate", HANDLER_COUNT)
+                  .await;
+              for listener in &listeners {
+                  listener.abort();
+              }
+              for listener in listeners {
+                  let _ = listener.await;
+              }
+          }
+
+          ''')
+          regex_once(events,
+              r'async fn wait_for_duplicate_observed\(observed: &Arc<Mutex<Vec<String>>>, event_id: &str\) \{.*?\n\}\n',
+              '''async fn wait_for_duplicate_observed(
+              observed: &Arc<Mutex<Vec<String>>>,
+              event_id: &str,
+              handler_count: usize,
+          ) {
+              let deadline = Instant::now() + Duration::from_secs(5);
+              let mut expected = (0..handler_count)
+                  .map(|index| format!("{index}:{event_id}"))
+                  .collect::<Vec<_>>();
+              expected.sort();
+              loop {
+                  let mut actual = observed.lock().await.clone();
+                  actual.sort();
+                  if actual == expected {
+                      return;
+                  }
+                  assert!(
+                      Instant::now() < deadline,
+                      "timed out waiting for all duplicate handlers: {actual:?}"
+                  );
+                  tokio::time::sleep(Duration::from_millis(100)).await;
+              }
+          }
+          ''')
+
+      - name: Verify synthetic failures are gone
+        shell: bash
+        run: |
+          set -euo pipefail
+          if rg -n 'fail_user_update_transaction|fail_next_context_revocation_dispatch|consume_test_post_commit_failure|fail_next_context_read|fail_next_readiness_check|integration_test_take_readiness_failure|injected integration-test dispatch failure|auth_transaction_failure_rolls_back_state_idempotency_and_actions|auth_post_commit_failure_retries_committed_context_revocation_once|authorization-failures-redeliver-or-term' \
+            integration/rust-runtime-test-matrix.json \
+            rust/crates/runtime/src/platform/auth/sqlite/common.rs \
+            rust/crates/runtime/src/platform/auth_post_commit.rs \
+            rust/crates/trellis-test/src/lib.rs \
+            rust/crates/trellis/src/client/authorization/provider_cache.rs \
+            rust/crates/trellis/src/service/local_validator.rs \
+            rust/crates/trellis/tests/integration/auth.rs \
+            rust/crates/trellis/tests/integration/event_consumers.rs; then
+            echo 'synthetic failure code remains' >&2
+            exit 1
+          fi
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Set up Deno
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: ${{ env.DENO_VERSION }}
+
+      - name: Generate SDK artifacts
+        run: cargo run --manifest-path rust/tools/generate/Cargo.toml -- prepare --no-npm .
+
+      - name: Format Rust
+        run: cargo fmt --manifest-path rust/Cargo.toml --all
+
+      - name: Test real SQLite rollback
+        run: cargo test --manifest-path rust/Cargo.toml -p trellis-runtime rollback_tests:: --lib
+
+      - name: Compile Rust integration tests
+        run: cargo test --manifest-path rust/Cargo.toml -p trellis-rs --test integration --no-run
+
+      - name: Test invalid proof termination
+        run: cargo test --manifest-path rust/Cargo.toml -p trellis-rs --test integration event_consumers_invalid_authorization_proof_is_terminated -- --nocapture
+
+      - name: Test concurrent durable registration
+        run: cargo test --manifest-path rust/Cargo.toml -p trellis-rs --test integration event_consumers_duplicate_handlers_share_single_group_waiter -- --nocapture
+
+      - name: Publish validated result
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'trellis-cleanup-bot'
+          git config user.email 'trellis-cleanup-bot@users.noreply.github.com'
+          git add \
+            integration/rust-runtime-test-matrix.json \
+            rust/crates/runtime/src/platform/auth/sqlite/common.rs \
+            rust/crates/runtime/src/platform/auth_post_commit.rs \
+            rust/crates/trellis-test/src/lib.rs \
+            rust/crates/trellis/src/client/authorization/provider_cache.rs \
+            rust/crates/trellis/src/service/local_validator.rs \
+            rust/crates/trellis/src/service/runtime_facade.rs \
+            rust/crates/trellis/tests/integration/auth.rs \
+            rust/crates/trellis/tests/integration/event_consumers.rs
+          git diff --cached --check
+          git commit -m 'Remove synthetic failures and fix durable listener ownership'
+          git push --force origin HEAD:refs/heads/agent/rs-cleanup-result
+
+      - name: Record validation result
+        if: always()
+        shell: bash
+        env:
+          VALIDATION_STATUS: ${{ job.status }}
+        run: |
+          set -euo pipefail
+          git fetch origin agent/rs-auth-cleanup-runner
+          git worktree add --detach /tmp/cleanup-validation origin/agent/rs-auth-cleanup-runner
+          cd /tmp/cleanup-validation
+          git switch -C agent/rs-auth-cleanup-runner
+          git config user.name 'trellis-cleanup-bot'
+          git config user.email 'trellis-cleanup-bot@users.noreply.github.com'
+          printf '%s\n' "$VALIDATION_STATUS" > .cleanup-validation-result
+          git add .cleanup-validation-result
+          git commit -m "Record consolidated cleanup validation: $VALIDATION_STATUS" || exit 0
+          git push origin HEAD:refs/heads/agent/rs-auth-cleanup-runner
