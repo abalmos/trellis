@@ -12,6 +12,10 @@ env:
   BASE_SHA: ed1a40c31f0def517635dadbe679c86a57b5f088
   CARGO_TERM_COLOR: always
 
+concurrency:
+  group: validate-transfer-import-v1
+  cancel-in-progress: true
+
 jobs:
   validate:
     if: github.actor != 'github-actions[bot]'
@@ -21,7 +25,15 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - run: git reset --hard "$BASE_SHA"
+      - name: Publish running run id and reset to rs
+        run: |
+          git config user.name trellis-validation
+          git config user.email actions@users.noreply.github.com
+          printf '%s\n' '${{ github.run_id }}' > .validation-running
+          git add .validation-running
+          git commit -m 'Record transfer import validation run'
+          git push --force origin HEAD:refs/heads/agent/running-transfer-import-v1
+          git reset --hard "$BASE_SHA"
       - uses: dtolnay/rust-toolchain@stable
       - uses: denoland/setup-deno@v2
         with:
@@ -55,3 +67,13 @@ jobs:
           git add rust/crates/trellis/src/client/transfer.rs
           git commit -m 'Fix transfer signed-header import'
           git push --force origin HEAD:refs/heads/agent/result-transfer-import-v1
+      - name: Publish failure run id
+        if: failure()
+        run: |
+          git reset --hard "$BASE_SHA"
+          git config user.name trellis-validation
+          git config user.email actions@users.noreply.github.com
+          printf '%s\n' '${{ github.run_id }}' > .validation-failed
+          git add .validation-failed
+          git commit -m 'Record failed transfer import validation'
+          git push --force origin HEAD:refs/heads/agent/failed-transfer-import-v1
