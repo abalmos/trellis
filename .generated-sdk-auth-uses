@@ -1,0 +1,16 @@
+rust/Cargo.toml:89:trellis-sdk-auth = { path = "../generated/packages/cargo/auth", version = "0.12.0" }
+rust/tools/generate/tests/auto_mode_test.rs:517:    assert!(!cargo_toml.contains("trellis-sdk-auth"));
+rust/crates/trellis/src/lib.rs:168:            "trellis-sdk-auth",
+rust/crates/codegen-rust/src/lib.rs:4978:            "trellis-sdk-auth"
+rust/crates/codegen-rust/src/lib.rs:5364:            (&auth_manifest, &auth_sdk_dir, "trellis-sdk-auth"),
+rust/crates/codegen-rust/src/lib.rs:5414:                    crate_name: "trellis-sdk-auth".to_string(),
+rust/crates/codegen-rust/src/lib.rs:5440:            .contains("alias `auth` -> crate `trellis-sdk-auth` contract `trellis.auth@v1`"));
+rust/crates/codegen-ts/src/lib.rs:2132:            package_name: "@qlever-llc/trellis-sdk-auth".to_string(),
+rust/crates/codegen-ts/src/lib.rs:2161:            sample_opts_and_loaded("@qlever-llc/trellis-sdk-auth", "trellis.auth@v1");
+rust/crates/codegen-ts/src/lib.rs:2186:            sample_opts_and_loaded("@qlever-llc/trellis-sdk-auth", "trellis.auth@v1");
+rust/crates/codegen-ts/src/lib.rs:2395:            sample_opts_and_loaded("@qlever-llc/trellis-sdk-auth", "trellis.auth@v1");
+rust/crates/runtime/Cargo.toml:56:trellis-sdk-auth.workspace = true
+rust/crates/runtime/src/platform/auth/rpc/mod.rs:99:        trellis_sdk_auth::api::register_rpc_metadata(&mut routes);
+rust/crates/runtime/src/platform/auth/rpc/mod.rs:4086:        trellis_sdk_auth::api::register_rpc_metadata(&mut routes);
+rust/crates/runtime/src/platform/auth/rpc/mod.rs:4111:        trellis_sdk_auth::api::register_rpc_metadata(&mut routes);
+rust/crates/runtime/src/platform/auth/verifier.rs:1143:        trellis_sdk_auth::api::register_rpc_metadata(&mut routes);
