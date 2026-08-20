@@ -1,17 +1,17 @@
-use std::future::Future;
-use std::marker::PhantomData;
-use std::sync::Arc;
-
-use futures_util::future::BoxFuture;
 use serde::{de::DeserializeOwned, Serialize};
 use serde_json::Value;
+use std::future::Future;
+use std::marker::PhantomData;
 
 use crate::jobs::active_job::ActiveJob as RuntimeActiveJob;
-use crate::jobs::manager::TrellisJobMetaSource;
+use crate::jobs::manager::{JobManager, TrellisJobMetaSource};
+use crate::jobs::projection::is_terminal;
+use crate::jobs::runtime_ref::NatsJobWaiter;
 use crate::jobs::types::{Job, JobContext, JobLogEntry, JobProgress, JobState};
 use crate::jobs::TrellisJobEventPublisher;
 
 pub(super) type RuntimeJob = RuntimeActiveJob<TrellisJobEventPublisher, TrellisJobMetaSource>;
+type RuntimeJobManager = JobManager<TrellisJobEventPublisher, TrellisJobMetaSource>;
 
 /// Errors returned by the typed jobs API.
 #[derive(Debug, thiserror::Error)]
@@ -113,16 +113,12 @@ pub enum JobSubmitOutcome<TPayload, TResult> {
 }
 
 /// Handle for a created job.
-type JobSnapshotFn<TPayload, TResult> =
-    dyn Fn() -> BoxFuture<'static, Result<JobSnapshot<TPayload, TResult>, JobsError>> + Send + Sync;
-type TerminalJobFn<TPayload, TResult> =
-    dyn Fn() -> BoxFuture<'static, Result<TerminalJob<TPayload, TResult>, JobsError>> + Send + Sync;
-
 pub struct JobRef<TPayload, TResult> {
     identity: JobIdentity,
-    get: Arc<JobSnapshotFn<TPayload, TResult>>,
-    wait: Arc<TerminalJobFn<TPayload, TResult>>,
-    cancel: Arc<JobSnapshotFn<TPayload, TResult>>,
+    seed: Job,
+    waiter: NatsJobWaiter,
+    manager: RuntimeJobManager,
+    _types: PhantomData<fn() -> (TPayload, TResult)>,
 }
 
 impl<TPayload, TResult> std::fmt::Debug for JobRef<TPayload, TResult> {
@@ -138,39 +134,30 @@ impl<TPayload, TResult> Clone for JobRef<TPayload, TResult> {
     fn clone(&self) -> Self {
         Self {
             identity: self.identity.clone(),
-            get: Arc::clone(&self.get),
-            wait: Arc::clone(&self.wait),
-            cancel: Arc::clone(&self.cancel),
+            seed: self.seed.clone(),
+            waiter: self.waiter.clone(),
+            manager: self.manager.clone(),
+            _types: PhantomData,
         }
     }
 }
 
 impl<TPayload, TResult> JobRef<TPayload, TResult>
 where
-    TPayload: Clone + Send + Sync + 'static,
-    TResult: Clone + Send + Sync + 'static,
+    TPayload: DeserializeOwned + Clone + Send + Sync + 'static,
+    TResult: DeserializeOwned + Clone + Send + Sync + 'static,
 {
-    #[doc = concat!("Trellis API operation `", stringify!(new), "`.")]
-    pub fn new(
-        identity: JobIdentity,
-        get: impl Fn() -> BoxFuture<'static, Result<JobSnapshot<TPayload, TResult>, JobsError>>
-            + Send
-            + Sync
-            + 'static,
-        wait: impl Fn() -> BoxFuture<'static, Result<TerminalJob<TPayload, TResult>, JobsError>>
-            + Send
-            + Sync
-            + 'static,
-        cancel: impl Fn() -> BoxFuture<'static, Result<JobSnapshot<TPayload, TResult>, JobsError>>
-            + Send
-            + Sync
-            + 'static,
+    pub(crate) fn from_runtime(
+        seed: Job,
+        waiter: NatsJobWaiter,
+        manager: RuntimeJobManager,
     ) -> Self {
         Self {
-            identity,
-            get: Arc::new(get),
-            wait: Arc::new(wait),
-            cancel: Arc::new(cancel),
+            identity: JobIdentity::from(&seed),
+            seed,
+            waiter,
+            manager,
+            _types: PhantomData,
         }
     }
 
@@ -181,17 +168,24 @@ where
 
     #[doc = concat!("Asynchronous Trellis API operation `", stringify!(get), "`.")]
     pub async fn get(&self) -> Result<JobSnapshot<TPayload, TResult>, JobsError> {
-        (self.get)().await
+        JobSnapshot::try_from(self.waiter.get(self.seed.clone()).await?)
     }
 
     #[doc = concat!("Asynchronous Trellis API operation `", stringify!(wait), "`.")]
     pub async fn wait(&self) -> Result<TerminalJob<TPayload, TResult>, JobsError> {
-        (self.wait)().await
+        self.waiter.wait_for_terminal(self.seed.clone()).await?;
+        self.get().await
     }
 
     #[doc = concat!("Asynchronous Trellis API operation `", stringify!(cancel), "`.")]
     pub async fn cancel(&self) -> Result<JobSnapshot<TPayload, TResult>, JobsError> {
-        (self.cancel)().await
+        let current = self.waiter.get(self.seed.clone()).await?;
+        if is_terminal(current.state) {
+            return JobSnapshot::try_from(current);
+        }
+        self.manager.cancel(&current).await.map_err(jobs_message)?;
+        self.waiter.wait_for_terminal(current).await?;
+        self.get().await
     }
 }
 

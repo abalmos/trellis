@@ -1299,13 +1299,19 @@ async fn jobs_terminal_local_job_edges_and_admin_rpcs() {
         terminal.result.expect("completed job result").document_id,
         "doc-terminal-admin"
     );
+    let snapshot = job.get().await.expect("get terminal service-local job");
+    assert_eq!(snapshot.state, JobState::Completed);
     assert_eq!(
-        job.get()
-            .await
-            .expect("get terminal service-local job")
-            .state,
-        JobState::Completed
+        snapshot
+            .progress
+            .as_ref()
+            .and_then(|progress| progress.current),
+        Some(1)
     );
+    assert!(snapshot
+        .logs
+        .iter()
+        .any(|entry| entry.message == "processed doc-terminal-admin"));
     assert_eq!(
         job.cancel()
             .await

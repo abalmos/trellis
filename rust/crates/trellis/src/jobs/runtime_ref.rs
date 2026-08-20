@@ -93,7 +93,7 @@ impl NatsJobWaiter {
             .get_stream_no_info(JOBS_STREAM)
             .await
             .map_err(|error| jobs_message(format!("open jobs lifecycle stream failed: {error}")))?;
-        latest_job_from_lifecycle(&lifecycle_stream, &subject, seed).await
+        project_job_from_lifecycle(&lifecycle_stream, &subject, seed).await
     }
 
     /// Subscribe to validated live-only updates until terminal lifecycle state.
@@ -248,23 +248,35 @@ impl NatsJobWaiter {
     }
 }
 
-async fn latest_job_from_lifecycle(
+async fn project_job_from_lifecycle(
     lifecycle_stream: &stream::Stream<()>,
     subject: &str,
-    seed: Job,
+    mut current: Job,
 ) -> Result<Job, JobsError> {
-    let latest = match latest_lifecycle_message(lifecycle_stream, subject).await {
-        Ok(Some(message)) => message,
-        Ok(None) => return Ok(seed),
-        Err(error) => {
-            return Err(jobs_message(format!(
-                "read latest job lifecycle event failed: {error}"
-            )));
-        }
-    };
-    let event: JobEvent = serde_json::from_slice(&latest.payload)
-        .map_err(|error| jobs_message(format!("decode latest job lifecycle event: {error}")))?;
-    Ok(apply_lifecycle_event(&seed, &event))
+    let mut sequence = 1_u64;
+    loop {
+        let message = match lifecycle_stream
+            .get_first_raw_message_by_subject(subject, sequence)
+            .await
+        {
+            Ok(message) => message,
+            Err(error) if matches!(error.kind(), stream::RawMessageErrorKind::NoMessageFound) => {
+                return Ok(current);
+            }
+            Err(error) => {
+                return Err(jobs_message(format!(
+                    "read job lifecycle history failed: {error}"
+                )));
+            }
+        };
+        sequence = message
+            .sequence
+            .checked_add(1)
+            .ok_or_else(|| jobs_message("job lifecycle stream sequence overflow".to_string()))?;
+        let event: JobEvent = serde_json::from_slice(&message.payload)
+            .map_err(|error| jobs_message(format!("decode job lifecycle event: {error}")))?;
+        current = apply_lifecycle_event(&current, &event);
+    }
 }
 
 async fn latest_terminal_message(
