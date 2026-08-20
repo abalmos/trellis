@@ -72,6 +72,16 @@ struct PendingContext {
     lock: tokio::sync::Mutex<()>,
 }
 
+struct AuthorizationProviderState {
+    root: Option<AuthorizationTrustRootV1>,
+    policy_floor: Option<(AuthorizationVerificationPolicyV1, u64, String)>,
+    manifest: Option<(VerifiedAuthorizationIssuerManifestV1, String)>,
+    verified_contexts: HashMap<String, VerifiedAuthorizationContextV1>,
+    retention_deadlines: HashMap<String, i64>,
+    revocations: HashMap<String, i64>,
+    health: AuthorizationProviderCacheHealth,
+}
+
 /// Provider-side caller-context resolution and revocation state.
 ///
 /// The provider cache resolves unknown caller context digests through the
@@ -83,15 +93,9 @@ pub struct AuthorizationProviderCache {
     nats: Option<async_nats::Client>,
     registry: Option<AuthorizationRegistryReader>,
     own: Option<Arc<AuthorizationContextCache>>,
-    root: Arc<RwLock<Option<AuthorizationTrustRootV1>>>,
-    policy_floor: Arc<RwLock<Option<(AuthorizationVerificationPolicyV1, u64, String)>>>,
-    manifest: Arc<RwLock<Option<(VerifiedAuthorizationIssuerManifestV1, String)>>>,
-    verified_contexts: Arc<RwLock<HashMap<String, VerifiedAuthorizationContextV1>>>,
-    retention_deadlines: Arc<RwLock<HashMap<String, i64>>>,
-    revocations: Arc<RwLock<HashMap<String, i64>>>,
+    state: Arc<RwLock<AuthorizationProviderState>>,
     in_flight: Arc<Mutex<HashMap<String, Arc<PendingContext>>>>,
     context_resolves: Arc<AtomicU64>,
-    health: Arc<RwLock<AuthorizationProviderCacheHealth>>,
     ready: Arc<tokio::sync::Notify>,
 }
 
@@ -107,20 +111,22 @@ impl AuthorizationProviderCache {
             nats: Some(nats),
             registry: Some(registry),
             own: Some(own),
-            root: Arc::new(RwLock::new(None)),
-            policy_floor: Arc::new(RwLock::new(None)),
-            manifest: Arc::new(RwLock::new(None)),
-            verified_contexts: Arc::new(RwLock::new(HashMap::new())),
-            retention_deadlines: Arc::new(RwLock::new(HashMap::new())),
-            revocations: Arc::new(RwLock::new(HashMap::new())),
+            state: Arc::new(RwLock::new(AuthorizationProviderState {
+                root: None,
+                policy_floor: None,
+                manifest: None,
+                verified_contexts: HashMap::new(),
+                retention_deadlines: HashMap::new(),
+                revocations: HashMap::new(),
+                health: AuthorizationProviderCacheHealth {
+                    manifest_revision: 0,
+                    revocation_revision: 0,
+                    last_update_at: 0,
+                    healthy: false,
+                },
+            })),
             in_flight: Arc::new(Mutex::new(HashMap::new())),
             context_resolves: Arc::new(AtomicU64::new(0)),
-            health: Arc::new(RwLock::new(AuthorizationProviderCacheHealth {
-                manifest_revision: 0,
-                revocation_revision: 0,
-                last_update_at: 0,
-                healthy: false,
-            })),
             ready: Arc::new(tokio::sync::Notify::new()),
         };
         cache.sync_trust_material()?;
@@ -139,24 +145,26 @@ impl AuthorizationProviderCache {
             nats: Some(nats),
             registry: Some(registry),
             own: None,
-            root: Arc::new(RwLock::new(Some(trust.root))),
-            policy_floor: Arc::new(RwLock::new(Some((
-                trust.policy,
-                trust.minimum_manifest_generation,
-                trust.minimum_manifest_digest,
-            )))),
-            manifest: Arc::new(RwLock::new(Some((trust.manifest, trust.manifest_digest)))),
-            verified_contexts: Arc::new(RwLock::new(HashMap::new())),
-            retention_deadlines: Arc::new(RwLock::new(HashMap::new())),
-            revocations: Arc::new(RwLock::new(HashMap::new())),
+            state: Arc::new(RwLock::new(AuthorizationProviderState {
+                root: Some(trust.root),
+                policy_floor: Some((
+                    trust.policy,
+                    trust.minimum_manifest_generation,
+                    trust.minimum_manifest_digest,
+                )),
+                manifest: Some((trust.manifest, trust.manifest_digest)),
+                verified_contexts: HashMap::new(),
+                retention_deadlines: HashMap::new(),
+                revocations: HashMap::new(),
+                health: AuthorizationProviderCacheHealth {
+                    manifest_revision: 0,
+                    revocation_revision: 0,
+                    last_update_at: 0,
+                    healthy: false,
+                },
+            })),
             in_flight: Arc::new(Mutex::new(HashMap::new())),
             context_resolves: Arc::new(AtomicU64::new(0)),
-            health: Arc::new(RwLock::new(AuthorizationProviderCacheHealth {
-                manifest_revision: 0,
-                revocation_revision: 0,
-                last_update_at: 0,
-                healthy: false,
-            })),
             ready: Arc::new(tokio::sync::Notify::new()),
         })
     }
@@ -184,24 +192,26 @@ impl AuthorizationProviderCache {
             nats: None,
             registry: None,
             own: Some(own),
-            root: Arc::new(RwLock::new(Some(root))),
-            policy_floor: Arc::new(RwLock::new(Some((
-                policy,
-                input.minimum_manifest_generation,
-                manifest_digest.clone(),
-            )))),
-            manifest: Arc::new(RwLock::new(Some((manifest, manifest_digest)))),
-            verified_contexts: Arc::new(RwLock::new(HashMap::new())),
-            retention_deadlines: Arc::new(RwLock::new(HashMap::new())),
-            revocations: Arc::new(RwLock::new(HashMap::new())),
+            state: Arc::new(RwLock::new(AuthorizationProviderState {
+                root: Some(root),
+                policy_floor: Some((
+                    policy,
+                    input.minimum_manifest_generation,
+                    manifest_digest.clone(),
+                )),
+                manifest: Some((manifest, manifest_digest)),
+                verified_contexts: HashMap::new(),
+                retention_deadlines: HashMap::new(),
+                revocations: HashMap::new(),
+                health: AuthorizationProviderCacheHealth {
+                    manifest_revision: 0,
+                    revocation_revision: 0,
+                    last_update_at: 0,
+                    healthy: true,
+                },
+            })),
             in_flight: Arc::new(Mutex::new(HashMap::new())),
             context_resolves: Arc::new(AtomicU64::new(0)),
-            health: Arc::new(RwLock::new(AuthorizationProviderCacheHealth {
-                manifest_revision: 0,
-                revocation_revision: 0,
-                last_update_at: 0,
-                healthy: true,
-            })),
             ready: Arc::new(tokio::sync::Notify::new()),
         };
         Ok(cache)
@@ -240,12 +250,19 @@ impl AuthorizationProviderCache {
         let root_digest = root
             .digest()
             .map_err(|error| TrellisClientError::Bootstrap(error.to_string()))?;
-        if let Some(current) = self
-            .root
-            .read()
-            .map_err(|_| TrellisClientError::Bootstrap("provider trust lock poisoned".into()))?
-            .as_ref()
-        {
+        let policy = AuthorizationVerificationPolicyV1::new(
+            own.corrected_now_seconds()?,
+            input.policy.allowed_clock_skew_seconds,
+            input.policy.maximum_context_lifetime_seconds,
+            input.policy.maximum_context_bytes,
+            input.policy.maximum_permissions,
+            input.policy.maximum_capabilities,
+            input.minimum_manifest_generation,
+        )
+        .map_err(|error| TrellisClientError::Bootstrap(error.to_string()))?;
+
+        let mut state = self.write_state()?;
+        if let Some(current) = state.root.as_ref() {
             if current.authority() != root.authority()
                 || current.key_id() != root.key_id()
                 || current
@@ -258,16 +275,7 @@ impl AuthorizationProviderCache {
                 ));
             }
         }
-        *self
-            .root
-            .write()
-            .map_err(|_| TrellisClientError::Bootstrap("provider trust lock poisoned".into()))? =
-            Some(root);
-        let mut policy_floor = self
-            .policy_floor
-            .write()
-            .map_err(|_| TrellisClientError::Bootstrap("provider trust lock poisoned".into()))?;
-        if let Some((_, generation, digest)) = policy_floor.as_ref() {
+        if let Some((_, generation, digest)) = state.policy_floor.as_ref() {
             if input.minimum_manifest_generation < *generation {
                 return Err(TrellisClientError::Bootstrap(
                     "authorization manifest floor rolled back".into(),
@@ -279,17 +287,8 @@ impl AuthorizationProviderCache {
                 ));
             }
         }
-        let policy = AuthorizationVerificationPolicyV1::new(
-            own.corrected_now_seconds()?,
-            input.policy.allowed_clock_skew_seconds,
-            input.policy.maximum_context_lifetime_seconds,
-            input.policy.maximum_context_bytes,
-            input.policy.maximum_permissions,
-            input.policy.maximum_capabilities,
-            input.minimum_manifest_generation,
-        )
-        .map_err(|error| TrellisClientError::Bootstrap(error.to_string()))?;
-        *policy_floor = Some((policy, input.minimum_manifest_generation, floor_digest));
+        state.root = Some(root);
+        state.policy_floor = Some((policy, input.minimum_manifest_generation, floor_digest));
         Ok(())
     }
 
@@ -378,10 +377,7 @@ impl AuthorizationProviderCache {
     }
 
     pub(crate) fn health(&self) -> Result<AuthorizationProviderCacheHealth, TrellisClientError> {
-        self.health
-            .read()
-            .map(|health| health.clone())
-            .map_err(|_| TrellisClientError::Bootstrap("provider health lock poisoned".into()))
+        Ok(self.read_state()?.health.clone())
     }
 
     /// Memory-only verified-context read without revocation or expiry filtering.
@@ -389,28 +385,14 @@ impl AuthorizationProviderCache {
         &self,
         digest: &str,
     ) -> Result<Option<VerifiedAuthorizationContextV1>, TrellisClientError> {
-        Ok(self
-            .verified_contexts
-            .read()
-            .map_err(|_| {
-                TrellisClientError::Bootstrap("provider context cache lock poisoned".into())
-            })?
-            .get(digest)
-            .cloned())
+        Ok(self.read_state()?.verified_contexts.get(digest).cloned())
     }
 
     fn active_context_raw(
         &self,
         digest: &str,
     ) -> Result<Option<VerifiedAuthorizationContextV1>, TrellisClientError> {
-        Ok(self
-            .verified_contexts
-            .read()
-            .map_err(|_| {
-                TrellisClientError::Bootstrap("provider context cache lock poisoned".into())
-            })?
-            .get(digest)
-            .cloned())
+        Ok(self.read_state()?.verified_contexts.get(digest).cloned())
     }
 
     #[cfg(feature = "runtime-internals")]
@@ -424,12 +406,7 @@ impl AuthorizationProviderCache {
 
     /// Memory-only revocation timestamp for a digest, when revoked.
     pub(crate) fn revocation_time(&self, digest: &str) -> Result<Option<i64>, TrellisClientError> {
-        Ok(self
-            .revocations
-            .read()
-            .map_err(|_| TrellisClientError::Bootstrap("provider revocation lock poisoned".into()))?
-            .get(digest)
-            .copied())
+        Ok(self.read_state()?.revocations.get(digest).copied())
     }
 
     #[cfg(feature = "runtime-internals")]
@@ -445,14 +422,14 @@ impl AuthorizationProviderCache {
         digest: &str,
         revoked_at: i64,
     ) -> Result<(), TrellisClientError> {
-        let mut revocations = self.revocations.write().map_err(|_| {
-            TrellisClientError::Bootstrap("provider revocation lock poisoned".into())
-        })?;
-        revocations
-            .entry(digest.to_owned())
-            .and_modify(|current| *current = (*current).max(revoked_at))
-            .or_insert(revoked_at);
-        drop(revocations);
+        {
+            let mut state = self.write_state()?;
+            state
+                .revocations
+                .entry(digest.to_owned())
+                .and_modify(|current| *current = (*current).max(revoked_at))
+                .or_insert(revoked_at);
+        }
         if let Some(own) = self.own.as_ref() {
             if own.context_digest().is_ok_and(|current| current == digest) {
                 own.clear()?;
@@ -464,14 +441,9 @@ impl AuthorizationProviderCache {
 
     /// Return the verification policy bound to the current trust material.
     pub(crate) fn policy(&self) -> Result<AuthorizationVerificationPolicyV1, TrellisClientError> {
-        let policy_floor = self
-            .policy_floor
-            .read()
-            .map_err(|_| TrellisClientError::Bootstrap("provider trust lock poisoned".into()))?
-            .clone()
-            .ok_or_else(|| {
-                TrellisClientError::Bootstrap("authorization context unavailable".into())
-            })?;
+        let policy_floor = self.read_state()?.policy_floor.clone().ok_or_else(|| {
+            TrellisClientError::Bootstrap("authorization context unavailable".into())
+        })?;
         let mut policy = policy_floor.0;
         policy.now_unix_seconds = self.now_seconds()?;
         policy.minimum_manifest_generation = policy.minimum_manifest_generation.max(policy_floor.1);
@@ -519,15 +491,16 @@ impl AuthorizationProviderCache {
     }
 
     fn set_healthy(&self, healthy: bool) {
-        if let Ok(mut health) = self.health.write() {
-            health.healthy = healthy;
+        if let Ok(mut state) = self.state.write() {
+            state.health.healthy = healthy;
         }
     }
 
     fn record_healthy(&self) {
-        if let Ok(mut health) = self.health.write() {
-            health.last_update_at = self.now_seconds().unwrap_or(0);
-            health.healthy = true;
+        let now = self.now_seconds().unwrap_or(0);
+        if let Ok(mut state) = self.state.write() {
+            state.health.last_update_at = now;
+            state.health.healthy = true;
         }
         self.ready.notify_waiters();
     }
@@ -652,21 +625,24 @@ impl AuthorizationProviderCache {
         pointer: &ManifestPointer,
         revision: u64,
     ) -> Result<(), TrellisClientError> {
-        if self.health()?.manifest_revision >= revision {
-            return Ok(());
-        }
-        let was_healthy = self.health()?.healthy;
-        let (current_generation, current_digest) = {
-            let manifest = self.manifest.read().map_err(|_| {
-                TrellisClientError::Bootstrap("provider manifest lock poisoned".into())
-            })?;
-            manifest
+        let (manifest_revision, was_healthy, current_generation, current_digest) = {
+            let state = self.read_state()?;
+            let (generation, digest) = state
+                .manifest
                 .as_ref()
                 .map(|(manifest, digest)| (manifest.generation(), digest.clone()))
-                .unwrap_or((0, String::new()))
+                .unwrap_or((0, String::new()));
+            (
+                state.health.manifest_revision,
+                state.health.healthy,
+                generation,
+                digest,
+            )
         };
+        if manifest_revision >= revision {
+            return Ok(());
+        }
         self.check_manifest_floor(pointer.generation, &pointer.digest)?;
-        let mut advanced = false;
         let initial_snapshot = current_generation == 0;
         if pointer.generation < current_generation {
             return Err(TrellisClientError::Bootstrap(
@@ -678,6 +654,7 @@ impl AuthorizationProviderCache {
                 "manifest.current equivocates at the accepted generation".into(),
             ));
         }
+
         if pointer.generation > current_generation {
             self.set_healthy(false);
             let Some(registry) = self.registry.as_ref() else {
@@ -718,43 +695,38 @@ impl AuthorizationProviderCache {
                 own.advance_manifest_floor(pointer.generation, &digest)
                     .await?;
             }
+
+            let now = self.now_seconds().unwrap_or(0);
             {
-                let mut floor = self.policy_floor.write().map_err(|_| {
-                    TrellisClientError::Bootstrap("provider trust lock poisoned".into())
-                })?;
-                let (mut policy, _, _) = floor.clone().ok_or_else(|| {
+                let mut state = self.write_state()?;
+                let (mut policy, _, _) = state.policy_floor.clone().ok_or_else(|| {
                     TrellisClientError::Bootstrap("authorization context unavailable".into())
                 })?;
                 policy.minimum_manifest_generation = pointer.generation;
-                *floor = Some((policy, pointer.generation, digest.clone()));
+                state.policy_floor = Some((policy, pointer.generation, digest.clone()));
+                state.manifest = Some((verified, digest));
+                state.verified_contexts.clear();
+                state.retention_deadlines.clear();
+                state.health.manifest_revision = state.health.manifest_revision.max(revision);
+                state.health.last_update_at = now;
+                state.health.healthy = false;
             }
-            *self.manifest.write().map_err(|_| {
-                TrellisClientError::Bootstrap("provider manifest lock poisoned".into())
-            })? = Some((verified, digest));
-            self.verified_contexts
-                .write()
-                .map_err(|_| {
-                    TrellisClientError::Bootstrap("provider context cache lock poisoned".into())
-                })?
-                .clear();
-            advanced = true;
             if let Some(own) = self.own.as_ref() {
                 own.request_refresh();
             }
+            if !initial_snapshot {
+                return Err(TrellisClientError::Bootstrap(
+                    "issuer manifest advanced; restarting complete provider snapshot".into(),
+                ));
+            }
+            return Ok(());
         }
-        {
-            let mut health = self.health.write().map_err(|_| {
-                TrellisClientError::Bootstrap("provider health lock poisoned".into())
-            })?;
-            health.manifest_revision = health.manifest_revision.max(revision);
-            health.last_update_at = self.now_seconds().unwrap_or(0);
-            health.healthy = was_healthy && !advanced;
-        }
-        if advanced && !initial_snapshot {
-            return Err(TrellisClientError::Bootstrap(
-                "issuer manifest advanced; restarting complete provider snapshot".into(),
-            ));
-        }
+
+        let now = self.now_seconds().unwrap_or(0);
+        let mut state = self.write_state()?;
+        state.health.manifest_revision = state.health.manifest_revision.max(revision);
+        state.health.last_update_at = now;
+        state.health.healthy = was_healthy;
         Ok(())
     }
 
@@ -771,23 +743,22 @@ impl AuthorizationProviderCache {
                 TrellisClientError::Bootstrap("authorization revocation key is invalid".into())
             })?;
         let revoked_at = parse_revocation_record(value)?;
-        let mut revocations = self.revocations.write().map_err(|_| {
-            TrellisClientError::Bootstrap("provider revocation lock poisoned".into())
-        })?;
-        revocations
-            .entry(digest.to_owned())
-            .and_modify(|current| *current = (*current).max(revoked_at))
-            .or_insert(revoked_at);
-        drop(revocations);
+        let now = self.now_seconds().unwrap_or(0);
+        {
+            let mut state = self.write_state()?;
+            state
+                .revocations
+                .entry(digest.to_owned())
+                .and_modify(|current| *current = (*current).max(revoked_at))
+                .or_insert(revoked_at);
+            state.health.revocation_revision = state.health.revocation_revision.max(revision);
+            state.health.last_update_at = now;
+        }
         if let Some(own) = self.own.as_ref() {
             if own.context_digest().is_ok_and(|current| current == digest) {
                 own.clear()?;
                 own.request_refresh();
             }
-        }
-        if let Ok(mut health) = self.health.write() {
-            health.revocation_revision = health.revocation_revision.max(revision);
-            health.last_update_at = self.now_seconds().unwrap_or(0);
         }
         Ok(())
     }
@@ -805,38 +776,25 @@ impl AuthorizationProviderCache {
             })?;
         // Revocation is monotonic: registry cleanup must never make a revoked context valid again.
         let _ = digest;
-        if let Ok(mut health) = self.health.write() {
-            health.revocation_revision = health.revocation_revision.max(revision);
-            health.last_update_at = self.now_seconds().unwrap_or(0);
-        }
+        let now = self.now_seconds().unwrap_or(0);
+        let mut state = self.write_state()?;
+        state.health.revocation_revision = state.health.revocation_revision.max(revision);
+        state.health.last_update_at = now;
         Ok(())
     }
 
     fn prune_contexts(&self, now: i64) -> Result<(), TrellisClientError> {
-        let expired = {
-            let mut deadlines = self.retention_deadlines.write().map_err(|_| {
-                TrellisClientError::Bootstrap("provider retention lock poisoned".into())
-            })?;
-            let expired = deadlines
-                .iter()
-                .filter(|(_, retained_until)| **retained_until <= now)
-                .map(|(digest, _)| digest.clone())
-                .collect::<Vec<_>>();
-            for digest in &expired {
-                deadlines.remove(digest);
-            }
-            expired
-        };
-        if expired.is_empty() {
-            return Ok(());
+        let mut state = self.write_state()?;
+        let expired = state
+            .retention_deadlines
+            .iter()
+            .filter(|(_, retained_until)| **retained_until <= now)
+            .map(|(digest, _)| digest.clone())
+            .collect::<Vec<_>>();
+        for digest in expired {
+            state.retention_deadlines.remove(&digest);
+            state.verified_contexts.remove(&digest);
         }
-        let mut contexts = self.verified_contexts.write().map_err(|_| {
-            TrellisClientError::Bootstrap("provider context cache lock poisoned".into())
-        })?;
-        for digest in &expired {
-            contexts.remove(digest);
-        }
-        drop(contexts);
         Ok(())
     }
 
@@ -854,13 +812,9 @@ impl AuthorizationProviderCache {
     }
 
     fn root_value(&self) -> Result<AuthorizationTrustRootV1, TrellisClientError> {
-        self.root
-            .read()
-            .map_err(|_| TrellisClientError::Bootstrap("provider trust lock poisoned".into()))?
-            .clone()
-            .ok_or_else(|| {
-                TrellisClientError::Bootstrap("authorization context unavailable".into())
-            })
+        self.read_state()?.root.clone().ok_or_else(|| {
+            TrellisClientError::Bootstrap("authorization context unavailable".into())
+        })
     }
 
     fn check_manifest_floor(
@@ -868,11 +822,8 @@ impl AuthorizationProviderCache {
         generation: u64,
         digest: &str,
     ) -> Result<(), TrellisClientError> {
-        let policy_floor = self
-            .policy_floor
-            .read()
-            .map_err(|_| TrellisClientError::Bootstrap("provider trust lock poisoned".into()))?;
-        let Some((_, minimum_generation, minimum_digest)) = policy_floor.as_ref() else {
+        let state = self.read_state()?;
+        let Some((_, minimum_generation, minimum_digest)) = state.policy_floor.as_ref() else {
             return Err(TrellisClientError::Bootstrap(
                 "authorization context unavailable".into(),
             ));
@@ -969,9 +920,8 @@ impl AuthorizationProviderCache {
     pub fn runtime_current_manifest(
         &self,
     ) -> Result<VerifiedAuthorizationIssuerManifestV1, TrellisClientError> {
-        self.manifest
-            .read()
-            .map_err(|_| TrellisClientError::Bootstrap("provider manifest lock poisoned".into()))?
+        self.read_state()?
+            .manifest
             .as_ref()
             .map(|(manifest, _)| manifest.clone())
             .ok_or_else(|| TrellisClientError::Bootstrap("provider manifest unavailable".into()))
@@ -989,9 +939,8 @@ impl AuthorizationProviderCache {
             return Ok(context);
         }
         let manifest_generation = self
+            .read_state()?
             .manifest
-            .read()
-            .map_err(|_| TrellisClientError::Bootstrap("provider manifest lock poisoned".into()))?
             .as_ref()
             .map(|(manifest, _)| manifest.generation())
             .ok_or_else(|| {
@@ -1008,7 +957,6 @@ impl AuthorizationProviderCache {
             }))
         };
         let _guard = pending.lock.lock().await;
-        // A concurrent caller may have resolved the digest while we waited.
         let known = self.active_context_raw(digest)?;
         if let Some(context) = known {
             return Ok(context);
@@ -1018,30 +966,25 @@ impl AuthorizationProviderCache {
             .await;
         self.drop_in_flight(digest, &pending);
         let context = outcome?;
-        let manifest = self
+        let mut state = self.write_state()?;
+        if state
             .manifest
-            .read()
-            .map_err(|_| TrellisClientError::Bootstrap("provider manifest lock poisoned".into()))?;
-        if manifest.as_ref().map(|(manifest, _)| manifest.generation()) != Some(manifest_generation)
+            .as_ref()
+            .map(|(manifest, _)| manifest.generation())
+            != Some(manifest_generation)
         {
             return Err(TrellisClientError::Bootstrap(
                 "authorization manifest advanced during context resolution".into(),
             ));
         }
         if !historical {
-            let retained_until = context.expires_at();
-            self.retention_deadlines
-                .write()
-                .map_err(|_| {
-                    TrellisClientError::Bootstrap("provider retention lock poisoned".into())
-                })?
-                .insert(digest.to_owned(), retained_until);
-            let mut active = self.verified_contexts.write().map_err(|_| {
-                TrellisClientError::Bootstrap("provider context cache lock poisoned".into())
-            })?;
-            active.insert(digest.to_owned(), context.clone());
+            state
+                .retention_deadlines
+                .insert(digest.to_owned(), context.expires_at());
+            state
+                .verified_contexts
+                .insert(digest.to_owned(), context.clone());
         }
-        drop(manifest);
         Ok(context)
     }
 
@@ -1091,11 +1034,8 @@ impl AuthorizationProviderCache {
         let generation = context.unsigned.issuer_manifest_generation;
         if !historical {
             let current_generation = self
+                .read_state()?
                 .manifest
-                .read()
-                .map_err(|_| {
-                    TrellisClientError::Bootstrap("provider manifest lock poisoned".into())
-                })?
                 .as_ref()
                 .map(|(manifest, _)| manifest.generation())
                 .ok_or_else(|| {
@@ -1141,9 +1081,8 @@ impl AuthorizationProviderCache {
         policy: &mut AuthorizationVerificationPolicyV1,
     ) -> Result<VerifiedAuthorizationIssuerManifestV1, TrellisClientError> {
         if let Some((manifest, digest)) = self
+            .read_state()?
             .manifest
-            .read()
-            .map_err(|_| TrellisClientError::Bootstrap("provider manifest lock poisoned".into()))?
             .as_ref()
             .filter(|(manifest, _)| manifest.generation() == generation)
             .cloned()
@@ -1196,6 +1135,24 @@ impl AuthorizationProviderCache {
         Ok(manifest)
     }
 
+    fn read_state(
+        &self,
+    ) -> Result<std::sync::RwLockReadGuard<'_, AuthorizationProviderState>, TrellisClientError>
+    {
+        self.state
+            .read()
+            .map_err(|_| TrellisClientError::Bootstrap("provider state lock poisoned".into()))
+    }
+
+    fn write_state(
+        &self,
+    ) -> Result<std::sync::RwLockWriteGuard<'_, AuthorizationProviderState>, TrellisClientError>
+    {
+        self.state
+            .write()
+            .map_err(|_| TrellisClientError::Bootstrap("provider state lock poisoned".into()))
+    }
+
     /// Install an already-verified snapshot for unit tests without registry I/O.
     #[cfg(test)]
     pub(crate) fn inject_verified_for_test(
@@ -1204,19 +1161,10 @@ impl AuthorizationProviderCache {
         verified: VerifiedAuthorizationContextV1,
         revoked_at: Option<i64>,
     ) -> Result<(), TrellisClientError> {
-        self.verified_contexts
-            .write()
-            .map_err(|_| {
-                TrellisClientError::Bootstrap("provider context cache lock poisoned".into())
-            })?
-            .insert(digest.to_owned(), verified);
+        let mut state = self.write_state()?;
+        state.verified_contexts.insert(digest.to_owned(), verified);
         if let Some(revoked_at) = revoked_at {
-            self.revocations
-                .write()
-                .map_err(|_| {
-                    TrellisClientError::Bootstrap("provider revocation lock poisoned".into())
-                })?
-                .insert(digest.to_owned(), revoked_at);
+            state.revocations.insert(digest.to_owned(), revoked_at);
         }
         Ok(())
     }
@@ -1239,11 +1187,8 @@ fn classify_event_resolution_failure(
         "cannot read issuer manifest",
         "authorization context issuer manifest is missing",
         "authorization manifest advanced during context resolution",
-        "provider trust lock poisoned",
-        "provider manifest lock poisoned",
-        "provider context cache lock poisoned",
+        "provider state lock poisoned",
         "provider resolution lock poisoned",
-        "provider retention lock poisoned",
         "context store lock poisoned",
         "authorization trust floor unavailable",
         "authorization trust floor digest is empty",
