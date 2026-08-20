@@ -101,23 +101,6 @@ impl AuthPostCommitRuntime {
         else {
             return Ok(());
         };
-        #[cfg(feature = "integration-test-hooks")]
-        if self
-            .repository
-            .consume_test_post_commit_failure(&action.action_id)
-            .await?
-        {
-            let delay = retry_delay_ms(action.attempts);
-            self.repository
-                .fail_post_commit_action(
-                    &action.action_id,
-                    claimed_until,
-                    now.saturating_add(delay),
-                    "injected integration-test dispatch failure".to_owned(),
-                )
-                .await?;
-            return Ok(());
-        }
         match self.dispatch(&action).await {
             Ok(()) => {
                 self.repository
