@@ -63,9 +63,12 @@ Validation:
 - [x] Give each runtime lease one owner task; remove the shared `Arc<Vec<Mutex<HeldLease>>>` renewal model.
 - [x] Fix the durable listener concurrent first-registration race by making check/create/spawn/insert one registry critical section (`09125056`).
 - [ ] Make durable-listener teardown/drop ownership deterministic and simple; do not depend on ad-hoc runtime availability if it can be avoided.
-- [ ] Consolidate coherent authorization provider trust state instead of independent root/policy/manifest/health locks where those values must move together.
-- [ ] Keep per-digest context singleflight; do not actorize normal cache reads.
+- [x] Consolidate authorization provider state behind one coherent synchronous state lock so trust root, policy floor, manifest, verified-context retention, revocations, and provider health transition together (`3859764b`).
+- [x] Keep per-digest context singleflight separate; normal cache reads remain direct and are not actorized.
 - [x] Simplify `JobRef` to immutable seed plus concrete waiter/manager state and remove boxed callback backends. `NatsJobWaiter::get` now projects the complete durable per-job lifecycle so accumulated progress/logs and legal transitions no longer depend on a mutable cached snapshot (`73ad6df2`).
+
+Validation:
+- Actions run `32333290228` validated the provider-state consolidation: clean generation/portal baseline, format/check/Clippy/library and integration compilation passed, and the focused real invalid-proof `TERM` live case remained green.
 
 ## 5. Runtime composition
 
@@ -123,12 +126,12 @@ Validation:
 - `e6615be3` — remove synthetic Auth transaction/post-commit failure injection and its live cases.
 - `00c9f48f` — remove provider Auth fault injection and retain a real invalid-proof `TERM` live boundary.
 - `73ad6df2` — remove JobRef callback/cache state and reconstruct snapshots from the durable lifecycle.
+- `3859764b` — consolidate authorization provider state while retaining per-digest singleflight.
 - CI/release simplification also includes adaptive concurrency, stale-governance deletion, release-DAG deletion, generated-artifact fixes, and one-generation `Check` preparation; use `git log rs` for the exact intermediate commit chain.
 
 ## Immediate next work
 
-1. Consolidate authorization provider trust state.
-2. Make durable-listener teardown/drop deterministic.
-3. Do the first-public `v1` proof cleanup.
-4. Continue production/test-boundary and runtime-composition cleanup.
-5. Finish release-only gate cleanup and record final timing baseline.
+1. Make durable-listener teardown/drop deterministic.
+2. Do the first-public `v1` proof cleanup.
+3. Continue production/test-boundary and runtime-composition cleanup.
+4. Finish release-only gate cleanup and record final timing baseline.
