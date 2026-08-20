@@ -1,0 +1,34 @@
+name: Inventory activation review test controls
+
+on:
+  push:
+    branches:
+      - agent/inventory-integration-hooks-v1
+
+permissions:
+  contents: write
+
+jobs:
+  inventory:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Inventory activation controls and callers
+        shell: bash
+        run: |
+          {
+            echo '# activation review test-control inventory'
+            echo
+            git grep -n -E 'set_activation_review_ttl|count_activation_review_reads|activation_review_read_count|__trellis_test_activation_review_(ttls|reads)|activation_review_test_ttl_ms' -- rust integration || true
+            echo
+            echo '## portal barriers'
+            git grep -n -E 'portal_(snapshot|reconciliation).*barrier|wait_for_portal_(snapshot|reconciliation)_test_barrier' -- rust integration || true
+          } > .activation-hook-inventory
+          git config user.name trellis-validation
+          git config user.email actions@users.noreply.github.com
+          git add .activation-hook-inventory
+          git commit -m 'Record activation review hook inventory'
+          git push --force origin HEAD:refs/heads/agent/result-activation-hook-inventory-v1
