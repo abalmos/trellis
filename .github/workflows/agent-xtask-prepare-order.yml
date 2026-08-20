@@ -6,7 +6,7 @@ on:
       - agent/fix-xtask-prepare-order-v1
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: agent-fix-xtask-prepare-order-v1
@@ -19,6 +19,19 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Publish running run id
+        shell: bash
+        run: |
+          git config user.name "trellis-validation"
+          git config user.email "actions@users.noreply.github.com"
+          printf '%s\n' '${{ github.run_id }}' > .validation-running
+          git add .validation-running
+          git commit -m "Record xtask prepare validation run"
+          git push --force origin HEAD:refs/heads/agent/running-xtask-prepare-order-v1
+          git reset --hard "$GITHUB_SHA"
 
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
@@ -46,3 +59,15 @@ jobs:
 
       - name: Test xtask
         run: cargo test --manifest-path rust/xtask/Cargo.toml
+
+      - name: Publish failure run id
+        if: failure()
+        shell: bash
+        run: |
+          git reset --hard "$GITHUB_SHA"
+          git config user.name "trellis-validation"
+          git config user.email "actions@users.noreply.github.com"
+          printf '%s\n' '${{ github.run_id }}' > .validation-failed
+          git add .validation-failed
+          git commit -m "Record failed xtask prepare validation"
+          git push --force origin HEAD:refs/heads/agent/failed-xtask-prepare-order-v1
