@@ -1,0 +1,1540 @@
+=== generated/packages/cargo/auth/src/operations.rs:22 ===
+/// Descriptor for `Auth.DeviceUserAuthorities.Resolve`.
+pub struct AuthDeviceUserAuthoritiesResolveOperation;
+impl OperationDescriptor for AuthDeviceUserAuthoritiesResolveOperation {
+    type Input = crate::types::AuthDeviceUserAuthoritiesResolveInput;
+    type Progress = crate::types::AuthDeviceUserAuthoritiesResolveProgress;
+    type Output = crate::types::AuthDeviceUserAuthoritiesResolveOutput;
+    type Error = AuthDeviceUserAuthoritiesResolveOperationError;
+    const INPUT_SCHEMA_JSON: &'static str =
+        crate::schemas::AUTH_DEVICE_USER_AUTHORITIES_RESOLVE_INPUT_SCHEMA_JSON;
+    const PROGRESS_SCHEMA_JSON: Option<&'static str> =
+        Some(crate::schemas::AUTH_DEVICE_USER_AUTHORITIES_RESOLVE_PROGRESS_SCHEMA_JSON);
+    const OUTPUT_SCHEMA_JSON: &'static str =
+        crate::schemas::AUTH_DEVICE_USER_AUTHORITIES_RESOLVE_OUTPUT_SCHEMA_JSON;
+    const SIGNAL_INPUT_SCHEMAS_JSON: &'static str =
+        crate::schemas::AUTH_DEVICE_USER_AUTHORITIES_RESOLVE_SIGNAL_INPUT_SCHEMAS_JSON;
+    const ERRORS: &'static [&'static str] = &["AuthError", "UnexpectedError", "ValidationError"];
+    const KEY: &'static str = "Auth.DeviceUserAuthorities.Resolve";
+    const SUBJECT: &'static str = "operations.v1.Auth.DeviceUserAuthorities.Resolve";
+    const CALLER_CAPABILITIES: &'static [&'static str] = &[];
+    const OBSERVE_CAPABILITIES: &'static [&'static str] = &[];
+    const CANCEL_CAPABILITIES: &'static [&'static str] = &[];
+
+=== generated/packages/cargo/auth/src/rpc.rs:18 ===
+//! Typed RPC descriptors for `trellis.auth@v1`.
+use serde::{Deserialize, Serialize};
+use trellis_rs::generated::RpcDescriptor;
+/// Empty request or response payload used by zero-argument RPCs.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct Empty {}
+/// Descriptor for `Auth.Capabilities.List`.
+pub struct AuthCapabilitiesListRpc;
+impl RpcDescriptor for AuthCapabilitiesListRpc {
+    type Input = crate::types::AuthCapabilitiesListRequest;
+    type Output = crate::types::AuthCapabilitiesListResponse;
+    const INPUT_SCHEMA_JSON: &'static str =
+        crate::schemas::AUTH_CAPABILITIES_LIST_INPUT_SCHEMA_JSON;
+    const OUTPUT_SCHEMA_JSON: &'static str =
+        crate::schemas::AUTH_CAPABILITIES_LIST_OUTPUT_SCHEMA_JSON;
+    const KEY: &'static str = "Auth.Capabilities.List";
+    const SUBJECT: &'static str = "rpc.v1.Auth.Capabilities.List";
+    const CALLER_CAPABILITIES: &'static [&'static str] = &["admin"];
+    const ERRORS: &'static [&'static str] = &["AuthError", "UnexpectedError", "ValidationError"];
+}
+
+=== generated/packages/cargo/auth/src/rpc.rs:66 ===
+    fn auth_error_reason(&self) -> Option<&str> {
+        match self {
+            Self::AuthError(payload) => Some(payload.reason.as_str()),
+            _ => None,
+        }
+    }
+}
+/// Descriptor for `Auth.CapabilityGroups.Delete`.
+pub struct AuthCapabilityGroupsDeleteRpc;
+impl RpcDescriptor for AuthCapabilityGroupsDeleteRpc {
+    type Input = crate::types::AuthCapabilityGroupsDeleteRequest;
+    type Output = crate::types::AuthCapabilityGroupsDeleteResponse;
+    const INPUT_SCHEMA_JSON: &'static str =
+        crate::schemas::AUTH_CAPABILITY_GROUPS_DELETE_INPUT_SCHEMA_JSON;
+    const OUTPUT_SCHEMA_JSON: &'static str =
+        crate::schemas::AUTH_CAPABILITY_GROUPS_DELETE_OUTPUT_SCHEMA_JSON;
+    const KEY: &'static str = "Auth.CapabilityGroups.Delete";
+    const SUBJECT: &'static str = "rpc.v1.Auth.CapabilityGroups.Delete";
+    const CALLER_CAPABILITIES: &'static [&'static str] = &["admin"];
+    const ERRORS: &'static [&'static str] = &["AuthError", "UnexpectedError", "ValidationError"];
+}
+
+=== generated/packages/cargo/auth/src/rpc.rs:114 ===
+    fn auth_error_reason(&self) -> Option<&str> {
+        match self {
+            Self::AuthError(payload) => Some(payload.reason.as_str()),
+            _ => None,
+        }
+    }
+}
+/// Descriptor for `Auth.CapabilityGroups.Get`.
+pub struct AuthCapabilityGroupsGetRpc;
+impl RpcDescriptor for AuthCapabilityGroupsGetRpc {
+    type Input = crate::types::AuthCapabilityGroupsGetRequest;
+    type Output = crate::types::AuthCapabilityGroupsGetResponse;
+    const INPUT_SCHEMA_JSON: &'static str =
+        crate::schemas::AUTH_CAPABILITY_GROUPS_GET_INPUT_SCHEMA_JSON;
+    const OUTPUT_SCHEMA_JSON: &'static str =
+        crate::schemas::AUTH_CAPABILITY_GROUPS_GET_OUTPUT_SCHEMA_JSON;
+    const KEY: &'static str = "Auth.CapabilityGroups.Get";
+    const SUBJECT: &'static str = "rpc.v1.Auth.CapabilityGroups.Get";
+    const CALLER_CAPABILITIES: &'static [&'static str] = &["admin"];
+    const ERRORS: &'static [&'static str] = &["AuthError", "UnexpectedError", "ValidationError"];
+}
+
+=== generated/packages/cargo/auth/src/rpc.rs:162 ===
+    fn auth_error_reason(&self) -> Option<&str> {
+        match self {
+            Self::AuthError(payload) => Some(payload.reason.as_str()),
+            _ => None,
+        }
+    }
+}
+/// Descriptor for `Auth.CapabilityGroups.List`.
+pub struct AuthCapabilityGroupsListRpc;
+impl RpcDescriptor for AuthCapabilityGroupsListRpc {
+    type Input = crate::types::AuthCapabilityGroupsListRequest;
+    type Output = crate::types::AuthCapabilityGroupsListResponse;
+    const INPUT_SCHEMA_JSON: &'static str =
+        crate::schemas::AUTH_CAPABILITY_GROUPS_LIST_INPUT_SCHEMA_JSON;
+    const OUTPUT_SCHEMA_JSON: &'static str =
+        crate::schemas::AUTH_CAPABILITY_GROUPS_LIST_OUTPUT_SCHEMA_JSON;
+    const KEY: &'static str = "Auth.CapabilityGroups.List";
+    const SUBJECT: &'static str = "rpc.v1.Auth.CapabilityGroups.List";
+    const CALLER_CAPABILITIES: &'static [&'static str] = &["admin"];
+    const ERRORS: &'static [&'static str] = &["AuthError", "UnexpectedError", "ValidationError"];
+}
+
+=== generated/packages/cargo/auth/src/rpc.rs:210 ===
+    fn auth_error_reason(&self) -> Option<&str> {
+        match self {
+            Self::AuthError(payload) => Some(payload.reason.as_str()),
+            _ => None,
+        }
+    }
+}
+/// Descriptor for `Auth.CapabilityGroups.Put`.
+pub struct AuthCapabilityGroupsPutRpc;
+impl RpcDescriptor for AuthCapabilityGroupsPutRpc {
+    type Input = crate::types::AuthCapabilityGroupsPutRequest;
+    type Output = crate::types::AuthCapabilityGroupsPutResponse;
+    const INPUT_SCHEMA_JSON: &'static str =
+        crate::schemas::AUTH_CAPABILITY_GROUPS_PUT_INPUT_SCHEMA_JSON;
+    const OUTPUT_SCHEMA_JSON: &'static str =
+        crate::schemas::AUTH_CAPABILITY_GROUPS_PUT_OUTPUT_SCHEMA_JSON;
+    const KEY: &'static str = "Auth.CapabilityGroups.Put";
+    const SUBJECT: &'static str = "rpc.v1.Auth.CapabilityGroups.Put";
+    const CALLER_CAPABILITIES: &'static [&'static str] = &["admin"];
+    const ERRORS: &'static [&'static str] = &["AuthError", "UnexpectedError", "ValidationError"];
+}
+
+=== generated/packages/cargo/auth/src/rpc.rs:257 ===
+    }
+    fn auth_error_reason(&self) -> Option<&str> {
+        match self {
+            Self::AuthError(payload) => Some(payload.reason.as_str()),
+            _ => None,
+        }
+    }
+}
+/// Descriptor for `Auth.Connections.Kick`.
+pub struct AuthConnectionsKickRpc;
+impl RpcDescriptor for AuthConnectionsKickRpc {
+    type Input = crate::types::AuthConnectionsKickRequest;
+    type Output = crate::types::AuthConnectionsKickResponse;
+    const INPUT_SCHEMA_JSON: &'static str = crate::schemas::AUTH_CONNECTIONS_KICK_INPUT_SCHEMA_JSON;
+    const OUTPUT_SCHEMA_JSON: &'static str =
+        crate::schemas::AUTH_CONNECTIONS_KICK_OUTPUT_SCHEMA_JSON;
+    const KEY: &'static str = "Auth.Connections.Kick";
+    const SUBJECT: &'static str = "rpc.v1.Auth.Connections.Kick";
+    const CALLER_CAPABILITIES: &'static [&'static str] = &["admin"];
+    const ERRORS: &'static [&'static str] = &["AuthError", "UnexpectedError", "ValidationError"];
+}
+
+=== generated/packages/cargo/auth/src/rpc.rs:304 ===
+    }
+    fn auth_error_reason(&self) -> Option<&str> {
+        match self {
+            Self::AuthError(payload) => Some(payload.reason.as_str()),
+            _ => None,
+        }
+    }
+}
+/// Descriptor for `Auth.Connections.List`.
+pub struct AuthConnectionsListRpc;
+impl RpcDescriptor for AuthConnectionsListRpc {
+    type Input = crate::types::AuthConnectionsListRequest;
+    type Output = crate::types::AuthConnectionsListResponse;
+    const INPUT_SCHEMA_JSON: &'static str = crate::schemas::AUTH_CONNECTIONS_LIST_INPUT_SCHEMA_JSON;
+    const OUTPUT_SCHEMA_JSON: &'static str =
+        crate::schemas::AUTH_CONNECTIONS_LIST_OUTPUT_SCHEMA_JSON;
+    const KEY: &'static str = "Auth.Connections.List";
+    const SUBJECT: &'static str = "rpc.v1.Auth.Connections.List";
+    const CALLER_CAPABILITIES: &'static [&'static str] = &["admin"];
+    const ERRORS: &'static [&'static str] = &["AuthError", "UnexpectedError", "ValidationError"];
+}
+
+=== generated/packages/cargo/auth/src/rpc.rs:352 ===
+    fn auth_error_reason(&self) -> Option<&str> {
+        match self {
+            Self::AuthError(payload) => Some(payload.reason.as_str()),
+            _ => None,
+        }
+    }
+}
+/// Descriptor for `Auth.DeploymentAuthority.AcceptMigration`.
+pub struct AuthDeploymentAuthorityAcceptMigrationRpc;
+impl RpcDescriptor for AuthDeploymentAuthorityAcceptMigrationRpc {
+    type Input = crate::types::AuthDeploymentAuthorityAcceptMigrationRequest;
+    type Output = crate::types::AuthDeploymentAuthorityAcceptMigrationResponse;
+    const INPUT_SCHEMA_JSON: &'static str =
+        crate::schemas::AUTH_DEPLOYMENT_AUTHORITY_ACCEPT_MIGRATION_INPUT_SCHEMA_JSON;
+    const OUTPUT_SCHEMA_JSON: &'static str =
+        crate::schemas::AUTH_DEPLOYMENT_AUTHORITY_ACCEPT_MIGRATION_OUTPUT_SCHEMA_JSON;
+    const KEY: &'static str = "Auth.DeploymentAuthority.AcceptMigration";
+    const SUBJECT: &'static str = "rpc.v1.Auth.DeploymentAuthority.AcceptMigration";
+    const CALLER_CAPABILITIES: &'static [&'static str] = &["admin"];
+    const ERRORS: &'static [&'static str] = &["AuthError", "UnexpectedError", "ValidationError"];
+}
+
+=== generated/packages/cargo/auth/src/rpc.rs:400 ===
+    fn auth_error_reason(&self) -> Option<&str> {
+        match self {
+            Self::AuthError(payload) => Some(payload.reason.as_str()),
+            _ => None,
+        }
+    }
+}
+/// Descriptor for `Auth.DeploymentAuthority.AcceptUpdate`.
+pub struct AuthDeploymentAuthorityAcceptUpdateRpc;
+impl RpcDescriptor for AuthDeploymentAuthorityAcceptUpdateRpc {
+    type Input = crate::types::AuthDeploymentAuthorityAcceptUpdateRequest;
+    type Output = crate::types::AuthDeploymentAuthorityAcceptUpdateResponse;
+    const INPUT_SCHEMA_JSON: &'static str =
+        crate::schemas::AUTH_DEPLOYMENT_AUTHORITY_ACCEPT_UPDATE_INPUT_SCHEMA_JSON;
+    const OUTPUT_SCHEMA_JSON: &'static str =
+        crate::schemas::AUTH_DEPLOYMENT_AUTHORITY_ACCEPT_UPDATE_OUTPUT_SCHEMA_JSON;
+    const KEY: &'static str = "Auth.DeploymentAuthority.AcceptUpdate";
+    const SUBJECT: &'static str = "rpc.v1.Auth.DeploymentAuthority.AcceptUpdate";
+    const CALLER_CAPABILITIES: &'static [&'static str] = &["admin"];
+    const ERRORS: &'static [&'static str] = &["AuthError", "UnexpectedError", "ValidationError"];
+}
+
+=== generated/packages/cargo/auth/src/rpc.rs:448 ===
+    fn auth_error_reason(&self) -> Option<&str> {
+        match self {
+            Self::AuthError(payload) => Some(payload.reason.as_str()),
+            _ => None,
+        }
+    }
+}
+/// Descriptor for `Auth.DeploymentAuthority.Get`.
+pub struct AuthDeploymentAuthorityGetRpc;
+impl RpcDescriptor for AuthDeploymentAuthorityGetRpc {
+    type Input = crate::types::AuthDeploymentAuthorityGetRequest;
+    type Output = crate::types::AuthDeploymentAuthorityGetResponse;
+    const INPUT_SCHEMA_JSON: &'static str =
+        crate::schemas::AUTH_DEPLOYMENT_AUTHORITY_GET_INPUT_SCHEMA_JSON;
+    const OUTPUT_SCHEMA_JSON: &'static str =
+        crate::schemas::AUTH_DEPLOYMENT_AUTHORITY_GET_OUTPUT_SCHEMA_JSON;
+    const KEY: &'static str = "Auth.DeploymentAuthority.Get";
+    const SUBJECT: &'static str = "rpc.v1.Auth.DeploymentAuthority.Get";
+    const CALLER_CAPABILITIES: &'static [&'static str] = &["admin"];
+    const ERRORS: &'static [&'static str] = &["AuthError", "UnexpectedError", "ValidationError"];
+}
+
+=== generated/packages/cargo/auth/src/rpc.rs:496 ===
+    fn auth_error_reason(&self) -> Option<&str> {
+        match self {
+            Self::AuthError(payload) => Some(payload.reason.as_str()),
+            _ => None,
+        }
+    }
+}
+/// Descriptor for `Auth.DeploymentAuthority.List`.
+pub struct AuthDeploymentAuthorityListRpc;
+impl RpcDescriptor for AuthDeploymentAuthorityListRpc {
+    type Input = crate::types::AuthDeploymentAuthorityListRequest;
+    type Output = crate::types::AuthDeploymentAuthorityListResponse;
+    const INPUT_SCHEMA_JSON: &'static str =
+        crate::schemas::AUTH_DEPLOYMENT_AUTHORITY_LIST_INPUT_SCHEMA_JSON;
+    const OUTPUT_SCHEMA_JSON: &'static str =
+        crate::schemas::AUTH_DEPLOYMENT_AUTHORITY_LIST_OUTPUT_SCHEMA_JSON;
+    const KEY: &'static str = "Auth.DeploymentAuthority.List";
+    const SUBJECT: &'static str = "rpc.v1.Auth.DeploymentAuthority.List";
+    const CALLER_CAPABILITIES: &'static [&'static str] = &["admin"];
+    const ERRORS: &'static [&'static str] = &["AuthError", "UnexpectedError", "ValidationError"];
+}
+
+=== generated/packages/cargo/auth/src/rpc.rs:544 ===
+    fn auth_error_reason(&self) -> Option<&str> {
+        match self {
+            Self::AuthError(payload) => Some(payload.reason.as_str()),
+            _ => None,
+        }
+    }
+}
+/// Descriptor for `Auth.DeploymentAuthority.Plan`.
+pub struct AuthDeploymentAuthorityPlanRpc;
+impl RpcDescriptor for AuthDeploymentAuthorityPlanRpc {
+    type Input = crate::types::AuthDeploymentAuthorityPlanRequest;
+    type Output = crate::types::AuthDeploymentAuthorityPlanResponse;
+    const INPUT_SCHEMA_JSON: &'static str =
+        crate::schemas::AUTH_DEPLOYMENT_AUTHORITY_PLAN_INPUT_SCHEMA_JSON;
+    const OUTPUT_SCHEMA_JSON: &'static str =
+        crate::schemas::AUTH_DEPLOYMENT_AUTHORITY_PLAN_OUTPUT_SCHEMA_JSON;
+    const KEY: &'static str = "Auth.DeploymentAuthority.Plan";
+    const SUBJECT: &'static str = "rpc.v1.Auth.DeploymentAuthority.Plan";
+    const CALLER_CAPABILITIES: &'static [&'static str] = &["admin"];
+    const ERRORS: &'static [&'static str] = &["AuthError", "UnexpectedError", "ValidationError"];
+}
+
+=== generated/packages/cargo/auth/src/rpc.rs:592 ===
+    fn auth_error_reason(&self) -> Option<&str> {
+        match self {
+            Self::AuthError(payload) => Some(payload.reason.as_str()),
+            _ => None,
+        }
+    }
+}
+/// Descriptor for `Auth.DeploymentAuthority.Plans.Get`.
+pub struct AuthDeploymentAuthorityPlansGetRpc;
+impl RpcDescriptor for AuthDeploymentAuthorityPlansGetRpc {
+    type Input = crate::types::AuthDeploymentAuthorityPlansGetRequest;
+    type Output = crate::types::AuthDeploymentAuthorityPlansGetResponse;
+    const INPUT_SCHEMA_JSON: &'static str =
+        crate::schemas::AUTH_DEPLOYMENT_AUTHORITY_PLANS_GET_INPUT_SCHEMA_JSON;
+    const OUTPUT_SCHEMA_JSON: &'static str =
+        crate::schemas::AUTH_DEPLOYMENT_AUTHORITY_PLANS_GET_OUTPUT_SCHEMA_JSON;
+    const KEY: &'static str = "Auth.DeploymentAuthority.Plans.Get";
+    const SUBJECT: &'static str = "rpc.v1.Auth.DeploymentAuthority.Plans.Get";
+    const CALLER_CAPABILITIES: &'static [&'static str] = &["admin"];
+    const ERRORS: &'static [&'static str] = &["AuthError", "UnexpectedError", "ValidationError"];
+}
+
+=== generated/packages/cargo/auth/src/rpc.rs:640 ===
+    fn auth_error_reason(&self) -> Option<&str> {
+        match self {
+            Self::AuthError(payload) => Some(payload.reason.as_str()),
+            _ => None,
+        }
+    }
+}
+/// Descriptor for `Auth.DeploymentAuthority.Plans.List`.
+pub struct AuthDeploymentAuthorityPlansListRpc;
+impl RpcDescriptor for AuthDeploymentAuthorityPlansListRpc {
+    type Input = crate::types::AuthDeploymentAuthorityPlansListRequest;
+    type Output = crate::types::AuthDeploymentAuthorityPlansListResponse;
+    const INPUT_SCHEMA_JSON: &'static str =
+        crate::schemas::AUTH_DEPLOYMENT_AUTHORITY_PLANS_LIST_INPUT_SCHEMA_JSON;
+    const OUTPUT_SCHEMA_JSON: &'static str =
+        crate::schemas::AUTH_DEPLOYMENT_AUTHORITY_PLANS_LIST_OUTPUT_SCHEMA_JSON;
+    const KEY: &'static str = "Auth.DeploymentAuthority.Plans.List";
+    const SUBJECT: &'static str = "rpc.v1.Auth.DeploymentAuthority.Plans.List";
+    const CALLER_CAPABILITIES: &'static [&'static str] = &["admin"];
+    const ERRORS: &'static [&'static str] = &["AuthError", "UnexpectedError", "ValidationError"];
+}
+
+=== generated/packages/cargo/auth/src/rpc.rs:688 ===
+    fn auth_error_reason(&self) -> Option<&str> {
+        match self {
+            Self::AuthError(payload) => Some(payload.reason.as_str()),
+            _ => None,
+        }
+    }
+}
+/// Descriptor for `Auth.DeploymentAuthority.Reconcile`.
+pub struct AuthDeploymentAuthorityReconcileRpc;
+impl RpcDescriptor for AuthDeploymentAuthorityReconcileRpc {
+    type Input = crate::types::AuthDeploymentAuthorityReconcileRequest;
+    type Output = crate::types::AuthDeploymentAuthorityReconcileResponse;
+    const INPUT_SCHEMA_JSON: &'static str =
+        crate::schemas::AUTH_DEPLOYMENT_AUTHORITY_RECONCILE_INPUT_SCHEMA_JSON;
+    const OUTPUT_SCHEMA_JSON: &'static str =
+        crate::schemas::AUTH_DEPLOYMENT_AUTHORITY_RECONCILE_OUTPUT_SCHEMA_JSON;
+    const KEY: &'static str = "Auth.DeploymentAuthority.Reconcile";
+    const SUBJECT: &'static str = "rpc.v1.Auth.DeploymentAuthority.Reconcile";
+    const CALLER_CAPABILITIES: &'static [&'static str] = &["admin"];
+    const ERRORS: &'static [&'static str] = &["AuthError", "UnexpectedError", "ValidationError"];
+}
+
+=== generated/packages/cargo/auth/src/rpc.rs:736 ===
+    fn auth_error_reason(&self) -> Option<&str> {
+        match self {
+            Self::AuthError(payload) => Some(payload.reason.as_str()),
+            _ => None,
+        }
+    }
+}
+/// Descriptor for `Auth.DeploymentAuthority.Reject`.
+pub struct AuthDeploymentAuthorityRejectRpc;
+impl RpcDescriptor for AuthDeploymentAuthorityRejectRpc {
+    type Input = crate::types::AuthDeploymentAuthorityRejectRequest;
+    type Output = crate::types::AuthDeploymentAuthorityRejectResponse;
+    const INPUT_SCHEMA_JSON: &'static str =
+        crate::schemas::AUTH_DEPLOYMENT_AUTHORITY_REJECT_INPUT_SCHEMA_JSON;
+    const OUTPUT_SCHEMA_JSON: &'static str =
+        crate::schemas::AUTH_DEPLOYMENT_AUTHORITY_REJECT_OUTPUT_SCHEMA_JSON;
+    const KEY: &'static str = "Auth.DeploymentAuthority.Reject";
+    const SUBJECT: &'static str = "rpc.v1.Auth.DeploymentAuthority.Reject";
+    const CALLER_CAPABILITIES: &'static [&'static str] = &["admin"];
+    const ERRORS: &'static [&'static str] = &["AuthError", "UnexpectedError", "ValidationError"];
+}
+
+=== generated/packages/cargo/auth/src/rpc.rs:784 ===
+    fn auth_error_reason(&self) -> Option<&str> {
+        match self {
+            Self::AuthError(payload) => Some(payload.reason.as_str()),
+            _ => None,
+        }
+    }
+}
+/// Descriptor for `Auth.Deployments.Create`.
+pub struct AuthDeploymentsCreateRpc;
+impl RpcDescriptor for AuthDeploymentsCreateRpc {
+    type Input = crate::types::AuthDeploymentsCreateRequest;
+    type Output = crate::types::AuthDeploymentsCreateResponse;
+    const INPUT_SCHEMA_JSON: &'static str =
+        crate::schemas::AUTH_DEPLOYMENTS_CREATE_INPUT_SCHEMA_JSON;
+    const OUTPUT_SCHEMA_JSON: &'static str =
+        crate::schemas::AUTH_DEPLOYMENTS_CREATE_OUTPUT_SCHEMA_JSON;
+    const KEY: &'static str = "Auth.Deployments.Create";
+    const SUBJECT: &'static str = "rpc.v1.Auth.Deployments.Create";
+    const CALLER_CAPABILITIES: &'static [&'static str] = &["admin"];
+    const ERRORS: &'static [&'static str] = &["AuthError", "UnexpectedError", "ValidationError"];
+}
+
+=== generated/packages/cargo/auth/src/rpc.rs:832 ===
+    fn auth_error_reason(&self) -> Option<&str> {
+        match self {
+            Self::AuthError(payload) => Some(payload.reason.as_str()),
+            _ => None,
+        }
+    }
+}
+/// Descriptor for `Auth.Deployments.Disable`.
+pub struct AuthDeploymentsDisableRpc;
+impl RpcDescriptor for AuthDeploymentsDisableRpc {
+    type Input = crate::types::AuthDeploymentsDisableRequest;
+    type Output = crate::types::AuthDeploymentsDisableResponse;
+    const INPUT_SCHEMA_JSON: &'static str =
+        crate::schemas::AUTH_DEPLOYMENTS_DISABLE_INPUT_SCHEMA_JSON;
+    const OUTPUT_SCHEMA_JSON: &'static str =
+        crate::schemas::AUTH_DEPLOYMENTS_DISABLE_OUTPUT_SCHEMA_JSON;
+    const KEY: &'static str = "Auth.Deployments.Disable";
+    const SUBJECT: &'static str = "rpc.v1.Auth.Deployments.Disable";
+    const CALLER_CAPABILITIES: &'static [&'static str] = &["admin"];
+    const ERRORS: &'static [&'static str] = &["AuthError", "UnexpectedError", "ValidationError"];
+}
+
+=== generated/packages/cargo/auth/src/rpc.rs:880 ===
+    fn auth_error_reason(&self) -> Option<&str> {
+        match self {
+            Self::AuthError(payload) => Some(payload.reason.as_str()),
+            _ => None,
+        }
+    }
+}
+/// Descriptor for `Auth.Deployments.Enable`.
+pub struct AuthDeploymentsEnableRpc;
+impl RpcDescriptor for AuthDeploymentsEnableRpc {
+    type Input = crate::types::AuthDeploymentsEnableRequest;
+    type Output = crate::types::AuthDeploymentsEnableResponse;
+    const INPUT_SCHEMA_JSON: &'static str =
+        crate::schemas::AUTH_DEPLOYMENTS_ENABLE_INPUT_SCHEMA_JSON;
+    const OUTPUT_SCHEMA_JSON: &'static str =
+        crate::schemas::AUTH_DEPLOYMENTS_ENABLE_OUTPUT_SCHEMA_JSON;
+    const KEY: &'static str = "Auth.Deployments.Enable";
+    const SUBJECT: &'static str = "rpc.v1.Auth.Deployments.Enable";
+    const CALLER_CAPABILITIES: &'static [&'static str] = &["admin"];
+    const ERRORS: &'static [&'static str] = &["AuthError", "UnexpectedError", "ValidationError"];
+}
+
+=== generated/packages/cargo/auth/src/rpc.rs:927 ===
+    }
+    fn auth_error_reason(&self) -> Option<&str> {
+        match self {
+            Self::AuthError(payload) => Some(payload.reason.as_str()),
+            _ => None,
+        }
+    }
+}
+/// Descriptor for `Auth.Deployments.List`.
+pub struct AuthDeploymentsListRpc;
+impl RpcDescriptor for AuthDeploymentsListRpc {
+    type Input = crate::types::AuthDeploymentsListRequest;
+    type Output = crate::types::AuthDeploymentsListResponse;
+    const INPUT_SCHEMA_JSON: &'static str = crate::schemas::AUTH_DEPLOYMENTS_LIST_INPUT_SCHEMA_JSON;
+    const OUTPUT_SCHEMA_JSON: &'static str =
+        crate::schemas::AUTH_DEPLOYMENTS_LIST_OUTPUT_SCHEMA_JSON;
+    const KEY: &'static str = "Auth.Deployments.List";
+    const SUBJECT: &'static str = "rpc.v1.Auth.Deployments.List";
+    const CALLER_CAPABILITIES: &'static [&'static str] = &["admin"];
+    const ERRORS: &'static [&'static str] = &["AuthError", "UnexpectedError", "ValidationError"];
+}
+
+=== generated/packages/cargo/auth/src/rpc.rs:975 ===
+    fn auth_error_reason(&self) -> Option<&str> {
+        match self {
+            Self::AuthError(payload) => Some(payload.reason.as_str()),
+            _ => None,
+        }
+    }
+}
+/// Descriptor for `Auth.Deployments.Remove`.
+pub struct AuthDeploymentsRemoveRpc;
+impl RpcDescriptor for AuthDeploymentsRemoveRpc {
+    type Input = crate::types::AuthDeploymentsRemoveRequest;
+    type Output = crate::types::AuthDeploymentsRemoveResponse;
+    const INPUT_SCHEMA_JSON: &'static str =
+        crate::schemas::AUTH_DEPLOYMENTS_REMOVE_INPUT_SCHEMA_JSON;
+    const OUTPUT_SCHEMA_JSON: &'static str =
+        crate::schemas::AUTH_DEPLOYMENTS_REMOVE_OUTPUT_SCHEMA_JSON;
+    const KEY: &'static str = "Auth.Deployments.Remove";
+    const SUBJECT: &'static str = "rpc.v1.Auth.Deployments.Remove";
+    const CALLER_CAPABILITIES: &'static [&'static str] = &["admin"];
+    const ERRORS: &'static [&'static str] = &["AuthError", "UnexpectedError", "ValidationError"];
+}
+
+=== generated/packages/cargo/auth/src/rpc.rs:1023 ===
+    fn auth_error_reason(&self) -> Option<&str> {
+        match self {
+            Self::AuthError(payload) => Some(payload.reason.as_str()),
+            _ => None,
+        }
+    }
+}
+/// Descriptor for `Auth.DeviceUserAuthorities.List`.
+pub struct AuthDeviceUserAuthoritiesListRpc;
+impl RpcDescriptor for AuthDeviceUserAuthoritiesListRpc {
+    type Input = crate::types::AuthDeviceUserAuthoritiesListRequest;
+    type Output = crate::types::AuthDeviceUserAuthoritiesListResponse;
+    const INPUT_SCHEMA_JSON: &'static str =
+        crate::schemas::AUTH_DEVICE_USER_AUTHORITIES_LIST_INPUT_SCHEMA_JSON;
+    const OUTPUT_SCHEMA_JSON: &'static str =
+        crate::schemas::AUTH_DEVICE_USER_AUTHORITIES_LIST_OUTPUT_SCHEMA_JSON;
+    const KEY: &'static str = "Auth.DeviceUserAuthorities.List";
+    const SUBJECT: &'static str = "rpc.v1.Auth.DeviceUserAuthorities.List";
+    const CALLER_CAPABILITIES: &'static [&'static str] = &["admin"];
+    const ERRORS: &'static [&'static str] = &["AuthError", "UnexpectedError", "ValidationError"];
+}
+
+=== generated/packages/cargo/auth/src/rpc.rs:1071 ===
+    fn auth_error_reason(&self) -> Option<&str> {
+        match self {
+            Self::AuthError(payload) => Some(payload.reason.as_str()),
+            _ => None,
+        }
+    }
+}
+/// Descriptor for `Auth.DeviceUserAuthorities.Reviews.Decide`.
+pub struct AuthDeviceUserAuthoritiesReviewsDecideRpc;
+impl RpcDescriptor for AuthDeviceUserAuthoritiesReviewsDecideRpc {
+    type Input = crate::types::AuthDeviceUserAuthoritiesReviewsDecideRequest;
+    type Output = crate::types::AuthDeviceUserAuthoritiesReviewsDecideResponse;
+    const INPUT_SCHEMA_JSON: &'static str =
+        crate::schemas::AUTH_DEVICE_USER_AUTHORITIES_REVIEWS_DECIDE_INPUT_SCHEMA_JSON;
+    const OUTPUT_SCHEMA_JSON: &'static str =
+        crate::schemas::AUTH_DEVICE_USER_AUTHORITIES_REVIEWS_DECIDE_OUTPUT_SCHEMA_JSON;
+    const KEY: &'static str = "Auth.DeviceUserAuthorities.Reviews.Decide";
+    const SUBJECT: &'static str = "rpc.v1.Auth.DeviceUserAuthorities.Reviews.Decide";
+    const CALLER_CAPABILITIES: &'static [&'static str] = &["admin", "trellis.auth::device.review"];
+    const ERRORS: &'static [&'static str] = &["AuthError", "UnexpectedError", "ValidationError"];
+}
+
+=== generated/packages/cargo/auth/src/rpc.rs:1119 ===
+    fn auth_error_reason(&self) -> Option<&str> {
+        match self {
+            Self::AuthError(payload) => Some(payload.reason.as_str()),
+            _ => None,
+        }
+    }
+}
+/// Descriptor for `Auth.DeviceUserAuthorities.Reviews.List`.
+pub struct AuthDeviceUserAuthoritiesReviewsListRpc;
+impl RpcDescriptor for AuthDeviceUserAuthoritiesReviewsListRpc {
+    type Input = crate::types::AuthDeviceUserAuthoritiesReviewsListRequest;
+    type Output = crate::types::AuthDeviceUserAuthoritiesReviewsListResponse;
+    const INPUT_SCHEMA_JSON: &'static str =
+        crate::schemas::AUTH_DEVICE_USER_AUTHORITIES_REVIEWS_LIST_INPUT_SCHEMA_JSON;
+    const OUTPUT_SCHEMA_JSON: &'static str =
+        crate::schemas::AUTH_DEVICE_USER_AUTHORITIES_REVIEWS_LIST_OUTPUT_SCHEMA_JSON;
+    const KEY: &'static str = "Auth.DeviceUserAuthorities.Reviews.List";
+    const SUBJECT: &'static str = "rpc.v1.Auth.DeviceUserAuthorities.Reviews.List";
+    const CALLER_CAPABILITIES: &'static [&'static str] = &["admin", "trellis.auth::device.review"];
+    const ERRORS: &'static [&'static str] = &["AuthError", "UnexpectedError", "ValidationError"];
+}
+
+=== generated/packages/cargo/auth/src/rpc.rs:1167 ===
+    fn auth_error_reason(&self) -> Option<&str> {
+        match self {
+            Self::AuthError(payload) => Some(payload.reason.as_str()),
+            _ => None,
+        }
+    }
+}
+/// Descriptor for `Auth.DeviceUserAuthorities.Revoke`.
+pub struct AuthDeviceUserAuthoritiesRevokeRpc;
+impl RpcDescriptor for AuthDeviceUserAuthoritiesRevokeRpc {
+    type Input = crate::types::AuthDeviceUserAuthoritiesRevokeRequest;
+    type Output = crate::types::AuthDeviceUserAuthoritiesRevokeResponse;
+    const INPUT_SCHEMA_JSON: &'static str =
+        crate::schemas::AUTH_DEVICE_USER_AUTHORITIES_REVOKE_INPUT_SCHEMA_JSON;
+    const OUTPUT_SCHEMA_JSON: &'static str =
+        crate::schemas::AUTH_DEVICE_USER_AUTHORITIES_REVOKE_OUTPUT_SCHEMA_JSON;
+    const KEY: &'static str = "Auth.DeviceUserAuthorities.Revoke";
+    const SUBJECT: &'static str = "rpc.v1.Auth.DeviceUserAuthorities.Revoke";
+    const CALLER_CAPABILITIES: &'static [&'static str] = &["admin"];
+    const ERRORS: &'static [&'static str] = &["AuthError", "UnexpectedError", "ValidationError"];
+}
+
+=== generated/packages/cargo/auth/src/rpc.rs:1215 ===
+    fn auth_error_reason(&self) -> Option<&str> {
+        match self {
+            Self::AuthError(payload) => Some(payload.reason.as_str()),
+            _ => None,
+        }
+    }
+}
+/// Descriptor for `Auth.Devices.ConnectInfo.Get`.
+pub struct AuthDevicesConnectInfoGetRpc;
+impl RpcDescriptor for AuthDevicesConnectInfoGetRpc {
+    type Input = crate::types::AuthDevicesConnectInfoGetRequest;
+    type Output = crate::types::AuthDevicesConnectInfoGetResponse;
+    const INPUT_SCHEMA_JSON: &'static str =
+        crate::schemas::AUTH_DEVICES_CONNECT_INFO_GET_INPUT_SCHEMA_JSON;
+    const OUTPUT_SCHEMA_JSON: &'static str =
+        crate::schemas::AUTH_DEVICES_CONNECT_INFO_GET_OUTPUT_SCHEMA_JSON;
+    const KEY: &'static str = "Auth.Devices.ConnectInfo.Get";
+    const SUBJECT: &'static str = "rpc.v1.Auth.Devices.ConnectInfo.Get";
+    const CALLER_CAPABILITIES: &'static [&'static str] = &[];
+    const ERRORS: &'static [&'static str] = &["AuthError", "UnexpectedError", "ValidationError"];
+}
+
+=== generated/packages/cargo/auth/src/rpc.rs:1262 ===
+    }
+    fn auth_error_reason(&self) -> Option<&str> {
+        match self {
+            Self::AuthError(payload) => Some(payload.reason.as_str()),
+            _ => None,
+        }
+    }
+}
+/// Descriptor for `Auth.Devices.Disable`.
+pub struct AuthDevicesDisableRpc;
+impl RpcDescriptor for AuthDevicesDisableRpc {
+    type Input = crate::types::AuthDevicesDisableRequest;
+    type Output = crate::types::AuthDevicesDisableResponse;
+    const INPUT_SCHEMA_JSON: &'static str = crate::schemas::AUTH_DEVICES_DISABLE_INPUT_SCHEMA_JSON;
+    const OUTPUT_SCHEMA_JSON: &'static str =
+        crate::schemas::AUTH_DEVICES_DISABLE_OUTPUT_SCHEMA_JSON;
+    const KEY: &'static str = "Auth.Devices.Disable";
+    const SUBJECT: &'static str = "rpc.v1.Auth.Devices.Disable";
+    const CALLER_CAPABILITIES: &'static [&'static str] = &["admin"];
+    const ERRORS: &'static [&'static str] = &["AuthError", "UnexpectedError", "ValidationError"];
+}
+
+=== generated/packages/cargo/auth/src/rpc.rs:1308 ===
+        }
+    }
+    fn auth_error_reason(&self) -> Option<&str> {
+        match self {
+            Self::AuthError(payload) => Some(payload.reason.as_str()),
+            _ => None,
+        }
+    }
+}
+/// Descriptor for `Auth.Devices.Enable`.
+pub struct AuthDevicesEnableRpc;
+impl RpcDescriptor for AuthDevicesEnableRpc {
+    type Input = crate::types::AuthDevicesEnableRequest;
+    type Output = crate::types::AuthDevicesEnableResponse;
+    const INPUT_SCHEMA_JSON: &'static str = crate::schemas::AUTH_DEVICES_ENABLE_INPUT_SCHEMA_JSON;
+    const OUTPUT_SCHEMA_JSON: &'static str = crate::schemas::AUTH_DEVICES_ENABLE_OUTPUT_SCHEMA_JSON;
+    const KEY: &'static str = "Auth.Devices.Enable";
+    const SUBJECT: &'static str = "rpc.v1.Auth.Devices.Enable";
+    const CALLER_CAPABILITIES: &'static [&'static str] = &["admin"];
+    const ERRORS: &'static [&'static str] = &["AuthError", "UnexpectedError", "ValidationError"];
+}
+
+=== generated/packages/cargo/auth/src/rpc.rs:1354 ===
+        }
+    }
+    fn auth_error_reason(&self) -> Option<&str> {
+        match self {
+            Self::AuthError(payload) => Some(payload.reason.as_str()),
+            _ => None,
+        }
+    }
+}
+/// Descriptor for `Auth.Devices.List`.
+pub struct AuthDevicesListRpc;
+impl RpcDescriptor for AuthDevicesListRpc {
+    type Input = crate::types::AuthDevicesListRequest;
+    type Output = crate::types::AuthDevicesListResponse;
+    const INPUT_SCHEMA_JSON: &'static str = crate::schemas::AUTH_DEVICES_LIST_INPUT_SCHEMA_JSON;
+    const OUTPUT_SCHEMA_JSON: &'static str = crate::schemas::AUTH_DEVICES_LIST_OUTPUT_SCHEMA_JSON;
+    const KEY: &'static str = "Auth.Devices.List";
+    const SUBJECT: &'static str = "rpc.v1.Auth.Devices.List";
+    const CALLER_CAPABILITIES: &'static [&'static str] = &["admin"];
+    const ERRORS: &'static [&'static str] = &["AuthError", "UnexpectedError", "ValidationError"];
+}
+
+=== generated/packages/cargo/auth/src/rpc.rs:1402 ===
+    fn auth_error_reason(&self) -> Option<&str> {
+        match self {
+            Self::AuthError(payload) => Some(payload.reason.as_str()),
+            _ => None,
+        }
+    }
+}
+/// Descriptor for `Auth.Devices.Provision`.
+pub struct AuthDevicesProvisionRpc;
+impl RpcDescriptor for AuthDevicesProvisionRpc {
+    type Input = crate::types::AuthDevicesProvisionRequest;
+    type Output = crate::types::AuthDevicesProvisionResponse;
+    const INPUT_SCHEMA_JSON: &'static str =
+        crate::schemas::AUTH_DEVICES_PROVISION_INPUT_SCHEMA_JSON;
+    const OUTPUT_SCHEMA_JSON: &'static str =
+        crate::schemas::AUTH_DEVICES_PROVISION_OUTPUT_SCHEMA_JSON;
+    const KEY: &'static str = "Auth.Devices.Provision";
+    const SUBJECT: &'static str = "rpc.v1.Auth.Devices.Provision";
+    const CALLER_CAPABILITIES: &'static [&'static str] = &["admin"];
+    const ERRORS: &'static [&'static str] = &["AuthError", "UnexpectedError", "ValidationError"];
+}
+
+=== generated/packages/cargo/auth/src/rpc.rs:1448 ===
+        }
+    }
+    fn auth_error_reason(&self) -> Option<&str> {
+        match self {
+            Self::AuthError(payload) => Some(payload.reason.as_str()),
+            _ => None,
+        }
+    }
+}
+/// Descriptor for `Auth.Devices.Remove`.
+pub struct AuthDevicesRemoveRpc;
+impl RpcDescriptor for AuthDevicesRemoveRpc {
+    type Input = crate::types::AuthDevicesRemoveRequest;
+    type Output = crate::types::AuthDevicesRemoveResponse;
+    const INPUT_SCHEMA_JSON: &'static str = crate::schemas::AUTH_DEVICES_REMOVE_INPUT_SCHEMA_JSON;
+    const OUTPUT_SCHEMA_JSON: &'static str = crate::schemas::AUTH_DEVICES_REMOVE_OUTPUT_SCHEMA_JSON;
+    const KEY: &'static str = "Auth.Devices.Remove";
+    const SUBJECT: &'static str = "rpc.v1.Auth.Devices.Remove";
+    const CALLER_CAPABILITIES: &'static [&'static str] = &["admin"];
+    const ERRORS: &'static [&'static str] = &["AuthError", "UnexpectedError", "ValidationError"];
+}
+
+=== generated/packages/cargo/auth/src/rpc.rs:1496 ===
+    fn auth_error_reason(&self) -> Option<&str> {
+        match self {
+            Self::AuthError(payload) => Some(payload.reason.as_str()),
+            _ => None,
+        }
+    }
+}
+/// Descriptor for `Auth.IdentityAuthority.Get`.
+pub struct AuthIdentityAuthorityGetRpc;
+impl RpcDescriptor for AuthIdentityAuthorityGetRpc {
+    type Input = crate::types::AuthIdentityAuthorityGetRequest;
+    type Output = crate::types::AuthIdentityAuthorityGetResponse;
+    const INPUT_SCHEMA_JSON: &'static str =
+        crate::schemas::AUTH_IDENTITY_AUTHORITY_GET_INPUT_SCHEMA_JSON;
+    const OUTPUT_SCHEMA_JSON: &'static str =
+        crate::schemas::AUTH_IDENTITY_AUTHORITY_GET_OUTPUT_SCHEMA_JSON;
+    const KEY: &'static str = "Auth.IdentityAuthority.Get";
+    const SUBJECT: &'static str = "rpc.v1.Auth.IdentityAuthority.Get";
+    const CALLER_CAPABILITIES: &'static [&'static str] = &["admin"];
+    const ERRORS: &'static [&'static str] = &["AuthError", "UnexpectedError", "ValidationError"];
+}
+
+=== generated/packages/cargo/auth/src/rpc.rs:1544 ===
+    fn auth_error_reason(&self) -> Option<&str> {
+        match self {
+            Self::AuthError(payload) => Some(payload.reason.as_str()),
+            _ => None,
+        }
+    }
+}
+/// Descriptor for `Auth.IdentityAuthority.List`.
+pub struct AuthIdentityAuthorityListRpc;
+impl RpcDescriptor for AuthIdentityAuthorityListRpc {
+    type Input = crate::types::AuthIdentityAuthorityListRequest;
+    type Output = crate::types::AuthIdentityAuthorityListResponse;
+    const INPUT_SCHEMA_JSON: &'static str =
+        crate::schemas::AUTH_IDENTITY_AUTHORITY_LIST_INPUT_SCHEMA_JSON;
+    const OUTPUT_SCHEMA_JSON: &'static str =
+        crate::schemas::AUTH_IDENTITY_AUTHORITY_LIST_OUTPUT_SCHEMA_JSON;
+    const KEY: &'static str = "Auth.IdentityAuthority.List";
+    const SUBJECT: &'static str = "rpc.v1.Auth.IdentityAuthority.List";
+    const CALLER_CAPABILITIES: &'static [&'static str] = &["admin"];
+    const ERRORS: &'static [&'static str] = &["AuthError", "UnexpectedError", "ValidationError"];
+}
+
+=== generated/packages/cargo/auth/src/rpc.rs:1592 ===
+    fn auth_error_reason(&self) -> Option<&str> {
+        match self {
+            Self::AuthError(payload) => Some(payload.reason.as_str()),
+            _ => None,
+        }
+    }
+}
+/// Descriptor for `Auth.IdentityAuthority.Revoke`.
+pub struct AuthIdentityAuthorityRevokeRpc;
+impl RpcDescriptor for AuthIdentityAuthorityRevokeRpc {
+    type Input = crate::types::AuthIdentityAuthorityRevokeRequest;
+    type Output = crate::types::AuthIdentityAuthorityRevokeResponse;
+    const INPUT_SCHEMA_JSON: &'static str =
+        crate::schemas::AUTH_IDENTITY_AUTHORITY_REVOKE_INPUT_SCHEMA_JSON;
+    const OUTPUT_SCHEMA_JSON: &'static str =
+        crate::schemas::AUTH_IDENTITY_AUTHORITY_REVOKE_OUTPUT_SCHEMA_JSON;
+    const KEY: &'static str = "Auth.IdentityAuthority.Revoke";
+    const SUBJECT: &'static str = "rpc.v1.Auth.IdentityAuthority.Revoke";
+    const CALLER_CAPABILITIES: &'static [&'static str] = &["admin"];
+    const ERRORS: &'static [&'static str] = &["AuthError", "UnexpectedError", "ValidationError"];
+}
+
+=== generated/packages/cargo/auth/src/rpc.rs:1640 ===
+    fn auth_error_reason(&self) -> Option<&str> {
+        match self {
+            Self::AuthError(payload) => Some(payload.reason.as_str()),
+            _ => None,
+        }
+    }
+}
+/// Descriptor for `Auth.IdentityGrants.List`.
+pub struct AuthIdentityGrantsListRpc;
+impl RpcDescriptor for AuthIdentityGrantsListRpc {
+    type Input = crate::types::AuthIdentityGrantsListRequest;
+    type Output = crate::types::AuthIdentityGrantsListResponse;
+    const INPUT_SCHEMA_JSON: &'static str =
+        crate::schemas::AUTH_IDENTITY_GRANTS_LIST_INPUT_SCHEMA_JSON;
+    const OUTPUT_SCHEMA_JSON: &'static str =
+        crate::schemas::AUTH_IDENTITY_GRANTS_LIST_OUTPUT_SCHEMA_JSON;
+    const KEY: &'static str = "Auth.IdentityGrants.List";
+    const SUBJECT: &'static str = "rpc.v1.Auth.IdentityGrants.List";
+    const CALLER_CAPABILITIES: &'static [&'static str] = &["admin"];
+    const ERRORS: &'static [&'static str] = &["AuthError", "UnexpectedError"];
+}
+
+=== generated/packages/cargo/auth/src/rpc.rs:1683 ===
+    fn auth_error_reason(&self) -> Option<&str> {
+        match self {
+            Self::AuthError(payload) => Some(payload.reason.as_str()),
+            _ => None,
+        }
+    }
+}
+/// Descriptor for `Auth.IdentityGrants.Revoke`.
+pub struct AuthIdentityGrantsRevokeRpc;
+impl RpcDescriptor for AuthIdentityGrantsRevokeRpc {
+    type Input = crate::types::AuthIdentityGrantsRevokeRequest;
+    type Output = crate::types::AuthIdentityGrantsRevokeResponse;
+    const INPUT_SCHEMA_JSON: &'static str =
+        crate::schemas::AUTH_IDENTITY_GRANTS_REVOKE_INPUT_SCHEMA_JSON;
+    const OUTPUT_SCHEMA_JSON: &'static str =
+        crate::schemas::AUTH_IDENTITY_GRANTS_REVOKE_OUTPUT_SCHEMA_JSON;
+    const KEY: &'static str = "Auth.IdentityGrants.Revoke";
+    const SUBJECT: &'static str = "rpc.v1.Auth.IdentityGrants.Revoke";
+    const CALLER_CAPABILITIES: &'static [&'static str] = &["admin"];
+    const ERRORS: &'static [&'static str] = &["AuthError", "UnexpectedError", "ValidationError"];
+}
+
+=== generated/packages/cargo/auth/src/rpc.rs:1729 ===
+        }
+    }
+    fn auth_error_reason(&self) -> Option<&str> {
+        match self {
+            Self::AuthError(payload) => Some(payload.reason.as_str()),
+            _ => None,
+        }
+    }
+}
+/// Descriptor for `Auth.Portals.Get`.
+pub struct AuthPortalsGetRpc;
+impl RpcDescriptor for AuthPortalsGetRpc {
+    type Input = crate::types::AuthPortalsGetRequest;
+    type Output = crate::types::AuthPortalsGetResponse;
+    const INPUT_SCHEMA_JSON: &'static str = crate::schemas::AUTH_PORTALS_GET_INPUT_SCHEMA_JSON;
+    const OUTPUT_SCHEMA_JSON: &'static str = crate::schemas::AUTH_PORTALS_GET_OUTPUT_SCHEMA_JSON;
+    const KEY: &'static str = "Auth.Portals.Get";
+    const SUBJECT: &'static str = "rpc.v1.Auth.Portals.Get";
+    const CALLER_CAPABILITIES: &'static [&'static str] = &["admin"];
+    const ERRORS: &'static [&'static str] = &["AuthError", "UnexpectedError", "ValidationError"];
+}
+
+=== generated/packages/cargo/auth/src/rpc.rs:1777 ===
+    fn auth_error_reason(&self) -> Option<&str> {
+        match self {
+            Self::AuthError(payload) => Some(payload.reason.as_str()),
+            _ => None,
+        }
+    }
+}
+/// Descriptor for `Auth.Portals.GrantOverrides.List`.
+pub struct AuthPortalsGrantOverridesListRpc;
+impl RpcDescriptor for AuthPortalsGrantOverridesListRpc {
+    type Input = crate::types::AuthPortalsGrantOverridesListRequest;
+    type Output = crate::types::AuthPortalsGrantOverridesListResponse;
+    const INPUT_SCHEMA_JSON: &'static str =
+        crate::schemas::AUTH_PORTALS_GRANT_OVERRIDES_LIST_INPUT_SCHEMA_JSON;
+    const OUTPUT_SCHEMA_JSON: &'static str =
+        crate::schemas::AUTH_PORTALS_GRANT_OVERRIDES_LIST_OUTPUT_SCHEMA_JSON;
+    const KEY: &'static str = "Auth.Portals.GrantOverrides.List";
+    const SUBJECT: &'static str = "rpc.v1.Auth.Portals.GrantOverrides.List";
+    const CALLER_CAPABILITIES: &'static [&'static str] = &["admin"];
+    const ERRORS: &'static [&'static str] = &["AuthError", "UnexpectedError", "ValidationError"];
+}
+
+=== generated/packages/cargo/auth/src/rpc.rs:1825 ===
+    fn auth_error_reason(&self) -> Option<&str> {
+        match self {
+            Self::AuthError(payload) => Some(payload.reason.as_str()),
+            _ => None,
+        }
+    }
+}
+/// Descriptor for `Auth.Portals.GrantOverrides.Put`.
+pub struct AuthPortalsGrantOverridesPutRpc;
+impl RpcDescriptor for AuthPortalsGrantOverridesPutRpc {
+    type Input = crate::types::AuthPortalsGrantOverridesPutRequest;
+    type Output = crate::types::AuthPortalsGrantOverridesPutResponse;
+    const INPUT_SCHEMA_JSON: &'static str =
+        crate::schemas::AUTH_PORTALS_GRANT_OVERRIDES_PUT_INPUT_SCHEMA_JSON;
+    const OUTPUT_SCHEMA_JSON: &'static str =
+        crate::schemas::AUTH_PORTALS_GRANT_OVERRIDES_PUT_OUTPUT_SCHEMA_JSON;
+    const KEY: &'static str = "Auth.Portals.GrantOverrides.Put";
+    const SUBJECT: &'static str = "rpc.v1.Auth.Portals.GrantOverrides.Put";
+    const CALLER_CAPABILITIES: &'static [&'static str] = &["admin"];
+    const ERRORS: &'static [&'static str] = &["AuthError", "UnexpectedError", "ValidationError"];
+}
+
+=== generated/packages/cargo/auth/src/rpc.rs:1873 ===
+    fn auth_error_reason(&self) -> Option<&str> {
+        match self {
+            Self::AuthError(payload) => Some(payload.reason.as_str()),
+            _ => None,
+        }
+    }
+}
+/// Descriptor for `Auth.Portals.GrantOverrides.Remove`.
+pub struct AuthPortalsGrantOverridesRemoveRpc;
+impl RpcDescriptor for AuthPortalsGrantOverridesRemoveRpc {
+    type Input = crate::types::AuthPortalsGrantOverridesRemoveRequest;
+    type Output = crate::types::AuthPortalsGrantOverridesRemoveResponse;
+    const INPUT_SCHEMA_JSON: &'static str =
+        crate::schemas::AUTH_PORTALS_GRANT_OVERRIDES_REMOVE_INPUT_SCHEMA_JSON;
+    const OUTPUT_SCHEMA_JSON: &'static str =
+        crate::schemas::AUTH_PORTALS_GRANT_OVERRIDES_REMOVE_OUTPUT_SCHEMA_JSON;
+    const KEY: &'static str = "Auth.Portals.GrantOverrides.Remove";
+    const SUBJECT: &'static str = "rpc.v1.Auth.Portals.GrantOverrides.Remove";
+    const CALLER_CAPABILITIES: &'static [&'static str] = &["admin"];
+    const ERRORS: &'static [&'static str] = &["AuthError", "UnexpectedError", "ValidationError"];
+}
+
+=== generated/packages/cargo/auth/src/rpc.rs:1919 ===
+        }
+    }
+    fn auth_error_reason(&self) -> Option<&str> {
+        match self {
+            Self::AuthError(payload) => Some(payload.reason.as_str()),
+            _ => None,
+        }
+    }
+}
+/// Descriptor for `Auth.Portals.List`.
+pub struct AuthPortalsListRpc;
+impl RpcDescriptor for AuthPortalsListRpc {
+    type Input = crate::types::AuthPortalsListRequest;
+    type Output = crate::types::AuthPortalsListResponse;
+    const INPUT_SCHEMA_JSON: &'static str = crate::schemas::AUTH_PORTALS_LIST_INPUT_SCHEMA_JSON;
+    const OUTPUT_SCHEMA_JSON: &'static str = crate::schemas::AUTH_PORTALS_LIST_OUTPUT_SCHEMA_JSON;
+    const KEY: &'static str = "Auth.Portals.List";
+    const SUBJECT: &'static str = "rpc.v1.Auth.Portals.List";
+    const CALLER_CAPABILITIES: &'static [&'static str] = &["admin"];
+    const ERRORS: &'static [&'static str] = &["AuthError", "UnexpectedError", "ValidationError"];
+}
+
+=== generated/packages/cargo/auth/src/rpc.rs:1967 ===
+    fn auth_error_reason(&self) -> Option<&str> {
+        match self {
+            Self::AuthError(payload) => Some(payload.reason.as_str()),
+            _ => None,
+        }
+    }
+}
+/// Descriptor for `Auth.Portals.LoginSettings.Get`.
+pub struct AuthPortalsLoginSettingsGetRpc;
+impl RpcDescriptor for AuthPortalsLoginSettingsGetRpc {
+    type Input = crate::types::AuthPortalsLoginSettingsGetRequest;
+    type Output = crate::types::AuthPortalsLoginSettingsGetResponse;
+    const INPUT_SCHEMA_JSON: &'static str =
+        crate::schemas::AUTH_PORTALS_LOGIN_SETTINGS_GET_INPUT_SCHEMA_JSON;
+    const OUTPUT_SCHEMA_JSON: &'static str =
+        crate::schemas::AUTH_PORTALS_LOGIN_SETTINGS_GET_OUTPUT_SCHEMA_JSON;
+    const KEY: &'static str = "Auth.Portals.LoginSettings.Get";
+    const SUBJECT: &'static str = "rpc.v1.Auth.Portals.LoginSettings.Get";
+    const CALLER_CAPABILITIES: &'static [&'static str] = &["admin"];
+    const ERRORS: &'static [&'static str] = &["AuthError", "UnexpectedError", "ValidationError"];
+}
+
+=== generated/packages/cargo/auth/src/rpc.rs:2015 ===
+    fn auth_error_reason(&self) -> Option<&str> {
+        match self {
+            Self::AuthError(payload) => Some(payload.reason.as_str()),
+            _ => None,
+        }
+    }
+}
+/// Descriptor for `Auth.Portals.LoginSettings.Update`.
+pub struct AuthPortalsLoginSettingsUpdateRpc;
+impl RpcDescriptor for AuthPortalsLoginSettingsUpdateRpc {
+    type Input = crate::types::AuthPortalsLoginSettingsUpdateRequest;
+    type Output = crate::types::AuthPortalsLoginSettingsUpdateResponse;
+    const INPUT_SCHEMA_JSON: &'static str =
+        crate::schemas::AUTH_PORTALS_LOGIN_SETTINGS_UPDATE_INPUT_SCHEMA_JSON;
+    const OUTPUT_SCHEMA_JSON: &'static str =
+        crate::schemas::AUTH_PORTALS_LOGIN_SETTINGS_UPDATE_OUTPUT_SCHEMA_JSON;
+    const KEY: &'static str = "Auth.Portals.LoginSettings.Update";
+    const SUBJECT: &'static str = "rpc.v1.Auth.Portals.LoginSettings.Update";
+    const CALLER_CAPABILITIES: &'static [&'static str] = &["admin"];
+    const ERRORS: &'static [&'static str] = &["AuthError", "UnexpectedError", "ValidationError"];
+}
+
+=== generated/packages/cargo/auth/src/rpc.rs:2061 ===
+        }
+    }
+    fn auth_error_reason(&self) -> Option<&str> {
+        match self {
+            Self::AuthError(payload) => Some(payload.reason.as_str()),
+            _ => None,
+        }
+    }
+}
+/// Descriptor for `Auth.Portals.Put`.
+pub struct AuthPortalsPutRpc;
+impl RpcDescriptor for AuthPortalsPutRpc {
+    type Input = crate::types::AuthPortalsPutRequest;
+    type Output = crate::types::AuthPortalsPutResponse;
+    const INPUT_SCHEMA_JSON: &'static str = crate::schemas::AUTH_PORTALS_PUT_INPUT_SCHEMA_JSON;
+    const OUTPUT_SCHEMA_JSON: &'static str = crate::schemas::AUTH_PORTALS_PUT_OUTPUT_SCHEMA_JSON;
+    const KEY: &'static str = "Auth.Portals.Put";
+    const SUBJECT: &'static str = "rpc.v1.Auth.Portals.Put";
+    const CALLER_CAPABILITIES: &'static [&'static str] = &["admin"];
+    const ERRORS: &'static [&'static str] = &["AuthError", "UnexpectedError", "ValidationError"];
+}
+
+=== generated/packages/cargo/auth/src/rpc.rs:2107 ===
+        }
+    }
+    fn auth_error_reason(&self) -> Option<&str> {
+        match self {
+            Self::AuthError(payload) => Some(payload.reason.as_str()),
+            _ => None,
+        }
+    }
+}
+/// Descriptor for `Auth.Portals.Remove`.
+pub struct AuthPortalsRemoveRpc;
+impl RpcDescriptor for AuthPortalsRemoveRpc {
+    type Input = crate::types::AuthPortalsRemoveRequest;
+    type Output = crate::types::AuthPortalsRemoveResponse;
+    const INPUT_SCHEMA_JSON: &'static str = crate::schemas::AUTH_PORTALS_REMOVE_INPUT_SCHEMA_JSON;
+    const OUTPUT_SCHEMA_JSON: &'static str = crate::schemas::AUTH_PORTALS_REMOVE_OUTPUT_SCHEMA_JSON;
+    const KEY: &'static str = "Auth.Portals.Remove";
+    const SUBJECT: &'static str = "rpc.v1.Auth.Portals.Remove";
+    const CALLER_CAPABILITIES: &'static [&'static str] = &["admin"];
+    const ERRORS: &'static [&'static str] = &["AuthError", "UnexpectedError", "ValidationError"];
+}
+
+=== generated/packages/cargo/auth/src/rpc.rs:2155 ===
+    fn auth_error_reason(&self) -> Option<&str> {
+        match self {
+            Self::AuthError(payload) => Some(payload.reason.as_str()),
+            _ => None,
+        }
+    }
+}
+/// Descriptor for `Auth.Portals.Routes.Put`.
+pub struct AuthPortalsRoutesPutRpc;
+impl RpcDescriptor for AuthPortalsRoutesPutRpc {
+    type Input = crate::types::AuthPortalsRoutesPutRequest;
+    type Output = crate::types::AuthPortalsRoutesPutResponse;
+    const INPUT_SCHEMA_JSON: &'static str =
+        crate::schemas::AUTH_PORTALS_ROUTES_PUT_INPUT_SCHEMA_JSON;
+    const OUTPUT_SCHEMA_JSON: &'static str =
+        crate::schemas::AUTH_PORTALS_ROUTES_PUT_OUTPUT_SCHEMA_JSON;
+    const KEY: &'static str = "Auth.Portals.Routes.Put";
+    const SUBJECT: &'static str = "rpc.v1.Auth.Portals.Routes.Put";
+    const CALLER_CAPABILITIES: &'static [&'static str] = &["admin"];
+    const ERRORS: &'static [&'static str] = &["AuthError", "UnexpectedError", "ValidationError"];
+}
+
+=== generated/packages/cargo/auth/src/rpc.rs:2203 ===
+    fn auth_error_reason(&self) -> Option<&str> {
+        match self {
+            Self::AuthError(payload) => Some(payload.reason.as_str()),
+            _ => None,
+        }
+    }
+}
+/// Descriptor for `Auth.Portals.Routes.Remove`.
+pub struct AuthPortalsRoutesRemoveRpc;
+impl RpcDescriptor for AuthPortalsRoutesRemoveRpc {
+    type Input = crate::types::AuthPortalsRoutesRemoveRequest;
+    type Output = crate::types::AuthPortalsRoutesRemoveResponse;
+    const INPUT_SCHEMA_JSON: &'static str =
+        crate::schemas::AUTH_PORTALS_ROUTES_REMOVE_INPUT_SCHEMA_JSON;
+    const OUTPUT_SCHEMA_JSON: &'static str =
+        crate::schemas::AUTH_PORTALS_ROUTES_REMOVE_OUTPUT_SCHEMA_JSON;
+    const KEY: &'static str = "Auth.Portals.Routes.Remove";
+    const SUBJECT: &'static str = "rpc.v1.Auth.Portals.Routes.Remove";
+    const CALLER_CAPABILITIES: &'static [&'static str] = &["admin"];
+    const ERRORS: &'static [&'static str] = &["AuthError", "UnexpectedError", "ValidationError"];
+}
+
+=== generated/packages/cargo/auth/src/rpc.rs:2251 ===
+    fn auth_error_reason(&self) -> Option<&str> {
+        match self {
+            Self::AuthError(payload) => Some(payload.reason.as_str()),
+            _ => None,
+        }
+    }
+}
+/// Descriptor for `Auth.ServiceInstances.Disable`.
+pub struct AuthServiceInstancesDisableRpc;
+impl RpcDescriptor for AuthServiceInstancesDisableRpc {
+    type Input = crate::types::AuthServiceInstancesDisableRequest;
+    type Output = crate::types::AuthServiceInstancesDisableResponse;
+    const INPUT_SCHEMA_JSON: &'static str =
+        crate::schemas::AUTH_SERVICE_INSTANCES_DISABLE_INPUT_SCHEMA_JSON;
+    const OUTPUT_SCHEMA_JSON: &'static str =
+        crate::schemas::AUTH_SERVICE_INSTANCES_DISABLE_OUTPUT_SCHEMA_JSON;
+    const KEY: &'static str = "Auth.ServiceInstances.Disable";
+    const SUBJECT: &'static str = "rpc.v1.Auth.ServiceInstances.Disable";
+    const CALLER_CAPABILITIES: &'static [&'static str] = &["admin"];
+    const ERRORS: &'static [&'static str] = &["AuthError", "UnexpectedError", "ValidationError"];
+}
+
+=== generated/packages/cargo/auth/src/rpc.rs:2299 ===
+    fn auth_error_reason(&self) -> Option<&str> {
+        match self {
+            Self::AuthError(payload) => Some(payload.reason.as_str()),
+            _ => None,
+        }
+    }
+}
+/// Descriptor for `Auth.ServiceInstances.Enable`.
+pub struct AuthServiceInstancesEnableRpc;
+impl RpcDescriptor for AuthServiceInstancesEnableRpc {
+    type Input = crate::types::AuthServiceInstancesEnableRequest;
+    type Output = crate::types::AuthServiceInstancesEnableResponse;
+    const INPUT_SCHEMA_JSON: &'static str =
+        crate::schemas::AUTH_SERVICE_INSTANCES_ENABLE_INPUT_SCHEMA_JSON;
+    const OUTPUT_SCHEMA_JSON: &'static str =
+        crate::schemas::AUTH_SERVICE_INSTANCES_ENABLE_OUTPUT_SCHEMA_JSON;
+    const KEY: &'static str = "Auth.ServiceInstances.Enable";
+    const SUBJECT: &'static str = "rpc.v1.Auth.ServiceInstances.Enable";
+    const CALLER_CAPABILITIES: &'static [&'static str] = &["admin"];
+    const ERRORS: &'static [&'static str] = &["AuthError", "UnexpectedError", "ValidationError"];
+}
+
+=== generated/packages/cargo/auth/src/rpc.rs:2347 ===
+    fn auth_error_reason(&self) -> Option<&str> {
+        match self {
+            Self::AuthError(payload) => Some(payload.reason.as_str()),
+            _ => None,
+        }
+    }
+}
+/// Descriptor for `Auth.ServiceInstances.List`.
+pub struct AuthServiceInstancesListRpc;
+impl RpcDescriptor for AuthServiceInstancesListRpc {
+    type Input = crate::types::AuthServiceInstancesListRequest;
+    type Output = crate::types::AuthServiceInstancesListResponse;
+    const INPUT_SCHEMA_JSON: &'static str =
+        crate::schemas::AUTH_SERVICE_INSTANCES_LIST_INPUT_SCHEMA_JSON;
+    const OUTPUT_SCHEMA_JSON: &'static str =
+        crate::schemas::AUTH_SERVICE_INSTANCES_LIST_OUTPUT_SCHEMA_JSON;
+    const KEY: &'static str = "Auth.ServiceInstances.List";
+    const SUBJECT: &'static str = "rpc.v1.Auth.ServiceInstances.List";
+    const CALLER_CAPABILITIES: &'static [&'static str] = &["admin"];
+    const ERRORS: &'static [&'static str] = &["AuthError", "UnexpectedError", "ValidationError"];
+}
+
+=== generated/packages/cargo/auth/src/rpc.rs:2395 ===
+    fn auth_error_reason(&self) -> Option<&str> {
+        match self {
+            Self::AuthError(payload) => Some(payload.reason.as_str()),
+            _ => None,
+        }
+    }
+}
+/// Descriptor for `Auth.ServiceInstances.Provision`.
+pub struct AuthServiceInstancesProvisionRpc;
+impl RpcDescriptor for AuthServiceInstancesProvisionRpc {
+    type Input = crate::types::AuthServiceInstancesProvisionRequest;
+    type Output = crate::types::AuthServiceInstancesProvisionResponse;
+    const INPUT_SCHEMA_JSON: &'static str =
+        crate::schemas::AUTH_SERVICE_INSTANCES_PROVISION_INPUT_SCHEMA_JSON;
+    const OUTPUT_SCHEMA_JSON: &'static str =
+        crate::schemas::AUTH_SERVICE_INSTANCES_PROVISION_OUTPUT_SCHEMA_JSON;
+    const KEY: &'static str = "Auth.ServiceInstances.Provision";
+    const SUBJECT: &'static str = "rpc.v1.Auth.ServiceInstances.Provision";
+    const CALLER_CAPABILITIES: &'static [&'static str] = &["admin"];
+    const ERRORS: &'static [&'static str] = &["AuthError", "UnexpectedError", "ValidationError"];
+}
+
+=== generated/packages/cargo/auth/src/rpc.rs:2443 ===
+    fn auth_error_reason(&self) -> Option<&str> {
+        match self {
+            Self::AuthError(payload) => Some(payload.reason.as_str()),
+            _ => None,
+        }
+    }
+}
+/// Descriptor for `Auth.ServiceInstances.Remove`.
+pub struct AuthServiceInstancesRemoveRpc;
+impl RpcDescriptor for AuthServiceInstancesRemoveRpc {
+    type Input = crate::types::AuthServiceInstancesRemoveRequest;
+    type Output = crate::types::AuthServiceInstancesRemoveResponse;
+    const INPUT_SCHEMA_JSON: &'static str =
+        crate::schemas::AUTH_SERVICE_INSTANCES_REMOVE_INPUT_SCHEMA_JSON;
+    const OUTPUT_SCHEMA_JSON: &'static str =
+        crate::schemas::AUTH_SERVICE_INSTANCES_REMOVE_OUTPUT_SCHEMA_JSON;
+    const KEY: &'static str = "Auth.ServiceInstances.Remove";
+    const SUBJECT: &'static str = "rpc.v1.Auth.ServiceInstances.Remove";
+    const CALLER_CAPABILITIES: &'static [&'static str] = &["admin"];
+    const ERRORS: &'static [&'static str] = &["AuthError", "UnexpectedError", "ValidationError"];
+}
+
+=== generated/packages/cargo/auth/src/rpc.rs:2489 ===
+        }
+    }
+    fn auth_error_reason(&self) -> Option<&str> {
+        match self {
+            Self::AuthError(payload) => Some(payload.reason.as_str()),
+            _ => None,
+        }
+    }
+}
+/// Descriptor for `Auth.Sessions.List`.
+pub struct AuthSessionsListRpc;
+impl RpcDescriptor for AuthSessionsListRpc {
+    type Input = crate::types::AuthSessionsListRequest;
+    type Output = crate::types::AuthSessionsListResponse;
+    const INPUT_SCHEMA_JSON: &'static str = crate::schemas::AUTH_SESSIONS_LIST_INPUT_SCHEMA_JSON;
+    const OUTPUT_SCHEMA_JSON: &'static str = crate::schemas::AUTH_SESSIONS_LIST_OUTPUT_SCHEMA_JSON;
+    const KEY: &'static str = "Auth.Sessions.List";
+    const SUBJECT: &'static str = "rpc.v1.Auth.Sessions.List";
+    const CALLER_CAPABILITIES: &'static [&'static str] = &["admin"];
+    const ERRORS: &'static [&'static str] = &["AuthError", "UnexpectedError", "ValidationError"];
+}
+
+=== generated/packages/cargo/auth/src/rpc.rs:2536 ===
+    }
+    fn auth_error_reason(&self) -> Option<&str> {
+        match self {
+            Self::AuthError(payload) => Some(payload.reason.as_str()),
+            _ => None,
+        }
+    }
+}
+/// Descriptor for `Auth.Sessions.Logout`.
+pub struct AuthSessionsLogoutRpc;
+impl RpcDescriptor for AuthSessionsLogoutRpc {
+    type Input = Empty;
+    type Output = crate::types::AuthSessionsLogoutResponse;
+    const INPUT_SCHEMA_JSON: &'static str = crate::schemas::AUTH_SESSIONS_LOGOUT_INPUT_SCHEMA_JSON;
+    const OUTPUT_SCHEMA_JSON: &'static str =
+        crate::schemas::AUTH_SESSIONS_LOGOUT_OUTPUT_SCHEMA_JSON;
+    const KEY: &'static str = "Auth.Sessions.Logout";
+    const SUBJECT: &'static str = "rpc.v1.Auth.Sessions.Logout";
+    const CALLER_CAPABILITIES: &'static [&'static str] = &[];
+    const ERRORS: &'static [&'static str] = &["AuthError", "UnexpectedError", "ValidationError"];
+}
+
+=== generated/packages/cargo/auth/src/rpc.rs:2582 ===
+        }
+    }
+    fn auth_error_reason(&self) -> Option<&str> {
+        match self {
+            Self::AuthError(payload) => Some(payload.reason.as_str()),
+            _ => None,
+        }
+    }
+}
+/// Descriptor for `Auth.Sessions.Me`.
+pub struct AuthSessionsMeRpc;
+impl RpcDescriptor for AuthSessionsMeRpc {
+    type Input = Empty;
+    type Output = crate::types::AuthSessionsMeResponse;
+    const INPUT_SCHEMA_JSON: &'static str = crate::schemas::AUTH_SESSIONS_ME_INPUT_SCHEMA_JSON;
+    const OUTPUT_SCHEMA_JSON: &'static str = crate::schemas::AUTH_SESSIONS_ME_OUTPUT_SCHEMA_JSON;
+    const KEY: &'static str = "Auth.Sessions.Me";
+    const SUBJECT: &'static str = "rpc.v1.Auth.Sessions.Me";
+    const CALLER_CAPABILITIES: &'static [&'static str] = &[];
+    const ERRORS: &'static [&'static str] = &["AuthError", "UnexpectedError", "ValidationError"];
+}
+
+=== generated/packages/cargo/auth/src/rpc.rs:2629 ===
+    }
+    fn auth_error_reason(&self) -> Option<&str> {
+        match self {
+            Self::AuthError(payload) => Some(payload.reason.as_str()),
+            _ => None,
+        }
+    }
+}
+/// Descriptor for `Auth.Sessions.Revoke`.
+pub struct AuthSessionsRevokeRpc;
+impl RpcDescriptor for AuthSessionsRevokeRpc {
+    type Input = crate::types::AuthSessionsRevokeRequest;
+    type Output = crate::types::AuthSessionsRevokeResponse;
+    const INPUT_SCHEMA_JSON: &'static str = crate::schemas::AUTH_SESSIONS_REVOKE_INPUT_SCHEMA_JSON;
+    const OUTPUT_SCHEMA_JSON: &'static str =
+        crate::schemas::AUTH_SESSIONS_REVOKE_OUTPUT_SCHEMA_JSON;
+    const KEY: &'static str = "Auth.Sessions.Revoke";
+    const SUBJECT: &'static str = "rpc.v1.Auth.Sessions.Revoke";
+    const CALLER_CAPABILITIES: &'static [&'static str] = &["admin"];
+    const ERRORS: &'static [&'static str] = &["AuthError", "UnexpectedError", "ValidationError"];
+}
+
+=== generated/packages/cargo/auth/src/rpc.rs:2677 ===
+    fn auth_error_reason(&self) -> Option<&str> {
+        match self {
+            Self::AuthError(payload) => Some(payload.reason.as_str()),
+            _ => None,
+        }
+    }
+}
+/// Descriptor for `Auth.UserIdentities.List`.
+pub struct AuthUserIdentitiesListRpc;
+impl RpcDescriptor for AuthUserIdentitiesListRpc {
+    type Input = crate::types::AuthUserIdentitiesListRequest;
+    type Output = crate::types::AuthUserIdentitiesListResponse;
+    const INPUT_SCHEMA_JSON: &'static str =
+        crate::schemas::AUTH_USER_IDENTITIES_LIST_INPUT_SCHEMA_JSON;
+    const OUTPUT_SCHEMA_JSON: &'static str =
+        crate::schemas::AUTH_USER_IDENTITIES_LIST_OUTPUT_SCHEMA_JSON;
+    const KEY: &'static str = "Auth.UserIdentities.List";
+    const SUBJECT: &'static str = "rpc.v1.Auth.UserIdentities.List";
+    const CALLER_CAPABILITIES: &'static [&'static str] = &[];
+    const ERRORS: &'static [&'static str] = &["AuthError", "UnexpectedError", "ValidationError"];
+}
+
+=== generated/packages/cargo/auth/src/rpc.rs:2725 ===
+    fn auth_error_reason(&self) -> Option<&str> {
+        match self {
+            Self::AuthError(payload) => Some(payload.reason.as_str()),
+            _ => None,
+        }
+    }
+}
+/// Descriptor for `Auth.UserIdentities.Unlink`.
+pub struct AuthUserIdentitiesUnlinkRpc;
+impl RpcDescriptor for AuthUserIdentitiesUnlinkRpc {
+    type Input = crate::types::AuthUserIdentitiesUnlinkRequest;
+    type Output = crate::types::AuthUserIdentitiesUnlinkResponse;
+    const INPUT_SCHEMA_JSON: &'static str =
+        crate::schemas::AUTH_USER_IDENTITIES_UNLINK_INPUT_SCHEMA_JSON;
+    const OUTPUT_SCHEMA_JSON: &'static str =
+        crate::schemas::AUTH_USER_IDENTITIES_UNLINK_OUTPUT_SCHEMA_JSON;
+    const KEY: &'static str = "Auth.UserIdentities.Unlink";
+    const SUBJECT: &'static str = "rpc.v1.Auth.UserIdentities.Unlink";
+    const CALLER_CAPABILITIES: &'static [&'static str] = &[];
+    const ERRORS: &'static [&'static str] = &["AuthError", "UnexpectedError", "ValidationError"];
+}
+
+=== generated/packages/cargo/auth/src/rpc.rs:2771 ===
+        }
+    }
+    fn auth_error_reason(&self) -> Option<&str> {
+        match self {
+            Self::AuthError(payload) => Some(payload.reason.as_str()),
+            _ => None,
+        }
+    }
+}
+/// Descriptor for `Auth.Users.Create`.
+pub struct AuthUsersCreateRpc;
+impl RpcDescriptor for AuthUsersCreateRpc {
+    type Input = crate::types::AuthUsersCreateRequest;
+    type Output = crate::types::AuthUsersCreateResponse;
+    const INPUT_SCHEMA_JSON: &'static str = crate::schemas::AUTH_USERS_CREATE_INPUT_SCHEMA_JSON;
+    const OUTPUT_SCHEMA_JSON: &'static str = crate::schemas::AUTH_USERS_CREATE_OUTPUT_SCHEMA_JSON;
+    const KEY: &'static str = "Auth.Users.Create";
+    const SUBJECT: &'static str = "rpc.v1.Auth.Users.Create";
+    const CALLER_CAPABILITIES: &'static [&'static str] = &["admin"];
+    const ERRORS: &'static [&'static str] = &["AuthError", "UnexpectedError", "ValidationError"];
+}
+
+=== generated/packages/cargo/auth/src/rpc.rs:2817 ===
+        }
+    }
+    fn auth_error_reason(&self) -> Option<&str> {
+        match self {
+            Self::AuthError(payload) => Some(payload.reason.as_str()),
+            _ => None,
+        }
+    }
+}
+/// Descriptor for `Auth.Users.Get`.
+pub struct AuthUsersGetRpc;
+impl RpcDescriptor for AuthUsersGetRpc {
+    type Input = crate::types::AuthUsersGetRequest;
+    type Output = crate::types::AuthUsersGetResponse;
+    const INPUT_SCHEMA_JSON: &'static str = crate::schemas::AUTH_USERS_GET_INPUT_SCHEMA_JSON;
+    const OUTPUT_SCHEMA_JSON: &'static str = crate::schemas::AUTH_USERS_GET_OUTPUT_SCHEMA_JSON;
+    const KEY: &'static str = "Auth.Users.Get";
+    const SUBJECT: &'static str = "rpc.v1.Auth.Users.Get";
+    const CALLER_CAPABILITIES: &'static [&'static str] = &["admin"];
+    const ERRORS: &'static [&'static str] = &["AuthError", "UnexpectedError", "ValidationError"];
+}
+
+=== generated/packages/cargo/auth/src/rpc.rs:2865 ===
+    fn auth_error_reason(&self) -> Option<&str> {
+        match self {
+            Self::AuthError(payload) => Some(payload.reason.as_str()),
+            _ => None,
+        }
+    }
+}
+/// Descriptor for `Auth.Users.IdentityLink.Create`.
+pub struct AuthUsersIdentityLinkCreateRpc;
+impl RpcDescriptor for AuthUsersIdentityLinkCreateRpc {
+    type Input = crate::types::AuthUsersIdentityLinkCreateRequest;
+    type Output = crate::types::AuthUsersIdentityLinkCreateResponse;
+    const INPUT_SCHEMA_JSON: &'static str =
+        crate::schemas::AUTH_USERS_IDENTITY_LINK_CREATE_INPUT_SCHEMA_JSON;
+    const OUTPUT_SCHEMA_JSON: &'static str =
+        crate::schemas::AUTH_USERS_IDENTITY_LINK_CREATE_OUTPUT_SCHEMA_JSON;
+    const KEY: &'static str = "Auth.Users.IdentityLink.Create";
+    const SUBJECT: &'static str = "rpc.v1.Auth.Users.IdentityLink.Create";
+    const CALLER_CAPABILITIES: &'static [&'static str] = &[];
+    const ERRORS: &'static [&'static str] = &["AuthError", "UnexpectedError", "ValidationError"];
+}
+
+=== generated/packages/cargo/auth/src/rpc.rs:2911 ===
+        }
+    }
+    fn auth_error_reason(&self) -> Option<&str> {
+        match self {
+            Self::AuthError(payload) => Some(payload.reason.as_str()),
+            _ => None,
+        }
+    }
+}
+/// Descriptor for `Auth.Users.List`.
+pub struct AuthUsersListRpc;
+impl RpcDescriptor for AuthUsersListRpc {
+    type Input = crate::types::AuthUsersListRequest;
+    type Output = crate::types::AuthUsersListResponse;
+    const INPUT_SCHEMA_JSON: &'static str = crate::schemas::AUTH_USERS_LIST_INPUT_SCHEMA_JSON;
+    const OUTPUT_SCHEMA_JSON: &'static str = crate::schemas::AUTH_USERS_LIST_OUTPUT_SCHEMA_JSON;
+    const KEY: &'static str = "Auth.Users.List";
+    const SUBJECT: &'static str = "rpc.v1.Auth.Users.List";
+    const CALLER_CAPABILITIES: &'static [&'static str] = &["admin"];
+    const ERRORS: &'static [&'static str] = &["AuthError", "UnexpectedError", "ValidationError"];
+}
+
+=== generated/packages/cargo/auth/src/rpc.rs:2959 ===
+    fn auth_error_reason(&self) -> Option<&str> {
+        match self {
+            Self::AuthError(payload) => Some(payload.reason.as_str()),
+            _ => None,
+        }
+    }
+}
+/// Descriptor for `Auth.Users.Password.Change`.
+pub struct AuthUsersPasswordChangeRpc;
+impl RpcDescriptor for AuthUsersPasswordChangeRpc {
+    type Input = crate::types::AuthUsersPasswordChangeRequest;
+    type Output = crate::types::AuthUsersPasswordChangeResponse;
+    const INPUT_SCHEMA_JSON: &'static str =
+        crate::schemas::AUTH_USERS_PASSWORD_CHANGE_INPUT_SCHEMA_JSON;
+    const OUTPUT_SCHEMA_JSON: &'static str =
+        crate::schemas::AUTH_USERS_PASSWORD_CHANGE_OUTPUT_SCHEMA_JSON;
+    const KEY: &'static str = "Auth.Users.Password.Change";
+    const SUBJECT: &'static str = "rpc.v1.Auth.Users.Password.Change";
+    const CALLER_CAPABILITIES: &'static [&'static str] = &[];
+    const ERRORS: &'static [&'static str] = &["AuthError", "UnexpectedError", "ValidationError"];
+}
+
+=== generated/packages/cargo/auth/src/rpc.rs:3007 ===
+    fn auth_error_reason(&self) -> Option<&str> {
+        match self {
+            Self::AuthError(payload) => Some(payload.reason.as_str()),
+            _ => None,
+        }
+    }
+}
+/// Descriptor for `Auth.Users.PasswordReset.Create`.
+pub struct AuthUsersPasswordResetCreateRpc;
+impl RpcDescriptor for AuthUsersPasswordResetCreateRpc {
+    type Input = crate::types::AuthUsersPasswordResetCreateRequest;
+    type Output = crate::types::AuthUsersPasswordResetCreateResponse;
+    const INPUT_SCHEMA_JSON: &'static str =
+        crate::schemas::AUTH_USERS_PASSWORD_RESET_CREATE_INPUT_SCHEMA_JSON;
+    const OUTPUT_SCHEMA_JSON: &'static str =
+        crate::schemas::AUTH_USERS_PASSWORD_RESET_CREATE_OUTPUT_SCHEMA_JSON;
+    const KEY: &'static str = "Auth.Users.PasswordReset.Create";
+    const SUBJECT: &'static str = "rpc.v1.Auth.Users.PasswordReset.Create";
+    const CALLER_CAPABILITIES: &'static [&'static str] = &["admin"];
+    const ERRORS: &'static [&'static str] = &["AuthError", "UnexpectedError", "ValidationError"];
+}
+
+=== generated/packages/cargo/auth/src/rpc.rs:3053 ===
+        }
+    }
+    fn auth_error_reason(&self) -> Option<&str> {
+        match self {
+            Self::AuthError(payload) => Some(payload.reason.as_str()),
+            _ => None,
+        }
+    }
+}
+/// Descriptor for `Auth.Users.Resolve`.
+pub struct AuthUsersResolveRpc;
+impl RpcDescriptor for AuthUsersResolveRpc {
+    type Input = crate::types::AuthUsersResolveRequest;
+    type Output = crate::types::AuthUsersResolveResponse;
+    const INPUT_SCHEMA_JSON: &'static str = crate::schemas::AUTH_USERS_RESOLVE_INPUT_SCHEMA_JSON;
+    const OUTPUT_SCHEMA_JSON: &'static str = crate::schemas::AUTH_USERS_RESOLVE_OUTPUT_SCHEMA_JSON;
+    const KEY: &'static str = "Auth.Users.Resolve";
+    const SUBJECT: &'static str = "rpc.v1.Auth.Users.Resolve";
+    const CALLER_CAPABILITIES: &'static [&'static str] = &[];
+    const ERRORS: &'static [&'static str] = &["AuthError", "UnexpectedError", "ValidationError"];
+}
+
+=== generated/packages/cargo/auth/src/rpc.rs:3099 ===
+        }
+    }
+    fn auth_error_reason(&self) -> Option<&str> {
+        match self {
+            Self::AuthError(payload) => Some(payload.reason.as_str()),
+            _ => None,
+        }
+    }
+}
+/// Descriptor for `Auth.Users.Update`.
+pub struct AuthUsersUpdateRpc;
+impl RpcDescriptor for AuthUsersUpdateRpc {
+    type Input = crate::types::AuthUsersUpdateRequest;
+    type Output = crate::types::AuthUsersUpdateResponse;
+    const INPUT_SCHEMA_JSON: &'static str = crate::schemas::AUTH_USERS_UPDATE_INPUT_SCHEMA_JSON;
+    const OUTPUT_SCHEMA_JSON: &'static str = crate::schemas::AUTH_USERS_UPDATE_OUTPUT_SCHEMA_JSON;
+    const KEY: &'static str = "Auth.Users.Update";
+    const SUBJECT: &'static str = "rpc.v1.Auth.Users.Update";
+    const CALLER_CAPABILITIES: &'static [&'static str] = &["admin"];
+    const ERRORS: &'static [&'static str] = &["AuthError", "UnexpectedError", "ValidationError"];
+}
+
