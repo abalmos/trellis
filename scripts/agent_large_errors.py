@@ -11,6 +11,15 @@ def replace_once(path: str, old: str, new: str) -> None:
     file.write_text(text.replace(old, new, 1))
 
 
+def replace_exact(path: str, old: str, new: str, expected: int) -> None:
+    file = Path(path)
+    text = file.read_text()
+    count = text.count(old)
+    if count != expected:
+        raise RuntimeError(f"{path}: expected {expected} occurrences, found {count}: {old[:100]!r}")
+    file.write_text(text.replace(old, new))
+
+
 def remove_expect(path: str, lint: str, expected: int | None = None) -> int:
     file = Path(path)
     text = file.read_text()
@@ -125,10 +134,11 @@ replace_once(
     ".map_err(ServiceRuntimeError::Server);",
     ".map_err(ServiceRuntimeError::from);",
 )
-replace_once(
+replace_exact(
     runtime,
     ".map_err(ServiceRuntimeError::Server)\n",
     ".map_err(ServiceRuntimeError::from)\n",
+    expected=2,
 )
 
 print(
