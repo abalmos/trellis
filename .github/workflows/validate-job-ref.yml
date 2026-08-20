@@ -1,0 +1,65 @@
+name: Validate JobRef cleanup
+
+on:
+  push:
+    branches:
+      - agent/validate-job-ref-v1
+
+permissions:
+  contents: write
+
+concurrency:
+  group: validate-job-ref-cleanup
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out validator branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Reset to exact rs base
+        run: |
+          cp .github/scripts/simplify_job_ref.py /tmp/simplify_job_ref.py
+          cp .github/scripts/validate_job_ref_cleanup.sh /tmp/validate_job_ref_cleanup.sh
+          git reset --hard ba68692718ca2020561f7cfc666c402232a3dfc3
+
+      - name: Publish running run id
+        run: |
+          git config user.name "trellis-validation"
+          git config user.email "actions@users.noreply.github.com"
+          printf '%s\n' '${{ github.run_id }}' > .validation-running
+          git add .validation-running
+          git commit -m "Record JobRef cleanup validation run"
+          git push --force origin HEAD:refs/heads/agent/running-job-ref-cleanup-v1
+          git reset --hard ba68692718ca2020561f7cfc666c402232a3dfc3
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Set up Deno
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: 2.9.4
+
+      - name: Cache generator build
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: rust/tools/generate -> target
+
+      - name: Validate JobRef cleanup
+        run: bash /tmp/validate_job_ref_cleanup.sh
+
+      - name: Publish failure run id
+        if: failure()
+        run: |
+          git reset --hard ba68692718ca2020561f7cfc666c402232a3dfc3
+          git config user.name "trellis-validation"
+          git config user.email "actions@users.noreply.github.com"
+          printf '%s\n' '${{ github.run_id }}' > .validation-failed
+          git add .validation-failed
+          git commit -m "Record failed JobRef cleanup validation"
+          git push --force origin HEAD:refs/heads/agent/failed-job-ref-cleanup-v1
