@@ -141,6 +141,14 @@ replace_exact(
     expected=2,
 )
 
+# The prepared-event integration assertion destructures the now-boxed handler source.
+prepared_events = "rust/crates/trellis/tests/integration/prepared_events.rs"
+replace_once(
+    prepared_events,
+    'matches!(source, ServerError::Nats(message) if message == "prepared handler denied")',
+    'matches!(*source, ServerError::Nats(message) if message == "prepared handler denied")',
+)
+
 print(
     "large error transform complete; removed "
     f"{removed_result_expects} ServiceRuntimeError result_large_err expectations"

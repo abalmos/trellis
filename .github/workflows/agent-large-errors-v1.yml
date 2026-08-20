@@ -65,7 +65,8 @@ jobs:
           git add rust/crates/trellis/src/client/error.rs \
             rust/crates/trellis/src/client/connection.rs \
             rust/crates/trellis/src/client/operations.rs \
-            rust/crates/trellis/src/service/runtime_facade.rs
+            rust/crates/trellis/src/service/runtime_facade.rs \
+            rust/crates/trellis/tests/integration/prepared_events.rs
           git diff --cached --check
           git commit -m 'Shrink typed runtime error payloads'
           git push --force origin HEAD:refs/heads/agent/result-large-errors-v1
