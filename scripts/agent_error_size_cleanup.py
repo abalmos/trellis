@@ -10,6 +10,15 @@ def replace_once(path: str, old: str, new: str) -> None:
     p.write_text(text.replace(old, new, 1))
 
 
+def replace_count(path: str, old: str, new: str, expected: int) -> None:
+    p = Path(path)
+    text = p.read_text()
+    count = text.count(old)
+    if count != expected:
+        raise RuntimeError(f"{path}: expected {expected} occurrences, found {count}: {old[:120]!r}")
+    p.write_text(text.replace(old, new))
+
+
 # Keep generated caller errors small regardless of the size of a contract-declared
 # error payload. These are cold error paths, so one allocation is preferable to
 # making every Result-returning caller carry a large enum inline.
@@ -51,6 +60,116 @@ replace_once(
     "rust/crates/trellis/src/client/error.rs",
     "                        Ok(None) if payload.error_type().is_some() => Self::Remote(payload),",
     "                        Ok(None) if payload.error_type().is_some() => Self::Remote(Box::new(payload)),",
+)
+
+# The local validation path used to suppress result_large_err because CallError was
+# large. Remove the suppression and construct the now-boxed validation payloads.
+replace_once(
+    "rust/crates/trellis/src/client/connection.rs",
+    '''#[expect(
+    clippy::result_large_err,
+    reason = "CallError is the public typed caller failure envelope"
+)]
+fn validate_caller_input<E>(schema_json: &str, value: &Value) -> Result<(), CallError<E>>
+''',
+    '''fn validate_caller_input<E>(schema_json: &str, value: &Value) -> Result<(), CallError<E>>
+''',
+)
+replace_once(
+    "rust/crates/trellis/src/client/connection.rs",
+    '''        Err(crate::service::ServerError::Validation { issues }) => Err(CallError::Validation(
+            crate::client::ValidationFailure::Validation(crate::client::ValidationErrorPayload {
+                id: "local".to_string(),
+                error_type: "ValidationError".to_string(),
+                message: "Input validation failed".to_string(),
+                issues: issues
+                    .into_iter()
+                    .map(|issue| crate::client::ValidationIssue {
+                        path: issue.path,
+                        message: issue.message,
+                    })
+                    .collect(),
+                context: None,
+                trace_id: None,
+            }),
+        )),
+''',
+    '''        Err(crate::service::ServerError::Validation { issues }) => Err(CallError::Validation(
+            Box::new(crate::client::ValidationFailure::Validation(
+                crate::client::ValidationErrorPayload {
+                    id: "local".to_string(),
+                    error_type: "ValidationError".to_string(),
+                    message: "Input validation failed".to_string(),
+                    issues: issues
+                        .into_iter()
+                        .map(|issue| crate::client::ValidationIssue {
+                            path: issue.path,
+                            message: issue.message,
+                        })
+                        .collect(),
+                    context: None,
+                    trace_id: None,
+                },
+            )),
+        )),
+''',
+)
+replace_once(
+    "rust/crates/trellis/src/client/connection.rs",
+    '''        Err(crate::service::ServerError::SchemaValidation { issues }) => Err(
+            CallError::Validation(crate::client::ValidationFailure::Schema(
+                crate::client::SchemaValidationErrorPayload {
+                    id: "local".to_string(),
+                    error_type: "SchemaValidationError".to_string(),
+                    message: "Input validation failed".to_string(),
+                    issues: issues
+                        .into_iter()
+                        .map(|issue| crate::client::SchemaValidationIssue {
+                            path: issue.path,
+                            schema_path: issue.schema_path,
+                            keyword: issue.keyword,
+                            code: issue.code,
+                            message: issue.message,
+                            label: issue.label,
+                            note: issue.note,
+                            i18n_key: issue.i18n_key,
+                            severity: issue.severity,
+                            params: issue.params,
+                        })
+                        .collect(),
+                    context: None,
+                    trace_id: None,
+                },
+            )),
+        ),
+''',
+    '''        Err(crate::service::ServerError::SchemaValidation { issues }) => Err(
+            CallError::Validation(Box::new(crate::client::ValidationFailure::Schema(
+                crate::client::SchemaValidationErrorPayload {
+                    id: "local".to_string(),
+                    error_type: "SchemaValidationError".to_string(),
+                    message: "Input validation failed".to_string(),
+                    issues: issues
+                        .into_iter()
+                        .map(|issue| crate::client::SchemaValidationIssue {
+                            path: issue.path,
+                            schema_path: issue.schema_path,
+                            keyword: issue.keyword,
+                            code: issue.code,
+                            message: issue.message,
+                            label: issue.label,
+                            note: issue.note,
+                            i18n_key: issue.i18n_key,
+                            severity: issue.severity,
+                            params: issue.params,
+                        })
+                        .collect(),
+                    context: None,
+                    trace_id: None,
+                },
+            ))),
+        ),
+''',
 )
 
 # Transfer-start errors intentionally return the accepted live reference on upload
@@ -171,6 +290,12 @@ impl From<ServerError> for ServiceRuntimeError {
 /// Options for registering a service event listener.
 '''
 replace_once("rust/crates/trellis/src/service/runtime_facade.rs", anchor, conversions)
+replace_count(
+    "rust/crates/trellis/src/service/runtime_facade.rs",
+    ".map_err(ServiceRuntimeError::Server)",
+    ".map_err(ServiceRuntimeError::from)",
+    2,
+)
 
 path = Path("rust/crates/trellis/src/service/runtime_facade.rs")
 text = path.read_text()
