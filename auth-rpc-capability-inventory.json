@@ -1,0 +1,728 @@
+{
+  "Auth.Capabilities.List": {
+    "adminPaths": [],
+    "keys": [
+      "docs",
+      "errors",
+      "input",
+      "output",
+      "version"
+    ],
+    "version": "v1"
+  },
+  "Auth.CapabilityGroups.Delete": {
+    "adminPaths": [],
+    "keys": [
+      "docs",
+      "errors",
+      "input",
+      "output",
+      "version"
+    ],
+    "version": "v1"
+  },
+  "Auth.CapabilityGroups.Get": {
+    "adminPaths": [],
+    "keys": [
+      "docs",
+      "errors",
+      "input",
+      "output",
+      "version"
+    ],
+    "version": "v1"
+  },
+  "Auth.CapabilityGroups.List": {
+    "adminPaths": [],
+    "keys": [
+      "docs",
+      "errors",
+      "input",
+      "output",
+      "version"
+    ],
+    "version": "v1"
+  },
+  "Auth.CapabilityGroups.Put": {
+    "adminPaths": [],
+    "keys": [
+      "docs",
+      "errors",
+      "input",
+      "output",
+      "version"
+    ],
+    "version": "v1"
+  },
+  "Auth.Connections.Kick": {
+    "adminPaths": [],
+    "keys": [
+      "docs",
+      "errors",
+      "input",
+      "output",
+      "version"
+    ],
+    "version": "v1"
+  },
+  "Auth.Connections.List": {
+    "adminPaths": [],
+    "keys": [
+      "docs",
+      "errors",
+      "input",
+      "output",
+      "version"
+    ],
+    "version": "v1"
+  },
+  "Auth.DeploymentAuthority.AcceptMigration": {
+    "adminPaths": [],
+    "keys": [
+      "docs",
+      "errors",
+      "input",
+      "output",
+      "version"
+    ],
+    "version": "v1"
+  },
+  "Auth.DeploymentAuthority.AcceptUpdate": {
+    "adminPaths": [],
+    "keys": [
+      "docs",
+      "errors",
+      "input",
+      "output",
+      "version"
+    ],
+    "version": "v1"
+  },
+  "Auth.DeploymentAuthority.Get": {
+    "adminPaths": [],
+    "keys": [
+      "docs",
+      "errors",
+      "input",
+      "output",
+      "version"
+    ],
+    "version": "v1"
+  },
+  "Auth.DeploymentAuthority.List": {
+    "adminPaths": [],
+    "keys": [
+      "docs",
+      "errors",
+      "input",
+      "output",
+      "version"
+    ],
+    "version": "v1"
+  },
+  "Auth.DeploymentAuthority.Plan": {
+    "adminPaths": [],
+    "keys": [
+      "docs",
+      "errors",
+      "input",
+      "output",
+      "version"
+    ],
+    "version": "v1"
+  },
+  "Auth.DeploymentAuthority.Plans.Get": {
+    "adminPaths": [],
+    "keys": [
+      "docs",
+      "errors",
+      "input",
+      "output",
+      "version"
+    ],
+    "version": "v1"
+  },
+  "Auth.DeploymentAuthority.Plans.List": {
+    "adminPaths": [],
+    "keys": [
+      "docs",
+      "errors",
+      "input",
+      "output",
+      "version"
+    ],
+    "version": "v1"
+  },
+  "Auth.DeploymentAuthority.Reconcile": {
+    "adminPaths": [],
+    "keys": [
+      "docs",
+      "errors",
+      "input",
+      "output",
+      "version"
+    ],
+    "version": "v1"
+  },
+  "Auth.DeploymentAuthority.Reject": {
+    "adminPaths": [],
+    "keys": [
+      "docs",
+      "errors",
+      "input",
+      "output",
+      "version"
+    ],
+    "version": "v1"
+  },
+  "Auth.Deployments.Create": {
+    "adminPaths": [],
+    "keys": [
+      "docs",
+      "errors",
+      "input",
+      "output",
+      "version"
+    ],
+    "version": "v1"
+  },
+  "Auth.Deployments.Disable": {
+    "adminPaths": [],
+    "keys": [
+      "docs",
+      "errors",
+      "input",
+      "output",
+      "version"
+    ],
+    "version": "v1"
+  },
+  "Auth.Deployments.Enable": {
+    "adminPaths": [],
+    "keys": [
+      "docs",
+      "errors",
+      "input",
+      "output",
+      "version"
+    ],
+    "version": "v1"
+  },
+  "Auth.Deployments.List": {
+    "adminPaths": [],
+    "keys": [
+      "docs",
+      "errors",
+      "input",
+      "output",
+      "version"
+    ],
+    "version": "v1"
+  },
+  "Auth.Deployments.Remove": {
+    "adminPaths": [],
+    "keys": [
+      "docs",
+      "errors",
+      "input",
+      "output",
+      "version"
+    ],
+    "version": "v1"
+  },
+  "Auth.DeviceUserAuthorities.List": {
+    "adminPaths": [],
+    "keys": [
+      "docs",
+      "errors",
+      "input",
+      "output",
+      "version"
+    ],
+    "version": "v1"
+  },
+  "Auth.DeviceUserAuthorities.Reviews.Decide": {
+    "adminPaths": [],
+    "keys": [
+      "docs",
+      "errors",
+      "input",
+      "output",
+      "version"
+    ],
+    "version": "v1"
+  },
+  "Auth.DeviceUserAuthorities.Reviews.List": {
+    "adminPaths": [],
+    "keys": [
+      "docs",
+      "errors",
+      "input",
+      "output",
+      "version"
+    ],
+    "version": "v1"
+  },
+  "Auth.DeviceUserAuthorities.Revoke": {
+    "adminPaths": [],
+    "keys": [
+      "docs",
+      "errors",
+      "input",
+      "output",
+      "version"
+    ],
+    "version": "v1"
+  },
+  "Auth.Devices.ConnectInfo.Get": {
+    "adminPaths": [],
+    "keys": [
+      "docs",
+      "errors",
+      "input",
+      "output",
+      "version"
+    ],
+    "version": "v1"
+  },
+  "Auth.Devices.Disable": {
+    "adminPaths": [],
+    "keys": [
+      "docs",
+      "errors",
+      "input",
+      "output",
+      "version"
+    ],
+    "version": "v1"
+  },
+  "Auth.Devices.Enable": {
+    "adminPaths": [],
+    "keys": [
+      "docs",
+      "errors",
+      "input",
+      "output",
+      "version"
+    ],
+    "version": "v1"
+  },
+  "Auth.Devices.List": {
+    "adminPaths": [],
+    "keys": [
+      "docs",
+      "errors",
+      "input",
+      "output",
+      "version"
+    ],
+    "version": "v1"
+  },
+  "Auth.Devices.Provision": {
+    "adminPaths": [],
+    "keys": [
+      "docs",
+      "errors",
+      "input",
+      "output",
+      "version"
+    ],
+    "version": "v1"
+  },
+  "Auth.Devices.Remove": {
+    "adminPaths": [],
+    "keys": [
+      "docs",
+      "errors",
+      "input",
+      "output",
+      "version"
+    ],
+    "version": "v1"
+  },
+  "Auth.IdentityAuthority.Get": {
+    "adminPaths": [],
+    "keys": [
+      "docs",
+      "errors",
+      "input",
+      "output",
+      "version"
+    ],
+    "version": "v1"
+  },
+  "Auth.IdentityAuthority.List": {
+    "adminPaths": [],
+    "keys": [
+      "docs",
+      "errors",
+      "input",
+      "output",
+      "version"
+    ],
+    "version": "v1"
+  },
+  "Auth.IdentityAuthority.Revoke": {
+    "adminPaths": [],
+    "keys": [
+      "docs",
+      "errors",
+      "input",
+      "output",
+      "version"
+    ],
+    "version": "v1"
+  },
+  "Auth.IdentityGrants.List": {
+    "adminPaths": [],
+    "keys": [
+      "docs",
+      "errors",
+      "input",
+      "output",
+      "version"
+    ],
+    "version": "v1"
+  },
+  "Auth.IdentityGrants.Revoke": {
+    "adminPaths": [],
+    "keys": [
+      "docs",
+      "errors",
+      "input",
+      "output",
+      "version"
+    ],
+    "version": "v1"
+  },
+  "Auth.Portals.Get": {
+    "adminPaths": [],
+    "keys": [
+      "docs",
+      "errors",
+      "input",
+      "output",
+      "version"
+    ],
+    "version": "v1"
+  },
+  "Auth.Portals.GrantOverrides.List": {
+    "adminPaths": [],
+    "keys": [
+      "docs",
+      "errors",
+      "input",
+      "output",
+      "version"
+    ],
+    "version": "v1"
+  },
+  "Auth.Portals.GrantOverrides.Put": {
+    "adminPaths": [],
+    "keys": [
+      "docs",
+      "errors",
+      "input",
+      "output",
+      "version"
+    ],
+    "version": "v1"
+  },
+  "Auth.Portals.GrantOverrides.Remove": {
+    "adminPaths": [],
+    "keys": [
+      "docs",
+      "errors",
+      "input",
+      "output",
+      "version"
+    ],
+    "version": "v1"
+  },
+  "Auth.Portals.List": {
+    "adminPaths": [],
+    "keys": [
+      "docs",
+      "errors",
+      "input",
+      "output",
+      "version"
+    ],
+    "version": "v1"
+  },
+  "Auth.Portals.LoginSettings.Get": {
+    "adminPaths": [],
+    "keys": [
+      "docs",
+      "errors",
+      "input",
+      "output",
+      "version"
+    ],
+    "version": "v1"
+  },
+  "Auth.Portals.LoginSettings.Update": {
+    "adminPaths": [],
+    "keys": [
+      "docs",
+      "errors",
+      "input",
+      "output",
+      "version"
+    ],
+    "version": "v1"
+  },
+  "Auth.Portals.Put": {
+    "adminPaths": [],
+    "keys": [
+      "docs",
+      "errors",
+      "input",
+      "output",
+      "version"
+    ],
+    "version": "v1"
+  },
+  "Auth.Portals.Remove": {
+    "adminPaths": [],
+    "keys": [
+      "docs",
+      "errors",
+      "input",
+      "output",
+      "version"
+    ],
+    "version": "v1"
+  },
+  "Auth.Portals.Routes.Put": {
+    "adminPaths": [],
+    "keys": [
+      "docs",
+      "errors",
+      "input",
+      "output",
+      "version"
+    ],
+    "version": "v1"
+  },
+  "Auth.Portals.Routes.Remove": {
+    "adminPaths": [],
+    "keys": [
+      "docs",
+      "errors",
+      "input",
+      "output",
+      "version"
+    ],
+    "version": "v1"
+  },
+  "Auth.ServiceInstances.Disable": {
+    "adminPaths": [],
+    "keys": [
+      "docs",
+      "errors",
+      "input",
+      "output",
+      "version"
+    ],
+    "version": "v1"
+  },
+  "Auth.ServiceInstances.Enable": {
+    "adminPaths": [],
+    "keys": [
+      "docs",
+      "errors",
+      "input",
+      "output",
+      "version"
+    ],
+    "version": "v1"
+  },
+  "Auth.ServiceInstances.List": {
+    "adminPaths": [],
+    "keys": [
+      "docs",
+      "errors",
+      "input",
+      "output",
+      "version"
+    ],
+    "version": "v1"
+  },
+  "Auth.ServiceInstances.Provision": {
+    "adminPaths": [],
+    "keys": [
+      "docs",
+      "errors",
+      "input",
+      "output",
+      "version"
+    ],
+    "version": "v1"
+  },
+  "Auth.ServiceInstances.Remove": {
+    "adminPaths": [],
+    "keys": [
+      "docs",
+      "errors",
+      "input",
+      "output",
+      "version"
+    ],
+    "version": "v1"
+  },
+  "Auth.Sessions.List": {
+    "adminPaths": [],
+    "keys": [
+      "docs",
+      "errors",
+      "input",
+      "output",
+      "version"
+    ],
+    "version": "v1"
+  },
+  "Auth.Sessions.Logout": {
+    "adminPaths": [],
+    "keys": [
+      "docs",
+      "errors",
+      "input",
+      "output",
+      "version"
+    ],
+    "version": "v1"
+  },
+  "Auth.Sessions.Me": {
+    "adminPaths": [],
+    "keys": [
+      "docs",
+      "errors",
+      "input",
+      "output",
+      "version"
+    ],
+    "version": "v1"
+  },
+  "Auth.Sessions.Revoke": {
+    "adminPaths": [],
+    "keys": [
+      "docs",
+      "errors",
+      "input",
+      "output",
+      "version"
+    ],
+    "version": "v1"
+  },
+  "Auth.UserIdentities.List": {
+    "adminPaths": [],
+    "keys": [
+      "docs",
+      "errors",
+      "input",
+      "output",
+      "version"
+    ],
+    "version": "v1"
+  },
+  "Auth.UserIdentities.Unlink": {
+    "adminPaths": [],
+    "keys": [
+      "docs",
+      "errors",
+      "input",
+      "output",
+      "version"
+    ],
+    "version": "v1"
+  },
+  "Auth.Users.Create": {
+    "adminPaths": [],
+    "keys": [
+      "docs",
+      "errors",
+      "input",
+      "output",
+      "version"
+    ],
+    "version": "v1"
+  },
+  "Auth.Users.Get": {
+    "adminPaths": [],
+    "keys": [
+      "docs",
+      "errors",
+      "input",
+      "output",
+      "version"
+    ],
+    "version": "v1"
+  },
+  "Auth.Users.IdentityLink.Create": {
+    "adminPaths": [],
+    "keys": [
+      "docs",
+      "errors",
+      "input",
+      "output",
+      "version"
+    ],
+    "version": "v1"
+  },
+  "Auth.Users.List": {
+    "adminPaths": [],
+    "keys": [
+      "docs",
+      "errors",
+      "input",
+      "output",
+      "version"
+    ],
+    "version": "v1"
+  },
+  "Auth.Users.Password.Change": {
+    "adminPaths": [],
+    "keys": [
+      "docs",
+      "errors",
+      "input",
+      "output",
+      "version"
+    ],
+    "version": "v1"
+  },
+  "Auth.Users.PasswordReset.Create": {
+    "adminPaths": [],
+    "keys": [
+      "docs",
+      "errors",
+      "input",
+      "output",
+      "version"
+    ],
+    "version": "v1"
+  },
+  "Auth.Users.Resolve": {
+    "adminPaths": [],
+    "keys": [
+      "docs",
+      "errors",
+      "input",
+      "output",
+      "version"
+    ],
+    "version": "v1"
+  },
+  "Auth.Users.Update": {
+    "adminPaths": [],
+    "keys": [
+      "docs",
+      "errors",
+      "input",
+      "output",
+      "version"
+    ],
+    "version": "v1"
+  }
+}
