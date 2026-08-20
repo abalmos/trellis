@@ -6,7 +6,7 @@ use bytes::Bytes;
 use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
 
-use crate::client::client::signed_headers;
+use crate::client::connection::signed_headers;
 use crate::client::{SessionAuth, TrellisClient, TrellisClientError};
 
 const TRANSFER_SEQUENCE_HEADER: &str = "trellis-transfer-seq";
@@ -423,7 +423,7 @@ mod tests {
     fn event_proof_v2_verifies_with_context_digest() {
         let auth = test_auth();
         let subject = "events.v1.Documents.Changed.doc-1";
-        let payload = br#"{"id":"doc-1"}"#;
+        let payload = br#"{\"id\":\"doc-1\"}"#;
         let event_id = "evt_doc_1";
         let event_time = "1970-01-01T00:19:10Z";
         let proof = auth
