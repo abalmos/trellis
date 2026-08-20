@@ -20,6 +20,16 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+      - name: Publish running run id
+        shell: bash
+        run: |
+          git config user.name trellis-validation
+          git config user.email actions@users.noreply.github.com
+          printf '%s\n' '${{ github.run_id }}' > .validation-running
+          git add .validation-running
+          git commit -m 'Record native Core validation run'
+          git push --force origin HEAD:refs/heads/agent/running-core-contract-rust-v1
+          git reset --hard "$GITHUB_SHA"
       - uses: dtolnay/rust-toolchain@stable
       - uses: denoland/setup-deno@v2
         with:
@@ -55,3 +65,14 @@ jobs:
           git add rust/crates/runtime/contracts/trellis_core.rs
           git commit -m 'Author Trellis Core contract in Rust'
           git push --force origin HEAD:refs/heads/agent/result-core-contract-rust-v1
+      - name: Publish failure run id
+        if: failure()
+        shell: bash
+        run: |
+          git reset --hard "$GITHUB_SHA"
+          git config user.name trellis-validation
+          git config user.email actions@users.noreply.github.com
+          printf '%s\n' '${{ github.run_id }}' > .validation-failed
+          git add .validation-failed
+          git commit -m 'Record failed native Core validation'
+          git push --force origin HEAD:refs/heads/agent/failed-core-contract-rust-v1
