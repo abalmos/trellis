@@ -1,0 +1,57 @@
+name: Validate native Trellis Core contract
+
+on:
+  push:
+    branches: [agent/core-contract-rust-v1]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: agent-core-contract-rust-v1
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: 2.9.4
+      - name: Record baseline identities
+        shell: bash
+        run: |
+          cp generated/protocol/apis/trellis.core@v1.json /tmp/core-api.json
+          cp generated/protocol/participants/trellis.core@v1.json /tmp/core-participant.json
+      - name: Prepare from native contract sources
+        run: cargo run --manifest-path rust/tools/generate/Cargo.toml -- prepare --no-npm .
+      - name: Require Core identity to remain exact
+        shell: bash
+        run: |
+          cmp /tmp/core-api.json generated/protocol/apis/trellis.core@v1.json
+          cmp /tmp/core-participant.json generated/protocol/participants/trellis.core@v1.json
+          test ! -e ts/packages/trellis/contracts/trellis_core.ts
+          test -e rust/crates/runtime/contracts/trellis_core.rs
+      - name: Format and check source
+        run: |
+          rustfmt --edition 2021 rust/crates/runtime/contracts/trellis_core.rs --check
+          git diff --check
+      - name: Require no unexpected tracked generation drift
+        shell: bash
+        run: |
+          git diff --exit-code -- generated/protocol/apis/trellis.core@v1.json generated/protocol/participants/trellis.core@v1.json
+      - name: Publish validated result
+        shell: bash
+        run: |
+          git config user.name trellis-validation
+          git config user.email actions@users.noreply.github.com
+          git add -u rust/crates/runtime/contracts/trellis_core.rs ts/packages/trellis/contracts/trellis_core.ts
+          git add rust/crates/runtime/contracts/trellis_core.rs
+          git commit -m 'Author Trellis Core contract in Rust'
+          git push --force origin HEAD:refs/heads/agent/result-core-contract-rust-v1
