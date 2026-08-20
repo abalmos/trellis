@@ -41,14 +41,14 @@ jobs:
           deno-version: 2.9.4
       - name: Apply error-size cleanup
         run: python /tmp/agent_error_size_cleanup.py
-      - name: Format source
-        run: cargo fmt --manifest-path rust/Cargo.toml --all
-      - name: Check patch hygiene
-        run: git diff --check
       - name: Prepare generated SDKs
         run: cargo run --manifest-path rust/tools/generate/Cargo.toml -- prepare --no-npm .
       - name: Build embedded portal
         run: deno task -c ts/portals/login/deno.json build:embedded
+      - name: Format source
+        run: cargo fmt --manifest-path rust/Cargo.toml --all
+      - name: Check patch hygiene
+        run: git diff --check
       - name: Check affected Rust crates
         run: cargo check --manifest-path rust/Cargo.toml -p trellis-rs -p trellis-runtime --all-targets
       - name: Clippy affected Rust crates
