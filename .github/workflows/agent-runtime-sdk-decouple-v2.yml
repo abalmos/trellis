@@ -1,0 +1,108 @@
+name: Validate runtime generated SDK decoupling v2
+
+on:
+  push:
+    branches: [agent/validate-runtime-sdk-decouple-v2]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: agent-runtime-sdk-decouple-v2
+  cancel-in-progress: true
+
+env:
+  BASE_SHA: fa723c49bc69f927bc222702756d2124151fa962
+  CARGO_TERM_COLOR: always
+
+jobs:
+  validate:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Preserve transform and publish run id
+        shell: bash
+        run: |
+          cp scripts/agent_runtime_sdk_decouple.py /tmp/agent_runtime_sdk_decouple.py
+          git config user.name trellis-validation
+          git config user.email actions@users.noreply.github.com
+          printf '%s\n' '${{ github.run_id }}' > .validation-running
+          git add .validation-running
+          git commit -m 'Record runtime SDK decoupling v2 validation run'
+          git push --force origin HEAD:refs/heads/agent/running-runtime-sdk-decouple-v2
+          git reset --hard "$BASE_SHA"
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: 2.9.4
+      - name: Apply runtime SDK decoupling
+        run: python /tmp/agent_runtime_sdk_decouple.py
+      - name: Format and check patch
+        shell: bash
+        run: |
+          cargo fmt --manifest-path rust/Cargo.toml --all
+          git diff --check
+      - name: Prove protocol WASM builds before generated SDKs exist
+        shell: bash
+        run: |
+          rm -rf generated
+          cargo check --manifest-path rust/Cargo.toml -p trellis-protocol-wasm --target wasm32-unknown-unknown
+      - name: Regenerate SDKs
+        run: cargo run --manifest-path rust/tools/generate/Cargo.toml -- prepare --no-npm .
+      - name: Prove generated Auth RPC metadata has no caller capabilities
+        shell: python
+        run: |
+          import pathlib, re
+          root = pathlib.Path('generated/packages/cargo/auth/src')
+          text = '\n'.join(path.read_text() for path in root.rglob('*.rs'))
+          matches = re.findall(r'CALLER_CAPABILITIES[^=]*=\s*&\[(.*?)\];', text, re.S)
+          if not matches:
+              raise SystemExit('no generated Auth CALLER_CAPABILITIES constants found')
+          nonempty = [value for value in matches if value.strip()]
+          if nonempty:
+              raise SystemExit(f'generated Auth RPC caller capabilities are not empty: {nonempty[:3]}')
+          print(f'validated {len(matches)} empty Auth RPC caller-capability constants')
+      - name: Build embedded portal
+        run: deno task -c ts/portals/login/deno.json build:embedded
+      - name: Check affected Rust crates
+        run: cargo check --manifest-path rust/Cargo.toml -p trellis-rs -p trellis-runtime --all-targets
+      - name: Clippy affected Rust crates
+        run: cargo clippy --manifest-path rust/Cargo.toml -p trellis-rs -p trellis-runtime --all-targets -- -D warnings
+      - name: Test affected Rust libraries
+        run: |
+          cargo test --manifest-path rust/Cargo.toml -p trellis-rs --lib
+          cargo test --manifest-path rust/Cargo.toml -p trellis-runtime --lib
+      - name: Require generated SDK independence
+        shell: bash
+        run: |
+          ! grep -q 'trellis-sdk-' rust/Cargo.toml
+          ! grep -q 'trellis-sdk-auth' rust/crates/runtime/Cargo.toml
+          ! grep -R -q 'trellis_sdk_auth' rust/crates/runtime/src
+      - name: Commit validated product source only
+        shell: bash
+        run: |
+          git add rust/Cargo.toml \
+            rust/crates/runtime/Cargo.toml \
+            rust/crates/trellis/src/service/router.rs \
+            rust/crates/runtime/src/platform/auth/rpc/mod.rs \
+            rust/crates/runtime/src/platform/auth/verifier.rs
+          git diff --cached --check
+          git commit -m 'Remove runtime dependency on generated Auth SDK'
+          git push --force origin HEAD:refs/heads/agent/result-runtime-sdk-decouple-v2
+      - name: Publish failure run id
+        if: failure()
+        shell: bash
+        run: |
+          git reset --hard "$BASE_SHA"
+          git config user.name trellis-validation
+          git config user.email actions@users.noreply.github.com
+          printf '%s\n' '${{ github.run_id }}' > .validation-failed
+          git add .validation-failed
+          git commit -m 'Record failed runtime SDK decoupling v2 validation'
+          git push --force origin HEAD:refs/heads/agent/failed-runtime-sdk-decouple-v2
