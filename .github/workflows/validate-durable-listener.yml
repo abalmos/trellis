@@ -1,0 +1,95 @@
+name: Validate durable listener cleanup
+
+on:
+  push:
+    branches:
+      - agent/validate-durable-listener-v2
+
+permissions:
+  contents: write
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out exact rs base
+        uses: actions/checkout@v4
+        with:
+          ref: cb0955fe194f988867b362a2614a15b8f8ce7a1d
+          fetch-depth: 0
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Prepare generated SDKs
+        run: cargo run --manifest-path rust/tools/generate/Cargo.toml -- prepare --no-npm .
+
+      - name: Require clean generated tree
+        run: git diff --exit-code
+
+      - name: Make durable listener registration atomic
+        shell: python
+        run: |
+          from pathlib import Path
+
+          path = Path("rust/crates/trellis/src/service/runtime_facade.rs")
+          source = path.read_text()
+          function = source.index("async fn listen_event_with_bindings")
+
+          open_registry = "    {\n        let mut listeners = event_listeners.lock().await;\n"
+          position = source.index(open_registry, function)
+          source = (
+              source[:position]
+              + "    let mut listeners = event_listeners.lock().await;\n"
+              + source[position + len(open_registry):]
+          )
+
+          close_registry = "        }\n    }\n\n    let subscribe_options = EventSubscribeOptions {\n"
+          if source.count(close_registry, position) != 1:
+              raise SystemExit("durable-listener registry closing block changed")
+          source = source.replace(
+              close_registry,
+              "        }\n\n    let subscribe_options = EventSubscribeOptions {\n",
+              1,
+          )
+
+          old_insert = "    event_listeners.lock().await.insert(\n"
+          if source.count(old_insert, position) != 1:
+              raise SystemExit("durable-listener insertion changed")
+          source = source.replace(old_insert, "    listeners.insert(\n", 1)
+
+          insert_end = "        },\n    );\n\n    Ok(ServiceEventListenerHandle::new(\n"
+          if source.count(insert_end, position) != 1:
+              raise SystemExit("durable-listener insertion tail changed")
+          source = source.replace(
+              insert_end,
+              "        },\n    );\n    drop(listeners);\n\n    Ok(ServiceEventListenerHandle::new(\n",
+              1,
+          )
+
+          path.write_text(source)
+
+      - name: Format
+        run: cargo fmt --manifest-path rust/Cargo.toml --all
+
+      - name: Check patch
+        run: |
+          git diff --check
+          test "$(git diff --name-only)" = "rust/crates/trellis/src/service/runtime_facade.rs"
+
+      - name: Check Trellis Rust facade
+        run: cargo check --manifest-path rust/Cargo.toml -p trellis-rs --all-targets
+
+      - name: Lint Trellis Rust facade
+        run: cargo clippy --manifest-path rust/Cargo.toml -p trellis-rs --all-targets -- -D warnings
+
+      - name: Test Trellis Rust facade
+        run: cargo test --manifest-path rust/Cargo.toml -p trellis-rs --lib
+
+      - name: Publish validated result branch
+        run: |
+          git config user.name "trellis-validation"
+          git config user.email "actions@users.noreply.github.com"
+          git add rust/crates/trellis/src/service/runtime_facade.rs
+          git commit -m "Make durable listener registration atomic"
+          git push --force origin HEAD:refs/heads/agent/result-durable-listener-v2
