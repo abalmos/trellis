@@ -110,8 +110,16 @@ def remove_matrix_cases(path: str, ids: set[str]) -> None:
     for start, end in reversed(remove_ranges):
         del lines[start : end + 1]
 
-    # If the final removed object had no comma, remove the previous object's comma.
-    # Conversely, when removing a non-final object the following object already has valid separation.
+    closing = next(i for i, line in enumerate(lines) if line.rstrip("\r\n") == "  ]")
+    last_case_end = next(
+        i
+        for i in range(closing - 1, -1, -1)
+        if lines[i].rstrip("\r\n") in {"    },", "    }"}
+    )
+    if lines[last_case_end].rstrip("\r\n") == "    },":
+        newline = "\r\n" if lines[last_case_end].endswith("\r\n") else "\n"
+        lines[last_case_end] = "    }" + newline
+
     text = "".join(lines)
     json.loads(text)
     p.write_text(text)
