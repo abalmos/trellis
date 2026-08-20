@@ -1,0 +1,23 @@
+name: Inventory generated auth SDK source uses
+on:
+  push:
+    branches: [agent/inventory-generated-sdk-deps-v1]
+permissions:
+  contents: write
+jobs:
+  inventory:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Inventory
+        shell: bash
+        run: |
+          {
+            grep -R -n -E 'trellis_sdk_auth|trellis-sdk-auth' rust --exclude='Cargo.lock' --exclude-dir=target || true
+          } > .generated-sdk-auth-uses
+          git config user.name trellis-validation
+          git config user.email actions@users.noreply.github.com
+          git add .generated-sdk-auth-uses
+          git commit -m 'Record generated auth SDK source uses'
+          git push --force origin HEAD:refs/heads/agent/result-generated-sdk-auth-uses-v1
