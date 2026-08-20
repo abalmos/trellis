@@ -33,6 +33,7 @@ jobs:
         run: |
           cp scripts/agent_wasm_boundary.py /tmp/agent_wasm_boundary.py
           cp scripts/agent_wasm_boundary_fix.py /tmp/agent_wasm_boundary_fix.py
+          cp scripts/agent_wasm_boundary_packaging.py /tmp/agent_wasm_boundary_packaging.py
           git config user.name trellis-validation
           git config user.email actions@users.noreply.github.com
           printf '%s\n' '${{ github.run_id }}' > .validation-running
@@ -55,6 +56,7 @@ jobs:
         run: |
           python /tmp/agent_wasm_boundary.py
           python /tmp/agent_wasm_boundary_fix.py
+          python /tmp/agent_wasm_boundary_packaging.py
 
       - name: Prepare SDKs and embedded portal without WASM
         run: cargo run --manifest-path rust/xtask/Cargo.toml -- prepare
@@ -88,7 +90,8 @@ jobs:
             ts/packages/trellis/deno.json \
             ts/packages/trellis/auth/protocol_wasm.ts \
             ts/packages/trellis/auth/authorization/provider_cache.ts \
-            ts/packages/trellis/auth/conformance_test.ts
+            ts/packages/trellis/auth/conformance_test.ts \
+            ts/packages/trellis/tests/npm_artifact_smoke_test.ts
 
       - name: Check patch hygiene
         run: git diff --check
