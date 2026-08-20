@@ -60,12 +60,14 @@ jobs:
       - name: Require root-cause cleanup
         shell: bash
         run: |
+          ! grep -q 'clippy::result_large_err' rust/crates/trellis/src/client/connection.rs
           ! grep -q 'clippy::large_enum_variant' rust/crates/trellis/src/client/operations.rs
           ! grep -q 'clippy::large_enum_variant' rust/crates/trellis/src/service/runtime_facade.rs
       - name: Commit validated source only
         shell: bash
         run: |
           git add rust/crates/trellis/src/client/error.rs \
+            rust/crates/trellis/src/client/connection.rs \
             rust/crates/trellis/src/client/operations.rs \
             rust/crates/trellis/src/service/runtime_facade.rs
           git diff --cached --check
