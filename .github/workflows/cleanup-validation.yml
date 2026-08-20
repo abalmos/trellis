@@ -60,7 +60,6 @@ jobs:
                   raise SystemExit(f"{path}: expected one regex match, got {count}")
               p.write_text(updated)
 
-          # The real SQLite rollback test replaces both synthetic Auth failure cases.
           matrix = "integration/rust-runtime-test-matrix.json"
           regex_once(
               matrix,
@@ -110,7 +109,6 @@ jobs:
               r'#\[tokio::test\]\nasync fn auth_transaction_failure_rolls_back_state_idempotency_and_actions\(\) \{.*?(?=#\[tokio::test\]\nasync fn portal_route_selection_and_policy_drive_browser_flow\(\))',
           )
 
-          # Delete one-shot provider/readiness failures; real infrastructure failures still retry.
           provider = "rust/crates/trellis/src/client/authorization/provider_cache.rs"
           replace_once(provider,
               '#[cfg(feature = "integration-test-scoping")]\nuse std::sync::atomic::AtomicBool;\n')
@@ -232,7 +230,6 @@ jobs:
 
           ''')
 
-          # Durable group registration is one tiny synchronous ownership critical section.
           facade = "rust/crates/trellis/src/service/runtime_facade.rs"
           replace_once(facade,
               'type SharedDurableEventListeners =\n    Arc<Mutex<BTreeMap<DurableEventListenerKey, SharedDurableEventListener>>>;',
@@ -335,7 +332,6 @@ jobs:
           source = source.replace('.lock()\n        .await\n        .get(key)', '.lock()\n        .unwrap_or_else(std::sync::PoisonError::into_inner)\n        .get(key)')
           p.write_text(source)
 
-          # Force simultaneous first registrations so the old unlock/spawn/insert race is deterministic.
           replace_once(events,
               'use tokio::sync::{oneshot, Mutex, Notify};',
               'use tokio::sync::{oneshot, Barrier, Mutex, Notify};')
@@ -535,3 +531,5 @@ jobs:
           git add .cleanup-validation-result
           git commit -m "Record consolidated cleanup validation: $VALIDATION_STATUS" || exit 0
           git push origin HEAD:refs/heads/agent/rs-auth-cleanup-runner
+
+# retrigger on abalmos/trellis fork
