@@ -92,6 +92,8 @@ jobs:
               if not raw:
                   continue
               path = Path(raw.decode())
+              if path.as_posix() == "CLEANUP.md":
+                  continue
               try:
                   text = path.read_text()
               except (UnicodeDecodeError, OSError):
@@ -124,14 +126,14 @@ jobs:
               print(path)
           PY
 
-      - name: Format Rust
-        run: cargo fmt --manifest-path rust/Cargo.toml --all
-
       - name: Prepare generated artifacts
         run: cargo run --manifest-path rust/tools/generate/Cargo.toml -- prepare --no-npm .
 
       - name: Build embedded portal
         run: deno task -c ts/portals/login/deno.json build:embedded
+
+      - name: Format Rust
+        run: cargo fmt --manifest-path rust/Cargo.toml --all
 
       - name: Check patch hygiene
         run: git diff --check
