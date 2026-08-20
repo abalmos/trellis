@@ -40,6 +40,11 @@ jobs:
         with:
           deno-version: 2.9.4
 
+      - name: Cache generator build
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: rust/tools/generate -> target
+
       - name: Prepare generated SDKs
         run: cargo run --manifest-path rust/tools/generate/Cargo.toml -- prepare --no-npm .
 
@@ -57,7 +62,7 @@ jobs:
         run: |
           git config user.name "trellis-validation"
           git config user.email "actions@users.noreply.github.com"
-          git add generated
+          git add -f generated
           git commit -m "Refresh generated contract artifacts"
           git push --force origin HEAD:refs/heads/agent/result-generated-sync-v1
 
