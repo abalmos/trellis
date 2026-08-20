@@ -2181,10 +2181,6 @@ impl OperationTransport for TrellisClient {
     }
 }
 
-#[expect(
-    clippy::result_large_err,
-    reason = "CallError is the public typed caller failure envelope"
-)]
 fn validate_caller_input<E>(schema_json: &str, value: &Value) -> Result<(), CallError<E>>
 where
     E: crate::client::DeclaredError,
@@ -2192,23 +2188,25 @@ where
     match crate::service::validate_input_schema(schema_json, value) {
         Ok(()) => Ok(()),
         Err(crate::service::ServerError::Validation { issues }) => Err(CallError::Validation(
-            crate::client::ValidationFailure::Validation(crate::client::ValidationErrorPayload {
-                id: "local".to_string(),
-                error_type: "ValidationError".to_string(),
-                message: "Input validation failed".to_string(),
-                issues: issues
-                    .into_iter()
-                    .map(|issue| crate::client::ValidationIssue {
-                        path: issue.path,
-                        message: issue.message,
-                    })
-                    .collect(),
-                context: None,
-                trace_id: None,
-            }),
+            Box::new(crate::client::ValidationFailure::Validation(
+                crate::client::ValidationErrorPayload {
+                    id: "local".to_string(),
+                    error_type: "ValidationError".to_string(),
+                    message: "Input validation failed".to_string(),
+                    issues: issues
+                        .into_iter()
+                        .map(|issue| crate::client::ValidationIssue {
+                            path: issue.path,
+                            message: issue.message,
+                        })
+                        .collect(),
+                    context: None,
+                    trace_id: None,
+                },
+            )),
         )),
         Err(crate::service::ServerError::SchemaValidation { issues }) => Err(
-            CallError::Validation(crate::client::ValidationFailure::Schema(
+            CallError::Validation(Box::new(crate::client::ValidationFailure::Schema(
                 crate::client::SchemaValidationErrorPayload {
                     id: "local".to_string(),
                     error_type: "SchemaValidationError".to_string(),
@@ -2231,7 +2229,7 @@ where
                     context: None,
                     trace_id: None,
                 },
-            )),
+            ))),
         ),
         Err(error) => Err(CallError::Protocol(crate::client::ProtocolError::new(
             error.to_string(),

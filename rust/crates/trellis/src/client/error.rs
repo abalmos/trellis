@@ -271,13 +271,13 @@ where
 {
     /// Contract-declared error.
     #[error("declared remote error: {0:?}")]
-    Declared(E),
+    Declared(Box<E>),
     /// Well-formed remote error not declared by this action.
     #[error("remote error: {}", .0.format_human())]
     Remote(RemoteErrorPayload),
     /// Standard validation failure.
     #[error("validation failed")]
-    Validation(ValidationFailure),
+    Validation(Box<ValidationFailure>),
     /// Request timeout.
     #[error("request timeout")]
     Timeout,
@@ -299,11 +299,13 @@ where
     pub(crate) fn from_client(error: TrellisClientError) -> Self {
         match error {
             TrellisClientError::RpcError(payload) => match E::decode(&payload) {
-                Ok(Some(error)) => Self::Declared(error),
+                Ok(Some(error)) => Self::Declared(Box::new(error)),
                 Ok(None) => match payload.decode_schema_validation() {
-                    Ok(Some(error)) => Self::Validation(ValidationFailure::Schema(error)),
+                    Ok(Some(error)) => Self::Validation(Box::new(ValidationFailure::Schema(error))),
                     Ok(None) => match payload.decode_validation() {
-                        Ok(Some(error)) => Self::Validation(ValidationFailure::Validation(error)),
+                        Ok(Some(error)) => {
+                            Self::Validation(Box::new(ValidationFailure::Validation(error)))
+                        }
                         Ok(None) if payload.error_type().is_some() => Self::Remote(payload),
                         Ok(None) => Self::Protocol(ProtocolError::new(
                             "remote error payload has no string type discriminator",

@@ -233,7 +233,7 @@ async fn prepared_events_prepared_publish_preserves_custom_headers_and_annotates
     match listener_error {
         ServiceRuntimeError::EventHandler { source, context } => {
             assert!(
-                matches!(source, ServerError::Nats(message) if message == "prepared handler denied")
+                matches!(*source, ServerError::Nats(message) if message == "prepared handler denied")
             );
             assert_eq!(context.id.as_deref(), Some(prepared.event_id()));
             assert_eq!(context.time.as_deref(), Some(prepared.event_time()));
