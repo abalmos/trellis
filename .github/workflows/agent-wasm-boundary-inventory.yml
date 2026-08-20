@@ -1,0 +1,40 @@
+name: Inventory WASM boundary callers
+
+on:
+  push:
+    branches:
+      - agent/fix-xtask-prepare-order-v1
+
+permissions:
+  contents: write
+
+jobs:
+  inventory:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Inventory callers
+        shell: bash
+        run: |
+          {
+            echo '## Rust verified authorization result uses'
+            git grep -n -E 'VerifiedAuthorization(Request|Event)|\.context\(\)|\.publisher\(\)' -- rust/crates/trellis rust/crates/runtime || true
+            echo
+            echo '## Protocol WASM source/package uses'
+            git grep -n -E 'protocol_wasm|verifyAuthorization(Context|Manifest|Request|Event).*Wasm|PROTOCOL_WASM_BASE64' -- ts .github rust/xtask || true
+            echo
+            echo '## Login portal references to Trellis auth/verifier modules'
+            git grep -n -E '@qlever-llc/trellis|auth/|protocol_wasm|verifyAuthorization' -- ts/portals/login || true
+          } > .wasm-boundary-inventory
+          cat .wasm-boundary-inventory
+      - name: Publish inventory
+        shell: bash
+        run: |
+          git config user.name trellis-validation
+          git config user.email actions@users.noreply.github.com
+          git add .wasm-boundary-inventory
+          git commit -m 'Record WASM boundary inventory'
+          git push --force origin HEAD:refs/heads/agent/result-wasm-boundary-inventory-v1
