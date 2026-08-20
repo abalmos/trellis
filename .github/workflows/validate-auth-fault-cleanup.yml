@@ -1,0 +1,243 @@
+name: Validate Auth fault cleanup
+
+on:
+  push:
+    branches:
+      - agent/validate-auth-fault-cleanup-v1
+
+permissions:
+  contents: write
+
+concurrency:
+  group: validate-auth-fault-cleanup-v1
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out exact rs base
+        uses: actions/checkout@v4
+        with:
+          ref: 08f9f9522f6d36e037a2fc44b91d98c7c020fb16
+          fetch-depth: 0
+
+      - name: Publish running run id
+        run: |
+          git config user.name "trellis-validation"
+          git config user.email "actions@users.noreply.github.com"
+          printf '%s\n' '${{ github.run_id }}' > .validation-running
+          git add .validation-running
+          git commit -m "Record Auth cleanup validation run"
+          git push --force origin HEAD:refs/heads/agent/running-auth-fault-cleanup-v1
+          git reset --hard 08f9f9522f6d36e037a2fc44b91d98c7c020fb16
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Set up Deno
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: 2.9.4
+
+      - name: Cache generator build
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: rust/tools/generate -> target
+
+      - name: Prepare generated SDKs
+        run: cargo run --manifest-path rust/tools/generate/Cargo.toml -- prepare --no-npm .
+
+      - name: Require clean generated tree
+        run: git diff --exit-code
+
+      - name: Remove synthetic Auth failures
+        shell: python
+        run: |
+          from pathlib import Path
+          import json
+
+          def remove_test(path: str, name: str) -> None:
+              p = Path(path)
+              source = p.read_text()
+              needle = f"async fn {name}()"
+              index = source.index(needle)
+              start = source.rfind("\n#[tokio::test]", 0, index)
+              if start < 0:
+                  raise SystemExit(f"missing test attribute for {name}")
+              start += 1
+              next_test = source.find("\n#[tokio::test]", index)
+              if next_test < 0:
+                  raise SystemExit(f"missing following test after {name}")
+              p.write_text(source[:start] + source[next_test + 1:])
+
+          def remove_fn(path: str, signature: str) -> None:
+              p = Path(path)
+              source = p.read_text()
+              index = source.index(signature)
+              start = source.rfind("\n", 0, index) + 1
+              while start > 0:
+                  previous_end = start - 1
+                  previous_start = source.rfind("\n", 0, previous_end) + 1
+                  previous = source[previous_start:previous_end].strip()
+                  if previous.startswith("///") or previous.startswith("#["):
+                      start = previous_start
+                  else:
+                      break
+              brace = source.index("{", index)
+              depth = 0
+              end = None
+              for offset in range(brace, len(source)):
+                  char = source[offset]
+                  if char == "{":
+                      depth += 1
+                  elif char == "}":
+                      depth -= 1
+                      if depth == 0:
+                          end = offset + 1
+                          break
+              if end is None:
+                  raise SystemExit(f"unclosed function {signature}")
+              while end < len(source) and source[end] == "\n":
+                  end += 1
+              p.write_text(source[:start] + source[end:])
+
+          def remove_matrix_cases(path: str, ids: set[str]) -> None:
+              p = Path(path)
+              source = p.read_text()
+              lines = source.splitlines(keepends=True)
+              starts = [i for i, line in enumerate(lines) if line.rstrip("\r\n") == "    {"]
+              if not starts:
+                  raise SystemExit("runtime matrix has no top-level cases")
+              cases = []
+              last_end = None
+              for start in starts:
+                  end = None
+                  for i in range(start, len(lines)):
+                      stripped = lines[i].rstrip("\r\n")
+                      if stripped in {"    },", "    }"}:
+                          end = i
+                          break
+                  if end is None:
+                      raise SystemExit("unterminated runtime matrix case")
+                  raw = "".join(lines[start:end + 1])
+                  if raw.rstrip().endswith("},"):
+                      pos = raw.rfind("},")
+                      raw = raw[:pos + 1] + raw[pos + 2:]
+                  parsed = json.loads(raw)
+                  cases.append((raw.rstrip("\r\n"), parsed["id"], start, end))
+                  last_end = end
+              found = {case_id for _, case_id, _, _ in cases if case_id in ids}
+              if found != ids:
+                  raise SystemExit(f"matrix cases changed: expected {ids}, found {found}")
+              kept = [raw for raw, case_id, _, _ in cases if case_id not in ids]
+              prefix = "".join(lines[:starts[0]])
+              suffix = "".join(lines[last_end + 1:])
+              updated = prefix + ",\n".join(kept) + "\n" + suffix
+              json.loads(updated)
+              p.write_text(updated)
+
+          auth_tests = "rust/crates/trellis/tests/integration/auth.rs"
+          remove_test(auth_tests, "auth_transaction_failure_rolls_back_state_idempotency_and_actions")
+          remove_test(auth_tests, "auth_post_commit_failure_retries_committed_context_revocation_once")
+
+          test_support = "rust/crates/trellis-test/src/lib.rs"
+          remove_fn(test_support, "pub fn fail_user_update_transaction(")
+          remove_fn(test_support, "pub fn clear_user_update_transaction_failure(")
+          remove_fn(test_support, "pub fn fail_next_context_revocation_dispatch(")
+
+          remove_fn(
+              "rust/crates/runtime/src/platform/auth/sqlite/common.rs",
+              "pub(crate) async fn consume_test_post_commit_failure(",
+          )
+
+          post_commit = Path("rust/crates/runtime/src/platform/auth_post_commit.rs")
+          source = post_commit.read_text()
+          injected = '''        #[cfg(feature = "integration-test-hooks")]
+          if self
+              .repository
+              .consume_test_post_commit_failure(&action.action_id)
+              .await?
+          {
+              let delay = retry_delay_ms(action.attempts);
+              self.repository
+                  .fail_post_commit_action(
+                      &action.action_id,
+                      claimed_until,
+                      now.saturating_add(delay),
+                      "injected integration-test dispatch failure".to_owned(),
+                  )
+                  .await?;
+              return Ok(());
+          }
+          '''
+          if source.count(injected) != 1:
+              raise SystemExit("post-commit injection block changed")
+          post_commit.write_text(source.replace(injected, "", 1))
+
+          remove_matrix_cases(
+              "integration/rust-runtime-test-matrix.json",
+              {
+                  "auth.transaction-failure-rolls-back-state-idempotency-and-actions",
+                  "auth.post-commit-failure-retries-committed-context-revocation-once",
+              },
+          )
+
+      - name: Format and validate patch
+        run: |
+          cargo fmt --manifest-path rust/Cargo.toml --all
+          git diff --check
+          python -m json.tool integration/rust-runtime-test-matrix.json >/dev/null
+          test "$(git diff --name-only | sort)" = "$(printf '%s\n' \
+            integration/rust-runtime-test-matrix.json \
+            rust/crates/runtime/src/platform/auth/sqlite/common.rs \
+            rust/crates/runtime/src/platform/auth_post_commit.rs \
+            rust/crates/trellis-test/src/lib.rs \
+            rust/crates/trellis/tests/integration/auth.rs | sort)"
+          ! grep -R -n --exclude-dir=target \
+            -e 'fail_user_update_transaction' \
+            -e 'clear_user_update_transaction_failure' \
+            -e 'fail_next_context_revocation_dispatch' \
+            -e 'consume_test_post_commit_failure' \
+            -e 'auth.transaction-failure-rolls-back-state-idempotency-and-actions' \
+            -e 'auth.post-commit-failure-retries-committed-context-revocation-once' \
+            rust integration
+
+      - name: Test real SQLite rollback
+        run: cargo test --manifest-path rust/Cargo.toml -p trellis-runtime rollback_tests:: --lib
+
+      - name: Check affected Rust crates
+        run: >-
+          cargo check --manifest-path rust/Cargo.toml
+          -p trellis-runtime -p trellis-test -p trellis-rs --all-targets
+
+      - name: Lint affected Rust crates
+        run: >-
+          cargo clippy --manifest-path rust/Cargo.toml
+          -p trellis-runtime -p trellis-test -p trellis-rs --all-targets -- -D warnings
+
+      - name: Compile Rust live integration suite
+        run: cargo test --manifest-path rust/Cargo.toml -p trellis-rs --test integration --no-run
+
+      - name: Publish validated result branch
+        run: |
+          git config user.name "trellis-validation"
+          git config user.email "actions@users.noreply.github.com"
+          git add integration/rust-runtime-test-matrix.json \
+            rust/crates/runtime/src/platform/auth/sqlite/common.rs \
+            rust/crates/runtime/src/platform/auth_post_commit.rs \
+            rust/crates/trellis-test/src/lib.rs \
+            rust/crates/trellis/tests/integration/auth.rs
+          git commit -m "Remove synthetic Auth failure injection"
+          git push --force origin HEAD:refs/heads/agent/result-auth-fault-cleanup-v1
+
+      - name: Publish failure run id
+        if: failure()
+        run: |
+          git reset --hard 08f9f9522f6d36e037a2fc44b91d98c7c020fb16
+          git config user.name "trellis-validation"
+          git config user.email "actions@users.noreply.github.com"
+          printf '%s\n' '${{ github.run_id }}' > .validation-failed
+          git add .validation-failed
+          git commit -m "Record failed Auth cleanup validation"
+          git push --force origin HEAD:refs/heads/agent/failed-auth-fault-cleanup-v1
