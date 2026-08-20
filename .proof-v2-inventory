@@ -1,0 +1,203 @@
+# proof-v2 inventory
+
+rust/crates/protocol-wasm/src/lib.rs:13:    verify_authorization_event_v2 as verify_authorization_event_v2_protocol,
+rust/crates/protocol-wasm/src/lib.rs:14:    verify_authorization_request_v2 as verify_authorization_request_v2_protocol,
+rust/crates/protocol-wasm/src/lib.rs:15:    verify_issuer_manifest_v1, verify_session_proof_v1, AuthorizationEventProofV2,
+rust/crates/protocol-wasm/src/lib.rs:16:    AuthorizationEventPublisherV2, AuthorizationRequestProofV2, AuthorizationTrustRootV1,
+rust/crates/protocol-wasm/src/lib.rs:258:struct WireAuthorizationRequestV2 {
+rust/crates/protocol-wasm/src/lib.rs:275:struct WireAuthorizationEventV2 {
+rust/crates/protocol-wasm/src/lib.rs:535:fn request_result(input: WireAuthorizationRequestV2) -> String {
+rust/crates/protocol-wasm/src/lib.rs:545:    let proof = match AuthorizationRequestProofV2::parse(input.proof) {
+rust/crates/protocol-wasm/src/lib.rs:549:    let verified = match verify_authorization_request_v2_protocol(
+rust/crates/protocol-wasm/src/lib.rs:571:fn event_publisher_projection(publisher: &AuthorizationEventPublisherV2) -> Value {
+rust/crates/protocol-wasm/src/lib.rs:582:fn event_result(input: WireAuthorizationEventV2) -> String {
+rust/crates/protocol-wasm/src/lib.rs:592:    let proof = match AuthorizationEventProofV2::parse(input.proof) {
+rust/crates/protocol-wasm/src/lib.rs:596:    let verified = match verify_authorization_event_v2_protocol(
+rust/crates/protocol-wasm/src/lib.rs:625:pub fn verify_authorization_request_v2(request_json: &str) -> String {
+rust/crates/protocol-wasm/src/lib.rs:626:    let input: WireAuthorizationRequestV2 = match serde_json::from_str(request_json) {
+rust/crates/protocol-wasm/src/lib.rs:641:pub fn verify_authorization_event_v2(event_json: &str) -> String {
+rust/crates/protocol-wasm/src/lib.rs:642:    let input: WireAuthorizationEventV2 = match serde_json::from_str(event_json) {
+rust/crates/protocol-wasm/src/lib.rs:805:        let valid = verify_authorization_request_v2(
+rust/crates/protocol-wasm/src/lib.rs:831:            let result = verify_authorization_request_v2(
+rust/crates/protocol-wasm/src/lib.rs:840:        let outside_reply = verify_authorization_request_v2(
+rust/crates/protocol-wasm/src/lib.rs:854:        let missing_permission = verify_authorization_request_v2(
+rust/crates/protocol-wasm/src/lib.rs:882:        let valid_event = verify_authorization_event_v2(&serde_json::to_string(&event).unwrap());
+rust/crates/protocol-wasm/src/lib.rs:889:        let revoked = verify_authorization_event_v2(&serde_json::to_string(&revoked).unwrap());
+rust/crates/protocol-wasm/src/lib.rs:898:            verify_authorization_event_v2(&serde_json::to_string(&historical_window).unwrap());
+rust/crates/trellis/src/client/transfer.rs:278:    use trellis_protocol::build_authorization_request_proof_input_v2;
+rust/crates/trellis/src/client/transfer.rs:316:        let input = build_authorization_request_proof_input_v2(
+rust/crates/trellis/src/client/auth.rs:4:    sign_authorization_event_v2, sign_authorization_request_v2, sign_session_proof_v1,
+rust/crates/trellis/src/client/auth.rs:5:    AuthorizationEventProofV2, AuthorizationRequestProofV2, SessionProofInputV1, SessionProofV1,
+rust/crates/trellis/src/client/auth.rs:99:    ) -> Result<AuthorizationRequestProofV2, TrellisClientError> {
+rust/crates/trellis/src/client/auth.rs:105:        sign_authorization_request_v2(
+rust/crates/trellis/src/client/auth.rs:126:    ) -> Result<AuthorizationEventProofV2, TrellisClientError> {
+rust/crates/trellis/src/client/auth.rs:127:        sign_authorization_event_v2(
+rust/crates/trellis/src/client/proof.rs:61:    let input = trellis_protocol::build_authorization_event_proof_input_v2(
+rust/crates/trellis/src/client/authorization/core.rs:2:    verify_authorization_event_v2, verify_authorization_request_v2, AuthorizationEventProofV2,
+rust/crates/trellis/src/client/authorization/core.rs:3:    AuthorizationEventPublisherV2, AuthorizationRequestProofV2, AuthorizationVerificationPolicyV1,
+rust/crates/trellis/src/client/authorization/core.rs:4:    PermissionAtomV1, ProtocolError, VerifiedAuthorizationContextV1, VerifiedAuthorizationEventV2,
+rust/crates/trellis/src/client/authorization/core.rs:5:    VerifiedAuthorizationRequestV2,
+rust/crates/trellis/src/client/authorization/core.rs:52:    request: VerifiedAuthorizationRequestV2,
+rust/crates/trellis/src/client/authorization/core.rs:71:    event: VerifiedAuthorizationEventV2,
+rust/crates/trellis/src/client/authorization/core.rs:76:    pub fn publisher(&self) -> &AuthorizationEventPublisherV2 {
+rust/crates/trellis/src/client/authorization/core.rs:118:        let proof = AuthorizationRequestProofV2::parse(proof.to_owned())?;
+rust/crates/trellis/src/client/authorization/core.rs:119:        let request = verify_authorization_request_v2(
+rust/crates/trellis/src/client/authorization/core.rs:155:        let proof = AuthorizationEventProofV2::parse(proof.to_owned())?;
+rust/crates/trellis/src/client/authorization/core.rs:156:        let event = verify_authorization_event_v2(
+rust/crates/trellis/src/client/tests.rs:10:    build_authorization_event_proof_input_v2, build_authorization_request_proof_input_v2,
+rust/crates/trellis/src/client/tests.rs:11:    AuthorizationEventProofV2, AuthorizationRequestProofV2,
+rust/crates/trellis/src/client/tests.rs:138:    let proof: AuthorizationRequestProofV2 = auth
+rust/crates/trellis/src/client/tests.rs:152:    let input = build_authorization_request_proof_input_v2(
+rust/crates/trellis/src/client/tests.rs:207:    let input = build_authorization_request_proof_input_v2(
+rust/crates/trellis/src/client/tests.rs:241:    let proof: AuthorizationEventProofV2 = auth
+rust/crates/trellis/src/client/tests.rs:254:    let input = build_authorization_event_proof_input_v2(
+rust/crates/protocol/src/authorization.rs:27://!     sign_authorization_context_v1, sign_authorization_event_v2, sign_authorization_request_v2,
+rust/crates/protocol/src/authorization.rs:29://!     verify_authorization_context_v1, verify_authorization_event_v2,
+rust/crates/protocol/src/authorization.rs:30://!     verify_authorization_request_v2,
+rust/crates/protocol/src/authorization.rs:117://! let proof = sign_authorization_request_v2(
+rust/crates/protocol/src/authorization.rs:126://! let request = verify_authorization_request_v2(
+rust/crates/protocol/src/authorization.rs:139://! let event_proof = sign_authorization_event_v2(
+rust/crates/protocol/src/authorization.rs:147://! let event = verify_authorization_event_v2(
+rust/crates/protocol/src/authorization.rs:183:pub const AUTHORIZATION_REQUEST_PROOF_DOMAIN_V2: &str = "trellis.authorization-request-proof.v2";
+rust/crates/protocol/src/authorization.rs:185:pub const AUTHORIZATION_EVENT_PROOF_DOMAIN_V2: &str = "trellis.authorization-event-proof.v2";
+rust/crates/protocol/src/authorization.rs:1634:pub struct AuthorizationRequestProofInputV2 {
+rust/crates/protocol/src/authorization.rs:1639:impl AuthorizationRequestProofInputV2 {
+rust/crates/protocol/src/authorization.rs:1653:pub struct AuthorizationRequestProofV2(String);
+rust/crates/protocol/src/authorization.rs:1655:impl AuthorizationRequestProofV2 {
+rust/crates/protocol/src/authorization.rs:1686:pub fn build_authorization_request_proof_input_v2(
+rust/crates/protocol/src/authorization.rs:1693:) -> Result<AuthorizationRequestProofInputV2, ProtocolError> {
+rust/crates/protocol/src/authorization.rs:1699:        AUTHORIZATION_REQUEST_PROOF_DOMAIN_V2.as_bytes(),
+rust/crates/protocol/src/authorization.rs:1710:    Ok(AuthorizationRequestProofInputV2 { bytes, digest })
+rust/crates/protocol/src/authorization.rs:1719:pub fn sign_authorization_request_v2(
+rust/crates/protocol/src/authorization.rs:1727:) -> Result<AuthorizationRequestProofV2, ProtocolError> {
+rust/crates/protocol/src/authorization.rs:1743:    let input = build_authorization_request_proof_input_v2(
+rust/crates/protocol/src/authorization.rs:1751:    Ok(AuthorizationRequestProofV2(encode_base64url(
+rust/crates/protocol/src/authorization.rs:1758:pub struct VerifiedAuthorizationRequestV2 {
+rust/crates/protocol/src/authorization.rs:1762:impl VerifiedAuthorizationRequestV2 {
+rust/crates/protocol/src/authorization.rs:1780:pub fn verify_authorization_request_v2(
+rust/crates/protocol/src/authorization.rs:1787:    proof: &AuthorizationRequestProofV2,
+rust/crates/protocol/src/authorization.rs:1791:) -> Result<VerifiedAuthorizationRequestV2, ProtocolError> {
+rust/crates/protocol/src/authorization.rs:1857:    let input = build_authorization_request_proof_input_v2(
+rust/crates/protocol/src/authorization.rs:1880:    Ok(VerifiedAuthorizationRequestV2 {
+rust/crates/protocol/src/authorization.rs:1887:pub struct AuthorizationEventProofInputV2 {
+rust/crates/protocol/src/authorization.rs:1892:impl AuthorizationEventProofInputV2 {
+rust/crates/protocol/src/authorization.rs:1906:pub struct AuthorizationEventProofV2(String);
+rust/crates/protocol/src/authorization.rs:1908:impl AuthorizationEventProofV2 {
+rust/crates/protocol/src/authorization.rs:1933:pub struct AuthorizationEventPublisherV2 {
+rust/crates/protocol/src/authorization.rs:1950:pub struct VerifiedAuthorizationEventV2 {
+rust/crates/protocol/src/authorization.rs:1952:    publisher: AuthorizationEventPublisherV2,
+rust/crates/protocol/src/authorization.rs:1955:impl VerifiedAuthorizationEventV2 {
+rust/crates/protocol/src/authorization.rs:1962:    pub fn publisher(&self) -> &AuthorizationEventPublisherV2 {
+rust/crates/protocol/src/authorization.rs:2007:pub fn build_authorization_event_proof_input_v2(
+rust/crates/protocol/src/authorization.rs:2013:) -> Result<AuthorizationEventProofInputV2, ProtocolError> {
+rust/crates/protocol/src/authorization.rs:2017:        AUTHORIZATION_EVENT_PROOF_DOMAIN_V2.as_bytes(),
+rust/crates/protocol/src/authorization.rs:2027:    Ok(AuthorizationEventProofInputV2 { bytes, digest })
+rust/crates/protocol/src/authorization.rs:2036:pub fn sign_authorization_event_v2(
+rust/crates/protocol/src/authorization.rs:2043:) -> Result<AuthorizationEventProofV2, ProtocolError> {
+rust/crates/protocol/src/authorization.rs:2059:    let input = build_authorization_event_proof_input_v2(
+rust/crates/protocol/src/authorization.rs:2066:    Ok(AuthorizationEventProofV2(encode_base64url(
+rust/crates/protocol/src/authorization.rs:2087:pub fn verify_authorization_event_v2(
+rust/crates/protocol/src/authorization.rs:2093:    proof: &AuthorizationEventProofV2,
+rust/crates/protocol/src/authorization.rs:2098:) -> Result<VerifiedAuthorizationEventV2, ProtocolError> {
+rust/crates/protocol/src/authorization.rs:2156:    let input = build_authorization_event_proof_input_v2(
+rust/crates/protocol/src/authorization.rs:2178:    let publisher = AuthorizationEventPublisherV2 {
+rust/crates/protocol/src/authorization.rs:2191:    Ok(VerifiedAuthorizationEventV2 {
+rust/crates/protocol/src/authorization.rs:2304:        let request_proof = sign_authorization_request_v2(
+rust/crates/protocol/src/authorization.rs:2314:        let event_proof = sign_authorization_event_v2(
+rust/crates/protocol/src/authorization.rs:2325:        verify_authorization_request_v2(
+rust/crates/protocol/src/authorization.rs:2339:        verify_authorization_event_v2(
+rust/crates/protocol/src/lib.rs:286:    build_authorization_event_proof_input_v2, build_authorization_request_proof_input_v2,
+rust/crates/protocol/src/lib.rs:288:    sign_authorization_context_v1, sign_authorization_event_v2, sign_authorization_request_v2,
+rust/crates/protocol/src/lib.rs:289:    sign_issuer_manifest_v1, verify_authorization_context_v1, verify_authorization_event_v2,
+rust/crates/protocol/src/lib.rs:290:    verify_authorization_request_v2, verify_issuer_manifest_v1, AuthorizationAuthorityKindV1,
+rust/crates/protocol/src/lib.rs:291:    AuthorizationAuthorityRefV1, AuthorizationEventProofInputV2, AuthorizationEventProofV2,
+rust/crates/protocol/src/lib.rs:292:    AuthorizationEventPublisherV2, AuthorizationIssuerManifestEntryV1, AuthorizationParticipantV1,
+rust/crates/protocol/src/lib.rs:293:    AuthorizationPrincipalKindV1, AuthorizationPrincipalV1, AuthorizationRequestProofInputV2,
+rust/crates/protocol/src/lib.rs:294:    AuthorizationRequestProofV2, AuthorizationTrustRootV1, AuthorizationVerificationPolicyV1,
+rust/crates/protocol/src/lib.rs:297:    VerifiedAuthorizationContextV1, VerifiedAuthorizationEventV2,
+rust/crates/protocol/src/lib.rs:298:    VerifiedAuthorizationIssuerManifestV1, VerifiedAuthorizationRequestV2,
+rust/crates/protocol/src/lib.rs:299:    AUTHORIZATION_CONTEXT_FORMAT_V1, AUTHORIZATION_EVENT_PROOF_DOMAIN_V2,
+rust/crates/protocol/src/lib.rs:300:    AUTHORIZATION_ISSUER_MANIFEST_FORMAT_V1, AUTHORIZATION_REQUEST_PROOF_DOMAIN_V2,
+rust/crates/runtime/src/platform/auth/verifier.rs:18:    AuthorizationEventPublisherV2, PermissionAtomV1, VerifiedAuthorizationContextV1,
+rust/crates/runtime/src/platform/auth/verifier.rs:284:    ) -> Result<AuthorizationEventPublisherV2, trellis_rs::service::EventVerificationFailure> {
+ts/packages/trellis/auth/proof.ts:28:const REQUEST_PROOF_DOMAIN = utf8("trellis.authorization-request-proof.v2");
+ts/packages/trellis/auth/proof.ts:29:const EVENT_PROOF_DOMAIN = utf8("trellis.authorization-event-proof.v2");
+ts/packages/trellis/auth/protocol_wasm.ts:13:  verify_authorization_event_v2(inputJson: string): string;
+ts/packages/trellis/auth/protocol_wasm.ts:14:  verify_authorization_request_v2(inputJson: string): string;
+ts/packages/trellis/auth/protocol_wasm.ts:208:export type VerifyAuthorizationRequestV2Result =
+ts/packages/trellis/auth/protocol_wasm.ts:213:export type VerifyAuthorizationEventV2Result =
+ts/packages/trellis/auth/protocol_wasm.ts:218:export type VerifyAuthorizationRequestV2Args =
+ts/packages/trellis/auth/protocol_wasm.ts:233:export type VerifyAuthorizationEventV2Args =
+ts/packages/trellis/auth/protocol_wasm.ts:408:export async function verifyAuthorizationRequestV2Wasm(
+ts/packages/trellis/auth/protocol_wasm.ts:409:  args: VerifyAuthorizationRequestV2Args,
+ts/packages/trellis/auth/protocol_wasm.ts:410:): Promise<VerifyAuthorizationRequestV2Result> {
+ts/packages/trellis/auth/protocol_wasm.ts:414:    protocolWasm.verify_authorization_request_v2(
+ts/packages/trellis/auth/protocol_wasm.ts:422:  ) as VerifyAuthorizationRequestV2Result;
+ts/packages/trellis/auth/protocol_wasm.ts:426:export async function verifyAuthorizationEventV2Wasm(
+ts/packages/trellis/auth/protocol_wasm.ts:427:  args: VerifyAuthorizationEventV2Args,
+ts/packages/trellis/auth/protocol_wasm.ts:428:): Promise<VerifyAuthorizationEventV2Result> {
+ts/packages/trellis/auth/protocol_wasm.ts:432:    protocolWasm.verify_authorization_event_v2(
+ts/packages/trellis/auth/protocol_wasm.ts:440:  ) as VerifyAuthorizationEventV2Result;
+ts/packages/trellis/auth/protocol_wasm/trellis_protocol_wasm.js:130:export function verify_authorization_event_v2(event_json) {
+ts/packages/trellis/auth/protocol_wasm/trellis_protocol_wasm.js:136:        const ret = wasm.verify_authorization_event_v2(ptr0, len0);
+ts/packages/trellis/auth/protocol_wasm/trellis_protocol_wasm.js:186:export function verify_authorization_request_v2(request_json) {
+ts/packages/trellis/auth/protocol_wasm/trellis_protocol_wasm.js:192:        const ret = wasm.verify_authorization_request_v2(ptr0, len0);
+ts/packages/trellis/auth/authorization/provider_cache.ts:9:  type VerifyAuthorizationEventV2Args,
+ts/packages/trellis/auth/authorization/provider_cache.ts:10:  type VerifyAuthorizationEventV2Result,
+ts/packages/trellis/auth/authorization/provider_cache.ts:11:  verifyAuthorizationEventV2Wasm,
+ts/packages/trellis/auth/authorization/provider_cache.ts:13:  type VerifyAuthorizationRequestV2Args,
+ts/packages/trellis/auth/authorization/provider_cache.ts:14:  type VerifyAuthorizationRequestV2Result,
+ts/packages/trellis/auth/authorization/provider_cache.ts:15:  verifyAuthorizationRequestV2Wasm,
+ts/packages/trellis/auth/authorization/provider_cache.ts:315:  ): Promise<VerifyAuthorizationRequestV2Result> {
+ts/packages/trellis/auth/authorization/provider_cache.ts:319:      const result = await verifyAuthorizationRequestV2Wasm(
+ts/packages/trellis/auth/authorization/provider_cache.ts:338:  ): Promise<VerifyAuthorizationEventV2Result> {
+ts/packages/trellis/auth/authorization/provider_cache.ts:344:      const result = await verifyAuthorizationEventV2Wasm(
+ts/packages/trellis/auth/authorization/provider_cache.ts:723:  ): Promise<VerifyAuthorizationRequestV2Args> {
+ts/packages/trellis/auth/authorization/provider_cache.ts:745:  ): Promise<VerifyAuthorizationEventV2Args> {
+ts/packages/trellis/session.ts:212:type VerifyAuthorizationRequestV2ResultLike =
+ts/packages/trellis/session.ts:215:type VerifyAuthorizationEventV2ResultLike =
+ts/packages/trellis/session.ts:216:  VerifyAuthorizationRequestV2ResultLike;
+ts/packages/trellis/session.ts:248:    | VerifyAuthorizationRequestV2ResultLike
+ts/packages/trellis/session.ts:249:    | VerifyAuthorizationEventV2ResultLike;
+ts/packages/trellis/session.ts:543:    "trellis.authorization-request-proof.v2",
+design/auth/auth-protocol.md:275:LP("trellis.authorization-request-proof.v2")
+demos/ts/@qlever-llc/trellis/auth/proof.ts:28:const REQUEST_PROOF_DOMAIN = utf8("trellis.authorization-request-proof.v2");
+demos/ts/@qlever-llc/trellis/auth/proof.ts:29:const EVENT_PROOF_DOMAIN = utf8("trellis.authorization-event-proof.v2");
+demos/ts/@qlever-llc/trellis/auth/protocol_wasm.ts:13:  verify_authorization_event_v2(inputJson: string): string;
+demos/ts/@qlever-llc/trellis/auth/protocol_wasm.ts:14:  verify_authorization_request_v2(inputJson: string): string;
+demos/ts/@qlever-llc/trellis/auth/protocol_wasm.ts:208:export type VerifyAuthorizationRequestV2Result =
+demos/ts/@qlever-llc/trellis/auth/protocol_wasm.ts:213:export type VerifyAuthorizationEventV2Result =
+demos/ts/@qlever-llc/trellis/auth/protocol_wasm.ts:218:export type VerifyAuthorizationRequestV2Args =
+demos/ts/@qlever-llc/trellis/auth/protocol_wasm.ts:233:export type VerifyAuthorizationEventV2Args =
+demos/ts/@qlever-llc/trellis/auth/protocol_wasm.ts:408:export async function verifyAuthorizationRequestV2Wasm(
+demos/ts/@qlever-llc/trellis/auth/protocol_wasm.ts:409:  args: VerifyAuthorizationRequestV2Args,
+demos/ts/@qlever-llc/trellis/auth/protocol_wasm.ts:410:): Promise<VerifyAuthorizationRequestV2Result> {
+demos/ts/@qlever-llc/trellis/auth/protocol_wasm.ts:414:    protocolWasm.verify_authorization_request_v2(
+demos/ts/@qlever-llc/trellis/auth/protocol_wasm.ts:422:  ) as VerifyAuthorizationRequestV2Result;
+demos/ts/@qlever-llc/trellis/auth/protocol_wasm.ts:426:export async function verifyAuthorizationEventV2Wasm(
+demos/ts/@qlever-llc/trellis/auth/protocol_wasm.ts:427:  args: VerifyAuthorizationEventV2Args,
+demos/ts/@qlever-llc/trellis/auth/protocol_wasm.ts:428:): Promise<VerifyAuthorizationEventV2Result> {
+demos/ts/@qlever-llc/trellis/auth/protocol_wasm.ts:432:    protocolWasm.verify_authorization_event_v2(
+demos/ts/@qlever-llc/trellis/auth/protocol_wasm.ts:440:  ) as VerifyAuthorizationEventV2Result;
+demos/ts/@qlever-llc/trellis/auth/protocol_wasm/trellis_protocol_wasm.js:130:export function verify_authorization_event_v2(event_json) {
+demos/ts/@qlever-llc/trellis/auth/protocol_wasm/trellis_protocol_wasm.js:136:        const ret = wasm.verify_authorization_event_v2(ptr0, len0);
+demos/ts/@qlever-llc/trellis/auth/protocol_wasm/trellis_protocol_wasm.js:186:export function verify_authorization_request_v2(request_json) {
+demos/ts/@qlever-llc/trellis/auth/protocol_wasm/trellis_protocol_wasm.js:192:        const ret = wasm.verify_authorization_request_v2(ptr0, len0);
+demos/ts/@qlever-llc/trellis/auth/authorization/provider_cache.ts:9:  type VerifyAuthorizationEventV2Args,
+demos/ts/@qlever-llc/trellis/auth/authorization/provider_cache.ts:10:  type VerifyAuthorizationEventV2Result,
+demos/ts/@qlever-llc/trellis/auth/authorization/provider_cache.ts:11:  verifyAuthorizationEventV2Wasm,
+demos/ts/@qlever-llc/trellis/auth/authorization/provider_cache.ts:13:  type VerifyAuthorizationRequestV2Args,
+demos/ts/@qlever-llc/trellis/auth/authorization/provider_cache.ts:14:  type VerifyAuthorizationRequestV2Result,
+demos/ts/@qlever-llc/trellis/auth/authorization/provider_cache.ts:15:  verifyAuthorizationRequestV2Wasm,
+demos/ts/@qlever-llc/trellis/auth/authorization/provider_cache.ts:315:  ): Promise<VerifyAuthorizationRequestV2Result> {
+demos/ts/@qlever-llc/trellis/auth/authorization/provider_cache.ts:319:      const result = await verifyAuthorizationRequestV2Wasm(
+demos/ts/@qlever-llc/trellis/auth/authorization/provider_cache.ts:338:  ): Promise<VerifyAuthorizationEventV2Result> {
+demos/ts/@qlever-llc/trellis/auth/authorization/provider_cache.ts:344:      const result = await verifyAuthorizationEventV2Wasm(
+demos/ts/@qlever-llc/trellis/auth/authorization/provider_cache.ts:723:  ): Promise<VerifyAuthorizationRequestV2Args> {
+demos/ts/@qlever-llc/trellis/auth/authorization/provider_cache.ts:745:  ): Promise<VerifyAuthorizationEventV2Args> {
+demos/ts/@qlever-llc/trellis/session.ts:212:type VerifyAuthorizationRequestV2ResultLike =
+demos/ts/@qlever-llc/trellis/session.ts:215:type VerifyAuthorizationEventV2ResultLike =
+demos/ts/@qlever-llc/trellis/session.ts:216:  VerifyAuthorizationRequestV2ResultLike;
+demos/ts/@qlever-llc/trellis/session.ts:248:    | VerifyAuthorizationRequestV2ResultLike
+demos/ts/@qlever-llc/trellis/session.ts:249:    | VerifyAuthorizationEventV2ResultLike;
+demos/ts/@qlever-llc/trellis/session.ts:543:    "trellis.authorization-request-proof.v2",
