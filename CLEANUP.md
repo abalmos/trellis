@@ -100,8 +100,9 @@ Validation:
 
 - [x] Delete the custom release lint-exception registry.
 - [x] Remove one concrete `too_many_arguments` cause with the `ActiveJob` callback-adapter deletion.
+- [x] Remove the `client::client` module inception and its Clippy suppression by naming the private implementation module `connection` (`88da68fc`).
 - [ ] Fix remaining `too_many_arguments` causes through cohesive inputs/ownership instead of adding suppressions.
-- [ ] Fix `result_large_err`, `large_enum_variant`, `module_inception`, and test-only `dead_code` causes where the design can be made simpler.
+- [ ] Fix `result_large_err`, `large_enum_variant`, and test-only `dead_code` causes where the design can be made simpler.
 - [ ] Shorten long names by using module context and splitting oversized modules, not by inventing abbreviations.
 
 ## 9. Final gate
@@ -127,6 +128,7 @@ Validation:
 - `00c9f48f` — remove provider Auth fault injection and retain a real invalid-proof `TERM` live boundary.
 - `73ad6df2` — remove JobRef callback/cache state and reconstruct snapshots from the durable lifecycle.
 - `3859764b` — consolidate authorization provider state while retaining per-digest singleflight.
+- `88da68fc` — remove the `client::client` module-inception suppression with a behavior-neutral private module rename.
 - CI/release simplification also includes adaptive concurrency, stale-governance deletion, release-DAG deletion, generated-artifact fixes, and one-generation `Check` preparation; use `git log rs` for the exact intermediate commit chain.
 
 ## Immediate next work
