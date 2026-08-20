@@ -93,3 +93,14 @@ jobs:
           git add rust/crates/trellis/src/service/runtime_facade.rs
           git commit -m "Make durable listener registration atomic"
           git push --force origin HEAD:refs/heads/agent/result-durable-listener-v2
+
+      - name: Publish failure run id
+        if: failure()
+        run: |
+          git reset --hard cb0955fe194f988867b362a2614a15b8f8ce7a1d
+          git config user.name "trellis-validation"
+          git config user.email "actions@users.noreply.github.com"
+          printf '%s\n' '${{ github.run_id }}' > .validation-failed
+          git add .validation-failed
+          git commit -m "Record failed durable listener validation"
+          git push --force origin HEAD:refs/heads/agent/failed-durable-listener-v2
