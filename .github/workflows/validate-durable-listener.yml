@@ -1,4 +1,4 @@
-name: Validate durable listener cleanup
+name: Validate Auth fault cleanup
 
 on:
   push:
@@ -9,7 +9,7 @@ permissions:
   contents: write
 
 concurrency:
-  group: validate-durable-listener-v2
+  group: validate-auth-fault-cleanup
   cancel-in-progress: true
 
 jobs:
@@ -19,7 +19,7 @@ jobs:
       - name: Check out exact rs base
         uses: actions/checkout@v4
         with:
-          ref: 08f9f9522f6d36e037a2fc44b91d98c7c020fb16
+          ref: 09125056c5310e9957fc62738767d2f22192db17
           fetch-depth: 0
 
       - name: Publish running run id
@@ -28,9 +28,9 @@ jobs:
           git config user.email "actions@users.noreply.github.com"
           printf '%s\n' '${{ github.run_id }}' > .validation-running
           git add .validation-running
-          git commit -m "Record durable listener validation run"
-          git push --force origin HEAD:refs/heads/agent/running-durable-listener-v2
-          git reset --hard 08f9f9522f6d36e037a2fc44b91d98c7c020fb16
+          git commit -m "Record Auth cleanup validation run"
+          git push --force origin HEAD:refs/heads/agent/running-auth-fault-cleanup-v3
+          git reset --hard 09125056c5310e9957fc62738767d2f22192db17
 
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
@@ -51,80 +51,147 @@ jobs:
       - name: Require clean generated tree
         run: git diff --exit-code
 
-      - name: Make durable listener registration atomic
+      - name: Remove synthetic Auth failures
         shell: python
         run: |
           from pathlib import Path
+          import json
 
-          path = Path("rust/crates/trellis/src/service/runtime_facade.rs")
-          source = path.read_text()
-          function = source.index("async fn listen_event_with_bindings")
+          def remove_test(path: str, name: str) -> None:
+              p = Path(path)
+              source = p.read_text()
+              index = source.index(f"async fn {name}()")
+              start = source.rfind("\n#[tokio::test]", 0, index)
+              if start < 0:
+                  raise SystemExit(f"missing test attribute for {name}")
+              start += 1
+              end = source.find("\n#[tokio::test]", index)
+              if end < 0:
+                  raise SystemExit(f"missing following test after {name}")
+              p.write_text(source[:start] + source[end + 1:])
 
-          open_registry = "    {\n        let mut listeners = event_listeners.lock().await;\n"
-          position = source.index(open_registry, function)
-          source = (
-              source[:position]
-              + "    let mut listeners = event_listeners.lock().await;\n"
-              + source[position + len(open_registry):]
+          def remove_fn(path: str, signature: str) -> None:
+              p = Path(path)
+              source = p.read_text()
+              index = source.index(signature)
+              start = source.rfind("\n", 0, index) + 1
+              while start > 0:
+                  previous_end = start - 1
+                  previous_start = source.rfind("\n", 0, previous_end) + 1
+                  previous = source[previous_start:previous_end].strip()
+                  if previous.startswith("///") or previous.startswith("#["):
+                      start = previous_start
+                  else:
+                      break
+              brace = source.index("{", index)
+              depth = 0
+              end = None
+              for offset in range(brace, len(source)):
+                  if source[offset] == "{":
+                      depth += 1
+                  elif source[offset] == "}":
+                      depth -= 1
+                      if depth == 0:
+                          end = offset + 1
+                          break
+              if end is None:
+                  raise SystemExit(f"unclosed function {signature}")
+              while end < len(source) and source[end] == "\n":
+                  end += 1
+              p.write_text(source[:start] + source[end:])
+
+          def remove_matrix_cases(path: str, ids: set[str]) -> None:
+              p = Path(path)
+              data = json.loads(p.read_text())
+              if not isinstance(data, list):
+                  raise SystemExit("runtime matrix must be a list")
+              found = {case.get("id") for case in data if case.get("id") in ids}
+              if found != ids:
+                  raise SystemExit(f"matrix cases changed: expected {ids}, found {found}")
+              data = [case for case in data if case.get("id") not in ids]
+              p.write_text(json.dumps(data, indent=2) + "\n")
+
+          auth_tests = "rust/crates/trellis/tests/integration/auth.rs"
+          remove_test(auth_tests, "auth_transaction_failure_rolls_back_state_idempotency_and_actions")
+          remove_test(auth_tests, "auth_post_commit_failure_retries_committed_context_revocation_once")
+
+          support = "rust/crates/trellis-test/src/lib.rs"
+          remove_fn(support, "pub fn fail_user_update_transaction(")
+          remove_fn(support, "pub fn clear_user_update_transaction_failure(")
+          remove_fn(support, "pub fn fail_next_context_revocation_dispatch(")
+
+          remove_fn(
+              "rust/crates/runtime/src/platform/auth/sqlite/common.rs",
+              "pub(crate) async fn consume_test_post_commit_failure(",
           )
 
-          close_registry = "        }\n    }\n\n    let subscribe_options = EventSubscribeOptions {\n"
-          if source.count(close_registry, position) != 1:
-              raise SystemExit("durable-listener registry closing block changed")
-          source = source.replace(
-              close_registry,
-              "        }\n\n    let subscribe_options = EventSubscribeOptions {\n",
-              1,
+          post_commit = Path("rust/crates/runtime/src/platform/auth_post_commit.rs")
+          source = post_commit.read_text()
+          start_marker = "        #[cfg(feature = \"integration-test-hooks\")]\n        if self\n            .repository\n            .consume_test_post_commit_failure"
+          end_marker = "        match self.dispatch(&action).await {"
+          start = source.index(start_marker)
+          end = source.index(end_marker, start)
+          post_commit.write_text(source[:start] + source[end:])
+
+          remove_matrix_cases(
+              "integration/rust-runtime-test-matrix.json",
+              {
+                  "auth.transaction-failure-rolls-back-state-idempotency-and-actions",
+                  "auth.post-commit-failure-retries-committed-context-revocation-once",
+              },
           )
 
-          old_insert = "    event_listeners.lock().await.insert(\n"
-          if source.count(old_insert, position) != 1:
-              raise SystemExit("durable-listener insertion changed")
-          source = source.replace(old_insert, "    listeners.insert(\n", 1)
-
-          insert_end = "        },\n    );\n\n    Ok(ServiceEventListenerHandle::new(\n"
-          if source.count(insert_end, position) != 1:
-              raise SystemExit("durable-listener insertion tail changed")
-          source = source.replace(
-              insert_end,
-              "        },\n    );\n    drop(listeners);\n\n    Ok(ServiceEventListenerHandle::new(\n",
-              1,
-          )
-
-          path.write_text(source)
-
-      - name: Format
-        run: cargo fmt --manifest-path rust/Cargo.toml --all
-
-      - name: Check patch
+      - name: Format and validate patch
         run: |
+          cargo fmt --manifest-path rust/Cargo.toml --all
           git diff --check
-          test "$(git diff --name-only)" = "rust/crates/trellis/src/service/runtime_facade.rs"
+          python -m json.tool integration/rust-runtime-test-matrix.json >/dev/null
+          test "$(git diff --name-only | sort)" = "$(printf '%s\n' \
+            integration/rust-runtime-test-matrix.json \
+            rust/crates/runtime/src/platform/auth/sqlite/common.rs \
+            rust/crates/runtime/src/platform/auth_post_commit.rs \
+            rust/crates/trellis-test/src/lib.rs \
+            rust/crates/trellis/tests/integration/auth.rs | sort)"
+          ! grep -R -n --exclude-dir=target \
+            -e 'fail_user_update_transaction' \
+            -e 'clear_user_update_transaction_failure' \
+            -e 'fail_next_context_revocation_dispatch' \
+            -e 'consume_test_post_commit_failure' \
+            -e 'auth.transaction-failure-rolls-back-state-idempotency-and-actions' \
+            -e 'auth.post-commit-failure-retries-committed-context-revocation-once' \
+            rust integration
 
-      - name: Check Trellis Rust facade
-        run: cargo check --manifest-path rust/Cargo.toml -p trellis-rs --all-targets
+      - name: Test real SQLite rollback
+        run: cargo test --manifest-path rust/Cargo.toml -p trellis-runtime rollback_tests:: --lib
 
-      - name: Lint Trellis Rust facade
-        run: cargo clippy --manifest-path rust/Cargo.toml -p trellis-rs --all-targets -- -D warnings
+      - name: Check affected Rust crates
+        run: cargo check --manifest-path rust/Cargo.toml -p trellis-runtime -p trellis-test -p trellis-rs --all-targets
 
-      - name: Test Trellis Rust facade
-        run: cargo test --manifest-path rust/Cargo.toml -p trellis-rs --lib
+      - name: Lint affected Rust crates
+        run: cargo clippy --manifest-path rust/Cargo.toml -p trellis-runtime -p trellis-test -p trellis-rs --all-targets -- -D warnings
+
+      - name: Compile Rust live integration suite
+        run: cargo test --manifest-path rust/Cargo.toml -p trellis-rs --test integration --no-run
 
       - name: Publish validated result branch
         run: |
           git config user.name "trellis-validation"
           git config user.email "actions@users.noreply.github.com"
-          git add rust/crates/trellis/src/service/runtime_facade.rs
-          git commit -m "Make durable listener registration atomic"
-          git push --force origin HEAD:refs/heads/agent/result-durable-listener-v2
+          git add integration/rust-runtime-test-matrix.json \
+            rust/crates/runtime/src/platform/auth/sqlite/common.rs \
+            rust/crates/runtime/src/platform/auth_post_commit.rs \
+            rust/crates/trellis-test/src/lib.rs \
+            rust/crates/trellis/tests/integration/auth.rs
+          git commit -m "Remove synthetic Auth failure injection"
+          git push --force origin HEAD:refs/heads/agent/result-auth-fault-cleanup-v3
 
       - name: Publish failure run id
         if: failure()
         run: |
-          git reset --hard 08f9f9522f6d36e037a2fc44b91d98c7c020fb16
+          git reset --hard 09125056c5310e9957fc62738767d2f22192db17
           git config user.name "trellis-validation"
           git config user.email "actions@users.noreply.github.com"
           printf '%s\n' '${{ github.run_id }}' > .validation-failed
           git add .validation-failed
-          git commit -m "Record failed durable listener validation"
-          git push --force origin HEAD:refs/heads/agent/failed-durable-listener-v2
+          git commit -m "Record failed Auth cleanup validation"
+          git push --force origin HEAD:refs/heads/agent/failed-auth-fault-cleanup-v3
