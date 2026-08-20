@@ -26,7 +26,7 @@ Status updated: 2026-08-20
 - [x] Remove the redundant standalone live-inventory pass and fixed `--jobs 20` override.
 - [x] Add a normal `Check` workflow for everyday `rs` validation.
 - [x] Fix clean-checkout SDK generation dependencies and the generated demo-contract compile dependency.
-- [x] Make `Check` prepare generated SDKs once and hand the ignored generated packages to Rust/TS/live jobs as an Actions artifact.
+- [x] Make `Check` prepare generated SDKs and the embedded login portal once, then hand those ignored build inputs to Rust/TS/live jobs as an Actions artifact.
 - [x] Keep hidden `agent/*` validation branches from triggering the full everyday `Check` suite.
 - [ ] Finish reducing `release.yml` to release-only packaging/docs/platform work; normal correctness belongs in `Check`.
 - [ ] Confirm the final `test` / `check` / `release` command split is simple and non-overlapping.
@@ -35,15 +35,16 @@ Status updated: 2026-08-20
 ## 2. Real tests only / synthetic failure removal
 
 - [x] Add a narrow real-SQLite Auth rollback test using an actual late constraint failure and assert aggregate state, idempotency state, and outbox actions all roll back.
+- [x] Assert the rollback failure through the production `AuthorizationStateError::StorageConflict` mapping rather than SQLite-specific error text.
 - [x] Remove the Rust demo contract's compile-time dependency on a generated TypeScript API artifact.
-- [ ] Remove the old live Auth transaction-failure case and trigger helper now replaced by the real SQLite rollback test.
-- [ ] Remove the synthetic Auth post-commit dispatch failure, SQLite hook, helper, live test, and matrix row.
+- [x] Remove the old live Auth transaction-failure case and trigger helper now replaced by the real SQLite rollback test.
+- [x] Remove the synthetic Auth post-commit dispatch failure, SQLite hook, helper, live test, and matrix row.
 - [ ] Remove provider `fail_next_context_read` / `fail_next_readiness_check` switches and the production verifier branch that consumes them.
 - [ ] Reduce the event-authorization failure live case to real behavior: publish a legitimate signed event, corrupt the proof, require JetStream `TERM`, and verify the handler is not invoked for the corrupt copy.
 - [ ] Audit the remaining `integration-test-hooks`; delete synthetic errors/faults and retain only genuine deterministic scheduling barriers where needed.
 - [ ] Replace avoidable fixed sleeps with observable readiness/state boundaries where practical.
 
-Current validation note: the first Auth-deletion validator did not reach the patch checks because a clean validation checkout was missing `rust/crates/runtime/generated/portal`; fix the validation/bootstrap order before treating that run as evidence about the Auth patch.
+Validation: Actions run `32329172166` validated commit `e6615be3` against the real SQLite rollback test, affected-crate `cargo check`, Clippy with `-D warnings`, and Rust live-integration compilation. The packet deleted 375 lines across five files with no additions.
 
 ## 3. First public protocol version
 
@@ -112,14 +113,17 @@ Current validation note: the first Auth-deletion validator did not reach the pat
 - `581fb43e` — test Auth rollback with a real SQLite failure.
 - `cb0955fe` — remove Jobs active-job callback adapter.
 - `09125056` — make durable listener registration atomic.
+- `6e8fa721` — prepare the embedded portal once in `Check` with generated SDK artifacts.
+- `86e6c95b` — assert the real rollback through the typed Auth storage-conflict boundary.
+- `e6615be3` — remove synthetic Auth transaction/post-commit failure injection and its live cases.
 - CI/release simplification also includes adaptive concurrency, stale-governance deletion, release-DAG deletion, generated-artifact fixes, and one-generation `Check` preparation; use `git log rs` for the exact intermediate commit chain.
 
 ## Immediate next work
 
-1. Fix the hidden Auth validator bootstrap so the generated embedded portal exists before compiling `trellis-runtime`.
-2. Land the validated synthetic Auth transaction/post-commit deletion.
-3. Delete provider readiness/context-read fault switches and keep only the real corrupt-proof `TERM` behavior test.
-4. Simplify `JobRef` callbacks.
-5. Consolidate authorization provider trust state.
-6. Do the first-public `v1` proof cleanup.
-7. Continue production/test-boundary and runtime-composition cleanup.
+1. Delete provider readiness/context-read fault switches and keep only the real corrupt-proof `TERM` behavior test.
+2. Simplify `JobRef` callbacks to immutable seed + concrete waiter/manager.
+3. Consolidate authorization provider trust state.
+4. Make durable-listener teardown/drop deterministic.
+5. Do the first-public `v1` proof cleanup.
+6. Continue production/test-boundary and runtime-composition cleanup.
+7. Finish release-only gate cleanup and record final timing baseline.
