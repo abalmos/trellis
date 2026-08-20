@@ -1,0 +1,630 @@
+# remaining integration/test-boundary inventory
+
+## integration-test-hooks feature references
+.github/workflows/inventory-integration-hooks.yml:25:            echo '## integration-test-hooks feature references'
+.github/workflows/inventory-integration-hooks.yml:26:            git grep -n -E 'integration-test-hooks' -- rust integration .github || true
+.github/workflows/inventory-integration-hooks.yml:29:            git grep -n -E 'cfg\(feature = "integration-test-hooks"\)|portal_test_|test_[A-Za-z0-9_]*barrier|integration_test_[A-Za-z0-9_]+' -- rust/crates/runtime rust/crates/trellis rust/crates/trellis-test || true
+rust/crates/runtime/Cargo.toml:17:integration-test-hooks = []
+rust/crates/runtime/src/platform/auth/application/repository.rs:589:    #[cfg(feature = "integration-test-hooks")]
+rust/crates/runtime/src/platform/auth/application/repository.rs:597:    #[cfg(feature = "integration-test-hooks")]
+rust/crates/runtime/src/platform/auth/application/repository.rs:604:    #[cfg(feature = "integration-test-hooks")]
+rust/crates/runtime/src/platform/auth/application/repository.rs:698:    #[cfg(feature = "integration-test-hooks")]
+rust/crates/runtime/src/platform/auth/http/bootstrap/mod.rs:486:            #[cfg(feature = "integration-test-hooks")]
+rust/crates/runtime/src/platform/auth/http/bootstrap/mod.rs:493:            #[cfg(not(feature = "integration-test-hooks"))]
+rust/crates/runtime/src/platform/auth/http/browser/consent.rs:290:            #[cfg(feature = "integration-test-hooks")]
+rust/crates/runtime/src/platform/auth/portal_reconciliation.rs:127:            #[cfg(feature = "integration-test-hooks")]
+rust/crates/runtime/src/platform/auth/portal_reconciliation.rs:144:            #[cfg(feature = "integration-test-hooks")]
+rust/crates/runtime/src/platform/auth/sqlite/accounts.rs:869:    #[cfg(feature = "integration-test-hooks")]
+rust/crates/runtime/src/platform/auth/sqlite/accounts.rs:927:    #[cfg(feature = "integration-test-hooks")]
+rust/crates/runtime/src/platform/auth/sqlite/accounts.rs:960:    #[cfg(feature = "integration-test-hooks")]
+rust/crates/runtime/src/platform/auth/sqlite/deployments.rs:25:    #[cfg(feature = "integration-test-hooks")]
+rust/crates/runtime/src/platform/auth/sqlite/provisioning.rs:183:        #[cfg(feature = "integration-test-hooks")]
+rust/crates/runtime/src/platform/auth/sqlite/provisioning.rs:208:        #[cfg(not(feature = "integration-test-hooks"))]
+rust/crates/trellis-test/integration_runner.ts:299:      "trellis-runtime/integration-test-hooks",
+
+## runtime cfg/test hook symbols
+rust/crates/runtime/src/platform/auth/application/repository.rs:589:    #[cfg(feature = "integration-test-hooks")]
+rust/crates/runtime/src/platform/auth/application/repository.rs:590:    async fn wait_for_portal_snapshot_test_barrier(
+rust/crates/runtime/src/platform/auth/application/repository.rs:597:    #[cfg(feature = "integration-test-hooks")]
+rust/crates/runtime/src/platform/auth/application/repository.rs:598:    async fn wait_for_portal_reconciliation_test_barrier(
+rust/crates/runtime/src/platform/auth/application/repository.rs:604:    #[cfg(feature = "integration-test-hooks")]
+rust/crates/runtime/src/platform/auth/application/repository.rs:698:    #[cfg(feature = "integration-test-hooks")]
+rust/crates/runtime/src/platform/auth/http/bootstrap/mod.rs:486:            #[cfg(feature = "integration-test-hooks")]
+rust/crates/runtime/src/platform/auth/http/browser/consent.rs:290:            #[cfg(feature = "integration-test-hooks")]
+rust/crates/runtime/src/platform/auth/http/browser/consent.rs:294:                .wait_for_portal_snapshot_test_barrier(&flow.flow_id, &portal.portal_id)
+rust/crates/runtime/src/platform/auth/portal_reconciliation.rs:127:            #[cfg(feature = "integration-test-hooks")]
+rust/crates/runtime/src/platform/auth/portal_reconciliation.rs:131:                    .wait_for_portal_reconciliation_test_barrier(portal_id)
+rust/crates/runtime/src/platform/auth/portal_reconciliation.rs:144:            #[cfg(feature = "integration-test-hooks")]
+rust/crates/runtime/src/platform/auth/sqlite/accounts.rs:869:    #[cfg(feature = "integration-test-hooks")]
+rust/crates/runtime/src/platform/auth/sqlite/accounts.rs:870:    async fn wait_for_portal_reconciliation_test_barrier(
+rust/crates/runtime/src/platform/auth/sqlite/accounts.rs:882:                           AND name = '__trellis_test_portal_reconciliation_barriers')",
+rust/crates/runtime/src/platform/auth/sqlite/accounts.rs:892:                        "UPDATE __trellis_test_portal_reconciliation_barriers
+rust/crates/runtime/src/platform/auth/sqlite/accounts.rs:910:                             FROM __trellis_test_portal_reconciliation_barriers
+rust/crates/runtime/src/platform/auth/sqlite/accounts.rs:927:    #[cfg(feature = "integration-test-hooks")]
+rust/crates/runtime/src/platform/auth/sqlite/accounts.rs:960:    #[cfg(feature = "integration-test-hooks")]
+rust/crates/runtime/src/platform/auth/sqlite/accounts.rs:961:    async fn wait_for_portal_snapshot_test_barrier(
+rust/crates/runtime/src/platform/auth/sqlite/accounts.rs:976:                           AND name = '__trellis_test_portal_snapshot_barriers')",
+rust/crates/runtime/src/platform/auth/sqlite/accounts.rs:986:                        "UPDATE __trellis_test_portal_snapshot_barriers
+rust/crates/runtime/src/platform/auth/sqlite/accounts.rs:1006:                             FROM __trellis_test_portal_snapshot_barriers
+rust/crates/runtime/src/platform/auth/sqlite/deployments.rs:25:    #[cfg(feature = "integration-test-hooks")]
+rust/crates/runtime/src/platform/auth/sqlite/provisioning.rs:183:        #[cfg(feature = "integration-test-hooks")]
+rust/crates/trellis-test/src/lib.rs:216:    IntegrationScope(#[from] trellis_rs::integration_test_scoping::IntegrationTestScopeError),
+rust/crates/trellis-test/src/lib.rs:392:        key.integration_test_scope.clone(),
+rust/crates/trellis-test/src/lib.rs:576:    integration_test_scope: Option<trellis_rs::integration_test_scoping::IntegrationTestScope>,
+rust/crates/trellis-test/src/lib.rs:642:            "CREATE TABLE IF NOT EXISTS __trellis_test_portal_snapshot_barriers (
+rust/crates/trellis-test/src/lib.rs:649:            "INSERT OR REPLACE INTO __trellis_test_portal_snapshot_barriers
+rust/crates/trellis-test/src/lib.rs:665:                "SELECT reached FROM __trellis_test_portal_snapshot_barriers
+rust/crates/trellis-test/src/lib.rs:685:            "UPDATE __trellis_test_portal_snapshot_barriers
+rust/crates/trellis-test/src/lib.rs:699:            "CREATE TABLE IF NOT EXISTS __trellis_test_portal_reconciliation_barriers (
+rust/crates/trellis-test/src/lib.rs:706:            "INSERT OR REPLACE INTO __trellis_test_portal_reconciliation_barriers
+rust/crates/trellis-test/src/lib.rs:722:                "SELECT reached FROM __trellis_test_portal_reconciliation_barriers
+rust/crates/trellis-test/src/lib.rs:745:            "UPDATE __trellis_test_portal_reconciliation_barriers
+rust/crates/trellis-test/src/lib.rs:1308:        let integration_test_scope = shared_runtime
+rust/crates/trellis-test/src/lib.rs:1311:                trellis_rs::integration_test_scoping::IntegrationTestScope::new(
+rust/crates/trellis-test/src/lib.rs:1367:                    integration_test_scope,
+rust/crates/trellis-test/src/lib.rs:1445:            integration_test_scope,
+rust/crates/trellis-test/src/lib.rs:1458:    pub fn integration_test_descriptor_subject(&self, subject: &str) -> String {
+rust/crates/trellis-test/src/lib.rs:1459:        self.integration_test_scope.as_ref().map_or_else(
+rust/crates/trellis-test/src/lib.rs:1492:        contract.scoped(self.integration_test_scope.as_ref())
+rust/crates/trellis-test/src/lib.rs:1792:            integration_test_scope: self.integration_test_scope.clone(),
+rust/crates/trellis-test/src/lib.rs:1824:        match self.integration_test_scope.clone() {
+rust/crates/trellis-test/src/lib.rs:1825:            Some(scope) => options.with_integration_test_scope(scope),
+rust/crates/trellis-test/src/lib.rs:1915:    integration_test_scope: Option<trellis_rs::integration_test_scoping::IntegrationTestScope>,
+rust/crates/trellis-test/src/lib.rs:1932:    integration_test_scope: Option<trellis_rs::integration_test_scoping::IntegrationTestScope>,
+rust/crates/trellis-test/src/lib.rs:2026:            integration_test_scope: options.integration_test_scope,
+rust/crates/trellis-test/src/lib.rs:2199:        let deployment_name = self.integration_test_scope.as_ref().map_or_else(
+rust/crates/trellis-test/src/lib.rs:2292:        let contract = contract.scoped(self.integration_test_scope.as_ref())?;
+rust/crates/trellis-test/src/lib.rs:2719:            integration_test_scope: self.integration_test_scope.clone(),
+rust/crates/trellis-test/src/lib.rs:3073:        let contract = contract.scoped(self.integration_test_scope.as_ref())?;
+rust/crates/trellis-test/src/lib.rs:3230:            integration_test_scope: self.integration_test_scope.clone(),
+rust/crates/trellis-test/src/lib.rs:3239:            reconnect.integration_test_scope.clone(),
+rust/crates/trellis-test/src/lib.rs:3256:        let contract = contract.scoped(self.integration_test_scope.as_ref())?;
+rust/crates/trellis-test/src/lib.rs:3604:    integration_test_scope: Option<trellis_rs::integration_test_scoping::IntegrationTestScope>,
+rust/crates/trellis-test/src/lib.rs:3620:            self.integration_test_scope.clone(),
+rust/crates/trellis-test/src/lib.rs:3645:        let options = match self.integration_test_scope.clone() {
+rust/crates/trellis-test/src/lib.rs:3646:            Some(scope) => options.with_integration_test_scope(scope),
+rust/crates/trellis-test/src/lib.rs:3761:        scope: Option<&trellis_rs::integration_test_scoping::IntegrationTestScope>,
+rust/crates/trellis-test/src/lib.rs:3823:    scope: &trellis_rs::integration_test_scoping::IntegrationTestScope,
+rust/crates/trellis-test/src/lib.rs:3845:    scope: &trellis_rs::integration_test_scoping::IntegrationTestScope,
+rust/crates/trellis-test/src/lib.rs:3910:    scope: &trellis_rs::integration_test_scoping::IntegrationTestScope,
+rust/crates/trellis-test/src/lib.rs:4197:    integration_test_scope: Option<trellis_rs::integration_test_scoping::IntegrationTestScope>,
+rust/crates/trellis-test/src/lib.rs:4512:    integration_test_scope: Option<trellis_rs::integration_test_scoping::IntegrationTestScope>,
+rust/crates/trellis-test/src/lib.rs:4547:    let options = match integration_test_scope {
+rust/crates/trellis-test/src/lib.rs:4548:        Some(scope) => options.with_integration_test_scope(scope),
+rust/crates/trellis-test/src/lib.rs:5551:            trellis_rs::integration_test_scoping::IntegrationTestScope::new("run", "case").unwrap();
+rust/crates/trellis/src/client/authorization/provider_cache.rs:470:    pub fn integration_test_io_counters(&self) -> IntegrationTestAuthorizationIoCounters {
+rust/crates/trellis/src/client/authorization/provider_cache.rs:489:    pub fn integration_test_provider_ready(&self) -> bool {
+rust/crates/trellis/src/client/connection.rs:36:use crate::integration_test_scoping::IntegrationTestScope;
+rust/crates/trellis/src/client/connection.rs:117:    pub(crate) integration_test_scope: Option<IntegrationTestScope>,
+rust/crates/trellis/src/client/connection.rs:139:    integration_test_scope: Option<IntegrationTestScope>,
+rust/crates/trellis/src/client/connection.rs:180:            integration_test_scope: None,
+rust/crates/trellis/src/client/connection.rs:197:    pub fn with_integration_test_scope(mut self, scope: IntegrationTestScope) -> Self {
+rust/crates/trellis/src/client/connection.rs:198:        self.integration_test_scope = Some(scope);
+rust/crates/trellis/src/client/connection.rs:1228:        integration_test_scope: opts.integration_test_scope.clone(),
+rust/crates/trellis/src/client/connection.rs:1247:    integration_test_scope: Option<IntegrationTestScope>,
+rust/crates/trellis/src/client/connection.rs:1280:            integration_test_scope: None,
+rust/crates/trellis/src/client/connection.rs:1293:    pub fn with_integration_test_scope(mut self, scope: IntegrationTestScope) -> Self {
+rust/crates/trellis/src/client/connection.rs:1294:        self.integration_test_scope = Some(scope);
+rust/crates/trellis/src/client/connection.rs:1357:    integration_test_scope: Option<IntegrationTestScope>,
+rust/crates/trellis/src/client/connection.rs:1364:            crate::integration_test_scoping::resolve_descriptor_subject(
+rust/crates/trellis/src/client/connection.rs:1365:                self.integration_test_scope.as_ref(),
+rust/crates/trellis/src/client/connection.rs:1376:    pub(crate) fn integration_test_scope(&self) -> Option<&IntegrationTestScope> {
+rust/crates/trellis/src/client/connection.rs:1377:        self.integration_test_scope.as_ref()
+rust/crates/trellis/src/client/connection.rs:1388:    pub fn integration_test_nats(&self) -> async_nats::Client {
+rust/crates/trellis/src/client/connection.rs:1673:            integration_test_scope: opts.integration_test_scope.clone(),
+rust/crates/trellis/src/client/connection.rs:1699:    pub fn integration_test_authorization_provider(
+rust/crates/trellis/src/generated.rs:62:    pub fn integration_test_descriptor_subject(&self, subject: &str) -> String {
+rust/crates/trellis/src/generated.rs:69:    pub fn integration_test_descriptor_capability(&self, capability: &str) -> String {
+rust/crates/trellis/src/generated.rs:70:        self.client.integration_test_scope().map_or_else(
+rust/crates/trellis/src/generated.rs:80:    pub fn integration_test_nats(&self) -> async_nats::Client {
+rust/crates/trellis/src/generated.rs:81:        self.client.integration_test_nats()
+rust/crates/trellis/src/generated.rs:275:    #[cfg(feature = "integration-test-scoping")] integration_test_scope: Option<
+rust/crates/trellis/src/generated.rs:276:        crate::integration_test_scoping::IntegrationTestScope,
+rust/crates/trellis/src/generated.rs:300:            integration_test_scope,
+rust/crates/trellis/src/lib.rs:63:pub mod integration_test_scoping;
+rust/crates/trellis/src/service/router.rs:231:    integration_test_scope: Option<crate::integration_test_scoping::IntegrationTestScope>,
+rust/crates/trellis/src/service/router.rs:246:    pub(crate) fn set_integration_test_scope(
+rust/crates/trellis/src/service/router.rs:248:        scope: Option<crate::integration_test_scoping::IntegrationTestScope>,
+rust/crates/trellis/src/service/router.rs:250:        self.integration_test_scope = scope;
+rust/crates/trellis/src/service/router.rs:256:            crate::integration_test_scoping::resolve_descriptor_subject(
+rust/crates/trellis/src/service/router.rs:257:                self.integration_test_scope.as_ref(),
+rust/crates/trellis/src/service/router.rs:269:        if let Some(scope) = &self.integration_test_scope {
+rust/crates/trellis/src/service/router.rs:283:        if let Some(scope) = &self.integration_test_scope {
+rust/crates/trellis/src/service/runtime_facade.rs:42:use crate::integration_test_scoping::IntegrationTestScope;
+rust/crates/trellis/src/service/runtime_facade.rs:181:    integration_test_scope: Option<IntegrationTestScope>,
+rust/crates/trellis/src/service/runtime_facade.rs:223:            integration_test_scope: None,
+rust/crates/trellis/src/service/runtime_facade.rs:257:    pub fn with_integration_test_scope(mut self, scope: IntegrationTestScope) -> Self {
+rust/crates/trellis/src/service/runtime_facade.rs:258:        self.integration_test_scope = Some(scope);
+rust/crates/trellis/src/service/runtime_facade.rs:939:    pub fn integration_test_authorization_provider(
+rust/crates/trellis/src/service/runtime_facade.rs:945:            .integration_test_authorization_provider()
+rust/crates/trellis/src/service/runtime_facade.rs:952:    pub fn integration_test_nats(&self) -> async_nats::Client {
+rust/crates/trellis/src/service/runtime_facade.rs:956:            .integration_test_nats()
+rust/crates/trellis/src/service/runtime_facade.rs:962:    pub async fn integration_test_request_json_value(
+rust/crates/trellis/src/service/runtime_facade.rs:992:        router.set_integration_test_scope(client.integration_test_scope().cloned());
+rust/crates/trellis/src/service/runtime_facade.rs:1780:                integration_test_scope: options.integration_test_scope.clone(),
+rust/crates/trellis/src/service/runtime_facade.rs:2026:    let (event_api_id, event_name, publish_capabilities) = match client.integration_test_scope() {
+rust/crates/trellis/tests/integration/auth.rs:2105:        .integration_test_descriptor_subject(&format!(
+rust/crates/trellis/tests/integration/auth.rs:2226:        .integration_test_descriptor_subject(&format!(
+rust/crates/trellis/tests/integration/auth.rs:2338:        .integration_test_descriptor_subject(&format!(
+rust/crates/trellis/tests/integration/auth.rs:2463:        .integration_test_descriptor_subject(&format!(
+rust/crates/trellis/tests/integration/auth.rs:3928:                .integration_test_descriptor_subject(ValueGet::SUBJECT),
+rust/crates/trellis/tests/integration/auth.rs:3936:                .integration_test_descriptor_subject(ValueChanged::SUBJECT),
+rust/crates/trellis/tests/integration/event_consumers.rs:145:    let expected_subject = _runtime.integration_test_descriptor_subject(SourcePingedEvent::SUBJECT);
+rust/crates/trellis/tests/integration/event_consumers.rs:408:        .integration_test_nats()
+rust/crates/trellis/tests/integration/event_consumers.rs:434:        .integration_test_nats()
+rust/crates/trellis/tests/integration/event_consumers.rs:558:    let expected_subject = _runtime.integration_test_descriptor_subject(SourcePingedEvent::SUBJECT);
+rust/crates/trellis/tests/integration/event_consumers.rs:2000:    let subject = runtime.integration_test_descriptor_subject(subject);
+rust/crates/trellis/tests/integration/event_consumers.rs:2024:    let first_subject = runtime.integration_test_descriptor_subject(first_subject);
+rust/crates/trellis/tests/integration/event_consumers.rs:2025:    let second_subject = runtime.integration_test_descriptor_subject(second_subject);
+rust/crates/trellis/tests/integration/prepared_events.rs:133:    let raw_subject = runtime.integration_test_descriptor_subject(EntityChanged::SUBJECT);
+rust/crates/trellis/tests/integration/rpc.rs:336:    let client_subject = client.integration_test_descriptor_subject(EntityGetRpc::SUBJECT);
+rust/crates/trellis/tests/integration/rpc.rs:337:    let client_capability = client.integration_test_descriptor_capability(RPC_READ_CAPABILITY);
+rust/crates/trellis/tests/integration/rpc.rs:491:    let provider = service.integration_test_authorization_provider();
+rust/crates/trellis/tests/integration/rpc.rs:492:    let service_nats = service.integration_test_nats();
+rust/crates/trellis/tests/integration/rpc.rs:493:    let before = provider.integration_test_io_counters();
+rust/crates/trellis/tests/integration/rpc.rs:509:    let first_io = provider.integration_test_io_counters();
+rust/crates/trellis/tests/integration/rpc.rs:519:    assert_eq!(provider.integration_test_io_counters(), first_io);
+rust/crates/trellis/tests/integration/rpc.rs:528:        if !provider.integration_test_provider_ready() {
+rust/crates/trellis/tests/integration/rpc.rs:540:        let current = provider.integration_test_io_counters();
+rust/crates/trellis/tests/integration/rpc.rs:551:        provider.integration_test_provider_ready(),
+rust/crates/trellis/tests/integration/rpc.rs:555:    let quiet = provider.integration_test_io_counters();
+rust/crates/trellis/tests/integration/rpc.rs:557:    let quiet_after = provider.integration_test_io_counters();
+rust/crates/trellis/tests/integration/rpc.rs:563:        provider.integration_test_provider_ready(),
+rust/crates/trellis/tests/integration/rpc.rs:567:    let client_js = async_nats::jetstream::new(client.integration_test_nats());
+rust/crates/trellis/tests/integration/rpc.rs:745:    let client_subject = client.integration_test_descriptor_subject(EntityGetRpc::SUBJECT);
+rust/crates/trellis/tests/integration/state.rs:836:    let jetstream = async_nats::jetstream::new(caller.integration_test_nats());
+rust/crates/trellis/tests/integration/state.rs:888:        .integration_test_request_json_value(
+
+## runtime-internals feature references
+rust/crates/runtime/Cargo.toml:55:trellis-rs = { path = "../trellis", features = ["runtime-internals"] }
+rust/crates/runtime/src/config/mod.rs:249:    pub fn resolve_nats_runtime_with(
+rust/crates/runtime/src/config/mod.rs:612:                .unwrap_or("trellis_runtime_leases")
+rust/crates/runtime/src/config/tests.rs:173:fn rejects_unknown_runtime_config_fields_with_source_location() {
+rust/crates/runtime/src/config/tests.rs:254:bucket = "trellis_runtime_leases"
+rust/crates/runtime/src/config/tests.rs:340:fn resolves_required_runtime_sections_and_lease_defaults() {
+rust/crates/runtime/src/config/tests.rs:370:        .resolve_nats_runtime_with(Some("nats://127.0.0.1:4223"))
+rust/crates/runtime/src/config/tests.rs:379:            .resolve_nats_runtime_with(None)
+rust/crates/runtime/src/config/tests.rs:395:    assert_eq!(leases.bucket, "trellis_runtime_leases");
+rust/crates/runtime/src/config/tests.rs:749:fn rejects_missing_nats_runtime_paths() {
+rust/crates/runtime/src/config/tests.rs:869:fn runtime_modes_require_leases_section_and_replicas_field() {
+rust/crates/runtime/src/config/tests.rs:907:bucket = "trellis_runtime_leases"
+rust/crates/runtime/src/eventlog/mod.rs:19:fn runtime_error(error: ServerError) -> RuntimeError {
+rust/crates/runtime/src/eventlog/mod.rs:92:        .map_err(runtime_error)?;
+rust/crates/runtime/src/eventlog/mod.rs:123:                result = &mut api_loop => result.map_err(runtime_error),
+rust/crates/runtime/src/eventlog/mod.rs:130:                        Err(error) => Err(runtime_error(error)),
+rust/crates/runtime/src/health/mod.rs:338:                if let Some(commit) = store.expire_due(now_ns()).map_err(map_runtime_store_error)? {
+rust/crates/runtime/src/health/mod.rs:353:                if let Some(commit) = store.cleanup(cutoff).map_err(map_runtime_store_error)? {
+rust/crates/runtime/src/health/mod.rs:386:                .map_err(map_runtime_store_error)?;
+rust/crates/runtime/src/health/mod.rs:402:        .map_err(map_runtime_store_error)?;
+rust/crates/runtime/src/health/mod.rs:501:        .map_err(map_runtime_store_error)?
+rust/crates/runtime/src/health/mod.rs:515:                    .map_err(map_runtime_store_error)?,
+rust/crates/runtime/src/health/mod.rs:518:                    .map_err(map_runtime_store_error)?,
+rust/crates/runtime/src/health/mod.rs:522:                .map_err(map_runtime_store_error)?,
+rust/crates/runtime/src/health/mod.rs:533:    let event_time = store::rfc3339(transition.created_at_ns).map_err(map_runtime_store_error)?;
+rust/crates/runtime/src/health/mod.rs:641:        .map_err(map_runtime_store_error)?;
+rust/crates/runtime/src/health/mod.rs:649:fn map_runtime_store_error(error: store::HealthStoreError) -> RuntimeError {
+rust/crates/runtime/src/health/query.rs:649:                heartbeat_deadline_ns, started_at, runtime, runtime_version, version,
+rust/crates/runtime/src/health/store.rs:258:                publish_interval_ms, runtime, runtime_version, version, latest_sample_json,
+rust/crates/runtime/src/health/store.rs:275:                runtime_version = excluded.runtime_version,
+rust/crates/runtime/src/health/store.rs:294:                sample.participant.runtime_version,
+rust/crates/runtime/src/health/store.rs:878:                runtime_version: None,
+rust/crates/runtime/src/jobs/mod.rs:32:fn runtime_error(error: ServerError) -> RuntimeError {
+rust/crates/runtime/src/jobs/mod.rs:55:        .map_err(runtime_error)?;
+rust/crates/runtime/src/jobs/mod.rs:62:                    return Err(runtime_error(error));
+rust/crates/runtime/src/jobs/mod.rs:75:                return Err(runtime_error(error));
+rust/crates/runtime/src/jobs/mod.rs:88:                return Err(runtime_error(error));
+rust/crates/runtime/src/jobs/mod.rs:131:            Err(error) => Err(runtime_error(error)),
+rust/crates/runtime/src/jobs/mod.rs:198:                result = &mut api_loop => result.map_err(runtime_error),
+rust/crates/runtime/src/leases/tests.rs:16:    assert_eq!(manager.bucket, "trellis_runtime_leases");
+rust/crates/runtime/src/platform/auth/application/repository.rs:329:    pub runtime_binding: Option<SessionRuntimeBinding>,
+rust/crates/runtime/src/platform/auth/application/sessions.rs:127:        let runtime_binding = match (input.deployment_id, input.instance_id) {
+rust/crates/runtime/src/platform/auth/application/sessions.rs:143:        if let Some(binding) = &runtime_binding {
+rust/crates/runtime/src/platform/auth/application/sessions.rs:144:            super::super::authority::validate_session_runtime_binding(binding)?;
+rust/crates/runtime/src/platform/auth/application/sessions.rs:153:                runtime_binding,
+rust/crates/runtime/src/platform/auth/application/sessions.rs:187:                    .get_session_runtime_binding(&committed.session_id)
+rust/crates/runtime/src/platform/auth/application/validation.rs:5:    validate_principal, validate_provider_identity, validate_runtime_instance,
+rust/crates/runtime/src/platform/auth/application/validation.rs:377:    validate_runtime_instance(instance)?;
+rust/crates/runtime/src/platform/auth/authority/mod.rs:245:    async fn list_runtime_instances(
+rust/crates/runtime/src/platform/auth/authority/mod.rs:265:    async fn get_runtime_instance(
+rust/crates/runtime/src/platform/auth/authority/mod.rs:271:    async fn put_runtime_instance(
+rust/crates/runtime/src/platform/auth/authority/mod.rs:291:    async fn get_session_runtime_binding(
+rust/crates/runtime/src/platform/auth/authority/mod.rs:702:pub(crate) fn validate_runtime_instance(
+rust/crates/runtime/src/platform/auth/authority/mod.rs:732:pub(super) fn validate_session_runtime_binding(
+rust/crates/runtime/src/platform/auth/builtins.rs:49:pub(crate) fn auth_runtime_participant_binding(
+rust/crates/runtime/src/platform/auth/context/issuer.rs:227:            .runtime_current_manifest()
+rust/crates/runtime/src/platform/auth/context/issuer.rs:318:        let provider_binding = trellis_rs::client::AuthorizationRegistryBinding::from_runtime_parts(
+rust/crates/runtime/src/platform/auth/context/issuer.rs:424:                .apply_runtime_revocation(
+rust/crates/runtime/src/platform/auth/context/repository.rs:1345:                runtime_binding: None,
+rust/crates/runtime/src/platform/auth/context/repository.rs:2668:            .put_runtime_instance(crate::platform::auth::RuntimeInstanceRecord {
+rust/crates/runtime/src/platform/auth/context/repository.rs:2777:            .get_runtime_instance("inst_context")
+rust/crates/runtime/src/platform/auth/http/bootstrap/mod.rs:379:        .get_runtime_instance(&input.instance_id)
+rust/crates/runtime/src/platform/auth/issuance.rs:146:    let (deployment_id, instance_id, delegation_expires_at) = runtime_identity(&runtime);
+rust/crates/runtime/src/platform/auth/issuance.rs:315:fn runtime_identity(evidence: &RuntimeEvidence) -> (Option<String>, Option<String>, Option<i64>) {
+rust/crates/runtime/src/platform/auth/mod.rs:26:pub(super) use builtins::{administration_participant_binding, auth_runtime_participant_binding};
+rust/crates/runtime/src/platform/auth/mod.rs:86:    validate_runtime_instance,
+rust/crates/runtime/src/platform/auth/rpc/mod.rs:596:            .get_runtime_instance(&identity.instance_id)
+rust/crates/runtime/src/platform/auth/rpc/mod.rs:630:                .get_runtime_instance(&identity.instance_id)
+rust/crates/runtime/src/platform/auth/rpc/mod.rs:812:        let instances = self.service.repository().list_runtime_instances().await?;
+rust/crates/runtime/src/platform/auth/rpc/mod.rs:863:            .get_runtime_instance(instance_id)
+rust/crates/runtime/src/platform/auth/rpc/mod.rs:2423:            .get_session_runtime_binding(&validated.session_id)
+rust/crates/runtime/src/platform/auth/rpc/mod.rs:2865:                    .get_session_runtime_binding(&session.session_id)
+rust/crates/runtime/src/platform/auth/rpc/mod.rs:4056:        let binding = crate::platform::auth::auth_runtime_participant_binding(1).unwrap();
+rust/crates/runtime/src/platform/auth/sqlite/contexts.rs:29:    load_participant_binding, load_resource_evidence, load_runtime_evidence,
+rust/crates/runtime/src/platform/auth/sqlite/contexts.rs:258:            load_runtime_evidence(connection, session_id)?
+rust/crates/runtime/src/platform/auth/sqlite/evidence.rs:6:    validate_device_delegation, validate_resource_evidence, validate_runtime_instance,
+rust/crates/runtime/src/platform/auth/sqlite/evidence.rs:7:    validate_session_runtime_binding, AuthorityEvidenceRepository,
+rust/crates/runtime/src/platform/auth/sqlite/evidence.rs:101:                    .map(|instance_id| load_runtime_instance(connection, &instance_id))
+rust/crates/runtime/src/platform/auth/sqlite/evidence.rs:126:    async fn list_runtime_instances(
+rust/crates/runtime/src/platform/auth/sqlite/evidence.rs:140:                    load_runtime_instance(connection, &instance_id)?
+rust/crates/runtime/src/platform/auth/sqlite/evidence.rs:192:    async fn get_runtime_instance(
+rust/crates/runtime/src/platform/auth/sqlite/evidence.rs:197:        self.run_read(move |connection| load_runtime_instance(connection, &instance_id))
+rust/crates/runtime/src/platform/auth/sqlite/evidence.rs:201:    async fn put_runtime_instance(
+rust/crates/runtime/src/platform/auth/sqlite/evidence.rs:207:            validate_sql_runtime_instance_relationships(&transaction, &instance)?;
+rust/crates/runtime/src/platform/auth/sqlite/evidence.rs:208:            if let Some(existing) = load_runtime_instance(&transaction, &instance.instance_id)? {
+rust/crates/runtime/src/platform/auth/sqlite/evidence.rs:269:    async fn get_session_runtime_binding(
+rust/crates/runtime/src/platform/auth/sqlite/evidence.rs:274:        self.run_read(move |connection| load_session_runtime_binding(connection, &session_id))
+rust/crates/runtime/src/platform/auth/sqlite/evidence.rs:410:pub(in crate::platform::auth) fn load_runtime_instance(
+rust/crates/runtime/src/platform/auth/sqlite/evidence.rs:435:            validate_runtime_instance(&instance)?;
+rust/crates/runtime/src/platform/auth/sqlite/evidence.rs:503:pub(in crate::platform::auth) fn load_session_runtime_binding(
+rust/crates/runtime/src/platform/auth/sqlite/evidence.rs:510:         FROM auth_session_runtime_bindings WHERE session_id = ?1",
+rust/crates/runtime/src/platform/auth/sqlite/evidence.rs:524:                validate_session_runtime_binding(&binding)?;
+rust/crates/runtime/src/platform/auth/sqlite/evidence.rs:530:pub(in crate::platform::auth) fn validate_sql_runtime_instance_relationships(
+rust/crates/runtime/src/platform/auth/sqlite/evidence.rs:574:pub(in crate::platform::auth) fn validate_sql_session_runtime_binding_relationships(
+rust/crates/runtime/src/platform/auth/sqlite/evidence.rs:594:    let instance = load_runtime_instance(connection, &binding.instance_id)?.ok_or_else(|| {
+rust/crates/runtime/src/platform/auth/sqlite/evidence.rs:609:pub(in crate::platform::auth) fn load_runtime_evidence(
+rust/crates/runtime/src/platform/auth/sqlite/evidence.rs:620:    let Some(binding) = load_session_runtime_binding(connection, session_id)? else {
+rust/crates/runtime/src/platform/auth/sqlite/evidence.rs:624:    let instance = load_runtime_instance(connection, &instance_id)?.ok_or_else(|| {
+rust/crates/runtime/src/platform/auth/sqlite/provisioning.rs:25:    load_deployment, load_device, load_device_delegation, load_runtime_instance,
+rust/crates/runtime/src/platform/auth/sqlite/provisioning.rs:134:            let instance = load_runtime_instance(&transaction, &command.review.instance_id)?;
+rust/crates/runtime/src/platform/auth/sqlite/provisioning.rs:529:            validate_sql_new_runtime_relationships(
+rust/crates/runtime/src/platform/auth/sqlite/provisioning.rs:545:            insert_sql_runtime_instance(&transaction, &command.instance)?;
+rust/crates/runtime/src/platform/auth/sqlite/provisioning.rs:579:            validate_sql_new_runtime_relationships(
+rust/crates/runtime/src/platform/auth/sqlite/provisioning.rs:596:            insert_sql_runtime_instance(&transaction, &command.instance)?;
+rust/crates/runtime/src/platform/auth/sqlite/provisioning.rs:634:            let current = load_runtime_instance(&transaction, &command.instance.instance_id)?
+rust/crates/runtime/src/platform/auth/sqlite/provisioning.rs:884:    let instance = load_runtime_instance(connection, &identity.instance_id)?.ok_or_else(|| {
+rust/crates/runtime/src/platform/auth/sqlite/provisioning.rs:915:pub(in crate::platform::auth) fn validate_sql_new_runtime_relationships(
+rust/crates/runtime/src/platform/auth/sqlite/provisioning.rs:933:        || load_runtime_instance(connection, &instance.instance_id)?.is_some()
+rust/crates/runtime/src/platform/auth/sqlite/provisioning.rs:962:pub(in crate::platform::auth) fn insert_sql_runtime_instance(
+rust/crates/runtime/src/platform/auth/sqlite/sessions.rs:17:    load_participant_binding, validate_sql_session_runtime_binding_relationships,
+rust/crates/runtime/src/platform/auth/sqlite/sessions.rs:107:                    if command.runtime_binding.is_some() {
+rust/crates/runtime/src/platform/auth/sqlite/sessions.rs:122:                    let binding = command.runtime_binding.ok_or_else(|| {
+rust/crates/runtime/src/platform/auth/sqlite/sessions.rs:132:                    validate_sql_session_runtime_binding_relationships(&transaction, &binding)?;
+rust/crates/runtime/src/platform/auth/sqlite/sessions.rs:135:                            "INSERT INTO auth_session_runtime_bindings (session_id, deployment_id, instance_id)
+rust/crates/runtime/src/platform/auth/tests/conformance/account_flows.rs:481:            runtime_binding: None,
+rust/crates/runtime/src/platform/auth/tests/conformance/account_flows.rs:492:            runtime_binding: None,
+rust/crates/runtime/src/platform/auth/tests/conformance/authority_flows.rs:53:        .get_runtime_instance("inst_companion")
+rust/crates/runtime/src/platform/auth/tests/conformance/deployments.rs:87:            .put_runtime_instance(RuntimeInstanceRecord {
+rust/crates/runtime/src/platform/auth/tests/conformance/deployments.rs:205:        .put_runtime_instance(RuntimeInstanceRecord {
+rust/crates/runtime/src/platform/auth/tests/conformance/deployments.rs:314:        .put_runtime_instance(RuntimeInstanceRecord {
+rust/crates/runtime/src/platform/auth/tests/conformance/fixtures.rs:190:    runtime_binding: Option<SessionRuntimeBinding>,
+rust/crates/runtime/src/platform/auth/tests/conformance/fixtures.rs:198:        runtime_binding,
+rust/crates/runtime/src/platform/auth/tests/conformance/provisioning.rs:90:        .put_runtime_instance(RuntimeInstanceRecord {
+rust/crates/runtime/src/platform/auth/tests/conformance/provisioning.rs:100:    let service_runtime_binding = SessionRuntimeBinding {
+rust/crates/runtime/src/platform/auth/tests/conformance/provisioning.rs:116:            Some(service_runtime_binding.clone()),
+rust/crates/runtime/src/platform/auth/tests/conformance/provisioning.rs:121:            .get_session_runtime_binding(&service_session.session_id)
+rust/crates/runtime/src/platform/auth/tests/conformance/provisioning.rs:123:        Some(service_runtime_binding)
+rust/crates/runtime/src/platform/auth/tests/conformance/provisioning.rs:425:    let device_runtime_binding = SessionRuntimeBinding {
+rust/crates/runtime/src/platform/auth/tests/conformance/provisioning.rs:434:            Some(device_runtime_binding.clone()),
+rust/crates/runtime/src/platform/auth/tests/conformance/provisioning.rs:439:            .get_session_runtime_binding(&device_session.session_id)
+rust/crates/runtime/src/platform/auth/tests/conformance/provisioning.rs:441:        Some(device_runtime_binding)
+rust/crates/runtime/src/platform/auth/tests/conformance/provisioning.rs:468:        .get_runtime_instance("inst_device")
+rust/crates/runtime/src/platform/auth/tests/conformance/provisioning.rs:497:        .get_runtime_instance("inst_device")
+rust/crates/runtime/src/platform/auth/verifier.rs:86:        self.runtime_verified_context_raw(digest)
+rust/crates/runtime/src/platform/auth/verifier.rs:91:        self.runtime_revocation_time(digest).map_err(provider_error)
+rust/crates/runtime/src/platform/auth/verifier.rs:97:        self.runtime_policy().map_err(provider_error)
+rust/crates/runtime/src/platform/auth/verifier.rs:101:        Ok(self.runtime_healthy())
+rust/crates/runtime/src/platform/auth/verifier.rs:109:        self.runtime_io_counters()
+rust/crates/runtime/src/platform/auth/verifier.rs:135:            self.runtime_resolve_event_context_for_verification(&digest, event_time)
+rust/crates/runtime/src/platform/auth/verifier.rs:392:        &AuthorizationRegistryBinding::from_runtime_parts(
+rust/crates/runtime/src/platform/auth_callout.rs:559:            .runtime_revocation_time(&token.context_digest)
+rust/crates/runtime/src/platform/auth_post_commit.rs:288:                    .get_session_runtime_binding(&session.session_id)
+rust/crates/runtime/src/platform/mod.rs:55:    let auth_participant = auth::auth_runtime_participant_binding(now)
+rust/crates/runtime/src/platform/mod.rs:71:        .resolve_nats_runtime_with(context.nats_override.as_ref().map(|o| o.servers.as_str()))
+rust/crates/runtime/src/platform/mod.rs:430:        .get_runtime_instance(INSTANCE_ID)
+rust/crates/runtime/src/platform/mod.rs:444:        auth::validate_runtime_instance(&instance)
+rust/crates/runtime/src/platform/mod.rs:448:            .put_runtime_instance(instance)
+rust/crates/runtime/src/platform/mod.rs:701:        let participant = auth::auth_runtime_participant_binding(1_700_000_000_000).unwrap();
+rust/crates/runtime/src/resources.rs:206:    fn runtime_mode_derives_only_owned_streams() {
+rust/crates/runtime/src/storage/sqlite/health/V3001__health_projection.sql:27:  runtime_version TEXT,
+rust/crates/runtime/src/storage/sqlite/platform/V1001__authorization_state.sql:129:CREATE TABLE auth_session_runtime_bindings (
+rust/crates/runtime/src/storage/sqlite/platform/fixtures/accepted_m7_authorization_state.sql:66:INSERT INTO auth_session_runtime_bindings (session_id, deployment_id, instance_id)
+rust/crates/runtime/src/storage/tests.rs:52:fn runtime_config() -> RuntimeConfig {
+rust/crates/runtime/src/storage/tests.rs:353:        .get_runtime_instance("inst_m7")
+rust/crates/runtime/src/storage/tests.rs:548:fn runtime_stores_all_mode_migrates_all_selected_subsystems(
+rust/crates/runtime/src/storage/tests.rs:555:    let mut config = runtime_config();
+rust/crates/runtime/src/storage/tests.rs:582:fn runtime_stores_split_mode_ignores_unselected_storage() -> Result<(), Box<dyn std::error::Error>>
+rust/crates/runtime/src/storage/tests.rs:586:    let mut config = runtime_config();
+rust/crates/runtime/src/supervisor.rs:172:    let nats = match config.resolve_nats_runtime_with(nats_servers) {
+rust/crates/runtime/src/supervisor.rs:621:        .resolve_nats_runtime_with(options.nats_override.as_ref().map(|o| o.servers.as_str()))?;
+rust/crates/runtime/src/supervisor.rs:718:    let (primary, server_finished, cause) = wait_for_runtime_event(
+rust/crates/runtime/src/supervisor.rs:753:async fn wait_for_runtime_event<F, S, R>(
+rust/crates/runtime/src/supervisor.rs:981:    fn runtime_options_carries_nats_endpoint_override() {
+rust/crates/runtime/src/supervisor.rs:1009:        let (result, server_finished, cause) = wait_for_runtime_event(
+rust/crates/runtime/src/supervisor.rs:1023:    async fn ownership_loss_wins_when_runtime_events_are_simultaneously_ready() {
+rust/crates/runtime/src/supervisor.rs:1031:        let (result, server_finished, cause) = wait_for_runtime_event(
+rust/crates/trellis/Cargo.toml:12:runtime-internals = []
+rust/crates/trellis/src/client/authorization/mod.rs:21:#[cfg(feature = "runtime-internals")]
+rust/crates/trellis/src/client/authorization/mod.rs:24:#[cfg(any(test, feature = "runtime-internals"))]
+rust/crates/trellis/src/client/authorization/provider_cache.rs:20:#[cfg(feature = "runtime-internals")]
+rust/crates/trellis/src/client/authorization/provider_cache.rs:49:#[cfg(feature = "runtime-internals")]
+rust/crates/trellis/src/client/authorization/provider_cache.rs:136:    #[cfg(feature = "runtime-internals")]
+rust/crates/trellis/src/client/authorization/provider_cache.rs:318:    #[cfg(feature = "runtime-internals")]
+rust/crates/trellis/src/client/authorization/provider_cache.rs:351:    #[cfg(feature = "runtime-internals")]
+rust/crates/trellis/src/client/authorization/provider_cache.rs:363:    #[cfg(feature = "runtime-internals")]
+rust/crates/trellis/src/client/authorization/provider_cache.rs:365:    pub fn runtime_healthy(&self) -> bool {
+rust/crates/trellis/src/client/authorization/provider_cache.rs:369:    #[cfg(feature = "runtime-internals")]
+rust/crates/trellis/src/client/authorization/provider_cache.rs:372:    pub fn runtime_io_counters(&self) -> RuntimeAuthorizationIoCounters {
+rust/crates/trellis/src/client/authorization/provider_cache.rs:398:    #[cfg(feature = "runtime-internals")]
+rust/crates/trellis/src/client/authorization/provider_cache.rs:400:    pub fn runtime_verified_context_raw(
+rust/crates/trellis/src/client/authorization/provider_cache.rs:412:    #[cfg(feature = "runtime-internals")]
+rust/crates/trellis/src/client/authorization/provider_cache.rs:414:    pub fn runtime_revocation_time(&self, digest: &str) -> Result<Option<i64>, TrellisClientError> {
+rust/crates/trellis/src/client/authorization/provider_cache.rs:418:    #[cfg(feature = "runtime-internals")]
+rust/crates/trellis/src/client/authorization/provider_cache.rs:420:    pub fn apply_runtime_revocation(
+rust/crates/trellis/src/client/authorization/provider_cache.rs:453:    #[cfg(feature = "runtime-internals")]
+rust/crates/trellis/src/client/authorization/provider_cache.rs:455:    pub fn runtime_policy(&self) -> Result<AuthorizationVerificationPolicyV1, TrellisClientError> {
+rust/crates/trellis/src/client/authorization/provider_cache.rs:854:    #[cfg(feature = "runtime-internals")]
+rust/crates/trellis/src/client/authorization/provider_cache.rs:897:    #[cfg(feature = "runtime-internals")]
+rust/crates/trellis/src/client/authorization/provider_cache.rs:899:    pub async fn runtime_resolve_event_context(
+rust/crates/trellis/src/client/authorization/provider_cache.rs:907:    #[cfg(feature = "runtime-internals")]
+rust/crates/trellis/src/client/authorization/provider_cache.rs:909:    pub async fn runtime_resolve_event_context_for_verification(
+rust/crates/trellis/src/client/authorization/provider_cache.rs:918:    #[cfg(feature = "runtime-internals")]
+rust/crates/trellis/src/client/authorization/provider_cache.rs:920:    pub fn runtime_current_manifest(
+rust/crates/trellis/src/client/authorization/types.rs:45:#[cfg(feature = "runtime-internals")]
+rust/crates/trellis/src/client/authorization/types.rs:49:    pub fn from_runtime_parts(trust_bucket: String, context_bucket: String) -> Self {
+rust/crates/trellis/src/client/mod.rs:22:#[cfg(any(test, feature = "runtime-internals"))]
+rust/crates/trellis/src/client/mod.rs:34:#[cfg(feature = "runtime-internals")]
+rust/crates/trellis/src/jobs/active_job.rs:11:use crate::jobs::runtime_worker::JobCancellationToken;
+rust/crates/trellis/src/jobs/api.rs:9:use crate::jobs::runtime_ref::NatsJobWaiter;
+rust/crates/trellis/src/jobs/manager.rs:26:use crate::jobs::runtime_worker::JobCancellationToken;
+rust/crates/trellis/src/jobs/mod.rs:25:pub mod runtime_ref;
+rust/crates/trellis/src/jobs/mod.rs:26:mod runtime_worker;
+rust/crates/trellis/src/jobs/mod.rs:55:pub use runtime_worker::{JobCancellationToken, WorkerHostHandle, WorkerHostOptions};
+rust/crates/trellis/src/jobs/mod.rs:69:    pub use super::runtime_worker::{
+rust/crates/trellis/src/jobs/mod.rs:134:) -> Result<WorkerHostHandle, runtime_worker::WorkerHostError>
+rust/crates/trellis/src/jobs/mod.rs:147:    runtime_worker::start_worker_host_from_binding(
+rust/crates/trellis/src/jobs/mod.rs:186:    ) -> Result<WorkerHostHandle, runtime_worker::WorkerHostError>
+rust/crates/trellis/src/jobs/registry.rs:10:use crate::jobs::runtime_worker::JobCancellationToken;
+rust/crates/trellis/src/jobs/runtime.rs:35:    #[cfg(feature = "runtime-internals")]
+rust/crates/trellis/src/sdk/health/types.rs:496:    pub runtime_version: Option<String>,
+rust/crates/trellis/src/sdk/health/types.rs:1914:    pub runtime_version: Option<String>,
+rust/crates/trellis/src/sdk/jobs/types.rs:2244:    pub runtime_band: Option<String>,
+rust/crates/trellis/src/sdk/jobs/types.rs:2248:    pub runtime_ms: Option<i64>,
+rust/crates/trellis/src/sdk/jobs/types.rs:4157:    pub runtime_band: Option<JobsQueryRequestRuntimeBand>,
+rust/crates/trellis/src/sdk/jobs/types.rs:4524:    pub runtime_band: Option<String>,
+rust/crates/trellis/src/sdk/jobs/types.rs:4528:    pub runtime_ms: Option<i64>,
+rust/crates/trellis/src/sdk/jobs/types.rs:6089:    pub runtime_band: Option<JobsWatchInputQueryRuntimeBand>,
+rust/crates/trellis/src/service/core_bootstrap.rs:16:    pub(crate) fn jobs_runtime_binding(
+rust/crates/trellis/src/service/eventlog_runtime.rs:33:    #[cfg(feature = "runtime-internals")]
+rust/crates/trellis/src/service/local_validator.rs:224:    ) -> Result<super::runtime_facade::ServiceEventPublisherContext, EventVerificationFailure> {
+rust/crates/trellis/src/service/local_validator.rs:329:        Ok(super::runtime_facade::ServiceEventPublisherContext {
+rust/crates/trellis/src/service/mod.rs:31:mod runtime_facade;
+rust/crates/trellis/src/service/mod.rs:78:pub use runtime_facade::{
+rust/crates/trellis/src/service/mod.rs:81:pub use runtime_facade::{
+rust/crates/trellis/src/service/mod.rs:115:    #[cfg(feature = "runtime-internals")]
+rust/crates/trellis/src/service/request_loop.rs:862:    async fn declared_error_reply_preserves_type_and_merges_runtime_context() {
+rust/crates/trellis/src/service/request_loop.rs:889:    async fn panic_error_reply_uses_same_runtime_context() {
+rust/crates/trellis/src/service/runtime_facade.rs:643:            .jobs_runtime_binding()
+rust/crates/trellis/src/service/runtime_facade.rs:675:        let waiter = crate::jobs::runtime_ref::NatsJobWaiter::new(
+rust/crates/trellis/src/service/runtime_facade.rs:1114:            self.binding.jobs_runtime_binding()?,
+rust/crates/trellis/src/service/runtime_facade.rs:1149:        let mut binding = self.binding.jobs_runtime_binding()?;
+rust/crates/trellis/tests/integration.rs:30:#[path = "integration/runtime_ownership.rs"]
+rust/crates/trellis/tests/integration.rs:31:mod runtime_ownership;
+rust/crates/trellis/tests/integration/auth.rs:26:use crate::support::assertions::{assert_case_registered, assert_runtime_case_registered};
+rust/crates/trellis/tests/integration/auth.rs:170:    assert_runtime_case_registered(
+rust/crates/trellis/tests/integration/auth.rs:468:    assert_runtime_case_registered("auth.local-login-binds-approved-client", "auth", "auth");
+rust/crates/trellis/tests/integration/auth.rs:534:    assert_runtime_case_registered(
+rust/crates/trellis/tests/integration/auth.rs:580:    assert_runtime_case_registered("auth.session-revoke-denies-reconnect", "auth", "auth");
+rust/crates/trellis/tests/integration/auth.rs:636:    assert_runtime_case_registered(
+rust/crates/trellis/tests/integration/auth.rs:708:    assert_runtime_case_registered(
+rust/crates/trellis/tests/integration/auth.rs:748:    assert_runtime_case_registered(
+rust/crates/trellis/tests/integration/auth.rs:815:    assert_runtime_case_registered(
+rust/crates/trellis/tests/integration/auth.rs:878:    assert_runtime_case_registered(
+rust/crates/trellis/tests/integration/auth.rs:982:    assert_runtime_case_registered(
+rust/crates/trellis/tests/integration/auth.rs:1049:    assert_runtime_case_registered(
+rust/crates/trellis/tests/integration/auth.rs:1096:    assert_runtime_case_registered(
+rust/crates/trellis/tests/integration/auth.rs:1236:    assert_runtime_case_registered("auth.account-flow-oauth-callback-runtime", "auth", "auth");
+rust/crates/trellis/tests/integration/auth.rs:1361:    assert_runtime_case_registered(
+rust/crates/trellis/tests/integration/auth.rs:1511:    assert_runtime_case_registered(
+rust/crates/trellis/tests/integration/auth.rs:1644:    assert_runtime_case_registered(
+rust/crates/trellis/tests/integration/auth.rs:1684:    assert_runtime_case_registered(
+rust/crates/trellis/tests/integration/auth.rs:1757:async fn run_device_activation_without_review(case_id: &str, runtime_case: bool) {
+rust/crates/trellis/tests/integration/auth.rs:1758:    if runtime_case {
+rust/crates/trellis/tests/integration/auth.rs:1759:        assert_runtime_case_registered(case_id, "auth", "auth");
+rust/crates/trellis/tests/integration/auth.rs:1843:    assert_runtime_case_registered("auth.device-activation-required-review", "auth", "auth");
+rust/crates/trellis/tests/integration/auth.rs:1992:    assert_runtime_case_registered(
+rust/crates/trellis/tests/integration/auth.rs:2082:    assert_runtime_case_registered(
+rust/crates/trellis/tests/integration/auth.rs:2303:    assert_runtime_case_registered(
+rust/crates/trellis/tests/integration/auth.rs:2440:    assert_runtime_case_registered(
+rust/crates/trellis/tests/integration/auth.rs:2686:    assert_runtime_case_registered("auth.device-activation-proof-scoping", "auth", "auth");
+rust/crates/trellis/tests/integration/auth.rs:3254:    assert_runtime_case_registered(
+rust/crates/trellis/tests/integration/auth.rs:3294:    assert_runtime_case_registered(
+rust/crates/trellis/tests/integration/auth.rs:3389:    assert_runtime_case_registered(
+rust/crates/trellis/tests/integration/auth.rs:3442:    assert_runtime_case_registered("auth.portal-login-policy-snapshot-race", "auth", "auth");
+rust/crates/trellis/tests/integration/auth.rs:3846:    assert_runtime_case_registered(
+rust/crates/trellis/tests/integration/auth.rs:4048:    assert_runtime_case_registered("auth.portal-reconciliation-a-b-a-converges", "auth", "auth");
+rust/crates/trellis/tests/integration/auth.rs:4088:    assert_runtime_case_registered(
+rust/crates/trellis/tests/integration/auth.rs:4144:    assert_runtime_case_registered("auth.oidc-role-mapping-converges-authority", "auth", "auth");
+rust/crates/trellis/tests/integration/auth.rs:4320:    assert_runtime_case_registered(
+rust/crates/trellis/tests/integration/authority_plan.rs:11:use crate::support::assertions::assert_runtime_case_registered;
+rust/crates/trellis/tests/integration/authority_plan.rs:109:    assert_runtime_case_registered(
+rust/crates/trellis/tests/integration/authority_plan.rs:119:    assert_runtime_case_registered(
+rust/crates/trellis/tests/integration/authority_plan.rs:129:    assert_runtime_case_registered(
+rust/crates/trellis/tests/integration/authority_plan.rs:205:    assert_runtime_case_registered(
+rust/crates/trellis/tests/integration/authority_plan.rs:326:    assert_runtime_case_registered(
+rust/crates/trellis/tests/integration/authority_plan.rs:454:    assert_runtime_case_registered(
+rust/crates/trellis/tests/integration/authority_plan.rs:553:    assert_runtime_case_registered(
+rust/crates/trellis/tests/integration/cli.rs:16:use crate::support::assertions::assert_runtime_case_registered;
+rust/crates/trellis/tests/integration/cli.rs:247:    assert_runtime_case_registered(CASE_ID, "cli", "cli");
+rust/crates/trellis/tests/integration/cli.rs:256:    let runtime_port = free_port();
+rust/crates/trellis/tests/integration/cli.rs:269:            &runtime_port.to_string(),
+rust/crates/trellis/tests/integration/cli.rs:361:        || port_accepts(runtime_port),
+rust/crates/trellis/tests/integration/cli.rs:504:        || port_accepts(runtime_port),
+rust/crates/trellis/tests/integration/event_consumers.rs:14:use crate::support::assertions::assert_runtime_case_registered;
+rust/crates/trellis/tests/integration/event_consumers.rs:116:    assert_runtime_case_registered(
+rust/crates/trellis/tests/integration/event_consumers.rs:158:    assert_runtime_case_registered(
+rust/crates/trellis/tests/integration/event_consumers.rs:280:    assert_runtime_case_registered(
+rust/crates/trellis/tests/integration/event_consumers.rs:355:    assert_runtime_case_registered(
+rust/crates/trellis/tests/integration/event_consumers.rs:487:    assert_runtime_case_registered(
+rust/crates/trellis/tests/integration/event_consumers.rs:530:    assert_runtime_case_registered(
+rust/crates/trellis/tests/integration/event_consumers.rs:613:    assert_runtime_case_registered(
+rust/crates/trellis/tests/integration/event_consumers.rs:659:    assert_runtime_case_registered(
+rust/crates/trellis/tests/integration/event_consumers.rs:735:    assert_runtime_case_registered(
+rust/crates/trellis/tests/integration/event_consumers.rs:829:    assert_runtime_case_registered(
+rust/crates/trellis/tests/integration/event_consumers.rs:978:    assert_runtime_case_registered(
+rust/crates/trellis/tests/integration/event_consumers.rs:1061:    assert_runtime_case_registered(
+rust/crates/trellis/tests/integration/event_consumers.rs:1156:    assert_runtime_case_registered(
+rust/crates/trellis/tests/integration/event_consumers.rs:1229:    assert_runtime_case_registered(
+rust/crates/trellis/tests/integration/event_consumers.rs:1352:    assert_runtime_case_registered(
+rust/crates/trellis/tests/integration/event_consumers.rs:1429:    assert_runtime_case_registered(
+rust/crates/trellis/tests/integration/event_consumers.rs:1517:    assert_runtime_case_registered("event-consumers.self-owned-grouped-consumer-waits-for-all-handlers-before-consuming-queued-event",
+rust/crates/trellis/tests/integration/health.rs:19:use crate::support::assertions::assert_runtime_case_registered;
+rust/crates/trellis/tests/integration/health.rs:80:bucket = "trellis_runtime_leases"
+rust/crates/trellis/tests/integration/health.rs:162:    assert_runtime_case_registered(CASE_ID, "health", "health");
+rust/crates/trellis/tests/integration/jobs.rs:14:    publish_worker_heartbeat, runtime_ref::NatsJobWaiter, JobDescriptor, JobLogLevel, JobManager,
+rust/crates/trellis/tests/integration/jobs.rs:23:use crate::support::assertions::assert_runtime_case_registered;
+rust/crates/trellis/tests/integration/jobs.rs:734:    assert_runtime_case_registered(
+rust/crates/trellis/tests/integration/jobs.rs:784:    assert_runtime_case_registered(
+rust/crates/trellis/tests/integration/jobs.rs:806:    assert_runtime_case_registered("jobs.keyed-jobs-serialize-same-key", "jobs", "jobs");
+rust/crates/trellis/tests/integration/jobs.rs:847:    assert_runtime_case_registered("jobs.keyed-active-redelivery-after-restart", "jobs", "jobs");
+rust/crates/trellis/tests/integration/jobs.rs:918:    assert_runtime_case_registered("jobs.keyed-jobs-reject-queue-full", "jobs", "jobs");
+rust/crates/trellis/tests/integration/jobs.rs:1006:    assert_runtime_case_registered("jobs.keyed-jobs-queue-policies-live", "jobs", "jobs");
+rust/crates/trellis/tests/integration/jobs.rs:1281:    assert_runtime_case_registered(
+rust/crates/trellis/tests/integration/jobs.rs:1393:    assert_runtime_case_registered("jobs.submitted-job-can-be-cancelled", "jobs", "jobs");
+rust/crates/trellis/tests/integration/jobs.rs:1407:    assert_runtime_case_registered("jobs.failed-job-retries-then-dead", "jobs", "jobs");
+rust/crates/trellis/tests/integration/jobs.rs:1439:    assert_runtime_case_registered("jobs.job-progress-and-log-are-published", "jobs", "jobs");
+rust/crates/trellis/tests/integration/jobs.rs:1456:    assert_runtime_case_registered("jobs.job-wait-returns-typed-result", "jobs", "jobs");
+rust/crates/trellis/tests/integration/jobs.rs:1474:    assert_runtime_case_registered(
+rust/crates/trellis/tests/integration/jobs.rs:1780:                runtime_band: None,
+rust/crates/trellis/tests/integration/operations.rs:19:use crate::support::assertions::{assert_case_registered, assert_runtime_case_registered};
+rust/crates/trellis/tests/integration/operations.rs:2132:    assert_runtime_case_registered(
+rust/crates/trellis/tests/integration/prepared_events.rs:14:use crate::support::assertions::assert_runtime_case_registered;
+rust/crates/trellis/tests/integration/prepared_events.rs:75:    assert_runtime_case_registered(CASE_ID, "prepared-events", "prepared_events");
+rust/crates/trellis/tests/integration/rpc.rs:11:use crate::support::assertions::{assert_case_registered, assert_runtime_case_registered};
+rust/crates/trellis/tests/integration/rpc.rs:362:    assert_runtime_case_registered(
+rust/crates/trellis/tests/integration/runtime_ownership.rs:12:const TEST_NAME: &str = "runtime_ownership::runtime_singleton_ownership_lifecycle";
+rust/crates/trellis/tests/integration/runtime_ownership.rs:14:    "runtime_ownership::runtime_incompatible_lease_bucket_fails_before_storage_open";
+rust/crates/trellis/tests/integration/runtime_ownership.rs:16:    "runtime_ownership::runtime_check_is_mode_scoped_and_read_only";
+rust/crates/trellis/tests/integration/runtime_ownership.rs:17:const LEASE_BUCKET: &str = "trellis_runtime_leases";
+rust/crates/trellis/tests/integration/runtime_ownership.rs:33:        write_runtime_config(runtime, mode, config_path, label, port);
+rust/crates/trellis/tests/integration/runtime_ownership.rs:38:        let child = runtime_command(mode, config_path)
+rust/crates/trellis/tests/integration/runtime_ownership.rs:131:async fn runtime_singleton_ownership_lifecycle() {
+rust/crates/trellis/tests/integration/runtime_ownership.rs:219:    let all_runtime_config = runtime.workdir().join("all-runtime.toml");
+rust/crates/trellis/tests/integration/runtime_ownership.rs:221:        RuntimeProcess::start(&runtime, "all", &all_runtime_config, "all-runtime");
+rust/crates/trellis/tests/integration/runtime_ownership.rs:321:async fn runtime_incompatible_lease_bucket_fails_before_storage_open() {
+rust/crates/trellis/tests/integration/runtime_ownership.rs:367:async fn runtime_check_is_mode_scoped_and_read_only() {
+rust/crates/trellis/tests/integration/runtime_ownership.rs:400:        let output = runtime_command(mode, &config_path)
+rust/crates/trellis/tests/integration/runtime_ownership.rs:412:    let failed_jobs = runtime_command("jobs", &config_path)
+rust/crates/trellis/tests/integration/runtime_ownership.rs:432:    let jobs_without_auth = runtime_command("jobs", &config_path)
+rust/crates/trellis/tests/integration/runtime_ownership.rs:455:    let all_missing_union = runtime_command("all", &config_path)
+rust/crates/trellis/tests/integration/runtime_ownership.rs:525:fn write_runtime_config(
+rust/crates/trellis/tests/integration/runtime_ownership.rs:657:fn runtime_command(mode: &str, config_path: &Path) -> Command {
+rust/crates/trellis/tests/integration/support/assertions.rs:1:use super::cases::{rust_case_by_id, rust_runtime_case_by_id};
+rust/crates/trellis/tests/integration/support/assertions.rs:2:use super::matrix::{load_client_test_matrix, load_rust_runtime_test_matrix};
+rust/crates/trellis/tests/integration/support/assertions.rs:20:pub(crate) fn assert_runtime_case_registered(case_id: &str, fixture: &str, module: &str) {
+rust/crates/trellis/tests/integration/support/assertions.rs:21:    let matrix = load_rust_runtime_test_matrix().expect("load Rust runtime test matrix");
+rust/crates/trellis/tests/integration/support/assertions.rs:25:    let local_case = rust_runtime_case_by_id(case_id)
+rust/crates/trellis/tests/integration/support/cases.rs:2:    load_client_test_matrix, load_rust_runtime_test_matrix, CompletionStatus, TestMatrix,
+rust/crates/trellis/tests/integration/support/cases.rs:16:pub(crate) fn rust_runtime_case_by_id(id: &str) -> Option<IntegrationCase> {
+rust/crates/trellis/tests/integration/support/cases.rs:17:    implemented_case_by_id(&load_rust_runtime_test_matrix().ok()?, id)
+rust/crates/trellis/tests/integration/support/matrix.rs:130:pub(crate) fn load_rust_runtime_test_matrix() -> Result<TestMatrix, String> {
+
+## integration-test-scoping feature references
+rust/crates/trellis-test/Cargo.toml:23:trellis-rs = { path = "../trellis", version = "0.12.0", features = ["integration-test-scoping", "test-support"] }
+rust/crates/trellis-test/src/lib.rs:216:    IntegrationScope(#[from] trellis_rs::integration_test_scoping::IntegrationTestScopeError),
+rust/crates/trellis-test/src/lib.rs:576:    integration_test_scope: Option<trellis_rs::integration_test_scoping::IntegrationTestScope>,
+rust/crates/trellis-test/src/lib.rs:1311:                trellis_rs::integration_test_scoping::IntegrationTestScope::new(
+rust/crates/trellis-test/src/lib.rs:1915:    integration_test_scope: Option<trellis_rs::integration_test_scoping::IntegrationTestScope>,
+rust/crates/trellis-test/src/lib.rs:1932:    integration_test_scope: Option<trellis_rs::integration_test_scoping::IntegrationTestScope>,
+rust/crates/trellis-test/src/lib.rs:3604:    integration_test_scope: Option<trellis_rs::integration_test_scoping::IntegrationTestScope>,
+rust/crates/trellis-test/src/lib.rs:3761:        scope: Option<&trellis_rs::integration_test_scoping::IntegrationTestScope>,
+rust/crates/trellis-test/src/lib.rs:3823:    scope: &trellis_rs::integration_test_scoping::IntegrationTestScope,
+rust/crates/trellis-test/src/lib.rs:3845:    scope: &trellis_rs::integration_test_scoping::IntegrationTestScope,
+rust/crates/trellis-test/src/lib.rs:3910:    scope: &trellis_rs::integration_test_scoping::IntegrationTestScope,
+rust/crates/trellis-test/src/lib.rs:4197:    integration_test_scope: Option<trellis_rs::integration_test_scoping::IntegrationTestScope>,
+rust/crates/trellis-test/src/lib.rs:4512:    integration_test_scope: Option<trellis_rs::integration_test_scoping::IntegrationTestScope>,
+rust/crates/trellis-test/src/lib.rs:5551:            trellis_rs::integration_test_scoping::IntegrationTestScope::new("run", "case").unwrap();
+rust/crates/trellis/Cargo.toml:11:integration-test-scoping = []
+rust/crates/trellis/src/auth/device_activation.rs:194:#[cfg(feature = "integration-test-scoping")]
+rust/crates/trellis/src/auth/mod.rs:19:#[cfg(feature = "integration-test-scoping")]
+rust/crates/trellis/src/client/authorization/mod.rs:19:#[cfg(feature = "integration-test-scoping")]
+rust/crates/trellis/src/client/authorization/provider_cache.rs:57:#[cfg(feature = "integration-test-scoping")]
+rust/crates/trellis/src/client/authorization/provider_cache.rs:468:    #[cfg(feature = "integration-test-scoping")]
+rust/crates/trellis/src/client/authorization/provider_cache.rs:486:    #[cfg(feature = "integration-test-scoping")]
+rust/crates/trellis/src/client/connection.rs:35:#[cfg(feature = "integration-test-scoping")]
+rust/crates/trellis/src/client/connection.rs:36:use crate::integration_test_scoping::IntegrationTestScope;
+rust/crates/trellis/src/client/connection.rs:116:    #[cfg(feature = "integration-test-scoping")]
+rust/crates/trellis/src/client/connection.rs:117:    pub(crate) integration_test_scope: Option<IntegrationTestScope>,
+rust/crates/trellis/src/client/connection.rs:138:    #[cfg(feature = "integration-test-scoping")]
+rust/crates/trellis/src/client/connection.rs:139:    integration_test_scope: Option<IntegrationTestScope>,
+rust/crates/trellis/src/client/connection.rs:179:            #[cfg(feature = "integration-test-scoping")]
+rust/crates/trellis/src/client/connection.rs:195:    #[cfg(feature = "integration-test-scoping")]
+rust/crates/trellis/src/client/connection.rs:197:    pub fn with_integration_test_scope(mut self, scope: IntegrationTestScope) -> Self {
+rust/crates/trellis/src/client/connection.rs:798:#[cfg(feature = "integration-test-scoping")]
+rust/crates/trellis/src/client/connection.rs:1227:        #[cfg(feature = "integration-test-scoping")]
+rust/crates/trellis/src/client/connection.rs:1246:    #[cfg(feature = "integration-test-scoping")]
+rust/crates/trellis/src/client/connection.rs:1247:    integration_test_scope: Option<IntegrationTestScope>,
+rust/crates/trellis/src/client/connection.rs:1279:            #[cfg(feature = "integration-test-scoping")]
+rust/crates/trellis/src/client/connection.rs:1291:    #[cfg(feature = "integration-test-scoping")]
+rust/crates/trellis/src/client/connection.rs:1293:    pub fn with_integration_test_scope(mut self, scope: IntegrationTestScope) -> Self {
+rust/crates/trellis/src/client/connection.rs:1300:#[cfg(feature = "integration-test-scoping")]
+rust/crates/trellis/src/client/connection.rs:1356:    #[cfg(feature = "integration-test-scoping")]
+rust/crates/trellis/src/client/connection.rs:1357:    integration_test_scope: Option<IntegrationTestScope>,
+rust/crates/trellis/src/client/connection.rs:1362:        #[cfg(feature = "integration-test-scoping")]
+rust/crates/trellis/src/client/connection.rs:1371:        #[cfg(not(feature = "integration-test-scoping"))]
+rust/crates/trellis/src/client/connection.rs:1375:    #[cfg(feature = "integration-test-scoping")]
+rust/crates/trellis/src/client/connection.rs:1376:    pub(crate) fn integration_test_scope(&self) -> Option<&IntegrationTestScope> {
+rust/crates/trellis/src/client/connection.rs:1385:    #[cfg(feature = "integration-test-scoping")]
+rust/crates/trellis/src/client/connection.rs:1672:            #[cfg(feature = "integration-test-scoping")]
+rust/crates/trellis/src/client/connection.rs:1697:    #[cfg(feature = "integration-test-scoping")]
+rust/crates/trellis/src/client/mod.rs:24:#[cfg(feature = "integration-test-scoping")]
+rust/crates/trellis/src/client/mod.rs:39:#[cfg(feature = "integration-test-scoping")]
+rust/crates/trellis/src/client/mod.rs:46:#[cfg(feature = "integration-test-scoping")]
+rust/crates/trellis/src/generated.rs:60:    #[cfg(all(feature = "integration-test-scoping", feature = "test-support"))]
+rust/crates/trellis/src/generated.rs:67:    #[cfg(all(feature = "integration-test-scoping", feature = "test-support"))]
+rust/crates/trellis/src/generated.rs:77:    #[cfg(all(feature = "integration-test-scoping", feature = "test-support"))]
+rust/crates/trellis/src/generated.rs:275:    #[cfg(feature = "integration-test-scoping")] integration_test_scope: Option<
+rust/crates/trellis/src/generated.rs:276:        crate::integration_test_scoping::IntegrationTestScope,
+rust/crates/trellis/src/generated.rs:299:            #[cfg(feature = "integration-test-scoping")]
+rust/crates/trellis/src/integration_test_scoping.rs:9:pub struct IntegrationTestScope {
+rust/crates/trellis/src/integration_test_scoping.rs:17:pub enum IntegrationTestScopeError {
+rust/crates/trellis/src/integration_test_scoping.rs:32:impl IntegrationTestScope {
+rust/crates/trellis/src/integration_test_scoping.rs:37:    ) -> Result<Self, IntegrationTestScopeError> {
+rust/crates/trellis/src/integration_test_scoping.rs:120:    pub fn descriptor_subject(&self, subject: &str) -> Result<String, IntegrationTestScopeError> {
+rust/crates/trellis/src/integration_test_scoping.rs:122:            .map_err(|_| IntegrationTestScopeError::InvalidSubject(subject.to_string()))?;
+rust/crates/trellis/src/integration_test_scoping.rs:129:            return Err(IntegrationTestScopeError::NotContractOwned(
+rust/crates/trellis/src/integration_test_scoping.rs:151:            .map_err(|_| IntegrationTestScopeError::InvalidSubject(scoped.clone()))?;
+rust/crates/trellis/src/integration_test_scoping.rs:158:    scope: Option<&IntegrationTestScope>,
+rust/crates/trellis/src/integration_test_scoping.rs:160:) -> Result<Cow<'a, str>, IntegrationTestScopeError> {
+rust/crates/trellis/src/integration_test_scoping.rs:164:            Err(IntegrationTestScopeError::NotContractOwned(_)) => Ok(Cow::Borrowed(subject)),
+rust/crates/trellis/src/integration_test_scoping.rs:171:fn validate_token(name: &'static str, token: &str) -> Result<(), IntegrationTestScopeError> {
+rust/crates/trellis/src/integration_test_scoping.rs:173:        return Err(IntegrationTestScopeError::InvalidToken { name });
+rust/crates/trellis/src/integration_test_scoping.rs:180:    use super::{resolve_descriptor_subject, IntegrationTestScope};
+rust/crates/trellis/src/integration_test_scoping.rs:192:        let scope = IntegrationTestScope::new("run1", "case2").unwrap();
+rust/crates/trellis/src/integration_test_scoping.rs:201:        let scope = IntegrationTestScope::new("run1", "case2").unwrap();
+rust/crates/trellis/src/integration_test_scoping.rs:222:        let scope = IntegrationTestScope::new("run1", "case2").unwrap();
+rust/crates/trellis/src/integration_test_scoping.rs:230:        let scope = IntegrationTestScope::new("run1", "case2").unwrap();
+rust/crates/trellis/src/integration_test_scoping.rs:239:        let scope = IntegrationTestScope::new("run1", "case2").unwrap();
+rust/crates/trellis/src/integration_test_scoping.rs:252:        let scope = IntegrationTestScope::new("run1", "case2").unwrap();
+rust/crates/trellis/src/lib.rs:61:#[cfg(feature = "integration-test-scoping")]
+rust/crates/trellis/src/service/router.rs:230:    #[cfg(feature = "integration-test-scoping")]
+rust/crates/trellis/src/service/router.rs:231:    integration_test_scope: Option<crate::integration_test_scoping::IntegrationTestScope>,
+rust/crates/trellis/src/service/router.rs:245:    #[cfg(feature = "integration-test-scoping")]
+rust/crates/trellis/src/service/router.rs:248:        scope: Option<crate::integration_test_scoping::IntegrationTestScope>,
+rust/crates/trellis/src/service/router.rs:254:        #[cfg(feature = "integration-test-scoping")]
+rust/crates/trellis/src/service/router.rs:263:        #[cfg(not(feature = "integration-test-scoping"))]
+rust/crates/trellis/src/service/router.rs:268:        #[cfg(feature = "integration-test-scoping")]
+rust/crates/trellis/src/service/router.rs:282:        #[cfg(feature = "integration-test-scoping")]
+rust/crates/trellis/src/service/runtime_facade.rs:41:#[cfg(feature = "integration-test-scoping")]
+rust/crates/trellis/src/service/runtime_facade.rs:42:use crate::integration_test_scoping::IntegrationTestScope;
+rust/crates/trellis/src/service/runtime_facade.rs:180:    #[cfg(feature = "integration-test-scoping")]
+rust/crates/trellis/src/service/runtime_facade.rs:181:    integration_test_scope: Option<IntegrationTestScope>,
+rust/crates/trellis/src/service/runtime_facade.rs:222:            #[cfg(feature = "integration-test-scoping")]
+rust/crates/trellis/src/service/runtime_facade.rs:255:    #[cfg(feature = "integration-test-scoping")]
+rust/crates/trellis/src/service/runtime_facade.rs:257:    pub fn with_integration_test_scope(mut self, scope: IntegrationTestScope) -> Self {
+rust/crates/trellis/src/service/runtime_facade.rs:937:    #[cfg(feature = "integration-test-scoping")]
+rust/crates/trellis/src/service/runtime_facade.rs:950:    #[cfg(feature = "integration-test-scoping")]
+rust/crates/trellis/src/service/runtime_facade.rs:960:    #[cfg(feature = "integration-test-scoping")]
+rust/crates/trellis/src/service/runtime_facade.rs:989:        #[cfg(feature = "integration-test-scoping")]
+rust/crates/trellis/src/service/runtime_facade.rs:991:        #[cfg(feature = "integration-test-scoping")]
+rust/crates/trellis/src/service/runtime_facade.rs:1779:                #[cfg(feature = "integration-test-scoping")]
+rust/crates/trellis/src/service/runtime_facade.rs:2025:    #[cfg(feature = "integration-test-scoping")]
