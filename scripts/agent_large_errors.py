@@ -51,6 +51,26 @@ replace_once(
     "                        Ok(Some(error)) => {\n                            Self::Validation(Box::new(ValidationFailure::Validation(error)))\n                        }\n",
 )
 
+# Local caller validation synthesizes the same public failure envelope, so adapt those
+# two constructors and remove the result_large_err suppression that boxing makes stale.
+connection = "rust/crates/trellis/src/client/connection.rs"
+remove_expect(connection, "result_large_err", expected=1)
+replace_once(
+    connection,
+    """        Err(crate::service::ServerError::Validation { issues }) => Err(CallError::Validation(\n            crate::client::ValidationFailure::Validation(crate::client::ValidationErrorPayload {\n""",
+    """        Err(crate::service::ServerError::Validation { issues }) => Err(CallError::Validation(\n            Box::new(crate::client::ValidationFailure::Validation(\n                crate::client::ValidationErrorPayload {\n""",
+)
+replace_once(
+    connection,
+    """                context: None,\n                trace_id: None,\n            }),\n        )),\n        Err(crate::service::ServerError::SchemaValidation { issues }) => Err(\n            CallError::Validation(crate::client::ValidationFailure::Schema(\n""",
+    """                    context: None,\n                    trace_id: None,\n                },\n            )),\n        )),\n        Err(crate::service::ServerError::SchemaValidation { issues }) => Err(\n            CallError::Validation(Box::new(crate::client::ValidationFailure::Schema(\n""",
+)
+replace_once(
+    connection,
+    """                    context: None,\n                    trace_id: None,\n                },\n            )),\n        ),\n        Err(error) => Err(CallError::Protocol(crate::client::ProtocolError::new(\n""",
+    """                    context: None,\n                    trace_id: None,\n                },\n            ))),\n        ),\n        Err(error) => Err(CallError::Protocol(crate::client::ProtocolError::new(\n""",
+)
+
 # Transfer-start errors intentionally return the accepted operation reference on an
 # upload failure. That reference is large state; store it behind a box instead of
 # suppressing the enum-size lint.
@@ -78,7 +98,7 @@ if removed_result_expects < 1:
 replace_once(
     runtime,
     "    Server(#[from] ServerError),\n",
-    "    Server(#[source] Box<ServerError>),\n",
+    "    Server(Box<ServerError>),\n",
 )
 replace_once(
     runtime,
@@ -99,6 +119,16 @@ replace_once(
     runtime,
     ".map_err(|source| ServiceRuntimeError::EventHandler { source, context })",
     ".map_err(|source| ServiceRuntimeError::EventHandler {\n                    source: Box::new(source),\n                    context: Box::new(context),\n                })",
+)
+replace_once(
+    runtime,
+    ".map_err(ServiceRuntimeError::Server);",
+    ".map_err(ServiceRuntimeError::from);",
+)
+replace_once(
+    runtime,
+    ".map_err(ServiceRuntimeError::Server)\n",
+    ".map_err(ServiceRuntimeError::from)\n",
 )
 
 print(

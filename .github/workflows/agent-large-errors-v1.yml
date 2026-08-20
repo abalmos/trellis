@@ -63,6 +63,7 @@ jobs:
         shell: bash
         run: |
           git add rust/crates/trellis/src/client/error.rs \
+            rust/crates/trellis/src/client/connection.rs \
             rust/crates/trellis/src/client/operations.rs \
             rust/crates/trellis/src/service/runtime_facade.rs
           git diff --cached --check
