@@ -1,0 +1,77 @@
+# activation review test-control inventory
+
+rust/crates/runtime/src/platform/auth/application/repository.rs:699:    async fn activation_review_test_ttl_ms(
+rust/crates/runtime/src/platform/auth/http/bootstrap/mod.rs:490:                .activation_review_test_ttl_ms(&input.deployment_id)
+rust/crates/runtime/src/platform/auth/sqlite/deployments.rs:26:    async fn activation_review_test_ttl_ms(
+rust/crates/runtime/src/platform/auth/sqlite/deployments.rs:36:                       AND name = '__trellis_test_activation_review_ttls')",
+rust/crates/runtime/src/platform/auth/sqlite/deployments.rs:47:                     FROM __trellis_test_activation_review_ttls
+rust/crates/runtime/src/platform/auth/sqlite/provisioning.rs:190:                           AND name = '__trellis_test_activation_review_reads')",
+rust/crates/runtime/src/platform/auth/sqlite/provisioning.rs:198:                            "UPDATE __trellis_test_activation_review_reads
+rust/crates/trellis-test/src/lib.rs:799:    pub fn set_activation_review_ttl(
+rust/crates/trellis-test/src/lib.rs:809:            "CREATE TABLE IF NOT EXISTS __trellis_test_activation_review_ttls (
+rust/crates/trellis-test/src/lib.rs:815:            "INSERT OR REPLACE INTO __trellis_test_activation_review_ttls
+rust/crates/trellis-test/src/lib.rs:823:    pub fn count_activation_review_reads(&self, review_id: &str) -> Result<(), TrellisTestError> {
+rust/crates/trellis-test/src/lib.rs:826:            "CREATE TABLE IF NOT EXISTS __trellis_test_activation_review_reads (
+rust/crates/trellis-test/src/lib.rs:832:            "INSERT OR REPLACE INTO __trellis_test_activation_review_reads
+rust/crates/trellis-test/src/lib.rs:840:    pub fn activation_review_read_count(&self, review_id: &str) -> Result<u64, TrellisTestError> {
+rust/crates/trellis-test/src/lib.rs:843:                "SELECT read_count FROM __trellis_test_activation_review_reads
+rust/crates/trellis/tests/integration/auth.rs:2022:        .count_activation_review_reads(&pending.review_id)
+rust/crates/trellis/tests/integration/auth.rs:2031:            .activation_review_read_count(&pending.review_id)
+rust/crates/trellis/tests/integration/auth.rs:2073:            .activation_review_read_count(&pending.review_id)
+rust/crates/trellis/tests/integration/auth.rs:2475:        .set_activation_review_ttl(&device.approval.deployment_id, Duration::from_millis(1_500))
+rust/crates/trellis/tests/integration/auth.rs:2498:        .count_activation_review_reads(&pending.review_id)
+rust/crates/trellis/tests/integration/auth.rs:2507:            .activation_review_read_count(&pending.review_id)
+rust/crates/trellis/tests/integration/auth.rs:2523:            .activation_review_read_count(&pending.review_id)
+rust/crates/trellis/tests/integration/auth.rs:2618:        .set_activation_review_ttl(
+
+## portal barriers
+rust/crates/runtime/src/platform/auth/application/repository.rs:590:    async fn wait_for_portal_snapshot_test_barrier(
+rust/crates/runtime/src/platform/auth/application/repository.rs:598:    async fn wait_for_portal_reconciliation_test_barrier(
+rust/crates/runtime/src/platform/auth/http/browser/consent.rs:294:                .wait_for_portal_snapshot_test_barrier(&flow.flow_id, &portal.portal_id)
+rust/crates/runtime/src/platform/auth/portal_reconciliation.rs:131:                    .wait_for_portal_reconciliation_test_barrier(portal_id)
+rust/crates/runtime/src/platform/auth/sqlite/accounts.rs:870:    async fn wait_for_portal_reconciliation_test_barrier(
+rust/crates/runtime/src/platform/auth/sqlite/accounts.rs:882:                           AND name = '__trellis_test_portal_reconciliation_barriers')",
+rust/crates/runtime/src/platform/auth/sqlite/accounts.rs:892:                        "UPDATE __trellis_test_portal_reconciliation_barriers
+rust/crates/runtime/src/platform/auth/sqlite/accounts.rs:910:                             FROM __trellis_test_portal_reconciliation_barriers
+rust/crates/runtime/src/platform/auth/sqlite/accounts.rs:961:    async fn wait_for_portal_snapshot_test_barrier(
+rust/crates/runtime/src/platform/auth/sqlite/accounts.rs:976:                           AND name = '__trellis_test_portal_snapshot_barriers')",
+rust/crates/runtime/src/platform/auth/sqlite/accounts.rs:986:                        "UPDATE __trellis_test_portal_snapshot_barriers
+rust/crates/runtime/src/platform/auth/sqlite/accounts.rs:1006:                             FROM __trellis_test_portal_snapshot_barriers
+rust/crates/trellis-test/src/lib.rs:639:    pub fn install_portal_snapshot_barrier(&self, flow_id: &str) -> Result<(), TrellisTestError> {
+rust/crates/trellis-test/src/lib.rs:642:            "CREATE TABLE IF NOT EXISTS __trellis_test_portal_snapshot_barriers (
+rust/crates/trellis-test/src/lib.rs:649:            "INSERT OR REPLACE INTO __trellis_test_portal_snapshot_barriers
+rust/crates/trellis-test/src/lib.rs:657:    pub async fn wait_for_portal_snapshot_barrier(
+rust/crates/trellis-test/src/lib.rs:665:                "SELECT reached FROM __trellis_test_portal_snapshot_barriers
+rust/crates/trellis-test/src/lib.rs:683:    pub fn release_portal_snapshot_barrier(&self, flow_id: &str) -> Result<(), TrellisTestError> {
+rust/crates/trellis-test/src/lib.rs:685:            "UPDATE __trellis_test_portal_snapshot_barriers
+rust/crates/trellis-test/src/lib.rs:693:    pub fn install_portal_reconciliation_barrier(
+rust/crates/trellis-test/src/lib.rs:699:            "CREATE TABLE IF NOT EXISTS __trellis_test_portal_reconciliation_barriers (
+rust/crates/trellis-test/src/lib.rs:706:            "INSERT OR REPLACE INTO __trellis_test_portal_reconciliation_barriers
+rust/crates/trellis-test/src/lib.rs:714:    pub async fn wait_for_portal_reconciliation_barrier(
+rust/crates/trellis-test/src/lib.rs:722:                "SELECT reached FROM __trellis_test_portal_reconciliation_barriers
+rust/crates/trellis-test/src/lib.rs:740:    pub fn release_portal_reconciliation_barrier(
+rust/crates/trellis-test/src/lib.rs:745:            "UPDATE __trellis_test_portal_reconciliation_barriers
+rust/crates/trellis/tests/integration/auth.rs:2945:        .install_portal_snapshot_barrier(portal_id)
+rust/crates/trellis/tests/integration/auth.rs:2948:        .install_portal_reconciliation_barrier(portal_id)
+rust/crates/trellis/tests/integration/auth.rs:2970:        .wait_for_portal_snapshot_barrier(portal_id, Duration::from_secs(10))
+rust/crates/trellis/tests/integration/auth.rs:2982:        .wait_for_portal_reconciliation_barrier(portal_id, Duration::from_secs(10))
+rust/crates/trellis/tests/integration/auth.rs:2986:        .release_portal_reconciliation_barrier(portal_id)
+rust/crates/trellis/tests/integration/auth.rs:2993:        .release_portal_snapshot_barrier(portal_id)
+rust/crates/trellis/tests/integration/auth.rs:3499:        .install_portal_snapshot_barrier(&tested_portal_id)
+rust/crates/trellis/tests/integration/auth.rs:3521:        result = sqlite.wait_for_portal_snapshot_barrier(
+rust/crates/trellis/tests/integration/auth.rs:3553:        .release_portal_snapshot_barrier(&tested_portal_id)
+rust/crates/trellis/tests/integration/auth.rs:3562:        .install_portal_snapshot_barrier(&tested_portal_id)
+rust/crates/trellis/tests/integration/auth.rs:3584:        .wait_for_portal_snapshot_barrier(&tested_portal_id, Duration::from_secs(10))
+rust/crates/trellis/tests/integration/auth.rs:3601:        .release_portal_snapshot_barrier(&tested_portal_id)
+rust/crates/trellis/tests/integration/auth.rs:3638:        .install_portal_snapshot_barrier(&tested_portal_id)
+rust/crates/trellis/tests/integration/auth.rs:3641:        .install_portal_reconciliation_barrier(&tested_portal_id)
+rust/crates/trellis/tests/integration/auth.rs:3658:        .wait_for_portal_snapshot_barrier(&tested_portal_id, Duration::from_secs(10))
+rust/crates/trellis/tests/integration/auth.rs:3672:        .wait_for_portal_reconciliation_barrier(&tested_portal_id, Duration::from_secs(10))
+rust/crates/trellis/tests/integration/auth.rs:3676:        .release_portal_snapshot_barrier(&tested_portal_id)
+rust/crates/trellis/tests/integration/auth.rs:3699:        .release_portal_reconciliation_barrier(&tested_portal_id)
+rust/crates/trellis/tests/integration/auth.rs:3726:        .install_portal_snapshot_barrier(&tested_portal_id)
+rust/crates/trellis/tests/integration/auth.rs:3745:        .wait_for_portal_snapshot_barrier(&tested_portal_id, Duration::from_secs(10))
+rust/crates/trellis/tests/integration/auth.rs:3771:        .release_portal_snapshot_barrier(&tested_portal_id)
+rust/crates/trellis/tests/integration/auth.rs:3785:        .install_portal_snapshot_barrier(&tested_portal_id)
+rust/crates/trellis/tests/integration/auth.rs:3804:        .wait_for_portal_snapshot_barrier(&tested_portal_id, Duration::from_secs(10))
+rust/crates/trellis/tests/integration/auth.rs:3830:        .release_portal_snapshot_barrier(&tested_portal_id)
