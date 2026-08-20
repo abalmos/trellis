@@ -39,12 +39,14 @@ Status updated: 2026-08-20
 - [x] Remove the Rust demo contract's compile-time dependency on a generated TypeScript API artifact.
 - [x] Remove the old live Auth transaction-failure case and trigger helper now replaced by the real SQLite rollback test.
 - [x] Remove the synthetic Auth post-commit dispatch failure, SQLite hook, helper, live test, and matrix row.
-- [ ] Remove provider `fail_next_context_read` / `fail_next_readiness_check` switches and the production verifier branch that consumes them.
-- [ ] Reduce the event-authorization failure live case to real behavior: publish a legitimate signed event, corrupt the proof, require JetStream `TERM`, and verify the handler is not invoked for the corrupt copy.
+- [x] Remove provider `fail_next_context_read` / `fail_next_readiness_check` switches and the production verifier branch that consumed them.
+- [x] Reduce the event-authorization failure live case to real behavior: publish a legitimate signed event, corrupt the proof, require JetStream `TERM`, and verify the handler is not invoked for the corrupt copy.
 - [ ] Audit the remaining `integration-test-hooks`; delete synthetic errors/faults and retain only genuine deterministic scheduling barriers where needed.
 - [ ] Replace avoidable fixed sleeps with observable readiness/state boundaries where practical.
 
-Validation: Actions run `32329172166` validated commit `e6615be3` against the real SQLite rollback test, affected-crate `cargo check`, Clippy with `-D warnings`, and Rust live-integration compilation. The packet deleted 375 lines across five files with no additions.
+Validation:
+- Actions run `32329172166` validated commit `e6615be3` against the real SQLite rollback test, affected-crate `cargo check`, Clippy with `-D warnings`, and Rust live-integration compilation. The packet deleted 375 lines across five files with no additions.
+- Actions run `32331381130` validated commit `00c9f48f`: provider fault switches and verifier injection were deleted, `trellis-rs` check/Clippy/106 library tests and integration compilation passed, and the focused real JetStream invalid-proof case emitted `TERM` without invoking the handler for the corrupt event.
 
 ## 3. First public protocol version
 
@@ -63,7 +65,7 @@ Validation: Actions run `32329172166` validated commit `e6615be3` against the re
 - [ ] Make durable-listener teardown/drop ownership deterministic and simple; do not depend on ad-hoc runtime availability if it can be avoided.
 - [ ] Consolidate coherent authorization provider trust state instead of independent root/policy/manifest/health locks where those values must move together.
 - [ ] Keep per-digest context singleflight; do not actorize normal cache reads.
-- [ ] Simplify `JobRef` to immutable identity/seed plus concrete Jobs client/waiter/manager state; remove boxed callback backends.
+- [ ] Simplify `JobRef` to immutable identity/seed plus concrete Jobs client/waiter/manager state; remove boxed callback backends. Before deleting the cache, make `NatsJobWaiter::get` project the complete durable per-job lifecycle so accumulated progress/logs and legal transitions do not depend on the old mutable snapshot.
 
 ## 5. Runtime composition
 
@@ -82,7 +84,7 @@ Validation: Actions run `32329172166` validated commit `e6615be3` against the re
 ## 7. Jobs and constructors
 
 - [x] Remove the typed `ActiveJob` heartbeat/progress/log callback adapter, duplicated active-job state, and its eight-argument constructor (`cb0955fe`).
-- [ ] Remove `JobRef`'s `Arc<dyn Fn>` get/wait/cancel backend and use concrete Jobs objects directly.
+- [ ] Remove `JobRef`'s `Arc<dyn Fn>` get/wait/cancel backend and use concrete Jobs objects directly; make the durable waiter projection complete first so this is a correctness improvement rather than just a structural change.
 - [ ] Collapse the remaining Jobs function/wrapper ladder to one implementation plus a small cohesive execution context/hooks where needed.
 - [ ] Remove duplicate contract metadata from `ServiceConnectOptions` / generated service contract evidence; generated contract evidence must have one source of truth.
 - [ ] Apply the same constructor simplification to device connection paths where equivalent duplication exists.
@@ -116,14 +118,14 @@ Validation: Actions run `32329172166` validated commit `e6615be3` against the re
 - `6e8fa721` — prepare the embedded portal once in `Check` with generated SDK artifacts.
 - `86e6c95b` — assert the real rollback through the typed Auth storage-conflict boundary.
 - `e6615be3` — remove synthetic Auth transaction/post-commit failure injection and its live cases.
+- `00c9f48f` — remove provider Auth fault injection and retain a real invalid-proof `TERM` live boundary.
 - CI/release simplification also includes adaptive concurrency, stale-governance deletion, release-DAG deletion, generated-artifact fixes, and one-generation `Check` preparation; use `git log rs` for the exact intermediate commit chain.
 
 ## Immediate next work
 
-1. Delete provider readiness/context-read fault switches and keep only the real corrupt-proof `TERM` behavior test.
-2. Simplify `JobRef` callbacks to immutable seed + concrete waiter/manager.
-3. Consolidate authorization provider trust state.
-4. Make durable-listener teardown/drop deterministic.
-5. Do the first-public `v1` proof cleanup.
-6. Continue production/test-boundary and runtime-composition cleanup.
-7. Finish release-only gate cleanup and record final timing baseline.
+1. Finish and land the `JobRef` concrete-state refactor with complete durable lifecycle projection.
+2. Consolidate authorization provider trust state.
+3. Make durable-listener teardown/drop deterministic.
+4. Do the first-public `v1` proof cleanup.
+5. Continue production/test-boundary and runtime-composition cleanup.
+6. Finish release-only gate cleanup and record final timing baseline.
