@@ -2177,30 +2177,28 @@ where
         })
     });
 
-    {
-        let mut listeners = event_listeners.lock().await;
-        if let Some(listener) = listeners.get_mut(&key) {
-            validate_event_listener_concurrency(
-                context.group.as_deref().expect("durable listener group"),
-                binding.ordering,
-                options.concurrency,
-                Some(listener.concurrency),
-            )?;
-            listener
-                .handlers
-                .entry(subject.clone())
-                .or_default()
-                .insert(handler_id, handler);
-            return Ok(ServiceEventListenerHandle::new(
-                tokio::spawn(async { futures_util::future::pending().await }),
-                Some(ServiceEventListenerRegistration {
-                    event_listeners: Arc::clone(&event_listeners),
-                    key,
-                    subject,
-                    handler_id,
-                }),
-            ));
-        }
+    let mut listeners = event_listeners.lock().await;
+    if let Some(listener) = listeners.get_mut(&key) {
+        validate_event_listener_concurrency(
+            context.group.as_deref().expect("durable listener group"),
+            binding.ordering,
+            options.concurrency,
+            Some(listener.concurrency),
+        )?;
+        listener
+            .handlers
+            .entry(subject.clone())
+            .or_default()
+            .insert(handler_id, handler);
+        return Ok(ServiceEventListenerHandle::new(
+            tokio::spawn(async { futures_util::future::pending().await }),
+            Some(ServiceEventListenerRegistration {
+                event_listeners: Arc::clone(&event_listeners),
+                key,
+                subject,
+                handler_id,
+            }),
+        ));
     }
 
     let subscribe_options = EventSubscribeOptions {
@@ -2225,7 +2223,7 @@ where
             .abort_handle()
         })
         .collect();
-    event_listeners.lock().await.insert(
+    listeners.insert(
         key.clone(),
         SharedDurableEventListener {
             expected_subjects: binding.filter_subjects.iter().cloned().collect(),
@@ -2234,6 +2232,7 @@ where
             pull_abort_handles,
         },
     );
+    drop(listeners);
 
     Ok(ServiceEventListenerHandle::new(
         tokio::spawn(async { futures_util::future::pending().await }),
