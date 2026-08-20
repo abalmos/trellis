@@ -28,6 +28,24 @@ jobs:
         shell: bash
         run: |
           cp scripts/agent_runtime_sdk_decouple_v3.py /tmp/agent_runtime_sdk_decouple_v3.py
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('/tmp/agent_runtime_sdk_decouple_v3.py')
+          text = path.read_text()
+          text = text.replace(
+              '    "fn sdk_stem_from_contract_id_pascal(contract_id: &str) -> String {",',
+              '    "fn string_literal(value: &str) -> String {",',
+              1,
+          )
+          text = text.replace(
+              'rust_codegen = Path("rust/crates/codegen-rust/src/lib.rs")\ntext = rust_codegen.read_text()\n',
+              'rust_codegen = Path("rust/crates/codegen-rust/src/lib.rs")\ntext = rust_codegen.read_text()\ntext = text.replace("use serde_json::Value;\\n", "", 1)\n',
+              1,
+          )
+          text = text.replace('api == self.id\n', 'api == self.id.as_str()\n', 1)
+          path.write_text(text)
+          PY
           git config user.name trellis-validation
           git config user.email actions@users.noreply.github.com
           printf '%s\n' '${{ github.run_id }}' > .validation-running
