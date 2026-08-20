@@ -34,6 +34,41 @@ if start < 0 or end < 0:
 text = text[:start] + text[end:]
 p.write_text(text)
 
+# Fix generated TypeScript class syntax: private #fields cannot be constructor parameter properties.
+p = Path("ts/packages/trellis/auth/protocol_wasm.ts")
+text = p.read_text()
+old = '''export class AuthorizationContextVerifierWasm {
+  constructor(
+    readonly token: VerifiedAuthorizationContextTokenProjection,
+    readonly context: VerifiedAuthorizationContextProjection,
+    #handle: ProtocolAuthorizationContextVerifier,
+  ) {}
+'''
+new = '''export class AuthorizationContextVerifierWasm {
+  #handle: ProtocolAuthorizationContextVerifier;
+
+  constructor(
+    readonly token: VerifiedAuthorizationContextTokenProjection,
+    readonly context: VerifiedAuthorizationContextProjection,
+    handle: ProtocolAuthorizationContextVerifier,
+  ) {
+    this.#handle = handle;
+  }
+'''
+if text.count(old) != 1:
+    raise RuntimeError("generated AuthorizationContextVerifierWasm constructor changed")
+p.write_text(text.replace(old, new, 1))
+
+# The free WASM verifier exports are gone, so the Rust protocol functions no longer need local aliases.
+p = Path("rust/crates/protocol-wasm/src/lib.rs")
+text = p.read_text()
+text = text.replace(
+    "    verify_authorization_event as verify_authorization_event_protocol,\n    verify_authorization_request as verify_authorization_request_protocol,",
+    "    verify_authorization_event, verify_authorization_request,",
+)
+text = text.replace("    AuthorizationEventPublisher, ", "")
+p.write_text(text)
+
 subprocess.run(
     [
         "git",
