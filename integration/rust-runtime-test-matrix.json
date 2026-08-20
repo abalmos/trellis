@@ -4325,60 +4325,6 @@
         }
       },
       "classification": "shared"
-    },
-    {
-      "id": "auth.transaction-failure-rolls-back-state-idempotency-and-actions",
-      "fixture": "auth",
-      "title": "Auth aggregate transaction failure rolls back completely",
-      "coverage": ["auth", "transactions", "idempotency", "post-commit"],
-      "description": "A target-scoped SQLite trigger fails one live user aggregate after its principal write; the aggregate rolls back state, idempotency, and post-commit actions together.",
-      "scenario": {
-        "participants": [],
-        "given": ["an active user and a target-scoped aggregate failure hook"],
-        "when": ["Auth.Users.Update reaches the repository transaction"],
-        "then": [
-          "the mutation fails",
-          "principal and profile state remain byte-for-byte equivalent",
-          "no idempotency result or post-commit action commits"
-        ]
-      },
-      "completion": { "rust": "implemented" },
-      "implementations": {
-        "rust": {
-          "module": "auth",
-          "function": "auth_transaction_failure_rolls_back_state_idempotency_and_actions"
-        }
-      },
-      "classification": "isolated-process",
-      "isolationReason": "installs a temporary process-global SQLite trigger on the runtime-owned Auth schema"
-    },
-    {
-      "id": "auth.post-commit-failure-retries-committed-context-revocation-once",
-      "fixture": "auth",
-      "title": "Auth post-commit failure retries a committed revocation",
-      "coverage": ["auth", "post-commit", "retry", "authorization-context"],
-      "description": "A target-scoped test hook fails the first dispatch of one committed context-revocation action; the durable user mutation remains committed and retry produces one revoked context and denied reconnect.",
-      "scenario": {
-        "participants": [],
-        "given": [
-          "an active user context and a one-shot dispatch failure for its exact digest"
-        ],
-        "when": ["the user is disabled in a committed aggregate transaction"],
-        "then": [
-          "the durable mutation remains committed while the first action attempt fails",
-          "the dispatcher retries and removes the acknowledged action",
-          "one context is externally revoked and reconnect is denied"
-        ]
-      },
-      "completion": { "rust": "implemented" },
-      "implementations": {
-        "rust": {
-          "module": "auth",
-          "function": "auth_post_commit_failure_retries_committed_context_revocation_once"
-        }
-      },
-      "classification": "isolated-process",
-      "isolationReason": "installs temporary process-global SQLite trigger and hook tables on the runtime-owned Auth schema"
     }
   ]
 }

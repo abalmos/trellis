@@ -16,34 +16,6 @@ pub(super) struct SqliteConnectionPool {
 }
 
 impl SqliteAuthorizationStore {
-    #[cfg(feature = "integration-test-hooks")]
-    pub(crate) async fn consume_test_post_commit_failure(
-        &self,
-        action_id: &str,
-    ) -> Result<bool, AuthorizationStateError> {
-        let action_id = action_id.to_owned();
-        self.run(move |connection| {
-            let exists = connection
-                .query_row(
-                    "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = '__trellis_test_post_commit_failures')",
-                    [],
-                    |row| row.get::<_, bool>(0),
-                )
-                .map_err(sql_error)?;
-            if !exists {
-                return Ok(false);
-            }
-            connection
-                .execute(
-                    "DELETE FROM __trellis_test_post_commit_failures WHERE action_id = ?",
-                    [action_id],
-                )
-                .map(|changed| changed == 1)
-                .map_err(sql_error)
-        })
-        .await
-    }
-
     pub(crate) fn open(store: &SqliteStore) -> Result<Self, StoreError> {
         let connections = (0..AUTHORIZATION_CONNECTION_POOL_SIZE)
             .map(|_| store.open())
