@@ -2,9 +2,9 @@ use serde_json::json;
 
 use super::SqliteAuthorizationStore;
 use crate::platform::auth::{
-    AccountCreation, AccountRepository, IdempotencyResultRecord, OutboxRepository,
-    PostCommitActionKind, PostCommitActionRecord, PrincipalKind, PrincipalRecord, PrincipalState,
-    UserAccountMutation, UserProfileRecord,
+    AccountCreation, AccountRepository, AuthorizationStateError, IdempotencyResultRecord,
+    OutboxRepository, PostCommitActionKind, PostCommitActionRecord, PrincipalKind, PrincipalRecord,
+    PrincipalState, UserAccountMutation, UserProfileRecord,
 };
 
 const NOW: i64 = 1_700_000_000_000;
@@ -92,10 +92,7 @@ async fn user_update_rolls_back_when_real_outbox_constraint_fails() {
         })
         .await
         .expect_err("invalid action id unexpectedly committed");
-    assert!(
-        error.to_string().contains("CHECK constraint failed"),
-        "unexpected SQLite failure: {error}"
-    );
+    assert_eq!(error, AuthorizationStateError::StorageConflict);
 
     assert_eq!(
         repository
