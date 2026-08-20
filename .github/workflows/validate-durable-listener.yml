@@ -19,7 +19,7 @@ jobs:
       - name: Check out exact rs base
         uses: actions/checkout@v4
         with:
-          ref: 2e7c471612f1100c5a6b43e0426a2e4416435188
+          ref: 08f9f9522f6d36e037a2fc44b91d98c7c020fb16
           fetch-depth: 0
 
       - name: Publish running run id
@@ -30,7 +30,7 @@ jobs:
           git add .validation-running
           git commit -m "Record durable listener validation run"
           git push --force origin HEAD:refs/heads/agent/running-durable-listener-v2
-          git reset --hard 2e7c471612f1100c5a6b43e0426a2e4416435188
+          git reset --hard 08f9f9522f6d36e037a2fc44b91d98c7c020fb16
 
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
@@ -39,6 +39,11 @@ jobs:
         uses: denoland/setup-deno@v2
         with:
           deno-version: 2.9.4
+
+      - name: Cache generator build
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: rust/tools/generate -> target
 
       - name: Prepare generated SDKs
         run: cargo run --manifest-path rust/tools/generate/Cargo.toml -- prepare --no-npm .
@@ -116,7 +121,7 @@ jobs:
       - name: Publish failure run id
         if: failure()
         run: |
-          git reset --hard 2e7c471612f1100c5a6b43e0426a2e4416435188
+          git reset --hard 08f9f9522f6d36e037a2fc44b91d98c7c020fb16
           git config user.name "trellis-validation"
           git config user.email "actions@users.noreply.github.com"
           printf '%s\n' '${{ github.run_id }}' > .validation-failed
