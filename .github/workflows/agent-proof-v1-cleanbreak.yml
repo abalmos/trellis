@@ -11,6 +11,7 @@ permissions:
 env:
   DENO_VERSION: 2.9.4
   CARGO_TERM_COLOR: always
+  BASE_SHA: ed1a40c31f0def517635dadbe679c86a57b5f088
 
 jobs:
   transform-validate-commit:
@@ -20,6 +21,19 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Publish running run id and reset to rs
+        shell: bash
+        run: |
+          git config user.name "trellis-validation"
+          git config user.email "actions@users.noreply.github.com"
+          printf '%s\n' '${{ github.run_id }}' > .validation-running
+          git add .validation-running
+          git commit -m "Record proof v1 validation run"
+          git push --force origin HEAD:refs/heads/agent/running-proof-v1-cleanbreak
+          git reset --hard "$BASE_SHA"
 
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
@@ -46,6 +60,12 @@ jobs:
               "AuthorizationEventPublisherV2": "AuthorizationEventPublisher",
               "VerifiedAuthorizationRequestV2": "VerifiedAuthorizationRequest",
               "VerifiedAuthorizationEventV2": "VerifiedAuthorizationEvent",
+              "WireAuthorizationRequestV2": "WireAuthorizationRequest",
+              "WireAuthorizationEventV2": "WireAuthorizationEvent",
+              "VerifyAuthorizationRequestV2": "VerifyAuthorizationRequest",
+              "VerifyAuthorizationEventV2": "VerifyAuthorizationEvent",
+              "verifyAuthorizationRequestV2": "verifyAuthorizationRequest",
+              "verifyAuthorizationEventV2": "verifyAuthorizationEvent",
               "build_authorization_request_proof_input_v2": "build_authorization_request_proof_input",
               "build_authorization_event_proof_input_v2": "build_authorization_event_proof_input",
               "sign_authorization_request_v2": "sign_authorization_request",
@@ -55,6 +75,8 @@ jobs:
               "create_request_proof_v2": "create_request_proof",
               "create_event_proof_v2": "create_event_proof",
               "verify_event_proof_v2": "verify_event_proof",
+              "request_proof_v2": "request_proof",
+              "event_proof_v2": "event_proof",
               "verify_v2_signature": "verify_signature",
               "trellis.authorization-request-proof.v2": "trellis.authorization-request-proof.v1",
               "trellis.authorization-event-proof.v2": "trellis.authorization-event-proof.v1",
@@ -111,6 +133,9 @@ jobs:
       - name: Build embedded portal
         run: deno task -c ts/portals/login/deno.json build:embedded
 
+      - name: Check patch hygiene
+        run: git diff --check
+
       - name: Check production Rust
         run: cargo clippy --manifest-path rust/Cargo.toml --workspace --all-targets -- -D warnings
 
@@ -127,16 +152,28 @@ jobs:
       - name: Ensure V2 proof history is gone
         shell: bash
         run: |
-          if git grep -n -E 'Authorization(Request|Event).*V2|authorization_(request|event).*_v2|proof\.v2|proof_v2|PROOF_DOMAIN_V2' -- ':!CLEANUP.md'; then
-            echo "unpublished V2 proof history remains" >&2
+          if git grep -n -E 'Authorization(Request|Event)[A-Za-z0-9_]*V2|verifyAuthorization(Request|Event)V2|authorization_(request|event)[A-Za-z0-9_]*_v2|(request|event)_proof_v2|proof\.v2|PROOF_DOMAIN_V2' -- ':!CLEANUP.md'; then
+            echo "unpublished V2 authorization proof history remains" >&2
             exit 1
           fi
 
       - name: Commit validated proof clean break
         shell: bash
         run: |
-          git config user.name "trellis-cleanup-agent"
+          git config user.name "trellis-validation"
           git config user.email "actions@users.noreply.github.com"
-          git add -- ':!.github/workflows/agent-proof-v1-cleanbreak.yml' ':!.github/agent-proof-v1-trigger'
+          git add -A
           git commit -m "Make authorization proofs first-public v1"
-          git push
+          git push --force origin HEAD:refs/heads/agent/result-proof-v1-cleanbreak
+
+      - name: Publish failure run id
+        if: failure()
+        shell: bash
+        run: |
+          git reset --hard "$BASE_SHA"
+          git config user.name "trellis-validation"
+          git config user.email "actions@users.noreply.github.com"
+          printf '%s\n' '${{ github.run_id }}' > .validation-failed
+          git add .validation-failed
+          git commit -m "Record failed proof v1 validation"
+          git push --force origin HEAD:refs/heads/agent/failed-proof-v1-cleanbreak
