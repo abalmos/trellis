@@ -1,0 +1,36 @@
+name: Inventory proof v1 cleanup
+
+on:
+  push:
+    branches:
+      - agent/inventory-proof-v1
+
+permissions:
+  contents: write
+
+jobs:
+  inventory:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Inventory unreleased proof v2 surface
+        run: |
+          set -euo pipefail
+          {
+            echo '# proof-v2 inventory'
+            echo
+            grep -R -n -I \
+              --exclude-dir=.git \
+              --exclude='CHANGELOG.md' \
+              -E 'Authorization(Request|Event|EventPublisher).*V2|VerifiedAuthorization(Request|Event)V2|authorization_(request|event).*_v2|AUTHORIZATION_(REQUEST|EVENT)_PROOF_DOMAIN_V2|authorization-(request|event)-proof\.v2|build_authorization_(request|event)_proof_input_v2|sign_authorization_(request|event)_v2|verify_authorization_(request|event)_v2' \
+              rust ts integration conformance design docs demos generated 2>/dev/null || true
+          } > /tmp/proof-inventory.txt
+          git reset --hard 14c7cd236cc6171adcc117d6bf9d51273bbd7b21
+          cp /tmp/proof-inventory.txt .proof-v2-inventory
+          git config user.name trellis-validation
+          git config user.email actions@users.noreply.github.com
+          git add .proof-v2-inventory
+          git commit -m 'Record proof v2 inventory'
+          git push --force origin HEAD:refs/heads/agent/result-proof-v1-inventory
