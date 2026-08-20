@@ -15,7 +15,6 @@ use bytes::Bytes;
 use futures_util::future::BoxFuture;
 use futures_util::{Stream, StreamExt};
 use serde_json::Value;
-use tokio::sync::Mutex;
 use tokio::task::{AbortHandle, JoinError, JoinHandle};
 
 pub use super::core_bootstrap::CoreBootstrapBinding;
@@ -51,7 +50,7 @@ const DURABLE_EVENT_CONSUMER_RETRY_MS: u64 = 100;
 static SERVICE_EVENT_HANDLER_ID: AtomicU64 = AtomicU64::new(1);
 
 type SharedDurableEventListeners =
-    Arc<Mutex<BTreeMap<DurableEventListenerKey, SharedDurableEventListener>>>;
+    Arc<StdMutex<BTreeMap<DurableEventListenerKey, SharedDurableEventListener>>>;
 type SharedEventHandler = Arc<
     dyn Fn(
             Bytes,
@@ -94,7 +93,7 @@ impl ServiceEventListenerRegistryCleanup {
 
 impl Drop for ServiceEventListenerRegistryCleanup {
     fn drop(&mut self) {
-        spawn_service_event_listeners_cleanup(Arc::clone(&self.event_listeners));
+        remove_service_event_listeners(&self.event_listeners);
     }
 }
 
@@ -502,7 +501,7 @@ impl ServiceEventListenerHandle {
     pub fn abort(&self) {
         if let Ok(mut registration) = self.registration.lock() {
             if let Some(registration) = registration.take() {
-                spawn_service_event_listener_cleanup(registration);
+                remove_service_event_listener_registration(registration);
             }
         }
         self.task.abort();
@@ -513,7 +512,7 @@ impl Drop for ServiceEventListenerHandle {
     fn drop(&mut self) {
         if let Ok(registration) = self.registration.get_mut() {
             if let Some(registration) = registration.take() {
-                spawn_service_event_listener_cleanup(registration);
+                remove_service_event_listener_registration(registration);
             }
         }
         self.task.abort();
@@ -2124,7 +2123,7 @@ where
         })
     });
 
-    let mut listeners = event_listeners.lock().await;
+    let mut listeners = lock_service_event_listeners(&event_listeners);
     if let Some(listener) = listeners.get_mut(&key) {
         validate_event_listener_concurrency(
             context.group.as_deref().expect("durable listener group"),
@@ -2223,10 +2222,16 @@ fn validate_event_listener_concurrency(
     Ok(())
 }
 
-async fn remove_service_event_listener_registration(
-    registration: ServiceEventListenerRegistration,
-) {
-    let mut listeners = registration.event_listeners.lock().await;
+fn lock_service_event_listeners(
+    event_listeners: &SharedDurableEventListeners,
+) -> std::sync::MutexGuard<'_, BTreeMap<DurableEventListenerKey, SharedDurableEventListener>> {
+    event_listeners
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+}
+
+fn remove_service_event_listener_registration(registration: ServiceEventListenerRegistration) {
+    let mut listeners = lock_service_event_listeners(&registration.event_listeners);
     let Some(listener) = listeners.get_mut(&registration.key) else {
         return;
     };
@@ -2237,8 +2242,7 @@ async fn remove_service_event_listener_registration(
         }
     }
     if listener.handlers.values().all(BTreeMap::is_empty) {
-        let listener = listeners.remove(&registration.key);
-        if let Some(listener) = listener {
+        if let Some(listener) = listeners.remove(&registration.key) {
             for handle in listener.pull_abort_handles {
                 handle.abort();
             }
@@ -2246,14 +2250,8 @@ async fn remove_service_event_listener_registration(
     }
 }
 
-fn spawn_service_event_listener_cleanup(registration: ServiceEventListenerRegistration) {
-    if let Ok(handle) = tokio::runtime::Handle::try_current() {
-        handle.spawn(remove_service_event_listener_registration(registration));
-    }
-}
-
-async fn remove_service_event_listeners(event_listeners: SharedDurableEventListeners) {
-    let listeners = std::mem::take(&mut *event_listeners.lock().await);
+fn remove_service_event_listeners(event_listeners: &SharedDurableEventListeners) {
+    let listeners = std::mem::take(&mut *lock_service_event_listeners(event_listeners));
     for (_, listener) in listeners {
         for handle in listener.pull_abort_handles {
             handle.abort();
@@ -2277,7 +2275,7 @@ async fn run_durable_event_pull_loop<D>(
     D::Event: Send + 'static,
 {
     loop {
-        if !durable_listener_ready(&event_listeners, &key).await {
+        if !durable_listener_ready(&event_listeners, &key) {
             tokio::time::sleep(Duration::from_millis(25)).await;
             continue;
         }
@@ -2302,7 +2300,7 @@ async fn run_durable_event_pull_loop<D>(
             }
         };
 
-        while durable_listener_ready(&event_listeners, &key).await {
+        while durable_listener_ready(&event_listeners, &key) {
             let Some(result) = messages.next().await else {
                 break;
             };
@@ -2324,12 +2322,10 @@ async fn run_durable_event_pull_loop<D>(
                     break;
                 }
             };
-            if !durable_listener_ready(&event_listeners, &key).await {
+            if !durable_listener_ready(&event_listeners, &key) {
                 break;
             }
-            let handlers = event_listeners
-                .lock()
-                .await
+            let handlers = lock_service_event_listeners(&event_listeners)
                 .get(&key)
                 .and_then(|listener| listener.handlers.get(message.subject()).cloned())
                 .unwrap_or_default();
@@ -2382,7 +2378,7 @@ async fn run_durable_event_pull_loop<D>(
             if !handled {
                 continue;
             }
-            if !durable_listener_ready(&event_listeners, &key).await {
+            if !durable_listener_ready(&event_listeners, &key) {
                 break;
             }
             if let Err(error) = message.ack().await {
@@ -2397,19 +2393,11 @@ async fn run_durable_event_pull_loop<D>(
     }
 }
 
-fn spawn_service_event_listeners_cleanup(event_listeners: SharedDurableEventListeners) {
-    if let Ok(handle) = tokio::runtime::Handle::try_current() {
-        handle.spawn(remove_service_event_listeners(event_listeners));
-    }
-}
-
-async fn durable_listener_ready(
+fn durable_listener_ready(
     event_listeners: &SharedDurableEventListeners,
     key: &DurableEventListenerKey,
 ) -> bool {
-    event_listeners
-        .lock()
-        .await
+    lock_service_event_listeners(event_listeners)
         .get(key)
         .map(|listener| {
             listener
