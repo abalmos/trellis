@@ -2,6 +2,7 @@
 set -euo pipefail
 
 cargo run --manifest-path rust/tools/generate/Cargo.toml -- prepare --no-npm .
+deno task -c ts/portals/login/deno.json build:embedded
 git diff --exit-code
 
 python /tmp/remove_auth_fault_injection.py
