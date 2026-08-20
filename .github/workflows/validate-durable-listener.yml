@@ -24,6 +24,7 @@ jobs:
       - name: Reset to exact rs base
         run: |
           cp .github/scripts/remove_auth_fault_injection.py /tmp/remove_auth_fault_injection.py
+          cp .github/scripts/validate_auth_fault_cleanup.sh /tmp/validate_auth_fault_cleanup.sh
           git reset --hard 09125056c5310e9957fc62738767d2f22192db17
 
       - name: Publish running run id
@@ -44,63 +45,15 @@ jobs:
         with:
           deno-version: 2.9.4
 
-      - name: Cache generator build
+      - name: Cache Rust builds
         uses: swatinem/rust-cache@v2
         with:
-          workspaces: rust/tools/generate -> target
+          workspaces: |
+            rust -> target
+            rust/tools/generate -> target
 
-      - name: Prepare generated SDKs
-        run: cargo run --manifest-path rust/tools/generate/Cargo.toml -- prepare --no-npm .
-
-      - name: Require clean generated tree
-        run: git diff --exit-code
-
-      - name: Remove synthetic Auth failures
-        run: python /tmp/remove_auth_fault_injection.py
-
-      - name: Format and validate patch
-        run: |
-          cargo fmt --manifest-path rust/Cargo.toml --all
-          git diff --check
-          python -m json.tool integration/rust-runtime-test-matrix.json >/dev/null
-          test "$(git diff --name-only | sort)" = "$(printf '%s\n' \
-            integration/rust-runtime-test-matrix.json \
-            rust/crates/runtime/src/platform/auth/sqlite/common.rs \
-            rust/crates/runtime/src/platform/auth_post_commit.rs \
-            rust/crates/trellis-test/src/lib.rs \
-            rust/crates/trellis/tests/integration/auth.rs | sort)"
-          ! grep -R -n --exclude-dir=target \
-            -e 'fail_user_update_transaction' \
-            -e 'clear_user_update_transaction_failure' \
-            -e 'fail_next_context_revocation_dispatch' \
-            -e 'consume_test_post_commit_failure' \
-            -e 'auth.transaction-failure-rolls-back-state-idempotency-and-actions' \
-            -e 'auth.post-commit-failure-retries-committed-context-revocation-once' \
-            rust integration
-
-      - name: Test real SQLite rollback
-        run: cargo test --manifest-path rust/Cargo.toml -p trellis-runtime rollback_tests:: --lib
-
-      - name: Check affected Rust crates
-        run: cargo check --manifest-path rust/Cargo.toml -p trellis-runtime -p trellis-test -p trellis-rs --all-targets
-
-      - name: Lint affected Rust crates
-        run: cargo clippy --manifest-path rust/Cargo.toml -p trellis-runtime -p trellis-test -p trellis-rs --all-targets -- -D warnings
-
-      - name: Compile Rust live integration suite
-        run: cargo test --manifest-path rust/Cargo.toml -p trellis-rs --test integration --no-run
-
-      - name: Publish validated result branch
-        run: |
-          git config user.name "trellis-validation"
-          git config user.email "actions@users.noreply.github.com"
-          git add integration/rust-runtime-test-matrix.json \
-            rust/crates/runtime/src/platform/auth/sqlite/common.rs \
-            rust/crates/runtime/src/platform/auth_post_commit.rs \
-            rust/crates/trellis-test/src/lib.rs \
-            rust/crates/trellis/tests/integration/auth.rs
-          git commit -m "Remove synthetic Auth failure injection"
-          git push --force origin HEAD:refs/heads/agent/result-auth-fault-cleanup-v3
+      - name: Validate Auth cleanup
+        run: bash /tmp/validate_auth_fault_cleanup.sh
 
       - name: Publish failure run id
         if: failure()
