@@ -1,0 +1,48 @@
+name: Validate clean xtask prepare ordering
+
+on:
+  push:
+    branches:
+      - agent/fix-xtask-prepare-order-v1
+
+permissions:
+  contents: read
+
+concurrency:
+  group: agent-fix-xtask-prepare-order-v1
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Set up Deno
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: 2.9.4
+
+      - name: Prepare clean checkout
+        run: cargo run --manifest-path rust/xtask/Cargo.toml -- prepare
+
+      - name: Verify preparation outputs and hygiene
+        shell: bash
+        run: |
+          test -f generated/packages/cargo/auth/Cargo.toml
+          test -f ts/packages/trellis/auth/protocol_wasm/trellis_protocol_wasm_bg.wasm
+          git diff --check
+          git diff --exit-code -- ts/packages/trellis/auth/protocol_wasm
+
+      - name: Check xtask formatting
+        run: cargo fmt --manifest-path rust/xtask/Cargo.toml --check
+
+      - name: Test xtask
+        run: cargo test --manifest-path rust/xtask/Cargo.toml
