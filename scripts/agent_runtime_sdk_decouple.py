@@ -160,7 +160,7 @@ rpc.write_text(text)
 replace_once(
     "rust/crates/runtime/src/platform/auth/verifier.rs",
     "        trellis_sdk_auth::api::register_rpc_metadata(&mut routes);",
-    "        super::rpc::register_auth_rpc_metadata(&mut routes).unwrap();",
+    "        super::super::rpc::register_auth_rpc_metadata(&mut routes).unwrap();",
 )
 
 print("runtime generated Auth SDK decoupling transform complete")
