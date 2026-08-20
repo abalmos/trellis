@@ -1,0 +1,84 @@
+name: Validate large Result error cleanup
+
+on:
+  push:
+    branches: [agent/validate-error-size-v1]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: agent-error-size-v1
+  cancel-in-progress: true
+
+env:
+  BASE_SHA: 20b69d162c512ed4b6a335a3cc31feb465151ecc
+  CARGO_TERM_COLOR: always
+
+jobs:
+  validate:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Preserve transform and publish run id
+        shell: bash
+        run: |
+          cp scripts/agent_error_size_cleanup.py /tmp/agent_error_size_cleanup.py
+          git config user.name trellis-validation
+          git config user.email actions@users.noreply.github.com
+          printf '%s\n' '${{ github.run_id }}' > .validation-running
+          git add .validation-running
+          git commit -m 'Record error-size cleanup validation run'
+          git push --force origin HEAD:refs/heads/agent/running-error-size-v1
+          git reset --hard "$BASE_SHA"
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: 2.9.4
+      - name: Apply error-size cleanup
+        run: python /tmp/agent_error_size_cleanup.py
+      - name: Format source
+        run: cargo fmt --manifest-path rust/Cargo.toml --all
+      - name: Check patch hygiene
+        run: git diff --check
+      - name: Prepare generated SDKs
+        run: cargo run --manifest-path rust/tools/generate/Cargo.toml -- prepare --no-npm .
+      - name: Build embedded portal
+        run: deno task -c ts/portals/login/deno.json build:embedded
+      - name: Check affected Rust crates
+        run: cargo check --manifest-path rust/Cargo.toml -p trellis-rs -p trellis-runtime --all-targets
+      - name: Clippy affected Rust crates
+        run: cargo clippy --manifest-path rust/Cargo.toml -p trellis-rs -p trellis-runtime --all-targets -- -D warnings
+      - name: Test Trellis library
+        run: cargo test --manifest-path rust/Cargo.toml -p trellis-rs --lib
+      - name: Test runtime library
+        run: cargo test --manifest-path rust/Cargo.toml -p trellis-runtime --lib
+      - name: Require root-cause cleanup
+        shell: bash
+        run: |
+          ! grep -q 'clippy::large_enum_variant' rust/crates/trellis/src/client/operations.rs
+          ! grep -q 'clippy::large_enum_variant' rust/crates/trellis/src/service/runtime_facade.rs
+      - name: Commit validated source only
+        shell: bash
+        run: |
+          git add rust/crates/trellis/src/client/error.rs \
+            rust/crates/trellis/src/client/operations.rs \
+            rust/crates/trellis/src/service/runtime_facade.rs
+          git diff --cached --check
+          git commit -m 'Shrink large runtime error payloads'
+          git push --force origin HEAD:refs/heads/agent/result-error-size-v1
+      - name: Publish failure run id
+        if: failure()
+        shell: bash
+        run: |
+          git reset --hard "$BASE_SHA"
+          git config user.name trellis-validation
+          git config user.email actions@users.noreply.github.com
+          printf '%s\n' '${{ github.run_id }}' > .validation-failed
+          git add .validation-failed
+          git commit -m 'Record failed error-size cleanup validation'
+          git push --force origin HEAD:refs/heads/agent/failed-error-size-v1
