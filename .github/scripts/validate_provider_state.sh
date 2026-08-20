@@ -14,14 +14,32 @@ new = '''        "provider state lock poisoned",\n        "provider resolution l
 if source.count(old) != 1:
     raise SystemExit('expected provider error-classification block exactly once')
 path.write_text(source.replace(old, new, 1))
+
+# The transform has a defensive token check. Remove its broad self.FIELD tokens
+# here because they also match legitimate helper calls such as self.root_value()
+# and self.health(). The precise post-transform field check below covers actual
+# chained field access without those false positives.
+transform = Path('/tmp/consolidate_provider_state.py')
+text = transform.read_text()
+for token in (
+    'self.root',
+    'self.policy_floor',
+    'self.manifest',
+    'self.verified_contexts',
+    'self.retention_deadlines',
+    'self.revocations',
+    'self.health',
+):
+    text = text.replace(f'        "{token}",\n', '')
+transform.write_text(text)
 PY
 python /tmp/consolidate_provider_state.py
 cargo fmt --manifest-path rust/Cargo.toml --all
 git diff --check
 
 test "$(git diff --name-only)" = "rust/crates/trellis/src/client/authorization/provider_cache.rs"
-if grep -n -E 'self\.(root|policy_floor|manifest|verified_contexts|retention_deadlines|revocations|health)' rust/crates/trellis/src/client/authorization/provider_cache.rs; then
-  echo 'fragmented provider state access remains' >&2
+if grep -n -E 'self\.(root|policy_floor|manifest|verified_contexts|retention_deadlines|revocations|health)\.' rust/crates/trellis/src/client/authorization/provider_cache.rs; then
+  echo 'fragmented provider state field access remains' >&2
   exit 1
 fi
 
