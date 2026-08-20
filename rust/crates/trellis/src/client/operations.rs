@@ -232,14 +232,10 @@ pub struct StartedOperationTransfer<'a, T, D> {
 }
 
 /// Error returned when starting or uploading an operation transfer fails.
-#[expect(
-    clippy::large_enum_variant,
-    reason = "upload failures return the live operation reference to the caller"
-)]
 pub enum OperationTransferStartError<'a, T, D> {
     Start(TrellisClientError),
     Upload {
-        operation_ref: OperationRef<'a, T, D>,
+        operation_ref: Box<OperationRef<'a, T, D>>,
         source: TrellisClientError,
     },
 }
@@ -422,7 +418,7 @@ where
             Ok(file_info) => file_info,
             Err(source) => {
                 return Err(OperationTransferStartError::Upload {
-                    operation_ref,
+                    operation_ref: Box::new(operation_ref),
                     source,
                 })
             }

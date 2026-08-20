@@ -262,10 +262,6 @@ impl<'a> ServiceConnectOptions<'a> {
 
 /// Errors returned by the high-level service runtime facade.
 #[derive(Debug, thiserror::Error)]
-#[expect(
-    clippy::large_enum_variant,
-    reason = "runtime errors retain typed handler context for operator diagnostics"
-)]
 pub enum ServiceRuntimeError {
     /// Client-side bootstrap, transport, or outbound RPC failure.
     #[error(transparent)]
@@ -273,15 +269,15 @@ pub enum ServiceRuntimeError {
 
     /// Server-side handler, auth-validation, or runtime-loop failure.
     #[error(transparent)]
-    Server(#[from] ServerError),
+    Server(Box<ServerError>),
 
     /// A service event listener handler failed while processing a concrete event message.
     #[error("event handler failed: {source}")]
     EventHandler {
         /// Handler failure returned by the service implementation.
-        source: ServerError,
+        source: Box<ServerError>,
         /// Event metadata observed from the delivered message.
-        context: ServiceEventListenerContext,
+        context: Box<ServiceEventListenerContext>,
     },
 
     /// The service bootstrap response did not include a resource binding.
@@ -385,6 +381,12 @@ pub enum ServiceRuntimeError {
         /// Conflicting requested listener count.
         requested: u32,
     },
+}
+
+impl From<ServerError> for ServiceRuntimeError {
+    fn from(source: ServerError) -> Self {
+        Self::Server(Box::new(source))
+    }
 }
 
 /// Options for registering a service event listener.
@@ -1008,10 +1010,6 @@ impl<C> ConnectedServiceRuntime<C> {
 
     /// Build a connected runtime from a service client that already completed bootstrap.
     #[cfg(feature = "test-support")]
-    #[expect(
-        clippy::result_large_err,
-        reason = "ServiceRuntimeError preserves typed runtime diagnostics"
-    )]
     pub(crate) fn from_connected_client(
         service_name: impl Into<String>,
         client: Arc<TrellisClient>,
@@ -1102,10 +1100,6 @@ impl<C> ConnectedServiceRuntime<C> {
     /// Return Jobs-only worker host access for Trellis integration tests.
     #[cfg(feature = "test-support")]
     #[doc(hidden)]
-    #[expect(
-        clippy::result_large_err,
-        reason = "ServiceRuntimeError preserves typed runtime diagnostics"
-    )]
     pub fn test_jobs_worker_runtime(
         &self,
     ) -> Result<crate::jobs::TestJobsWorkerRuntime, ServiceRuntimeError> {
@@ -1674,13 +1668,13 @@ impl<C> ConnectedServiceRuntime<C> {
                 return runner
                     .run(Some(client), subjects, host)
                     .await
-                    .map_err(ServiceRuntimeError::Server);
+                    .map_err(ServiceRuntimeError::from);
             }
             let serve = async {
                 runner
                     .run(Some(client), subjects, host)
                     .await
-                    .map_err(ServiceRuntimeError::Server)
+                    .map_err(ServiceRuntimeError::from)
             };
             let workers = async {
                 futures_util::future::try_join_all(
@@ -1699,7 +1693,7 @@ impl<C> ConnectedServiceRuntime<C> {
             runner
                 .run(None, subjects, EmptyHandler)
                 .await
-                .map_err(ServiceRuntimeError::Server)
+                .map_err(ServiceRuntimeError::from)
         }
 
         #[cfg(not(test))]
@@ -1955,10 +1949,6 @@ impl RequestHandler for EmptyHandler {
     }
 }
 
-#[expect(
-    clippy::result_large_err,
-    reason = "ServiceRuntimeError preserves typed bootstrap diagnostics"
-)]
 fn parse_bootstrap_binding(
     client: &TrellisClient,
 ) -> Result<CoreBootstrapBinding, ServiceRuntimeError> {
@@ -2083,7 +2073,10 @@ where
                     let event = serde_json::from_slice::<D::Event>(&message.payload)
                         .map_err(TrellisClientError::from)?;
                     if let Err(source) = handler(event, context.clone()).await {
-                        return Err(ServiceRuntimeError::EventHandler { source, context });
+                        return Err(ServiceRuntimeError::EventHandler {
+                            source: Box::new(source),
+                            context: Box::new(context),
+                        });
                     }
                 }
                 Ok(())
@@ -2117,9 +2110,12 @@ where
             .map_err(TrellisClientError::from)
             .map_err(ServiceRuntimeError::from);
         Box::pin(async move {
-            handler(event?, context.clone())
-                .await
-                .map_err(|source| ServiceRuntimeError::EventHandler { source, context })
+            handler(event?, context.clone()).await.map_err(|source| {
+                ServiceRuntimeError::EventHandler {
+                    source: Box::new(source),
+                    context: Box::new(context),
+                }
+            })
         })
     });
 
@@ -2191,10 +2187,6 @@ where
     ))
 }
 
-#[expect(
-    clippy::result_large_err,
-    reason = "ServiceRuntimeError preserves typed listener diagnostics"
-)]
 fn validate_event_listener_concurrency(
     group: &str,
     ordering: super::EventConsumerOrdering,
@@ -2408,10 +2400,6 @@ fn durable_listener_ready(
         .unwrap_or(false)
 }
 
-#[expect(
-    clippy::result_large_err,
-    reason = "ServiceRuntimeError preserves typed binding diagnostics"
-)]
 fn resolve_event_consumer_binding(
     bindings: &BTreeMap<String, super::EventConsumerResourceBinding>,
     subject: &str,
