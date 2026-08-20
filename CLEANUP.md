@@ -58,6 +58,17 @@ Validation:
 - [ ] Prefer unversioned implementation names (`ApiArtifact`, `PermissionAtom`, `AuthorizationContext`, `AuthorizationRequestProof`, etc.) until a real second public implementation version exists.
 - [ ] Regenerate final conformance vectors and generated artifacts after the clean break.
 
+### TS protocol WASM boundary
+
+- [ ] Keep the Rust protocol crate as the single authoritative implementation for substantial authorization verification; do not duplicate the trust/context verifier in TypeScript.
+- [ ] Stop committing protocol-WASM binary/bindgen/base64 output as normal source state. Build it only for TS tests/package assembly/release and transfer it as a CI/package artifact where needed.
+- [ ] Make Rust-only `check`/test paths independent of protocol-WASM generation.
+- [ ] Make the canonical preparation/build order work from a clean checkout: generate SDK dependencies before any WASM build that loads the Rust workspace.
+- [ ] Replace per-message root + manifest + context JSON round-trips with an opaque WASM verified-context handle. Verify each context/trust chain once; request/event hot paths verify only their proof and authorization requirements against the already-verified context.
+- [ ] Preserve manifest/revocation invalidation in the TS provider cache and discard/rebuild verified-context handles when their trust epoch changes.
+- [ ] Keep simple request/event proof-input construction/signing native in TS; WASM is for the substantial verifier, not every cryptographic helper.
+- [ ] Validate the boundary with shared Rust/TS conformance vectors and a focused repeated-message test that proves one context verification can serve many request/event verifications without re-verifying the trust chain.
+
 ## 4. Ownership / locks
 
 - [x] Give each runtime lease one owner task; remove the shared `Arc<Vec<Mutex<HeldLease>>>` renewal model.
@@ -134,6 +145,6 @@ Validation:
 
 ## Immediate next work
 
-1. Do the first-public `v1` proof cleanup.
+1. Finish the protocol-WASM build/boundary cleanup and first-public `v1` proof clean break together so the TS/WASM API is only renamed once.
 2. Continue production/test-boundary and runtime-composition cleanup.
 3. Finish release-only gate cleanup and record final timing baseline.
