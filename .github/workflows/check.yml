@@ -5,7 +5,6 @@ on:
   push:
     branches:
       - rs
-      - "agent/**"
   pull_request:
 
 permissions:
@@ -20,6 +19,32 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  generated:
+    name: Generated artifacts
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Set up Deno
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: ${{ env.DENO_VERSION }}
+
+      - name: Cache generator build
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: rust/tools/generate -> target
+
+      - name: Regenerate SDKs
+        run: cargo run --manifest-path rust/tools/generate/Cargo.toml -- prepare --no-npm .
+
+      - name: Require generated artifacts to be current
+        run: git diff --exit-code
+
   rust:
     name: Rust
     runs-on: ubuntu-latest
@@ -34,9 +59,6 @@ jobs:
         uses: denoland/setup-deno@v2
         with:
           deno-version: ${{ env.DENO_VERSION }}
-
-      - name: Prepare generated SDKs
-        run: cargo run --manifest-path rust/tools/generate/Cargo.toml -- prepare --no-npm .
 
       - name: Cache Rust build artifacts
         uses: swatinem/rust-cache@v2
@@ -72,16 +94,10 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
-      - name: Set up Rust
-        uses: dtolnay/rust-toolchain@stable
-
       - name: Set up Deno
         uses: denoland/setup-deno@v2
         with:
           deno-version: ${{ env.DENO_VERSION }}
-
-      - name: Prepare generated SDKs
-        run: cargo run --manifest-path rust/tools/generate/Cargo.toml -- prepare --no-npm .
 
       - name: Check formatting
         run: deno fmt -c ts/deno.json --check
@@ -111,9 +127,6 @@ jobs:
         uses: denoland/setup-deno@v2
         with:
           deno-version: ${{ env.DENO_VERSION }}
-
-      - name: Prepare generated SDKs
-        run: cargo run --manifest-path rust/tools/generate/Cargo.toml -- prepare --no-npm .
 
       - name: Cache Rust build artifacts
         uses: swatinem/rust-cache@v2
