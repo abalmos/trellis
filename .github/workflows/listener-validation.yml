@@ -1,0 +1,344 @@
+name: Listener validation
+
+on:
+  push:
+    branches:
+      - agent/rs-auth-cleanup-runner
+    paths:
+      - .github/workflows/listener-validation.yml
+
+permissions:
+  contents: write
+
+env:
+  DENO_VERSION: 2.9.4
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out current rs
+        uses: actions/checkout@v4
+        with:
+          ref: rs
+          fetch-depth: 0
+
+      - name: Verify listener inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git hash-object rust/crates/trellis/src/service/runtime_facade.rs)" = "40aeaecbf80c971336885aea8a11b667bda452ca"
+          test "$(git hash-object rust/crates/trellis/tests/integration/event_consumers.rs)" = "77f2cd1a3dc53c59ea8498129fb688d956561b8a"
+
+      - name: Make durable registration atomic
+        shell: python
+        run: |
+          from pathlib import Path
+          import re
+
+          def one(path, old, new):
+              p = Path(path)
+              s = p.read_text()
+              count = s.count(old)
+              if count != 1:
+                  raise SystemExit(f"{path}: expected one exact match, got {count}")
+              p.write_text(s.replace(old, new, 1))
+
+          facade = "rust/crates/trellis/src/service/runtime_facade.rs"
+          one(facade,
+              "type SharedDurableEventListeners =\n    Arc<Mutex<BTreeMap<DurableEventListenerKey, SharedDurableEventListener>>>;",
+              "type SharedDurableEventListeners =\n    Arc<StdMutex<BTreeMap<DurableEventListenerKey, SharedDurableEventListener>>>;")
+          one(facade,
+              "        spawn_service_event_listeners_cleanup(Arc::clone(&self.event_listeners));",
+              "        remove_service_event_listeners(&self.event_listeners);")
+          one(facade,
+              "                spawn_service_event_listener_cleanup(registration);",
+              "                remove_service_event_listener_registration(registration);")
+          # Same call appears once more in Drop after the first replacement.
+          one(facade,
+              "                spawn_service_event_listener_cleanup(registration);",
+              "                remove_service_event_listener_registration(registration);")
+
+          p = Path(facade)
+          s = p.read_text()
+          pattern = re.compile(r'''    \{\n        let mut listeners = event_listeners\.lock\(\)\.await;\n        if let Some\(listener\) = listeners\.get_mut\(&key\) \{.*?\n        \}\n    \}\n\n    let subscribe_options = EventSubscribeOptions \{.*?\n    event_listeners\.lock\(\)\.await\.insert\(\n        key\.clone\(\),\n        SharedDurableEventListener \{.*?\n        \},\n    \);''', re.S)
+          replacement = '''    let mut listeners = event_listeners
+              .lock()
+              .unwrap_or_else(std::sync::PoisonError::into_inner);
+          if let Some(listener) = listeners.get_mut(&key) {
+              validate_event_listener_concurrency(
+                  context.group.as_deref().expect("durable listener group"),
+                  binding.ordering,
+                  options.concurrency,
+                  Some(listener.concurrency),
+              )?;
+              listener
+                  .handlers
+                  .entry(subject.clone())
+                  .or_default()
+                  .insert(handler_id, handler);
+              return Ok(ServiceEventListenerHandle::new(
+                  tokio::spawn(async { futures_util::future::pending().await }),
+                  Some(ServiceEventListenerRegistration {
+                      event_listeners: Arc::clone(&event_listeners),
+                      key,
+                      subject,
+                      handler_id,
+                  }),
+              ));
+          }
+
+          let subscribe_options = EventSubscribeOptions {
+              stream: Some(binding.stream.clone()),
+              mode: EventSubscriptionMode::Durable,
+              replay: EventReplayPolicy::New,
+              durable_name: Some(binding.consumer_name.clone()),
+          };
+          let pull_abort_handles = (0..options.concurrency)
+              .map(|_| {
+                  tokio::spawn(run_durable_event_pull_loop::<D>(
+                      Arc::clone(client),
+                      auth.clone(),
+                      event_api_id.clone(),
+                      event_name.clone(),
+                      publish_capabilities.clone(),
+                      Arc::clone(&event_listeners),
+                      key.clone(),
+                      subscribe_options.clone(),
+                      context.clone(),
+                  ))
+                  .abort_handle()
+              })
+              .collect();
+          listeners.insert(
+              key.clone(),
+              SharedDurableEventListener {
+                  expected_subjects: binding.filter_subjects.iter().cloned().collect(),
+                  handlers: BTreeMap::from([(
+                      subject.clone(),
+                      BTreeMap::from([(handler_id, handler)]),
+                  )]),
+                  concurrency: options.concurrency,
+                  pull_abort_handles,
+              },
+          );
+          drop(listeners);'''
+          s, count = pattern.subn(replacement, s, count=1)
+          if count != 1:
+              raise SystemExit(f"listener create block: expected one match, got {count}")
+          p.write_text(s)
+
+          p = Path(facade)
+          s = p.read_text()
+          pattern = re.compile(r'''async fn remove_service_event_listener_registration\(\n    registration: ServiceEventListenerRegistration,\n\) \{\n    let mut listeners = registration\.event_listeners\.lock\(\)\.await;(?P<body>.*?)\n\}\n\nfn spawn_service_event_listener_cleanup\(registration: ServiceEventListenerRegistration\) \{.*?\n\}\n\nasync fn remove_service_event_listeners\(event_listeners: SharedDurableEventListeners\) \{\n    let listeners = std::mem::take\(&mut \*event_listeners\.lock\(\)\.await\);(?P<tail>.*?)\n\}''', re.S)
+          match = pattern.search(s)
+          if not match:
+              raise SystemExit("cleanup block not found")
+          replacement = '''fn remove_service_event_listener_registration(registration: ServiceEventListenerRegistration) {
+              let mut listeners = registration
+                  .event_listeners
+                  .lock()
+                  .unwrap_or_else(std::sync::PoisonError::into_inner);''' + match.group('body') + '''
+          }
+
+          fn remove_service_event_listeners(event_listeners: &SharedDurableEventListeners) {
+              let listeners = std::mem::take(
+                  &mut *event_listeners
+                      .lock()
+                      .unwrap_or_else(std::sync::PoisonError::into_inner),
+              );''' + match.group('tail') + '''
+          }'''
+          s = pattern.sub(replacement, s, count=1)
+          s = s.replace('durable_listener_ready(&event_listeners, &key).await', 'durable_listener_ready(&event_listeners, &key)')
+          s = s.replace('.lock()\n                .await\n                .get(&key)', '.lock()\n                .unwrap_or_else(std::sync::PoisonError::into_inner)\n                .get(&key)')
+          s, count = re.subn(r'''fn spawn_service_event_listeners_cleanup\(event_listeners: SharedDurableEventListeners\) \{.*?\n\}\n\nasync fn durable_listener_ready\(''', 'fn durable_listener_ready(', s, count=1, flags=re.S)
+          if count != 1:
+              raise SystemExit("final listener cleanup block not found")
+          s = s.replace('.lock()\n        .await\n        .get(key)', '.lock()\n        .unwrap_or_else(std::sync::PoisonError::into_inner)\n        .get(key)')
+          p.write_text(s)
+
+      - name: Make duplicate registration test concurrent
+        shell: python
+        run: |
+          from pathlib import Path
+          import re
+          path = Path("rust/crates/trellis/tests/integration/event_consumers.rs")
+          s = path.read_text()
+          s = s.replace(
+              "use tokio::sync::{oneshot, Mutex, Notify};",
+              "use tokio::sync::{oneshot, Barrier, Mutex, Notify};",
+              1,
+          )
+          pattern = re.compile(r'''#\[tokio::test\]\nasync fn event_consumers_duplicate_handlers_share_single_group_waiter\(\) \{.*?\n\}\n\n(?=#\[tokio::test\]\nasync fn event_consumers_self_owned_durable_consumer_receives_self_published_event)''', re.S)
+          replacement = '''#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+          async fn event_consumers_duplicate_handlers_share_single_group_waiter() {
+              assert_runtime_case_registered(
+                  "event-consumers.duplicate-handlers-share-single-group-waiter",
+                  "event-consumers",
+                  "event_consumers",
+              );
+
+              let (runtime, bootstrap_url, mut admin) = start_runtime().await;
+              let source_contract = test_contract(SOURCE_API_SOURCE_JSON);
+              admin
+                  .provision_service_instance(&bootstrap_url, &source_contract, Some("source"), None)
+                  .await
+                  .expect("approve source contract");
+              let consumer = connect_consumer(
+                  &mut admin,
+                  runtime.trellis_url(),
+                  &bootstrap_url,
+                  DEPENDENCY_CONSUMER_JSON,
+                  "event-consumers-dependency-rust",
+              )
+              .await;
+
+              const HANDLER_COUNT: usize = 8;
+              let observed = Arc::new(Mutex::new(Vec::<String>::new()));
+              let barrier = Arc::new(Barrier::new(HANDLER_COUNT + 1));
+              let service = consumer.generated_handle();
+              let mut registrations = Vec::with_capacity(HANDLER_COUNT);
+              for index in 0..HANDLER_COUNT {
+                  let service = service.clone();
+                  let observed = Arc::clone(&observed);
+                  let barrier = Arc::clone(&barrier);
+                  registrations.push(tokio::spawn(async move {
+                      barrier.wait().await;
+                      service
+                          .listen_event_with_api_id::<SourcePingedEvent, _, _>(
+                              SOURCE_CONTRACT_ID,
+                              move |event, context| {
+                                  let observed = Arc::clone(&observed);
+                                  async move {
+                                      assert_eq!(context.group.as_deref(), Some("ingest"));
+                                      observed.lock().await.push(format!("{index}:{}", event.id));
+                                      Ok(())
+                                  }
+                              },
+                              ServiceEventListenOptions {
+                                  mode: ServiceEventListenerMode::Durable,
+                                  group: Some("ingest".to_owned()),
+                                  durable_name: None,
+                                  concurrency: 1,
+                              },
+                          )
+                          .await
+                          .expect("start concurrent duplicate listener")
+                  }));
+              }
+              barrier.wait().await;
+
+              let mut listeners = Vec::with_capacity(HANDLER_COUNT);
+              for registration in registrations {
+                  listeners.push(registration.await.expect("duplicate registration task"));
+              }
+              wait_for_waiting_count(&runtime, SourcePingedEvent::SUBJECT, 1).await;
+
+              let publisher = admin
+                  .connect_client(&bootstrap_url, &publisher_contract())
+                  .await
+                  .expect("connect event publisher client");
+              publisher
+                  .publish::<SourcePingedEvent>(&EventRecord {
+                      id: "rust-event-consumers-duplicate".to_owned(),
+                      value: "duplicate".to_owned(),
+                  })
+                  .await
+                  .expect("publish source event");
+
+              wait_for_duplicate_observed(
+                  &observed,
+                  "rust-event-consumers-duplicate",
+                  HANDLER_COUNT,
+              )
+              .await;
+              for listener in &listeners {
+                  listener.abort();
+              }
+              for listener in listeners {
+                  let _ = listener.await;
+              }
+          }
+
+          '''
+          s, count = pattern.subn(replacement, s, count=1)
+          if count != 1:
+              raise SystemExit(f"duplicate test: expected one match, got {count}")
+          pattern = re.compile(r'''async fn wait_for_duplicate_observed\(observed: &Arc<Mutex<Vec<String>>>, event_id: &str\) \{.*?\n\}\n''', re.S)
+          replacement = '''async fn wait_for_duplicate_observed(
+              observed: &Arc<Mutex<Vec<String>>>,
+              event_id: &str,
+              handler_count: usize,
+          ) {
+              let deadline = Instant::now() + Duration::from_secs(5);
+              let mut expected = (0..handler_count)
+                  .map(|index| format!("{index}:{event_id}"))
+                  .collect::<Vec<_>>();
+              expected.sort();
+              loop {
+                  let mut actual = observed.lock().await.clone();
+                  actual.sort();
+                  if actual == expected {
+                      return;
+                  }
+                  assert!(
+                      Instant::now() < deadline,
+                      "timed out waiting for all duplicate handlers: {actual:?}"
+                  );
+                  tokio::time::sleep(Duration::from_millis(100)).await;
+              }
+          }
+          '''
+          s, count = pattern.subn(replacement, s, count=1)
+          if count != 1:
+              raise SystemExit(f"duplicate helper: expected one match, got {count}")
+          path.write_text(s)
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Set up Deno
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: ${{ env.DENO_VERSION }}
+
+      - name: Generate SDK artifacts
+        run: cargo run --manifest-path rust/tools/generate/Cargo.toml -- prepare --no-npm .
+
+      - name: Format Rust
+        run: cargo fmt --manifest-path rust/Cargo.toml --all
+
+      - name: Compile integration tests
+        run: cargo test --manifest-path rust/Cargo.toml -p trellis-rs --test integration --no-run
+
+      - name: Run concurrent durable-listener regression
+        run: cargo test --manifest-path rust/Cargo.toml -p trellis-rs --test integration event_consumers_duplicate_handlers_share_single_group_waiter -- --exact --nocapture
+
+      - name: Publish validated result branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "trellis-cleanup-bot"
+          git config user.email "trellis-cleanup-bot@users.noreply.github.com"
+          git add rust/crates/trellis/src/service/runtime_facade.rs rust/crates/trellis/tests/integration/event_consumers.rs
+          git diff --cached --check
+          git commit -m "Make durable listener registration atomic"
+          git push --force origin HEAD:refs/heads/agent/rs-listener-result
+
+      - name: Record validation result
+        if: always()
+        shell: bash
+        env:
+          VALIDATION_STATUS: ${{ job.status }}
+        run: |
+          set -euo pipefail
+          git fetch origin agent/rs-auth-cleanup-runner
+          git worktree add --detach /tmp/listener-validation origin/agent/rs-auth-cleanup-runner
+          cd /tmp/listener-validation
+          git switch -C agent/rs-auth-cleanup-runner
+          git config user.name "trellis-cleanup-bot"
+          git config user.email "trellis-cleanup-bot@users.noreply.github.com"
+          printf '%s\n' "$VALIDATION_STATUS" > .listener-validation-result
+          git add .listener-validation-result
+          git commit -m "Record listener validation: $VALIDATION_STATUS" || exit 0
+          git push origin HEAD:refs/heads/agent/rs-auth-cleanup-runner
