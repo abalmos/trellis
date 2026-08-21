@@ -12,15 +12,23 @@ for struct_name in ("TrellisTestClientReconnect", "TrellisTestServiceKey"):
 
 path.write_text(text)
 
+client_path = Path("ts/packages/trellis-test/src/integration/shared_runtime_client.ts")
+client = client_path.read_text()
+old = "  return manifest.version === 4 &&"
+if client.count(old) != 1:
+    raise RuntimeError(f"expected one shared-runtime client version check, found {client.count(old)}")
+client_path.write_text(client.replace(old, "  return manifest.version === 5 &&", 1))
+
 # The shared-runtime manifest is private and version-locked. Every active reader
 # and writer must move together; do not carry a compatibility branch.
 for path in (
     Path("rust/crates/trellis-test/src/lib.rs"),
     Path("ts/packages/trellis-test/src/integration/shared_runtime_protocol.ts"),
     Path("ts/packages/trellis-test/src/integration/shared_runtime_host.ts"),
+    Path("ts/packages/trellis-test/src/integration/shared_runtime_client.ts"),
 ):
     content = path.read_text()
-    if "version: 4" in content or "version != 4" in content or "version !== 4" in content:
+    if "version: 4" in content or "version != 4" in content or "version !== 4" in content or "version === 4" in content:
         raise RuntimeError(f"stale shared-runtime manifest v4 reference in {path}")
 
 # No identity-mutating harness helper should survive after the implementation is
