@@ -44,6 +44,11 @@ jobs:
               1,
           )
           text = text.replace('api == self.id\n', 'api == self.id.as_str()\n', 1)
+          text = text.replace(
+              '"        super::rpc::register_auth_rpc_metadata(&mut routes).unwrap();",',
+              '"        crate::platform::auth::rpc::register_auth_rpc_metadata(&mut routes).unwrap();",',
+              1,
+          )
           path.write_text(text)
           PY
           git config user.name trellis-validation
