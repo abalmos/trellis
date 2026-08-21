@@ -27,14 +27,17 @@ if text.count(old) != 1:
     raise RuntimeError(f"trellis_core import anchor count: {text.count(old)}")
 path.write_text(text.replace(old, new, 1))
 
+# The contract-resolution test deliberately exercises the runtime Rust/WASM
+# boundary. Keep generic SDK preparation independent and make the consumer ask
+# for the artifact it needs.
+replace_once(
+    "ts/deno.json",
+    '    "test:contracts": "deno task prepare && deno test -A packages/trellis/contract_support/protocol_test.ts packages/trellis/contract_support/protocol_artifacts_test.ts packages/trellis/contract_support/descriptors_test.ts",',
+    '    "test:contracts": "deno task prepare && deno task protocol:wasm && deno test -A packages/trellis/contract_support/protocol_test.ts packages/trellis/contract_support/protocol_artifacts_test.ts packages/trellis/contract_support/descriptors_test.ts",',
+)
+
 # Console bundles the runtime resolver, so local dev/build/check must explicitly
 # materialize protocol WASM once it is no longer checked into source control.
-for task, command in {
-    '"dev"': '"dev": "deno task prepare && deno run -A vite dev"',
-    '"build"': '"build": "deno task prepare && deno run -A vite build"',
-    '"check"': '"check": "deno task prepare && deno run -A @sveltejs/kit sync && deno run -A svelte-check --tsconfig ./tsconfig.check.json"',
-}.items():
-    pass
 replace_once(
     "ts/apps/console/deno.json",
     '    "dev": "deno task prepare && deno run -A vite dev",',
