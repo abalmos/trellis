@@ -6,6 +6,7 @@ on:
       - agent/connected-runtime-v1
     paths:
       - scripts/agent_connected_runtime_v1.py
+      - scripts/agent_connected_runtime_public_connect.py
       - .github/workflows/agent-connected-runtime-v1.yml
   workflow_dispatch:
 
@@ -51,19 +52,24 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          python3 -m py_compile scripts/agent_connected_runtime_v1.py
+          python3 -m py_compile \
+            scripts/agent_connected_runtime_v1.py \
+            scripts/agent_connected_runtime_public_connect.py
           python3 scripts/agent_connected_runtime_v1.py
+          python3 scripts/agent_connected_runtime_public_connect.py
           cargo fmt --manifest-path rust/Cargo.toml --all
           git diff --check
           ! rg -n \
-            'MissingClient|ServiceRuntimeRunner|DefaultServiceRunner|RecordingRunner|EmptyHandler|from_test_binding|run_with_runner|client: Option<Arc<TrellisClient>>|caller: Option<crate::generated::Caller>' \
-            rust/crates/trellis/src/service/runtime_facade.rs
+            'MissingClient|ServiceRuntimeRunner|DefaultServiceRunner|RecordingRunner|EmptyHandler|from_test_binding|from_connected_client|run_with_runner|test_connect_service_runtime|client: Option<Arc<TrellisClient>>|caller: Option<crate::generated::Caller>' \
+            rust/crates/trellis/src rust/crates/trellis-test/src
 
       - name: Check Rust workspace
         run: cargo check --locked --manifest-path rust/Cargo.toml --workspace --all-targets
 
       - name: Test Rust libraries
-        run: cargo test --locked --manifest-path rust/Cargo.toml -p trellis-rs --lib
+        run: |
+          cargo test --locked --manifest-path rust/Cargo.toml -p trellis-rs --lib
+          cargo test --locked --manifest-path rust/Cargo.toml -p trellis-test
 
       - name: Clippy Rust workspace
         run: cargo clippy --locked --manifest-path rust/Cargo.toml --workspace --all-targets -- -D warnings
@@ -85,11 +91,15 @@ jobs:
           set -euo pipefail
           rm -f \
             scripts/agent_connected_runtime_v1.py \
+            scripts/agent_connected_runtime_public_connect.py \
             .github/workflows/agent-connected-runtime-v1.yml \
             .validation-run
-          git add -- rust/crates/trellis
+          git add -- \
+            rust/crates/trellis \
+            rust/crates/trellis-test
           git add -u -- \
             scripts/agent_connected_runtime_v1.py \
+            scripts/agent_connected_runtime_public_connect.py \
             .github/workflows/agent-connected-runtime-v1.yml \
             .validation-run
           git diff --cached --check
