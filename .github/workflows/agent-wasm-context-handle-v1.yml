@@ -1,0 +1,120 @@
+name: Agent WASM Context Handle v1
+
+on:
+  push:
+    branches:
+      - agent/wasm-context-handle-v1
+    paths:
+      - scripts/agent_wasm_context_handle_v1.py
+      - .github/workflows/agent-wasm-context-handle-v1.yml
+  workflow_dispatch:
+
+concurrency:
+  group: agent-wasm-context-handle-v1
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+jobs:
+  validate:
+    runs-on: [self-hosted, Linux, X64]
+    timeout-minutes: 180
+    steps:
+      - name: Check out scratch branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Record validation run
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "trellis-validation"
+          git config user.email "trellis-validation@users.noreply.github.com"
+          printf '%s\n' '${{ github.run_id }}' > .validation-run
+          git add -- .validation-run
+          git commit -m "Record WASM context-handle validation run"
+          git push origin HEAD:refs/heads/agent/wasm-context-handle-v1
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+          components: rustfmt,clippy
+
+      - name: Setup Deno
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.9.4
+
+      - name: Apply retained-context transform
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile scripts/agent_wasm_context_handle_v1.py
+          python3 scripts/agent_wasm_context_handle_v1.py
+          cargo fmt --manifest-path rust/Cargo.toml --all
+          deno fmt -c ts/deno.json \
+            ts/packages/trellis/auth/protocol_wasm.ts \
+            ts/packages/trellis/auth/authorization/provider_cache.ts
+          git diff --check
+          ! rg -n 'pub fn verify_authorization_(request|event)_v2\(' \
+            rust/crates/protocol-wasm/src/lib.rs
+          ! rg -n 'verifyAuthorization(Request|Event)V2Wasm|#requestInput\(|#eventInput\(' \
+            ts/packages/trellis/auth
+
+      - name: Regenerate protocol WASM and repository artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo run --manifest-path rust/xtask/Cargo.toml -- prepare
+          test -f ts/packages/trellis/auth/protocol_wasm/trellis_protocol_wasm.d.ts
+          grep -q '^export class VerifiedAuthorizationContextHandle' \
+            ts/packages/trellis/auth/protocol_wasm/trellis_protocol_wasm.d.ts
+          ! grep -q '^export function verify_authorization_request_v2' \
+            ts/packages/trellis/auth/protocol_wasm/trellis_protocol_wasm.d.ts
+          ! grep -q '^export function verify_authorization_event_v2' \
+            ts/packages/trellis/auth/protocol_wasm/trellis_protocol_wasm.d.ts
+
+      - name: Check authorization TypeScript
+        shell: bash
+        run: |
+          set -euo pipefail
+          deno check -c ts/deno.json \
+            ts/packages/trellis/auth/protocol_wasm.ts \
+            ts/packages/trellis/auth/authorization/provider_cache.ts \
+            ts/packages/trellis/auth/authorization_context_test.ts
+
+      - name: Test authorization context and provider cache
+        run: >-
+          deno test -A -c ts/deno.json
+          ts/packages/trellis/auth/authorization_context_test.ts
+
+      - name: Test and lint protocol WASM
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --locked --manifest-path rust/Cargo.toml -p trellis-protocol-wasm
+          cargo clippy --locked --manifest-path rust/Cargo.toml \
+            -p trellis-protocol-wasm --all-targets -- -D warnings
+
+      - name: Publish clean source candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -f \
+            scripts/agent_wasm_context_handle_v1.py \
+            .github/workflows/agent-wasm-context-handle-v1.yml \
+            .validation-run
+          git add -- \
+            rust/crates/protocol-wasm/src/lib.rs \
+            ts/packages/trellis/auth/protocol_wasm.ts \
+            ts/packages/trellis/auth/authorization/provider_cache.ts
+          git add -u -- \
+            scripts/agent_wasm_context_handle_v1.py \
+            .github/workflows/agent-wasm-context-handle-v1.yml \
+            .validation-run
+          git diff --cached --check
+          git commit -m "Retain verified authorization contexts in WASM"
+          git push --force origin HEAD:refs/heads/agent/wasm-context-handle-candidate
