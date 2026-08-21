@@ -22,3 +22,18 @@ for path in (
     content = path.read_text()
     if "version: 4" in content or "version != 4" in content or "version !== 4" in content:
         raise RuntimeError(f"stale shared-runtime manifest v4 reference in {path}")
+
+# No identity-mutating harness helper should survive after the implementation is
+# deleted. These names are intentionally not retained as no-op compatibility shims.
+for root in (Path("rust/crates/trellis-test"), Path("rust/crates/trellis/tests/integration")):
+    for candidate in root.rglob("*.rs"):
+        content = candidate.read_text()
+        for token in (
+            "scoped_contract",
+            "scope_authoring_source",
+            "scope_artifact",
+            "scope_source_value",
+            "refresh_scoped_api_digests",
+        ):
+            if token in content:
+                raise RuntimeError(f"stale integration identity helper {token!r} in {candidate}")
