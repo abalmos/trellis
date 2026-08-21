@@ -4,7 +4,7 @@
   "exports": "./contract.ts",
   "extends": "../../deno.json",
   "tasks": {
-    "prepare": "deno task -c ../../deno.json prepare",
+    "prepare": "deno task -c ../../deno.json prepare && deno task -c ../../deno.json protocol:wasm",
     "dev": "deno task prepare && deno run -A vite dev",
     "build:static": "deno task prepare && deno run -A @sveltejs/kit sync && deno run -A vite build",
     "build:static:prebuilt": "deno run -A --lock=../../deno.lock --frozen @sveltejs/kit sync && deno run -A --lock=../../deno.lock --frozen vite build",
