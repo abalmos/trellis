@@ -1,4 +1,4 @@
-name: Run WASM boundary v3.3 validation
+name: Run WASM boundary v3.4 validation
 
 on:
   push:
@@ -11,7 +11,7 @@ permissions:
   contents: write
 
 concurrency:
-  group: wasm-boundary-v3-3-runner
+  group: wasm-boundary-v3-4-runner
   cancel-in-progress: true
 
 env:
@@ -36,6 +36,7 @@ jobs:
           git fetch origin agent/rs-gate-validation
           git show origin/agent/rs-gate-validation:scripts/agent_wasm_boundary_v3_pre.py > /tmp/wasm-boundary-pre.py
           git show origin/agent/rs-gate-validation:scripts/agent_wasm_boundary_v3.py > /tmp/wasm-boundary.py
+          git show origin/agent/rs-gate-validation:scripts/agent_wasm_boundary_v3_participant_fix.py > /tmp/wasm-boundary-participant.py
           git show origin/agent/rs-gate-validation:scripts/agent_wasm_boundary_v3_ci_fix.py > /tmp/wasm-boundary-ci.py
 
       - name: Record validation run
@@ -46,7 +47,7 @@ jobs:
           git config user.email actions@users.noreply.github.com
           printf '%s\n' "$GITHUB_RUN_ID" > .validation-run
           git add .validation-run
-          git commit -m 'Record WASM boundary v3.3 validation'
+          git commit -m 'Record WASM boundary v3.4 validation'
           git push origin HEAD:"$TARGET_BRANCH"
 
       - name: Set up Rust
@@ -70,6 +71,7 @@ jobs:
           set -euo pipefail
           python /tmp/wasm-boundary-pre.py
           python /tmp/wasm-boundary.py
+          python /tmp/wasm-boundary-participant.py
           python /tmp/wasm-boundary-ci.py
           git rm \
             ts/packages/trellis/auth/protocol_wasm/trellis_protocol_wasm.js \
@@ -77,6 +79,7 @@ jobs:
             ts/packages/trellis/auth/protocol_wasm/trellis_protocol_wasm_bytes.ts
           git rm .validation-run
           cargo fmt --manifest-path rust/xtask/Cargo.toml
+          cargo fmt --manifest-path rust/tools/generate/Cargo.toml
           deno fmt -c ts/deno.json \
             ts/deno.json \
             ts/packages/trellis/deno.json \
@@ -98,8 +101,8 @@ jobs:
         run: |
           set -euo pipefail
           rm -rf ts/packages/trellis/auth/protocol_wasm
-          deno eval -c ts/deno.json 'const m = await import("./ts/packages/trellis/contracts/trellis_core.ts"); if (!m.API_DIGEST || !m.default.CONTRACT_DIGEST) throw new Error("core contract did not build")'
-          deno eval -c ts/deno.json 'const m = await import("./ts/portals/login/contract.ts"); if (!m.default.CONTRACT_DIGEST) throw new Error("portal contract did not build")'
+          deno eval -c ts/deno.json 'const m = await import("./ts/packages/trellis/contracts/trellis_core.ts"); if (!m.API_DIGEST || !m.default.CONTRACT_DIGEST || !m.default.PARTICIPANT) throw new Error("core contract did not build intrinsic artifacts")'
+          deno eval -c ts/deno.json 'const m = await import("./ts/portals/login/contract.ts"); if (!m.default.CONTRACT_DIGEST || !m.default.PARTICIPANT) throw new Error("portal contract did not build intrinsic artifacts")'
           test ! -e ts/packages/trellis/auth/protocol_wasm/trellis_protocol_wasm.js
 
       - name: Refresh current tool baselines
@@ -136,6 +139,9 @@ jobs:
           cargo check --locked --manifest-path rust/Cargo.toml -p trellis-protocol-wasm
           cargo run --manifest-path rust/tools/generate/Cargo.toml -- prepare --no-npm .
           test ! -e ts/packages/trellis/auth/protocol_wasm/trellis_protocol_wasm.js
+          test -s generated/protocol/participants/trellis.core@v1.json
+          test -s generated/protocol/participants/trellis.console@v1.json
+          test -s generated/protocol/participants/trellis.portal.activation@v1.json
           cargo run --manifest-path rust/xtask/Cargo.toml -- protocol-wasm
           test -s ts/packages/trellis/auth/protocol_wasm/trellis_protocol_wasm.js
           test -s ts/packages/trellis/auth/protocol_wasm/trellis_protocol_wasm.d.ts
