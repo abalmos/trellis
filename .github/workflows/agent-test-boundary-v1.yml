@@ -6,6 +6,7 @@ on:
       - agent/test-boundary-v1
     paths:
       - scripts/agent_test_boundary_v1.py
+      - scripts/agent_test_boundary_v1_fix.py
       - .github/workflows/agent-test-boundary-v1.yml
   workflow_dispatch:
 
@@ -52,6 +53,7 @@ jobs:
         run: |
           set -euo pipefail
           python3 scripts/agent_test_boundary_v1.py
+          python3 scripts/agent_test_boundary_v1_fix.py
           cargo fmt --manifest-path rust/Cargo.toml --all
           deno fmt -c ts/deno.json \
             ts/packages/trellis-test/src/integration/shared_runtime_protocol.ts \
@@ -108,13 +110,18 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          rm -f scripts/agent_test_boundary_v1.py .github/workflows/agent-test-boundary-v1.yml .validation-run
+          rm -f \
+            scripts/agent_test_boundary_v1.py \
+            scripts/agent_test_boundary_v1_fix.py \
+            .github/workflows/agent-test-boundary-v1.yml \
+            .validation-run
           git add -- \
             rust/crates/trellis \
             rust/crates/trellis-test \
             ts/packages/trellis-test/src
           git add -u -- \
             scripts/agent_test_boundary_v1.py \
+            scripts/agent_test_boundary_v1_fix.py \
             .github/workflows/agent-test-boundary-v1.yml \
             .validation-run
           git diff --cached --check
