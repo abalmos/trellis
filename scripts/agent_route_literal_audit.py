@@ -6,7 +6,9 @@ SUFFIXES = {".rs", ".ts", ".tsx", ".json", ".md", ".toml", ".yml", ".yaml"}
 ROUTE = re.compile(
     r'(?P<subject>(?:rpc|operations|events|feed)\.v[1-9][0-9]*\.[A-Za-z0-9_@*><.-]+)'
 )
-QUALIFIED = re.compile(r'^api\.(?:[A-Za-z0-9_-]+\.)+v[1-9][0-9]*\.[A-Za-z]')
+QUALIFIED = re.compile(
+    r'^api\.(?:[A-Za-z0-9_-]+\.)+v[1-9][0-9]*\.[A-Za-z0-9_-]'
+)
 
 errors: list[str] = []
 for root in ROOTS:
