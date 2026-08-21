@@ -1,4 +1,4 @@
-name: Run WASM boundary v3.11 validation
+name: Run WASM boundary v3.12 validation
 
 on:
   push:
@@ -51,7 +51,7 @@ jobs:
           git config user.email actions@users.noreply.github.com
           printf '%s\n' "$GITHUB_RUN_ID" > .validation-run
           git add .validation-run
-          git commit -m 'Record WASM boundary v3.11 validation'
+          git commit -m 'Record WASM boundary v3.12 validation'
           git push origin HEAD:"$TARGET_BRANCH"
 
       - name: Set up Rust
@@ -234,10 +234,11 @@ jobs:
           deno test -A -c ts/deno.json ts/packages/trellis/tests/npm_artifact_smoke_test.ts
           git diff --exit-code
 
-      - name: Validate Rust protocol and client
+      - name: Validate Rust workspace, protocol, and client
         shell: bash
         run: |
           set -euo pipefail
+          cargo check --manifest-path rust/Cargo.toml --workspace --all-targets
           cargo test --manifest-path rust/Cargo.toml -p trellis-protocol
           cargo test --manifest-path rust/Cargo.toml -p trellis-rs --lib
           cargo clippy --manifest-path rust/Cargo.toml -p trellis-protocol -p trellis-protocol-wasm -p trellis-rs --all-targets -- -D warnings
