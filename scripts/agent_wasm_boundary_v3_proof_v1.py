@@ -31,8 +31,25 @@ core_replacements = {
     "sign_authorization_event_v2": "sign_authorization_event",
     "verify_authorization_request_v2": "verify_authorization_request",
     "verify_authorization_event_v2": "verify_authorization_event",
+    "create_request_proof_v2": "create_request_proof",
+    "create_event_proof_v2": "create_event_proof",
+    "verify_event_proof_v2": "verify_event_proof",
+    "verify_v2_signature": "verify_signature",
+    "request_proof_v2_matches": "request_proof_v1_matches",
+    "event_proof_v2_matches": "event_proof_v1_matches",
 }
 replace_in_tree("rust", (".rs",), core_replacements)
+
+# The remaining v2 prose in the Rust facade describes this same prerelease proof
+# layer, not a separately-versioned serialized record.
+replace_in_tree(
+    "rust",
+    (".rs",),
+    {
+        "context-bound v2 `proof` header": "context-bound v1 `proof` header",
+        "context-bound v2 event proof": "context-bound v1 event proof",
+    },
+)
 
 # The WASM wire ABI remains explicitly versioned even though the Rust API is the
 # first-public unversioned proof API.
@@ -156,6 +173,10 @@ stale = (
     "VerifiedAuthorizationEventV2",
     "AuthorizationProviderRequestV2",
     "AuthorizationProviderEventV2",
+    "create_request_proof_v2",
+    "create_event_proof_v2",
+    "verify_event_proof_v2",
+    "verify_v2_signature",
     "verifyRequestV2",
     "verifyEventV2",
     "VerifyAuthorizationRequestV2",
