@@ -1,0 +1,97 @@
+name: Agent Connected Runtime v1
+
+on:
+  push:
+    branches:
+      - agent/connected-runtime-v1
+    paths:
+      - scripts/agent_connected_runtime_v1.py
+      - .github/workflows/agent-connected-runtime-v1.yml
+  workflow_dispatch:
+
+concurrency:
+  group: agent-connected-runtime-v1
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+jobs:
+  validate:
+    runs-on: [self-hosted, Linux, X64]
+    timeout-minutes: 180
+    steps:
+      - name: Check out scratch branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Record validation run
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "trellis-validation"
+          git config user.email "trellis-validation@users.noreply.github.com"
+          printf '%s\n' '${{ github.run_id }}' > .validation-run
+          git add -- .validation-run
+          git commit -m "Record connected-runtime validation run"
+          git push origin HEAD:refs/heads/agent/connected-runtime-v1
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt,clippy
+
+      - name: Setup Deno
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.9.4
+
+      - name: Apply connected-runtime cleanup
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile scripts/agent_connected_runtime_v1.py
+          python3 scripts/agent_connected_runtime_v1.py
+          cargo fmt --manifest-path rust/Cargo.toml --all
+          git diff --check
+          ! rg -n \
+            'MissingClient|ServiceRuntimeRunner|DefaultServiceRunner|RecordingRunner|EmptyHandler|from_test_binding|run_with_runner|client: Option<Arc<TrellisClient>>|caller: Option<crate::generated::Caller>' \
+            rust/crates/trellis/src/service/runtime_facade.rs
+
+      - name: Check Rust workspace
+        run: cargo check --locked --manifest-path rust/Cargo.toml --workspace --all-targets
+
+      - name: Test Rust libraries
+        run: cargo test --locked --manifest-path rust/Cargo.toml -p trellis-rs --lib
+
+      - name: Clippy Rust workspace
+        run: cargo clippy --locked --manifest-path rust/Cargo.toml --workspace --all-targets -- -D warnings
+
+      - name: Run full live integration suite
+        shell: bash
+        env:
+          RUST_BACKTRACE: "1"
+        run: |
+          set -euo pipefail
+          logical=$(getconf _NPROCESSORS_ONLN 2>/dev/null || nproc)
+          jobs=$(( logical / 2 ))
+          if [ "$jobs" -lt 1 ]; then jobs=1; fi
+          deno run -A -c ts/deno.json rust/crates/trellis-test/integration_runner.ts --jobs "$jobs"
+
+      - name: Publish clean candidate tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -f \
+            scripts/agent_connected_runtime_v1.py \
+            .github/workflows/agent-connected-runtime-v1.yml \
+            .validation-run
+          git add -- rust/crates/trellis
+          git add -u -- \
+            scripts/agent_connected_runtime_v1.py \
+            .github/workflows/agent-connected-runtime-v1.yml \
+            .validation-run
+          git diff --cached --check
+          git commit -m "Make connected service runtimes valid by construction"
+          git push --force origin HEAD:refs/heads/agent/connected-runtime-candidate
