@@ -10,6 +10,10 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: wasm-boundary-v2
+  cancel-in-progress: true
+
 env:
   DENO_VERSION: 2.9.4
   CARGO_TERM_COLOR: always
@@ -61,26 +65,26 @@ jobs:
           old = '''      - name: Set up Rust toolchain
                 uses: dtolnay/rust-toolchain@stable
 
-              - name: Prepare release version'''
+              - name: Prepare release version'''.replace('                ', '        ').replace('              ', '      ')
           new = '''      - name: Set up Rust toolchain
                 uses: dtolnay/rust-toolchain@stable
                 with:
                   targets: wasm32-unknown-unknown
 
-              - name: Prepare release version'''
+              - name: Prepare release version'''.replace('                ', '        ').replace('                  ', '          ').replace('              ', '      ')
           if text.count(old) != 1:
               raise SystemExit(f'release Rust setup anchor count: {text.count(old)}')
           text = text.replace(old, new, 1)
 
           old = '''      - name: Generate release SDK artifacts
                 run: time cargo run --manifest-path rust/tools/generate/Cargo.toml -- prepare --no-npm .
-'''
+'''.replace('                ', '        ')
           new = '''      - name: Generate release SDK artifacts
                 run: time cargo run --manifest-path rust/tools/generate/Cargo.toml -- prepare --no-npm .
 
               - name: Build protocol WASM
                 run: time cargo run --manifest-path rust/xtask/Cargo.toml -- protocol-wasm
-'''
+'''.replace('                ', '        ').replace('              ', '      ')
           if text.count(old) != 1:
               raise SystemExit(f'release SDK anchor count: {text.count(old)}')
           path.write_text(text.replace(old, new, 1))
