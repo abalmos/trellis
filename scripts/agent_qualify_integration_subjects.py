@@ -22,6 +22,17 @@ PLATFORM_APIS = {
 }
 
 
+def api_namespace(api_id: str) -> str:
+    marker = api_id.rfind("@v")
+    if marker <= 0:
+        raise RuntimeError(f"invalid API id {api_id!r}")
+    lineage = api_id[:marker]
+    major = api_id[marker + 2 :]
+    if not major.isdigit() or major.startswith("0"):
+        raise RuntimeError(f"invalid API id version {api_id!r}")
+    return f"api.{lineage}.v{major}"
+
+
 def add(mapping: dict[str, set[str]], old: str, new: str) -> None:
     if old != new:
         mapping[old].add(new)
@@ -31,6 +42,7 @@ def add_api(mapping: dict[str, set[str]], api: dict[str, object]) -> None:
     api_id = api.get("id")
     if api.get("format") != "trellis.api.v1" or not isinstance(api_id, str):
         return
+    namespace = api_namespace(api_id)
     for section, family in FAMILIES.items():
         definitions = api.get(section)
         if not isinstance(definitions, dict):
@@ -42,7 +54,7 @@ def add_api(mapping: dict[str, set[str]], api: dict[str, object]) -> None:
             if not isinstance(version, str):
                 continue
             old = f"{family}.{version}.{name}"
-            new = f"{family}.{version}.{api_id}.{name}"
+            new = f"{family}.{version}.{namespace}.{name}"
             add(mapping, old, new)
             if section == "events":
                 params = definition.get("params")
@@ -98,7 +110,9 @@ def builder_apis(text: str):
 
 
 def platform_mappings(mapping: dict[str, set[str]], text: str) -> None:
-    literal = re.compile(r'(?P<family>rpc|operations|events|feed)\.(?P<version>v[1-9][0-9]*)\.(?P<name>[A-Za-z][A-Za-z0-9_]*(?:\.[A-Za-z0-9_*><-]+)*)')
+    literal = re.compile(
+        r'(?P<family>rpc|operations|events|feed)\.(?P<version>v[1-9][0-9]*)\.(?P<name>[A-Za-z][A-Za-z0-9_]*(?:\.[A-Za-z0-9_*><-]+)*)'
+    )
     for match in literal.finditer(text):
         name = match.group("name")
         root = name.split(".", 1)[0]
@@ -106,7 +120,10 @@ def platform_mappings(mapping: dict[str, set[str]], text: str) -> None:
         if api_id is None:
             continue
         old = match.group(0)
-        new = f"{match.group('family')}.{match.group('version')}.{api_id}.{name}"
+        new = (
+            f"{match.group('family')}.{match.group('version')}."
+            f"{api_namespace(api_id)}.{name}"
+        )
         add(mapping, old, new)
 
 
@@ -125,7 +142,12 @@ def replace_unambiguous(text: str, mapping: dict[str, set[str]], path: Path) -> 
 
 def qualified(subject: str) -> bool:
     parts = subject.split(".", 2)
-    return len(parts) == 3 and re.search(r'@v[1-9][0-9]*(?:\.|$)', parts[2]) is not None
+    if len(parts) != 3:
+        return False
+    remainder = parts[2]
+    return remainder.startswith("api.") and re.search(
+        r'\.v[1-9][0-9]*\.[A-Za-z]', remainder
+    ) is not None
 
 
 for path in sorted(ROOT.glob("*.rs")):
