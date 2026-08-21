@@ -1140,7 +1140,7 @@ mod tests {
         source.install(verified, policy);
         let verifier = RuntimeAuthVerifier::new(source.clone());
         let mut routes = trellis_rs::service::Router::new();
-        trellis_sdk_auth::api::register_rpc_metadata(&mut routes);
+        crate::platform::auth::rpc::register_auth_rpc_metadata(&mut routes).unwrap();
         let required_permission = routes
             .required_permission(subject, payload)
             .unwrap()

@@ -86,9 +86,4 @@ tower-http = { version = "0.6.8", features = ["cors", "limit", "set-header", "tr
 time = { version = "0.3.46", features = ["formatting"] }
 url = "2.5.8"
 self_update = { version = "0.44.0", default-features = false, features = ["archive-tar", "archive-zip", "compression-flate2", "compression-zip-deflate", "rustls", "ureq"] }
-trellis-sdk-auth = { path = "../generated/packages/cargo/auth", version = "0.12.0" }
-trellis-sdk-core = { path = "../generated/packages/cargo/trellis-core", version = "0.12.0" }
-trellis-sdk-health = { path = "../generated/packages/cargo/health", version = "0.12.0" }
-trellis-sdk-jobs = { path = "../generated/packages/cargo/jobs", version = "0.12.0" }
-trellis-sdk-state = { path = "../generated/packages/cargo/state", version = "0.12.0" }
 trellis-protocol = { path = "crates/protocol", version = "0.12.0" }

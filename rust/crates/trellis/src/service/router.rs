@@ -264,17 +264,20 @@ impl Router {
         subject.to_string()
     }
 
-    fn descriptor_capabilities(&self, capabilities: &[&str]) -> Vec<String> {
+    fn descriptor_capabilities<T>(&self, capabilities: &[T]) -> Vec<String>
+    where
+        T: AsRef<str>,
+    {
         #[cfg(feature = "integration-test-scoping")]
         if let Some(scope) = &self.integration_test_scope {
             return capabilities
                 .iter()
-                .map(|capability| scope.capability(capability))
+                .map(|capability| scope.capability(capability.as_ref()))
                 .collect();
         }
         capabilities
             .iter()
-            .map(|capability| (*capability).to_string())
+            .map(|capability| capability.as_ref().to_string())
             .collect()
     }
 
@@ -322,22 +325,27 @@ impl Router {
         );
     }
 
-    /// Register one generated RPC descriptor for routing metadata only.
+    /// Register one RPC route for routing metadata only.
     ///
-    /// This is used by runtimes whose handler dispatch predates the typed
-    /// router but still must consume the router's exact permission metadata.
-    pub fn register_rpc_metadata<D>(&mut self)
-    where
-        D: RpcDescriptor + 'static,
+    /// This supports runtimes that dispatch handlers outside [`Router`] while
+    /// still using its exact permission metadata. Generated descriptors reduce
+    /// to this same primitive through [`Self::register_rpc_metadata`].
+    pub fn register_rpc_metadata_parts<T>(
+        &mut self,
+        subject: &str,
+        name: &str,
+        caller_capabilities: &[T],
+    ) where
+        T: AsRef<str>,
     {
-        let capabilities = self.descriptor_capabilities(D::CALLER_CAPABILITIES);
+        let capabilities = self.descriptor_capabilities(caller_capabilities);
         self.handlers.insert(
-            self.descriptor_subject(D::SUBJECT),
+            self.descriptor_subject(subject),
             Route {
                 capabilities: RouteCapabilities::Static(capabilities),
                 permission: RoutePermissionSpec::Static(
                     ApiSurfaceKindV1::Rpc,
-                    self.descriptor_name(D::KEY),
+                    self.descriptor_name(name),
                     PermissionActionV1::Call,
                 ),
                 handler: Box::new(|_, _| {
@@ -349,6 +357,14 @@ impl Router {
                 }),
             },
         );
+    }
+
+    /// Register one generated RPC descriptor for routing metadata only.
+    pub fn register_rpc_metadata<D>(&mut self)
+    where
+        D: RpcDescriptor + 'static,
+    {
+        self.register_rpc_metadata_parts(D::SUBJECT, D::KEY, D::CALLER_CAPABILITIES);
     }
 
     /// Register one generated operation descriptor for routing metadata only.

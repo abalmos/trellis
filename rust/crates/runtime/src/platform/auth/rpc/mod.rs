@@ -17,8 +17,9 @@ use std::time::{Duration, Instant};
 
 use serde_json::{json, Value};
 use trellis_protocol::{
-    parse_session_proof_v1, session_proof_request_digest_v1, verify_session_proof_v1,
-    AuthorizationPrincipalKindV1, SessionProofInputV1, SessionProofPolicyV1,
+    parse_api_v1, parse_session_proof_v1, session_proof_request_digest_v1, verify_session_proof_v1,
+    ApiSurfaceKindV1, AuthorizationPrincipalKindV1, PermissionActionV1, SessionProofInputV1,
+    SessionProofPolicyV1,
 };
 use trellis_rs::service::Router;
 use ulid::Ulid;
@@ -50,6 +51,30 @@ use crate::shutdown::StopHandle;
 use crate::supervisor::RuntimeError;
 
 const MAX_CONCURRENT_REQUESTS: usize = 64;
+
+const AUTH_API_JSON: &str = include_str!("../../../../trellis.api.json");
+
+pub(super) fn register_auth_rpc_metadata(
+    routes: &mut Router,
+) -> Result<(), AuthorizationStateError> {
+    let value: Value = serde_json::from_str(AUTH_API_JSON)
+        .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
+    let api = parse_api_v1(&value)
+        .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
+    let subjects = api
+        .derived_subjects()
+        .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
+    routes.set_api_id(api.id());
+    for (name, subject) in subjects.rpc {
+        let capabilities = api.capability_names_for_surface(
+            ApiSurfaceKindV1::Rpc,
+            &name,
+            PermissionActionV1::Call,
+        );
+        routes.register_rpc_metadata_parts(&subject, &name, &capabilities);
+    }
+    Ok(())
+}
 
 pub(crate) struct AuthRpcRuntime {
     subscriber: async_nats::Subscriber,
@@ -96,7 +121,7 @@ impl AuthRpcRuntime {
             .await
             .map_err(|error| AuthorizationStateError::Storage(error.to_string()))?;
         let mut routes = Router::new();
-        trellis_sdk_auth::api::register_rpc_metadata(&mut routes);
+        register_auth_rpc_metadata(&mut routes)?;
         Ok(Self {
             subscriber,
             processor: AuthRpcProcessor {
@@ -4083,7 +4108,7 @@ mod tests {
     #[test]
     fn generated_router_resolves_every_auth_rpc_subject_exactly() {
         let mut routes = Router::new();
-        trellis_sdk_auth::api::register_rpc_metadata(&mut routes);
+        register_auth_rpc_metadata(&mut routes).unwrap();
         let artifact: Value =
             serde_json::from_str(include_str!("../../../../trellis.api.json")).unwrap();
         let rpc = artifact.get("rpc").and_then(Value::as_object).unwrap();
@@ -4108,7 +4133,7 @@ mod tests {
     #[test]
     fn operation_control_permissions_remain_exact() {
         let mut routes = Router::new();
-        trellis_sdk_auth::api::register_rpc_metadata(&mut routes);
+        register_auth_rpc_metadata(&mut routes).unwrap();
         let invoke = routes
             .required_permission("operations.v1.Auth.DeviceUserAuthorities.Resolve", b"{}")
             .unwrap()

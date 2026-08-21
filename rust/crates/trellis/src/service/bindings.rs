@@ -261,7 +261,7 @@ pub fn validate_bootstrap_contract_state(
 
     if binding.contract_id != expected.id || binding.digest != expected.digest {
         return Err(ServerError::BootstrapBindingMismatch {
-            service_name: service_name.to_string(),
+            service_name: (service_name.to_string()).into_boxed_str(),
             expected_contract_id: expected.id.clone(),
             expected_contract_digest: expected.digest.clone(),
             actual_contract_id: binding.contract_id.clone(),

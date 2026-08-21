@@ -547,7 +547,7 @@ where
                 })?;
         if stored.service != operation_ref.service || stored.operation != operation_ref.operation {
             return Err(ServerError::OperationMismatch {
-                operation_id: operation_ref.id.clone(),
+                operation_id: (operation_ref.id.clone()).into_boxed_str(),
                 expected_service: operation_ref.service.clone(),
                 expected_operation: operation_ref.operation.clone(),
                 actual_service: stored.service.clone(),
@@ -601,7 +601,7 @@ where
             .service
             .as_ref()
             .ok_or_else(|| ServerError::OperationMismatch {
-                operation_id: operation_id.clone(),
+                operation_id: (operation_id.clone()).into_boxed_str(),
                 expected_service: self.service.clone(),
                 expected_operation: D::KEY.to_string(),
                 actual_service: String::new(),
@@ -612,7 +612,7 @@ where
                 .operation
                 .as_ref()
                 .ok_or_else(|| ServerError::OperationMismatch {
-                    operation_id: operation_id.clone(),
+                    operation_id: (operation_id.clone()).into_boxed_str(),
                     expected_service: self.service.clone(),
                     expected_operation: D::KEY.to_string(),
                     actual_service: service.clone(),
@@ -620,7 +620,7 @@ where
                 })?;
         if service != &self.service || operation != D::KEY {
             return Err(ServerError::OperationMismatch {
-                operation_id: operation_id.clone(),
+                operation_id: (operation_id.clone()).into_boxed_str(),
                 expected_service: self.service.clone(),
                 expected_operation: D::KEY.to_string(),
                 actual_service: service.clone(),
@@ -858,7 +858,7 @@ where
     ) -> Result<(), ServerError> {
         if stored.service != self.service || stored.operation != D::KEY {
             return Err(ServerError::OperationMismatch {
-                operation_id: operation_id.to_string(),
+                operation_id: (operation_id.to_string()).into_boxed_str(),
                 expected_service: self.service.clone(),
                 expected_operation: D::KEY.to_string(),
                 actual_service: stored.service.clone(),
@@ -1067,7 +1067,7 @@ where
                     {
                         return Some((
                             Err(ServerError::OperationMismatch {
-                                operation_id: state.operation_ref.id.clone(),
+                                operation_id: (state.operation_ref.id.clone()).into_boxed_str(),
                                 expected_service: state.operation_ref.service.clone(),
                                 expected_operation: state.operation_ref.operation.clone(),
                                 actual_service: stored.service.clone(),
@@ -1107,7 +1107,7 @@ where
             || stored.operation != self.operation_ref.operation
         {
             return Err(ServerError::OperationMismatch {
-                operation_id: self.operation_ref.id.clone(),
+                operation_id: (self.operation_ref.id.clone()).into_boxed_str(),
                 expected_service: self.operation_ref.service.clone(),
                 expected_operation: self.operation_ref.operation.clone(),
                 actual_service: stored.service.clone(),

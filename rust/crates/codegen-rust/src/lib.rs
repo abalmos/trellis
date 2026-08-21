@@ -7,11 +7,10 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 use serde::Deserialize;
-use serde_json::Value;
 use trellis_contracts::{
     canonicalize_json, load_participant_source as load_native_participant, load_sdk_source,
-    ContractBuilder, ContractKind, ContractsError, LoadedApi, LoadedParticipant,
-    ParticipantUseRenderModel,
+    ApiSurfaceKindV1, ContractBuilder, ContractKind, ContractsError, LoadedApi, LoadedParticipant,
+    ParticipantUseRenderModel, PermissionActionV1,
 };
 
 /// Errors returned while generating a Rust SDK crate.
@@ -2613,7 +2612,11 @@ fn render_rpc_rs(loaded: &trellis_contracts::LoadedApi) -> String {
         } else {
             format!("crate::types::{base}Response")
         };
-        let capabilities = capability_names(&loaded.value, "rpc", key, "call");
+        let capabilities = loaded.api.capability_names_for_surface(
+            ApiSurfaceKindV1::Rpc,
+            key,
+            PermissionActionV1::Call,
+        );
         let errors = rpc
             .errors
             .as_ref()
@@ -2717,8 +2720,16 @@ fn render_events_rs(loaded: &trellis_contracts::LoadedApi) -> String {
 
     for key in loaded.render_model.events.keys() {
         let base = key_to_pascal(key);
-        let publish = capability_names(&loaded.value, "event", key, "publish");
-        let subscribe = capability_names(&loaded.value, "event", key, "subscribe");
+        let publish = loaded.api.capability_names_for_surface(
+            ApiSurfaceKindV1::Event,
+            key,
+            PermissionActionV1::Publish,
+        );
+        let subscribe = loaded.api.capability_names_for_surface(
+            ApiSurfaceKindV1::Event,
+            key,
+            PermissionActionV1::Subscribe,
+        );
         lines.push(format!("/// Descriptor for `{key}`."));
         lines.push(format!("pub struct {base}EventDescriptor;"));
         lines.push(String::new());
@@ -2781,7 +2792,11 @@ fn render_feeds_rs(loaded: &trellis_contracts::LoadedApi) -> String {
             format!("crate::types::{base}Input")
         };
         let event_type = format!("crate::types::{base}Event");
-        let subscribe = capability_names(&loaded.value, "feed", key, "subscribe");
+        let subscribe = loaded.api.capability_names_for_surface(
+            ApiSurfaceKindV1::Feed,
+            key,
+            PermissionActionV1::Subscribe,
+        );
 
         lines.push(format!("/// Descriptor for `{key}`."));
         lines.push(format!("pub struct {base}FeedDescriptor;"));
@@ -2880,10 +2895,26 @@ fn render_operations_rs(loaded: &trellis_contracts::LoadedApi) -> String {
             }
             _ => "crate::rpc::Empty".to_string(),
         };
-        let caller = capability_names(&loaded.value, "operation", key, "invoke");
-        let observe = capability_names(&loaded.value, "operation", key, "observe");
-        let cancel = capability_names(&loaded.value, "operation", key, "cancel");
-        let control = capability_names(&loaded.value, "operation", key, "control");
+        let caller = loaded.api.capability_names_for_surface(
+            ApiSurfaceKindV1::Operation,
+            key,
+            PermissionActionV1::Invoke,
+        );
+        let observe = loaded.api.capability_names_for_surface(
+            ApiSurfaceKindV1::Operation,
+            key,
+            PermissionActionV1::Observe,
+        );
+        let cancel = loaded.api.capability_names_for_surface(
+            ApiSurfaceKindV1::Operation,
+            key,
+            PermissionActionV1::Cancel,
+        );
+        let control = loaded.api.capability_names_for_surface(
+            ApiSurfaceKindV1::Operation,
+            key,
+            PermissionActionV1::Control,
+        );
         let error_types: Vec<String> = operation
             .errors
             .iter()
@@ -4247,36 +4278,6 @@ fn join_string_literals(values: &[String]) -> String {
         .map(|value| string_literal(value))
         .collect::<Vec<_>>()
         .join(", ")
-}
-
-fn capability_names(api: &Value, surface: &str, name: &str, action: &str) -> Vec<String> {
-    let mut names = api
-        .get("capabilities")
-        .and_then(Value::as_object)
-        .into_iter()
-        .flat_map(|capabilities| capabilities.iter())
-        .filter(|(_, capability)| {
-            capability
-                .get("allows")
-                .and_then(Value::as_array)
-                .is_some_and(|allows| {
-                    allows.iter().any(|permission| {
-                        permission.get("action").and_then(Value::as_str) == Some(action)
-                            && permission.pointer("/target/kind").and_then(Value::as_str)
-                                == Some("apiSurface")
-                            && permission
-                                .pointer("/target/surface")
-                                .and_then(Value::as_str)
-                                == Some(surface)
-                            && permission.pointer("/target/name").and_then(Value::as_str)
-                                == Some(name)
-                    })
-                })
-        })
-        .map(|(name, _)| name.clone())
-        .collect::<Vec<_>>();
-    names.sort();
-    names
 }
 
 fn string_literal(value: &str) -> String {

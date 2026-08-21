@@ -9,7 +9,7 @@ use oxc_allocator::Allocator;
 use oxc_parser::Parser;
 use oxc_span::SourceType;
 use serde_json::Value;
-use trellis_contracts::{load_sdk_source, LoadedApi};
+use trellis_contracts::{load_sdk_source, ApiSurfaceKindV1, LoadedApi, PermissionActionV1};
 
 /// Errors returned while generating a TypeScript SDK package.
 #[derive(thiserror::Error, Debug)]
@@ -599,7 +599,11 @@ fn render_descriptors_ts(opts: &GenerateTsSdkOpts, loaded: &LoadedApi) -> String
         if rpc.transfer.is_some() {
             lines.push("  transfer: { direction: \"receive\" },".to_string());
         }
-        let capabilities = capability_names(&loaded.value, "rpc", key, "call");
+        let capabilities = loaded.api.capability_names_for_surface(
+            ApiSurfaceKindV1::Rpc,
+            key,
+            PermissionActionV1::Call,
+        );
         lines.push(format!(
             "  callerCapabilities: {} as const,",
             serde_json::to_string(&capabilities).unwrap()
@@ -774,10 +778,26 @@ fn render_descriptors_ts(opts: &GenerateTsSdkOpts, loaded: &LoadedApi) -> String
             ));
             lines.push("  },".to_string());
         }
-        let caller = capability_names(&loaded.value, "operation", key, "invoke");
-        let observe = capability_names(&loaded.value, "operation", key, "observe");
-        let cancel = capability_names(&loaded.value, "operation", key, "cancel");
-        let control = capability_names(&loaded.value, "operation", key, "control");
+        let caller = loaded.api.capability_names_for_surface(
+            ApiSurfaceKindV1::Operation,
+            key,
+            PermissionActionV1::Invoke,
+        );
+        let observe = loaded.api.capability_names_for_surface(
+            ApiSurfaceKindV1::Operation,
+            key,
+            PermissionActionV1::Observe,
+        );
+        let cancel = loaded.api.capability_names_for_surface(
+            ApiSurfaceKindV1::Operation,
+            key,
+            PermissionActionV1::Cancel,
+        );
+        let control = loaded.api.capability_names_for_surface(
+            ApiSurfaceKindV1::Operation,
+            key,
+            PermissionActionV1::Control,
+        );
         lines.push(format!(
             "  callerCapabilities: {} as const,",
             serde_json::to_string(&caller).unwrap()
@@ -899,8 +919,16 @@ fn render_descriptors_ts(opts: &GenerateTsSdkOpts, loaded: &LoadedApi) -> String
                 .get(event.event.schema.as_str())
                 .expect("missing public schema export for event schema")
         ));
-        let publish = capability_names(&loaded.value, "event", key, "publish");
-        let subscribe = capability_names(&loaded.value, "event", key, "subscribe");
+        let publish = loaded.api.capability_names_for_surface(
+            ApiSurfaceKindV1::Event,
+            key,
+            PermissionActionV1::Publish,
+        );
+        let subscribe = loaded.api.capability_names_for_surface(
+            ApiSurfaceKindV1::Event,
+            key,
+            PermissionActionV1::Subscribe,
+        );
         lines.push(format!(
             "  publishCapabilities: {} as const,",
             serde_json::to_string(&publish).unwrap()
@@ -950,7 +978,11 @@ fn render_descriptors_ts(opts: &GenerateTsSdkOpts, loaded: &LoadedApi) -> String
                 .get(feed.event.schema.as_str())
                 .expect("missing public schema export for feed event")
         ));
-        let subscribe = capability_names(&loaded.value, "feed", key, "subscribe");
+        let subscribe = loaded.api.capability_names_for_surface(
+            ApiSurfaceKindV1::Feed,
+            key,
+            PermissionActionV1::Subscribe,
+        );
         lines.push(format!(
             "  subscribeCapabilities: {} as const,",
             serde_json::to_string(&subscribe).unwrap()
@@ -1257,36 +1289,6 @@ fn write_if_changed(path: &Path, contents: &str) -> Result<(), CodegenTsError> {
 
 fn js_string(value: &str) -> String {
     serde_json::to_string(value).expect("js string")
-}
-
-fn capability_names(api: &Value, surface: &str, name: &str, action: &str) -> Vec<String> {
-    let mut names = api
-        .get("capabilities")
-        .and_then(Value::as_object)
-        .into_iter()
-        .flat_map(|capabilities| capabilities.iter())
-        .filter(|(_, capability)| {
-            capability
-                .get("allows")
-                .and_then(Value::as_array)
-                .is_some_and(|allows| {
-                    allows.iter().any(|permission| {
-                        permission.get("action").and_then(Value::as_str) == Some(action)
-                            && permission.pointer("/target/kind").and_then(Value::as_str)
-                                == Some("apiSurface")
-                            && permission
-                                .pointer("/target/surface")
-                                .and_then(Value::as_str)
-                                == Some(surface)
-                            && permission.pointer("/target/name").and_then(Value::as_str)
-                                == Some(name)
-                    })
-                })
-        })
-        .map(|(name, _)| name.clone())
-        .collect::<Vec<_>>();
-    names.sort();
-    names
 }
 
 fn escape_js_string(value: &str) -> String {

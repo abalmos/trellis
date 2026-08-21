@@ -229,7 +229,7 @@ pub enum ServerError {
     )]
     #[doc(hidden)]
     OperationMismatch {
-        operation_id: String,
+        operation_id: Box<str>,
         expected_service: String,
         expected_operation: String,
         actual_service: String,
@@ -269,7 +269,7 @@ pub enum ServerError {
     )]
     #[doc(hidden)]
     BootstrapBindingMismatch {
-        service_name: String,
+        service_name: Box<str>,
         expected_contract_id: String,
         expected_contract_digest: String,
         actual_contract_id: String,
@@ -291,7 +291,7 @@ pub enum ServerError {
     )]
     #[doc(hidden)]
     BootstrapAuthContractMismatch {
-        service_name: String,
+        service_name: Box<str>,
         expected_contract_id: String,
         expected_contract_digest: String,
         actual_contract_id: String,

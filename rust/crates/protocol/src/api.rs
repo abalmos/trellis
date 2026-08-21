@@ -111,6 +111,35 @@ impl ApiArtifactV1 {
         &self.id
     }
 
+    /// Return capability names that include one exact API-surface permission.
+    ///
+    /// Results follow canonical capability-name order because API capabilities
+    /// are normalized in a [`BTreeMap`].
+    #[must_use]
+    pub fn capability_names_for_surface(
+        &self,
+        surface: ApiSurfaceKindV1,
+        name: &str,
+        action: PermissionActionV1,
+    ) -> Vec<String> {
+        self.capabilities
+            .iter()
+            .filter(|(_, capability)| {
+                capability.allows().iter().any(|atom| {
+                    atom.action() == action
+                        && atom.target().as_api_surface().is_some_and(
+                            |(api, target_surface, target_name)| {
+                                api == self.id.as_str()
+                                    && target_surface == surface
+                                    && target_name == name
+                            },
+                        )
+                })
+            })
+            .map(|(name, _)| name.clone())
+            .collect()
+    }
+
     /// Return one declared State definition by name.
     pub fn state_definition(&self, name: &str) -> Option<&StateDefinitionV1> {
         self.state.get(name)
