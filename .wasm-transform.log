@@ -1,0 +1,22 @@
+=== transform one ===
+transform_one_status=0
+=== transform two ===
+Traceback (most recent call last):
+  File "/tmp/two.py", line 47, in <module>
+    replace_once(
+  File "/tmp/two.py", line 9, in replace_once
+    raise RuntimeError(f"{path}: expected one occurrence, found {count}: {old[:100]!r}")
+RuntimeError: .github/workflows/release.yml: expected one occurrence, found 0: '      - name: Generate release SDK artifacts\n        run: cargo run --manifest-path rust/tools/gener'
+transform_two_status=1
+=== changed files ===
+ M .github/workflows/check.yml
+ M .gitignore
+ M rust/xtask/Cargo.toml
+ M rust/xtask/src/main.rs
+ M rust/xtask/src/release/plan.rs
+ M ts/deno.json
+ D ts/packages/trellis/auth/protocol_wasm/trellis_protocol_wasm.js
+ D ts/packages/trellis/auth/protocol_wasm/trellis_protocol_wasm_bg.wasm
+ D ts/packages/trellis/auth/protocol_wasm/trellis_protocol_wasm_bytes.ts
+ M ts/packages/trellis/deno.json
+ M ts/packages/trellis/tests/npm_artifact_smoke_test.ts
