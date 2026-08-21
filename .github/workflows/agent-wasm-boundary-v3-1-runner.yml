@@ -1,4 +1,4 @@
-name: Run WASM boundary v3.1 validation
+name: Run WASM boundary v3.2 validation
 
 on:
   push:
@@ -11,7 +11,7 @@ permissions:
   contents: write
 
 concurrency:
-  group: wasm-boundary-v3-1-runner
+  group: wasm-boundary-v3-2-runner
   cancel-in-progress: true
 
 env:
@@ -36,7 +36,7 @@ jobs:
           git fetch origin agent/rs-gate-validation
           git show origin/agent/rs-gate-validation:scripts/agent_wasm_boundary_v3_pre.py > /tmp/wasm-boundary-pre.py
           git show origin/agent/rs-gate-validation:scripts/agent_wasm_boundary_v3.py > /tmp/wasm-boundary.py
-          git show origin/agent/rs-gate-validation:scripts/agent_wasm_boundary_v3_ci.py > /tmp/wasm-boundary-ci.py
+          git show origin/agent/rs-gate-validation:scripts/agent_wasm_boundary_v3_ci_fix.py > /tmp/wasm-boundary-ci.py
 
       - name: Record validation run
         shell: bash
@@ -46,7 +46,7 @@ jobs:
           git config user.email actions@users.noreply.github.com
           printf '%s\n' "$GITHUB_RUN_ID" > .validation-run
           git add .validation-run
-          git commit -m 'Record WASM boundary v3.1 validation'
+          git commit -m 'Record WASM boundary v3.2 validation'
           git push origin HEAD:"$TARGET_BRANCH"
 
       - name: Set up Rust
