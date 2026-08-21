@@ -52,19 +52,21 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          python3 -m py_compile scripts/agent_test_boundary_v1.py scripts/agent_test_boundary_v1_fix.py
           python3 scripts/agent_test_boundary_v1.py
           python3 scripts/agent_test_boundary_v1_fix.py
           cargo fmt --manifest-path rust/Cargo.toml --all
           deno fmt -c ts/deno.json \
             ts/packages/trellis-test/src/integration/shared_runtime_protocol.ts \
             ts/packages/trellis-test/src/integration/shared_runtime_host.ts \
+            ts/packages/trellis-test/src/integration/shared_runtime_client.ts \
             rust/crates/trellis-test/integration_runner.ts \
             rust/crates/trellis-test/integration_runner_test.ts
           git diff --check
           test ! -e rust/crates/trellis/src/integration_test_scoping.rs
           ! rg -n \
             'integration-test-scoping|IntegrationTestScope|integration_test_scope|with_integration_test_scope|integration_test_descriptor_subject|integration_test_descriptor_capability' \
-            rust/crates/trellis rust/crates/trellis-test ts/packages/trellis-test/src
+            rust ts/packages/trellis-test/src
 
       - name: Validate runner unit behavior
         shell: bash
