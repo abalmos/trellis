@@ -30,6 +30,8 @@ jobs:
 
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
 
       - name: Set up Deno
         uses: denoland/setup-deno@v2
@@ -43,16 +45,16 @@ jobs:
           cargo check --locked --manifest-path rust/Cargo.toml -p trellis-protocol-wasm
           git restore generated
 
-      - name: Cache generator build
+      - name: Cache preparation build
         uses: swatinem/rust-cache@v2
         with:
-          workspaces: rust/tools/generate -> target
+          workspaces: |
+            rust -> target
+            rust/tools/generate -> target
+            rust/xtask -> target
 
-      - name: Generate SDKs
-        run: cargo run --manifest-path rust/tools/generate/Cargo.toml -- prepare --no-npm .
-
-      - name: Build embedded portal
-        run: deno task -c ts/portals/login/deno.json build:embedded
+      - name: Prepare generated artifacts
+        run: cargo run --manifest-path rust/xtask/Cargo.toml -- prepare
 
       - name: Inspect generated artifact drift
         id: current
@@ -72,6 +74,7 @@ jobs:
           path: |
             generated
             rust/crates/runtime/generated/portal
+            ts/packages/trellis/auth/protocol_wasm
           retention-days: 1
 
   generated:
