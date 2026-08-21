@@ -71,6 +71,8 @@ jobs:
         run: |
           rm -rf generated
           cargo check --manifest-path rust/Cargo.toml -p trellis-protocol-wasm --target wasm32-unknown-unknown
+      - name: Restore generated baseline
+        run: git restore --source="$BASE_SHA" --worktree -- generated
       - name: Regenerate SDKs
         run: cargo run --manifest-path rust/tools/generate/Cargo.toml -- prepare --no-npm .
       - name: Require generated output identity
