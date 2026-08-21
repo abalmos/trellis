@@ -1,4 +1,4 @@
-name: Run WASM boundary v3.5 validation
+name: Run WASM boundary v3.6 validation
 
 on:
   push:
@@ -11,7 +11,7 @@ permissions:
   contents: write
 
 concurrency:
-  group: wasm-boundary-v3-5-runner
+  group: wasm-boundary-v3-6-runner
   cancel-in-progress: true
 
 env:
@@ -21,7 +21,7 @@ env:
 
 jobs:
   validate:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64]
     steps:
       - name: Check out candidate
         uses: actions/checkout@v4
@@ -37,6 +37,7 @@ jobs:
           git show origin/agent/rs-gate-validation:scripts/agent_wasm_boundary_v3_pre.py > /tmp/wasm-boundary-pre.py
           git show origin/agent/rs-gate-validation:scripts/agent_wasm_boundary_v3.py > /tmp/wasm-boundary.py
           git show origin/agent/rs-gate-validation:scripts/agent_wasm_boundary_v3_participant_fix.py > /tmp/wasm-boundary-participant.py
+          git show origin/agent/rs-gate-validation:scripts/agent_wasm_boundary_v3_protocol_writer_fix.py > /tmp/wasm-boundary-protocol-writer.py
           git show origin/agent/rs-gate-validation:scripts/agent_wasm_boundary_v3_ci_fix.py > /tmp/wasm-boundary-ci.py
 
       - name: Record validation run
@@ -47,7 +48,7 @@ jobs:
           git config user.email actions@users.noreply.github.com
           printf '%s\n' "$GITHUB_RUN_ID" > .validation-run
           git add .validation-run
-          git commit -m 'Record WASM boundary v3.5 validation'
+          git commit -m 'Record WASM boundary v3.6 validation'
           git push origin HEAD:"$TARGET_BRANCH"
 
       - name: Set up Rust
@@ -72,6 +73,7 @@ jobs:
           python /tmp/wasm-boundary-pre.py
           python /tmp/wasm-boundary.py
           python /tmp/wasm-boundary-participant.py
+          python /tmp/wasm-boundary-protocol-writer.py
           python /tmp/wasm-boundary-ci.py
           git rm \
             ts/packages/trellis/auth/protocol_wasm/trellis_protocol_wasm.js \
