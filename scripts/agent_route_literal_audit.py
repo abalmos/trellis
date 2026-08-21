@@ -6,6 +6,7 @@ SUFFIXES = {".rs", ".ts", ".tsx", ".json", ".md", ".toml", ".yml", ".yaml"}
 ROUTE = re.compile(
     r'(?P<subject>(?:rpc|operations|events|feed)\.v[1-9][0-9]*\.[A-Za-z0-9_@*><.-]+)'
 )
+QUALIFIED = re.compile(r'^api\.(?:[A-Za-z0-9_-]+\.)+v[1-9][0-9]*\.[A-Za-z]')
 
 errors: list[str] = []
 for root in ROOTS:
@@ -24,9 +25,9 @@ for root in ROOTS:
             # Broad family-version wildcard patterns are intentionally API-agnostic.
             if remainder in {">", "*"} or remainder.startswith((">.", "*.")):
                 continue
-            # Exact canonical routes contain a versioned API identity before the
-            # logical surface. API IDs may themselves contain dot tokens.
-            if re.search(r'@v[1-9][0-9]*(?:\.|$)', remainder):
+            # Exact canonical routes carry a reversible API namespace:
+            # API `trellis.auth@v1` -> `api.trellis.auth.v1`.
+            if QUALIFIED.match(remainder):
                 continue
             line = text.count("\n", 0, match.start()) + 1
             errors.append(f"{path}:{line}: {subject}")
