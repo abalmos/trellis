@@ -1,0 +1,125 @@
+from pathlib import Path
+import re
+
+def read(path: str) -> str:
+    return Path(path).read_text()
+
+def write(path: str, text: str) -> None:
+    Path(path).write_text(text)
+
+# After protocol scoping is removed, subject resolvers are pure identity wrappers.
+# Delete the indirection rather than keeping compatibility shims.
+path = "rust/crates/trellis/src/client/connection.rs"
+text = read(path)
+old = '''    pub(crate) fn descriptor_subject(&self, subject: &str) -> String {
+        subject.to_string()
+    }
+
+'''
+if text.count(old) != 1:
+    raise RuntimeError(f"{path}: expected one identity descriptor_subject, found {text.count(old)}")
+text = text.replace(old, "", 1)
+text = text.replace(".request_json(&self.descriptor_subject(D::SUBJECT), value)", ".request_json(D::SUBJECT, value)")
+text = text.replace(".request_json(&self.descriptor_subject(D::SUBJECT), input)", ".request_json(D::SUBJECT, input)")
+text = text.replace(
+    "prepare_event::<D>(event)?.with_subject(self.descriptor_subject(D::SUBJECT))",
+    "prepare_event::<D>(event)?.with_subject(D::SUBJECT)",
+)
+text = text.replace(
+    '''let event = event
+            .clone()
+            .with_subject(self.descriptor_subject(event.subject()));''',
+    "let event = event.clone();",
+)
+text = text.replace(".subscribe(self.descriptor_subject(D::SUBSCRIBE_SUBJECT))", ".subscribe(D::SUBSCRIBE_SUBJECT)")
+text = text.replace(
+    "event_consumer_config(&options, self.descriptor_subject(D::SUBSCRIBE_SUBJECT))",
+    "event_consumer_config(&options, D::SUBSCRIBE_SUBJECT.to_owned())",
+)
+text = text.replace("let subject = self.descriptor_subject(D::SUBJECT);", "let subject = D::SUBJECT.to_owned();")
+old = '''impl OperationTransport for TrellisClient {
+    fn descriptor_subject(&self, subject: &str) -> String {
+        self.descriptor_subject(subject)
+    }
+
+'''
+if text.count(old) != 1:
+    raise RuntimeError(f"{path}: OperationTransport resolver shape changed")
+text = text.replace(old, "impl OperationTransport for TrellisClient {\n", 1)
+write(path, text)
+
+path = "rust/crates/trellis/src/client/operations.rs"
+text = read(path)
+old = '''pub trait OperationTransport {
+    fn descriptor_subject(&self, subject: &str) -> String {
+        subject.to_string()
+    }
+
+'''
+if text.count(old) != 1:
+    raise RuntimeError(f"{path}: OperationTransport default resolver shape changed")
+text = text.replace(old, "pub trait OperationTransport {\n", 1)
+text = text.replace("self.transport.descriptor_subject(D::SUBJECT)", "D::SUBJECT.to_owned()")
+text = text.replace("control_subject(&D::SUBJECT.to_owned())", "control_subject(D::SUBJECT)")
+write(path, text)
+
+path = "rust/crates/trellis/src/generated.rs"
+text = read(path)
+old = '''impl crate::client::OperationTransport for Caller {
+    fn descriptor_subject(&self, subject: &str) -> String {
+        self.client.descriptor_subject(subject)
+    }
+
+'''
+if text.count(old) != 1:
+    raise RuntimeError(f"{path}: generated OperationTransport resolver shape changed")
+text = text.replace(old, "impl crate::client::OperationTransport for Caller {\n", 1)
+write(path, text)
+
+path = "rust/crates/trellis/src/service/router.rs"
+text = read(path)
+old = '''    fn descriptor_subject(&self, subject: &str) -> String {
+        subject.to_string()
+    }
+
+'''
+if text.count(old) != 1:
+    raise RuntimeError(f"{path}: router subject identity helper changed")
+text = text.replace(old, "", 1)
+old = '''    fn descriptor_name(&self, name: &str) -> String {
+        name.to_string()
+    }
+
+'''
+if text.count(old) != 1:
+    raise RuntimeError(f"{path}: router name identity helper changed")
+text = text.replace(old, "", 1)
+text = text.replace("self.descriptor_subject(D::SUBJECT)", "D::SUBJECT.to_owned()")
+text = text.replace("self.descriptor_name(D::KEY)", "D::KEY.to_owned()")
+write(path, text)
+
+path = "rust/crates/trellis/src/service/runtime_facade.rs"
+text = read(path)
+old = '''    fn descriptor_subject(&self, subject: &str) -> String {
+        self.client.as_ref().map_or_else(
+            || subject.to_owned(),
+            |client| client.descriptor_subject(subject),
+        )
+    }
+
+'''
+if text.count(old) != 1:
+    raise RuntimeError(f"{path}: service subject resolver shape changed")
+text = text.replace(old, "", 1)
+text = text.replace("self.descriptor_subject(D::SUBJECT)", "D::SUBJECT.to_owned()")
+text = text.replace("control_subject(&D::SUBJECT.to_owned())", "control_subject(D::SUBJECT)")
+text = text.replace("client.descriptor_subject(D::SUBJECT)", "D::SUBJECT.to_owned()")
+text = text.replace(".subscribe(D::SUBJECT.to_owned())", ".subscribe(D::SUBJECT)")
+write(path, text)
+
+# No source-level subject/name compatibility resolver should survive.
+for candidate in Path("rust/crates/trellis/src").rglob("*.rs"):
+    content = candidate.read_text()
+    for token in ("descriptor_subject(", "descriptor_name("):
+        if token in content:
+            raise RuntimeError(f"stale descriptor identity wrapper {token!r} in {candidate}")
