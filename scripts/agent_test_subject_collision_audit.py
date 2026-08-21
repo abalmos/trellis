@@ -9,6 +9,9 @@ AUTHORING_ID = re.compile(
 JSON_ID = re.compile(
     r'\\?"id\\?"\s*:\s*\\?"(trellis\.integration\.[A-Za-z0-9_.-]+@v[1-9][0-9]*)\\?"'
 )
+CONST_ID = re.compile(
+    r'const\s+[A-Z0-9_]*(?:CONTRACT_)?ID\s*:\s*&str\s*=\s*"(trellis\.integration\.[A-Za-z0-9_.-]+@v[1-9][0-9]*)"'
+)
 PLATFORM_ROOTS = {"Auth", "EventLog", "Health", "Jobs", "State", "Trellis"}
 
 subject_owners: dict[str, set[str]] = defaultdict(set)
@@ -23,7 +26,11 @@ for path in root.glob("*.rs"):
         if logical_root in PLATFORM_ROOTS:
             continue
         subject_owners[subject].add(module)
-    for participant_id in [*AUTHORING_ID.findall(content), *JSON_ID.findall(content)]:
+    for participant_id in [
+        *AUTHORING_ID.findall(content),
+        *JSON_ID.findall(content),
+        *CONST_ID.findall(content),
+    ]:
         identity_owners[participant_id].add(module)
 
 subject_collisions = {
