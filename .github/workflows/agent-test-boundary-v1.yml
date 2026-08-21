@@ -1,0 +1,122 @@
+name: Agent Test Boundary v1
+
+on:
+  push:
+    branches:
+      - agent/test-boundary-v1
+    paths:
+      - scripts/agent_test_boundary_v1.py
+      - .github/workflows/agent-test-boundary-v1.yml
+  workflow_dispatch:
+
+concurrency:
+  group: agent-test-boundary-v1
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+jobs:
+  validate:
+    runs-on: [self-hosted, Linux, X64]
+    timeout-minutes: 180
+    steps:
+      - name: Check out scratch branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Record validation run
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "trellis-validation"
+          git config user.email "trellis-validation@users.noreply.github.com"
+          printf '%s\n' '${{ github.run_id }}' > .validation-run
+          git add -- .validation-run
+          git commit -m "Record test-boundary validation run"
+          git push origin HEAD:refs/heads/agent/test-boundary-v1
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt,clippy
+
+      - name: Setup Deno
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.9.4
+
+      - name: Apply test-boundary cleanup
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/agent_test_boundary_v1.py
+          cargo fmt --manifest-path rust/Cargo.toml --all
+          deno fmt -c ts/deno.json \
+            ts/packages/trellis-test/src/integration/shared_runtime_protocol.ts \
+            ts/packages/trellis-test/src/integration/shared_runtime_host.ts \
+            rust/crates/trellis-test/integration_runner.ts \
+            rust/crates/trellis-test/integration_runner_test.ts
+          git diff --check
+          test ! -e rust/crates/trellis/src/integration_test_scoping.rs
+          ! rg -n \
+            'integration-test-scoping|IntegrationTestScope|integration_test_scope|with_integration_test_scope|integration_test_descriptor_subject|integration_test_descriptor_capability' \
+            rust/crates/trellis rust/crates/trellis-test ts/packages/trellis-test/src
+
+      - name: Validate runner unit behavior
+        shell: bash
+        run: |
+          set -euo pipefail
+          deno test -A -c ts/deno.json rust/crates/trellis-test/integration_runner_test.ts
+
+      - name: Check Rust workspace
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo check --manifest-path rust/Cargo.toml --workspace --all-targets
+
+      - name: Test facade and harness
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --manifest-path rust/Cargo.toml -p trellis-rs --lib
+          cargo test --manifest-path rust/Cargo.toml -p trellis-test
+          cargo test --manifest-path rust/Cargo.toml -p trellis-rs --test integration --no-run
+
+      - name: Clippy facade and harness
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo clippy --manifest-path rust/Cargo.toml \
+            -p trellis-rs -p trellis-test --all-targets -- -D warnings
+
+      - name: Run live Rust integration suite
+        shell: bash
+        env:
+          RUST_BACKTRACE: "1"
+        run: |
+          set -euo pipefail
+          logical=$(getconf _NPROCESSORS_ONLN 2>/dev/null || nproc)
+          jobs=$(( logical / 2 ))
+          if [ "$jobs" -lt 1 ]; then jobs=1; fi
+          echo "Running live Rust integration fixtures with $jobs workers across $logical logical CPUs"
+          deno run -A -c ts/deno.json \
+            rust/crates/trellis-test/integration_runner.ts --jobs "$jobs"
+
+      - name: Publish clean candidate tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -f scripts/agent_test_boundary_v1.py .github/workflows/agent-test-boundary-v1.yml .validation-run
+          git add -- \
+            rust/crates/trellis \
+            rust/crates/trellis-test \
+            ts/packages/trellis-test/src
+          git add -u -- \
+            scripts/agent_test_boundary_v1.py \
+            .github/workflows/agent-test-boundary-v1.yml \
+            .validation-run
+          git diff --cached --check
+          git commit -m "Remove integration test protocol scoping"
+          git push --force origin HEAD:refs/heads/agent/test-boundary-candidate
