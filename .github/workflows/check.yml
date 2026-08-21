@@ -2,208 +2,69 @@ name: Check
 
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - rs
-  pull_request:
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
-  group: check-${{ github.workflow }}-${{ github.ref }}
+  group: wasm-boundary-v13-dispatch
   cancel-in-progress: true
 
 env:
   DENO_VERSION: 2.9.4
   CARGO_TERM_COLOR: always
+  TARGET_BRANCH: agent/wasm-boundary-v3
+  TRANSFORM_BRANCH: agent/rs-gate-validation
 
 jobs:
-  prepare:
-    name: Prepare generated artifacts
-    runs-on: ubuntu-latest
-    outputs:
-      current: ${{ steps.current.outputs.current }}
+  validate:
+    name: WASM boundary v3.13
+    runs-on: [self-hosted, Linux, X64]
+    timeout-minutes: 180
     steps:
-      - name: Check out repository
+      - name: Check out candidate
         uses: actions/checkout@v4
-
-      - name: Set up Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Set up Deno
-        uses: denoland/setup-deno@v2
         with:
-          deno-version: ${{ env.DENO_VERSION }}
+          ref: ${{ env.TARGET_BRANCH }}
+          fetch-depth: 0
 
-      - name: Check protocol WASM clean bootstrap
+      - name: Load scratch validator
+        uses: actions/checkout@v4
+        with:
+          ref: agent/wasm-boundary-validation-v13
+          path: .agent-validator
+          fetch-depth: 1
+
+      - name: Detach validator from candidate tree
         shell: bash
         run: |
-          rm -rf generated
-          cargo check --locked --manifest-path rust/Cargo.toml -p trellis-protocol-wasm
-          git restore generated
+          set -euo pipefail
+          cp .agent-validator/scripts/agent_run_wasm_boundary_v13.sh /tmp/agent-run-wasm-boundary-v13.sh
+          rm -rf .agent-validator
+          test -f /tmp/agent-run-wasm-boundary-v13.sh
+          git status --short
 
-      - name: Cache generator build
-        uses: swatinem/rust-cache@v2
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
         with:
-          workspaces: rust/tools/generate -> target
+          targets: wasm32-unknown-unknown
+          components: rustfmt,clippy
 
-      - name: Generate SDKs
-        run: cargo run --manifest-path rust/tools/generate/Cargo.toml -- prepare --no-npm .
+      - name: Set up Deno
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: ${{ env.DENO_VERSION }}
 
-      - name: Build embedded portal
-        run: deno task -c ts/portals/login/deno.json build:embedded
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
 
-      - name: Inspect generated artifact drift
-        id: current
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: 1.24.x
+
+      - name: Validate candidate
         shell: bash
-        run: |
-          if git diff --quiet; then
-            echo "current=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "current=false" >> "$GITHUB_OUTPUT"
-            git diff --stat
-          fi
-
-      - name: Upload prepared artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: check-generated
-          path: |
-            generated
-            rust/crates/runtime/generated/portal
-          retention-days: 1
-
-  generated:
-    name: Generated artifacts current
-    needs: prepare
-    runs-on: ubuntu-latest
-    steps:
-      - name: Require generated artifacts to be current
-        env:
-          GENERATED_CURRENT: ${{ needs.prepare.outputs.current }}
-        run: test "$GENERATED_CURRENT" = true
-
-  rust:
-    name: Rust
-    needs: prepare
-    runs-on: ubuntu-latest
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
-
-      - name: Download prepared artifacts
-        uses: actions/download-artifact@v4
-        with:
-          name: check-generated
-          path: .
-
-      - name: Set up Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Set up Deno
-        uses: denoland/setup-deno@v2
-        with:
-          deno-version: ${{ env.DENO_VERSION }}
-
-      - name: Cache Rust build artifacts
-        uses: swatinem/rust-cache@v2
-        with:
-          workspaces: |
-            rust -> target
-            rust/tools/generate -> target
-            rust/xtask -> target
-            xtask -> target
-
-      - name: Check formatting
-        run: |
-          cargo fmt --manifest-path rust/Cargo.toml --all --check
-          cargo fmt --manifest-path rust/tools/generate/Cargo.toml --check
-          cargo fmt --manifest-path rust/xtask/Cargo.toml --check
-
-      - name: Lint production Rust
-        run: cargo clippy --manifest-path rust/Cargo.toml --workspace --all-targets -- -D warnings
-
-      - name: Test Rust libraries
-        run: cargo test --manifest-path rust/Cargo.toml --workspace --lib
-
-      - name: Test Rust tooling
-        run: |
-          cargo test --manifest-path rust/tools/generate/Cargo.toml
-          cargo test --manifest-path rust/xtask/Cargo.toml
-          cargo test --manifest-path xtask/Cargo.toml
-
-  typescript:
-    name: TypeScript
-    needs: prepare
-    runs-on: ubuntu-latest
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
-
-      - name: Download prepared artifacts
-        uses: actions/download-artifact@v4
-        with:
-          name: check-generated
-          path: .
-
-      - name: Set up Deno
-        uses: denoland/setup-deno@v2
-        with:
-          deno-version: ${{ env.DENO_VERSION }}
-
-      - name: Check formatting
-        run: deno fmt -c ts/deno.json --check
-
-      - name: Check TypeScript packages
-        run: >-
-          deno check -c ts/deno.json
-          ts/packages/trellis/index.ts
-          ts/packages/trellis-svelte/src/index.ts
-          ts/packages/trellis-svelte/src/context.svelte.ts
-          ts/packages/trellis-test/index.ts
-
-      - name: Test TypeScript packages
-        run: deno task -c ts/deno.json test:prepared
-
-  live:
-    name: Live Trellis
-    needs: prepare
-    runs-on: ubuntu-latest
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
-
-      - name: Download prepared artifacts
-        uses: actions/download-artifact@v4
-        with:
-          name: check-generated
-          path: .
-
-      - name: Set up Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Set up Deno
-        uses: denoland/setup-deno@v2
-        with:
-          deno-version: ${{ env.DENO_VERSION }}
-
-      - name: Cache Rust build artifacts
-        uses: swatinem/rust-cache@v2
-        with:
-          workspaces: rust -> target
-
-      - name: Check live runners
-        run: >-
-          deno check -c ts/deno.json
-          integration/live_runner.ts
-          rust/crates/trellis-test/integration_runner.ts
-
-      - name: Test live runners
-        run: >-
-          deno test -A -c ts/deno.json
-          integration/live_runner_test.ts
-          rust/crates/trellis-test/integration_runner_test.ts
-
-      - name: Run live integration suite
-        run: deno run -A -c ts/deno.json integration/live_runner.ts
+        run: bash /tmp/agent-run-wasm-boundary-v13.sh
