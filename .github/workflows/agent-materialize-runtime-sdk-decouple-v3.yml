@@ -1,0 +1,70 @@
+name: Materialize runtime SDK decoupling v3 WIP
+
+on:
+  push:
+    branches: [agent/materialize-runtime-sdk-decouple-v3]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: agent-materialize-runtime-sdk-decouple-v3
+  cancel-in-progress: true
+
+env:
+  BASE_SHA: fa723c49bc69f927bc222702756d2124151fa962
+
+jobs:
+  materialize:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Preserve transforms and reset to frozen product baseline
+        shell: bash
+        run: |
+          cp scripts/agent_runtime_sdk_decouple_v3.py /tmp/agent_runtime_sdk_decouple_v3.py
+          cp scripts/agent_runtime_error_size_cleanup_v3.py /tmp/agent_runtime_error_size_cleanup_v3.py
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('/tmp/agent_runtime_sdk_decouple_v3.py')
+          text = path.read_text()
+          text = text.replace(
+              '    "fn sdk_stem_from_contract_id_pascal(contract_id: &str) -> String {",',
+              '    "fn string_literal(value: &str) -> String {",',
+              1,
+          )
+          text = text.replace(
+              'rust_codegen = Path("rust/crates/codegen-rust/src/lib.rs")\ntext = rust_codegen.read_text()\n',
+              'rust_codegen = Path("rust/crates/codegen-rust/src/lib.rs")\ntext = rust_codegen.read_text()\ntext = text.replace("use serde_json::Value;\\n", "", 1)\n',
+              1,
+          )
+          text = text.replace('api == self.id\n', 'api == self.id.as_str()\n', 1)
+          text = text.replace(
+              '"        super::rpc::register_auth_rpc_metadata(&mut routes).unwrap();",',
+              '"        crate::platform::auth::rpc::register_auth_rpc_metadata(&mut routes).unwrap();",',
+              1,
+          )
+          path.write_text(text)
+          PY
+          git reset --hard "$BASE_SHA"
+      - name: Apply current WIP transforms
+        shell: bash
+        run: |
+          python /tmp/agent_runtime_sdk_decouple_v3.py
+          python /tmp/agent_runtime_error_size_cleanup_v3.py
+          cargo fmt --manifest-path rust/Cargo.toml --all
+          git diff --check
+      - name: Publish source-tree WIP branch
+        shell: bash
+        run: |
+          git config user.name trellis-validation
+          git config user.email actions@users.noreply.github.com
+          git add -A
+          git diff --cached --check
+          git commit -m 'WIP: decouple runtime from generated Auth SDK'
+          git push --force origin HEAD:refs/heads/agent/wip-runtime-sdk-decouple-v3
