@@ -31,6 +31,57 @@ for path in (
     if "version: 4" in content or "version != 4" in content or "version !== 4" in content or "version === 4" in content:
         raise RuntimeError(f"stale shared-runtime manifest v4 reference in {path}")
 
+# Keep the existing adaptive worker budget while serializing each fixture. A
+# fixed batch would strand workers whenever one fixture in a batch runs long.
+runner_path = Path("rust/crates/trellis-test/integration_runner.ts")
+runner = runner_path.read_text()
+old = '''    const fixtureGroups = groupRustTestsByFixture(sharedTests);
+    for (let offset = 0; offset < fixtureGroups.length; offset += jobs) {
+      const batch = fixtureGroups.slice(offset, offset + jobs);
+      runs.push(...await Promise.all(batch.map((group) => {
+        const otherSharedTests = sharedTests.filter((name) => !group.tests.includes(name));
+        return runTests(executable, [
+          ...testArgs,
+          ...unregisteredTests.flatMap((name) => ["--skip", name]),
+          ...isolatedTests.flatMap((name) => ["--skip", name]),
+          ...otherSharedTests.flatMap((name) => ["--skip", name]),
+          "--test-threads=1",
+          "--format=pretty",
+        ], env);
+      })));
+    }
+'''
+new = '''    const fixtureGroups = groupRustTestsByFixture(sharedTests);
+    let nextFixture = 0;
+    const fixtureRuns = await Promise.all(
+      Array.from(
+        { length: Math.min(jobs, fixtureGroups.length) },
+        async () => {
+          const workerRuns: TestRun[] = [];
+          while (nextFixture < fixtureGroups.length) {
+            const group = fixtureGroups[nextFixture++];
+            const otherSharedTests = sharedTests.filter((name) =>
+              !group.tests.includes(name)
+            );
+            workerRuns.push(await runTests(executable, [
+              ...testArgs,
+              ...unregisteredTests.flatMap((name) => ["--skip", name]),
+              ...isolatedTests.flatMap((name) => ["--skip", name]),
+              ...otherSharedTests.flatMap((name) => ["--skip", name]),
+              "--test-threads=1",
+              "--format=pretty",
+            ], env));
+          }
+          return workerRuns;
+        },
+      ),
+    );
+    runs.push(...fixtureRuns.flat());
+'''
+if runner.count(old) != 1:
+    raise RuntimeError(f"expected one fixed fixture batch loop, found {runner.count(old)}")
+runner_path.write_text(runner.replace(old, new, 1))
+
 # No identity-mutating harness helper should survive after the implementation is
 # deleted. These names are intentionally not retained as no-op compatibility shims.
 for root in (Path("rust/crates/trellis-test"), Path("rust/crates/trellis/tests/integration")):
