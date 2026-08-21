@@ -143,3 +143,33 @@ auth.write_text(text)
 readme = Path("conformance/README.md")
 text = readme.read_text().replace("request-proof v2 vectors", "request/event-proof v1 vectors")
 readme.write_text(text)
+
+# Guard the clean break inside the transform too, so any newly-added stale
+# prerelease name retriggers validation and fails before the test/build phases.
+stale = (
+    "AuthorizationRequestProofV2",
+    "AuthorizationEventProofV2",
+    "AuthorizationRequestProofInputV2",
+    "AuthorizationEventProofInputV2",
+    "AuthorizationEventPublisherV2",
+    "VerifiedAuthorizationRequestV2",
+    "VerifiedAuthorizationEventV2",
+    "AuthorizationProviderRequestV2",
+    "AuthorizationProviderEventV2",
+    "verifyRequestV2",
+    "verifyEventV2",
+    "VerifyAuthorizationRequestV2",
+    "VerifyAuthorizationEventV2",
+    "verifyAuthorizationRequestV2Wasm",
+    "verifyAuthorizationEventV2Wasm",
+    "trellis.authorization-request-proof.v2",
+    "trellis.authorization-event-proof.v2",
+)
+for root in ("rust", "ts", "conformance", "docs"):
+    for candidate in Path(root).rglob("*"):
+        if not candidate.is_file() or candidate.suffix not in {".rs", ".ts", ".tsx", ".md", ".json"}:
+            continue
+        content = candidate.read_text()
+        for token in stale:
+            if token in content:
+                raise RuntimeError(f"stale first-public proof token {token!r} in {candidate}")
