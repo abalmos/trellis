@@ -1,4 +1,4 @@
-name: Run WASM boundary v3.7 validation
+name: Run WASM boundary v3.8 validation
 
 on:
   push:
@@ -48,7 +48,7 @@ jobs:
           git config user.email actions@users.noreply.github.com
           printf '%s\n' "$GITHUB_RUN_ID" > .validation-run
           git add .validation-run
-          git commit -m 'Record WASM boundary v3.7 validation'
+          git commit -m 'Record WASM boundary v3.8 validation'
           git push origin HEAD:"$TARGET_BRANCH"
 
       - name: Set up Rust
@@ -84,6 +84,7 @@ jobs:
           cargo fmt --manifest-path rust/tools/generate/Cargo.toml
           deno fmt -c ts/deno.json \
             ts/deno.json \
+            ts/apps/console/deno.json \
             ts/packages/trellis/deno.json \
             ts/packages/trellis/contract_support/protocol_artifacts.ts \
             ts/packages/trellis/contract_support/protocol_artifacts_test.ts \
@@ -93,7 +94,8 @@ jobs:
             ts/packages/trellis/service/runtime/service.ts \
             ts/packages/trellis/contracts/trellis_core.ts \
             ts/portals/login/contract.ts \
-            ts/portals/login/deno.json
+            ts/portals/login/deno.json \
+            docs/deno.json
           git diff --check
           git add -A
           git commit -m 'Move protocol WASM to runtime resolution boundary'
@@ -171,6 +173,17 @@ jobs:
           fi
           git diff --exit-code
 
+      - name: Validate fresh consumer tasks
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf ts/packages/trellis/auth/protocol_wasm
+          deno task -c ts/deno.json test:contracts
+          rm -rf ts/packages/trellis/auth/protocol_wasm
+          deno task -c ts/apps/console/deno.json check
+          test -s ts/packages/trellis/auth/protocol_wasm/trellis_protocol_wasm.js
+          git diff --exit-code
+
       - name: Validate TypeScript and package assembly
         shell: bash
         run: |
@@ -180,6 +193,7 @@ jobs:
             ts/packages/trellis-svelte/src/index.ts \
             ts/packages/trellis-svelte/src/context.svelte.ts \
             ts/packages/trellis-test/index.ts
+          deno task -c ts/deno.json check:integration
           deno task -c ts/deno.json test:prepared
           deno task -c ts/packages/trellis/deno.json build:npm
           deno test -A -c ts/deno.json ts/packages/trellis/tests/npm_artifact_smoke_test.ts
@@ -201,7 +215,10 @@ jobs:
         run: |
           set -euo pipefail
           go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.7
-          "$(go env GOPATH)/bin/actionlint" .github/workflows/check.yml .github/workflows/release.yml
+          "$(go env GOPATH)/bin/actionlint" \
+            .github/workflows/check.yml \
+            .github/workflows/release.yml \
+            .github/workflows/pages.yml
 
       - name: Publish validated candidate
         shell: bash
