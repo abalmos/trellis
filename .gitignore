@@ -47,6 +47,7 @@ utils/arangodb/data/
 
 # Generated build artifacts
 generated/
+ts/packages/trellis/auth/protocol_wasm/
 docs/static/api/typescript/
 **/npm/
 ts/services/trellis/jsr/
