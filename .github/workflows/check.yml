@@ -36,6 +36,13 @@ jobs:
         with:
           deno-version: ${{ env.DENO_VERSION }}
 
+      - name: Check protocol WASM clean bootstrap
+        shell: bash
+        run: |
+          rm -rf generated
+          cargo check --locked --manifest-path rust/Cargo.toml -p trellis-protocol-wasm
+          git restore generated
+
       - name: Cache generator build
         uses: swatinem/rust-cache@v2
         with:

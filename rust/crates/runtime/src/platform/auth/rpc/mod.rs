@@ -20,6 +20,7 @@ use trellis_protocol::{
     parse_session_proof_v1, session_proof_request_digest_v1, verify_session_proof_v1,
     AuthorizationPrincipalKindV1, SessionProofInputV1, SessionProofPolicyV1,
 };
+use trellis_rs::sdk::auth as trellis_sdk_auth;
 use trellis_rs::service::Router;
 use ulid::Ulid;
 

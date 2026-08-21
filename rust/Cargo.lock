@@ -4936,20 +4936,8 @@ dependencies = [
  "trellis-jobs-runtime",
  "trellis-protocol",
  "trellis-rs",
- "trellis-sdk-auth",
  "ulid",
  "url",
-]
-
-[[package]]
-name = "trellis-sdk-auth"
-version = "0.12.0"
-dependencies = [
- "futures-util",
- "serde",
- "serde_json",
- "trellis-contracts",
- "trellis-rs",
 ]
 
 [[package]]
