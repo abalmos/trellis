@@ -1,0 +1,178 @@
+name: Validate WASM boundary v2
+
+on:
+  push:
+    branches:
+      - agent/wasm-boundary-v2
+    paths:
+      - .github/workflows/agent-wasm-boundary-v2.yml
+
+permissions:
+  contents: write
+
+env:
+  DENO_VERSION: 2.9.4
+  CARGO_TERM_COLOR: always
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out candidate
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Record validation run
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name trellis-validation
+          git config user.email actions@users.noreply.github.com
+          printf '%s\n' "$GITHUB_RUN_ID" > .validation-run
+          git add .validation-run
+          git commit -m 'Record WASM boundary v2 validation'
+          git push origin HEAD:agent/wasm-boundary-v2
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Set up Deno
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: ${{ env.DENO_VERSION }}
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Finish source boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('.github/workflows/release.yml')
+          text = path.read_text()
+          old = '''      - name: Set up Rust toolchain
+                uses: dtolnay/rust-toolchain@stable
+
+              - name: Prepare release version'''
+          new = '''      - name: Set up Rust toolchain
+                uses: dtolnay/rust-toolchain@stable
+                with:
+                  targets: wasm32-unknown-unknown
+
+              - name: Prepare release version'''
+          if text.count(old) != 1:
+              raise SystemExit(f'release Rust setup anchor count: {text.count(old)}')
+          text = text.replace(old, new, 1)
+
+          old = '''      - name: Generate release SDK artifacts
+                run: time cargo run --manifest-path rust/tools/generate/Cargo.toml -- prepare --no-npm .
+'''
+          new = '''      - name: Generate release SDK artifacts
+                run: time cargo run --manifest-path rust/tools/generate/Cargo.toml -- prepare --no-npm .
+
+              - name: Build protocol WASM
+                run: time cargo run --manifest-path rust/xtask/Cargo.toml -- protocol-wasm
+'''
+          if text.count(old) != 1:
+              raise SystemExit(f'release SDK anchor count: {text.count(old)}')
+          path.write_text(text.replace(old, new, 1))
+          PY
+          git rm \
+            ts/packages/trellis/auth/protocol_wasm/trellis_protocol_wasm.js \
+            ts/packages/trellis/auth/protocol_wasm/trellis_protocol_wasm_bg.wasm \
+            ts/packages/trellis/auth/protocol_wasm/trellis_protocol_wasm_bytes.ts
+          git rm .github/workflows/agent-wasm-boundary-v2.yml .validation-run
+          cargo fmt --manifest-path rust/xtask/Cargo.toml
+          deno fmt -c ts/deno.json \
+            ts/deno.json \
+            ts/packages/trellis/deno.json \
+            ts/packages/trellis/contracts/trellis_core.ts \
+            ts/portals/login/contract.ts \
+            ts/portals/login/deno.json
+          git diff --check
+          git add -A
+          git commit -m 'Move protocol WASM to generated build state'
+
+      - name: Refresh current tool baselines
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo run --manifest-path rust/xtask/Cargo.toml -- prepare
+          cargo fmt --manifest-path rust/Cargo.toml --all
+          cargo fmt --manifest-path rust/tools/generate/Cargo.toml
+          cargo fmt --manifest-path rust/xtask/Cargo.toml
+          python - <<'PY'
+          import subprocess
+          expected = {
+              'rust/crates/trellis/src/client/mod.rs',
+              'ts/deno.lock',
+          }
+          changed = set(filter(None, subprocess.check_output(
+              ['git', 'diff', '--name-only'], text=True
+          ).splitlines()))
+          if changed != expected:
+              raise SystemExit(f'unexpected baseline drift: {sorted(changed)}')
+          PY
+          git diff --check
+          git add rust/crates/trellis/src/client/mod.rs ts/deno.lock
+          git commit -m 'Refresh check baselines'
+
+      - name: Validate clean preparation boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf generated ts/packages/trellis/auth/protocol_wasm rust/crates/runtime/generated/portal
+          cargo check --locked --manifest-path rust/Cargo.toml -p trellis-protocol-wasm
+          cargo run --manifest-path rust/xtask/Cargo.toml -- prepare
+          test -s ts/packages/trellis/auth/protocol_wasm/trellis_protocol_wasm.js
+          test -s ts/packages/trellis/auth/protocol_wasm/trellis_protocol_wasm.d.ts
+          test -s ts/packages/trellis/auth/protocol_wasm/trellis_protocol_wasm_bg.wasm
+          test -s ts/packages/trellis/auth/protocol_wasm/trellis_protocol_wasm_bytes.ts
+          git diff --exit-code
+
+      - name: Validate TypeScript and package assembly
+        shell: bash
+        run: |
+          set -euo pipefail
+          deno check -c ts/deno.json \
+            ts/packages/trellis/index.ts \
+            ts/packages/trellis-svelte/src/index.ts \
+            ts/packages/trellis-svelte/src/context.svelte.ts \
+            ts/packages/trellis-test/index.ts
+          deno task -c ts/deno.json test:prepared
+          deno task -c ts/packages/trellis/deno.json build:npm
+          deno test -A -c ts/deno.json ts/packages/trellis/tests/npm_artifact_smoke_test.ts
+          git diff --exit-code
+
+      - name: Validate Rust tooling
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo fmt --manifest-path rust/Cargo.toml --all --check
+          cargo fmt --manifest-path rust/tools/generate/Cargo.toml --check
+          cargo fmt --manifest-path rust/xtask/Cargo.toml --check
+          cargo test --manifest-path rust/xtask/Cargo.toml
+          cargo clippy --manifest-path rust/xtask/Cargo.toml --all-targets -- -D warnings
+          git diff --exit-code
+
+      - name: Validate workflow syntax
+        shell: bash
+        run: |
+          set -euo pipefail
+          go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.7
+          "$(go env GOPATH)/bin/actionlint" .github/workflows/check.yml .github/workflows/release.yml
+
+      - name: Publish validated candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          git log --oneline -3
+          git push origin HEAD:agent/wasm-boundary-v2
