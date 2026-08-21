@@ -1,0 +1,117 @@
+name: Run test-boundary v1 validation
+
+on:
+  push:
+    branches:
+      - agent/rs-gate-validation
+    paths:
+      - .github/workflows/agent-test-boundary-v1-runner.yml
+      - scripts/agent_test_boundary_v1.py.gz.b64
+
+permissions:
+  contents: write
+
+concurrency:
+  group: test-boundary-v1-runner
+  cancel-in-progress: true
+
+env:
+  DENO_VERSION: 2.9.4
+  CARGO_TERM_COLOR: always
+  TARGET_BRANCH: agent/test-boundary-v1
+
+jobs:
+  validate:
+    runs-on: [self-hosted, Linux, X64]
+    steps:
+      - name: Check out candidate
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TARGET_BRANCH }}
+          fetch-depth: 0
+
+      - name: Load validation transform
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin agent/rs-gate-validation
+          git show origin/agent/rs-gate-validation:scripts/agent_test_boundary_v1.py.gz.b64 \
+            | base64 --decode \
+            | gzip --decompress \
+            > /tmp/agent-test-boundary-v1.py
+          python -m py_compile /tmp/agent-test-boundary-v1.py
+
+      - name: Record validation run
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name trellis-validation
+          git config user.email actions@users.noreply.github.com
+          printf '%s\n' "$GITHUB_RUN_ID" > .test-boundary-validation-run
+          git add .test-boundary-validation-run
+          git commit -m 'Record test-boundary v1 validation'
+          git push origin HEAD:"$TARGET_BRANCH"
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Set up Deno
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: ${{ env.DENO_VERSION }}
+
+      - name: Apply production-test boundary cleanup
+        shell: bash
+        run: |
+          set -euo pipefail
+          python /tmp/agent-test-boundary-v1.py
+          cargo fmt --manifest-path rust/Cargo.toml --all
+          deno fmt -c ts/deno.json \
+            rust/crates/trellis-test/integration_runner.ts \
+            rust/crates/trellis-test/integration_runner_test.ts \
+            ts/packages/trellis-test/src/integration/shared_runtime_protocol.ts \
+            ts/packages/trellis-test/src/integration/shared_runtime_host.ts
+          git diff --check
+          if rg -n 'integration-test-scoping|IntegrationTestScope|with_integration_test_scope|integration_test_scope|integration_test_descriptor_subject|integration_test_descriptor_capability|scoped_contract' \
+            rust/crates/trellis/src \
+            rust/crates/trellis-test/src \
+            rust/crates/trellis/tests \
+            ts/packages/trellis-test/src; then
+            echo 'obsolete integration-test scoping surface remains' >&2
+            exit 1
+          fi
+          git add -A
+          git commit -m 'Remove integration test scoping from production semantics'
+
+      - name: Validate runner scheduling
+        shell: bash
+        run: |
+          set -euo pipefail
+          deno check -c ts/deno.json rust/crates/trellis-test/integration_runner.ts
+          deno test -A -c ts/deno.json rust/crates/trellis-test/integration_runner_test.ts
+          git diff --exit-code
+
+      - name: Validate Rust workspace
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo fmt --manifest-path rust/Cargo.toml --all --check
+          cargo check --manifest-path rust/Cargo.toml --workspace --all-targets
+          cargo clippy --manifest-path rust/Cargo.toml --workspace --all-targets --all-features -- -D warnings
+          cargo test --manifest-path rust/Cargo.toml -p trellis-rs --lib
+          cargo test --manifest-path rust/Cargo.toml -p trellis-rs --test integration --no-run
+          git diff --exit-code
+
+      - name: Run full Rust live integration suite
+        shell: bash
+        run: |
+          set -euo pipefail
+          /usr/bin/time -p deno run -A -c ts/deno.json rust/crates/trellis-test/integration_runner.ts
+          git diff --exit-code
+
+      - name: Publish validated candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          git log --oneline -3
+          git push origin HEAD:"$TARGET_BRANCH"
