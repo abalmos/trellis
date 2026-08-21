@@ -58,9 +58,10 @@ new = '''                let protocol_participant_out = match (
                         entry.npm_out.as_deref(),
                         entry.cargo_out.as_deref(),
                     )
-                    && protocol_participant_out
-                        .as_ref()
-                        .is_none_or(|path| path.is_file())
+                    && match protocol_participant_out.as_deref() {
+                        Some(path) => protocol_participant_output_is_fresh(&resolved, path)?,
+                        None => true,
+                    }
                 {
 '''
 if text.count(old) != 1:
@@ -144,6 +145,20 @@ helper = '''fn protocol_participant_output_path(
     Ok(protocol_root
         .join("participants")
         .join(format!("{participant_id}.json")))
+}
+
+fn protocol_participant_output_is_fresh(
+    resolved: &contract_input::ResolvedNativeInput,
+    output: &Path,
+) -> miette::Result<bool> {
+    let Some(expected) = resolved.participant.as_ref() else {
+        return Ok(false);
+    };
+    let Ok(existing) = trellis_contracts::load_participant_source(output) else {
+        return Ok(false);
+    };
+    Ok(existing.participant.digest().into_diagnostic()?
+        == expected.participant.digest().into_diagnostic()?)
 }
 
 '''
