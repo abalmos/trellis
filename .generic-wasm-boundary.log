@@ -1,0 +1,264 @@
+transform_one=0
+transform_two=0
+cargo_check=0
+git_restore=0
+xtask_prepare=1
+wasm_absent=0
+git_diff=0
+=== cargo check tail ===
+[1m[92m   Compiling[0m rustversion v1.0.22
+[1m[92m    Checking[0m scopeguard v1.2.0
+[1m[92m    Checking[0m lock_api v0.4.14
+[1m[92m    Checking[0m tinystr v0.8.3
+[1m[92m    Checking[0m potential_utf v0.1.5
+[1m[92m    Checking[0m icu_locale_core v2.2.0
+[1m[92m    Checking[0m icu_collections v2.2.0
+[1m[92m    Checking[0m num-rational v0.4.2
+[1m[92m    Checking[0m regex-automata v0.4.14
+[1m[92m   Compiling[0m curve25519-dalek-derive v0.1.1
+[1m[92m    Checking[0m icu_provider v2.2.0
+[1m[92m    Checking[0m icu_properties v2.2.0
+[1m[92m    Checking[0m icu_normalizer v2.2.0
+[1m[92m    Checking[0m ppv-lite86 v0.2.21
+[1m[92m    Checking[0m spki v0.7.3
+[1m[92m    Checking[0m num-iter v0.1.45
+[1m[92m    Checking[0m num-complex v0.4.6
+[1m[92m    Checking[0m allocator-api2 v0.2.21
+[1m[92m   Compiling[0m unicode-general-category v1.1.0
+[1m[92m    Checking[0m borrow-or-share v0.2.4
+[1m[92m    Checking[0m foldhash v0.2.0
+[1m[92m    Checking[0m subtle v2.6.1
+[1m[92m    Checking[0m bit-vec v0.8.0
+[1m[92m    Checking[0m equivalent v1.0.2
+[1m[92m    Checking[0m hashbrown v0.17.1
+[1m[92m    Checking[0m fluent-uri v0.4.1
+[1m[92m    Checking[0m bit-set v0.8.0
+[1m[92m    Checking[0m num v0.4.3
+[1m[92m    Checking[0m rand_chacha v0.3.1
+[1m[92m    Checking[0m pkcs8 v0.10.2
+[1m[92m    Checking[0m parking_lot v0.12.5
+[1m[92m    Checking[0m idna_adapter v1.2.2
+[1m[92m    Checking[0m sha2 v0.10.9
+[1m[92m    Checking[0m block-buffer v0.12.1
+[1m[92m    Checking[0m crypto-common v0.2.2
+[1m[92m    Checking[0m ed25519 v2.2.3
+[1m[92m    Checking[0m micromap v0.3.0
+[1m[92m    Checking[0m lazy_static v1.5.0
+[1m[92m    Checking[0m const-oid v0.10.2
+[1m[92m   Compiling[0m thiserror v2.0.18
+[1m[92m   Compiling[0m bumpalo v3.19.0
+[1m[92m    Checking[0m data-encoding v2.11.0
+[1m[92m    Checking[0m outref v0.5.2
+[1m[92m    Checking[0m vsimd v0.8.0
+[1m[92m    Checking[0m powerfmt v0.2.0
+[1m[92m    Checking[0m percent-encoding v2.3.2
+[1m[92m    Checking[0m deranged v0.5.8
+[1m[92m   Compiling[0m wasm-bindgen-macro-support v0.2.125
+[1m[92m    Checking[0m referencing v0.47.0
+[1m[92m    Checking[0m uuid-simd v0.8.0
+[1m[92m    Checking[0m digest v0.11.3
+[1m[92m    Checking[0m fraction v0.15.4
+[1m[92m    Checking[0m ed25519-dalek v2.2.0
+[1m[92m   Compiling[0m wasm-bindgen v0.2.125
+[1m[92m    Checking[0m idna v1.1.0
+[1m[92m    Checking[0m rand v0.8.6
+[1m[92m    Checking[0m signatory v0.27.1
+[1m[92m    Checking[0m fancy-regex v0.18.0
+[1m[92m    Checking[0m email_address v0.2.9
+[1m[92m    Checking[0m regex v1.12.4
+[1m[92m   Compiling[0m thiserror-impl v2.0.18
+[1m[92m    Checking[0m jsonschema-regex v0.47.0
+[1m[92m    Checking[0m cpufeatures v0.3.0
+[1m[92m    Checking[0m num-conv v0.2.2
+[1m[92m    Checking[0m bytecount v0.6.9
+[1m[92m    Checking[0m ryu-js v1.0.3
+[1m[92m    Checking[0m log v0.4.33
+[1m[92m    Checking[0m num-cmp v0.1.0
+[1m[92m    Checking[0m time-core v0.1.8
+[1m[92m    Checking[0m time v0.3.46
+[1m[92m    Checking[0m jsonschema v0.47.0
+[1m[92m    Checking[0m nkeys v0.4.5
+[1m[92m    Checking[0m serde_json_canonicalizer v0.3.2
+[1m[92m    Checking[0m sha2 v0.11.0
+[1m[92m    Checking[0m base64 v0.22.1
+[1m[92m    Checking[0m jsonptr v0.7.1
+[1m[92m   Compiling[0m wasm-bindgen-macro v0.2.125
+[1m[92m    Checking[0m trellis-protocol v0.12.0 (/home/runner/work/trellis/trellis/rust/crates/protocol)
+[1m[92m    Checking[0m trellis-protocol-wasm v0.12.0 (/home/runner/work/trellis/trellis/rust/crates/protocol-wasm)
+[1m[92m    Finished[0m `dev` profile [unoptimized + debuginfo] target(s) in 16.31s
+=== restore ===
+=== xtask prepare tail ===
+[1m[92m   Compiling[0m flate2 v1.1.9
+[1m[92m   Compiling[0m rustls-webpki v0.103.14
+[1m[92m   Compiling[0m winnow v1.0.4
+[1m[92m   Compiling[0m colorchoice v1.0.5
+[1m[92m   Compiling[0m is_terminal_polyfill v1.70.2
+[1m[92m   Compiling[0m crossbeam-deque v0.8.7
+[1m[92m   Compiling[0m anstyle-query v1.1.5
+[1m[92m   Compiling[0m prettyplease v0.2.37
+[1m[92m   Compiling[0m base64 v0.23.1
+[1m[92m   Compiling[0m rustc-demangle v0.1.28
+[1m[92m   Compiling[0m same-file v1.0.6
+[1m[92m   Compiling[0m anstyle v1.0.14
+[1m[92m   Compiling[0m byteorder v1.5.0
+[1m[92m   Compiling[0m socks v0.3.4
+[1m[92m   Compiling[0m oxc_ecmascript v0.96.0
+[1m[92m   Compiling[0m backtrace v0.3.76
+[1m[92m   Compiling[0m anstream v1.0.0
+[1m[92m   Compiling[0m walkdir v2.5.0
+[1m[92m   Compiling[0m tempfile v3.27.0
+[1m[92m   Compiling[0m ureq-proto v0.6.1
+[1m[92m   Compiling[0m toml_parser v1.1.3+spec-1.1.0
+[1m[92m   Compiling[0m trellis-contracts v0.12.0 (/home/runner/work/trellis/trellis/rust/crates/contracts)
+[1m[92m   Compiling[0m webpki-roots v1.0.9
+[1m[92m   Compiling[0m zopfli v0.8.3
+[1m[92m   Compiling[0m xattr v1.6.1
+[1m[92m   Compiling[0m indexmap v2.14.0
+[1m[92m   Compiling[0m console v0.16.4
+[1m[92m   Compiling[0m toml_datetime v1.1.1+spec-1.1.0
+[1m[92m   Compiling[0m serde_spanned v1.1.1
+[1m[92m   Compiling[0m filetime v0.2.29
+[1m[92m   Compiling[0m bstr v1.13.1
+[1m[92m   Compiling[0m encoding_rs v0.8.35
+[1m[92m   Compiling[0m seq-macro v0.3.6
+[1m[92m   Compiling[0m heck v0.5.0
+[1m[92m   Compiling[0m is_ci v1.2.0
+[1m[92m   Compiling[0m utf8-zero v0.8.1
+[1m[92m   Compiling[0m toml_writer v1.1.2+spec-1.1.0
+[1m[92m   Compiling[0m self_update v0.44.0
+[1m[92m   Compiling[0m strsim v0.11.1
+[1m[92m   Compiling[0m clap_lex v1.1.0
+[1m[92m   Compiling[0m unit-prefix v0.5.2
+[1m[92m   Compiling[0m indicatif v0.18.6
+[1m[92m   Compiling[0m clap_builder v4.6.6
+[1m[92m   Compiling[0m toml v1.1.4+spec-1.1.0
+[1m[92m   Compiling[0m ureq v3.4.0
+[1m[92m   Compiling[0m supports-color v3.0.2
+[1m[92m   Compiling[0m clap_derive v4.6.4
+[1m[92m   Compiling[0m oxc_parser v0.96.0
+[1m[92m   Compiling[0m globset v0.4.20
+[1m[92m   Compiling[0m tar v0.4.46
+[1m[92m   Compiling[0m zip v6.0.0
+[1m[92m   Compiling[0m inotify v0.11.5
+[1m[92m   Compiling[0m self-replace v1.5.0
+[1m[92m   Compiling[0m backtrace-ext v0.2.1
+[1m[92m   Compiling[0m terminal_size v0.4.4
+[1m[92m   Compiling[0m miette-derive v7.6.0
+[1m[92m   Compiling[0m mio v1.2.2
+[1m[92m   Compiling[0m notify-types v2.1.0
+[1m[92m   Compiling[0m quick-xml v0.38.4
+[1m[92m   Compiling[0m trellis-generate v0.12.0 (/home/runner/work/trellis/trellis/rust/tools/generate)
+[1m[92m   Compiling[0m urlencoding v2.1.3
+[1m[92m   Compiling[0m supports-hyperlinks v3.2.0
+[1m[92m   Compiling[0m supports-unicode v3.0.0
+[1m[92m   Compiling[0m unicode-width v0.1.14
+[1m[92m   Compiling[0m either v1.18.0
+[1m[92m   Compiling[0m miette v7.6.0
+[1m[92m   Compiling[0m notify v8.2.0
+[1m[92m   Compiling[0m ignore v0.4.33
+[1m[92m   Compiling[0m trellis-codegen-rust v0.12.0 (/home/runner/work/trellis/trellis/rust/crates/codegen-rust)
+[1m[92m   Compiling[0m trellis-codegen-ts v0.12.0 (/home/runner/work/trellis/trellis/rust/crates/codegen-ts)
+[1m[92m   Compiling[0m clap v4.6.6
+[1m[92m    Finished[0m `dev` profile [unoptimized + debuginfo] target(s) in 46.47s
+[1m[92m     Running[0m `rust/tools/generate/target/debug/trellis-generate prepare /home/runner/work/trellis/trellis`
+[36m[1mTrellis Prepare[0m[39m
+
+[34m[1mgenerate trellis.eventlog@v1[0m[39m
+  [1mkind:[0m service
+  [1msource:[0m /home/runner/work/trellis/trellis/rust/crates/eventlog-runtime/contracts/trellis_eventlog.rs
+  [1mapi:[0m /home/runner/work/trellis/trellis/generated/protocol/apis/trellis.eventlog@v1.json
+  [1mjsr package:[0m /home/runner/work/trellis/trellis/generated/packages/jsr/eventlog
+  [1mnpm package:[0m /home/runner/work/trellis/trellis/generated/packages/npm/eventlog
+  [1mcargo package:[0m /home/runner/work/trellis/trellis/generated/packages/cargo/eventlog
+  [1mcargo participant:[0m /home/runner/work/trellis/trellis/generated/packages/cargo-participants/eventlog
+[1m[32mOK[39m[0m generated contract artifacts for trellis.eventlog@v1
+  [1mapi:[0m /home/runner/work/trellis/trellis/generated/protocol/apis/trellis.eventlog@v1.json
+  [1mdigest:[0m ldHKKyQCxcEYuuIRjwPa9CZMEKV8mNUyGkAtSh9MzZ8
+  [1mrust participant:[0m /home/runner/work/trellis/trellis/generated/packages/cargo-participants/eventlog
+  [1mparticipant:[0m /home/runner/work/trellis/trellis/generated/protocol/participants/trellis.eventlog@v1.json
+  [1mparticipant digest:[0m CszqW8jxAZzHBADHx7IF4FeSPvZJIFW_DKlpdbuIxlk
+
+[34m[1mgenerate trellis.jobs@v1[0m[39m
+  [1mkind:[0m service
+  [1msource:[0m /home/runner/work/trellis/trellis/rust/crates/jobs-runtime/contracts/trellis_jobs.rs
+  [1mapi:[0m /home/runner/work/trellis/trellis/generated/protocol/apis/trellis.jobs@v1.json
+  [1mjsr package:[0m /home/runner/work/trellis/trellis/generated/packages/jsr/jobs
+  [1mnpm package:[0m /home/runner/work/trellis/trellis/generated/packages/npm/jobs
+  [1mcargo package:[0m /home/runner/work/trellis/trellis/generated/packages/cargo/jobs
+  [1mcargo participant:[0m /home/runner/work/trellis/trellis/generated/packages/cargo-participants/jobs
+[1m[32mOK[39m[0m generated contract artifacts for trellis.jobs@v1
+  [1mapi:[0m /home/runner/work/trellis/trellis/generated/protocol/apis/trellis.jobs@v1.json
+  [1mdigest:[0m qVQbpA0Lhmv3S4TcDfkvg4Pl5OvXCKEOrZUpt6Yq524
+  [1mrust participant:[0m /home/runner/work/trellis/trellis/generated/packages/cargo-participants/jobs
+  [1mparticipant:[0m /home/runner/work/trellis/trellis/generated/protocol/participants/trellis.jobs@v1.json
+  [1mparticipant digest:[0m Z1h4Wy9FnenAg9-1XDXLQIugIdnaHegI4gp3U0qt71Y
+
+[34m[1mgenerate trellis.health@v1[0m[39m
+  [1mkind:[0m service
+  [1msource:[0m /home/runner/work/trellis/trellis/rust/crates/runtime/contracts/trellis_health.rs
+  [1mapi:[0m /home/runner/work/trellis/trellis/generated/protocol/apis/trellis.health@v1.json
+  [1mjsr package:[0m /home/runner/work/trellis/trellis/generated/packages/jsr/health
+  [1mnpm package:[0m /home/runner/work/trellis/trellis/generated/packages/npm/health
+  [1mcargo package:[0m /home/runner/work/trellis/trellis/generated/packages/cargo/health
+  [1mcargo participant:[0m /home/runner/work/trellis/trellis/generated/packages/cargo-participants/health
+[1m[32mOK[39m[0m generated contract artifacts for trellis.health@v1
+  [1mapi:[0m /home/runner/work/trellis/trellis/generated/protocol/apis/trellis.health@v1.json
+  [1mdigest:[0m didAZZoUrnCyj4EF01tWRMkd2UlHrMvYnwWyGmBg5Uk
+  [1mrust participant:[0m /home/runner/work/trellis/trellis/generated/packages/cargo-participants/health
+  [1mparticipant:[0m /home/runner/work/trellis/trellis/generated/protocol/participants/trellis.health@v1.json
+  [1mparticipant digest:[0m ZKr7sUr1sqld999sOulAuCob0B4jptPT1_nvcJw_dH0
+
+[34m[1mgenerate trellis.state@v1[0m[39m
+  [1mkind:[0m service
+  [1msource:[0m /home/runner/work/trellis/trellis/rust/crates/runtime/contracts/trellis_state.rs
+  [1mapi:[0m /home/runner/work/trellis/trellis/generated/protocol/apis/trellis.state@v1.json
+  [1mjsr package:[0m /home/runner/work/trellis/trellis/generated/packages/jsr/state
+  [1mnpm package:[0m /home/runner/work/trellis/trellis/generated/packages/npm/state
+  [1mcargo package:[0m /home/runner/work/trellis/trellis/generated/packages/cargo/state
+  [1mcargo participant:[0m /home/runner/work/trellis/trellis/generated/packages/cargo-participants/state
+[1m[32mOK[39m[0m generated contract artifacts for trellis.state@v1
+  [1mapi:[0m /home/runner/work/trellis/trellis/generated/protocol/apis/trellis.state@v1.json
+  [1mdigest:[0m qs1u5DVKbglPE25fTx77AadXTT-MDwSkmHVFJlCwE2A
+  [1mrust participant:[0m /home/runner/work/trellis/trellis/generated/packages/cargo-participants/state
+  [1mparticipant:[0m /home/runner/work/trellis/trellis/generated/protocol/participants/trellis.state@v1.json
+  [1mparticipant digest:[0m 65UgDaf79gkfp9QJYfBLg0RVeErZXKcIBDCKL7gNGZs
+
+[34m[1mgenerate trellis.auth@v1[0m[39m
+  [1mkind:[0m service
+  [1msource:[0m /home/runner/work/trellis/trellis/rust/crates/runtime/trellis.api.json
+  [1mapi:[0m /home/runner/work/trellis/trellis/generated/protocol/apis/trellis.auth@v1.json
+  [1mjsr package:[0m /home/runner/work/trellis/trellis/generated/packages/jsr/auth
+  [1mnpm package:[0m /home/runner/work/trellis/trellis/generated/packages/npm/auth
+  [1mcargo package:[0m /home/runner/work/trellis/trellis/generated/packages/cargo/auth
+[1m[32mOK[39m[0m generated contract artifacts for trellis.auth@v1
+  [1mapi:[0m /home/runner/work/trellis/trellis/generated/protocol/apis/trellis.auth@v1.json
+  [1mdigest:[0m Fs_nA37wXgMpLRfB7IyYDhIEDUdSl3PdNp6ehnXcV1A
+  [1mparticipant:[0m /home/runner/work/trellis/trellis/generated/protocol/participants/trellis-auth-runtime.json
+  [1mparticipant digest:[0m jAkqkfpocUgZxht4UzRlZviJZ4mwKWrWQTlpF9ROCIs
+Error:   × failed to resolve contract source /home/runner/work/trellis/trellis/ts/
+  │ packages/trellis/contracts/trellis_core.ts: [0m[1m[31merror[0m: Uncaught (in promise)
+  │ TypeError: Module not found "file:///home/runner/work/trellis/trellis/ts/
+  │ packages/trellis/auth/protocol_wasm/trellis_protocol_wasm.js".
+  │     at [0m[36mfile:///home/runner/work/trellis/trellis/ts/packages/trellis/auth/
+  │ protocol_wasm.ts[0m:[0m[33m4[0m:[0m[33m8[0m
+  │ const mod = await import(new URL(sourcePath, "file:///").href);
+  │ [0m[31m            ^[0m
+  │     at async [0m[2m[38;5;245mfile:///home/runner/work/trellis/trellis/ts/packages/trellis/
+  │ [0m[0m[36m$deno$eval.mts[0m:[0m[33m3[0m:[0m[33m13[0m
+
+  × prepare workflow failed with status exit status: 1
+
+=== diff ===
+M	.github/workflows/check.yml
+M	.github/workflows/release.yml
+M	.gitignore
+M	rust/xtask/Cargo.toml
+M	rust/xtask/src/main.rs
+M	rust/xtask/src/release/plan.rs
+M	ts/deno.json
+M	ts/deno.lock
+D	ts/packages/trellis/auth/protocol_wasm/trellis_protocol_wasm.js
+D	ts/packages/trellis/auth/protocol_wasm/trellis_protocol_wasm_bg.wasm
+D	ts/packages/trellis/auth/protocol_wasm/trellis_protocol_wasm_bytes.ts
+M	ts/packages/trellis/deno.json
+M	ts/packages/trellis/tests/npm_artifact_smoke_test.ts
