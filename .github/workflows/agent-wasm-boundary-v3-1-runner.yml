@@ -1,4 +1,4 @@
-name: Run WASM boundary v3.4 validation
+name: Run WASM boundary v3.5 validation
 
 on:
   push:
@@ -11,7 +11,7 @@ permissions:
   contents: write
 
 concurrency:
-  group: wasm-boundary-v3-4-runner
+  group: wasm-boundary-v3-5-runner
   cancel-in-progress: true
 
 env:
@@ -47,7 +47,7 @@ jobs:
           git config user.email actions@users.noreply.github.com
           printf '%s\n' "$GITHUB_RUN_ID" > .validation-run
           git add .validation-run
-          git commit -m 'Record WASM boundary v3.4 validation'
+          git commit -m 'Record WASM boundary v3.5 validation'
           git push origin HEAD:"$TARGET_BRANCH"
 
       - name: Set up Rust
@@ -118,6 +118,9 @@ jobs:
           python - <<'PY'
           import subprocess
           expected = {
+              'generated/protocol/participants/trellis.console@v1.json',
+              'generated/protocol/participants/trellis.core@v1.json',
+              'generated/protocol/participants/trellis.portal.activation@v1.json',
               'rust/crates/trellis/src/client/mod.rs',
               'ts/deno.lock',
           }
@@ -128,8 +131,13 @@ jobs:
               raise SystemExit(f'unexpected baseline drift: {sorted(changed)}')
           PY
           git diff --check
-          git add rust/crates/trellis/src/client/mod.rs ts/deno.lock
-          git commit -m 'Refresh check baselines'
+          git add \
+            generated/protocol/participants/trellis.console@v1.json \
+            generated/protocol/participants/trellis.core@v1.json \
+            generated/protocol/participants/trellis.portal.activation@v1.json \
+            rust/crates/trellis/src/client/mod.rs \
+            ts/deno.lock
+          git commit -m 'Refresh generated participant baselines'
 
       - name: Validate clean preparation order
         shell: bash
