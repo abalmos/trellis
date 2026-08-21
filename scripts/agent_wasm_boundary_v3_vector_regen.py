@@ -79,22 +79,26 @@ helper = r'''    // AGENT_AUTHORIZATION_PROOF_VECTOR_REGEN_START
         };
         let fixture_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../../conformance/authorization-context/vectors.json");
-        let mut fixture: serde_json::Value = serde_json::from_str(
-            &std::fs::read_to_string(&fixture_path).unwrap(),
-        )
-        .unwrap();
-        let chain = &mut fixture["completeChain"];
-        chain["requestProofInputHex"] = serde_json::json!(hex(request_input.as_bytes()));
-        chain["requestProofDigest"] = serde_json::json!(encode_base64url(request_input.digest()));
-        chain["requestProof"] = serde_json::json!(request_proof.as_str());
-        chain["eventProofInputHex"] = serde_json::json!(hex(event_input.as_bytes()));
-        chain["eventProofDigest"] = serde_json::json!(encode_base64url(event_input.digest()));
-        chain["eventProof"] = serde_json::json!(event_proof.as_str());
-        std::fs::write(
-            fixture_path,
-            format!("{}\n", serde_json::to_string_pretty(&fixture).unwrap()),
-        )
-        .unwrap();
+        let original = std::fs::read_to_string(&fixture_path).unwrap();
+        let fixture: serde_json::Value = serde_json::from_str(&original).unwrap();
+        let chain = &fixture["completeChain"];
+        let replacements = [
+            ("requestProofInputHex", hex(request_input.as_bytes())),
+            ("requestProofDigest", encode_base64url(request_input.digest())),
+            ("requestProof", request_proof.as_str().to_owned()),
+            ("eventProofInputHex", hex(event_input.as_bytes())),
+            ("eventProofDigest", encode_base64url(event_input.digest())),
+            ("eventProof", event_proof.as_str().to_owned()),
+        ];
+        let mut updated = original;
+        for (field, value) in replacements {
+            let old = chain[field].as_str().unwrap();
+            let needle = format!("    \"{field}\": \"{old}\"");
+            let replacement = format!("    \"{field}\": \"{value}\"");
+            assert_eq!(updated.matches(&needle).count(), 1, "fixture field {field}");
+            updated = updated.replacen(&needle, &replacement, 1);
+        }
+        std::fs::write(fixture_path, updated).unwrap();
     }
     // AGENT_AUTHORIZATION_PROOF_VECTOR_REGEN_END
 '''
