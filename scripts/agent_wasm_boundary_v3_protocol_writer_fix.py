@@ -187,8 +187,8 @@ replace_once(
 )
 
 # The monolithic release verifier starts independent lanes in parallel. Generic
-# preparation is intentionally WASM-free, so materialize the shared runtime
-# artifact once before the Static lane imports the TypeScript package root.
+# preparation is intentionally WASM-free, so install the build target and
+# materialize the shared runtime artifact once before Static imports the package root.
 replace_once(
     "rust/xtask/src/release/runner.rs",
     '''        "repository preparation failed",
@@ -196,6 +196,11 @@ replace_once(
     if working_tree_snapshot(repo_root)? != before_prepare {
 ''',
     '''        "repository preparation failed",
+    )?;
+    run_checked_command(
+        repo_root,
+        &CommandSpec::new("rustup", ["target", "add", "wasm32-unknown-unknown"]),
+        "protocol WASM target installation failed",
     )?;
     run_checked_command(
         repo_root,
