@@ -22,6 +22,7 @@ env:
 jobs:
   validate:
     runs-on: [self-hosted, Linux, X64]
+    timeout-minutes: 180
     steps:
       - name: Check out candidate
         uses: actions/checkout@v4
@@ -57,6 +58,7 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: wasm32-unknown-unknown
+          components: rustfmt,clippy
 
       - name: Set up Deno
         uses: denoland/setup-deno@v2
@@ -67,6 +69,11 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 24
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: 1.24.x
 
       - name: Apply runtime resolution boundary
         shell: bash
@@ -108,7 +115,7 @@ jobs:
           set -euo pipefail
           python /tmp/proof-v1.py
           python /tmp/vector-regen.py add
-          cargo test --manifest-path rust/Cargo.toml -p trellis-protocol regenerate_authorization_proof_v1_vector -- --ignored
+          cargo test --locked --manifest-path rust/Cargo.toml -p trellis-protocol regenerate_authorization_proof_v1_vector -- --ignored
           python /tmp/vector-regen.py remove
           cargo fmt --manifest-path rust/Cargo.toml --all
           deno fmt -c ts/deno.json ts/packages/trellis/auth
@@ -148,7 +155,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          cargo run --manifest-path rust/xtask/Cargo.toml -- prepare
+          cargo run --locked --manifest-path rust/xtask/Cargo.toml -- prepare
           cargo fmt --manifest-path rust/Cargo.toml --all
           cargo fmt --manifest-path rust/tools/generate/Cargo.toml
           cargo fmt --manifest-path rust/xtask/Cargo.toml
@@ -182,12 +189,12 @@ jobs:
           set -euo pipefail
           rm -rf generated ts/packages/trellis/auth/protocol_wasm rust/crates/runtime/generated/portal
           cargo check --locked --manifest-path rust/Cargo.toml -p trellis-protocol-wasm
-          cargo run --manifest-path rust/tools/generate/Cargo.toml -- prepare --no-npm .
+          cargo run --locked --manifest-path rust/tools/generate/Cargo.toml -- prepare --no-npm .
           test ! -e ts/packages/trellis/auth/protocol_wasm/trellis_protocol_wasm.js
           test -s generated/protocol/participants/trellis.core@v1.json
           test -s generated/protocol/participants/trellis.console@v1.json
           test -s generated/protocol/participants/trellis.portal.activation@v1.json
-          cargo run --manifest-path rust/xtask/Cargo.toml -- protocol-wasm
+          cargo run --locked --manifest-path rust/xtask/Cargo.toml -- protocol-wasm
           test -s ts/packages/trellis/auth/protocol_wasm/trellis_protocol_wasm.js
           test -s ts/packages/trellis/auth/protocol_wasm/trellis_protocol_wasm.d.ts
           test -s ts/packages/trellis/auth/protocol_wasm/trellis_protocol_wasm_bg.wasm
@@ -237,10 +244,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          cargo check --manifest-path rust/Cargo.toml --workspace --all-targets
-          cargo test --manifest-path rust/Cargo.toml -p trellis-protocol
-          cargo test --manifest-path rust/Cargo.toml -p trellis-rs --lib
-          cargo clippy --manifest-path rust/Cargo.toml -p trellis-protocol -p trellis-protocol-wasm -p trellis-rs --all-targets -- -D warnings
+          cargo check --locked --manifest-path rust/Cargo.toml --workspace --all-targets
+          cargo test --locked --manifest-path rust/Cargo.toml -p trellis-protocol
+          cargo test --locked --manifest-path rust/Cargo.toml -p trellis-rs --lib
+          cargo clippy --locked --manifest-path rust/Cargo.toml -p trellis-protocol -p trellis-protocol-wasm -p trellis-rs --all-targets -- -D warnings
           git diff --exit-code
 
       - name: Validate Rust tooling
@@ -250,8 +257,8 @@ jobs:
           cargo fmt --manifest-path rust/Cargo.toml --all --check
           cargo fmt --manifest-path rust/tools/generate/Cargo.toml --check
           cargo fmt --manifest-path rust/xtask/Cargo.toml --check
-          cargo test --manifest-path rust/xtask/Cargo.toml
-          cargo clippy --manifest-path rust/xtask/Cargo.toml --all-targets -- -D warnings
+          cargo test --locked --manifest-path rust/xtask/Cargo.toml
+          cargo clippy --locked --manifest-path rust/xtask/Cargo.toml --all-targets -- -D warnings
           git diff --exit-code
 
       - name: Validate workflow syntax
