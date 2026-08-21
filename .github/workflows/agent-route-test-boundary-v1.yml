@@ -1,0 +1,199 @@
+name: Agent Route + Test Boundary v1
+
+on:
+  push:
+    branches:
+      - agent/route-test-boundary-v1
+    paths:
+      - scripts/agent_qualify_integration_subjects.py
+      - scripts/agent_route_literal_audit.py
+      - .github/workflows/agent-route-test-boundary-v1.yml
+  workflow_dispatch:
+
+concurrency:
+  group: agent-route-test-boundary-v1
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+jobs:
+  validate:
+    runs-on: [self-hosted, Linux, X64]
+    timeout-minutes: 240
+    steps:
+      - name: Check out combined scratch branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Record validation run
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "trellis-validation"
+          git config user.email "trellis-validation@users.noreply.github.com"
+          printf '%s\n' '${{ github.run_id }}' > .validation-run
+          git add -- .validation-run
+          git commit -m "Record combined route validation run"
+          git push origin HEAD:refs/heads/agent/route-test-boundary-v1
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+          components: rustfmt,clippy
+
+      - name: Setup Deno
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.9.4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Load reviewed scratch transforms
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin \
+            refs/heads/agent/api-subject-namespace-v1:refs/remotes/origin/agent/api-subject-namespace-v1 \
+            refs/heads/agent/test-boundary-v1:refs/remotes/origin/agent/test-boundary-v1
+          git show origin/agent/api-subject-namespace-v1:scripts/agent_api_subject_namespace_v1.py > /tmp/agent_api_subject_namespace_v1.py
+          git show origin/agent/test-boundary-v1:scripts/agent_test_boundary_v1.py > /tmp/agent_test_boundary_v1.py
+          git show origin/agent/test-boundary-v1:scripts/agent_test_boundary_v1_fix.py > /tmp/agent_test_boundary_v1_fix.py
+          python3 -m py_compile \
+            /tmp/agent_api_subject_namespace_v1.py \
+            /tmp/agent_test_boundary_v1.py \
+            /tmp/agent_test_boundary_v1_fix.py \
+            scripts/agent_qualify_integration_subjects.py \
+            scripts/agent_route_literal_audit.py
+
+      - name: Apply canonical route and test-boundary cleanup
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 /tmp/agent_api_subject_namespace_v1.py
+          python3 scripts/agent_qualify_integration_subjects.py
+          python3 /tmp/agent_test_boundary_v1.py
+          python3 /tmp/agent_test_boundary_v1_fix.py
+          test ! -e rust/crates/trellis/src/integration_test_scoping.rs
+          ! rg -n \
+            'integration-test-scoping|IntegrationTestScope|integration_test_scope|with_integration_test_scope|integration_test_descriptor_subject|integration_test_descriptor_capability' \
+            rust ts/packages/trellis-test/src
+          ! rg -n 'subject\?: string;' ts/packages/trellis/contract_support/mod.ts
+
+      - name: Regenerate canonical artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo run --manifest-path rust/xtask/Cargo.toml -- prepare
+          cargo fmt --manifest-path rust/Cargo.toml --all
+          deno fmt -c ts/deno.json \
+            ts/packages/trellis/contract_support/mod.ts \
+            ts/packages/trellis-test/src/integration/shared_runtime_protocol.ts \
+            ts/packages/trellis-test/src/integration/shared_runtime_host.ts \
+            ts/packages/trellis-test/src/integration/shared_runtime_client.ts \
+            rust/crates/trellis-test/integration_runner.ts \
+            rust/crates/trellis-test/integration_runner_test.ts
+          python3 scripts/agent_route_literal_audit.py
+          git diff --check
+
+      - name: Prove deterministic SDK regeneration
+        shell: bash
+        run: |
+          set -euo pipefail
+          before=$(git diff --binary | sha256sum | awk '{print $1}')
+          cargo run --manifest-path rust/tools/generate/Cargo.toml -- prepare --no-npm .
+          cargo fmt --manifest-path rust/Cargo.toml --all
+          deno fmt -c ts/deno.json \
+            ts/packages/trellis/contract_support/mod.ts \
+            ts/packages/trellis-test/src/integration/shared_runtime_protocol.ts \
+            ts/packages/trellis-test/src/integration/shared_runtime_host.ts \
+            ts/packages/trellis-test/src/integration/shared_runtime_client.ts \
+            rust/crates/trellis-test/integration_runner.ts \
+            rust/crates/trellis-test/integration_runner_test.ts
+          after=$(git diff --binary | sha256sum | awk '{print $1}')
+          test "$before" = "$after"
+          python3 scripts/agent_route_literal_audit.py
+          git diff --check
+
+      - name: Validate TypeScript authoring and runner
+        shell: bash
+        run: |
+          set -euo pipefail
+          deno task -c ts/deno.json check
+          deno task -c ts/deno.json test:contracts
+          deno test -A -c ts/deno.json rust/crates/trellis-test/integration_runner_test.ts
+
+      - name: Test canonical protocol and code generation
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --manifest-path rust/Cargo.toml -p trellis-protocol
+          cargo test --manifest-path rust/Cargo.toml -p trellis-codegen-rust
+
+      - name: Check Rust workspace
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo check --manifest-path rust/Cargo.toml --workspace --all-targets
+
+      - name: Test facade and harness
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --manifest-path rust/Cargo.toml -p trellis-rs --lib
+          cargo test --manifest-path rust/Cargo.toml -p trellis-test
+          cargo test --manifest-path rust/Cargo.toml -p trellis-rs --test integration --no-run
+
+      - name: Clippy changed Rust boundaries
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo clippy --manifest-path rust/Cargo.toml \
+            -p trellis-protocol \
+            -p trellis-codegen-rust \
+            -p trellis-rs \
+            -p trellis-test \
+            --all-targets -- -D warnings
+
+      - name: Run full live Rust integration suite
+        shell: bash
+        env:
+          RUST_BACKTRACE: "1"
+        run: |
+          set -euo pipefail
+          logical=$(getconf _NPROCESSORS_ONLN 2>/dev/null || nproc)
+          jobs=$(( logical / 2 ))
+          if [ "$jobs" -lt 1 ]; then jobs=1; fi
+          echo "Running live Rust integration fixtures with $jobs workers across $logical logical CPUs"
+          deno run -A -c ts/deno.json \
+            rust/crates/trellis-test/integration_runner.ts --jobs "$jobs"
+
+      - name: Publish clean combined candidate tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -f \
+            scripts/agent_qualify_integration_subjects.py \
+            scripts/agent_route_literal_audit.py \
+            .github/workflows/agent-route-test-boundary-v1.yml \
+            .validation-run
+          git add -- \
+            rust \
+            ts \
+            generated \
+            integration \
+            conformance \
+            docs
+          git add -u -- \
+            scripts/agent_qualify_integration_subjects.py \
+            scripts/agent_route_literal_audit.py \
+            .github/workflows/agent-route-test-boundary-v1.yml \
+            .validation-run
+          git diff --cached --check
+          git commit -m "Qualify API routes and remove test protocol scoping"
+          git push --force origin HEAD:refs/heads/agent/route-test-boundary-candidate
