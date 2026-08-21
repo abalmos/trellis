@@ -1,4 +1,4 @@
-name: Run WASM boundary v3.8 validation
+name: Run WASM boundary v3.9 validation
 
 on:
   push:
@@ -11,7 +11,7 @@ permissions:
   contents: write
 
 concurrency:
-  group: wasm-boundary-v3-6-runner
+  group: wasm-boundary-v3-9-runner
   cancel-in-progress: true
 
 env:
@@ -39,6 +39,8 @@ jobs:
           git show origin/agent/rs-gate-validation:scripts/agent_wasm_boundary_v3_participant_fix.py > /tmp/wasm-boundary-participant.py
           git show origin/agent/rs-gate-validation:scripts/agent_wasm_boundary_v3_protocol_writer_fix.py > /tmp/wasm-boundary-protocol-writer.py
           git show origin/agent/rs-gate-validation:scripts/agent_wasm_boundary_v3_ci_fix.py > /tmp/wasm-boundary-ci.py
+          git show origin/agent/rs-gate-validation:scripts/agent_wasm_boundary_v3_proof_v1.py > /tmp/proof-v1.py
+          git show origin/agent/rs-gate-validation:scripts/agent_wasm_boundary_v3_vector_regen.py > /tmp/vector-regen.py
 
       - name: Record validation run
         shell: bash
@@ -48,7 +50,7 @@ jobs:
           git config user.email actions@users.noreply.github.com
           printf '%s\n' "$GITHUB_RUN_ID" > .validation-run
           git add .validation-run
-          git commit -m 'Record WASM boundary v3.8 validation'
+          git commit -m 'Record WASM boundary v3.9 validation'
           git push origin HEAD:"$TARGET_BRANCH"
 
       - name: Set up Rust
@@ -99,6 +101,39 @@ jobs:
           git diff --check
           git add -A
           git commit -m 'Move protocol WASM to runtime resolution boundary'
+
+      - name: Publish first-public authorization proof v1
+        shell: bash
+        run: |
+          set -euo pipefail
+          python /tmp/proof-v1.py
+          python /tmp/vector-regen.py add
+          cargo test --manifest-path rust/Cargo.toml -p trellis-protocol regenerate_authorization_proof_v1_vector -- --ignored
+          python /tmp/vector-regen.py remove
+          cargo fmt --manifest-path rust/Cargo.toml --all
+          deno fmt -c ts/deno.json ts/packages/trellis/auth/protocol_wasm.ts
+          if rg -n 'Authorization(Request|Event)Proof(Input)?V2|AuthorizationEventPublisherV2|VerifiedAuthorization(Request|Event)V2|build_authorization_(request|event)_proof_input_v2|sign_authorization_(request|event)_v2|verify_authorization_(request|event)_v2|VerifyAuthorization(Request|Event)V2|verifyAuthorization(Request|Event)V2Wasm|authorization-(request|event)-proof\.v2' rust ts conformance docs; then
+            echo 'obsolete request/event proof v2 surface remains' >&2
+            exit 1
+          fi
+          rg -n 'trellis\.authorization-request-proof\.v1' rust/crates/protocol/src/authorization.rs
+          rg -n 'trellis\.authorization-event-proof\.v1' rust/crates/protocol/src/authorization.rs
+          rg -n 'verify_authorization_request_v1|verify_authorization_event_v1' rust/crates/protocol-wasm/src/lib.rs ts/packages/trellis/auth/protocol_wasm.ts
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          fixture = json.loads(Path('conformance/authorization-context/vectors.json').read_text())
+          chain = fixture['completeChain']
+          request = bytes.fromhex(chain['requestProofInputHex'])
+          event = bytes.fromhex(chain['eventProofInputHex'])
+          if b'trellis.authorization-request-proof.v1' not in request:
+              raise SystemExit('request vector did not regenerate with v1 domain')
+          if b'trellis.authorization-event-proof.v1' not in event:
+              raise SystemExit('event vector did not regenerate with v1 domain')
+          PY
+          git diff --check
+          git add -A
+          git commit -m 'Publish authorization request and event proofs as v1'
 
       - name: Prove contract authoring is WASM-free
         shell: bash
@@ -224,5 +259,5 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          git log --oneline -3
+          git log --oneline -4
           git push origin HEAD:"$TARGET_BRANCH"
