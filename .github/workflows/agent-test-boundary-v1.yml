@@ -7,6 +7,7 @@ on:
     paths:
       - scripts/agent_test_boundary_v1.py
       - scripts/agent_test_boundary_v1_fix.py
+      - scripts/agent_test_boundary_noop_cleanup.py
       - scripts/agent_test_subject_collision_audit.py
       - .github/workflows/agent-test-boundary-v1.yml
   workflow_dispatch:
@@ -56,9 +57,11 @@ jobs:
           python3 -m py_compile \
             scripts/agent_test_boundary_v1.py \
             scripts/agent_test_boundary_v1_fix.py \
+            scripts/agent_test_boundary_noop_cleanup.py \
             scripts/agent_test_subject_collision_audit.py
           python3 scripts/agent_test_boundary_v1.py
           python3 scripts/agent_test_boundary_v1_fix.py
+          python3 scripts/agent_test_boundary_noop_cleanup.py
           python3 scripts/agent_test_subject_collision_audit.py
           cargo fmt --manifest-path rust/Cargo.toml --all
           deno fmt -c ts/deno.json \
@@ -73,6 +76,16 @@ jobs:
             'integration-test-scoping|IntegrationTestScope|integration_test_scope|with_integration_test_scope|integration_test_descriptor_subject|integration_test_descriptor_capability' \
             rust ts/packages/trellis-test/src
 
+      - name: Check runner TypeScript
+        shell: bash
+        run: |
+          set -euo pipefail
+          deno check -c ts/deno.json \
+            ts/packages/trellis-test/src/integration/shared_runtime_protocol.ts \
+            ts/packages/trellis-test/src/integration/shared_runtime_host.ts \
+            ts/packages/trellis-test/src/integration/shared_runtime_client.ts \
+            rust/crates/trellis-test/integration_runner.ts
+
       - name: Validate runner unit behavior
         shell: bash
         run: |
@@ -83,21 +96,21 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          cargo check --manifest-path rust/Cargo.toml --workspace --all-targets
+          cargo check --locked --manifest-path rust/Cargo.toml --workspace --all-targets
 
       - name: Test facade and harness
         shell: bash
         run: |
           set -euo pipefail
-          cargo test --manifest-path rust/Cargo.toml -p trellis-rs --lib
-          cargo test --manifest-path rust/Cargo.toml -p trellis-test
-          cargo test --manifest-path rust/Cargo.toml -p trellis-rs --test integration --no-run
+          cargo test --locked --manifest-path rust/Cargo.toml -p trellis-rs --lib
+          cargo test --locked --manifest-path rust/Cargo.toml -p trellis-test
+          cargo test --locked --manifest-path rust/Cargo.toml -p trellis-rs --test integration --no-run
 
       - name: Clippy facade and harness
         shell: bash
         run: |
           set -euo pipefail
-          cargo clippy --manifest-path rust/Cargo.toml \
+          cargo clippy --locked --manifest-path rust/Cargo.toml \
             -p trellis-rs -p trellis-test --all-targets -- -D warnings
 
       - name: Run live Rust integration suite
@@ -120,6 +133,7 @@ jobs:
           rm -f \
             scripts/agent_test_boundary_v1.py \
             scripts/agent_test_boundary_v1_fix.py \
+            scripts/agent_test_boundary_noop_cleanup.py \
             scripts/agent_test_subject_collision_audit.py \
             .github/workflows/agent-test-boundary-v1.yml \
             .validation-run
@@ -130,6 +144,7 @@ jobs:
           git add -u -- \
             scripts/agent_test_boundary_v1.py \
             scripts/agent_test_boundary_v1_fix.py \
+            scripts/agent_test_boundary_noop_cleanup.py \
             scripts/agent_test_subject_collision_audit.py \
             .github/workflows/agent-test-boundary-v1.yml \
             .validation-run
