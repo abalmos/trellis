@@ -1,8 +1,8 @@
+import { defineServiceContract } from "../contract.ts";
 import {
-  defineServiceContract,
   TrellisSurfaceStatusRequestSchema,
   TrellisSurfaceStatusResponseSchema,
-} from "@qlever-llc/trellis";
+} from "../models/trellis/rpc/TrellisSurfaceStatus.ts";
 
 const schemas = {
   TrellisSurfaceStatusRequest: TrellisSurfaceStatusRequestSchema,
