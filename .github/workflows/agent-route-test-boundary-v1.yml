@@ -62,10 +62,12 @@ jobs:
             refs/heads/agent/api-subject-namespace-v1:refs/remotes/origin/agent/api-subject-namespace-v1 \
             refs/heads/agent/test-boundary-v1:refs/remotes/origin/agent/test-boundary-v1
           git show origin/agent/api-subject-namespace-v1:scripts/agent_api_subject_namespace_v1.py > /tmp/agent_api_subject_namespace_v1.py
+          git show origin/agent/api-subject-namespace-v1:scripts/agent_api_subject_namespace_v1_fix.py > /tmp/agent_api_subject_namespace_v1_fix.py
           git show origin/agent/test-boundary-v1:scripts/agent_test_boundary_v1.py > /tmp/agent_test_boundary_v1.py
           git show origin/agent/test-boundary-v1:scripts/agent_test_boundary_v1_fix.py > /tmp/agent_test_boundary_v1_fix.py
           python3 -m py_compile \
             /tmp/agent_api_subject_namespace_v1.py \
+            /tmp/agent_api_subject_namespace_v1_fix.py \
             /tmp/agent_test_boundary_v1.py \
             /tmp/agent_test_boundary_v1_fix.py \
             scripts/agent_qualify_integration_subjects.py \
@@ -76,6 +78,7 @@ jobs:
         run: |
           set -euo pipefail
           python3 /tmp/agent_api_subject_namespace_v1.py
+          python3 /tmp/agent_api_subject_namespace_v1_fix.py
           python3 scripts/agent_qualify_integration_subjects.py
           python3 /tmp/agent_test_boundary_v1.py
           python3 /tmp/agent_test_boundary_v1_fix.py
