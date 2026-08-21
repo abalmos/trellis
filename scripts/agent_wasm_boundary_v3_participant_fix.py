@@ -58,9 +58,15 @@ new = '''                let protocol_participant_out = match (
                         entry.npm_out.as_deref(),
                         entry.cargo_out.as_deref(),
                     )
-                    && match protocol_participant_out.as_deref() {
-                        Some(path) => protocol_participant_output_is_fresh(&resolved, path)?,
-                        None => true,
+                    && match (
+                        resolved.participant.as_ref(),
+                        protocol_participant_out.as_deref(),
+                    ) {
+                        (Some(expected), Some(path)) => {
+                            protocol_participant_output_is_fresh(expected, path)?
+                        }
+                        (None, None) => true,
+                        _ => false,
                     }
                 {
 '''
@@ -148,12 +154,9 @@ helper = '''fn protocol_participant_output_path(
 }
 
 fn protocol_participant_output_is_fresh(
-    resolved: &contract_input::ResolvedNativeInput,
+    expected: &trellis_contracts::LoadedParticipant,
     output: &Path,
 ) -> miette::Result<bool> {
-    let Some(expected) = resolved.participant.as_ref() else {
-        return Ok(false);
-    };
     let Ok(existing) = trellis_contracts::load_participant_source(output) else {
         return Ok(false);
     };
@@ -165,5 +168,34 @@ fn protocol_participant_output_is_fresh(
 if text.count(marker) != 1:
     raise RuntimeError(f"helper anchor count: {text.count(marker)}")
 text = text.replace(marker, helper + marker, 1)
+
+test_marker = '''    #[test]
+    fn auto_plan_orders_local_jsr_package_imports_before_dependents() {'''
+test = r'''    #[test]
+    fn protocol_participant_freshness_tracks_semantic_identity() {
+        let temp = tempfile::tempdir().unwrap();
+        let expected_path = temp.path().join("expected.participant.json");
+        let output_path = temp.path().join("generated.participant.json");
+        let service = r#"{"format":"trellis.participant.v1","id":"example.fixture@v1","displayName":"Example","description":"Example participant","kind":"service"}"#;
+        let app = r#"{"format":"trellis.participant.v1","id":"example.fixture@v1","displayName":"Example","description":"Example participant","kind":"app"}"#;
+        fs::write(&expected_path, service).unwrap();
+        fs::write(&output_path, service).unwrap();
+        let expected = trellis_contracts::load_participant_source(&expected_path).unwrap();
+        assert!(protocol_participant_output_is_fresh(&expected, &output_path).unwrap());
+
+        fs::write(&output_path, app).unwrap();
+        assert!(!protocol_participant_output_is_fresh(&expected, &output_path).unwrap());
+
+        fs::write(&output_path, "{").unwrap();
+        assert!(!protocol_participant_output_is_fresh(&expected, &output_path).unwrap());
+
+        fs::remove_file(&output_path).unwrap();
+        assert!(!protocol_participant_output_is_fresh(&expected, &output_path).unwrap());
+    }
+
+'''
+if text.count(test_marker) != 1:
+    raise RuntimeError(f"test anchor count: {text.count(test_marker)}")
+text = text.replace(test_marker, test + test_marker, 1)
 
 path.write_text(text)
