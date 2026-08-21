@@ -1,4 +1,4 @@
-name: Run WASM boundary v3.2 validation
+name: Run WASM boundary v3.3 validation
 
 on:
   push:
@@ -11,7 +11,7 @@ permissions:
   contents: write
 
 concurrency:
-  group: wasm-boundary-v3-2-runner
+  group: wasm-boundary-v3-3-runner
   cancel-in-progress: true
 
 env:
@@ -46,7 +46,7 @@ jobs:
           git config user.email actions@users.noreply.github.com
           printf '%s\n' "$GITHUB_RUN_ID" > .validation-run
           git add .validation-run
-          git commit -m 'Record WASM boundary v3.2 validation'
+          git commit -m 'Record WASM boundary v3.3 validation'
           git push origin HEAD:"$TARGET_BRANCH"
 
       - name: Set up Rust
@@ -98,8 +98,8 @@ jobs:
         run: |
           set -euo pipefail
           rm -rf ts/packages/trellis/auth/protocol_wasm
-          deno eval -A -c ts/deno.json 'const m = await import("./ts/packages/trellis/contracts/trellis_core.ts"); if (!m.API_DIGEST || !m.default.CONTRACT_DIGEST) throw new Error("core contract did not build")'
-          deno eval -A -c ts/deno.json 'const m = await import("./ts/portals/login/contract.ts"); if (!m.default.CONTRACT_DIGEST) throw new Error("portal contract did not build")'
+          deno eval -c ts/deno.json 'const m = await import("./ts/packages/trellis/contracts/trellis_core.ts"); if (!m.API_DIGEST || !m.default.CONTRACT_DIGEST) throw new Error("core contract did not build")'
+          deno eval -c ts/deno.json 'const m = await import("./ts/portals/login/contract.ts"); if (!m.default.CONTRACT_DIGEST) throw new Error("portal contract did not build")'
           test ! -e ts/packages/trellis/auth/protocol_wasm/trellis_protocol_wasm.js
 
       - name: Refresh current tool baselines
