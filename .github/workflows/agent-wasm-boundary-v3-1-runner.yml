@@ -1,4 +1,4 @@
-name: Run WASM boundary v3.10 validation
+name: Run WASM boundary v3.11 validation
 
 on:
   push:
@@ -51,7 +51,7 @@ jobs:
           git config user.email actions@users.noreply.github.com
           printf '%s\n' "$GITHUB_RUN_ID" > .validation-run
           git add .validation-run
-          git commit -m 'Record WASM boundary v3.10 validation'
+          git commit -m 'Record WASM boundary v3.11 validation'
           git push origin HEAD:"$TARGET_BRANCH"
 
       - name: Set up Rust
@@ -112,13 +112,13 @@ jobs:
           cargo test --manifest-path rust/Cargo.toml -p trellis-protocol regenerate_authorization_proof_v1_vector -- --ignored
           python /tmp/vector-regen.py remove
           cargo fmt --manifest-path rust/Cargo.toml --all
-          deno fmt -c ts/deno.json ts/packages/trellis/auth/protocol_wasm.ts
-          if rg -n 'Authorization(Request|Event)Proof(Input)?V2|AuthorizationEventPublisherV2|VerifiedAuthorization(Request|Event)V2|build_authorization_(request|event)_proof_input_v2|sign_authorization_(request|event)_v2|verify_authorization_(request|event)_v2|VerifyAuthorization(Request|Event)V2|verifyAuthorization(Request|Event)V2Wasm|authorization-(request|event)-proof\.v2' rust ts conformance docs; then
+          deno fmt -c ts/deno.json ts/packages/trellis/auth
+          if rg -n 'Authorization(Request|Event)Proof(Input)?V2|AuthorizationEventPublisherV2|VerifiedAuthorization(Request|Event)V2|AuthorizationProvider(Request|Event)V2|create_(request|event)_proof_v2|verify_event_proof_v2|verify_v2_signature|build_authorization_(request|event)_proof_input_v2|sign_authorization_(request|event)_v2|verify_authorization_(request|event)_v2|VerifyAuthorization(Request|Event)V2|verifyAuthorization(Request|Event)V2Wasm|verify(Request|Event)V2|authorization-(request|event)-proof\.v2' rust ts conformance docs; then
             echo 'obsolete request/event proof v2 surface remains' >&2
             exit 1
           fi
-          rg -n 'trellis\.authorization-request-proof\.v1' rust/crates/protocol/src/authorization.rs
-          rg -n 'trellis\.authorization-event-proof\.v1' rust/crates/protocol/src/authorization.rs
+          rg -n 'trellis\.authorization-request-proof\.v1' rust/crates/protocol/src/authorization.rs ts/packages/trellis/auth/proof.ts
+          rg -n 'trellis\.authorization-event-proof\.v1' rust/crates/protocol/src/authorization.rs ts/packages/trellis/auth/proof.ts
           rg -n 'verify_authorization_request_v1|verify_authorization_event_v1' rust/crates/protocol-wasm/src/lib.rs ts/packages/trellis/auth/protocol_wasm.ts
           python - <<'PY'
           import json
@@ -161,7 +161,6 @@ jobs:
               'generated/protocol/participants/trellis.console@v1.json',
               'generated/protocol/participants/trellis.core@v1.json',
               'generated/protocol/participants/trellis.portal.activation@v1.json',
-              'rust/crates/trellis/src/client/mod.rs',
               'ts/deno.lock',
           }
           changed = set(filter(None, subprocess.check_output(
@@ -175,7 +174,6 @@ jobs:
             generated/protocol/participants/trellis.console@v1.json \
             generated/protocol/participants/trellis.core@v1.json \
             generated/protocol/participants/trellis.portal.activation@v1.json \
-            rust/crates/trellis/src/client/mod.rs \
             ts/deno.lock
           git commit -m 'Refresh generated participant baselines'
 
@@ -224,6 +222,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          deno fmt -c ts/deno.json --check
           deno check -c ts/deno.json \
             ts/packages/trellis/index.ts \
             ts/packages/trellis-svelte/src/index.ts \
@@ -233,6 +232,15 @@ jobs:
           deno task -c ts/deno.json test:prepared
           deno task -c ts/packages/trellis/deno.json build:npm
           deno test -A -c ts/deno.json ts/packages/trellis/tests/npm_artifact_smoke_test.ts
+          git diff --exit-code
+
+      - name: Validate Rust protocol and client
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --manifest-path rust/Cargo.toml -p trellis-protocol
+          cargo test --manifest-path rust/Cargo.toml -p trellis-rs --lib
+          cargo clippy --manifest-path rust/Cargo.toml -p trellis-protocol -p trellis-protocol-wasm -p trellis-rs --all-targets -- -D warnings
           git diff --exit-code
 
       - name: Validate Rust tooling
