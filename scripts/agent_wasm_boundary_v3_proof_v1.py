@@ -46,7 +46,8 @@ text = text.replace("local_authorization_v2_", "local_authorization_v1_")
 wasm.write_text(text)
 
 # TypeScript exposes the same first-public unversioned API while calling the
-# explicitly-versioned v1 WASM ABI.
+# explicitly-versioned v1 WASM ABI. Provider request/event values are ordinary
+# in-memory verifier inputs, not independently-versioned serialized formats.
 ts_replacements = {
     "VerifyAuthorizationRequestV2Result": "VerifyAuthorizationRequestResult",
     "VerifyAuthorizationEventV2Result": "VerifyAuthorizationEventResult",
@@ -54,6 +55,10 @@ ts_replacements = {
     "VerifyAuthorizationEventV2Args": "VerifyAuthorizationEventArgs",
     "verifyAuthorizationRequestV2Wasm": "verifyAuthorizationRequestWasm",
     "verifyAuthorizationEventV2Wasm": "verifyAuthorizationEventWasm",
+    "AuthorizationProviderRequestV2": "AuthorizationProviderRequest",
+    "AuthorizationProviderEventV2": "AuthorizationProviderEvent",
+    "verifyRequestV2": "verifyRequest",
+    "verifyEventV2": "verifyEvent",
 }
 replace_in_tree("ts", (".ts", ".tsx"), ts_replacements)
 
@@ -62,6 +67,60 @@ text = wrapper.read_text()
 text = text.replace("verify_authorization_request_v2", "verify_authorization_request_v1")
 text = text.replace("verify_authorization_event_v2", "verify_authorization_event_v1")
 wrapper.write_text(text)
+
+# Lightweight proof transcript construction/signing intentionally stays native
+# in TypeScript, but it must use the same first-public domains as Rust.
+proof = Path("ts/packages/trellis/auth/proof.ts")
+text = proof.read_text()
+text = text.replace(
+    'utf8("trellis.authorization-request-proof.v2")',
+    'utf8("trellis.authorization-request-proof.v1")',
+)
+text = text.replace(
+    'utf8("trellis.authorization-event-proof.v2")',
+    'utf8("trellis.authorization-event-proof.v1")',
+)
+text = text.replace("canonical v2 context-bound request proof", "canonical v1 context-bound request proof")
+text = text.replace("canonical v2 context-bound event proof", "canonical v1 context-bound event proof")
+proof.write_text(text)
+
+mod = Path("ts/packages/trellis/auth/mod.ts")
+text = mod.read_text().replace(
+    "// Context-bound v2 proof helpers for local signing and signature verification.",
+    "// Context-bound proof helpers for local signing and signature verification.",
+)
+mod.write_text(text)
+
+types = Path("ts/packages/trellis/auth/authorization/types.ts")
+text = types.read_text()
+text = text.replace(
+    "/** Presented request-v2 data supplied by a provider transport adapter. */",
+    "/** Presented request proof data supplied by a provider transport adapter. */",
+)
+text = text.replace(
+    "/** Presented event-v2 data supplied by a provider event adapter. */",
+    "/** Presented event proof data supplied by a provider event adapter. */",
+)
+types.write_text(text)
+
+provider = Path("ts/packages/trellis/auth/authorization/provider_cache.ts")
+text = provider.read_text()
+text = text.replace(
+    "/** Verify a presented request-v2 proof with exact route permissions. */",
+    "/** Verify a presented request proof with exact route permissions. */",
+)
+text = text.replace(
+    "/** Verify a presented event-v2 proof with exact publish permissions. */",
+    "/** Verify a presented event proof with exact publish permissions. */",
+)
+provider.write_text(text)
+
+conformance = Path("ts/packages/trellis/auth/conformance_test.ts")
+text = conformance.read_text().replace(
+    'Deno.test("request and event proof v2 match language-neutral vectors", async () => {',
+    'Deno.test("request and event proof v1 match language-neutral vectors", async () => {',
+)
+conformance.write_text(text)
 
 # Only the request/event proof domains change. Authorization context, manifest,
 # grant-set, and session-proof v1 formats are independent serialized contracts.
