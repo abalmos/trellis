@@ -40,16 +40,16 @@ core_replacements = {
 }
 replace_in_tree("rust", (".rs",), core_replacements)
 
-# The remaining v2 prose in the Rust facade describes this same prerelease proof
-# layer, not a separately-versioned serialized record.
-replace_in_tree(
-    "rust",
-    (".rs",),
-    {
-        "context-bound v2 `proof` header": "context-bound v1 `proof` header",
-        "context-bound v2 event proof": "context-bound v1 event proof",
-    },
-)
+# Remaining v2 prose describes this same prerelease proof layer, not a separate
+# serialized record. Keep the first-public implementation vocabulary coherent.
+proof_prose = {
+    "v2 request and event proofs": "v1 request and event proofs",
+    "v2 request proof": "v1 request proof",
+    "v2 event proof": "v1 event proof",
+    "context-bound v2 `proof` header": "context-bound v1 `proof` header",
+    "context-bound v2 event proof": "context-bound v1 event proof",
+}
+replace_in_tree("rust", (".rs",), proof_prose)
 
 # The WASM wire ABI remains explicitly versioned even though the Rust API is the
 # first-public unversioned proof API.
@@ -162,7 +162,7 @@ text = readme.read_text().replace("request-proof v2 vectors", "request/event-pro
 readme.write_text(text)
 
 # Guard the clean break inside the transform too, so any newly-added stale
-# prerelease name retriggers validation and fails before the test/build phases.
+# prerelease name or prose retriggers validation and fails before build phases.
 stale = (
     "AuthorizationRequestProofV2",
     "AuthorizationEventProofV2",
@@ -185,6 +185,11 @@ stale = (
     "verifyAuthorizationEventV2Wasm",
     "trellis.authorization-request-proof.v2",
     "trellis.authorization-event-proof.v2",
+    "v2 request and event proofs",
+    "v2 request proof",
+    "v2 event proof",
+    "request-v2",
+    "event-v2",
 )
 for root in ("rust", "ts", "conformance", "docs"):
     for candidate in Path(root).rglob("*"):
