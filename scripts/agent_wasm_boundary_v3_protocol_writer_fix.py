@@ -93,3 +93,95 @@ replace_once(
 ''',
     "protocol participant call",
 )
+
+# Every source/task that actually loads runtime protocol resolution requests the
+# generated WASM explicitly. Contract source evaluation itself remains WASM-free.
+replace_once(
+    "ts/deno.json",
+    '    "protocol:wasm": "cargo run --manifest-path ../rust/xtask/Cargo.toml -- protocol-wasm",',
+    '    "protocol:wasm": "cargo run --manifest-path ../rust/xtask/Cargo.toml -- protocol-wasm",\n    "prepare:runtime": "deno task prepare && deno task protocol:wasm && deno task -c portals/login/deno.json build:embedded",',
+    "runtime preparation task",
+)
+replace_once(
+    "ts/deno.json",
+    '    "check:integration": "deno check -c integration/deno.json integration/all_runner.ts integration/runner.ts integration/matrix_conformance_test.ts integration/_support/runtime.ts integration/authorization_registry/*.integration_test.ts integration/rpc/_fixture.ts integration/rpc/*.integration_test.ts integration/events/_fixture.ts integration/events/*.integration_test.ts integration/operations/_fixture.ts integration/operations/*.integration_test.ts integration/feeds/_fixture.ts integration/feeds/*.integration_test.ts integration/transfer/_fixture.ts integration/transfer/*.integration_test.ts integration/resources/_fixture.ts integration/resources/*.integration_test.ts integration/state/*.integration_test.ts",',
+    '    "check:integration": "deno task prepare && deno task protocol:wasm && deno check -c integration/deno.json integration/all_runner.ts integration/runner.ts integration/matrix_conformance_test.ts integration/_support/runtime.ts integration/authorization_registry/*.integration_test.ts integration/rpc/_fixture.ts integration/rpc/*.integration_test.ts integration/events/_fixture.ts integration/events/*.integration_test.ts integration/operations/_fixture.ts integration/operations/*.integration_test.ts integration/feeds/_fixture.ts integration/feeds/*.integration_test.ts integration/transfer/_fixture.ts integration/transfer/*.integration_test.ts integration/resources/_fixture.ts integration/resources/*.integration_test.ts integration/state/*.integration_test.ts",',
+    "integration typecheck task",
+)
+replace_once(
+    "ts/deno.json",
+    '    "test:client-integration": "deno run -A -c integration/deno.json integration/runner.ts",',
+    '    "test:client-integration": "deno task prepare:runtime && deno run -A -c integration/deno.json integration/runner.ts",',
+    "client integration task",
+)
+replace_once(
+    "ts/deno.json",
+    '    "test:integration": "deno run -A -c integration/deno.json integration/all_runner.ts",',
+    '    "test:integration": "deno task prepare:runtime && deno run -A -c integration/deno.json integration/all_runner.ts",',
+    "integration task",
+)
+replace_once(
+    "ts/deno.json",
+    '    "test:contracts": "deno task prepare && deno test -A packages/trellis/contract_support/protocol_test.ts packages/trellis/contract_support/protocol_artifacts_test.ts packages/trellis/contract_support/descriptors_test.ts",',
+    '    "test:contracts": "deno task prepare && deno task protocol:wasm && deno test -A packages/trellis/contract_support/protocol_test.ts packages/trellis/contract_support/protocol_artifacts_test.ts packages/trellis/contract_support/descriptors_test.ts",',
+    "contract tests",
+)
+
+for task, command in [
+    ("dev", "deno run -A vite dev"),
+    ("build", "deno run -A vite build"),
+    ("check", "deno run -A @sveltejs/kit sync && deno run -A svelte-check --tsconfig ./tsconfig.check.json"),
+]:
+    replace_once(
+        "ts/apps/console/deno.json",
+        f'    "{task}": "deno task prepare && {command}",',
+        f'    "{task}": "deno task prepare && deno task -c ../../deno.json protocol:wasm && {command}",',
+        f"console {task} task",
+    )
+
+replace_once(
+    "docs/deno.json",
+    '    "docs:api": "deno task -c ../ts/deno.json prepare && deno run -A ./scripts/generate_ts_api_docs.ts",',
+    '    "docs:api": "deno task -c ../ts/deno.json prepare && deno task -c ../ts/deno.json protocol:wasm && deno run -A ./scripts/generate_ts_api_docs.ts",',
+    "docs API task",
+)
+
+# Pages bypasses the app/doc task wrappers to control output roots. Generate the
+# focused WASM only for source trees that no longer carry the old checked-in output.
+replace_once(
+    ".github/workflows/pages.yml",
+    '''      - uses: dtolnay/rust-toolchain@stable
+''',
+    '''      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+''',
+    "pages Rust WASM target",
+)
+replace_once(
+    ".github/workflows/pages.yml",
+    '''          prepare_once "${release_worktree}" "${latest_tag}"
+          prepare_once "${current_root}" "${current_tag}"
+
+          build_docs "${release_docs_root}" "${site_root}" "${release_root}/docs"
+''',
+    '''          prepare_once "${release_worktree}" "${latest_tag}"
+          prepare_once "${current_root}" "${current_tag}"
+
+          ensure_protocol_wasm() {
+            local repo_root="$1"
+            local output="${repo_root}/ts/packages/trellis/auth/protocol_wasm/trellis_protocol_wasm.js"
+            if [ -s "${output}" ]; then
+              return 0
+            fi
+            cargo run --manifest-path "${repo_root}/rust/xtask/Cargo.toml" -- protocol-wasm
+          }
+
+          ensure_protocol_wasm "${release_docs_root}"
+          ensure_protocol_wasm "${release_console_root}"
+          ensure_protocol_wasm "${current_root}"
+
+          build_docs "${release_docs_root}" "${site_root}" "${release_root}/docs"
+''',
+    "pages protocol WASM preparation",
+)
