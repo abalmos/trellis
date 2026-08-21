@@ -5,6 +5,7 @@ on:
     branches:
       - agent/test-boundary-v1
     paths:
+      - scripts/agent_test_boundary_v1_pre.py
       - scripts/agent_test_boundary_v1.py
       - scripts/agent_test_boundary_v1_fix.py
       - scripts/agent_test_boundary_noop_cleanup.py
@@ -55,10 +56,12 @@ jobs:
         run: |
           set -euo pipefail
           python3 -m py_compile \
+            scripts/agent_test_boundary_v1_pre.py \
             scripts/agent_test_boundary_v1.py \
             scripts/agent_test_boundary_v1_fix.py \
             scripts/agent_test_boundary_noop_cleanup.py \
             scripts/agent_test_subject_collision_audit.py
+          python3 scripts/agent_test_boundary_v1_pre.py
           python3 scripts/agent_test_boundary_v1.py
           python3 scripts/agent_test_boundary_v1_fix.py
           python3 scripts/agent_test_boundary_noop_cleanup.py
@@ -131,6 +134,7 @@ jobs:
         run: |
           set -euo pipefail
           rm -f \
+            scripts/agent_test_boundary_v1_pre.py \
             scripts/agent_test_boundary_v1.py \
             scripts/agent_test_boundary_v1_fix.py \
             scripts/agent_test_boundary_noop_cleanup.py \
@@ -142,6 +146,7 @@ jobs:
             rust/crates/trellis-test \
             ts/packages/trellis-test/src
           git add -u -- \
+            scripts/agent_test_boundary_v1_pre.py \
             scripts/agent_test_boundary_v1.py \
             scripts/agent_test_boundary_v1_fix.py \
             scripts/agent_test_boundary_noop_cleanup.py \
