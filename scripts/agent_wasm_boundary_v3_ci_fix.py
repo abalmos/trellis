@@ -8,9 +8,13 @@ def replace_once(text: str, old: str, new: str, label: str) -> str:
     return text.replace(old, new, 1)
 
 
-# Check: edit only the preparation job; the Rust/live jobs have their own toolchains.
+# Check: use the current self-hosted Linux/x64 pool, then edit only preparation.
 path = Path(".github/workflows/check.yml")
 text = path.read_text()
+runner = "    runs-on: ubuntu-latest"
+if text.count(runner) != 5:
+    raise RuntimeError(f"check runners: expected five ubuntu jobs, found {text.count(runner)}")
+text = text.replace(runner, "    runs-on: [self-hosted, Linux, X64]")
 start = text.index("  prepare:\n")
 end = text.index("\n  generated:\n", start)
 prepare = text[start:end]
