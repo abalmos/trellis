@@ -111,7 +111,7 @@ git add -- \\
 git commit -m 'Keep external smoke in live phase'
 
 # Apply the independently reviewed follow-up commits before the full gate.
-git fetch origin agent/wasm-boundary-reviewed-followups
+git fetch --depth=20 origin agent/wasm-boundary-reviewed-followups
 git cherry-pick \
   da8ad8554aa30721635a2e5db77e9a9cc3e92d83 \
   8acc4fef7371fe67bb169de383bc64248a20263d \
