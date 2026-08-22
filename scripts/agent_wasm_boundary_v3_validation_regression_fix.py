@@ -10,70 +10,34 @@ def replace_once(text: str, old: str, new: str, label: str) -> str:
     return text.replace(old, new, 1)
 
 
-# The release workflow already builds one shared live artifact bundle. Preserve
-# the cheap inventory-only proof before the full shared live execution instead
-# of weakening the existing release invariant.
-path = Path(".github/workflows/release.yml")
+path = Path("ts/packages/trellis/tests/publishing_targets_test.ts")
 text = path.read_text()
-verify_live = "  verify-live:\n"
-insert_at = text.index(verify_live)
-inventory = '''  verify-live-inventory:
-    name: Verify shared live inventory
-    needs:
-      - prepare-release
-      - verify-live-build
-    runs-on: [self-hosted, Linux, X64]
 
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
-
-      - name: Download prepared release workspace
-        uses: actions/download-artifact@v4
-        with:
-          name: prepared-release
-          path: .
-
-      - name: Download shared live artifacts
-        uses: actions/download-artifact@v4
-        with:
-          name: integration-live-artifacts
-          path: dist/integration-runtime
-
-      - name: Set up Deno
-        uses: denoland/setup-deno@v2
-        with:
-          deno-version: ${{ env.DENO_VERSION }}
-
-      - name: Verify shared live inventory
-        run: deno run -A -c ts/deno.json integration/live_runner.ts --inventory-only --prebuilt-only --artifacts-manifest dist/integration-runtime/manifest.json
-
-'''
-text = text[:insert_at] + inventory + text[insert_at:]
+# The standalone live-inventory pass was deliberately removed earlier in the
+# cleanup. Make the release guard assert that simplification instead of carrying
+# a stale expectation for the deleted lane.
 text = replace_once(
     text,
-    '''  verify-live:
-    name: Verify shared live lane
-    needs:
-      - prepare-release
-      - verify-live-build
+    '''  assertStringIncludes(releaseWorkflow, "\\n  verify-live-inventory:");
+  assertStringIncludes(
+    releaseWorkflow,
+    "integration/live_runner.ts --inventory-only --prebuilt-only --artifacts-manifest dist/integration-runtime/manifest.json",
+  );
 ''',
-    '''  verify-live:
-    name: Verify shared live lane
-    needs:
-      - prepare-release
-      - verify-live-build
-      - verify-live-inventory
+    '''  assertEquals(releaseWorkflow.includes("\\n  verify-live-inventory:"), false);
+  assertEquals(releaseWorkflow.includes("--inventory-only"), false);
 ''',
-    "release live inventory dependency",
+    "stale live inventory assertions",
 )
-path.write_text(text)
-
+text = replace_once(
+    text,
+    '  assertStringIncludes(verifyLive, "- verify-live-inventory");',
+    '  assertEquals(verifyLive.includes("- verify-live-inventory"), false);',
+    "stale live inventory dependency assertion",
+)
 
 # The packet removes the package self-import from trellis_core.ts. Tighten the
 # publishing guard from one known offender to zero offenders.
-path = Path("ts/packages/trellis/tests/publishing_targets_test.ts")
-text = path.read_text()
 text = replace_once(
     text,
     '  assertEquals(offenders, ["contracts/trellis_core.ts"]);',
