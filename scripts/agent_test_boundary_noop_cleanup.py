@@ -23,16 +23,47 @@ if text.count(old) != 1:
 text = text.replace(old, "", 1)
 text = text.replace(".request_json(&self.descriptor_subject(D::SUBJECT), value)", ".request_json(D::SUBJECT, value)")
 text = text.replace(".request_json(&self.descriptor_subject(D::SUBJECT), input)", ".request_json(D::SUBJECT, input)")
-text = text.replace(
-    "prepare_event::<D>(event)?.with_subject(self.descriptor_subject(D::SUBJECT))",
-    "prepare_event::<D>(event)?.with_subject(D::SUBJECT)",
-)
-text = text.replace(
-    '''let event = event
+old = "        let prepared = prepare_event::<D>(event)?.with_subject(self.descriptor_subject(D::SUBJECT));\n"
+new = "        let prepared = prepare_event::<D>(event)?;\n"
+if text.count(old) != 1:
+    raise RuntimeError(f"{path}: typed event publish subject overwrite changed")
+text = text.replace(old, new, 1)
+old = '''    pub async fn publish_prepared(
+        &self,
+        event: &PreparedTrellisEvent,
+    ) -> Result<(), TrellisClientError> {
+        let event = event
             .clone()
-            .with_subject(self.descriptor_subject(event.subject()));''',
-    "let event = event.clone();",
-)
+            .with_subject(self.descriptor_subject(event.subject()));
+        let context_digest = self.authorization_context_digest()?;
+        publish_prepared_event(
+            &self.nats,
+            &self.auth,
+            &context_digest,
+            self.timeout_ms,
+            &event,
+        )
+        .await
+    }
+'''
+new = '''    pub async fn publish_prepared(
+        &self,
+        event: &PreparedTrellisEvent,
+    ) -> Result<(), TrellisClientError> {
+        let context_digest = self.authorization_context_digest()?;
+        publish_prepared_event(
+            &self.nats,
+            &self.auth,
+            &context_digest,
+            self.timeout_ms,
+            event,
+        )
+        .await
+    }
+'''
+if text.count(old) != 1:
+    raise RuntimeError(f"{path}: prepared event subject rewrite shape changed")
+text = text.replace(old, new, 1)
 text = text.replace(".subscribe(self.descriptor_subject(D::SUBSCRIBE_SUBJECT))", ".subscribe(D::SUBSCRIBE_SUBJECT)")
 text = text.replace(
     "event_consumer_config(&options, self.descriptor_subject(D::SUBSCRIBE_SUBJECT))",
@@ -48,6 +79,28 @@ old = '''impl OperationTransport for TrellisClient {
 if text.count(old) != 1:
     raise RuntimeError(f"{path}: OperationTransport resolver shape changed")
 text = text.replace(old, "impl OperationTransport for TrellisClient {\n", 1)
+write(path, text)
+
+# Prepared events already carry their exact concrete subject. The private
+# subject-rewrite helper existed only for integration-test scoping and is now
+# both unnecessary and incorrect for descriptor subjects with dynamic tokens.
+path = "rust/crates/trellis/src/client/events.rs"
+text = read(path)
+old = '''impl PreparedTrellisEvent {
+    pub(crate) fn with_subject(mut self, subject: String) -> Self {
+        self.subject = subject;
+        self
+    }
+    /// Build a prepared event from an already encoded JSON body payload.
+'''
+new = '''impl PreparedTrellisEvent {
+    /// Build a prepared event from an already encoded JSON body payload.
+'''
+if text.count(old) != 1:
+    raise RuntimeError(f"{path}: prepared event subject mutator shape changed")
+text = text.replace(old, new, 1)
+if "with_subject(" in text:
+    raise RuntimeError(f"{path}: stale prepared event subject mutator")
 write(path, text)
 
 path = "rust/crates/trellis/src/client/operations.rs"
