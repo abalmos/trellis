@@ -34,6 +34,9 @@ jobs:
         with:
           components: rustfmt
 
+      - name: Expose Rust toolchain binaries
+        run: echo "$(dirname "$(rustup which rustfmt)")" >> "$GITHUB_PATH"
+
       - name: Set up Deno
         uses: denoland/setup-deno@v2
         with:
@@ -170,6 +173,11 @@ jobs:
 
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+
+      - name: Expose Rust toolchain binaries
+        run: echo "$(dirname "$(rustup which rustfmt)")" >> "$GITHUB_PATH"
 
       - name: Set up Deno
         uses: denoland/setup-deno@v2
