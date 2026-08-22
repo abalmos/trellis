@@ -53,8 +53,44 @@ for value in ("device.approval.deployment_id", "no_review.approval.deployment_id
         {value},
     )'''
     if text.count(old) != 1:
-        raise RuntimeError(f"expected one scoped activation event subject for {value}")
+        raise RuntimeError(f"expected one activation event subject for {value}")
     text = text.replace(old, new, 1)
+
+resolved_old = '''fixture
+        .runtime
+        .integration_test_descriptor_subject(&format!(
+            "{}.{}",
+            auth_sdk::events::AuthDeviceUserAuthoritiesResolvedEventDescriptor::SUBJECT,
+            device.approval.deployment_id,
+        ))'''
+resolved_new = '''format!(
+        "{}.{}",
+        auth_sdk::events::AuthDeviceUserAuthoritiesResolvedEventDescriptor::SUBJECT,
+        device.approval.deployment_id,
+    )'''
+if text.count(resolved_old) != 2:
+    raise RuntimeError(
+        f"expected two resolved authority event subjects, found {text.count(resolved_old)}"
+    )
+text = text.replace(resolved_old, resolved_new)
+
+rpc_observer = '''        .subscribe(
+            fixture
+                .runtime
+                .integration_test_descriptor_subject(ValueGet::SUBJECT),
+        )'''
+if text.count(rpc_observer) != 1:
+    raise RuntimeError(f"expected one raw RPC observer, found {text.count(rpc_observer)}")
+text = text.replace(rpc_observer, "        .subscribe(ValueGet::SUBJECT)", 1)
+
+event_observer = '''        .subscribe(
+            fixture
+                .runtime
+                .integration_test_descriptor_subject(ValueChanged::SUBJECT),
+        )'''
+if text.count(event_observer) != 1:
+    raise RuntimeError(f"expected one raw event observer, found {text.count(event_observer)}")
+text = text.replace(event_observer, "        .subscribe(ValueChanged::SUBJECT)", 1)
 
 for token in ("scoped_contract", "integration_test_descriptor_subject"):
     if token in text:
