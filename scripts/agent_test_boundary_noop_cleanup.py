@@ -1,11 +1,13 @@
 from pathlib import Path
-import re
+
 
 def read(path: str) -> str:
     return Path(path).read_text()
 
+
 def write(path: str, text: str) -> None:
     Path(path).write_text(text)
+
 
 # After protocol scoping is removed, subject resolvers are pure identity wrappers.
 # Delete the indirection rather than keeping compatibility shims.
@@ -94,8 +96,97 @@ old = '''    fn descriptor_name(&self, name: &str) -> String {
 if text.count(old) != 1:
     raise RuntimeError(f"{path}: router name identity helper changed")
 text = text.replace(old, "", 1)
+old = '''    fn descriptor_capabilities(&self, capabilities: &[&str]) -> Vec<String> {
+        capabilities
+            .iter()
+            .map(|capability| (*capability).to_string())
+            .collect()
+    }
+
+'''
+if text.count(old) != 1:
+    raise RuntimeError(f"{path}: router capability identity helper changed")
+text = text.replace(old, "", 1)
+
+# Generated descriptor capability lists are static data. Keep them static in the
+# routing table and allocate owned strings only when a request asks for the
+# required-capability projection.
+old = '''enum RouteCapabilities {
+    Static(Vec<String>),
+    OperationControl {
+        observe: Vec<String>,
+        cancel: Vec<String>,
+        control: Vec<String>,
+    },
+}
+'''
+new = '''enum RouteCapabilities {
+    Static(&'static [&'static str]),
+    OperationControl {
+        observe: &'static [&'static str],
+        cancel: &'static [&'static str],
+        control: &'static [&'static str],
+    },
+}
+'''
+if text.count(old) != 1:
+    raise RuntimeError(f"{path}: RouteCapabilities storage shape changed")
+text = text.replace(old, new, 1)
+old = '''        let capabilities = match self {
+            Self::Static(capabilities) => capabilities,
+            Self::OperationControl {
+                observe,
+                cancel,
+                control,
+            } => match serde_json::from_slice::<OperationControlRequest>(payload) {
+                Ok(request) => match request.action.as_str() {
+                    "get" | "wait" | "watch" => observe,
+                    "cancel" => cancel,
+                    "signal" => control,
+                    _ => return Some(Vec::new()),
+                },
+                Err(_) => return Some(Vec::new()),
+            },
+        };
+
+        Some(capabilities.to_vec())
+'''
+new = '''        let capabilities = match self {
+            Self::Static(capabilities) => *capabilities,
+            Self::OperationControl {
+                observe,
+                cancel,
+                control,
+            } => match serde_json::from_slice::<OperationControlRequest>(payload) {
+                Ok(request) => match request.action.as_str() {
+                    "get" | "wait" | "watch" => *observe,
+                    "cancel" => *cancel,
+                    "signal" => *control,
+                    _ => return Some(Vec::new()),
+                },
+                Err(_) => return Some(Vec::new()),
+            },
+        };
+
+        Some(
+            capabilities
+                .iter()
+                .map(|capability| (*capability).to_owned())
+                .collect(),
+        )
+'''
+if text.count(old) != 1:
+    raise RuntimeError(f"{path}: RouteCapabilities projection shape changed")
+text = text.replace(old, new, 1)
+
+text = text.replace("let capabilities = self.descriptor_capabilities(D::CALLER_CAPABILITIES);", "let capabilities = D::CALLER_CAPABILITIES;")
+text = text.replace("let capabilities = self.descriptor_capabilities(D::SUBSCRIBE_CAPABILITIES);", "let capabilities = D::SUBSCRIBE_CAPABILITIES;")
 text = text.replace("self.descriptor_subject(D::SUBJECT)", "D::SUBJECT.to_owned()")
 text = text.replace("self.descriptor_name(D::KEY)", "D::KEY.to_owned()")
+text = text.replace("self.descriptor_capabilities(D::CALLER_CAPABILITIES)", "D::CALLER_CAPABILITIES")
+text = text.replace("self.descriptor_capabilities(D::OBSERVE_CAPABILITIES)", "D::OBSERVE_CAPABILITIES")
+text = text.replace("self.descriptor_capabilities(D::CANCEL_CAPABILITIES)", "D::CANCEL_CAPABILITIES")
+text = text.replace("self.descriptor_capabilities(D::CONTROL_CAPABILITIES)", "D::CONTROL_CAPABILITIES")
 write(path, text)
 
 path = "rust/crates/trellis/src/service/runtime_facade.rs"
@@ -117,9 +208,9 @@ text = text.replace("client.descriptor_subject(D::SUBJECT)", "D::SUBJECT.to_owne
 text = text.replace(".subscribe(D::SUBJECT.to_owned())", ".subscribe(D::SUBJECT)")
 write(path, text)
 
-# No source-level subject/name compatibility resolver should survive.
+# No source-level subject/name/capability compatibility resolver should survive.
 for candidate in Path("rust/crates/trellis/src").rglob("*.rs"):
     content = candidate.read_text()
-    for token in ("descriptor_subject(", "descriptor_name("):
+    for token in ("descriptor_subject(", "descriptor_name(", "descriptor_capabilities("):
         if token in content:
             raise RuntimeError(f"stale descriptor identity wrapper {token!r} in {candidate}")
