@@ -76,6 +76,9 @@ ts_replacements = {
     "AuthorizationProviderEventV2": "AuthorizationProviderEvent",
     "verifyRequestV2": "verifyRequest",
     "verifyEventV2": "verifyEvent",
+    "trellis.authorization-request-proof.v2": "trellis.authorization-request-proof.v1",
+    "trellis.authorization-event-proof.v2": "trellis.authorization-event-proof.v1",
+    **proof_prose,
 }
 replace_in_tree("ts", (".ts", ".tsx"), ts_replacements)
 
