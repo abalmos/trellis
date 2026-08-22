@@ -30,6 +30,8 @@ jobs:
 
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
 
       - name: Set up Deno
         uses: denoland/setup-deno@v2
@@ -80,7 +82,6 @@ jobs:
         env:
           GENERATED_CURRENT: ${{ needs.prepare.outputs.current }}
         run: test "$GENERATED_CURRENT" = true
-
 
   wasm:
     name: Protocol WASM
