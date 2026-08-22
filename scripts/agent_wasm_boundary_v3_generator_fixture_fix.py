@@ -40,7 +40,7 @@ text = text.replace(old, new, 1)
 
 def patch_test(name: str, digests: list[str]) -> None:
     global text
-    marker = f"#[test]\\nfn {name}() {{"
+    marker = f"#[test]\nfn {name}() {{"
     start = text.find(marker)
     if start < 0:
         raise SystemExit(f"missing test {name}")
@@ -81,10 +81,7 @@ patch_test(
     ],
 )
 
-remaining = [
-    match.start()
-    for match in re.finditer(re.escape(placeholder), text)
-]
+remaining = [match.start() for match in re.finditer(re.escape(placeholder), text)]
 if len(remaining) != 1:
     raise SystemExit(
         f"expected only the intentionally-invalid fixture placeholder to remain, found {len(remaining)}"
