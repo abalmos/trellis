@@ -37,6 +37,7 @@ cargo fmt --manifest-path rust/tools/generate/Cargo.toml
 deno fmt -c ts/deno.json \
   ts/deno.json \
   ts/apps/console/deno.json \
+  ts/apps/console/src/lib/trellis-context.svelte.ts \
   ts/packages/trellis/deno.json \
   ts/packages/trellis/contract_support/protocol_artifacts.ts \
   ts/packages/trellis/contract_support/protocol_artifacts_test.ts \
@@ -45,6 +46,12 @@ deno fmt -c ts/deno.json \
   ts/packages/trellis/client_connect.ts \
   ts/packages/trellis/service/runtime/service.ts \
   ts/packages/trellis/contracts/trellis_core.ts \
+  ts/packages/trellis/tests/connect_public_typing_test.ts \
+  ts/packages/trellis-svelte/src/context.svelte.ts \
+  ts/packages/trellis-svelte/src/context.api_check.ts \
+  ts/packages/trellis-test/src/runtime.ts \
+  ts/packages/trellis-test/src/types.ts \
+  ts/packages/trellis-test/src/admin/methods.ts \
   ts/portals/login/contract.ts \
   ts/portals/login/deno.json \
   docs/deno.json
@@ -139,10 +146,13 @@ test -s ts/packages/trellis/auth/protocol_wasm/trellis_protocol_wasm_bytes.ts
 deno task -c ts/portals/login/deno.json build:embedded
 git diff --exit-code
 
-# Intrinsic participant identity must match Rust contextual resolution.
+# Intrinsic participant identity must match Rust contextual resolution and no
+# TypeScript author/runtime surface may resurrect eager contextual identity.
 deno test -A -c ts/deno.json \
   ts/packages/trellis/contract_support/protocol_artifacts_test.ts
-if rg -n 'PARTICIPANT_NEEDS_DIGEST' ts/packages/trellis --glob '!npm/**'; then
+if rg -n 'PARTICIPANT_NEEDS_DIGEST' ts \
+  --glob '!**/npm/**' \
+  --glob '!**/node_modules/**'; then
   echo 'eager participant needs digest remains in TypeScript source' >&2
   exit 1
 fi
