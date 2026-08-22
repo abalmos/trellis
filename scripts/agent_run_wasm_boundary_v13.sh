@@ -73,15 +73,13 @@ git add -- \\
   ts/tools/package_build/result_npm_test.ts
 git commit -m 'Keep package-build tests in packaging phase'
 
-# Preserve the meaningful pre-existing release inventory invariant and tighten
-# the package self-import guard now that trellis_core.ts is clean.
+# Match the already-landed release simplification and tighten the package
+# self-import guard now that trellis_core.ts is clean.
 python3 /tmp/validation-regression.py
 deno fmt -c ts/deno.json ts/packages/trellis/tests/publishing_targets_test.ts
 git diff --check
-git add -- \\
-  .github/workflows/release.yml \\
-  ts/packages/trellis/tests/publishing_targets_test.ts
-git commit -m 'Restore release inventory and self-import guard'
+git add -- ts/packages/trellis/tests/publishing_targets_test.ts
+git commit -m 'Align release and self-import guards'
 
 # Prove clean generation order: source resolution and participant emission occur
 ''',
