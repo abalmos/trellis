@@ -41,6 +41,9 @@ jobs:
           git config --local tag.gpgSign false
           printf '%s.%s\n' "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" > .validation-run
           test -s .validation-run
+          git add .validation-run
+          git commit -m 'Start WASM boundary validation'
+          git push origin HEAD:${{ env.TARGET_BRANCH }}
 
       - name: Load scratch validator
         uses: actions/checkout@v4
