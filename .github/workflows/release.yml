@@ -47,7 +47,7 @@ jobs:
   resolve-release:
     name: Resolve release marker
     if: github.event_name != 'push' || github.event.deleted != true
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64]
     outputs:
       release-tag: ${{ steps.release.outputs.tag }}
       release-version: ${{ steps.release.outputs.version }}
@@ -114,7 +114,7 @@ jobs:
   prepare-release:
     name: Prepare release workspace
     needs: resolve-release
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64]
     outputs:
       release-tag: ${{ steps.release.outputs.tag }}
       release-version: ${{ steps.release.outputs.version }}
@@ -147,12 +147,17 @@ jobs:
 
       - name: Set up Rust toolchain
         uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
 
       - name: Prepare release version
         run: time cargo run --manifest-path xtask/Cargo.toml -- release prepare --tag "${RELEASE_TAG}"
 
       - name: Generate release SDK artifacts
         run: time cargo run --manifest-path rust/tools/generate/Cargo.toml -- prepare --no-npm .
+
+      - name: Build protocol WASM
+        run: time cargo run --manifest-path rust/xtask/Cargo.toml -- protocol-wasm
 
       - name: Cache Rust build artifacts
         uses: swatinem/rust-cache@v2
@@ -228,7 +233,7 @@ jobs:
   verify-static:
     name: Verify static lane
     needs: prepare-release
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64]
 
     steps:
       - name: Check out repository
@@ -257,7 +262,7 @@ jobs:
   verify-rust:
     name: Verify Rust
     needs: prepare-release
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64]
     env:
       RELEASE_TAG: ${{ needs.prepare-release.outputs.release-tag }}
 
@@ -296,7 +301,7 @@ jobs:
   verify-js:
     name: Verify JavaScript
     needs: prepare-release
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64]
     env:
       RELEASE_TAG: ${{ needs.prepare-release.outputs.release-tag }}
 
@@ -451,7 +456,7 @@ jobs:
     name: Build verified ${{ matrix.image }} image
     if: needs.prepare-release.outputs.release-tag != ''
     needs: prepare-release
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64]
     env:
       RELEASE_TAG: ${{ needs.prepare-release.outputs.release-tag }}
 
@@ -657,7 +662,7 @@ jobs:
   verify-live-build:
     name: Build shared live artifacts
     needs: prepare-release
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64]
 
     steps:
       - name: Check out repository
@@ -700,7 +705,7 @@ jobs:
     needs:
       - prepare-release
       - verify-live-build
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64]
 
     steps:
       - name: Check out repository
@@ -746,7 +751,7 @@ jobs:
         needs.prepare-release.outputs.release-tag == ''
         || (needs.build-cli.result == 'success' && needs.verify-images.result == 'success')
       )
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64]
 
     steps:
       - name: Confirm release verification passed
@@ -758,7 +763,7 @@ jobs:
     needs:
       - prepare-release
       - release-gate
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64]
     permissions:
       contents: write
 
@@ -812,7 +817,7 @@ jobs:
       - prepare-release
       - release-gate
       - create-release-tag
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64]
     permissions:
       contents: write
 
@@ -849,7 +854,7 @@ jobs:
       - prepare-release
       - release-gate
       - github-release
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64]
     permissions:
       contents: read
       id-token: write
@@ -997,7 +1002,7 @@ jobs:
       - prepare-release
       - github-release
       - verify-js
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64]
     permissions:
       contents: read
       id-token: write
@@ -1107,7 +1112,7 @@ jobs:
       - prepare-release
       - github-release
       - verify-js
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64]
     permissions:
       contents: read
       id-token: write
@@ -1219,7 +1224,7 @@ jobs:
       - prepare-release
       - release-gate
       - github-release
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64]
     permissions:
       contents: read
       packages: write

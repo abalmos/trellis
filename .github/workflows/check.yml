@@ -21,7 +21,7 @@ env:
 jobs:
   prepare:
     name: Prepare generated artifacts
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64]
     outputs:
       current: ${{ steps.current.outputs.current }}
     steps:
@@ -43,16 +43,15 @@ jobs:
           cargo check --locked --manifest-path rust/Cargo.toml -p trellis-protocol-wasm
           git restore generated
 
-      - name: Cache generator build
+      - name: Cache preparation build
         uses: swatinem/rust-cache@v2
         with:
-          workspaces: rust/tools/generate -> target
+          workspaces: |
+            rust/tools/generate -> target
+            rust/xtask -> target
 
-      - name: Generate SDKs
-        run: cargo run --manifest-path rust/tools/generate/Cargo.toml -- prepare --no-npm .
-
-      - name: Build embedded portal
-        run: deno task -c ts/portals/login/deno.json build:embedded
+      - name: Prepare generated artifacts
+        run: cargo run --manifest-path rust/xtask/Cargo.toml -- prepare
 
       - name: Inspect generated artifact drift
         id: current
@@ -69,34 +68,103 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: check-generated
-          path: |
-            generated
-            rust/crates/runtime/generated/portal
+          path: generated
           retention-days: 1
 
   generated:
     name: Generated artifacts current
     needs: prepare
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64]
     steps:
       - name: Require generated artifacts to be current
         env:
           GENERATED_CURRENT: ${{ needs.prepare.outputs.current }}
         run: test "$GENERATED_CURRENT" = true
 
-  rust:
-    name: Rust
-    needs: prepare
-    runs-on: ubuntu-latest
+
+  wasm:
+    name: Protocol WASM
+    runs-on: [self-hosted, Linux, X64]
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
 
-      - name: Download prepared artifacts
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Cache protocol WASM build
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            rust -> target
+            rust/xtask -> target
+
+      - name: Build protocol WASM
+        run: cargo run --manifest-path rust/xtask/Cargo.toml -- protocol-wasm
+
+      - name: Upload protocol WASM
+        uses: actions/upload-artifact@v4
+        with:
+          name: check-protocol-wasm
+          path: ts/packages/trellis/auth/protocol_wasm
+          retention-days: 1
+
+  portal:
+    name: Embedded login portal
+    needs: [prepare, wasm]
+    runs-on: [self-hosted, Linux, X64]
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Download generated artifacts
         uses: actions/download-artifact@v4
         with:
           name: check-generated
           path: .
+
+      - name: Download protocol WASM
+        uses: actions/download-artifact@v4
+        with:
+          name: check-protocol-wasm
+          path: ts/packages/trellis/auth/protocol_wasm
+
+      - name: Set up Deno
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: ${{ env.DENO_VERSION }}
+
+      - name: Build embedded portal
+        run: deno task -c ts/portals/login/deno.json build:embedded
+
+      - name: Upload embedded portal
+        uses: actions/upload-artifact@v4
+        with:
+          name: check-portal
+          path: rust/crates/runtime/generated/portal
+          retention-days: 1
+
+  rust:
+    name: Rust
+    needs: [prepare, portal]
+    runs-on: [self-hosted, Linux, X64]
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Download generated artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: check-generated
+          path: .
+
+      - name: Download embedded portal
+        uses: actions/download-artifact@v4
+        with:
+          name: check-portal
+          path: rust/crates/runtime/generated/portal
 
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
@@ -135,17 +203,23 @@ jobs:
 
   typescript:
     name: TypeScript
-    needs: prepare
-    runs-on: ubuntu-latest
+    needs: [prepare, wasm]
+    runs-on: [self-hosted, Linux, X64]
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
 
-      - name: Download prepared artifacts
+      - name: Download generated artifacts
         uses: actions/download-artifact@v4
         with:
           name: check-generated
           path: .
+
+      - name: Download protocol WASM
+        uses: actions/download-artifact@v4
+        with:
+          name: check-protocol-wasm
+          path: ts/packages/trellis/auth/protocol_wasm
 
       - name: Set up Deno
         uses: denoland/setup-deno@v2
@@ -168,17 +242,29 @@ jobs:
 
   live:
     name: Live Trellis
-    needs: prepare
-    runs-on: ubuntu-latest
+    needs: [prepare, wasm, portal]
+    runs-on: [self-hosted, Linux, X64]
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
 
-      - name: Download prepared artifacts
+      - name: Download generated artifacts
         uses: actions/download-artifact@v4
         with:
           name: check-generated
           path: .
+
+      - name: Download protocol WASM
+        uses: actions/download-artifact@v4
+        with:
+          name: check-protocol-wasm
+          path: ts/packages/trellis/auth/protocol_wasm
+
+      - name: Download embedded portal
+        uses: actions/download-artifact@v4
+        with:
+          name: check-portal
+          path: rust/crates/runtime/generated/portal
 
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable

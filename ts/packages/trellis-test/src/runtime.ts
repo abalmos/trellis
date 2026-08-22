@@ -516,7 +516,6 @@ export class TrellisTestRuntime implements AsyncDisposable {
       participant: {
         id: key.participantId,
         artifactDigest: key.participantArtifactDigest,
-        needsDigest: key.participantNeedsDigest,
       },
       auth: auth.auth,
       onAuthRequired: auth.onAuthRequired,

@@ -1,4 +1,3 @@
-import { resolveParticipantV1WasmSync } from "../auth/protocol_wasm.ts";
 import {
   canonicalizeJson,
   isJsonValue,
@@ -21,7 +20,6 @@ export type NativeProtocolPresentation = {
 export type NativeProtocolArtifacts = NativeProtocolPresentation & {
   apiDigest: string;
   participantDigest: string;
-  participantNeedsDigest: string;
 };
 
 function object(value: JsonValue | undefined): JsonObject | undefined {
@@ -43,7 +41,6 @@ export type NativeProtocolContract = {
   readonly API: Readonly<Record<string, unknown>>;
   readonly API_DIGEST: string;
   readonly PARTICIPANT: Readonly<Record<string, unknown>>;
-  readonly PARTICIPANT_NEEDS_DIGEST: string;
   readonly [CONTRACT_RUNTIME]: ContractRuntime;
 };
 
@@ -370,6 +367,205 @@ function apiDigestValue(api: JsonObject): string {
   return sha256Base64urlSync(canonicalizeJson(projection));
 }
 
+/** Return the semantic digest of a native participant artifact. */
+export function participantDigest(
+  participant: Readonly<Record<string, unknown>>,
+): string {
+  const value = normalizeParticipant(
+    structuredClone(checkedObject(participant)),
+  );
+  const projection: JsonObject = {
+    format: value.format,
+    id: value.id,
+    kind: value.kind,
+  };
+  for (const field of ["schemas", "implements", "uses"]) {
+    copy(value, projection, field);
+  }
+  for (const section of ["state", "jobQueues", "eventConsumers"]) {
+    const definitions = object(value[section]);
+    if (!definitions || Object.keys(definitions).length === 0) continue;
+    const lowered = structuredClone(definitions);
+    for (const definition of Object.values(lowered)) {
+      const record = object(definition);
+      if (record) delete record.docs;
+    }
+    projection[section] = lowered;
+  }
+  const resources = object(value.resources);
+  if (resources && Object.keys(resources).length > 0) {
+    const lowered = structuredClone(resources);
+    for (const definitions of Object.values(lowered)) {
+      for (const definition of Object.values(object(definitions) ?? {})) {
+        const record = object(definition);
+        if (!record) continue;
+        delete record.purpose;
+        delete record.docs;
+      }
+    }
+    projection.resources = lowered;
+  }
+  return sha256Base64urlSync(canonicalizeJson(projection));
+}
+
+function sortedUniqueStrings(
+  value: JsonValue | undefined,
+  path: string,
+): JsonValue[] | undefined {
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value)) throw new Error(`${path} must be an array`);
+  const strings = value.map((item) => {
+    if (typeof item !== "string") {
+      throw new Error(`${path} must contain only strings`);
+    }
+    return item;
+  });
+  return [...new Set(strings)].sort(compareProtocolStrings);
+}
+
+function normalizeSelectionList(
+  parent: JsonObject | undefined,
+  key: string,
+  path: string,
+): void {
+  if (!parent || !(key in parent)) return;
+  const normalized = sortedUniqueStrings(parent[key], path)!;
+  if (normalized.length === 0) delete parent[key];
+  else parent[key] = normalized;
+}
+
+function deleteEmptyObject(parent: JsonObject, key: string): void {
+  const value = object(parent[key]);
+  if (value && Object.keys(value).length === 0) delete parent[key];
+}
+
+function normalizeUsedApi(used: JsonObject, path: string): void {
+  const rpc = object(used.rpc);
+  normalizeSelectionList(rpc, "call", `${path}.rpc.call`);
+  deleteEmptyObject(used, "rpc");
+  const operations = object(used.operations);
+  normalizeSelectionList(operations, "invoke", `${path}.operations.invoke`);
+  normalizeSelectionList(operations, "observe", `${path}.operations.observe`);
+  normalizeSelectionList(operations, "cancel", `${path}.operations.cancel`);
+  const control = object(operations?.control);
+  if (control) {
+    for (const [operation, signals] of Object.entries(control)) {
+      const normalized = sortedUniqueStrings(
+        signals,
+        `${path}.operations.control.${operation}`,
+      )!;
+      if (normalized.length === 0) delete control[operation];
+      else control[operation] = normalized;
+    }
+    if (Object.keys(control).length === 0) delete operations!.control;
+  }
+  deleteEmptyObject(used, "operations");
+  for (
+    const [section, keys] of [["events", ["publish", "subscribe"]], ["feeds", [
+      "subscribe",
+    ]], ["state", ["read", "write"]]] as const
+  ) {
+    const selection = object(used[section]);
+    for (const key of keys) {
+      normalizeSelectionList(selection, key, `${path}.${section}.${key}`);
+    }
+    deleteEmptyObject(used, section);
+  }
+}
+
+function normalizeParticipant(participant: JsonObject): JsonObject {
+  const uses = object(participant.uses);
+  if (uses) {
+    for (const requirement of ["required", "optional"] as const) {
+      const group = object(uses[requirement]);
+      if (!group) continue;
+      for (const [alias, value] of Object.entries(group)) {
+        const used = object(value);
+        if (!used) {
+          throw new Error(`uses.${requirement}.${alias} must be an object`);
+        }
+        normalizeUsedApi(used, `uses.${requirement}.${alias}`);
+      }
+      if (Object.keys(group).length === 0) delete uses[requirement];
+    }
+    if (Object.keys(uses).length === 0) delete participant.uses;
+  }
+  const consumers = object(participant.eventConsumers);
+  if (consumers) {
+    for (const [name, value] of Object.entries(consumers)) {
+      const consumer = object(value);
+      if (!consumer) {
+        throw new Error(`eventConsumers.${name} must be an object`);
+      }
+      const events = object(consumer.events);
+      if (events) {
+        for (const [alias, selected] of Object.entries(events)) {
+          events[alias] = sortedUniqueStrings(
+            selected,
+            `eventConsumers.${name}.events.${alias}`,
+          )!;
+        }
+      }
+      if (consumer.replay === "new") delete consumer.replay;
+      if (consumer.ordering === "strict") delete consumer.ordering;
+    }
+  }
+  const state = object(participant.state);
+  if (state) {
+    for (const value of Object.values(state)) {
+      const definition = object(value);
+      if (definition) deleteEmptyObject(definition, "acceptedVersions");
+    }
+  }
+  const queues = object(participant.jobQueues);
+  if (queues) {
+    for (const value of Object.values(queues)) {
+      const queue = object(value);
+      if (!queue) continue;
+      for (
+        const key of ["progress", "logs", "dlq"]
+      ) if (queue[key] === false) delete queue[key];
+    }
+  }
+  const resources = object(participant.resources);
+  const kv = object(resources?.kv);
+  if (kv) {
+    for (const value of Object.values(kv)) {
+      const resource = object(value);
+      if (!resource) continue;
+      if (resource.required === true) delete resource.required;
+      if (resource.history === 1) delete resource.history;
+      if (resource.ttlMs === 0) delete resource.ttlMs;
+    }
+  }
+  const stores = object(resources?.store);
+  if (stores) {
+    for (const value of Object.values(stores)) {
+      const resource = object(value);
+      if (!resource) continue;
+      if (resource.required === true) delete resource.required;
+      if (resource.ttlMs === 0) delete resource.ttlMs;
+    }
+  }
+  if (resources) {
+    deleteEmptyObject(resources, "kv");
+    deleteEmptyObject(resources, "store");
+    if (Object.keys(resources).length === 0) delete participant.resources;
+  }
+  for (
+    const section of [
+      "schemas",
+      "implements",
+      "state",
+      "jobQueues",
+      "eventConsumers",
+    ]
+  ) {
+    deleteEmptyObject(participant, section);
+  }
+  return participant;
+}
+
 function compileParticipant(
   source: JsonObject,
   api: JsonObject,
@@ -499,7 +695,7 @@ function compileParticipant(
       }),
     );
   }
-  return participant;
+  return normalizeParticipant(participant);
 }
 
 function compareProtocolStrings(left: string, right: string): number {
@@ -507,8 +703,9 @@ function compareProtocolStrings(left: string, right: string): number {
 }
 
 /**
- * Returns native artifacts and exact dependency API evidence carried by a
- * defined contract without compiling or converting an authoring manifest.
+ * Returns intrinsic native artifacts and exact dependency API evidence carried
+ * by a defined contract. Contextual participant resolution is deliberately a
+ * separate runtime concern.
  */
 export function nativeProtocolPresentation(
   contract: NativeProtocolContract,
@@ -532,30 +729,18 @@ export function nativeProtocolPresentation(
     throw new Error(`Conflicting API evidence for owned API '${ownedApiId}'`);
   }
   apis[ownedApiId] = api;
-  const resolved = resolveParticipantV1WasmSync({ participant, apis });
-  const resolvedApi = resolved.apiArtifacts[ownedApiId];
-  if (!resolvedApi || canonicalizeJson(resolvedApi) !== canonicalizeJson(api)) {
-    throw new Error(
-      "Resolved owned API does not match the defined contract API",
-    );
+  if (apiDigest(api) !== contract.API_DIGEST) {
+    throw new Error("Defined contract API digest does not match its artifact");
   }
-  if (resolved.apiDigests[ownedApiId] !== contract.API_DIGEST) {
-    throw new Error("Defined contract API digest does not match resolution");
-  }
-  if (resolved.participantDigest !== contract.CONTRACT_DIGEST) {
+  if (participantDigest(participant) !== contract.CONTRACT_DIGEST) {
     throw new Error(
-      "Defined contract participant digest does not match resolution",
-    );
-  }
-  if (resolved.participantNeedsDigest !== contract.PARTICIPANT_NEEDS_DIGEST) {
-    throw new Error(
-      "Defined contract participant needs digest does not match resolution",
+      "Defined contract participant digest does not match its artifact",
     );
   }
   return {
-    api: resolvedApi,
-    participant: resolved.participant,
-    referencedApis: Object.entries(resolved.apiArtifacts)
+    api,
+    participant,
+    referencedApis: Object.entries(apis)
       .filter(([id]) => id !== ownedApiId)
       .map(([, referencedApi]) => referencedApi),
   };
@@ -568,6 +753,7 @@ export function buildNativeProtocolArtifacts(
 ): NativeProtocolArtifacts {
   const contract = checkedObject(source);
   const api = compileApi(contract);
+  const apiId = String(api.id);
   const apiDigests: Record<string, string> = {};
   const collectedSources = collectActionSources(Object.values(referencedApis));
   const apis: Record<string, JsonObject> = Object.fromEntries(
@@ -582,41 +768,29 @@ export function buildNativeProtocolArtifacts(
       return [id, artifact];
     }),
   );
-  Object.assign(apis, {
-    [String(api.id)]: api,
-  });
+  apis[apiId] = api;
+  apiDigests[apiId] = apiDigest(api);
   const contractUses = object(contract.uses);
   for (
     const value of Object.values(object(contractUses?.required) ?? {})
       .concat(Object.values(object(contractUses?.optional) ?? {}))
   ) {
     const reference = object(value);
-    const apiId = reference?.contract;
-    if (typeof apiId !== "string" || !apis[apiId]) {
-      throw new Error(`Referenced API artifact '${String(apiId)}' is required`);
+    const referencedApiId = reference?.contract;
+    if (typeof referencedApiId !== "string" || !apis[referencedApiId]) {
+      throw new Error(
+        `Referenced API artifact '${String(referencedApiId)}' is required`,
+      );
     }
   }
   const participant = compileParticipant(contract, api, apis, apiDigests);
-  const resolved = resolveParticipantV1WasmSync({
-    participant,
-    apis,
-  });
-  const apiId = String(api.id);
-  const nativeApi = resolved.apiArtifacts[apiId];
-  const nativeApiDigest = resolved.apiDigests[apiId];
-  if (!nativeApi || !nativeApiDigest) {
-    throw new Error(
-      `Native API artifact '${apiId}' is missing from resolution`,
-    );
-  }
   return {
-    api: nativeApi,
-    participant: resolved.participant,
-    referencedApis: Object.entries(resolved.apiArtifacts)
+    api,
+    participant,
+    referencedApis: Object.entries(apis)
       .filter(([id]) => id !== apiId)
       .map(([, value]) => value),
-    apiDigest: nativeApiDigest,
-    participantDigest: resolved.participantDigest,
-    participantNeedsDigest: resolved.participantNeedsDigest,
+    apiDigest: apiDigests[apiId],
+    participantDigest: participantDigest(participant),
   };
 }

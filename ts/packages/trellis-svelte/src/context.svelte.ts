@@ -43,7 +43,6 @@ export type CreateTrellisAppOptions<
   participant: {
     id: string;
     artifactDigest: string;
-    needsDigest: string;
   };
 
   /** Trellis URL, or a resolver for runtime-selected Trellis URLs. */

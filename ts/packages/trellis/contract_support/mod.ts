@@ -161,6 +161,7 @@ export {
 } from "./schema_pointers.ts";
 export * from "./descriptors.ts";
 export * from "./features.ts";
+export { participantDigest } from "./protocol_artifacts.ts";
 
 const NonEmptyStringSchema = Type.String({ minLength: 1 });
 const VersionSchema = Type.String({ pattern: "^v[0-9]+$" });
@@ -342,7 +343,6 @@ export const CONTRACT_EVENT_CONSUMERS_METADATA = Symbol.for(
 );
 /** Internal runtime metadata attached to defined contracts. */
 export { CONTRACT_RUNTIME } from "./contract_runtime.ts";
-export { resolveParticipantV1WasmSync } from "../auth/protocol_wasm.ts";
 const CONTRACT_ERROR_RUNTIME_METADATA = Symbol.for(
   "@qlever-llc/trellis/contracts/error-runtime",
 );
@@ -1765,7 +1765,6 @@ export type DefinedContract<
   readonly API: Readonly<Record<string, JsonValue>>;
   readonly API_DIGEST: string;
   readonly PARTICIPANT: Readonly<Record<string, JsonValue>>;
-  readonly PARTICIPANT_NEEDS_DIGEST: string;
   readonly [CONTRACT_RUNTIME]: ContractRuntime<
     TSelectedAction,
     TOwnedApi,
@@ -4214,7 +4213,6 @@ function buildOwnedActionDescriptors(
       !exportName || exportName === "API" ||
       exportName === "PARTICIPANT" || exportName === "CONTRACT_ID" ||
       exportName === "CONTRACT_DIGEST" || exportName === "API_DIGEST" ||
-      exportName === "PARTICIPANT_NEEDS_DIGEST" ||
       Object.hasOwn(actions, exportName)
     ) {
       throw new Error(`Owned action export name '${exportName}' collides`);
@@ -4432,7 +4430,6 @@ function defineContract(
     API,
     API_DIGEST,
     PARTICIPANT,
-    PARTICIPANT_NEEDS_DIGEST: native.participantNeedsDigest,
     [CONTRACT_JOBS_METADATA]: buildContractJobsMetadata(
       source.schemas,
       source.jobs,

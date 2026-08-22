@@ -36,7 +36,6 @@ const app = createTrellisApp({
   participant: {
     id: testContract.CONTRACT_ID,
     artifactDigest: testContract.CONTRACT_DIGEST,
-    needsDigest: testContract.PARTICIPANT_NEEDS_DIGEST,
   },
   trellisUrl: "https://trellis.example",
 });
@@ -59,7 +58,6 @@ const generatedApp = createTrellisApp<typeof testContract, GeneratedClient>(
     participant: {
       id: testContract.CONTRACT_ID,
       artifactDigest: testContract.CONTRACT_DIGEST,
-      needsDigest: testContract.PARTICIPANT_NEEDS_DIGEST,
     },
     trellisUrl: () => new URL("https://trellis.example"),
   },

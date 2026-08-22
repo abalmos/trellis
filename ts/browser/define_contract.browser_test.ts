@@ -48,7 +48,6 @@ Deno.test("a real browser imports and defines a native contract synchronously", 
       .then((handle) => handle.jsonValue() as Promise<Record<string, string>>);
     assertEquals(identity.id, identity.participantId);
     assertEquals(identity.digest.length > 0, true);
-    assertEquals(identity.needsDigest.length > 0, true);
   } finally {
     await browser?.close();
     await server.shutdown();

@@ -387,6 +387,17 @@ pub fn execute_auto_plan(
                 let out_api = entry.out_api.as_ref().ok_or_else(|| {
                     miette::miette!("missing manifest output for generated contract")
                 })?;
+                let protocol_participant_out = match (
+                    entry.protocol_participant_out.as_ref(),
+                    resolved.participant.as_ref(),
+                ) {
+                    (Some(path), _) => Some(path.clone()),
+                    (None, Some(participant)) => Some(protocol_participant_output_path(
+                        out_api,
+                        participant.participant.id(),
+                    )?),
+                    (None, None) => None,
+                };
                 let metadata = generated_artifacts_metadata(
                     &resolved,
                     &native_api_digest(&resolved)?,
@@ -408,6 +419,16 @@ pub fn execute_auto_plan(
                         entry.npm_out.as_deref(),
                         entry.cargo_out.as_deref(),
                     )
+                    && match (
+                        resolved.participant.as_ref(),
+                        protocol_participant_out.as_deref(),
+                    ) {
+                        (Some(expected), Some(path)) => {
+                            protocol_participant_output_is_fresh(expected, path)?
+                        }
+                        (None, None) => true,
+                        _ => false,
+                    }
                 {
                     output::print_success(&format!(
                         "artifacts already up to date for {}",
@@ -440,7 +461,7 @@ pub fn execute_auto_plan(
                     write_participant_facade_outputs(
                         &resolved.api_path,
                         participant_source,
-                        entry.protocol_participant_out.as_deref().ok_or_else(|| {
+                        protocol_participant_out.as_deref().ok_or_else(|| {
                             miette::miette!("missing protocol participant output")
                         })?,
                         cargo_participant_out,
@@ -455,22 +476,8 @@ pub fn execute_auto_plan(
                         entry.cargo_out.clone(),
                         mappings,
                     )?;
-                } else if let Some(protocol_participant_out) =
-                    entry.protocol_participant_out.as_deref()
-                {
-                    let sibling_participant = entry
-                        .discovered
-                        .source_path
-                        .with_file_name("trellis.participant.json");
-                    let participant_source = resolved
-                        .participant_path
-                        .as_deref()
-                        .unwrap_or(&sibling_participant);
-                    write_protocol_participant(
-                        &resolved.api_path,
-                        participant_source,
-                        protocol_participant_out,
-                    )?;
+                } else if let Some(protocol_participant_out) = protocol_participant_out.as_deref() {
+                    write_protocol_participant(&resolved, protocol_participant_out)?;
                 }
                 summary.generated += 1;
             }
@@ -484,6 +491,29 @@ pub fn execute_auto_plan(
         }
     }
     Ok(summary)
+}
+
+fn protocol_participant_output_path(
+    out_api: &Path,
+    participant_id: &str,
+) -> miette::Result<PathBuf> {
+    let protocol_root = out_api.parent().and_then(Path::parent).ok_or_else(|| {
+        miette::miette!("generated API output is outside generated/protocol/apis")
+    })?;
+    Ok(protocol_root
+        .join("participants")
+        .join(format!("{participant_id}.json")))
+}
+
+fn protocol_participant_output_is_fresh(
+    expected: &trellis_contracts::LoadedParticipant,
+    output: &Path,
+) -> miette::Result<bool> {
+    let Ok(existing) = trellis_contracts::load_participant_source(output) else {
+        return Ok(false);
+    };
+    Ok(existing.participant.digest().into_diagnostic()?
+        == expected.participant.digest().into_diagnostic()?)
 }
 
 fn cleanup_legacy_protocol_outputs(plan: &[AutoPlanEntry]) -> miette::Result<()> {
@@ -829,6 +859,28 @@ fn auto_plan_rank(entry: &AutoPlanEntry) -> u8 {
 mod tests {
     use super::*;
     use crate::discovery::SourceLanguage;
+
+    #[test]
+    fn protocol_participant_freshness_tracks_semantic_identity() {
+        let temp = tempfile::tempdir().unwrap();
+        let expected_path = temp.path().join("expected.participant.json");
+        let output_path = temp.path().join("generated.participant.json");
+        let service = r#"{"format":"trellis.participant.v1","id":"example.fixture@v1","displayName":"Example","description":"Example participant","kind":"service"}"#;
+        let app = r#"{"format":"trellis.participant.v1","id":"example.fixture@v1","displayName":"Example","description":"Example participant","kind":"app"}"#;
+        fs::write(&expected_path, service).unwrap();
+        fs::write(&output_path, service).unwrap();
+        let expected = trellis_contracts::load_participant_source(&expected_path).unwrap();
+        assert!(protocol_participant_output_is_fresh(&expected, &output_path).unwrap());
+
+        fs::write(&output_path, app).unwrap();
+        assert!(!protocol_participant_output_is_fresh(&expected, &output_path).unwrap());
+
+        fs::write(&output_path, "{").unwrap();
+        assert!(!protocol_participant_output_is_fresh(&expected, &output_path).unwrap());
+
+        fs::remove_file(&output_path).unwrap();
+        assert!(!protocol_participant_output_is_fresh(&expected, &output_path).unwrap());
+    }
 
     #[test]
     fn auto_plan_orders_local_jsr_package_imports_before_dependents() {

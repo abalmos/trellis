@@ -8,10 +8,8 @@ import {
   type ContractStateMetadata,
 } from "./contract_support/mod.ts";
 import { getContractRuntime } from "./contract_support/contract_runtime.ts";
-import {
-  type NativeProtocolContract,
-  nativeProtocolPresentation,
-} from "./contract_support/protocol_artifacts.ts";
+import type { NativeProtocolContract } from "./contract_support/protocol_artifacts.ts";
+import { resolveNativeProtocolPresentation } from "./contract_support/protocol_resolution.ts";
 import { type CallerRuntime, createCallerRuntime } from "./caller.ts";
 import {
   base64urlDecode,
@@ -224,7 +222,6 @@ type ClientConnectArgsFor<TContract extends ClientContract> =
     participant: {
       id: string;
       artifactDigest: string;
-      needsDigest: string;
     };
     auth?: ClientAuthOptions;
     onAuthRequired?: (
@@ -822,14 +819,13 @@ async function buildSessionKeyLoginUrl(args: {
   const startedAt = performance.now();
   const requestId = ulid();
   const issuedAt = Date.now();
+  const presentation = resolveNativeProtocolPresentation(args.contract);
   if (
     args.participant.id !== args.contract.CONTRACT_ID ||
-    args.participant.artifactDigest !== args.contract.CONTRACT_DIGEST ||
-    args.participant.needsDigest !== args.contract.PARTICIPANT_NEEDS_DIGEST
+    args.participant.artifactDigest !== args.contract.CONTRACT_DIGEST
   ) {
     throw new Error("Client participant identity does not match its contract");
   }
-  const presentation = nativeProtocolPresentation(args.contract);
   const unsigned = {
     requestId,
     issuedAt,
@@ -837,7 +833,7 @@ async function buildSessionKeyLoginUrl(args: {
     sessionNkey: args.identity.sessionNkey,
     participantId: args.participant.id,
     participantArtifactDigest: args.participant.artifactDigest,
-    participantNeedsDigest: args.participant.needsDigest,
+    participantNeedsDigest: presentation.participantNeedsDigest,
     participantArtifact: presentation.participant,
     referencedApiArtifacts: [presentation.api, ...presentation.referencedApis],
     redirectTarget: args.redirectTo,

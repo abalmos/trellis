@@ -1,7 +1,7 @@
 import { type CallerRuntime, defineAppContract } from "@qlever-llc/trellis";
 import {
   CONTRACT_RUNTIME,
-  resolveParticipantV1WasmSync,
+  participantDigest,
 } from "@qlever-llc/trellis/contracts";
 import {
   AuthCapabilityGroupsPut,
@@ -76,14 +76,8 @@ import {
   StateAdminListRequestSchema,
   StateAdminListResponseSchema,
 } from "@qlever-llc/trellis/sdk/state";
-import {
-  API as AUTH_API,
-  API_DIGEST as AUTH_API_DIGEST,
-} from "@qlever-llc/trellis/sdk/auth/api";
-import {
-  API as STATE_API,
-  API_DIGEST as STATE_API_DIGEST,
-} from "@qlever-llc/trellis/sdk/state/api";
+import { API_DIGEST as AUTH_API_DIGEST } from "@qlever-llc/trellis/sdk/auth/api";
+import { API_DIGEST as STATE_API_DIGEST } from "@qlever-llc/trellis/sdk/state/api";
 import administrationParticipantSource from "../../../../../rust/crates/trellis/artifacts/trellis.admin.participant.json" with {
   type: "json",
 };
@@ -127,21 +121,16 @@ const administrationParticipant = structuredClone(
 );
 administrationParticipant.uses.required.auth.apiDigest = AUTH_API_DIGEST;
 administrationParticipant.uses.required.state.apiDigest = STATE_API_DIGEST;
-const administrationResolution = resolveParticipantV1WasmSync({
-  participant: administrationParticipant,
-  apis: {
-    [AUTH_API.id]: AUTH_API,
-    [STATE_API.id]: STATE_API,
-  },
-});
+const administrationParticipantDigest = participantDigest(
+  administrationParticipant,
+);
 
 export const adminContract = Object.defineProperty(
   {
     ...adminDescriptors,
     CONTRACT_ID: administrationParticipant.id,
-    CONTRACT_DIGEST: administrationResolution.participantDigest,
+    CONTRACT_DIGEST: administrationParticipantDigest,
     PARTICIPANT: administrationParticipant,
-    PARTICIPANT_NEEDS_DIGEST: administrationResolution.participantNeedsDigest,
   },
   CONTRACT_RUNTIME,
   {
@@ -153,19 +142,16 @@ export const adminContract = Object.defineProperty(
     | "CONTRACT_ID"
     | "CONTRACT_DIGEST"
     | "PARTICIPANT"
-    | "PARTICIPANT_NEEDS_DIGEST"
   >
   & {
     readonly CONTRACT_ID: "trellis-platform-administration";
     readonly CONTRACT_DIGEST: string;
     readonly PARTICIPANT: typeof administrationParticipant;
-    readonly PARTICIPANT_NEEDS_DIGEST: string;
   };
 
 export const ADMIN_PARTICIPANT = {
   id: adminContract.CONTRACT_ID,
   artifactDigest: adminContract.CONTRACT_DIGEST,
-  needsDigest: adminContract.PARTICIPANT_NEEDS_DIGEST,
 } as const;
 
 export type AdminClient = CallerRuntime<typeof adminContract>;

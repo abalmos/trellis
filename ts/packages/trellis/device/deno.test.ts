@@ -2,6 +2,7 @@ import { assertEquals } from "@std/assert";
 
 import { testAuthorizationContext } from "../auth/test_context.ts";
 import { defineDeviceContract } from "../contract.ts";
+import { resolveNativeProtocolPresentation } from "../contract_support/protocol_resolution.ts";
 import { checkDeviceActivation } from "./deno.ts";
 
 const deviceContract = defineDeviceContract(() => ({
@@ -10,13 +11,14 @@ const deviceContract = defineDeviceContract(() => ({
   description: "Test device contract.",
 }));
 const rootSecret = new Uint8Array(32).fill(1);
+const devicePresentation = resolveNativeProtocolPresentation(deviceContract);
 const identity = {
   deploymentId: "reader.default",
   instanceId: "dev_123",
   principalId: "device_123",
   participantId: deviceContract.CONTRACT_ID,
   participantArtifactDigest: deviceContract.CONTRACT_DIGEST,
-  participantNeedsDigest: deviceContract.PARTICIPANT_NEEDS_DIGEST,
+  participantNeedsDigest: devicePresentation.participantNeedsDigest,
 };
 
 Deno.test("checkDeviceActivation persists provisioned activation state", async () => {
