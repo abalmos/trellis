@@ -10,6 +10,7 @@ for script in [
     "agent_wasm_boundary_v3_normalization_fix.py",
     "agent_wasm_boundary_v3_eager_digest_fix.py",
     "agent_wasm_boundary_v3_client_identity_fix.py",
+    "agent_wasm_boundary_v3_client_identity_cleanup.py",
 ]:
     source = subprocess.check_output(
         ["git", "show", f"FETCH_HEAD:scripts/{script}"],
