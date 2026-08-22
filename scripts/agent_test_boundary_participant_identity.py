@@ -92,6 +92,42 @@ fn case_participant_id(id: &str, namespace: &str) -> Result<String, TrellisTestE
     Ok(format!("{name}{suffix}@{version}"))
 }
 
+#[cfg(test)]
+mod participant_identity_tests {
+    use super::*;
+
+    #[test]
+    fn test_namespace_changes_only_participant_identity() {
+        let contract = TrellisTestContract::from_artifacts(
+            trellis_rs::contracts::ContractBuilder::authoring(
+                "trellis.integration.participant-identity-proof@v1",
+                "Participant identity proof",
+                "Proves shared test isolation does not rewrite API surfaces.",
+                trellis_rs::contracts::ContractKind::App,
+            )
+            .build()
+            .expect("build participant identity proof artifacts"),
+        )
+        .expect("build participant identity proof contract");
+
+        let case = contract
+            .for_test_namespace(Some("run-123-case-rpc"))
+            .expect("build case participant");
+
+        assert_eq!(case.api(), contract.api());
+        assert_eq!(
+            case.id(),
+            "trellis.integration.participant-identity-proof-run-123-case-rpc@v1"
+        );
+        assert_ne!(case.participant_digest(), contract.participant_digest());
+
+        let original = contract.participant().clone();
+        let mut case_participant = case.participant().clone();
+        case_participant["id"] = original["id"].clone();
+        assert_eq!(case_participant, original);
+    }
+}
+
 fn builtin_api_artifacts()'''
 text = replace_once(text, impl_anchor, impl_replacement, "participant-only contract identity")
 
