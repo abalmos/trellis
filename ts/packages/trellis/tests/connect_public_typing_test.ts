@@ -46,7 +46,6 @@ if (false) {
     participant: {
       id: "trellis.connect-typing-app@v1",
       artifactDigest: "participant-digest",
-      needsDigest: "needs-digest",
     },
   }).orThrow();
 

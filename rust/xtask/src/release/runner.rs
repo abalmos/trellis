@@ -59,6 +59,25 @@ pub(super) fn run_verify(
         ),
         "repository preparation failed",
     )?;
+    run_checked_command(
+        repo_root,
+        &CommandSpec::new("rustup", ["target", "add", "wasm32-unknown-unknown"]),
+        "protocol WASM target installation failed",
+    )?;
+    run_checked_command(
+        repo_root,
+        &CommandSpec::new(
+            "cargo",
+            [
+                "run",
+                "--manifest-path",
+                "xtask/Cargo.toml",
+                "--",
+                "protocol-wasm",
+            ],
+        ),
+        "protocol WASM preparation failed",
+    )?;
     if working_tree_snapshot(repo_root)? != before_prepare {
         return Err(miette!(
             "repository preparation changed generated output; run prepare and commit the result"

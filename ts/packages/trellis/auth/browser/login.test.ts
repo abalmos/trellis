@@ -10,6 +10,7 @@ import {
   toArrayBuffer,
   utf8,
 } from "../utils.ts";
+import { resolveNativeProtocolPresentation } from "../../contract_support/protocol_resolution.ts";
 
 const TEST_CONTRACT = defineAppContract(() => ({
   id: "demo.app@v1",
@@ -168,6 +169,7 @@ Deno.test("startAuthRequest omits scalar context from both request body and sign
 });
 
 Deno.test("startAuthRequest signs provider, contract, and canonical context", async () => {
+  const signedPresentation = resolveNativeProtocolPresentation(SIGNED_CONTRACT);
   const originalFetch = globalThis.fetch;
   try {
     const handle = await createHandle();
@@ -179,7 +181,7 @@ Deno.test("startAuthRequest signs provider, contract, and canonical context", as
             canonicalizeJsonValue({
               participantId: SIGNED_CONTRACT.CONTRACT_ID,
               participantArtifactDigest: SIGNED_CONTRACT.CONTRACT_DIGEST,
-              participantNeedsDigest: SIGNED_CONTRACT.PARTICIPANT_NEEDS_DIGEST,
+              participantNeedsDigest: signedPresentation.participantNeedsDigest,
               participantArtifact: SIGNED_CONTRACT.PARTICIPANT,
               referencedApiArtifacts: [
                 SIGNED_CONTRACT.API,

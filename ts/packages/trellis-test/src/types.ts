@@ -18,7 +18,6 @@ export type TrellisTestContractDescriptor = {
   readonly API: Readonly<Record<string, unknown>>;
   readonly API_DIGEST: string;
   readonly PARTICIPANT: Readonly<Record<string, unknown>>;
-  readonly PARTICIPANT_NEEDS_DIGEST: string;
 };
 
 /** Native contract artifacts accepted by Trellis test admin automation. */

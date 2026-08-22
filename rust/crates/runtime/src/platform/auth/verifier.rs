@@ -1139,14 +1139,16 @@ mod tests {
         let source = Arc::new(StubSource::default());
         source.install(verified, policy);
         let verifier = RuntimeAuthVerifier::new(source.clone());
-        let mut routes = trellis_rs::service::Router::new();
-        trellis_sdk_auth::api::register_rpc_metadata(&mut routes);
-        let required_permission = routes
-            .required_permission(subject, payload)
-            .unwrap()
-            .unwrap()
-            .permission_atom()
-            .unwrap();
+        let required_permission = PermissionAtomV1::new(
+            PermissionTargetV1::api_surface(
+                "trellis.auth@v1",
+                ApiSurfaceKindV1::Rpc,
+                "Auth.Sessions.Me",
+            )
+            .unwrap(),
+            PermissionActionV1::Call,
+        )
+        .unwrap();
         let proof = auth
             .create_request_proof_v2(&digest, subject, &reply, payload, 1100, "req_admin")
             .unwrap();

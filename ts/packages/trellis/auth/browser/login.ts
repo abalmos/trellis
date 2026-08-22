@@ -1,8 +1,6 @@
 import { Value } from "typebox/value";
-import {
-  type NativeProtocolContract,
-  nativeProtocolPresentation,
-} from "../../contract_support/protocol_artifacts.ts";
+import type { NativeProtocolContract } from "../../contract_support/protocol_artifacts.ts";
+import { resolveNativeProtocolPresentation } from "../../contract_support/protocol_resolution.ts";
 import {
   type AuthStartRequest,
   AuthStartRequestSchema,
@@ -136,12 +134,12 @@ export async function startAuthRequest(
   args: StartAuthRequestArgs,
 ): Promise<AuthStartResponse> {
   const context = contextRecord(args.context);
-  const presentation = nativeProtocolPresentation(args.contract);
+  const presentation = resolveNativeProtocolPresentation(args.contract);
   const participantDigest = args.contract.CONTRACT_DIGEST;
   const participantEvidence = {
     participantId: args.contract.CONTRACT_ID,
     participantArtifactDigest: participantDigest,
-    participantNeedsDigest: args.contract.PARTICIPANT_NEEDS_DIGEST,
+    participantNeedsDigest: presentation.participantNeedsDigest,
     participantArtifact: presentation.participant,
     referencedApiArtifacts: [presentation.api, ...presentation.referencedApis],
   };

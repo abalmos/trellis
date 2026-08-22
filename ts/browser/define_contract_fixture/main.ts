@@ -11,6 +11,5 @@ Object.assign(globalThis, {
     id: contract.CONTRACT_ID,
     participantId: contract.PARTICIPANT.id,
     digest: contract.CONTRACT_DIGEST,
-    needsDigest: contract.PARTICIPANT_NEEDS_DIGEST,
   },
 });

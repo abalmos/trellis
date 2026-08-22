@@ -28,7 +28,9 @@ import {
   apiDigest,
   collectActionSources,
   nativeProtocolPresentation,
+  participantDigest,
 } from "./protocol_artifacts.ts";
+import { resolveNativeProtocolPresentation } from "./protocol_resolution.ts";
 import { resolveParticipantV1WasmSync } from "../auth/protocol_wasm.ts";
 
 Deno.test("generated actions preserve canonical source artifact identity", () => {
@@ -48,6 +50,27 @@ Deno.test("generated actions preserve canonical source artifact identity", () =>
       },
     },
   });
+});
+
+Deno.test("participant digest matches Rust normalization for explicit empty defaults", () => {
+  const participant = {
+    format: "trellis.participant.v1",
+    id: "trellis.test.raw-participant@v1",
+    displayName: "Raw participant",
+    description: "Checks intrinsic participant normalization.",
+    kind: "agent",
+    schemas: {},
+    implements: {},
+    uses: { required: {}, optional: {} },
+    state: {},
+    jobQueues: {},
+    eventConsumers: {},
+    resources: {},
+  } as const;
+  const resolved = resolveParticipantV1WasmSync({ participant, apis: {} });
+
+  assertEquals(participantDigest(participant), resolved.participantDigest);
+  assertEquals(participant.uses.optional, {});
 });
 
 Deno.test("service contracts retain authoring event-consumer runtime metadata", () => {
@@ -298,7 +321,7 @@ Deno.test("capability references require declared local or platform/global names
   assertThrows(() => define("typo.read"), Error, "undeclared local capability");
 });
 
-Deno.test("native presentation verifies all participant identities and evidence", () => {
+Deno.test("resolved native presentation verifies participant identity and evidence", () => {
   const provider = defineServiceContract(
     { schemas: { Empty: Type.Object({}) } },
     (ref) => ({
@@ -327,31 +350,42 @@ Deno.test("native presentation verifies all participant identities and evidence"
     ...changes,
   });
 
-  assertThrows(
-    () => nativeProtocolPresentation(forged({ CONTRACT_DIGEST: "forged" })),
-    Error,
-    "participant digest",
+  const resolved = resolveNativeProtocolPresentation(consumer);
+  assertEquals(resolved.participantDigest, consumer.CONTRACT_DIGEST);
+  assertEquals(
+    resolved.participantNeedsDigest,
+    resolveParticipantV1WasmSync({
+      participant: consumer.PARTICIPANT,
+      apis: Object.fromEntries(
+        [resolved.api, ...resolved.referencedApis].map((api) => [
+          String(api.id),
+          api,
+        ]),
+      ),
+    }).participantNeedsDigest,
   );
   assertThrows(
     () =>
-      nativeProtocolPresentation(
-        forged({ PARTICIPANT_NEEDS_DIGEST: "forged" }),
-      ),
+      resolveNativeProtocolPresentation(forged({ CONTRACT_DIGEST: "forged" })),
     Error,
-    "needs digest",
+    "participant digest",
   );
   const staleSelf = structuredClone(provider.PARTICIPANT);
   (staleSelf.implements as Record<string, Record<string, unknown>>).self
     .apiDigest = "forged";
   assertThrows(
-    () => nativeProtocolPresentation({ ...provider, PARTICIPANT: staleSelf }),
+    () =>
+      resolveNativeProtocolPresentation({
+        ...provider,
+        PARTICIPANT: staleSelf,
+      }),
     Error,
     "digest",
   );
   const runtime = consumer[CONTRACT_RUNTIME];
   assertThrows(
     () =>
-      nativeProtocolPresentation(
+      resolveNativeProtocolPresentation(
         forged({ [CONTRACT_RUNTIME]: { ...runtime, actions: [] } }),
       ),
     Error,

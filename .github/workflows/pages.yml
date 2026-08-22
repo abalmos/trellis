@@ -19,7 +19,7 @@ concurrency:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64]
     steps:
       - uses: actions/checkout@v4
         with:
@@ -30,6 +30,8 @@ jobs:
           deno-version: v2.x
 
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
 
       - uses: actions/cache@v4
         with:
@@ -224,6 +226,19 @@ jobs:
           prepare_once "${release_worktree}" "${latest_tag}"
           prepare_once "${current_root}" "${current_tag}"
 
+          ensure_protocol_wasm() {
+            local repo_root="$1"
+            local output="${repo_root}/ts/packages/trellis/auth/protocol_wasm/trellis_protocol_wasm.js"
+            if [ -s "${output}" ]; then
+              return 0
+            fi
+            cargo run --manifest-path "${repo_root}/rust/xtask/Cargo.toml" -- protocol-wasm
+          }
+
+          ensure_protocol_wasm "${release_docs_root}"
+          ensure_protocol_wasm "${release_console_root}"
+          ensure_protocol_wasm "${current_root}"
+
           build_docs "${release_docs_root}" "${site_root}" "${release_root}/docs"
           build_docs "${current_root}" "${site_root}/current" "${pages_root}/current"
 
@@ -280,7 +295,7 @@ jobs:
 
   deploy:
     needs: build
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64]
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}

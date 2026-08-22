@@ -5,10 +5,18 @@ use std::process::Command;
 use trellis_generate::artifacts::trellis_package_version;
 
 fn write_ts_contract(path: &Path, id: &str, display_name: &str, kind: &str) {
+    let api_digest = trellis_contracts::ApiBuilder::new(serde_json::json!({
+        "format": "trellis.api.v1",
+        "id": id,
+        "displayName": display_name,
+        "description": "Fixture API",
+    }))
+    .digest()
+    .unwrap();
     fs::write(
         path,
         format!(
-            "const API = {{\n  format: \"trellis.api.v1\",\n  id: \"{id}\",\n  displayName: \"{display_name}\",\n  description: \"Fixture API\",\n}};\nconst PARTICIPANT = {{\n  format: \"trellis.participant.v1\",\n  id: \"{id}\",\n  displayName: \"{display_name}\",\n  description: \"Fixture participant\",\n  kind: \"{kind}\",\n  implements: {{ self: {{ api: \"{id}\", apiDigest: \"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\" }} }},\n}};\n\nexport default {{ API, PARTICIPANT }};\n"
+            "const API = {{\n  format: \"trellis.api.v1\",\n  id: \"{id}\",\n  displayName: \"{display_name}\",\n  description: \"Fixture API\",\n}};\nconst PARTICIPANT = {{\n  format: \"trellis.participant.v1\",\n  id: \"{id}\",\n  displayName: \"{display_name}\",\n  description: \"Fixture participant\",\n  kind: \"{kind}\",\n  implements: {{ self: {{ api: \"{id}\", apiDigest: \"{api_digest}\" }} }},\n}};\n\nexport default {{ API, PARTICIPANT }};\n"
         ),
     )
     .unwrap();
@@ -257,7 +265,7 @@ const PARTICIPANT = {
   displayName: API.displayName,
   description: "Fixture service participant",
   kind: "service",
-  implements: { self: { api: API.id, apiDigest: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA" } },
+  implements: { self: { api: API.id, apiDigest: "zUfuTGEjjiCbjt57ucSJo1FS7MO5BQUFug0bRxCMwyM" } },
 };
 
 export default { API, PARTICIPANT };
@@ -282,7 +290,7 @@ const PARTICIPANT = {
   displayName: API.displayName,
   description: "Fixture app participant",
   kind: "app",
-  implements: { self: { api: API.id, apiDigest: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA" } },
+  implements: { self: { api: API.id, apiDigest: "IWSLPqsRVWP2jwWfRuC-arNDiq3ML32fNaH7Xit2WYs" } },
 };
 
 export default { API, PARTICIPANT };
@@ -800,7 +808,7 @@ const PARTICIPANT = {
   displayName: API.displayName,
   description: "Fixture app participant",
   kind: "app",
-  implements: { self: { api: API.id, apiDigest: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA" } },
+  implements: { self: { api: API.id, apiDigest: "va2NvbdTudYLfxVBLgiwZXyEXCUvKB-ilGDWl_4yklQ" } },
 };
 
 export default { API, PARTICIPANT };
@@ -999,7 +1007,7 @@ fn local_mode_generates_service_artifacts_from_node_project_contracts() {
             "  displayName: 'Node Orders',\n",
             "  description: 'Node Orders service',\n",
             "  kind: CONTRACT_KIND,\n",
-            "  implements: { self: { api: CONTRACT_ID, apiDigest: 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA' } },\n",
+            "  implements: { self: { api: CONTRACT_ID, apiDigest: '7aZlI7NfeGJOqx4ypFKNCcsAf2CEL4PqJpY6IQfQLTQ' } },\n",
             "};\n",
             "export default { API, PARTICIPANT };\n",
         ),
@@ -1009,7 +1017,7 @@ fn local_mode_generates_service_artifacts_from_node_project_contracts() {
     write_executable(
         &tsx_path,
         "#!/bin/sh
-printf '{\"api\":{\"format\":\"trellis.api.v1\",\"id\":\"trellis.node-orders@v1\",\"displayName\":\"Node Orders\",\"description\":\"Orders from node project\"},\"participant\":{\"format\":\"trellis.participant.v1\",\"id\":\"trellis.node-orders@v1\",\"displayName\":\"Node Orders\",\"description\":\"Node Orders service\",\"kind\":\"service\",\"implements\":{\"self\":{\"api\":\"trellis.node-orders@v1\",\"apiDigest\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\"}}}}'
+printf '{\"api\":{\"format\":\"trellis.api.v1\",\"id\":\"trellis.node-orders@v1\",\"displayName\":\"Node Orders\",\"description\":\"Orders from node project\"},\"participant\":{\"format\":\"trellis.participant.v1\",\"id\":\"trellis.node-orders@v1\",\"displayName\":\"Node Orders\",\"description\":\"Node Orders service\",\"kind\":\"service\",\"implements\":{\"self\":{\"api\":\"trellis.node-orders@v1\",\"apiDigest\":\"7aZlI7NfeGJOqx4ypFKNCcsAf2CEL4PqJpY6IQfQLTQ\"}}}}'
 ",
     );
     write_executable(

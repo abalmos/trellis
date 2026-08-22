@@ -10,7 +10,7 @@ import {
   CONTRACT_STATE_METADATA,
   type ContractStateMetadata,
 } from "./contract_support/mod.ts";
-import { nativeProtocolPresentation } from "./contract_support/protocol_artifacts.ts";
+import { resolveNativeProtocolPresentation } from "./contract_support/protocol_resolution.ts";
 
 import {
   deriveDeviceConfirmationCode,
@@ -76,7 +76,6 @@ type DeviceContract<
   readonly API: Readonly<Record<string, unknown>>;
   readonly API_DIGEST: string;
   readonly PARTICIPANT: Readonly<Record<string, unknown>>;
-  readonly PARTICIPANT_NEEDS_DIGEST: string;
   readonly [CONTRACT_STATE_METADATA]?: ContractStateMetadata;
 };
 
@@ -542,6 +541,7 @@ async function fetchDeviceBootstrap(args: {
   activationNonce?: string;
   signal?: AbortSignal;
 }): Promise<DeviceBootstrapResponse> {
+  const presentation = resolveNativeProtocolPresentation(args.contract);
   for (let attempt = 0; attempt < 2; attempt += 1) {
     const requestStartedAtMs = args.now();
     const issuedAt = Math.trunc(
@@ -569,13 +569,12 @@ async function fetchDeviceBootstrap(args: {
       args.provisioned.participantArtifactDigest !==
         args.contract.CONTRACT_DIGEST ||
       args.provisioned.participantNeedsDigest !==
-        args.contract.PARTICIPANT_NEEDS_DIGEST
+        presentation.participantNeedsDigest
     ) {
       throw new Error(
         "Device participant identity does not match its contract",
       );
     }
-    const presentation = nativeProtocolPresentation(args.contract);
     const unsigned = {
       requestId,
       issuedAt,
@@ -590,7 +589,7 @@ async function fetchDeviceBootstrap(args: {
       newSessionNkey: sessionAuth.sessionNkey,
       participantId: args.provisioned.participantId,
       participantArtifactDigest: args.contract.CONTRACT_DIGEST,
-      participantNeedsDigest: args.contract.PARTICIPANT_NEEDS_DIGEST,
+      participantNeedsDigest: presentation.participantNeedsDigest,
       participantArtifact: presentation.participant,
       referencedApiArtifacts: [
         presentation.api,

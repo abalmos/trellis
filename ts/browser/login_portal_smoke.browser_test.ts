@@ -411,8 +411,6 @@ withLivePortalPage(
         participant: {
           id: liveLocalLoginFixture.clientContract.CONTRACT_ID,
           artifactDigest: liveLocalLoginFixture.clientContract.CONTRACT_DIGEST,
-          needsDigest:
-            liveLocalLoginFixture.clientContract.PARTICIPANT_NEEDS_DIGEST,
         },
         auth: {
           ...clientAuth.auth,
@@ -511,7 +509,6 @@ withLivePortalPage(
         participant: {
           id: fixture.clientContract.CONTRACT_ID,
           artifactDigest: fixture.clientContract.CONTRACT_DIGEST,
-          needsDigest: fixture.clientContract.PARTICIPANT_NEEDS_DIGEST,
         },
         auth: {
           mode: "session_key",
@@ -549,7 +546,6 @@ withLivePortalPage(
         participant: {
           id: fixture.clientContract.CONTRACT_ID,
           artifactDigest: fixture.clientContract.CONTRACT_DIGEST,
-          needsDigest: fixture.clientContract.PARTICIPANT_NEEDS_DIGEST,
         },
         auth: {
           mode: "session_key",
@@ -633,7 +629,6 @@ withLivePortalPage(
         participant: {
           id: fixture.clientContract.CONTRACT_ID,
           artifactDigest: fixture.clientContract.CONTRACT_DIGEST,
-          needsDigest: fixture.clientContract.PARTICIPANT_NEEDS_DIGEST,
         },
         auth: {
           ...clientAuth.auth,
@@ -718,7 +713,6 @@ withLivePortalPage(
         participant: {
           id: fixture.clientContract.CONTRACT_ID,
           artifactDigest: fixture.clientContract.CONTRACT_DIGEST,
-          needsDigest: fixture.clientContract.PARTICIPANT_NEEDS_DIGEST,
         },
         auth: {
           ...clientAuth.auth,
@@ -785,7 +779,6 @@ withLivePortalPage(
         participant: {
           id: fixture.clientContract.CONTRACT_ID,
           artifactDigest: fixture.clientContract.CONTRACT_DIGEST,
-          needsDigest: fixture.clientContract.PARTICIPANT_NEEDS_DIGEST,
         },
         auth: {
           ...clientAuth.auth,
@@ -866,7 +859,6 @@ withLivePortalPage(
         participant: {
           id: fixture.clientContract.CONTRACT_ID,
           artifactDigest: fixture.clientContract.CONTRACT_DIGEST,
-          needsDigest: fixture.clientContract.PARTICIPANT_NEEDS_DIGEST,
         },
         auth: {
           ...clientAuth.auth,
@@ -957,7 +949,6 @@ withLivePortalPage(
         participant: {
           id: fixture.clientContract.CONTRACT_ID,
           artifactDigest: fixture.clientContract.CONTRACT_DIGEST,
-          needsDigest: fixture.clientContract.PARTICIPANT_NEEDS_DIGEST,
         },
         auth: {
           mode: "session_key",
@@ -1028,7 +1019,6 @@ withLivePortalPage(
           participant: {
             id: fixture.clientContract.CONTRACT_ID,
             artifactDigest: fixture.clientContract.CONTRACT_DIGEST,
-            needsDigest: fixture.clientContract.PARTICIPANT_NEEDS_DIGEST,
           },
           auth: {
             mode: "session_key",
@@ -1136,7 +1126,6 @@ withLivePortalPage(
         participant: {
           id: fixture.clientContract.CONTRACT_ID,
           artifactDigest: fixture.clientContract.CONTRACT_DIGEST,
-          needsDigest: fixture.clientContract.PARTICIPANT_NEEDS_DIGEST,
         },
         auth: {
           ...secondClientAuth.auth,
@@ -1330,7 +1319,6 @@ withLivePortalPage(
         participant: {
           id: fixture.clientContract.CONTRACT_ID,
           artifactDigest: fixture.clientContract.CONTRACT_DIGEST,
-          needsDigest: fixture.clientContract.PARTICIPANT_NEEDS_DIGEST,
         },
         auth: {
           ...restorationClientAuth.auth,
@@ -1496,7 +1484,6 @@ Deno.test("browser.login-portal live OIDC role mapping", async () => {
               participant: {
                 id: fixture.clientContract.CONTRACT_ID,
                 artifactDigest: fixture.clientContract.CONTRACT_DIGEST,
-                needsDigest: fixture.clientContract.PARTICIPANT_NEEDS_DIGEST,
               },
               auth: {
                 ...clientAuth.auth,
@@ -1770,7 +1757,6 @@ withLivePortalPage(
         participant: {
           id: fixture.clientContract.CONTRACT_ID,
           artifactDigest: fixture.clientContract.CONTRACT_DIGEST,
-          needsDigest: fixture.clientContract.PARTICIPANT_NEEDS_DIGEST,
         },
         auth: {
           ...clientAuth.auth,
@@ -1866,7 +1852,6 @@ withLivePortalPage(
         participant: {
           id: fixture.clientContract.CONTRACT_ID,
           artifactDigest: fixture.clientContract.CONTRACT_DIGEST,
-          needsDigest: fixture.clientContract.PARTICIPANT_NEEDS_DIGEST,
         },
         auth: {
           ...clientAuth.auth,
@@ -2026,13 +2011,14 @@ withLivePortalPage(
     try {
       const { identity, rootSecret, provisioned } = await fixture
         .setupProvisionedDevice(admin, deploymentId);
-      const { confirmationCode, flowId } = await fixture.setupActivationRequest(
-        runtime,
-        admin,
-        deploymentId,
-        identity,
-        provisioned.device.instanceId,
-      );
+      const { confirmationCode, flowId, participantNeedsDigest } = await fixture
+        .setupActivationRequest(
+          runtime,
+          admin,
+          deploymentId,
+          identity,
+          provisioned.device.instanceId,
+        );
       await setupDeviceActivationPortalUser({
         admin: loginAdmin,
         runtime,
@@ -2070,7 +2056,7 @@ withLivePortalPage(
         principalId: provisioned.device.instanceId,
         participantId: fixture.deviceContract.CONTRACT_ID,
         participantArtifactDigest: fixture.deviceContract.CONTRACT_DIGEST,
-        participantNeedsDigest: fixture.deviceContract.PARTICIPANT_NEEDS_DIGEST,
+        participantNeedsDigest,
         pollIntervalMs: 25,
       });
       await runtime.waitFor(async () => {
@@ -2098,8 +2084,7 @@ withLivePortalPage(
           principalId: provisioned.device.instanceId,
           participantId: fixture.deviceContract.CONTRACT_ID,
           participantArtifactDigest: fixture.deviceContract.CONTRACT_DIGEST,
-          participantNeedsDigest:
-            fixture.deviceContract.PARTICIPANT_NEEDS_DIGEST,
+          participantNeedsDigest,
         },
         log: false,
         authorizationContextEphemeral: true,
@@ -2133,13 +2118,14 @@ withLivePortalPage(
     try {
       const { identity, rootSecret, provisioned } = await fixture
         .setupProvisionedDevice(admin, deploymentId);
-      const { confirmationCode, flowId } = await fixture.setupActivationRequest(
-        runtime,
-        admin,
-        deploymentId,
-        identity,
-        provisioned.device.instanceId,
-      );
+      const { confirmationCode, flowId, participantNeedsDigest } = await fixture
+        .setupActivationRequest(
+          runtime,
+          admin,
+          deploymentId,
+          identity,
+          provisioned.device.instanceId,
+        );
       await setupDeviceActivationPortalUser({
         admin: loginAdmin,
         runtime,
@@ -2184,6 +2170,7 @@ withLivePortalPage(
         rootSecret,
         deploymentId,
         instanceId: provisioned.device.instanceId,
+        participantNeedsDigest,
       });
     } finally {
       await loginAdmin.connection.close().catch(() => undefined);
@@ -2207,13 +2194,14 @@ withLivePortalPage(
     try {
       const { identity, rootSecret, provisioned } = await fixture
         .setupProvisionedDevice(admin, deploymentId);
-      const { confirmationCode, flowId } = await fixture.setupActivationRequest(
-        runtime,
-        admin,
-        deploymentId,
-        identity,
-        provisioned.device.instanceId,
-      );
+      const { confirmationCode, flowId, participantNeedsDigest } = await fixture
+        .setupActivationRequest(
+          runtime,
+          admin,
+          deploymentId,
+          identity,
+          provisioned.device.instanceId,
+        );
       const review = await waitForDeviceActivationReview({
         admin,
         runtime,
@@ -2270,6 +2258,7 @@ withLivePortalPage(
         rootSecret,
         deploymentId,
         instanceId: provisioned.device.instanceId,
+        participantNeedsDigest,
       });
     } finally {
       await loginAdmin.connection.close().catch(() => undefined);
@@ -2735,6 +2724,7 @@ async function assertDeviceConnectRejected(args: {
   rootSecret: Uint8Array;
   deploymentId: string;
   instanceId: string;
+  participantNeedsDigest: string;
 }): Promise<void> {
   const connect = await TrellisDevice.connect({
     trellisUrl: args.runtime.trellisUrl,
@@ -2746,8 +2736,7 @@ async function assertDeviceConnectRejected(args: {
       principalId: args.instanceId,
       participantId: args.fixture.deviceContract.CONTRACT_ID,
       participantArtifactDigest: args.fixture.deviceContract.CONTRACT_DIGEST,
-      participantNeedsDigest:
-        args.fixture.deviceContract.PARTICIPANT_NEEDS_DIGEST,
+      participantNeedsDigest: args.participantNeedsDigest,
     },
     log: false,
     authorizationContextEphemeral: true,

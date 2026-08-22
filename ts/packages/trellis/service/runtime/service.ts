@@ -42,10 +42,8 @@ import type {
   PermissionAtomV1,
   RuntimeApi,
 } from "../../contract_support/runtime.ts";
-import {
-  type NativeProtocolContract,
-  nativeProtocolPresentation,
-} from "../../contract_support/protocol_artifacts.ts";
+import type { NativeProtocolContract } from "../../contract_support/protocol_artifacts.ts";
+import { resolveNativeProtocolPresentation } from "../../contract_support/protocol_resolution.ts";
 import type {
   ContractEventConsumers,
   ContractJobsMetadata,
@@ -601,12 +599,12 @@ async function fetchServiceBootstrapInfoOnce(args: {
   const provisionedIdentityKeyId = base64urlEncode(
     await sha256(base64urlDecode(args.identityAuth.sessionKey)),
   );
-  const presentation = nativeProtocolPresentation(args.contract);
+  const presentation = resolveNativeProtocolPresentation(args.contract);
   if (
     args.identity.participantId !== args.contract.CONTRACT_ID ||
     args.identity.participantArtifactDigest !== args.contract.CONTRACT_DIGEST ||
     args.identity.participantNeedsDigest !==
-      args.contract.PARTICIPANT_NEEDS_DIGEST
+      presentation.participantNeedsDigest
   ) {
     throw new Error("Service participant identity does not match its contract");
   }
@@ -620,7 +618,7 @@ async function fetchServiceBootstrapInfoOnce(args: {
     newSessionNkey: args.sessionAuth.sessionNkey,
     participantId: args.identity.participantId,
     participantArtifactDigest: args.contract.CONTRACT_DIGEST,
-    participantNeedsDigest: args.contract.PARTICIPANT_NEEDS_DIGEST,
+    participantNeedsDigest: presentation.participantNeedsDigest,
     participantArtifact: presentation.participant,
     referencedApiArtifacts: [presentation.api, ...presentation.referencedApis],
     proof: { format: SESSION_PROOF_FORMAT_V1, signature: "" },

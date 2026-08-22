@@ -17,7 +17,7 @@ use trellis_codegen_ts::{
     collect_ts_sdk_sources, GenerateTsSdkOpts, TsRuntimeDeps,
     TsRuntimeSource as CodegenTsRuntimeSource,
 };
-use trellis_contracts::ApiBuilder;
+use trellis_contracts::{canonicalize_json, ApiBuilder, ContractBuilder};
 
 use crate::cli::{ContractInputArgs, RuntimeSource};
 use crate::contract_input::{self, ResolvedNativeInput};
@@ -609,13 +609,26 @@ pub fn write_participant_facade_outputs(
 }
 
 pub fn write_protocol_participant(
-    api_path: &Path,
-    participant_path: &Path,
+    resolved: &ResolvedNativeInput,
     protocol_participant_out: &Path,
 ) -> miette::Result<()> {
-    let (participant_json, participant_digest) =
-        trellis_codegen_rust::native_participant_artifact(api_path, participant_path, &[])
+    let participant = resolved
+        .participant
+        .as_ref()
+        .ok_or_else(|| miette::miette!("missing resolved participant"))?;
+    let referenced_apis = resolved
+        .referenced_apis
+        .iter()
+        .map(|api| (api.render_model.id.clone(), api.value.clone()))
+        .collect();
+    let artifacts =
+        ContractBuilder::from_native(resolved.api.value.clone(), participant.value.clone())
+            .referenced_apis(referenced_apis)
+            .build()
             .into_diagnostic()?;
+    let participant_json =
+        canonicalize_json(&artifacts.participant_value().into_diagnostic()?).into_diagnostic()?;
+    let participant_digest = artifacts.participant_digest().into_diagnostic()?;
     if let Some(parent) = protocol_participant_out.parent() {
         fs::create_dir_all(parent).into_diagnostic()?;
     }

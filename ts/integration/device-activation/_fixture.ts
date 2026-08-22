@@ -11,6 +11,7 @@ import {
 } from "@qlever-llc/trellis/auth";
 import * as trellisAuth from "@qlever-llc/trellis/sdk/auth";
 import { nativeProtocolPresentation } from "../../packages/trellis/contract_support/protocol_artifacts.ts";
+import { resolveNativeProtocolPresentation } from "../../packages/trellis/contract_support/protocol_resolution.ts";
 import type { LiveTrellisRuntime } from "../_support/runtime.ts";
 import {
   caseScopedContractId,
@@ -300,6 +301,7 @@ export function createDeviceActivationFixture(caseId: string) {
     identity: Awaited<ReturnType<typeof deriveDeviceIdentity>>,
     instanceId: string,
   ) {
+    const presentation = resolveNativeProtocolPresentation(deviceContract);
     const nonce = crypto.randomUUID();
     const confirmationCode = await deriveDeviceConfirmationCode({
       activationKey: identity.activationKey,
@@ -317,7 +319,7 @@ export function createDeviceActivationFixture(caseId: string) {
       principalId: instanceId,
       participantId: deviceContract.CONTRACT_ID,
       participantArtifactDigest: deviceContract.CONTRACT_DIGEST,
-      participantNeedsDigest: deviceContract.PARTICIPANT_NEEDS_DIGEST,
+      participantNeedsDigest: presentation.participantNeedsDigest,
       nonce,
       signal: controller.signal,
       pollIntervalMs: 25,
@@ -337,7 +339,11 @@ export function createDeviceActivationFixture(caseId: string) {
     controller.abort();
     await bootstrap.catch(() => undefined);
 
-    return { confirmationCode, flowId: review.reviewId };
+    return {
+      confirmationCode,
+      flowId: review.reviewId,
+      participantNeedsDigest: presentation.participantNeedsDigest,
+    };
   }
 
   async function approveDeviceContract(
