@@ -32,6 +32,7 @@ replace_once(
 python3 -m py_compile \\
 ''',
     '''git show origin/"$TRANSFORM_BRANCH":scripts/agent_wasm_boundary_v3_vector_regen.py > /tmp/vector-regen.py
+git show origin/"$TRANSFORM_BRANCH":scripts/agent_wasm_boundary_v3_proof_name_cleanup.py > /tmp/proof-name-cleanup.py
 git show origin/"$TRANSFORM_BRANCH":scripts/agent_packaging_phase_fix.py > /tmp/package-phase.py
 git show origin/"$TRANSFORM_BRANCH":scripts/agent_wasm_boundary_v3_validation_regression_fix.py > /tmp/validation-regression.py
 git show origin/"$TRANSFORM_BRANCH":scripts/agent_live_fixture_phase_fix.py > /tmp/live-fixture-phase.py
@@ -47,11 +48,22 @@ replace_once(
     '''  /tmp/wasm-boundary-ci.py \\
   /tmp/proof-v1.py \\
   /tmp/vector-regen.py \\
+  /tmp/proof-name-cleanup.py \\
   /tmp/package-phase.py \\
   /tmp/validation-regression.py \\
   /tmp/live-fixture-phase.py
 ''',
     "compile supplemental transforms",
+)
+replace_once(
+    '''python3 /tmp/proof-v1.py
+python3 /tmp/vector-regen.py add
+''',
+    '''python3 /tmp/proof-v1.py
+python3 /tmp/proof-name-cleanup.py
+python3 /tmp/vector-regen.py add
+''',
+    "apply proof name cleanup",
 )
 replace_once(
     '''git commit -m 'Refresh generated participant baselines'
