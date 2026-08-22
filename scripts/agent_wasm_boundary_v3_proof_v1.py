@@ -82,6 +82,15 @@ ts_replacements = {
 }
 replace_in_tree("ts", (".ts", ".tsx"), ts_replacements)
 
+# The shorter first-public type name fits on one line. Keep the transform output
+# itself formatted instead of making validation mutate product source.
+session = Path("ts/packages/trellis/session.ts")
+text = session.read_text().replace(
+    "type VerifyAuthorizationEventResultLike =\n  VerifyAuthorizationRequestResultLike;",
+    "type VerifyAuthorizationEventResultLike = VerifyAuthorizationRequestResultLike;",
+)
+session.write_text(text)
+
 wrapper = Path("ts/packages/trellis/auth/protocol_wasm.ts")
 text = wrapper.read_text()
 text = text.replace("verify_authorization_request_v2", "verify_authorization_request_v1")
