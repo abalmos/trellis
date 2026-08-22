@@ -128,7 +128,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: check-generated
-          path: .
+          path: generated
 
       - name: Download protocol WASM
         uses: actions/download-artifact@v4
@@ -163,7 +163,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: check-generated
-          path: .
+          path: generated
 
       - name: Download embedded portal
         uses: actions/download-artifact@v4
@@ -223,7 +223,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: check-generated
-          path: .
+          path: generated
 
       - name: Download protocol WASM
         uses: actions/download-artifact@v4
@@ -265,7 +265,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: check-generated
-          path: .
+          path: generated
 
       - name: Download protocol WASM
         uses: actions/download-artifact@v4
