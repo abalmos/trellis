@@ -2,7 +2,7 @@ from collections import defaultdict
 from pathlib import Path
 import re
 
-SUBJECT = re.compile(r'"((?:rpc|operations|events|feed)\.v[1-9][0-9]*\.[A-Za-z0-9_.*>-]+)"')
+SUBJECT = re.compile(r'"((?:rpc|operations|events|feed|feeds)\.v[1-9][0-9]*\.[A-Za-z0-9_.*>-]+)"')
 AUTHORING_ID = re.compile(
     r'ContractBuilder::authoring\(\s*"(trellis\.integration\.[A-Za-z0-9_.-]+@v[1-9][0-9]*)"'
 )
@@ -23,6 +23,8 @@ for path in root.glob("*.rs"):
     for subject in SUBJECT.findall(content):
         parts = subject.split(".")
         logical_root = parts[2] if len(parts) >= 3 else ""
+        # Platform subjects were intentionally never scoped, so sharing them is
+        # not a new consequence of deleting IntegrationTestScope.
         if logical_root in PLATFORM_ROOTS:
             continue
         subject_owners[subject].add(module)
