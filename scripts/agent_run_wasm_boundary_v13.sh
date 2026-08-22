@@ -2,8 +2,8 @@
 set -euo pipefail
 
 # Keep the previously audited v3.13 validator exact, then patch only the
-# packaging-phase regressions exposed by attempts 3 and 7. This file is
-# scratch-only.
+# packaging-phase and validation regressions exposed by later attempts. This
+# file is scratch-only.
 BASE_VALIDATOR_COMMIT="578feac189833cfd336d9c9bb9063f28cc58ac2e"
 BASE_URL="https://raw.githubusercontent.com/abalmos/trellis/${BASE_VALIDATOR_COMMIT}/scripts/agent_run_wasm_boundary_v13.sh"
 curl --fail --silent --show-error --location "$BASE_URL" -o /tmp/agent-run-wasm-boundary-v13-base.sh
@@ -33,9 +33,10 @@ python3 -m py_compile \\
 ''',
     '''git show origin/"$TRANSFORM_BRANCH":scripts/agent_wasm_boundary_v3_vector_regen.py > /tmp/vector-regen.py
 git show origin/"$TRANSFORM_BRANCH":scripts/agent_packaging_phase_fix.py > /tmp/package-phase.py
+git show origin/"$TRANSFORM_BRANCH":scripts/agent_wasm_boundary_v3_validation_regression_fix.py > /tmp/validation-regression.py
 python3 -m py_compile \\
 ''',
-    "load packaging transform",
+    "load supplemental transforms",
 )
 replace_once(
     '''  /tmp/wasm-boundary-ci.py \\
@@ -45,9 +46,10 @@ replace_once(
     '''  /tmp/wasm-boundary-ci.py \\
   /tmp/proof-v1.py \\
   /tmp/vector-regen.py \\
-  /tmp/package-phase.py
+  /tmp/package-phase.py \\
+  /tmp/validation-regression.py
 ''',
-    "compile packaging transform",
+    "compile supplemental transforms",
 )
 replace_once(
     '''git commit -m 'Refresh generated participant baselines'
@@ -71,9 +73,19 @@ git add -- \\
   ts/tools/package_build/result_npm_test.ts
 git commit -m 'Keep package-build tests in packaging phase'
 
+# Preserve the meaningful pre-existing release inventory invariant and tighten
+# the package self-import guard now that trellis_core.ts is clean.
+python3 /tmp/validation-regression.py
+deno fmt -c ts/deno.json ts/packages/trellis/tests/publishing_targets_test.ts
+git diff --check
+git add -- \\
+  .github/workflows/release.yml \\
+  ts/packages/trellis/tests/publishing_targets_test.ts
+git commit -m 'Restore release inventory and self-import guard'
+
 # Prove clean generation order: source resolution and participant emission occur
 ''',
-    "commit packaging cleanup",
+    "commit supplemental cleanup",
 )
 replace_once(
     '''deno task -c ts/deno.json test:prepared
@@ -89,7 +101,7 @@ git diff --exit-code
 )
 replace_once(
     "git log --oneline -4\n",
-    "git log --oneline -5\n",
+    "git log --oneline -6\n",
     "final log depth",
 )
 
