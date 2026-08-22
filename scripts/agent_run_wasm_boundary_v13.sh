@@ -113,8 +113,8 @@ git commit -m 'Keep external smoke in live phase'
 # Apply the independently reviewed follow-up commits before the full gate.
 git fetch --depth=20 origin agent/wasm-boundary-reviewed-followups
 git cherry-pick \
-  da8ad8554aa30721635a2e5db77e9a9cc3e92d83 \
-  8acc4fef7371fe67bb169de383bc64248a20263d \
+  da8ad855d5ecda1f09ee80ec3b5ee4992fb519c6 \
+  8acc4fef58914bcaf089e8a63727aac30e1e79b0 \
   f912c644b85a4e5db3c2f2b4317001961bc7f674
 
 # Prove clean generation order: source resolution and participant emission occur
