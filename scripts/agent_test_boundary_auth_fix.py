@@ -1,8 +1,7 @@
 from pathlib import Path
-import re
 
-# Stable protocol identities are intentional. Reset only durable test-owned
-# portal policy state between serial auth cases.
+# Stable API/action/capability/subject identity is intentional. Reset only
+# durable test-owned portal policy state between serial auth cases.
 path = Path("rust/crates/trellis-test/src/lib.rs")
 text = path.read_text()
 old = '''    /// Create one participant-scoped login portal and route through public Auth RPCs.
@@ -181,29 +180,28 @@ if text.count(old) != 1:
     raise RuntimeError(f"expected one test portal helper, found {text.count(old)}")
 path.write_text(text.replace(old, new, 1))
 
-# The auth fixture no longer needs any case-specific contract identity. Directly
-# use the authored contract IDs/digests and the real platform event subjects.
+# API capability identity stays authored. Participant authority/portal identity
+# uses the per-test participant artifact produced by TrellisTestRuntime::case_contract.
 path = Path("rust/crates/trellis/tests/integration/auth.rs")
 text = path.read_text()
-old = '''    let expected_contract = fixture
-        .runtime
-        .scoped_contract(&fixture.client_contract)
-        .expect("scope inventoried participant");
-    let expected_needs_digest = expected_contract.needs_digest();
+service_scope = '''        runtime
+            .scoped_contract(&service_contract)
+            .expect("scope trusted-portal service contract")
+            .id()
 '''
-new = '''    let expected_needs_digest = fixture.client_contract.needs_digest();
-'''
-if text.count(old) != 1:
-    raise RuntimeError(f"expected one inventoried scoped contract, found {text.count(old)}")
-text = text.replace(old, new, 1)
-
-pattern = re.compile(
-    r'''(?:fixture\s*\.\s*runtime|runtime)\s*\.\s*scoped_contract\(\s*&(?P<contract>(?:fixture\.)?[A-Za-z_][A-Za-z0-9_]*)\s*\)\s*\.\s*expect\("[^"]*"\)''',
-    re.MULTILINE,
-)
-text, count = pattern.subn(lambda match: match.group("contract"), text)
-if count != 8:
-    raise RuntimeError(f"expected eight remaining scoped contract uses, found {count}")
+if text.count(service_scope) != 1:
+    raise RuntimeError(f"expected one capability-only service scoped contract, found {text.count(service_scope)}")
+text = text.replace(service_scope, "        service_contract.id()\n", 1)
+remaining = text.count(".scoped_contract(")
+if remaining != 8:
+    raise RuntimeError(f"expected eight participant scoped-contract uses, found {remaining}")
+text = text.replace(".scoped_contract(", ".case_contract(")
+text = text.replace("scope approved client contract", "build case approved client participant")
+text = text.replace("scope optional client contract", "build case optional client participant")
+text = text.replace("scope inventoried participant", "build case inventoried participant")
+text = text.replace("scope routed client", "build case routed client participant")
+text = text.replace("scope trusted portal client", "build case trusted portal participant")
+text = text.replace("scope trusted-portal client contract", "build case trusted-portal client participant")
 
 for value in ("device.approval.deployment_id", "no_review.approval.deployment_id"):
     old = f'''fixture
