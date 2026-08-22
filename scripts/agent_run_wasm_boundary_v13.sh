@@ -2,7 +2,8 @@
 set -euo pipefail
 
 # Keep the previously audited v3.13 validator exact, then patch only the
-# packaging-phase regression exposed by attempt 3. This file is scratch-only.
+# packaging-phase regressions exposed by attempts 3 and 7. This file is
+# scratch-only.
 BASE_VALIDATOR_COMMIT="578feac189833cfd336d9c9bb9063f28cc58ac2e"
 BASE_URL="https://raw.githubusercontent.com/abalmos/trellis/${BASE_VALIDATOR_COMMIT}/scripts/agent_run_wasm_boundary_v13.sh"
 curl --fail --silent --show-error --location "$BASE_URL" -o /tmp/agent-run-wasm-boundary-v13-base.sh
@@ -59,11 +60,13 @@ replace_once(
 # the existing packaging phase an explicit Check responsibility.
 python3 /tmp/package-phase.py
 deno fmt -c ts/deno.json \\
+  ts/deno.json \\
   ts/packages/result/tests/package_identity_test.ts \\
   ts/tools/package_build/result_npm_test.ts
 git diff --check
 git add -- \\
   .github/workflows/check.yml \\
+  ts/deno.json \\
   ts/packages/result/tests/package_identity_test.ts \\
   ts/tools/package_build/result_npm_test.ts
 git commit -m 'Keep package-build tests in packaging phase'
