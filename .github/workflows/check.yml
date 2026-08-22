@@ -2,6 +2,9 @@ name: Check
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - agent/wasm-boundary-validation-v13
 
 permissions:
   contents: write
@@ -27,6 +30,17 @@ jobs:
         with:
           ref: ${{ env.TARGET_BRANCH }}
           fetch-depth: 0
+
+      - name: Prepare validation run
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config --local user.name trellis-validation
+          git config --local user.email trellis-validation@users.noreply.github.com
+          git config --local commit.gpgsign false
+          git config --local tag.gpgSign false
+          printf '%s\n' "$GITHUB_RUN_ID" > .validation-run
+          test -s .validation-run
 
       - name: Load scratch validator
         uses: actions/checkout@v4
