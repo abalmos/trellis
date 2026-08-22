@@ -20,10 +20,11 @@ The result preserves typed action and runtime descriptors and exposes exactly:
 - `API`
 - `API_DIGEST`
 - `PARTICIPANT`
-- `PARTICIPANT_NEEDS_DIGEST`
 
 `CONTRACT_ID` is the participant id and `CONTRACT_DIGEST` is the semantic
-participant digest. The object does not expose a serialized combined artifact.
+participant digest. TypeScript computes both intrinsic digests without WASM. The
+object does not expose a serialized combined artifact or an eager contextual
+needs digest.
 
 ## Native construction
 
@@ -37,10 +38,11 @@ Capability selections become `api.capabilities[*].allows`. Every declared
 capability exists even when unused. Human wording becomes API consent. Wording
 changes preserve `API_DIGEST`; permission changes do not.
 
-Participant resolution and grant derivation use the authoritative
-`trellis_protocol` resolver through the lazy protocol WASM bridge. Importing a
-descriptor has no WASM initialization side effect; defining a contract performs
-synchronous lazy initialization in server and browser environments.
+Contract authoring is WASM-free. Runtime bootstrap and presentation pass the
+participant and exact referenced APIs to the narrow protocol-WASM resolution
+boundary. That boundary compares Rust's API and participant digests with the
+TypeScript intrinsic identities, then returns the contextual needs digest and
+grant derivation.
 
 ## Generated packages
 
@@ -56,6 +58,7 @@ prepare`; never edit generated files.
 
 ## Runtime presentation
 
-Clients, devices, browser auth starts, and services present `PARTICIPANT`, the
-owned API, all exact referenced APIs, `CONTRACT_DIGEST`, and
-`PARTICIPANT_NEEDS_DIGEST`. There is no conversion or alternate bootstrap shape.
+Clients, devices, browser auth starts, and services resolve `PARTICIPANT`, the
+owned API, and all exact referenced APIs at runtime before presenting the
+resulting contextual needs digest. There is no eager contextual digest on the
+authored contract.

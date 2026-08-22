@@ -66,9 +66,9 @@ Rules:
   the immutable proposal; Svelte portal code never expands or applies them.
 - `TrellisClientFor<typeof contract>` and
   `createTrellisApp(...)` require a module-shaped contract with `CONTRACT`,
-  `CONTRACT_ID`, `CONTRACT_DIGEST`, `API`, `API_DIGEST`, `PARTICIPANT`, and
-  `PARTICIPANT_NEEDS_DIGEST`. The source contract returned by
-  `defineAppContract(...)` already has that shape.
+  `CONTRACT_ID`, `CONTRACT_DIGEST`, `API`, `API_DIGEST`, and `PARTICIPANT`. The
+  source contract returned by `defineAppContract(...)` already has that shape;
+  Trellis resolves contextual participant needs at runtime.
 - Import `defineAppContract(...)` from the browser-safe `@qlever-llc/trellis`
   root. Keep generated SDKs and browser auth helpers on their explicit subpaths
   or local workspace aliases.

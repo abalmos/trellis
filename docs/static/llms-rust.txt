@@ -102,7 +102,7 @@ https://raw.githubusercontent.com/qlever-llc/trellis/main/docs/static/llms-full.
 - Pure protocol/tooling code can use `trellis-protocol` signed authorization
   types to verify a pinned root, root-signed direct-key issuer manifest,
   issuer-signed short-lived context, and
-  context-bound request proof v2 without NATS, storage, wall-clock, or async
+  context-bound request proof v1 without NATS, storage, wall-clock, or async
   access. Supply verification time and limits explicitly.
 - Signed contexts bind principal and participant identity separately, exact
   participant/needs digests, authority version, session key, inbox prefix, exact
@@ -117,7 +117,7 @@ https://raw.githubusercontent.com/qlever-llc/trellis/main/docs/static/llms-full.
   byte limit, not the base64url token length.
 - NATS admission validates the signed context, NKey/session-key binding, and
   current physical bindings. Target
-  providers then verify request/event proof v2 locally against the presented
+  providers then verify request/event proof v1 locally against the presented
   context, actual transport fields, exact generated permission atom,
   capabilities and revocation state. Provider
   authorization evidence comes from the internal NATS KV registry: watches for

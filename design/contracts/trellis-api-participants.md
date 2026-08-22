@@ -30,7 +30,7 @@ TypeScript defined contracts expose:
 - `CONTRACT_ID` — participant id
 - `CONTRACT_DIGEST` — semantic participant digest
 - `API`, `API_DIGEST`
-- `PARTICIPANT`, `PARTICIPANT_NEEDS_DIGEST`
+- `PARTICIPANT`
 
 Rust `ContractArtifacts` exposes the equivalent native objects, digests, and
 grant sets without being serializable as a third artifact.
@@ -74,10 +74,11 @@ JSON, needs digest, owned API evidence, and exact referenced API evidence.
 
 ## Runtime presentation
 
-Clients, devices, and services present the normalized participant, its exact
-owned and referenced APIs, `CONTRACT_DIGEST`, and `PARTICIPANT_NEEDS_DIGEST`.
-Bootstrap validates this evidence directly. There is no retry state for
-requesting another artifact shape.
+Clients, devices, and services resolve the normalized participant with its exact
+owned and referenced APIs before presentation. The runtime boundary compares the
+resolved API and participant digests with TypeScript's intrinsic identities and
+supplies the contextual needs digest. Bootstrap validates this evidence
+directly. There is no retry state for requesting another artifact shape.
 
 State declarations, writers, migrations, and admin views use the resolved
 participant binding's artifact digest. Compatible participant digest changes do
@@ -92,6 +93,7 @@ required and optional uses, event consumers, capability and consent, transfers,
 devices, and agents. Each vector asserts normalized API and participant JSON,
 API and participant digests, needs digest, and required and optional grants.
 
-Protocol validation, normalization, digesting, participant resolution, and grant
-derivation are authoritative in `trellis_protocol`. TypeScript uses the same
-resolver through the lazy protocol WASM bridge.
+Protocol validation, contextual participant resolution, and grant derivation are
+authoritative in `trellis_protocol`. TypeScript computes intrinsic API and
+participant digests without WASM, then runtime paths use the narrow
+protocol-WASM boundary for contextual resolution.

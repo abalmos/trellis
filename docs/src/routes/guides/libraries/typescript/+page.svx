@@ -645,8 +645,8 @@ Svelte-reactive `SvelteTrellisConnection`.
 Browser apps should pass the app source contract default export to Trellis
 helpers. The source contract returned by `defineAppContract(...)` already has the
 native contract shape Trellis needs: `CONTRACT_ID`, `CONTRACT_DIGEST`, `API`,
-`API_DIGEST`, `PARTICIPANT`, and `PARTICIPANT_NEEDS_DIGEST`, plus
-contract metadata.
+`API_DIGEST`, and `PARTICIPANT`, plus contract metadata. Trellis resolves the
+contextual participant-needs digest at runtime from the exact referenced APIs.
 
 ```ts
 import { defineAppContract } from "@qlever-llc/trellis";

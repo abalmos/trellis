@@ -42,7 +42,7 @@ commands.
   revocations, become ready after current manifest verification and revocation
   initial state, and fail closed only on actual connection/watch failure.
   Registry handles are not service-author APIs.
-  Ordinary request and event proof v2 verification is local,
+  Ordinary request and event proof v1 verification is local,
   exact-permission/capability checked, and performs no Auth RPC,
   HTTP, SQLite, or registry read on a cache hit.
 - The deny-all bootstrap JWT only selects the Auth Callout route. Context refresh
