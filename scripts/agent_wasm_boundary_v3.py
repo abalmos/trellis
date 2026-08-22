@@ -9,7 +9,6 @@ exec(compile(base, f"<blob {BASE_TRANSFORM_BLOB}>", "exec"), {})
 for script in [
     "agent_wasm_boundary_v3_normalization_fix.py",
     "agent_wasm_boundary_v3_eager_digest_fix.py",
-    "agent_wasm_boundary_v3_consumer_fix.py",
     "agent_wasm_boundary_v3_client_identity_fix.py",
 ]:
     source = subprocess.check_output(
