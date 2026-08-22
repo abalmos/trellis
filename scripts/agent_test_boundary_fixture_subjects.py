@@ -17,7 +17,7 @@ replace_exact(
     "rust/crates/trellis/tests/integration/authority_plan.rs",
     '"Value.Get"',
     '"AuthorityPlan.Value.Get"',
-    6,
+    9,
 )
 replace_exact(
     "rust/crates/trellis/tests/integration/authority_plan.rs",
@@ -30,7 +30,7 @@ replace_exact(
     "rust/crates/trellis/tests/integration/prepared_events.rs",
     '"Entity.Changed"',
     '"Prepared.Entity.Changed"',
-    4,
+    5,
 )
 replace_exact(
     "rust/crates/trellis/tests/integration/prepared_events.rs",
