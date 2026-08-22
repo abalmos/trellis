@@ -127,15 +127,19 @@ replace_once(
     "contract tests",
 )
 
-for task, command in [
-    ("dev", "deno run -A vite dev"),
-    ("build", "deno run -A vite build"),
-    ("check", "deno run -A @sveltejs/kit sync && deno run -A svelte-check --tsconfig ./tsconfig.check.json"),
+for task, command, suffix in [
+    ("dev", "deno run -A vite dev", ","),
+    ("build", "deno run -A vite build", ","),
+    (
+        "check",
+        "deno run -A @sveltejs/kit sync && deno run -A svelte-check --tsconfig ./tsconfig.check.json",
+        "",
+    ),
 ]:
     replace_once(
         "ts/apps/console/deno.json",
-        f'    "{task}": "deno task prepare && {command}",',
-        f'    "{task}": "deno task prepare && deno task -c ../../deno.json protocol:wasm && {command}",',
+        f'    "{task}": "deno task prepare && {command}"{suffix}',
+        f'    "{task}": "deno task prepare && deno task -c ../../deno.json protocol:wasm && {command}"{suffix}',
         f"console {task} task",
     )
 
