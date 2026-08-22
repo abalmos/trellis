@@ -191,7 +191,7 @@ The trust hierarchy is:
 pinned root
   -> root-signed current issuer manifest
   -> issuer-signed short-lived authorization context
-  -> session-key-signed request proof v2
+  -> session-key-signed request proof v1
 ```
 
 All signed JSON security objects use strict recognized top-level fields. Signed
@@ -269,10 +269,10 @@ deployment and instance ids, participant artifact and needs digests, context and
 session identity, validity bounds, grants, capabilities, and immutable signed
 context needed by auditing and later runtime integration.
 
-Request proof v2 input is:
+Request proof v1 input is:
 
 ```text
-LP("trellis.authorization-request-proof.v2")
+LP("trellis.authorization-request-proof.v1")
 LP(raw 32-byte signed-context digest)
 LP(exact subject UTF-8)
 LP(exact reply subject UTF-8, or empty)
@@ -308,12 +308,12 @@ whole-bucket watches, enumeration, and writes remain denied.
 
 Providers exact-match generated route metadata before resolving caller context.
 They compute the payload hash from the raw bytes received and verify request
-proof v2 over the context digest, actual subject, actual reply subject, payload
+proof v1 over the context digest, actual subject, actual reply subject, payload
 hash, corrected issue time, and request id. The resolved signed context must
 bind the presented session key and contain the exact generated permission atom
 and every declared capability.
 
-Event proof v2 binds the context digest, actual event subject, raw payload hash,
+Event proof v1 binds the context digest, actual event subject, raw payload hash,
 event id, and canonical event time. Typed consumers use their receiver-owned
 generated event descriptor for the API id, event name, actual subject, exact
 Publish atom, and required capabilities. The generic Event Log verifies trust,
