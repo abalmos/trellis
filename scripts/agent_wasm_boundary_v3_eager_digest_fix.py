@@ -56,8 +56,8 @@ p.write_text(text)
 
 p = Path("ts/packages/trellis/auth/browser/login.test.ts")
 text = p.read_text()
-anchor = 'import { canonicalizeJsonValue } from "../../contract_support/canonical.ts";\n'
-if text.count(anchor) != 1: raise RuntimeError("browser login test canonical import anchor changed")
+anchor = '} from "../utils.ts";\n'
+if text.count(anchor) != 1: raise RuntimeError("browser login test utils import anchor changed")
 text = text.replace(anchor, anchor + 'import { resolveNativeProtocolPresentation } from "../../contract_support/protocol_resolution.ts";\n', 1)
 anchor = 'Deno.test("startAuthRequest signs provider, contract, and canonical context", async () => {\n'
 if text.count(anchor) != 1: raise RuntimeError("signed login test anchor changed")
