@@ -70,9 +70,9 @@ jobs:
             scripts/agent_test_boundary_noop_cleanup.py \
             scripts/agent_test_subject_collision_audit.py
           python3 scripts/agent_test_boundary_v1_pre.py
+          python3 scripts/agent_test_boundary_auth_fix.py
           python3 scripts/agent_test_boundary_v1.py
           python3 scripts/agent_test_boundary_participant_identity.py
-          python3 scripts/agent_test_boundary_auth_fix.py
           python3 scripts/agent_test_boundary_fixture_subjects.py
           python3 scripts/agent_test_boundary_fixture_hooks.py
           python3 scripts/agent_test_boundary_v1_fix.py
