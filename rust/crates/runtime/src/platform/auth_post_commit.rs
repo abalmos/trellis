@@ -226,7 +226,7 @@ impl AuthPostCommitRuntime {
         headers.insert(
             "proof",
             self.event_session
-                .create_event_proof_v2(
+                .create_event_proof(
                     &self.event_context_digest,
                     &event_subject,
                     &payload,

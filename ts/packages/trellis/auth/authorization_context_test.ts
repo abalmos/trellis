@@ -15,8 +15,8 @@ import {
   type AuthorizationContextBundle,
   AuthorizationContextCache,
   AuthorizationProviderCache,
-  type AuthorizationProviderEventV2,
-  type AuthorizationProviderRequestV2,
+  type AuthorizationProviderEvent,
+  type AuthorizationProviderRequest,
   MemoryAuthorizationContextStore,
   refreshAuthorizationContext,
   startAuthorizationContextRefresh,
@@ -434,7 +434,7 @@ function providerPermission(): PermissionAtomV1 {
 function providerRequest(
   proof = vectors.completeChain.requestProof,
   contextDigest = vectors.completeChain.contextDigest,
-): AuthorizationProviderRequestV2 {
+): AuthorizationProviderRequest {
   const request = vectors.defaults.request;
   return {
     contextDigest,
@@ -473,7 +473,7 @@ function providerEvent(
   proof: string,
   eventId = vectors.defaults.event.eventId,
   eventTime = vectors.defaults.event.eventTime,
-): AuthorizationProviderEventV2 {
+): AuthorizationProviderEvent {
   const event = vectors.defaults.event;
   return {
     contextDigest: vectors.completeChain.contextDigest,
@@ -1036,7 +1036,7 @@ Deno.test("provider cache fails closed for missing and revoked contexts", async 
     true,
   );
   try {
-    const missingResult = await missing.verifyRequestV2(
+    const missingResult = await missing.verifyRequest(
       providerRequest(
         undefined,
         `B${vectors.completeChain.contextDigest.slice(1)}`,
@@ -1063,7 +1063,7 @@ Deno.test("provider cache fails closed for missing and revoked contexts", async 
     await assertRejects(() => malformed.waitReady({ timeoutMs: 50 }));
     await assertRejects(
       () =>
-        malformed.verifyEventV2(
+        malformed.verifyEvent(
           providerEvent(vectors.completeChain.eventProof),
         ),
       Error,
@@ -1081,7 +1081,7 @@ Deno.test("provider cache fails closed for missing and revoked contexts", async 
     [providerRevocation()],
   );
   try {
-    const revokedResult = await revoked.verifyRequestV2(providerRequest());
+    const revokedResult = await revoked.verifyRequest(providerRequest());
     assert(!revokedResult.ok);
     assertEquals(revoked.ioCounters().contextGets, 0);
   } finally {
@@ -1098,7 +1098,7 @@ Deno.test("provider cache verifies historical events and rejects revoked context
     1_400,
   );
   try {
-    const historicalResult = await historical.verifyEventV2(
+    const historicalResult = await historical.verifyEvent(
       providerEvent(chain.eventProof),
     );
     assert(historicalResult.ok);
@@ -1114,7 +1114,7 @@ Deno.test("provider cache verifies historical events and rejects revoked context
     [providerRevocation()],
   );
   try {
-    const beforeRevocation = await revoked.verifyEventV2(
+    const beforeRevocation = await revoked.verifyEvent(
       providerEvent(
         await eventProof("evt_before_revocation", "1970-01-01T00:19:00Z"),
         "evt_before_revocation",
@@ -1125,7 +1125,7 @@ Deno.test("provider cache verifies historical events and rejects revoked context
     if (!beforeRevocation.ok) {
       assertEquals(beforeRevocation.error.code, "EventRevoked");
     }
-    const atRevocation = await revoked.verifyEventV2(
+    const atRevocation = await revoked.verifyEvent(
       providerEvent(
         await eventProof("evt_at_revocation", vectors.defaults.event.eventTime),
         "evt_at_revocation",
@@ -1142,20 +1142,20 @@ Deno.test("same request and event proofs are accepted", async () => {
   const calls: string[] = [];
   const cache = await readyProvider(await providerContextCache(), calls);
   try {
-    const invalid = await cache.verifyRequestV2(
+    const invalid = await cache.verifyRequest(
       providerRequest(`A${vectors.completeChain.requestProof.slice(1)}`),
     );
     assert(!invalid.ok);
-    const first = await cache.verifyRequestV2(providerRequest());
+    const first = await cache.verifyRequest(providerRequest());
     assert(first.ok);
-    const duplicate = await cache.verifyRequestV2(providerRequest());
+    const duplicate = await cache.verifyRequest(providerRequest());
     assert(duplicate.ok);
 
-    const event = await cache.verifyEventV2(
+    const event = await cache.verifyEvent(
       providerEvent(vectors.completeChain.eventProof),
     );
     assert(event.ok);
-    const eventDuplicate = await cache.verifyEventV2(
+    const eventDuplicate = await cache.verifyEvent(
       providerEvent(vectors.completeChain.eventProof),
     );
     assert(eventDuplicate.ok);

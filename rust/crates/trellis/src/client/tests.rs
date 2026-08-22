@@ -4,11 +4,11 @@ use std::path::PathBuf;
 use serde::Deserialize;
 
 use crate::client::proof::base64url_encode;
-use crate::client::verify_event_proof_v2;
+use crate::client::verify_event_proof;
 use crate::client::{SessionAuth, TrellisClientError};
 use trellis_protocol::{
-    build_authorization_event_proof_input_v2, build_authorization_request_proof_input_v2,
-    AuthorizationEventProofV2, AuthorizationRequestProofV2,
+    build_authorization_event_proof_input, build_authorization_request_proof_input,
+    AuthorizationEventProof, AuthorizationRequestProof,
 };
 
 #[derive(Debug, Deserialize)]
@@ -128,15 +128,15 @@ fn vector_defaults() -> AuthorizationVectorDefaults {
 }
 
 #[test]
-fn request_proof_v2_matches_language_neutral_conformance_vector() {
+fn request_proof_v1_matches_language_neutral_conformance_vector() {
     let chain = chain_fixture();
     let defaults = vector_defaults();
     let auth = SessionAuth::from_seed_base64url(&chain.session_seed).unwrap();
     assert_eq!(auth.session_key, chain.session_public_key);
 
     let payload = defaults.request.payload.as_bytes();
-    let proof: AuthorizationRequestProofV2 = auth
-        .create_request_proof_v2(
+    let proof: AuthorizationRequestProof = auth
+        .create_request_proof(
             &chain.context_digest,
             &defaults.request.subject,
             &defaults.request.reply,
@@ -149,7 +149,7 @@ fn request_proof_v2_matches_language_neutral_conformance_vector() {
 
     let context_digest = crate::client::proof::base64url_decode(&chain.context_digest).unwrap();
     let context_digest: [u8; 32] = context_digest.try_into().unwrap();
-    let input = build_authorization_request_proof_input_v2(
+    let input = build_authorization_request_proof_input(
         &context_digest,
         &defaults.request.subject,
         Some(&defaults.request.reply),
@@ -204,7 +204,7 @@ fn verify_request_proof(
     let context_digest: [u8; 32] = context_digest.try_into().map_err(|_| {
         TrellisClientError::Bootstrap("authorization context digest must encode 32 bytes".into())
     })?;
-    let input = build_authorization_request_proof_input_v2(
+    let input = build_authorization_request_proof_input(
         &context_digest,
         subject,
         Some(reply),
@@ -231,15 +231,15 @@ fn verify_request_proof(
 }
 
 #[test]
-fn event_proof_v2_matches_language_neutral_conformance_vector() {
+fn event_proof_v1_matches_language_neutral_conformance_vector() {
     let chain = chain_fixture();
     let defaults = vector_defaults();
     let auth = SessionAuth::from_seed_base64url(&chain.session_seed).unwrap();
     assert_eq!(auth.session_key, chain.session_public_key);
 
     let payload = defaults.event.payload.as_bytes();
-    let proof: AuthorizationEventProofV2 = auth
-        .create_event_proof_v2(
+    let proof: AuthorizationEventProof = auth
+        .create_event_proof(
             &chain.context_digest,
             &defaults.event.subject,
             payload,
@@ -251,7 +251,7 @@ fn event_proof_v2_matches_language_neutral_conformance_vector() {
 
     let context_digest = crate::client::proof::base64url_decode(&chain.context_digest).unwrap();
     let context_digest: [u8; 32] = context_digest.try_into().unwrap();
-    let input = build_authorization_event_proof_input_v2(
+    let input = build_authorization_event_proof_input(
         &context_digest,
         &defaults.event.subject,
         payload,
@@ -261,7 +261,7 @@ fn event_proof_v2_matches_language_neutral_conformance_vector() {
     .unwrap();
     assert_eq!(bytes_to_hex(input.as_bytes()), chain.event_proof_input_hex);
     assert_eq!(base64url_encode(input.digest()), chain.event_proof_digest);
-    assert!(verify_event_proof_v2(
+    assert!(verify_event_proof(
         &auth.session_key,
         &chain.context_digest,
         &defaults.event.subject,
@@ -271,7 +271,7 @@ fn event_proof_v2_matches_language_neutral_conformance_vector() {
         proof.as_str(),
     )
     .expect("event proof verifies"));
-    assert!(!verify_event_proof_v2(
+    assert!(!verify_event_proof(
         &auth.session_key,
         &chain.context_digest,
         &defaults.event.subject,

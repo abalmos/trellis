@@ -37,8 +37,8 @@ import type { StaticDecode } from "typebox";
 import { buildEventProofInput } from "./auth/proof.ts";
 import {
   AuthorizationProviderCache,
-  type AuthorizationProviderEventV2,
-  type AuthorizationProviderRequestV2,
+  type AuthorizationProviderEvent,
+  type AuthorizationProviderRequest,
 } from "./auth/authorization_context.ts";
 import { AuthorizationProviderUnavailableError } from "./auth/authorization/provider_cache.ts";
 import type {
@@ -209,11 +209,10 @@ type LocalAuthorizationArgs =
     requiredCapabilities: readonly string[];
   };
 
-type VerifyAuthorizationRequestV2ResultLike =
+type VerifyAuthorizationRequestResultLike =
   | ({ ok: true } & VerifiedAuthorizationContextProjection)
   | { ok: false; error: { code: AuthorizationVerificationErrorCode } };
-type VerifyAuthorizationEventV2ResultLike =
-  VerifyAuthorizationRequestV2ResultLike;
+type VerifyAuthorizationEventResultLike = VerifyAuthorizationRequestResultLike;
 
 class EventVerificationAuthError extends AuthError {
   constructor(readonly retryable: boolean) {
@@ -245,8 +244,8 @@ export async function verifyLocalAuthorization(
   }
 
   let result:
-    | VerifyAuthorizationRequestV2ResultLike
-    | VerifyAuthorizationEventV2ResultLike;
+    | VerifyAuthorizationRequestResultLike
+    | VerifyAuthorizationEventResultLike;
   try {
     if (args.kind === "request") {
       const iatHeader = args.message.headers?.get("iat");
@@ -256,7 +255,7 @@ export async function verifyLocalAuthorization(
       if (!Number.isSafeInteger(iat) || !requestId || !reply) {
         return err(new AuthError({ reason: "invalid_signature" }));
       }
-      const request: AuthorizationProviderRequestV2 = {
+      const request: AuthorizationProviderRequest = {
         contextDigest,
         subject: args.message.subject,
         reply,
@@ -267,14 +266,14 @@ export async function verifyLocalAuthorization(
         requiredPermissions: [toVerifierPermission(args.permission)],
         requiredCapabilities: [...args.requiredCapabilities],
       };
-      result = await args.cache.verifyRequestV2(request);
+      result = await args.cache.verifyRequest(request);
     } else {
       const eventId = args.message.headers?.get("Nats-Msg-Id");
       const eventTime = args.message.headers?.get("Trellis-Event-Time");
       if (!eventId || !eventTime) {
         return err(new AuthError({ reason: "invalid_signature" }));
       }
-      const event: AuthorizationProviderEventV2 = {
+      const event: AuthorizationProviderEvent = {
         contextDigest,
         subject: args.message.subject,
         payload: new Uint8Array(args.message.data ?? new Uint8Array()),
@@ -284,7 +283,7 @@ export async function verifyLocalAuthorization(
         requiredPermissions: [toVerifierPermission(args.permission)],
         requiredCapabilities: [...args.requiredCapabilities],
       };
-      result = await args.cache.verifyEventV2(event);
+      result = await args.cache.verifyEvent(event);
     }
   } catch (error) {
     if (
@@ -540,7 +539,7 @@ export function buildProofInput(
     throw new Error("request reply subject must not be empty");
   }
   const domainBytes = enc.encode(
-    "trellis.authorization-request-proof.v2",
+    "trellis.authorization-request-proof.v1",
   );
   const subjectBytes = enc.encode(subject);
   const replyBytes = enc.encode(reply);
@@ -579,7 +578,7 @@ export type TrellisAuth = {
   sessionKey: string;
   sign: TrellisSigner;
   currentIat?: () => number;
-  /** Current authorization-context digest bound into v2 request and event proofs. */
+  /** Current authorization-context digest bound into v1 request and event proofs. */
   contextDigest?: string | (() => string);
   /** Provider-only local verifier for service request and event handling. */
   authorizationProviderCache?: AuthorizationProviderCache;
@@ -4982,7 +4981,7 @@ export class Trellis<
       : this.#auth.contextDigest;
     if (digest === undefined) {
       throw new Error(
-        "contextDigest is required to sign v2 request and event proofs",
+        "contextDigest is required to sign v1 request and event proofs",
       );
     }
     return digest;

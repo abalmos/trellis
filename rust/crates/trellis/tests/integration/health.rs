@@ -8,7 +8,7 @@ use futures_util::StreamExt;
 use serde_json::{json, Value};
 use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
-use trellis_rs::client::{verify_event_proof_v2, PreparedTrellisEvent};
+use trellis_rs::client::{verify_event_proof, PreparedTrellisEvent};
 use trellis_rs::sdk::health::client::HealthClient;
 use trellis_rs::sdk::health::types::{
     HealthInspectRequest, HealthMetricsRequest, HealthQueryRequest, HealthQueryResponse,
@@ -385,7 +385,7 @@ fn assert_signed_transition(transition: &async_nats::Message) {
         .expect("transition authorization-context")
         .as_str();
     let proof = headers.get("proof").expect("transition proof").as_str();
-    assert!(verify_event_proof_v2(
+    assert!(verify_event_proof(
         session_key,
         context_digest,
         transition.subject.as_str(),

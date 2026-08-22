@@ -46,9 +46,9 @@ pub fn new_request_id() -> String {
     format!("req_{nanos:x}_{sequence:x}")
 }
 
-/// Verify a context-bound v2 event proof against the raw published values.
-#[doc = concat!("Trellis API operation `", stringify!(verify_event_proof_v2), "`.")]
-pub fn verify_event_proof_v2(
+/// Verify a context-bound v1 event proof against the raw published values.
+#[doc = concat!("Trellis API operation `", stringify!(verify_event_proof), "`.")]
+pub fn verify_event_proof(
     public_session_key: &str,
     context_digest: &str,
     subject: &str,
@@ -58,7 +58,7 @@ pub fn verify_event_proof_v2(
     proof_base64url: &str,
 ) -> Result<bool, TrellisClientError> {
     let context_digest = decode_context_digest(context_digest)?;
-    let input = trellis_protocol::build_authorization_event_proof_input_v2(
+    let input = trellis_protocol::build_authorization_event_proof_input(
         &context_digest,
         subject,
         payload,
@@ -66,7 +66,7 @@ pub fn verify_event_proof_v2(
         event_time,
     )
     .map_err(|error| TrellisClientError::Bootstrap(error.to_string()))?;
-    Ok(verify_v2_signature(
+    Ok(verify_signature(
         public_session_key,
         input.digest(),
         proof_base64url,
@@ -80,7 +80,7 @@ fn decode_context_digest(context_digest: &str) -> Result<[u8; 32], TrellisClient
     })
 }
 
-fn verify_v2_signature(public_session_key: &str, digest: &[u8; 32], proof_base64url: &str) -> bool {
+fn verify_signature(public_session_key: &str, digest: &[u8; 32], proof_base64url: &str) -> bool {
     let Ok(public_key_bytes) = base64url_decode(public_session_key) else {
         return false;
     };

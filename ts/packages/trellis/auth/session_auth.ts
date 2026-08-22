@@ -35,7 +35,7 @@ export type TrellisAuth = {
   sign: (data: Uint8Array) => Promise<Uint8Array>;
   currentIat: () => number;
   setServerClockOffsetMs: (clockOffsetMs: number) => void;
-  /** Current authorization-context digest bound into v2 request and event proofs. */
+  /** Current authorization-context digest bound into v1 request and event proofs. */
   contextDigest: () => string;
   /** Local verifier for received requests and events. */
   authorizationProviderCache?: AuthorizationProviderCache;
@@ -80,7 +80,7 @@ export async function createAuth(
       ? opts.contextDigest()
       : opts.contextDigest;
     if (digest === undefined) {
-      throw new Error("contextDigest is required to sign v2 request proofs");
+      throw new Error("contextDigest is required to sign v1 request proofs");
     }
     return digest;
   };

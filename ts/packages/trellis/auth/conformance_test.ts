@@ -87,7 +87,7 @@ Deno.test("shared auth-proof vectors match TypeScript implementation", async () 
   }
 });
 
-Deno.test("request and event proof v2 match language-neutral vectors", async () => {
+Deno.test("request and event proof v1 match language-neutral vectors", async () => {
   const chain = vectors.completeChain as unknown as Chain;
   const defaults = vectors.defaults as unknown as VectorDefaults;
   const auth = await createAuth({

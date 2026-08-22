@@ -10,8 +10,8 @@ type JsonObject = { [key: string]: JsonValue };
 
 type ProtocolWasmModule = typeof protocolWasmModule & {
   resolve_participant_v1(participantJson: string, apisJson: string): string;
-  verify_authorization_event_v2(inputJson: string): string;
-  verify_authorization_request_v2(inputJson: string): string;
+  verify_authorization_event_v1(inputJson: string): string;
+  verify_authorization_request_v1(inputJson: string): string;
 };
 
 const protocolWasm = protocolWasmModule as ProtocolWasmModule;
@@ -205,17 +205,17 @@ export type AuthorizationVerificationError = {
 };
 
 /** Result envelope returned by a local request authorization verifier. */
-export type VerifyAuthorizationRequestV2Result =
+export type VerifyAuthorizationRequestResult =
   | ({ ok: true } & VerifiedAuthorizationRequestProjection)
   | { ok: false; error: AuthorizationVerificationError };
 
 /** Result envelope returned by a local event authorization verifier. */
-export type VerifyAuthorizationEventV2Result =
+export type VerifyAuthorizationEventResult =
   | ({ ok: true } & VerifiedAuthorizationEventProjection)
   | { ok: false; error: AuthorizationVerificationError };
 
 /** Arguments for local context-bound request authorization. */
-export type VerifyAuthorizationRequestV2Args =
+export type VerifyAuthorizationRequestArgs =
   & AuthorizationContextVerificationInput
   & {
     subject: string;
@@ -230,7 +230,7 @@ export type VerifyAuthorizationRequestV2Args =
   };
 
 /** Arguments for local context-bound event authorization. */
-export type VerifyAuthorizationEventV2Args =
+export type VerifyAuthorizationEventArgs =
   & AuthorizationContextVerificationInput
   & {
     subject: string;
@@ -405,13 +405,13 @@ export async function verifyAuthorizationManifestWasm(args: {
 }
 
 /** Verify one context-bound request proof using actual received request bytes. */
-export async function verifyAuthorizationRequestV2Wasm(
-  args: VerifyAuthorizationRequestV2Args,
-): Promise<VerifyAuthorizationRequestV2Result> {
+export async function verifyAuthorizationRequestWasm(
+  args: VerifyAuthorizationRequestArgs,
+): Promise<VerifyAuthorizationRequestResult> {
   await initialize();
   const { context, ...input } = args;
   return JSON.parse(
-    protocolWasm.verify_authorization_request_v2(
+    protocolWasm.verify_authorization_request_v1(
       JSON.stringify({
         ...input,
         policy: wasmVerificationPolicy(args.policy),
@@ -419,17 +419,17 @@ export async function verifyAuthorizationRequestV2Wasm(
         payload: Array.from(args.payload),
       }),
     ),
-  ) as VerifyAuthorizationRequestV2Result;
+  ) as VerifyAuthorizationRequestResult;
 }
 
 /** Verify one context-bound event proof, including historical time/revocation checks. */
-export async function verifyAuthorizationEventV2Wasm(
-  args: VerifyAuthorizationEventV2Args,
-): Promise<VerifyAuthorizationEventV2Result> {
+export async function verifyAuthorizationEventWasm(
+  args: VerifyAuthorizationEventArgs,
+): Promise<VerifyAuthorizationEventResult> {
   await initialize();
   const { context, ...input } = args;
   return JSON.parse(
-    protocolWasm.verify_authorization_event_v2(
+    protocolWasm.verify_authorization_event_v1(
       JSON.stringify({
         ...input,
         policy: wasmVerificationPolicy(args.policy),
@@ -437,7 +437,7 @@ export async function verifyAuthorizationEventV2Wasm(
         payload: Array.from(args.payload),
       }),
     ),
-  ) as VerifyAuthorizationEventV2Result;
+  ) as VerifyAuthorizationEventResult;
 }
 
 function wasmVerificationPolicy(

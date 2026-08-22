@@ -10,10 +10,10 @@ use trellis_protocol::{
     parse_api_v1, parse_authorization_context_v1, parse_issuer_manifest_v1, parse_participant_v1,
     resolve_participant_v1 as resolve_participant_v1_protocol, session_proof_request_digest_v1,
     session_proof_signing_digest_v1, verify_authorization_context_v1,
-    verify_authorization_event_v2 as verify_authorization_event_v2_protocol,
-    verify_authorization_request_v2 as verify_authorization_request_v2_protocol,
-    verify_issuer_manifest_v1, verify_session_proof_v1, AuthorizationEventProofV2,
-    AuthorizationEventPublisherV2, AuthorizationRequestProofV2, AuthorizationTrustRootV1,
+    verify_authorization_event as verify_authorization_event_protocol,
+    verify_authorization_request as verify_authorization_request_protocol,
+    verify_issuer_manifest_v1, verify_session_proof_v1, AuthorizationEventProof,
+    AuthorizationEventPublisher, AuthorizationRequestProof, AuthorizationTrustRootV1,
     AuthorizationVerificationPolicyV1, PermissionAtomV1, ProtocolError, SessionProofInputV1,
     SessionProofPolicyV1, SessionProofV1, VerifiedAuthorizationContextV1,
 };
@@ -255,7 +255,7 @@ struct WireAuthorizationVerificationPolicyV1 {
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
-struct WireAuthorizationRequestV2 {
+struct WireAuthorizationRequestV1 {
     root: Value,
     manifest: Value,
     context: Value,
@@ -272,7 +272,7 @@ struct WireAuthorizationRequestV2 {
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
-struct WireAuthorizationEventV2 {
+struct WireAuthorizationEventV1 {
     root: Value,
     manifest: Value,
     context: Value,
@@ -532,7 +532,7 @@ fn verified_result(mut projection: Value) -> String {
     json_result(projection)
 }
 
-fn request_result(input: WireAuthorizationRequestV2) -> String {
+fn request_result(input: WireAuthorizationRequestV1) -> String {
     let policy = match authorization_verification_policy_from_wire(&input.policy) {
         Ok(policy) => policy,
         Err(_) => return input_error_result("/policy"),
@@ -542,11 +542,11 @@ fn request_result(input: WireAuthorizationRequestV2) -> String {
             Ok(context) => context,
             Err(error) => return protocol_error_result(&error),
         };
-    let proof = match AuthorizationRequestProofV2::parse(input.proof) {
+    let proof = match AuthorizationRequestProof::parse(input.proof) {
         Ok(proof) => proof,
         Err(error) => return protocol_error_result(&error),
     };
-    let verified = match verify_authorization_request_v2_protocol(
+    let verified = match verify_authorization_request_protocol(
         &context,
         &input.subject,
         input.reply.0.as_deref(),
@@ -568,7 +568,7 @@ fn request_result(input: WireAuthorizationRequestV2) -> String {
     verified_result(projection)
 }
 
-fn event_publisher_projection(publisher: &AuthorizationEventPublisherV2) -> Value {
+fn event_publisher_projection(publisher: &AuthorizationEventPublisher) -> Value {
     json!({
         "kind": publisher.kind,
         "deploymentId": publisher.deployment_id,
@@ -579,7 +579,7 @@ fn event_publisher_projection(publisher: &AuthorizationEventPublisherV2) -> Valu
     })
 }
 
-fn event_result(input: WireAuthorizationEventV2) -> String {
+fn event_result(input: WireAuthorizationEventV1) -> String {
     let policy = match authorization_verification_policy_from_wire(&input.policy) {
         Ok(policy) => policy,
         Err(_) => return input_error_result("/policy"),
@@ -589,11 +589,11 @@ fn event_result(input: WireAuthorizationEventV2) -> String {
             Ok(context) => context,
             Err(error) => return protocol_error_result(&error),
         };
-    let proof = match AuthorizationEventProofV2::parse(input.proof) {
+    let proof = match AuthorizationEventProof::parse(input.proof) {
         Ok(proof) => proof,
         Err(error) => return protocol_error_result(&error),
     };
-    let verified = match verify_authorization_event_v2_protocol(
+    let verified = match verify_authorization_event_protocol(
         &context,
         &input.subject,
         &input.payload,
@@ -622,8 +622,8 @@ fn event_result(input: WireAuthorizationEventV2) -> String {
 /// contain verified caller/context metadata; rejected inputs have `ok: false`
 /// and a stable authorization error code and path.
 #[wasm_bindgen]
-pub fn verify_authorization_request_v2(request_json: &str) -> String {
-    let input: WireAuthorizationRequestV2 = match serde_json::from_str(request_json) {
+pub fn verify_authorization_request_v1(request_json: &str) -> String {
+    let input: WireAuthorizationRequestV1 = match serde_json::from_str(request_json) {
         Ok(input) => input,
         Err(_) => return input_error_result(""),
     };
@@ -638,8 +638,8 @@ pub fn verify_authorization_request_v2(request_json: &str) -> String {
 /// checked at their signed historical boundary before the strict event-time
 /// window is evaluated.
 #[wasm_bindgen]
-pub fn verify_authorization_event_v2(event_json: &str) -> String {
-    let input: WireAuthorizationEventV2 = match serde_json::from_str(event_json) {
+pub fn verify_authorization_event_v1(event_json: &str) -> String {
+    let input: WireAuthorizationEventV1 = match serde_json::from_str(event_json) {
         Ok(input) => input,
         Err(_) => return input_error_result(""),
     };
@@ -781,7 +781,7 @@ mod tests {
     }
 
     #[test]
-    fn local_authorization_v2_uses_conformance_chain() {
+    fn local_authorization_v1_uses_conformance_chain() {
         let fixture = authorization_fixture();
         let chain = &fixture["completeChain"];
         let defaults = &fixture["defaults"];
@@ -802,7 +802,7 @@ mod tests {
             input
         };
 
-        let valid = verify_authorization_request_v2(
+        let valid = verify_authorization_request_v1(
             &serde_json::to_string(&request(
                 defaults["request"]["subject"].as_str().unwrap(),
                 defaults["request"]["reply"].as_str(),
@@ -828,7 +828,7 @@ mod tests {
             ),
             ("rpc.v1.Documents.Get", Some("_INBOX.test.reply"), "changed"),
         ] {
-            let result = verify_authorization_request_v2(
+            let result = verify_authorization_request_v1(
                 &serde_json::to_string(&request(subject, reply, body, permission.clone())).unwrap(),
             );
             assert_eq!(
@@ -837,7 +837,7 @@ mod tests {
             );
         }
 
-        let outside_reply = verify_authorization_request_v2(
+        let outside_reply = verify_authorization_request_v1(
             &serde_json::to_string(&request(
                 "rpc.v1.Documents.Get",
                 Some("OTHER.reply"),
@@ -851,7 +851,7 @@ mod tests {
             ("ReplySubjectMismatch".to_owned(), "/reply".to_owned())
         );
 
-        let missing_permission = verify_authorization_request_v2(
+        let missing_permission = verify_authorization_request_v1(
             &serde_json::to_string(&request(
                 defaults["request"]["subject"].as_str().unwrap(),
                 defaults["request"]["reply"].as_str(),
@@ -879,14 +879,14 @@ mod tests {
         event["requiredPermissions"] = json!([permission]);
         event["requiredCapabilities"] = json!([]);
 
-        let valid_event = verify_authorization_event_v2(&serde_json::to_string(&event).unwrap());
+        let valid_event = verify_authorization_event_v1(&serde_json::to_string(&event).unwrap());
         let valid_event: Value = serde_json::from_str(&valid_event).unwrap();
         assert_eq!(valid_event["ok"], true);
         assert_eq!(valid_event["publisher"]["sessionId"], "ses_test");
 
         let mut revoked = event.clone();
         revoked["revokedAt"] = Value::from(1_150);
-        let revoked = verify_authorization_event_v2(&serde_json::to_string(&revoked).unwrap());
+        let revoked = verify_authorization_event_v1(&serde_json::to_string(&revoked).unwrap());
         assert_eq!(
             error_code_and_path(&revoked),
             ("EventRevoked".to_owned(), "/event-time".to_owned())
@@ -895,7 +895,7 @@ mod tests {
         let mut historical_window = event;
         historical_window["eventTime"] = Value::from("1970-01-01T00:16:40Z");
         let historical_window =
-            verify_authorization_event_v2(&serde_json::to_string(&historical_window).unwrap());
+            verify_authorization_event_v1(&serde_json::to_string(&historical_window).unwrap());
         assert_eq!(
             error_code_and_path(&historical_window),
             ("ContextNotYetValid".to_owned(), "/event-time".to_owned())

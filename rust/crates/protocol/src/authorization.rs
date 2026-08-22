@@ -24,10 +24,10 @@
 //! use ed25519_dalek::SigningKey;
 //! use serde_json::Map;
 //! use trellis_protocol::{
-//!     sign_authorization_context_v1, sign_authorization_event_v2, sign_authorization_request_v2,
+//!     sign_authorization_context_v1, sign_authorization_event, sign_authorization_request,
 //!     sign_issuer_manifest_v1,
-//!     verify_authorization_context_v1, verify_authorization_event_v2,
-//!     verify_authorization_request_v2,
+//!     verify_authorization_context_v1, verify_authorization_event,
+//!     verify_authorization_request,
 //!     verify_issuer_manifest_v1, ApiSurfaceKindV1, AuthorizationAuthorityKindV1,
 //!     AuthorizationAuthorityRefV1, AuthorizationIssuerManifestEntryV1,
 //!     AuthorizationParticipantV1,
@@ -114,7 +114,7 @@
 //! )?;
 //! let context = verify_authorization_context_v1(&root, &manifest, &context, &policy)?;
 //! assert!(context.allows(&permission));
-//! let proof = sign_authorization_request_v2(
+//! let proof = sign_authorization_request(
 //!     context.context_digest(),
 //!     "rpc.v1.Documents.Get",
 //!     Some("_INBOX.example.reply"),
@@ -123,7 +123,7 @@
 //!     "req_example",
 //!     &session_key,
 //! )?;
-//! let request = verify_authorization_request_v2(
+//! let request = verify_authorization_request(
 //!     &context,
 //!     "rpc.v1.Documents.Get",
 //!     Some("_INBOX.example.reply"),
@@ -136,7 +136,7 @@
 //!     &[],
 //! )?;
 //! assert_eq!(request.context().principal().id, "usr_example");
-//! let event_proof = sign_authorization_event_v2(
+//! let event_proof = sign_authorization_event(
 //!     context.context_digest(),
 //!     "events.v1.Documents.Changed.doc-1",
 //!     br#"{"id":"doc-1"}"#,
@@ -144,7 +144,7 @@
 //!     "1970-01-01T00:19:10Z",
 //!     &session_key,
 //! )?;
-//! let event = verify_authorization_event_v2(
+//! let event = verify_authorization_event(
 //!     &context,
 //!     "events.v1.Documents.Changed.doc-1",
 //!     br#"{"id":"doc-1"}"#,
@@ -180,9 +180,9 @@ pub const AUTHORIZATION_ISSUER_MANIFEST_FORMAT_V1: &str =
 /// Issuer-signed authorization-context wire format and signature domain.
 pub const AUTHORIZATION_CONTEXT_FORMAT_V1: &str = "trellis.authorization-context.v1";
 /// Context-bound request-proof signature domain.
-pub const AUTHORIZATION_REQUEST_PROOF_DOMAIN_V2: &str = "trellis.authorization-request-proof.v2";
+pub const AUTHORIZATION_REQUEST_PROOF_DOMAIN_V1: &str = "trellis.authorization-request-proof.v1";
 /// Context-bound event-proof signature domain.
-pub const AUTHORIZATION_EVENT_PROOF_DOMAIN_V2: &str = "trellis.authorization-event-proof.v2";
+pub const AUTHORIZATION_EVENT_PROOF_DOMAIN_V1: &str = "trellis.authorization-event-proof.v1";
 
 const MAXIMUM_REQUEST_ID_BYTES: usize = 256;
 const MAXIMUM_EVENT_ID_BYTES: usize = 256;
@@ -1631,12 +1631,12 @@ pub fn verify_authorization_context_v1(
 
 /// Canonical context-bound request-proof input and digest.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct AuthorizationRequestProofInputV2 {
+pub struct AuthorizationRequestProofInput {
     bytes: Vec<u8>,
     digest: [u8; 32],
 }
 
-impl AuthorizationRequestProofInputV2 {
+impl AuthorizationRequestProofInput {
     /// Return the exact length-prefixed proof input bytes.
     pub fn as_bytes(&self) -> &[u8] {
         &self.bytes
@@ -1650,9 +1650,9 @@ impl AuthorizationRequestProofInputV2 {
 
 /// An unpadded base64url Ed25519 request proof.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct AuthorizationRequestProofV2(String);
+pub struct AuthorizationRequestProof(String);
 
-impl AuthorizationRequestProofV2 {
+impl AuthorizationRequestProof {
     /// Parse and strictly validate an encoded request proof.
     ///
     /// # Errors
@@ -1675,7 +1675,7 @@ impl AuthorizationRequestProofV2 {
     }
 }
 
-/// Build request-proof v2 input from the exact received request values.
+/// Build request-proof v1 input from the exact received request values.
 ///
 /// The payload hash is computed internally from `raw_payload`.
 ///
@@ -1683,20 +1683,20 @@ impl AuthorizationRequestProofV2 {
 ///
 /// Returns [`ProtocolError::Authorization`] if a component exceeds the unsigned
 /// 32-bit length-prefix range.
-pub fn build_authorization_request_proof_input_v2(
+pub fn build_authorization_request_proof_input(
     context_digest: &[u8; 32],
     subject: &str,
     reply_subject: Option<&str>,
     raw_payload: &[u8],
     iat: i64,
     request_id: &str,
-) -> Result<AuthorizationRequestProofInputV2, ProtocolError> {
+) -> Result<AuthorizationRequestProofInput, ProtocolError> {
     validate_safe_i64(iat, &["iat"])?;
     let payload_hash = sha256(raw_payload);
     let iat = iat.to_string();
     let mut bytes = Vec::new();
     for component in [
-        AUTHORIZATION_REQUEST_PROOF_DOMAIN_V2.as_bytes(),
+        AUTHORIZATION_REQUEST_PROOF_DOMAIN_V1.as_bytes(),
         context_digest,
         subject.as_bytes(),
         reply_subject.unwrap_or("").as_bytes(),
@@ -1707,7 +1707,7 @@ pub fn build_authorization_request_proof_input_v2(
         push_length_prefixed(&mut bytes, component)?;
     }
     let digest = sha256(&bytes);
-    Ok(AuthorizationRequestProofInputV2 { bytes, digest })
+    Ok(AuthorizationRequestProofInput { bytes, digest })
 }
 
 /// Sign a context-bound request with the session private key.
@@ -1716,7 +1716,7 @@ pub fn build_authorization_request_proof_input_v2(
 ///
 /// Returns [`ProtocolError::Authorization`] for an invalid context digest or
 /// oversized proof component.
-pub fn sign_authorization_request_v2(
+pub fn sign_authorization_request(
     context_digest: &str,
     subject: &str,
     reply_subject: Option<&str>,
@@ -1724,7 +1724,7 @@ pub fn sign_authorization_request_v2(
     iat: i64,
     request_id: &str,
     session_key: &SigningKey,
-) -> Result<AuthorizationRequestProofV2, ProtocolError> {
+) -> Result<AuthorizationRequestProof, ProtocolError> {
     validate_safe_i64(iat, &["iat"])?;
     validate_text(request_id, &["request-id"])?;
     validate_text(subject, &["subject"])?;
@@ -1740,7 +1740,7 @@ pub fn sign_authorization_request_v2(
         &["authorization-context"],
         AuthorizationErrorCodeV1::InvalidEncoding,
     )?;
-    let input = build_authorization_request_proof_input_v2(
+    let input = build_authorization_request_proof_input(
         &context_digest,
         subject,
         reply_subject,
@@ -1748,18 +1748,18 @@ pub fn sign_authorization_request_v2(
         iat,
         request_id,
     )?;
-    Ok(AuthorizationRequestProofV2(encode_base64url(
+    Ok(AuthorizationRequestProof(encode_base64url(
         &session_key.sign(input.digest()).to_bytes(),
     )))
 }
 
 /// Verified local caller metadata.
 #[derive(Clone, Debug)]
-pub struct VerifiedAuthorizationRequestV2 {
+pub struct VerifiedAuthorizationRequestProof {
     context: VerifiedAuthorizationContextV1,
 }
 
-impl VerifiedAuthorizationRequestV2 {
+impl VerifiedAuthorizationRequestProof {
     /// Return verified caller context metadata.
     pub fn context(&self) -> &VerifiedAuthorizationContextV1 {
         &self.context
@@ -1777,18 +1777,18 @@ impl VerifiedAuthorizationRequestV2 {
     clippy::too_many_arguments,
     reason = "the language-neutral proof API takes each signed request component explicitly"
 )]
-pub fn verify_authorization_request_v2(
+pub fn verify_authorization_request(
     context: &VerifiedAuthorizationContextV1,
     subject: &str,
     reply_subject: Option<&str>,
     raw_payload: &[u8],
     iat: i64,
     request_id: &str,
-    proof: &AuthorizationRequestProofV2,
+    proof: &AuthorizationRequestProof,
     policy: &AuthorizationVerificationPolicyV1,
     required_permissions: &[PermissionAtomV1],
     required_capabilities: &[String],
-) -> Result<VerifiedAuthorizationRequestV2, ProtocolError> {
+) -> Result<VerifiedAuthorizationRequestProof, ProtocolError> {
     validate_policy(policy)?;
     validate_safe_i64(iat, &["iat"])?;
     validate_text(request_id, &["request-id"])?;
@@ -1854,7 +1854,7 @@ pub fn verify_authorization_request_v2(
         &["authorization-context"],
         AuthorizationErrorCodeV1::InvalidEncoding,
     )?;
-    let input = build_authorization_request_proof_input_v2(
+    let input = build_authorization_request_proof_input(
         &context_digest,
         subject,
         reply_subject,
@@ -1877,19 +1877,19 @@ pub fn verify_authorization_request_v2(
                 "context-bound request signature verification failed",
             )
         })?;
-    Ok(VerifiedAuthorizationRequestV2 {
+    Ok(VerifiedAuthorizationRequestProof {
         context: context.clone(),
     })
 }
 
 /// Canonical context-bound event-proof input and digest.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct AuthorizationEventProofInputV2 {
+pub struct AuthorizationEventProofInput {
     bytes: Vec<u8>,
     digest: [u8; 32],
 }
 
-impl AuthorizationEventProofInputV2 {
+impl AuthorizationEventProofInput {
     /// Return the exact length-prefixed proof input bytes.
     pub fn as_bytes(&self) -> &[u8] {
         &self.bytes
@@ -1903,9 +1903,9 @@ impl AuthorizationEventProofInputV2 {
 
 /// An unpadded base64url Ed25519 event proof.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct AuthorizationEventProofV2(String);
+pub struct AuthorizationEventProof(String);
 
-impl AuthorizationEventProofV2 {
+impl AuthorizationEventProof {
     /// Parse and strictly validate an encoded event proof.
     ///
     /// # Errors
@@ -1930,7 +1930,7 @@ impl AuthorizationEventProofV2 {
 
 /// Typed publisher projection for Event Log indexing.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct AuthorizationEventPublisherV2 {
+pub struct AuthorizationEventPublisher {
     /// Principal kind of the verified publisher.
     pub kind: String,
     /// Deployment identity for deployed principals.
@@ -1947,19 +1947,19 @@ pub struct AuthorizationEventPublisherV2 {
 
 /// Verified event metadata and publisher projection.
 #[derive(Clone, Debug)]
-pub struct VerifiedAuthorizationEventV2 {
+pub struct VerifiedAuthorizationEventProof {
     context: VerifiedAuthorizationContextV1,
-    publisher: AuthorizationEventPublisherV2,
+    publisher: AuthorizationEventPublisher,
 }
 
-impl VerifiedAuthorizationEventV2 {
+impl VerifiedAuthorizationEventProof {
     /// Return verified publisher context metadata.
     pub fn context(&self) -> &VerifiedAuthorizationContextV1 {
         &self.context
     }
 
     /// Return the typed publisher projection for Event Log indexing.
-    pub fn publisher(&self) -> &AuthorizationEventPublisherV2 {
+    pub fn publisher(&self) -> &AuthorizationEventPublisher {
         &self.publisher
     }
 }
@@ -1995,7 +1995,7 @@ fn canonical_event_time_seconds(event_time: &str, path: &[&str]) -> Result<i64, 
     Ok(parsed.unix_timestamp())
 }
 
-/// Build event-proof v2 input from the exact published event values.
+/// Build event-proof v1 input from the exact published event values.
 ///
 /// The payload hash is computed internally from `raw_payload`, and the exact
 /// `event_time` string is signed without reformatting.
@@ -2004,17 +2004,17 @@ fn canonical_event_time_seconds(event_time: &str, path: &[&str]) -> Result<i64, 
 ///
 /// Returns [`ProtocolError::Authorization`] if a component exceeds the unsigned
 /// 32-bit length-prefix range.
-pub fn build_authorization_event_proof_input_v2(
+pub fn build_authorization_event_proof_input(
     context_digest: &[u8; 32],
     subject: &str,
     raw_payload: &[u8],
     event_id: &str,
     event_time: &str,
-) -> Result<AuthorizationEventProofInputV2, ProtocolError> {
+) -> Result<AuthorizationEventProofInput, ProtocolError> {
     let payload_hash = sha256(raw_payload);
     let mut bytes = Vec::new();
     for component in [
-        AUTHORIZATION_EVENT_PROOF_DOMAIN_V2.as_bytes(),
+        AUTHORIZATION_EVENT_PROOF_DOMAIN_V1.as_bytes(),
         context_digest,
         subject.as_bytes(),
         payload_hash.as_slice(),
@@ -2024,7 +2024,7 @@ pub fn build_authorization_event_proof_input_v2(
         push_length_prefixed(&mut bytes, component)?;
     }
     let digest = sha256(&bytes);
-    Ok(AuthorizationEventProofInputV2 { bytes, digest })
+    Ok(AuthorizationEventProofInput { bytes, digest })
 }
 
 /// Sign a context-bound event with the session private key.
@@ -2033,14 +2033,14 @@ pub fn build_authorization_event_proof_input_v2(
 ///
 /// Returns [`ProtocolError::Authorization`] for an invalid context digest,
 /// non-canonical event time, or oversized proof component.
-pub fn sign_authorization_event_v2(
+pub fn sign_authorization_event(
     context_digest: &str,
     subject: &str,
     raw_payload: &[u8],
     event_id: &str,
     event_time: &str,
     session_key: &SigningKey,
-) -> Result<AuthorizationEventProofV2, ProtocolError> {
+) -> Result<AuthorizationEventProof, ProtocolError> {
     validate_text(event_id, &["event-id"])?;
     validate_text(subject, &["subject"])?;
     if event_id.len() > MAXIMUM_EVENT_ID_BYTES {
@@ -2056,14 +2056,14 @@ pub fn sign_authorization_event_v2(
         &["authorization-context"],
         AuthorizationErrorCodeV1::InvalidEncoding,
     )?;
-    let input = build_authorization_event_proof_input_v2(
+    let input = build_authorization_event_proof_input(
         &context_digest,
         subject,
         raw_payload,
         event_id,
         event_time,
     )?;
-    Ok(AuthorizationEventProofV2(encode_base64url(
+    Ok(AuthorizationEventProof(encode_base64url(
         &session_key.sign(input.digest()).to_bytes(),
     )))
 }
@@ -2084,18 +2084,18 @@ pub fn sign_authorization_event_v2(
     clippy::too_many_arguments,
     reason = "the language-neutral proof API takes each signed event component explicitly"
 )]
-pub fn verify_authorization_event_v2(
+pub fn verify_authorization_event(
     context: &VerifiedAuthorizationContextV1,
     subject: &str,
     raw_payload: &[u8],
     event_id: &str,
     event_time: &str,
-    proof: &AuthorizationEventProofV2,
+    proof: &AuthorizationEventProof,
     policy: &AuthorizationVerificationPolicyV1,
     required_permissions: &[PermissionAtomV1],
     required_capabilities: &[String],
     revoked_at: Option<i64>,
-) -> Result<VerifiedAuthorizationEventV2, ProtocolError> {
+) -> Result<VerifiedAuthorizationEventProof, ProtocolError> {
     validate_policy(policy)?;
     validate_text(event_id, &["event-id"])?;
     validate_text(subject, &["subject"])?;
@@ -2153,7 +2153,7 @@ pub fn verify_authorization_event_v2(
         &["authorization-context"],
         AuthorizationErrorCodeV1::InvalidEncoding,
     )?;
-    let input = build_authorization_event_proof_input_v2(
+    let input = build_authorization_event_proof_input(
         &context_digest,
         subject,
         raw_payload,
@@ -2175,7 +2175,7 @@ pub fn verify_authorization_event_v2(
                 "context-bound event signature verification failed",
             )
         })?;
-    let publisher = AuthorizationEventPublisherV2 {
+    let publisher = AuthorizationEventPublisher {
         kind: match context.principal().kind {
             AuthorizationPrincipalKindV1::User => "user",
             AuthorizationPrincipalKindV1::Service => "service",
@@ -2188,7 +2188,7 @@ pub fn verify_authorization_event_v2(
         participant_digest: context.participant().artifact_digest.clone(),
         session_id: context.session_id().to_owned(),
     };
-    Ok(VerifiedAuthorizationEventV2 {
+    Ok(VerifiedAuthorizationEventProof {
         context: context.clone(),
         publisher,
     })
@@ -2301,7 +2301,7 @@ mod phase_a_tests {
         let policy = policy(1_100);
         let verified =
             verify_authorization_context_v1(&root, &manifest, &context, &policy).unwrap();
-        let request_proof = sign_authorization_request_v2(
+        let request_proof = sign_authorization_request(
             verified.context_digest(),
             "rpc.v1.Documents.Get",
             Some("_INBOX.test.reply"),
@@ -2311,7 +2311,7 @@ mod phase_a_tests {
             &session_key,
         )
         .unwrap();
-        let event_proof = sign_authorization_event_v2(
+        let event_proof = sign_authorization_event(
             verified.context_digest(),
             "events.v1.Documents.Changed.doc-1",
             br#"{"id":"doc-1"}"#,
@@ -2322,7 +2322,7 @@ mod phase_a_tests {
         .unwrap();
         assert_eq!(verified.context_digest(), &context.digest().unwrap());
 
-        verify_authorization_request_v2(
+        verify_authorization_request(
             &verified,
             "rpc.v1.Documents.Get",
             Some("_INBOX.test.reply"),
@@ -2336,7 +2336,7 @@ mod phase_a_tests {
         )
         .unwrap();
 
-        verify_authorization_event_v2(
+        verify_authorization_event(
             &verified,
             "events.v1.Documents.Changed.doc-1",
             br#"{"id":"doc-1"}"#,

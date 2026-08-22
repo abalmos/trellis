@@ -25,8 +25,8 @@ export type EventProofParams = {
   eventTime: string;
 };
 
-const REQUEST_PROOF_DOMAIN = utf8("trellis.authorization-request-proof.v2");
-const EVENT_PROOF_DOMAIN = utf8("trellis.authorization-event-proof.v2");
+const REQUEST_PROOF_DOMAIN = utf8("trellis.authorization-request-proof.v1");
+const EVENT_PROOF_DOMAIN = utf8("trellis.authorization-event-proof.v1");
 
 function appendLengthPrefixed(
   buf: Uint8Array,
@@ -58,7 +58,7 @@ function buildLengthPrefixed(
 }
 
 /**
- * Builds the canonical v2 context-bound request proof input bytes.
+ * Builds the canonical v1 context-bound request proof input bytes.
  *
  * The exact NATS reply inbox must be created before signing and is bound into
  * the proof input, matching the runtime request verifier.
@@ -90,7 +90,7 @@ export function buildProofInput(
 }
 
 /**
- * Builds the canonical v2 context-bound event proof input bytes.
+ * Builds the canonical v1 context-bound event proof input bytes.
  */
 export function buildEventProofInput(
   contextDigest: string,
