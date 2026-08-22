@@ -174,7 +174,7 @@ jobs:
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
         with:
-          components: rustfmt
+          components: rustfmt, clippy
 
       - name: Expose Rust toolchain binaries
         run: echo "$(dirname "$(rustup which rustfmt)")" >> "$GITHUB_PATH"
