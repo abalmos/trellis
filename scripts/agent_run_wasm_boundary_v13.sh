@@ -110,6 +110,13 @@ git add -- \\
   ts/packages/trellis-test/tests/fixtures/external-service-repo/trellis.integration.ts
 git commit -m 'Keep external smoke in live phase'
 
+# Apply the independently reviewed follow-up commits before the full gate.
+git fetch origin agent/wasm-boundary-v3
+git cherry-pick \
+  da8ad8554aa30721635a2e5db77e9a9cc3e92d83 \
+  8acc4fef7371fe67bb169de383bc64248a20263d \
+  f912c644b85a4e5db3c2f2b4317001961bc7f674
+
 # Prove clean generation order: source resolution and participant emission occur
 ''',
     "commit supplemental cleanup",
@@ -138,7 +145,7 @@ git diff --exit-code
 )
 replace_once(
     "git log --oneline -4\n",
-    "git log --oneline -7\n",
+    "git log --oneline -10\n",
     "final log depth",
 )
 
