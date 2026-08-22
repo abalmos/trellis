@@ -550,8 +550,8 @@ where
                 operation_id: operation_ref.id.clone(),
                 expected_service: operation_ref.service.clone(),
                 expected_operation: operation_ref.operation.clone(),
-                actual_service: stored.service.clone(),
-                actual_operation: stored.operation.clone(),
+                actual_service: stored.service.clone().into_boxed_str(),
+                actual_operation: stored.operation.clone().into_boxed_str(),
             });
         }
         self.validate_stored(&operation_ref.id, stored)?;
@@ -604,8 +604,12 @@ where
                 operation_id: operation_id.clone(),
                 expected_service: self.service.clone(),
                 expected_operation: D::KEY.to_string(),
-                actual_service: String::new(),
-                actual_operation: snapshot.operation.clone().unwrap_or_default(),
+                actual_service: String::new().into_boxed_str(),
+                actual_operation: snapshot
+                    .operation
+                    .clone()
+                    .unwrap_or_default()
+                    .into_boxed_str(),
             })?;
         let operation =
             snapshot
@@ -615,16 +619,16 @@ where
                     operation_id: operation_id.clone(),
                     expected_service: self.service.clone(),
                     expected_operation: D::KEY.to_string(),
-                    actual_service: service.clone(),
-                    actual_operation: String::new(),
+                    actual_service: service.clone().into_boxed_str(),
+                    actual_operation: String::new().into_boxed_str(),
                 })?;
         if service != &self.service || operation != D::KEY {
             return Err(ServerError::OperationMismatch {
                 operation_id: operation_id.clone(),
                 expected_service: self.service.clone(),
                 expected_operation: D::KEY.to_string(),
-                actual_service: service.clone(),
-                actual_operation: operation.clone(),
+                actual_service: service.clone().into_boxed_str(),
+                actual_operation: operation.clone().into_boxed_str(),
             });
         }
 
@@ -861,8 +865,8 @@ where
                 operation_id: operation_id.to_string(),
                 expected_service: self.service.clone(),
                 expected_operation: D::KEY.to_string(),
-                actual_service: stored.service.clone(),
-                actual_operation: stored.operation.clone(),
+                actual_service: stored.service.clone().into_boxed_str(),
+                actual_operation: stored.operation.clone().into_boxed_str(),
             });
         }
         Ok(())
@@ -1070,8 +1074,8 @@ where
                                 operation_id: state.operation_ref.id.clone(),
                                 expected_service: state.operation_ref.service.clone(),
                                 expected_operation: state.operation_ref.operation.clone(),
-                                actual_service: stored.service.clone(),
-                                actual_operation: stored.operation.clone(),
+                                actual_service: stored.service.clone().into_boxed_str(),
+                                actual_operation: stored.operation.clone().into_boxed_str(),
                             }),
                             state,
                         ));
@@ -1110,8 +1114,8 @@ where
                 operation_id: self.operation_ref.id.clone(),
                 expected_service: self.operation_ref.service.clone(),
                 expected_operation: self.operation_ref.operation.clone(),
-                actual_service: stored.service.clone(),
-                actual_operation: stored.operation.clone(),
+                actual_service: stored.service.clone().into_boxed_str(),
+                actual_operation: stored.operation.clone().into_boxed_str(),
             });
         }
         self.operation

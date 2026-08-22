@@ -200,10 +200,6 @@ impl SharedOpState {
     }
 }
 
-#[expect(
-    clippy::result_large_err,
-    reason = "test helpers exercise the public structured ServerError"
-)]
 fn now_iso() -> Result<String, ServerError> {
     time::OffsetDateTime::now_utc()
         .format(&time::format_description::well_known::Rfc3339)

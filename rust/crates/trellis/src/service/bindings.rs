@@ -264,8 +264,8 @@ pub fn validate_bootstrap_contract_state(
             service_name: service_name.to_string(),
             expected_contract_id: expected.id.clone(),
             expected_contract_digest: expected.digest.clone(),
-            actual_contract_id: binding.contract_id.clone(),
-            actual_contract_digest: binding.digest.clone(),
+            actual_contract_id: binding.contract_id.clone().into_boxed_str(),
+            actual_contract_digest: binding.digest.clone().into_boxed_str(),
         });
     }
 

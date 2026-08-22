@@ -1,9 +1,4 @@
 //! Platform-owned Trellis State RPC runtime.
-#![expect(
-    clippy::result_large_err,
-    reason = "typed router handlers return the shared ServerError"
-)]
-
 use std::collections::{BTreeMap, BTreeSet};
 use std::time::Duration;
 

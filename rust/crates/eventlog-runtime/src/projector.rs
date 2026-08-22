@@ -154,10 +154,6 @@ pub async fn start_eventlog_projector(
     Ok(EventLogProjectorHandle { task: Some(task) })
 }
 
-#[expect(
-    clippy::result_large_err,
-    reason = "ServerError preserves typed projector diagnostics"
-)]
 fn collect_message(
     message: Result<jetstream::Message, impl std::fmt::Display>,
     batch: &mut Vec<jetstream::Message>,
@@ -211,48 +207,36 @@ async fn process_message(
         let _ = message.ack().await;
         return Ok(());
     }
-    match project_message(message, verifier).await {
-        Ok((message, event)) => {
-            match tokio::task::spawn_blocking(move || store.insert_event(&event)).await {
-                Ok(Ok(())) => {
-                    let _ = message.ack().await;
-                }
-                Ok(Err(error)) => {
-                    tracing::warn!(%error, subject = %message.subject, "retrying Event Log persistence");
-                    let _ = message
-                        .ack_with(AckKind::Nak(Some(Duration::from_secs(5))))
-                        .await;
-                }
-                Err(error) => {
-                    tracing::warn!(%error, subject = %message.subject, "retrying Event Log persistence task");
-                    let _ = message
-                        .ack_with(AckKind::Nak(Some(Duration::from_secs(5))))
-                        .await;
-                }
+    match project_message_inner(&message, verifier).await {
+        Ok(event) => match tokio::task::spawn_blocking(move || store.insert_event(&event)).await {
+            Ok(Ok(())) => {
+                let _ = message.ack().await;
             }
-        }
-        Err((message, EventVerificationFailure::Retryable(error))) => {
+            Ok(Err(error)) => {
+                tracing::warn!(%error, subject = %message.subject, "retrying Event Log persistence");
+                let _ = message
+                    .ack_with(AckKind::Nak(Some(Duration::from_secs(5))))
+                    .await;
+            }
+            Err(error) => {
+                tracing::warn!(%error, subject = %message.subject, "retrying Event Log persistence task");
+                let _ = message
+                    .ack_with(AckKind::Nak(Some(Duration::from_secs(5))))
+                    .await;
+            }
+        },
+        Err(EventVerificationFailure::Retryable(error)) => {
             tracing::warn!(%error, subject = %message.subject, "retrying temporarily unverifiable event log message");
             let _ = message
                 .ack_with(AckKind::Nak(Some(Duration::from_secs(5))))
                 .await;
         }
-        Err((message, EventVerificationFailure::Rejected(error))) => {
+        Err(EventVerificationFailure::Rejected(error)) => {
             tracing::warn!(%error, subject = %message.subject, "dropping rejected event log message");
             let _ = message.ack().await;
         }
     }
     Ok(())
-}
-
-async fn project_message(
-    message: jetstream::Message,
-    verifier: EventVerifier,
-) -> Result<(jetstream::Message, ProjectedEvent), (jetstream::Message, EventVerificationFailure)> {
-    match project_message_inner(&message, verifier).await {
-        Ok(event) => Ok((message, event)),
-        Err(error) => Err((message, error)),
-    }
 }
 
 async fn project_message_inner(

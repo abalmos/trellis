@@ -232,8 +232,8 @@ pub enum ServerError {
         operation_id: String,
         expected_service: String,
         expected_operation: String,
-        actual_service: String,
-        actual_operation: String,
+        actual_service: Box<str>,
+        actual_operation: Box<str>,
     },
 
     #[error("operation '{operation_id}' is already terminal in state '{state}'")]
@@ -272,8 +272,8 @@ pub enum ServerError {
         service_name: String,
         expected_contract_id: String,
         expected_contract_digest: String,
-        actual_contract_id: String,
-        actual_contract_digest: String,
+        actual_contract_id: Box<str>,
+        actual_contract_digest: Box<str>,
     },
 
     #[error(
@@ -294,8 +294,8 @@ pub enum ServerError {
         service_name: String,
         expected_contract_id: String,
         expected_contract_digest: String,
-        actual_contract_id: String,
-        actual_contract_digest: String,
+        actual_contract_id: Box<str>,
+        actual_contract_digest: Box<str>,
     },
 
     #[error(
@@ -413,3 +413,13 @@ pub enum ServerError {
 
 /// Result alias used by descriptor-backed RPC handlers.
 pub type HandlerResult<T> = Result<T, ServerError>;
+
+#[cfg(test)]
+mod tests {
+    use super::ServerError;
+
+    #[test]
+    fn server_error_remains_small() {
+        assert!(std::mem::size_of::<ServerError>() < 128);
+    }
+}
