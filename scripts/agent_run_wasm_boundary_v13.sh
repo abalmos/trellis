@@ -131,13 +131,11 @@ for i, line in enumerate(lines):
         end = min(len(lines), i + 24)
         interesting.extend(lines[start:end])
         interesting.append('---')
-# Bound the scratch diagnostic even if a test prints an enormous fixture.
 summary = '\n'.join(interesting[-1200:])
 tail = '\n'.join(lines[-600:])
 Path('.validation-failure').write_text(
     f'run={__import__("os").environ.get("GITHUB_RUN_ID")}.'
-    f'{__import__("os").environ.get("GITHUB_RUN_ATTEMPT")}\n'
-    f'exit={__import__("os").environ.get("status", "unknown")}\n\n'
+    f'{__import__("os").environ.get("GITHUB_RUN_ATTEMPT")}\n\n'
     f'=== interesting ===\n{summary}\n\n=== tail ===\n{tail}\n'
 )
 PY
@@ -145,7 +143,7 @@ PY
   git config --local user.email trellis-validation@users.noreply.github.com
   git config --local commit.gpgsign false
   git config --local tag.gpgSign false
-  git add .validation-failure
+  git add -f .validation-failure
   git commit -m 'Record WASM boundary validation failure'
   git push --force-with-lease origin HEAD:agent/wasm-boundary-v3
   exit "$status"
