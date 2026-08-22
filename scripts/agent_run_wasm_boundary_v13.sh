@@ -114,7 +114,9 @@ if changed != expected:
     raise SystemExit(f'unexpected baseline drift: {sorted(changed)}')
 PY
 git diff --check
-git add \
+# These baselines are already tracked under the intentionally ignored generated/
+# tree. Stage modifications only; never force-add a new ignored artifact.
+git add -u -- \
   generated/protocol/participants/trellis.console@v1.json \
   generated/protocol/participants/trellis.core@v1.json \
   generated/protocol/participants/trellis.portal.activation@v1.json
