@@ -106,4 +106,47 @@ replace_once(
 path.write_text(text)
 PY
 
-bash /tmp/agent-run-wasm-boundary-v13-base.sh
+set +e
+bash /tmp/agent-run-wasm-boundary-v13-base.sh 2>&1 | tee /tmp/agent-wasm-boundary-v13.log
+status=${PIPESTATUS[0]}
+set -e
+
+if [ "$status" -ne 0 ]; then
+  python3 - <<'PY'
+from pathlib import Path
+import re
+
+raw = Path('/tmp/agent-wasm-boundary-v13.log').read_text(errors='replace')
+clean = re.sub(r'\x1b\[[0-9;]*[A-Za-z]', '', raw)
+lines = clean.splitlines()
+interesting = []
+patterns = (
+    'error:', 'error[', 'failed', 'failures', 'panicked at', 'assertion',
+    'not found', 'no such file', 'process completed', 'diff]', 'warning:',
+)
+for i, line in enumerate(lines):
+    lower = line.lower()
+    if any(p in lower for p in patterns):
+        start = max(0, i - 8)
+        end = min(len(lines), i + 24)
+        interesting.extend(lines[start:end])
+        interesting.append('---')
+# Bound the scratch diagnostic even if a test prints an enormous fixture.
+summary = '\n'.join(interesting[-1200:])
+tail = '\n'.join(lines[-600:])
+Path('.validation-failure').write_text(
+    f'run={__import__("os").environ.get("GITHUB_RUN_ID")}.'
+    f'{__import__("os").environ.get("GITHUB_RUN_ATTEMPT")}\n'
+    f'exit={__import__("os").environ.get("status", "unknown")}\n\n'
+    f'=== interesting ===\n{summary}\n\n=== tail ===\n{tail}\n'
+)
+PY
+  git config --local user.name trellis-validation
+  git config --local user.email trellis-validation@users.noreply.github.com
+  git config --local commit.gpgsign false
+  git config --local tag.gpgSign false
+  git add .validation-failure
+  git commit -m 'Record WASM boundary validation failure'
+  git push --force-with-lease origin HEAD:agent/wasm-boundary-v3
+  exit "$status"
+fi
