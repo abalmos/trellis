@@ -197,6 +197,19 @@ Deno.test("result npm ESM build constructs UnexpectedError", async () => {
 '''
 )
 
+# The ordinary source-test phase owns portal and non-packaging tools only.
+# Package-build assertions run after packages:build:npm in the existing
+# packaging phase, so do not discover them recursively from tools here.
+path = Path("ts/deno.json")
+text = path.read_text()
+text = replace_once(
+    text,
+    '"test:prepared:ui-tools": "deno test -A portals/login tools",',
+    '"test:prepared:ui-tools": "deno test -A --ignore=tools/package_build portals/login tools",',
+    "exclude package-build tests from source phase",
+)
+path.write_text(text)
+
 # The clean Check lane must execute the packaging phase explicitly. This phase
 # already owns building all npm packages before running built-artifact tests.
 path = Path(".github/workflows/check.yml")
