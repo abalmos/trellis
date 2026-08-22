@@ -44,6 +44,14 @@ Deno.test("workspace npm build task only builds the supported published packages
     "deno task -c packages/result/deno.json build:npm && deno task -c packages/trellis/deno.json build:npm && deno task -c packages/trellis-svelte/deno.json build:npm",
   );
   assertEquals(
+    config.tasks["packages:build:npm:prepared"],
+    "deno task -c packages/result/deno.json build:npm && deno task -c packages/trellis/deno.json build:npm:prepared && deno task -c packages/trellis-svelte/deno.json build:npm",
+  );
+  assertEquals(
+    config.tasks["test:prepared:packaging"],
+    "deno task packages:build:npm:prepared && deno task test:prepared:packaging:built",
+  );
+  assertEquals(
     config.tasks["build:npm"],
     "deno task prepare && deno task packages:build:npm",
   );
