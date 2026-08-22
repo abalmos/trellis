@@ -8,6 +8,13 @@ def replace_once(text: str, old: str, new: str, label: str) -> str:
     return text.replace(old, new, 1)
 
 
+def replace_job(text: str, job: str, next_job: str | None, old: str, new: str, label: str) -> str:
+    start = text.index(f"  {job}:\n")
+    end = text.index(f"\n  {next_job}:\n", start) if next_job else len(text)
+    block = replace_once(text[start:end], old, new, label)
+    return text[:start] + block + text[end:]
+
+
 # `prepare` is source/protocol generation only. WASM and the embedded portal are
 # consumer build state. Keep `xtask build` as the full application build path.
 path = Path("rust/xtask/src/main.rs")
@@ -161,8 +168,10 @@ consumer_jobs = r'''
 '''
 text = text[:insert_at] + "\n" + consumer_jobs + text[insert_at:]
 
-text = replace_once(
+text = replace_job(
     text,
+    "rust",
+    "typescript",
     '''  rust:
     name: Rust
     needs: prepare
@@ -173,8 +182,10 @@ text = replace_once(
 ''',
     "rust dependencies",
 )
-text = replace_once(
+text = replace_job(
     text,
+    "rust",
+    "typescript",
     '''      - name: Download prepared artifacts
         uses: actions/download-artifact@v4
         with:
@@ -200,8 +211,10 @@ text = replace_once(
     "rust artifacts",
 )
 
-text = replace_once(
+text = replace_job(
     text,
+    "typescript",
+    "live",
     '''  typescript:
     name: TypeScript
     needs: prepare
@@ -212,10 +225,10 @@ text = replace_once(
 ''',
     "typescript dependencies",
 )
-# The second original prepared-artifact block belongs to TypeScript now that the
-# Rust block above was rewritten.
-text = replace_once(
+text = replace_job(
     text,
+    "typescript",
+    "live",
     '''      - name: Download prepared artifacts
         uses: actions/download-artifact@v4
         with:
@@ -241,8 +254,10 @@ text = replace_once(
     "typescript artifacts",
 )
 
-text = replace_once(
+text = replace_job(
     text,
+    "live",
+    None,
     '''  live:
     name: Live Trellis
     needs: prepare
@@ -253,8 +268,10 @@ text = replace_once(
 ''',
     "live dependencies",
 )
-text = replace_once(
+text = replace_job(
     text,
+    "live",
+    None,
     '''      - name: Download prepared artifacts
         uses: actions/download-artifact@v4
         with:
