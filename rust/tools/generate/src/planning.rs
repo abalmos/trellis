@@ -509,11 +509,8 @@ fn protocol_participant_output_is_fresh(
     expected: &trellis_contracts::LoadedParticipant,
     output: &Path,
 ) -> miette::Result<bool> {
-    let Ok(existing) = trellis_contracts::load_participant_source(output) else {
-        return Ok(false);
-    };
-    Ok(existing.participant.digest().into_diagnostic()?
-        == expected.participant.digest().into_diagnostic()?)
+    Ok(fs::read_to_string(output)
+        .is_ok_and(|existing| existing == format!("{}\n", expected.canonical)))
 }
 
 fn cleanup_legacy_protocol_outputs(plan: &[AutoPlanEntry]) -> miette::Result<()> {
@@ -861,18 +858,30 @@ mod tests {
     use crate::discovery::SourceLanguage;
 
     #[test]
-    fn protocol_participant_freshness_tracks_semantic_identity() {
+    fn protocol_participant_freshness_tracks_canonical_artifact() {
         let temp = tempfile::tempdir().unwrap();
         let expected_path = temp.path().join("expected.participant.json");
         let output_path = temp.path().join("generated.participant.json");
         let service = r#"{"format":"trellis.participant.v1","id":"example.fixture@v1","displayName":"Example","description":"Example participant","kind":"service"}"#;
         let app = r#"{"format":"trellis.participant.v1","id":"example.fixture@v1","displayName":"Example","description":"Example participant","kind":"app"}"#;
         fs::write(&expected_path, service).unwrap();
-        fs::write(&output_path, service).unwrap();
         let expected = trellis_contracts::load_participant_source(&expected_path).unwrap();
+        fs::write(&output_path, format!("{}\n", expected.canonical)).unwrap();
         assert!(protocol_participant_output_is_fresh(&expected, &output_path).unwrap());
 
         fs::write(&output_path, app).unwrap();
+        assert!(!protocol_participant_output_is_fresh(&expected, &output_path).unwrap());
+
+        fs::write(
+            &output_path,
+            format!(
+                "{}\n",
+                expected
+                    .canonical
+                    .replace("Example participant", "Stale description")
+            ),
+        )
+        .unwrap();
         assert!(!protocol_participant_output_is_fresh(&expected, &output_path).unwrap());
 
         fs::write(&output_path, "{").unwrap();
