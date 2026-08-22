@@ -196,17 +196,14 @@ Deno.test("release workflows use generated package-manager targets", async () =>
   );
   assertStringIncludes(releaseWorkflow, "name: integration-live-artifacts");
   assertStringIncludes(releaseWorkflow, "path: dist/integration-runtime");
-  assertStringIncludes(releaseWorkflow, "\n  verify-live-inventory:");
-  assertStringIncludes(
-    releaseWorkflow,
-    "integration/live_runner.ts --inventory-only --prebuilt-only --artifacts-manifest dist/integration-runtime/manifest.json",
-  );
+  assertEquals(releaseWorkflow.includes("\n  verify-live-inventory:"), false);
+  assertEquals(releaseWorkflow.includes("--inventory-only"), false);
   const verifyLive = releaseWorkflow.split("\n  verify-live:")[1].split(
     "\n  release-gate:",
   )[0];
   assertStringIncludes(verifyLive, "- prepare-release");
   assertStringIncludes(verifyLive, "- verify-live-build");
-  assertStringIncludes(verifyLive, "- verify-live-inventory");
+  assertEquals(verifyLive.includes("- verify-live-inventory"), false);
   assertEquals(verifyLive.includes("- verify-static"), false);
   assertEquals(verifyLive.includes("- verify-rust"), false);
   assertEquals(verifyLive.includes("- verify-js"), false);
@@ -369,7 +366,7 @@ Deno.test("published trellis sources do not self-import package subpaths", async
     }
   }
 
-  assertEquals(offenders, ["contracts/trellis_core.ts"]);
+  assertEquals(offenders, []);
 });
 
 Deno.test("workspace config does not shadow publishable package members", async () => {
