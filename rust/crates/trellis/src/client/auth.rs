@@ -1,8 +1,8 @@
 use ed25519_dalek::{Signature, Signer, SigningKey};
 use nkeys::{KeyPair, KeyPairType};
 use trellis_protocol::{
-    sign_authorization_event_v2, sign_authorization_request_v2, sign_session_proof_v1,
-    AuthorizationEventProofV2, AuthorizationRequestProofV2, SessionProofInputV1, SessionProofV1,
+    sign_authorization_event, sign_authorization_request, sign_session_proof_v1,
+    AuthorizationEventProof, AuthorizationRequestProof, SessionProofInputV1, SessionProofV1,
 };
 
 use crate::client::proof::{base64url_decode, base64url_encode, sha256};
@@ -83,12 +83,12 @@ impl SessionAuth {
         )
     }
 
-    /// Create the context-bound v2 `proof` header for a signed RPC request.
+    /// Create the context-bound v1 `proof` header for a signed RPC request.
     ///
     /// The exact NATS reply inbox must be created before signing and used for
     /// both the proof input and the publish reply.
-    #[doc = concat!("Trellis API operation `", stringify!(create_request_proof_v2), "`.")]
-    pub fn create_request_proof_v2(
+    #[doc = concat!("Trellis API operation `", stringify!(create_request_proof), "`.")]
+    pub fn create_request_proof(
         &self,
         context_digest: &str,
         subject: &str,
@@ -96,13 +96,13 @@ impl SessionAuth {
         payload: &[u8],
         iat: i64,
         request_id: &str,
-    ) -> Result<AuthorizationRequestProofV2, TrellisClientError> {
+    ) -> Result<AuthorizationRequestProof, TrellisClientError> {
         if reply_subject.is_empty() {
             return Err(TrellisClientError::Bootstrap(
                 "request reply subject must not be empty".into(),
             ));
         }
-        sign_authorization_request_v2(
+        sign_authorization_request(
             context_digest,
             subject,
             Some(reply_subject),
@@ -114,17 +114,17 @@ impl SessionAuth {
         .map_err(|error| TrellisClientError::Bootstrap(error.to_string()))
     }
 
-    /// Create the context-bound v2 `proof` header for a signed event.
-    #[doc = concat!("Trellis API operation `", stringify!(create_event_proof_v2), "`.")]
-    pub fn create_event_proof_v2(
+    /// Create the context-bound v1 `proof` header for a signed event.
+    #[doc = concat!("Trellis API operation `", stringify!(create_event_proof), "`.")]
+    pub fn create_event_proof(
         &self,
         context_digest: &str,
         subject: &str,
         payload: &[u8],
         event_id: &str,
         event_time: &str,
-    ) -> Result<AuthorizationEventProofV2, TrellisClientError> {
-        sign_authorization_event_v2(
+    ) -> Result<AuthorizationEventProof, TrellisClientError> {
+        sign_authorization_event(
             context_digest,
             subject,
             payload,

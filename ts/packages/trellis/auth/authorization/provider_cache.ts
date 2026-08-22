@@ -6,13 +6,13 @@ import {
   type AuthorizationVerificationErrorCode,
   type VerifiedAuthorizationContextTokenProjection,
   verifyAuthorizationContextWasm,
-  type VerifyAuthorizationEventV2Args,
-  type VerifyAuthorizationEventV2Result,
-  verifyAuthorizationEventV2Wasm,
+  type VerifyAuthorizationEventArgs,
+  type VerifyAuthorizationEventResult,
+  verifyAuthorizationEventWasm,
   verifyAuthorizationManifestWasm,
-  type VerifyAuthorizationRequestV2Args,
-  type VerifyAuthorizationRequestV2Result,
-  verifyAuthorizationRequestV2Wasm,
+  type VerifyAuthorizationRequestArgs,
+  type VerifyAuthorizationRequestResult,
+  verifyAuthorizationRequestWasm,
 } from "../protocol_wasm.ts";
 import { canonicalizeJsonValue } from "../utils.ts";
 import {
@@ -27,8 +27,8 @@ import {
   registryWatchEntry,
 } from "./nats_registry.ts";
 import type {
-  AuthorizationProviderEventV2,
-  AuthorizationProviderRequestV2,
+  AuthorizationProviderEvent,
+  AuthorizationProviderRequest,
   AuthorizationRegistryBinding,
   AuthorizationTrustBundle,
 } from "./types.ts";
@@ -309,14 +309,14 @@ export class AuthorizationProviderCache {
     );
   }
 
-  /** Verify a presented request-v2 proof with exact route permissions. */
-  async verifyRequestV2(
-    request: AuthorizationProviderRequestV2,
-  ): Promise<VerifyAuthorizationRequestV2Result> {
+  /** Verify a presented request proof with exact route permissions. */
+  async verifyRequest(
+    request: AuthorizationProviderRequest,
+  ): Promise<VerifyAuthorizationRequestResult> {
     try {
       this.#requireHealthy();
       const entry = await this.#resolveEntry(request.contextDigest);
-      const result = await verifyAuthorizationRequestV2Wasm(
+      const result = await verifyAuthorizationRequestWasm(
         await this.#requestInput(entry, request),
       );
       if (!result.ok) return structuredClone(result);
@@ -332,16 +332,16 @@ export class AuthorizationProviderCache {
     }
   }
 
-  /** Verify a presented event-v2 proof with exact publish permissions. */
-  async verifyEventV2(
-    event: AuthorizationProviderEventV2,
-  ): Promise<VerifyAuthorizationEventV2Result> {
+  /** Verify a presented event proof with exact publish permissions. */
+  async verifyEvent(
+    event: AuthorizationProviderEvent,
+  ): Promise<VerifyAuthorizationEventResult> {
     try {
       this.#requireHealthy();
       parseEventTime(event.eventTime);
       const entry = await this.#resolveEntry(event.contextDigest);
       const revokedAt = this.#revocationEvidence(entry.contextDigest);
-      const result = await verifyAuthorizationEventV2Wasm(
+      const result = await verifyAuthorizationEventWasm(
         await this.#eventInput(
           entry,
           event,
@@ -719,8 +719,8 @@ export class AuthorizationProviderCache {
 
   async #requestInput(
     entry: ProviderContextEntry,
-    request: AuthorizationProviderRequestV2,
-  ): Promise<VerifyAuthorizationRequestV2Args> {
+    request: AuthorizationProviderRequest,
+  ): Promise<VerifyAuthorizationRequestArgs> {
     const chain = await this.#resolveChain(entry);
     return {
       root: entry.root,
@@ -740,9 +740,9 @@ export class AuthorizationProviderCache {
 
   async #eventInput(
     entry: ProviderContextEntry,
-    event: AuthorizationProviderEventV2,
+    event: AuthorizationProviderEvent,
     revokedAt: number | null,
-  ): Promise<VerifyAuthorizationEventV2Args> {
+  ): Promise<VerifyAuthorizationEventArgs> {
     const chain = await this.#resolveChain(entry);
     return {
       root: entry.root,

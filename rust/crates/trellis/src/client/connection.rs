@@ -84,7 +84,7 @@ pub(crate) fn signed_headers(
     let iat = now_iat_seconds() as i64;
     let request_id = new_request_id();
     let proof =
-        auth.create_request_proof_v2(context_digest, subject, reply, payload, iat, &request_id)?;
+        auth.create_request_proof(context_digest, subject, reply, payload, iat, &request_id)?;
     let mut headers = HeaderMap::new();
     headers.insert("session-key", auth.session_key.as_str());
     headers.insert("authorization-context", context_digest);
@@ -906,7 +906,7 @@ fn signed_event_headers(
     headers.insert("authorization-context", context_digest);
     headers.insert(
         "proof",
-        auth.create_event_proof_v2(
+        auth.create_event_proof(
             context_digest,
             event.subject(),
             event.payload(),

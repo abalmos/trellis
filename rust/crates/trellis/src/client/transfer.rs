@@ -272,10 +272,10 @@ fn parse_upload_ack(message: async_nats::Message) -> Result<UploadAck, TrellisCl
 
 #[cfg(test)]
 mod tests {
-    use crate::client::proof::verify_event_proof_v2;
+    use crate::client::proof::verify_event_proof;
     use base64::Engine as _;
     use ed25519_dalek::{Signature, Verifier as _, VerifyingKey};
-    use trellis_protocol::build_authorization_request_proof_input_v2;
+    use trellis_protocol::build_authorization_request_proof_input;
 
     use super::*;
 
@@ -313,7 +313,7 @@ mod tests {
             .expect("context digest")
             .try_into()
             .expect("context digest bytes");
-        let input = build_authorization_request_proof_input_v2(
+        let input = build_authorization_request_proof_input(
             &context_digest,
             subject,
             Some(reply),
@@ -420,16 +420,16 @@ mod tests {
     }
 
     #[test]
-    fn event_proof_v2_verifies_with_context_digest() {
+    fn event_proof_v1_verifies_with_context_digest() {
         let auth = test_auth();
         let subject = "events.v1.Documents.Changed.doc-1";
         let payload = br#"{"id":"doc-1"}"#;
         let event_id = "evt_doc_1";
         let event_time = "1970-01-01T00:19:10Z";
         let proof = auth
-            .create_event_proof_v2(TEST_CONTEXT_DIGEST, subject, payload, event_id, event_time)
+            .create_event_proof(TEST_CONTEXT_DIGEST, subject, payload, event_id, event_time)
             .expect("event proof");
-        assert!(verify_event_proof_v2(
+        assert!(verify_event_proof(
             &auth.session_key,
             TEST_CONTEXT_DIGEST,
             subject,
@@ -439,7 +439,7 @@ mod tests {
             proof.as_str(),
         )
         .expect("event proof verifies"));
-        assert!(!verify_event_proof_v2(
+        assert!(!verify_event_proof(
             &auth.session_key,
             TEST_CONTEXT_DIGEST,
             subject,

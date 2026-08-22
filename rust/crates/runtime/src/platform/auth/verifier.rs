@@ -1,6 +1,6 @@
 //! Runtime-local request/event verification backed by the validator cache.
 //!
-//! The runtime verifier checks v2 request and event proofs entirely against
+//! The runtime verifier checks v1 request and event proofs entirely against
 //! in-process state: the shared [`AuthorizationProviderCache`] (verified contexts,
 //! manifest, and full revocation timestamps) plus a precompiled
 //! route/permission index built once at startup from the source-owned API
@@ -15,7 +15,7 @@ use futures_util::future::BoxFuture;
 #[cfg(test)]
 use trellis_protocol::{ApiSurfaceKindV1, PermissionActionV1, PermissionTargetV1};
 use trellis_protocol::{
-    AuthorizationEventPublisherV2, PermissionAtomV1, VerifiedAuthorizationContextV1,
+    AuthorizationEventPublisher, PermissionAtomV1, VerifiedAuthorizationContextV1,
 };
 use trellis_rs::client::{
     AuthorizationProviderCache, AuthorizationRegistryBinding, AuthorizationVerificationCore,
@@ -197,7 +197,7 @@ impl RuntimeAuthVerifier {
         }
     }
 
-    /// Verify a v2 request proof against the exact routed permission.
+    /// Verify a v1 request proof against the exact routed permission.
     ///
     /// `reply` must be the actual NATS reply inbox (`message.reply`); the
     /// proof is bound to it. Verification happens only after full proof, time,
@@ -281,7 +281,7 @@ impl RuntimeAuthVerifier {
         authorization_context: &str,
         event_id: &str,
         event_time: &str,
-    ) -> Result<AuthorizationEventPublisherV2, trellis_rs::service::EventVerificationFailure> {
+    ) -> Result<AuthorizationEventPublisher, trellis_rs::service::EventVerificationFailure> {
         use trellis_rs::service::EventVerificationFailure;
 
         let now = self
@@ -864,7 +864,7 @@ mod tests {
         let payload = defaults.request.payload.as_bytes();
         let (verifier, source, _, digest) = verifier(None);
         let proof = auth
-            .create_request_proof_v2(
+            .create_request_proof(
                 &digest,
                 &defaults.request.subject,
                 &defaults.request.reply,
@@ -967,7 +967,7 @@ mod tests {
         let payload = defaults.request.payload.as_bytes();
         let (verifier, _, _, digest) = verifier(None);
         let proof = auth
-            .create_request_proof_v2(
+            .create_request_proof(
                 &digest,
                 &defaults.request.subject,
                 &defaults.request.reply,
@@ -1013,7 +1013,7 @@ mod tests {
         let event_time = "1970-01-01T00:19:10Z";
         let event_subject = "events.v1.Documents.Changed.doc-1";
         let event_proof = auth
-            .create_event_proof_v2(
+            .create_event_proof(
                 &digest,
                 event_subject,
                 br#"{"id":"doc-1"}"#,
@@ -1054,7 +1054,7 @@ mod tests {
         let payload = defaults.request.payload.as_bytes();
         let (verifier, _, _, digest) = verifier(Some(1150));
         let proof = auth
-            .create_request_proof_v2(
+            .create_request_proof(
                 &digest,
                 &defaults.request.subject,
                 &defaults.request.reply,
@@ -1081,7 +1081,7 @@ mod tests {
         let event_subject = "events.v1.Documents.Changed.doc-1";
         // Revocation denies proofs created both before and after its timestamp.
         let before_proof = auth
-            .create_event_proof_v2(
+            .create_event_proof(
                 &digest,
                 event_subject,
                 br#"{"id":"doc-1"}"#,
@@ -1102,7 +1102,7 @@ mod tests {
             .await
             .is_err());
         let after_proof = auth
-            .create_event_proof_v2(
+            .create_event_proof(
                 &digest,
                 event_subject,
                 br#"{"id":"doc-1"}"#,
@@ -1150,7 +1150,7 @@ mod tests {
         )
         .unwrap();
         let proof = auth
-            .create_request_proof_v2(&digest, subject, &reply, payload, 1100, "req_admin")
+            .create_request_proof(&digest, subject, &reply, payload, 1100, "req_admin")
             .unwrap();
         assert!(verifier
             .verify_request(
@@ -1181,7 +1181,7 @@ mod tests {
         let reply = defaults.request.reply.clone();
         let (verifier, source, _, digest) = verifier(None);
         let proof = |request_id: &str| {
-            auth.create_request_proof_v2(&digest, subject, &reply, payload, now, request_id)
+            auth.create_request_proof(&digest, subject, &reply, payload, now, request_id)
                 .unwrap()
         };
         verifier
@@ -1233,7 +1233,7 @@ mod tests {
         let verifier = RuntimeAuthVerifier::new(source.clone());
         for request_id in ["req_unknown_1", "req_unknown_2"] {
             let proof = auth
-                .create_request_proof_v2(&unknown_digest, subject, &reply, payload, now, request_id)
+                .create_request_proof(&unknown_digest, subject, &reply, payload, now, request_id)
                 .unwrap();
             verifier
                 .verify_request(
@@ -1264,7 +1264,7 @@ mod tests {
             .healthy
             .store(false, std::sync::atomic::Ordering::SeqCst);
         let proof = auth
-            .create_request_proof_v2(
+            .create_request_proof(
                 &digest,
                 &defaults.request.subject,
                 &defaults.request.reply,

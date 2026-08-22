@@ -1,8 +1,8 @@
 use trellis_protocol::{
-    verify_authorization_event_v2, verify_authorization_request_v2, AuthorizationEventProofV2,
-    AuthorizationEventPublisherV2, AuthorizationRequestProofV2, AuthorizationVerificationPolicyV1,
-    PermissionAtomV1, ProtocolError, VerifiedAuthorizationContextV1, VerifiedAuthorizationEventV2,
-    VerifiedAuthorizationRequestV2,
+    verify_authorization_event, verify_authorization_request, AuthorizationEventProof,
+    AuthorizationEventPublisher, AuthorizationRequestProof, AuthorizationVerificationPolicyV1,
+    PermissionAtomV1, ProtocolError, VerifiedAuthorizationContextV1,
+    VerifiedAuthorizationEventProof, VerifiedAuthorizationRequestProof,
 };
 
 /// Typed caller projection produced after a local authorization proof verifies.
@@ -49,7 +49,7 @@ impl From<ProtocolError> for AuthorizationVerificationError {
 /// Verified request proof and its local caller projection.
 #[derive(Clone, Debug)]
 pub struct VerifiedAuthorizationRequest {
-    request: VerifiedAuthorizationRequestV2,
+    request: VerifiedAuthorizationRequestProof,
     caller: VerifiedCaller,
 }
 
@@ -68,12 +68,12 @@ impl VerifiedAuthorizationRequest {
 /// Verified event proof and its protocol publisher projection.
 #[derive(Clone, Debug)]
 pub struct VerifiedAuthorizationEvent {
-    event: VerifiedAuthorizationEventV2,
+    event: VerifiedAuthorizationEventProof,
 }
 
 impl VerifiedAuthorizationEvent {
     /// Return the verified publisher projection.
-    pub fn publisher(&self) -> &AuthorizationEventPublisherV2 {
+    pub fn publisher(&self) -> &AuthorizationEventPublisher {
         self.event.publisher()
     }
 
@@ -115,8 +115,8 @@ impl AuthorizationVerificationCore {
         required_capabilities: &[String],
     ) -> Result<VerifiedAuthorizationRequest, AuthorizationVerificationError> {
         self.check_context_binding(context, session_key, context_digest)?;
-        let proof = AuthorizationRequestProofV2::parse(proof.to_owned())?;
-        let request = verify_authorization_request_v2(
+        let proof = AuthorizationRequestProof::parse(proof.to_owned())?;
+        let request = verify_authorization_request(
             context,
             subject,
             reply_subject,
@@ -152,8 +152,8 @@ impl AuthorizationVerificationCore {
         revoked_at: Option<i64>,
     ) -> Result<VerifiedAuthorizationEvent, AuthorizationVerificationError> {
         self.check_context_binding(context, session_key, context_digest)?;
-        let proof = AuthorizationEventProofV2::parse(proof.to_owned())?;
-        let event = verify_authorization_event_v2(
+        let proof = AuthorizationEventProof::parse(proof.to_owned())?;
+        let event = verify_authorization_event(
             context,
             subject,
             payload,

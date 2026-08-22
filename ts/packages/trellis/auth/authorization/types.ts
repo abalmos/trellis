@@ -129,8 +129,8 @@ export type AuthorizationClientState = {
   runtime?: AuthorizationRuntimeBinding;
 };
 
-/** Presented request-v2 data supplied by a provider transport adapter. */
-export type AuthorizationProviderRequestV2 = {
+/** Presented request proof data supplied by a provider transport adapter. */
+export type AuthorizationProviderRequest = {
   contextDigest: string;
   subject: string;
   reply: string | null;
@@ -142,8 +142,8 @@ export type AuthorizationProviderRequestV2 = {
   requiredCapabilities: string[];
 };
 
-/** Presented event-v2 data supplied by a provider event adapter. */
-export type AuthorizationProviderEventV2 = {
+/** Presented event proof data supplied by a provider event adapter. */
+export type AuthorizationProviderEvent = {
   contextDigest: string;
   subject: string;
   payload: Uint8Array;

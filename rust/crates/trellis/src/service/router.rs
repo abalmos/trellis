@@ -33,7 +33,7 @@ pub struct RequestContext {
     pub session_key: Option<String>,
     /// Proof signature from the authenticated request headers.
     pub proof: Option<String>,
-    /// Authorization-context digest bound by the v2 request proof.
+    /// Authorization-context digest bound by the v1 request proof.
     pub authorization_context: Option<String>,
     /// Proof issued-at timestamp from the authenticated request headers.
     pub iat: Option<i64>,

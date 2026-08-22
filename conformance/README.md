@@ -9,7 +9,7 @@ runtimes:
 - `canonical-json/` - canonical serialization and digest vectors
 - `auth-proof/` - session-key proof and domain-signature vectors
 - `authorization-context/` - signed authorization trust chains, contexts, and
-  request-proof v2 vectors
+  request/event-proof v1 vectors
 
 Authorization-context vectors are executable data rather than a case-name
 catalog. Every case names one public protocol operation, starts from the pinned

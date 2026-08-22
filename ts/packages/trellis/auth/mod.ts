@@ -13,8 +13,8 @@ export {
   AuthorizationContextRefreshError,
   type AuthorizationContextStore,
   AuthorizationProviderCache,
-  type AuthorizationProviderEventV2,
-  type AuthorizationProviderRequestV2,
+  type AuthorizationProviderEvent,
+  type AuthorizationProviderRequest,
   type AuthorizationRoutingMaterial,
   type AuthorizationSessionBinding,
   type AuthorizationTrustBundle,
@@ -78,7 +78,7 @@ export type {
   AuthDeviceUserAuthoritiesResolveOutput,
   AuthDeviceUserAuthoritiesResolveProgress,
 } from "../sdk/auth.ts";
-// Context-bound v2 proof helpers for local signing and signature verification.
+// Context-bound proof helpers for local signing and signature verification.
 export {
   buildEventProofInput,
   buildProofInput,

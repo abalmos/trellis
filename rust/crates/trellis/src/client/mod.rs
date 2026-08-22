@@ -44,7 +44,9 @@ pub(crate) use connection::ServiceBootstrapResponse;
 pub(crate) use connection::ServiceConnectWithContractOptions;
 pub(crate) use connection::TrellisClient;
 #[cfg(feature = "integration-test-scoping")]
-pub(crate) use connection::{fetch_device_activation_with_test_proof, DeviceBootstrapProofOverrides};
+pub(crate) use connection::{
+    fetch_device_activation_with_test_proof, DeviceBootstrapProofOverrides,
+};
 pub use connection::{
     DeviceConnectOptions, EventMessage, EventReplayPolicy, EventSubscribeOptions,
     EventSubscriptionMode, UserConnectOptions,
@@ -69,7 +71,7 @@ pub use operations::{
     OperationTransport, OperationUpdateDescriptor, OperationUpdateEvent, StartedOperationTransfer,
     TransferOperationDescriptor,
 };
-pub use proof::verify_event_proof_v2;
+pub use proof::verify_event_proof;
 pub use state::{
     DeleteStateOptions, ExpectedPutRevision, ListStateOptions, MapStateEntry, MapStateListResult,
     MapStateStore, PutStateOptions, StateDeleteResult, StateEntry, StateGetResult,

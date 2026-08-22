@@ -538,7 +538,7 @@ fn transition_headers(
     headers.insert("authorization-context", context_digest);
     headers.insert(
         "proof",
-        auth.create_event_proof_v2(
+        auth.create_event_proof(
             context_digest,
             STATUS_CHANGED_SUBJECT,
             &transition.payload,
@@ -657,7 +657,7 @@ fn now_ns() -> i64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use trellis_rs::client::verify_event_proof_v2;
+    use trellis_rs::client::verify_event_proof;
 
     #[test]
     fn heartbeat_subject_identity_is_authoritative() {
@@ -709,7 +709,7 @@ mod tests {
         let event_time = headers.get(EVENT_TIME_HEADER).expect("event time").as_str();
         let proof = headers.get("proof").expect("proof").as_str();
 
-        assert!(verify_event_proof_v2(
+        assert!(verify_event_proof(
             &auth.session_key,
             context_digest,
             STATUS_CHANGED_SUBJECT,

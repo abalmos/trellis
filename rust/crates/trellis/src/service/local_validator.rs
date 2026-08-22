@@ -60,7 +60,7 @@ impl LocalAuthVerifier {
         })
     }
 
-    /// Verify a v2 request proof against the digest-keyed context and exact route.
+    /// Verify a v1 request proof against the digest-keyed context and exact route.
     async fn verify_request(
         &self,
         subject: &str,
@@ -208,7 +208,7 @@ impl LocalAuthVerifier {
         })
     }
 
-    /// Verify a v2 event proof against the digest-keyed context, historical
+    /// Verify a v1 event proof against the digest-keyed context, historical
     /// policy, and the publisher's exact `Publish` atom for `event_name`.
     ///
     /// `event_name` is the API-local event name derived from the registered
@@ -679,7 +679,7 @@ mod tests {
         let auth = signer(&chain);
         let payload = defaults.request.payload.as_bytes();
         let proof = auth
-            .create_request_proof_v2(
+            .create_request_proof(
                 &chain.context_digest,
                 &defaults.request.subject,
                 &defaults.request.reply,
@@ -762,7 +762,7 @@ mod tests {
         let auth = signer(&chain);
         let payload = defaults.request.payload.as_bytes();
         let proof = auth
-            .create_request_proof_v2(
+            .create_request_proof(
                 &chain.context_digest,
                 &defaults.request.subject,
                 &defaults.request.reply,
@@ -805,7 +805,7 @@ mod tests {
         let auth = signer(&chain);
         let payload = defaults.request.payload.as_bytes();
         let proof = auth
-            .create_request_proof_v2(
+            .create_request_proof(
                 &chain.context_digest,
                 &defaults.request.subject,
                 &defaults.request.reply,
@@ -849,7 +849,7 @@ mod tests {
         let auth = signer(&chain);
         let payload = defaults.request.payload.as_bytes();
         let forged = auth
-            .create_request_proof_v2(
+            .create_request_proof(
                 &chain.context_digest,
                 &defaults.request.subject,
                 &defaults.request.reply,
@@ -879,7 +879,7 @@ mod tests {
         );
 
         let valid = auth
-            .create_request_proof_v2(
+            .create_request_proof(
                 &chain.context_digest,
                 &defaults.request.subject,
                 &defaults.request.reply,
@@ -914,7 +914,7 @@ mod tests {
         let auth = signer(&chain);
         let payload = defaults.request.payload.as_bytes();
         let proof = auth
-            .create_request_proof_v2(
+            .create_request_proof(
                 &chain.context_digest,
                 &defaults.request.subject,
                 &defaults.request.reply,
@@ -960,7 +960,7 @@ mod tests {
         let auth = signer(&chain);
         let payload = defaults.request.payload.as_bytes();
         let proof = auth
-            .create_request_proof_v2(
+            .create_request_proof(
                 &chain.context_digest,
                 &defaults.request.subject,
                 &defaults.request.reply,
@@ -1047,7 +1047,7 @@ mod tests {
         let event_id = "evt_doc_1";
         let event_time = "1970-01-01T00:19:10Z";
         let proof = auth
-            .create_event_proof_v2(
+            .create_event_proof(
                 &chain.context_digest,
                 subject,
                 payload,
@@ -1084,7 +1084,7 @@ mod tests {
         let historical = verifier_at(&chain, &defaults, None, 1_400);
         let historical_time = "1970-01-01T00:19:10Z";
         let historical_proof = auth
-            .create_event_proof_v2(
+            .create_event_proof(
                 &chain.context_digest,
                 subject,
                 payload,
@@ -1113,7 +1113,7 @@ mod tests {
         // Revocation invalidates all event proofs from the context, including replays.
         let revoked = verifier_at(&chain, &defaults, Some(1_150), 1_100);
         let before_proof = auth
-            .create_event_proof_v2(
+            .create_event_proof(
                 &chain.context_digest,
                 subject,
                 payload,
@@ -1140,7 +1140,7 @@ mod tests {
             .is_err());
         let boundary_time = "1970-01-01T00:19:10Z";
         let boundary_proof = auth
-            .create_event_proof_v2(
+            .create_event_proof(
                 &chain.context_digest,
                 subject,
                 payload,
@@ -1166,7 +1166,7 @@ mod tests {
             .await
             .is_err());
         let after_proof = auth
-            .create_event_proof_v2(
+            .create_event_proof(
                 &chain.context_digest,
                 subject,
                 payload,
@@ -1202,7 +1202,7 @@ mod tests {
         let event_id = "evt_doc_1";
         let event_time = "1970-01-01T00:19:10Z";
         let proof = auth
-            .create_event_proof_v2(
+            .create_event_proof(
                 &chain.context_digest,
                 subject,
                 payload,
