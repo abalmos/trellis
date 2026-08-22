@@ -62,7 +62,7 @@ function recordSuccessfulRun(
 }
 
 Deno.test("external service repo fixture config supplies the Trellis command", () => {
-  assertEquals(externalServiceRepoRuntime.trellis.command, {
+  assertEquals(externalServiceRepoTrellisCommand(""), {
     cmd: "cargo",
     args: [
       "run",

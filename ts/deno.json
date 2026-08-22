@@ -14,6 +14,7 @@
     "protocol:wasm": "cargo run --manifest-path ../rust/xtask/Cargo.toml -- protocol-wasm",
     "prepare:runtime": "deno task prepare && deno task protocol:wasm && deno task -c portals/login/deno.json build:embedded",
     "packages:build:npm": "deno task -c packages/result/deno.json build:npm && deno task -c packages/trellis/deno.json build:npm && deno task -c packages/trellis-svelte/deno.json build:npm",
+    "packages:build:npm:prepared": "deno task -c packages/result/deno.json build:npm && deno task -c packages/trellis/deno.json build:npm:prepared && deno task -c packages/trellis-svelte/deno.json build:npm",
     "smoke:npm": "deno run -A tools/package_build/npm_smoke.ts",
     "check:npm-release": "deno task build:npm && deno task smoke:npm",
     "build:npm": "deno task prepare && deno task packages:build:npm",
@@ -47,7 +48,7 @@
     "test:browser:coverage": "TRELLIS_BROWSER_COVERAGE_SOURCEMAP=1 deno task -c portals/login/deno.json build:static && deno test -A browser/*.browser_test.ts && deno task coverage:browser",
     "coverage:browser": "deno run -A tools/browser_v8_to_lcov.ts",
     "coverage:browser:merge": "deno run -A tools/browser_v8_to_lcov.ts --append-to ../coverage/live-integration/lcov.info",
-    "test:prepared:packaging": "deno task packages:build:npm && deno task test:prepared:packaging:built",
+    "test:prepared:packaging": "deno task packages:build:npm:prepared && deno task test:prepared:packaging:built",
     "test:prepared:packaging:built": "deno test -A packages/trellis/tests/npm_artifact_smoke_test.ts packages/trellis/tests/publishing_targets_test.ts tools/package_build",
     "trellis": "bash ../scripts/trellis-cli.sh",
     "trellis-generate": "deno run -A @qlever-llc/trellis/generate"
