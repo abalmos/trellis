@@ -4,14 +4,7 @@ set -euo pipefail
 TARGET_BRANCH="${TARGET_BRANCH:-agent/wasm-boundary-v3}"
 TRANSFORM_BRANCH="${TRANSFORM_BRANCH:-agent/rs-gate-validation}"
 
-# Leave a remotely visible run marker until the final validated candidate push.
-git config user.name trellis-validation
-git config user.email actions@users.noreply.github.com
-printf '%s\n' "$GITHUB_RUN_ID" > .validation-run
-git add .validation-run
-git commit -m 'Record WASM boundary v3.13 validation'
-git push origin HEAD:"$TARGET_BRANCH"
-
+# The workflow already persisted .validation-run after configuring commit signing.
 git fetch origin "$TRANSFORM_BRANCH"
 git show origin/"$TRANSFORM_BRANCH":scripts/agent_wasm_boundary_v3_pre.py > /tmp/wasm-boundary-pre.py
 git show origin/"$TRANSFORM_BRANCH":scripts/agent_wasm_boundary_v3.py > /tmp/wasm-boundary.py
@@ -100,8 +93,8 @@ deno eval -c ts/deno.json \
   'const m = await import("./ts/portals/login/contract.ts"); if (!m.default.CONTRACT_DIGEST || !m.default.PARTICIPANT) throw new Error("portal contract did not build intrinsic artifacts")'
 test ! -e ts/packages/trellis/auth/protocol_wasm/trellis_protocol_wasm.js
 
-# Refresh only known tool baselines. xtask and trellis-generate are standalone
-# workspaces without checked-in lockfiles, so --locked does not apply to them.
+# Refresh exactly the dynamic TypeScript participant baselines restored by the
+# clean-generation fix. No unrelated generated or lockfile drift is accepted.
 cargo run --manifest-path rust/xtask/Cargo.toml -- prepare
 cargo fmt --manifest-path rust/Cargo.toml --all
 cargo fmt --manifest-path rust/tools/generate/Cargo.toml
@@ -112,7 +105,6 @@ expected = {
     'generated/protocol/participants/trellis.console@v1.json',
     'generated/protocol/participants/trellis.core@v1.json',
     'generated/protocol/participants/trellis.portal.activation@v1.json',
-    'ts/deno.lock',
 }
 changed = set(filter(None, subprocess.check_output(
     ['git', 'diff', '--name-only'], text=True
@@ -125,8 +117,7 @@ git diff --check
 git add \
   generated/protocol/participants/trellis.console@v1.json \
   generated/protocol/participants/trellis.core@v1.json \
-  generated/protocol/participants/trellis.portal.activation@v1.json \
-  ts/deno.lock
+  generated/protocol/participants/trellis.portal.activation@v1.json
 git commit -m 'Refresh generated participant baselines'
 
 # Prove clean generation order: source resolution and participant emission occur
