@@ -2,6 +2,7 @@ import {
   assertEquals,
   assertNotEquals,
   assertObjectMatch,
+  assertRejects,
   assertThrows,
 } from "@std/assert";
 import { Type } from "typebox";
@@ -321,7 +322,7 @@ Deno.test("capability references require declared local or platform/global names
   assertThrows(() => define("typo.read"), Error, "undeclared local capability");
 });
 
-Deno.test("resolved native presentation verifies participant identity and evidence", () => {
+Deno.test("resolved native presentation verifies participant identity and evidence", async () => {
   const provider = defineServiceContract(
     { schemas: { Empty: Type.Object({}) } },
     (ref) => ({
@@ -350,7 +351,7 @@ Deno.test("resolved native presentation verifies participant identity and eviden
     ...changes,
   });
 
-  const resolved = resolveNativeProtocolPresentation(consumer);
+  const resolved = await resolveNativeProtocolPresentation(consumer);
   assertEquals(resolved.participantDigest, consumer.CONTRACT_DIGEST);
   assertEquals(
     resolved.participantNeedsDigest,
@@ -364,7 +365,7 @@ Deno.test("resolved native presentation verifies participant identity and eviden
       ),
     }).participantNeedsDigest,
   );
-  assertThrows(
+  await assertRejects(
     () =>
       resolveNativeProtocolPresentation(forged({ CONTRACT_DIGEST: "forged" })),
     Error,
@@ -373,7 +374,7 @@ Deno.test("resolved native presentation verifies participant identity and eviden
   const staleSelf = structuredClone(provider.PARTICIPANT);
   (staleSelf.implements as Record<string, Record<string, unknown>>).self
     .apiDigest = "forged";
-  assertThrows(
+  await assertRejects(
     () =>
       resolveNativeProtocolPresentation({
         ...provider,
@@ -383,7 +384,7 @@ Deno.test("resolved native presentation verifies participant identity and eviden
     "digest",
   );
   const runtime = consumer[CONTRACT_RUNTIME];
-  assertThrows(
+  await assertRejects(
     () =>
       resolveNativeProtocolPresentation(
         forged({ [CONTRACT_RUNTIME]: { ...runtime, actions: [] } }),

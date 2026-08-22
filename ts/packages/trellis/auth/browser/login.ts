@@ -134,7 +134,7 @@ export async function startAuthRequest(
   args: StartAuthRequestArgs,
 ): Promise<AuthStartResponse> {
   const context = contextRecord(args.context);
-  const presentation = resolveNativeProtocolPresentation(args.contract);
+  const presentation = await resolveNativeProtocolPresentation(args.contract);
   const participantDigest = args.contract.CONTRACT_DIGEST;
   const participantEvidence = {
     participantId: args.contract.CONTRACT_ID,

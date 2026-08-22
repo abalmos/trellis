@@ -1,18 +1,14 @@
 import type { NatsConnection } from "@nats-io/nats-core";
 import type { KvEntry, KvWatchEntry } from "@nats-io/kv";
 
-import {
-  type AuthorizationContextVerificationPolicyV1,
-  type AuthorizationVerificationErrorCode,
-  type VerifiedAuthorizationContextTokenProjection,
-  verifyAuthorizationContextWasm,
-  type VerifyAuthorizationEventArgs,
-  type VerifyAuthorizationEventResult,
-  verifyAuthorizationEventWasm,
-  verifyAuthorizationManifestWasm,
-  type VerifyAuthorizationRequestArgs,
-  type VerifyAuthorizationRequestResult,
-  verifyAuthorizationRequestWasm,
+import type {
+  AuthorizationContextVerificationPolicyV1,
+  AuthorizationVerificationErrorCode,
+  VerifiedAuthorizationContextTokenProjection,
+  VerifyAuthorizationEventArgs,
+  VerifyAuthorizationEventResult,
+  VerifyAuthorizationRequestArgs,
+  VerifyAuthorizationRequestResult,
 } from "../protocol_wasm.ts";
 import { canonicalizeJsonValue } from "../utils.ts";
 import {
@@ -316,6 +312,9 @@ export class AuthorizationProviderCache {
     try {
       this.#requireHealthy();
       const entry = await this.#resolveEntry(request.contextDigest);
+      const { verifyAuthorizationRequestWasm } = await import(
+        "../protocol_wasm.ts"
+      );
       const result = await verifyAuthorizationRequestWasm(
         await this.#requestInput(entry, request),
       );
@@ -341,6 +340,9 @@ export class AuthorizationProviderCache {
       parseEventTime(event.eventTime);
       const entry = await this.#resolveEntry(event.contextDigest);
       const revokedAt = this.#revocationEvidence(entry.contextDigest);
+      const { verifyAuthorizationEventWasm } = await import(
+        "../protocol_wasm.ts"
+      );
       const result = await verifyAuthorizationEventWasm(
         await this.#eventInput(
           entry,
@@ -482,6 +484,9 @@ export class AuthorizationProviderCache {
     const value = parseJsonRecord(
       stored.value,
       "authorization issuer manifest",
+    );
+    const { verifyAuthorizationManifestWasm } = await import(
+      "../protocol_wasm.ts"
     );
     const verifiedManifest = await verifyAuthorizationManifestWasm({
       root: this.#root,
@@ -647,6 +652,9 @@ export class AuthorizationProviderCache {
     if (existing) return existing;
     const chain = await this.#resolveChain(entry);
     const policy = this.#policyFor(entry, verificationTime, historical);
+    const { verifyAuthorizationContextWasm } = await import(
+      "../protocol_wasm.ts"
+    );
     const verified = await verifyAuthorizationContextWasm({
       root: entry.root,
       manifest: chain.value,

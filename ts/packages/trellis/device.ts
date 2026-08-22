@@ -541,7 +541,7 @@ async function fetchDeviceBootstrap(args: {
   activationNonce?: string;
   signal?: AbortSignal;
 }): Promise<DeviceBootstrapResponse> {
-  const presentation = resolveNativeProtocolPresentation(args.contract);
+  const presentation = await resolveNativeProtocolPresentation(args.contract);
   for (let attempt = 0; attempt < 2; attempt += 1) {
     const requestStartedAtMs = args.now();
     const issuedAt = Math.trunc(

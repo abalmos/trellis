@@ -169,7 +169,7 @@ Deno.test("startAuthRequest omits scalar context from both request body and sign
 });
 
 Deno.test("startAuthRequest signs provider, contract, and canonical context", async () => {
-  const signedPresentation = resolveNativeProtocolPresentation(SIGNED_CONTRACT);
+  const signedPresentation = await resolveNativeProtocolPresentation(SIGNED_CONTRACT);
   const originalFetch = globalThis.fetch;
   try {
     const handle = await createHandle();

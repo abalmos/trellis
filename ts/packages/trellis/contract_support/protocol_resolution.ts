@@ -1,4 +1,3 @@
-import { resolveParticipantV1WasmSync } from "../auth/protocol_wasm.ts";
 import { canonicalizeJson } from "./canonical.ts";
 import {
   type NativeProtocolContract,
@@ -12,9 +11,12 @@ export type ResolvedNativeProtocolPresentation = NativeProtocolPresentation & {
 };
 
 /** Resolve and validate one defined contract against its exact API evidence. */
-export function resolveNativeProtocolPresentation(
+export async function resolveNativeProtocolPresentation(
   contract: NativeProtocolContract,
-): ResolvedNativeProtocolPresentation {
+): Promise<ResolvedNativeProtocolPresentation> {
+  const { resolveParticipantV1WasmSync } = await import(
+    "../auth/protocol_wasm.ts"
+  );
   const intrinsic = nativeProtocolPresentation(contract);
   const apis = Object.fromEntries(
     [intrinsic.api, ...intrinsic.referencedApis].map((api) => [

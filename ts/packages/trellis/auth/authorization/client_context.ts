@@ -1,10 +1,8 @@
 import { Type } from "typebox";
 import { Value } from "typebox/value";
 
-import {
-  type AuthorizationContextVerificationPolicyV1,
-  verifyAuthorizationContextWasm,
-  verifyAuthorizationManifestWasm,
+import type {
+  AuthorizationContextVerificationPolicyV1,
 } from "../protocol_wasm.ts";
 import { canonicalizeJsonValue } from "../utils.ts";
 import {
@@ -152,6 +150,9 @@ export class AuthorizationContextCache {
       durable?.trust.minimumManifestGeneration ?? 1,
     );
     const manifest = bundle.trust.manifest;
+    const { verifyAuthorizationManifestWasm } = await import(
+      "../protocol_wasm.ts"
+    );
     const verifiedManifest = await verifyAuthorizationManifestWasm({
       root: bundle.trust.root,
       manifest,
@@ -452,6 +453,9 @@ export async function verifyAuthorizationContext(args: {
   manifest: unknown;
   policy: AuthorizationContextVerificationPolicyV1;
 }): Promise<VerifiedAuthorizationContext> {
+  const { verifyAuthorizationContextWasm } = await import(
+    "../protocol_wasm.ts"
+  );
   const result = await verifyAuthorizationContextWasm({
     root: args.bundle.trust.root,
     manifest: args.manifest,

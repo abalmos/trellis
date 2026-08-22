@@ -819,7 +819,7 @@ async function buildSessionKeyLoginUrl(args: {
   const startedAt = performance.now();
   const requestId = ulid();
   const issuedAt = Date.now();
-  const presentation = resolveNativeProtocolPresentation(args.contract);
+  const presentation = await resolveNativeProtocolPresentation(args.contract);
   if (
     args.participant.id !== args.contract.CONTRACT_ID ||
     args.participant.artifactDigest !== args.contract.CONTRACT_DIGEST

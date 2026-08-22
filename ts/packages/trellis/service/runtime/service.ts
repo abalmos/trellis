@@ -599,7 +599,7 @@ async function fetchServiceBootstrapInfoOnce(args: {
   const provisionedIdentityKeyId = base64urlEncode(
     await sha256(base64urlDecode(args.identityAuth.sessionKey)),
   );
-  const presentation = resolveNativeProtocolPresentation(args.contract);
+  const presentation = await resolveNativeProtocolPresentation(args.contract);
   if (
     args.identity.participantId !== args.contract.CONTRACT_ID ||
     args.identity.participantArtifactDigest !== args.contract.CONTRACT_DIGEST ||
