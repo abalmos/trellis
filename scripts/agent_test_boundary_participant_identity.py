@@ -119,7 +119,7 @@ mod participant_identity_tests {
             case.id(),
             "trellis.integration.participant-identity-proof-run-123-case-rpc@v1"
         );
-        assert_ne!(case.participant_digest(), contract.participant_digest());
+        assert_ne!(case.digest(), contract.digest());
 
         let original = contract.participant().clone();
         let mut case_participant = case.participant().clone();
