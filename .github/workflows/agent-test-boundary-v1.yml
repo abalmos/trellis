@@ -8,6 +8,8 @@ on:
       - scripts/agent_test_boundary_v1_pre.py
       - scripts/agent_test_boundary_v1.py
       - scripts/agent_test_boundary_v1_fix.py
+      - scripts/agent_test_boundary_auth_fix.py
+      - scripts/agent_test_boundary_identity_reset.py
       - scripts/agent_test_boundary_noop_cleanup.py
       - scripts/agent_test_subject_collision_audit.py
       - .github/workflows/agent-test-boundary-v1.yml
@@ -59,11 +61,15 @@ jobs:
             scripts/agent_test_boundary_v1_pre.py \
             scripts/agent_test_boundary_v1.py \
             scripts/agent_test_boundary_v1_fix.py \
+            scripts/agent_test_boundary_auth_fix.py \
+            scripts/agent_test_boundary_identity_reset.py \
             scripts/agent_test_boundary_noop_cleanup.py \
             scripts/agent_test_subject_collision_audit.py
           python3 scripts/agent_test_boundary_v1_pre.py
           python3 scripts/agent_test_boundary_v1.py
           python3 scripts/agent_test_boundary_v1_fix.py
+          python3 scripts/agent_test_boundary_auth_fix.py
+          python3 scripts/agent_test_boundary_identity_reset.py
           python3 scripts/agent_test_boundary_noop_cleanup.py
           python3 scripts/agent_test_subject_collision_audit.py
           cargo fmt --manifest-path rust/Cargo.toml --all
@@ -137,6 +143,8 @@ jobs:
             scripts/agent_test_boundary_v1_pre.py \
             scripts/agent_test_boundary_v1.py \
             scripts/agent_test_boundary_v1_fix.py \
+            scripts/agent_test_boundary_auth_fix.py \
+            scripts/agent_test_boundary_identity_reset.py \
             scripts/agent_test_boundary_noop_cleanup.py \
             scripts/agent_test_subject_collision_audit.py \
             .github/workflows/agent-test-boundary-v1.yml \
@@ -149,6 +157,8 @@ jobs:
             scripts/agent_test_boundary_v1_pre.py \
             scripts/agent_test_boundary_v1.py \
             scripts/agent_test_boundary_v1_fix.py \
+            scripts/agent_test_boundary_auth_fix.py \
+            scripts/agent_test_boundary_identity_reset.py \
             scripts/agent_test_boundary_noop_cleanup.py \
             scripts/agent_test_subject_collision_audit.py \
             .github/workflows/agent-test-boundary-v1.yml \
