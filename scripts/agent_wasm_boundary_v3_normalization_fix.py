@@ -95,6 +95,9 @@ function normalizeParticipant(participant: JsonObject): JsonObject {
   const stores = object(resources?.store);
   if (stores) for (const value of Object.values(stores)) { const resource = object(value); if (!resource) continue; if (resource.required === true) delete resource.required; if (resource.ttlMs === 0) delete resource.ttlMs; }
   if (resources) { deleteEmptyObject(resources, "kv"); deleteEmptyObject(resources, "store"); if (Object.keys(resources).length === 0) delete participant.resources; }
+  for (const section of ["schemas", "implements", "state", "jobQueues", "eventConsumers"]) {
+    deleteEmptyObject(participant, section);
+  }
   return participant;
 }
 
@@ -103,4 +106,65 @@ text = text.replace(marker, normalization + marker, 1)
 anchor = "  return participant;\n}\n\nfunction compareProtocolStrings"
 if text.count(anchor) != 1: raise RuntimeError("compileParticipant return anchor changed")
 text = text.replace(anchor, "  return normalizeParticipant(participant);\n}\n\nfunction compareProtocolStrings", 1)
+digest_anchor = '''export function participantDigest(
+  participant: Readonly<Record<string, unknown>>,
+): string {
+  const value = checkedObject(participant);
+'''
+if text.count(digest_anchor) != 1:
+    raise RuntimeError("participantDigest normalization anchor changed")
+text = text.replace(
+    digest_anchor,
+    '''export function participantDigest(
+  participant: Readonly<Record<string, unknown>>,
+): string {
+  const value = normalizeParticipant(structuredClone(checkedObject(participant)));
+''',
+    1,
+)
+p.write_text(text)
+
+p = Path("ts/packages/trellis/contract_support/protocol_artifacts_test.ts")
+text = p.read_text()
+import_anchor = '''  apiDigest,
+  collectActionSources,
+  nativeProtocolPresentation,
+} from "./protocol_artifacts.ts";'''
+if text.count(import_anchor) != 1:
+    raise RuntimeError("protocol artifact participantDigest import anchor changed")
+text = text.replace(
+    import_anchor,
+    '''  apiDigest,
+  collectActionSources,
+  nativeProtocolPresentation,
+  participantDigest,
+} from "./protocol_artifacts.ts";''',
+    1,
+)
+test_anchor = 'Deno.test("service contracts retain authoring event-consumer runtime metadata", () => {'
+if text.count(test_anchor) != 1:
+    raise RuntimeError("protocol artifact normalization test anchor changed")
+regression = r'''Deno.test("participant digest matches Rust normalization for explicit empty defaults", () => {
+  const participant = {
+    format: "trellis.participant.v1",
+    id: "trellis.test.raw-participant@v1",
+    displayName: "Raw participant",
+    description: "Checks intrinsic participant normalization.",
+    kind: "agent",
+    schemas: {},
+    implements: {},
+    uses: { required: {}, optional: {} },
+    state: {},
+    jobQueues: {},
+    eventConsumers: {},
+    resources: {},
+  } as const;
+  const resolved = resolveParticipantV1WasmSync({ participant, apis: {} });
+
+  assertEquals(participantDigest(participant), resolved.participantDigest);
+  assertEquals(participant.uses.optional, {});
+});
+
+'''
+text = text.replace(test_anchor, regression + test_anchor, 1)
 p.write_text(text)
