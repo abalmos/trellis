@@ -8,26 +8,46 @@ export const externalServiceRepoJsRoot = resolve(
   "../../../../../",
 );
 
+export const TRELLIS_TEST_SERVER_BIN_ENV = "TRELLIS_TEST_SERVER_BIN";
+
+export function externalServiceRepoTrellisCommand(
+  serverBin = Deno.env.get(TRELLIS_TEST_SERVER_BIN_ENV),
+) {
+  const env = {
+    RUST_LOG: "info,trellis_runtime::platform::auth_callout=debug",
+  };
+  if (serverBin !== undefined && serverBin.length > 0) {
+    return {
+      cmd: serverBin,
+      args: ["--config", "{config}", "all"],
+      env,
+      cwd: externalServiceRepoJsRoot,
+    };
+  }
+
+  return {
+    cmd: "cargo",
+    args: [
+      "run",
+      "--manifest-path",
+      "../rust/Cargo.toml",
+      "-p",
+      "trellis-runtime",
+      "--bin",
+      "trellis-server",
+      "--",
+      "--config",
+      "{config}",
+      "all",
+    ],
+    env,
+    cwd: externalServiceRepoJsRoot,
+  };
+}
+
 export const externalServiceRepoRuntime = {
   trellis: {
-    command: {
-      cmd: "cargo",
-      args: [
-        "run",
-        "--manifest-path",
-        "../rust/Cargo.toml",
-        "-p",
-        "trellis-runtime",
-        "--bin",
-        "trellis-server",
-        "--",
-        "--config",
-        "{config}",
-        "all",
-      ],
-      env: { RUST_LOG: "info,trellis_runtime::platform::auth_callout=debug" },
-      cwd: externalServiceRepoJsRoot,
-    },
+    command: externalServiceRepoTrellisCommand(),
   },
   timeouts: {
     startupMs: 60_000,

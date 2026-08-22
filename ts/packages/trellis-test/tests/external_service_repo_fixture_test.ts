@@ -9,6 +9,7 @@ import config, {
   externalServiceRepoJsRoot,
   externalServiceRepoRoot,
   externalServiceRepoRuntime,
+  externalServiceRepoTrellisCommand,
 } from "./fixtures/external-service-repo/trellis.integration.ts";
 
 type RunnerCommand = Parameters<
@@ -89,6 +90,15 @@ Deno.test("external service repo fixture config supplies the Trellis command", (
       coverage: ["rpc", "smoke"],
     },
   ]);
+});
+
+Deno.test("external service repo fixture accepts a prebuilt Trellis server", () => {
+  assertEquals(externalServiceRepoTrellisCommand("/tmp/trellis-server"), {
+    cmd: "/tmp/trellis-server",
+    args: ["--config", "{config}", "all"],
+    env: { RUST_LOG: "info,trellis_runtime::platform::auth_callout=debug" },
+    cwd: externalServiceRepoJsRoot,
+  });
 });
 
 Deno.test("external service repo fixture runs through generic runner serial mode", async () => {

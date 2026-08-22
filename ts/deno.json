@@ -27,7 +27,7 @@
     "test:prepared:result": "deno test -A packages/result",
     "test:prepared:trellis": "deno test -A packages/trellis",
     "test:prepared:trellis-svelte": "deno test -A packages/trellis-svelte",
-    "test:prepared:trellis-test": "deno test -A packages/trellis-test",
+    "test:prepared:trellis-test": "deno test -A --ignore=packages/trellis-test/tests/fixtures/external-service-repo/integration packages/trellis-test",
     "test:prepared:packages": {
       "dependencies": [
         "test:prepared:result",
