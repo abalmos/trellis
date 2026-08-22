@@ -1,4 +1,5 @@
 import re
+import subprocess
 from pathlib import Path
 
 
@@ -168,4 +169,19 @@ replace_once(
     "ts/browser/define_contract.browser_test.ts",
     "    assertEquals(identity.needsDigest.length > 0, true);\n",
     "",
+)
+
+subprocess.run(
+    [
+        "deno",
+        "fmt",
+        "-c",
+        "ts/deno.json",
+        "ts/portals/login/src/lib/device_activation.ts",
+        "ts/integration/device-activation/_fixture.ts",
+        "ts/browser/login_portal_smoke.browser_test.ts",
+        "ts/browser/define_contract_fixture/main.ts",
+        "ts/browser/define_contract.browser_test.ts",
+    ],
+    check=True,
 )
