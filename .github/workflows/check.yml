@@ -294,5 +294,18 @@ jobs:
           integration/live_runner_test.ts
           rust/crates/trellis-test/integration_runner_test.ts
 
+      - name: Build live Trellis server
+        run: cargo build --locked --manifest-path rust/Cargo.toml -p trellis-runtime --bin trellis-server
+
       - name: Run live integration suite
         run: deno run -A -c ts/deno.json integration/live_runner.ts
+
+      - name: Run external repository smoke
+        env:
+          TRELLIS_TEST_SERVER_BIN: ${{ github.workspace }}/rust/target/debug/trellis-server
+        run: >-
+          deno run -A -c ts/deno.json
+          ts/packages/trellis-test/src/integration/runner.ts
+          --config
+          ts/packages/trellis-test/tests/fixtures/external-service-repo/trellis.integration.ts
+          --case external.rpc-smoke
