@@ -20,7 +20,7 @@ if client.count(old) != 1:
 client_path.write_text(client.replace(old, "  return manifest.version === 5 &&", 1))
 
 # The shared-runtime manifest is private and version-locked. Every active reader
-# and writer must move together; do not carry a compatibility branch.
+# and writer moves together; do not carry a compatibility branch.
 for path in (
     Path("rust/crates/trellis-test/src/lib.rs"),
     Path("ts/packages/trellis-test/src/integration/shared_runtime_protocol.ts"),
@@ -81,6 +81,15 @@ new = '''    const fixtureGroups = groupRustTestsByFixture(sharedTests);
 if runner.count(old) != 1:
     raise RuntimeError(f"expected one fixed fixture batch loop, found {runner.count(old)}")
 runner_path.write_text(runner.replace(old, new, 1))
+
+# Old scoped_contract() callers explicitly asked the harness for the current
+# test's mutated participant artifact. With API/action/capability/subject
+# mutation deleted, case_contract() is the direct participant-only equivalent.
+# auth.rs already removes its one capability-name misuse before this generic pass.
+for candidate in Path("rust/crates/trellis/tests/integration").glob("*.rs"):
+    content = candidate.read_text()
+    if ".scoped_contract(" in content:
+        candidate.write_text(content.replace(".scoped_contract(", ".case_contract("))
 
 # No identity-mutating harness helper should survive after the implementation is
 # deleted. These names are intentionally not retained as no-op compatibility shims.
