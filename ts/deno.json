@@ -36,7 +36,7 @@
         "test:prepared:trellis-test"
       ]
     },
-    "test:prepared:ui-tools": "deno test -A portals/login tools",
+    "test:prepared:ui-tools": "deno test -A --ignore=tools/package_build portals/login tools",
     "test:prepared": {
       "dependencies": [
         "test:prepared:packages",
