@@ -24,7 +24,7 @@ self_hosted = "    runs-on: [self-hosted, Linux, X64]"
 # with an X64 Linux runner.
 for workflow, expected in [
     (".github/workflows/pages.yml", 2),
-    (".github/workflows/release.yml", 9),
+    (".github/workflows/release.yml", 15),
 ]:
     path = Path(workflow)
     text = path.read_text()
