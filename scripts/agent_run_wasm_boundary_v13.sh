@@ -2,8 +2,8 @@
 set -euo pipefail
 
 # Keep the previously audited v3.13 validator exact, then patch only the
-# packaging-phase and validation regressions exposed by later attempts. This
-# file is scratch-only.
+# packaging, live-fixture, and validation regressions exposed by later
+# attempts. This file is scratch-only.
 BASE_VALIDATOR_COMMIT="578feac189833cfd336d9c9bb9063f28cc58ac2e"
 BASE_URL="https://raw.githubusercontent.com/abalmos/trellis/${BASE_VALIDATOR_COMMIT}/scripts/agent_run_wasm_boundary_v13.sh"
 curl --fail --silent --show-error --location "$BASE_URL" -o /tmp/agent-run-wasm-boundary-v13-base.sh
@@ -34,6 +34,7 @@ python3 -m py_compile \\
     '''git show origin/"$TRANSFORM_BRANCH":scripts/agent_wasm_boundary_v3_vector_regen.py > /tmp/vector-regen.py
 git show origin/"$TRANSFORM_BRANCH":scripts/agent_packaging_phase_fix.py > /tmp/package-phase.py
 git show origin/"$TRANSFORM_BRANCH":scripts/agent_wasm_boundary_v3_validation_regression_fix.py > /tmp/validation-regression.py
+git show origin/"$TRANSFORM_BRANCH":scripts/agent_live_fixture_phase_fix.py > /tmp/live-fixture-phase.py
 python3 -m py_compile \\
 ''',
     "load supplemental transforms",
@@ -47,7 +48,8 @@ replace_once(
   /tmp/proof-v1.py \\
   /tmp/vector-regen.py \\
   /tmp/package-phase.py \\
-  /tmp/validation-regression.py
+  /tmp/validation-regression.py \\
+  /tmp/live-fixture-phase.py
 ''',
     "compile supplemental transforms",
 )
@@ -81,6 +83,21 @@ git diff --check
 git add -- ts/packages/trellis/tests/publishing_targets_test.ts
 git commit -m 'Align release and self-import guards'
 
+# Keep the external-repository process smoke out of recursive source discovery.
+# The live phase builds the server first, then starts the readiness deadline.
+python3 /tmp/live-fixture-phase.py
+deno fmt -c ts/deno.json \\
+  ts/deno.json \\
+  ts/packages/trellis-test/tests/external_service_repo_fixture_test.ts \\
+  ts/packages/trellis-test/tests/fixtures/external-service-repo/trellis.integration.ts
+git diff --check
+git add -- \\
+  .github/workflows/check.yml \\
+  ts/deno.json \\
+  ts/packages/trellis-test/tests/external_service_repo_fixture_test.ts \\
+  ts/packages/trellis-test/tests/fixtures/external-service-repo/trellis.integration.ts
+git commit -m 'Keep external smoke in live phase'
+
 # Prove clean generation order: source resolution and participant emission occur
 ''',
     "commit supplemental cleanup",
@@ -93,13 +110,23 @@ git diff --exit-code
 ''',
     '''deno task -c ts/deno.json test:prepared
 deno task -c ts/deno.json test:prepared:packaging
+
+# Preserve the external-repository end-to-end smoke, but compile outside the
+# Trellis readiness deadline exactly as the live Check lane does.
+cargo build --locked --manifest-path rust/Cargo.toml \\
+  -p trellis-runtime --bin trellis-server
+TRELLIS_TEST_SERVER_BIN="$PWD/rust/target/debug/trellis-server" \\
+  deno run -A -c ts/deno.json \\
+  ts/packages/trellis-test/src/integration/runner.ts \\
+  --config ts/packages/trellis-test/tests/fixtures/external-service-repo/trellis.integration.ts \\
+  --case external.rpc-smoke
 git diff --exit-code
 ''',
-    "validate packaging phase",
+    "validate packaging and live fixture phases",
 )
 replace_once(
     "git log --oneline -4\n",
-    "git log --oneline -6\n",
+    "git log --oneline -7\n",
     "final log depth",
 )
 
