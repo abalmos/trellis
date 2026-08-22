@@ -2,9 +2,6 @@ name: Check
 
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - agent/wasm-boundary-validation-v13
 
 permissions:
   contents: write
