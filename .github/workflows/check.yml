@@ -39,7 +39,7 @@ jobs:
           git config --local user.email trellis-validation@users.noreply.github.com
           git config --local commit.gpgsign false
           git config --local tag.gpgSign false
-          printf '%s\n' "$GITHUB_RUN_ID" > .validation-run
+          printf '%s.%s\n' "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" > .validation-run
           test -s .validation-run
 
       - name: Load scratch validator
