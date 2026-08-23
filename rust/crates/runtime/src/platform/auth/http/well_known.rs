@@ -106,7 +106,7 @@ where
             expected_needs_digest: request.expected_needs_digest.clone(),
             known_root_key_id: request.known_root_key_id.clone(),
             minimum_manifest_generation: request.minimum_manifest_generation,
-            request_digest,
+            request_digest: request_digest.clone(),
         },
     )
     .map_err(|_| HttpError::unauthorized("invalid_proof"))?;

@@ -1,9 +1,8 @@
 use futures_util::StreamExt;
 use serde::Deserialize;
+use trellis_rs::jobs::events::{dead, EventMeta};
 use trellis_rs::jobs::types::{Job, JobEvent};
-use trellis_rs::jobs::{
-    dead_event, is_terminal, job_event_subject, job_from_work_event, JobsRuntime,
-};
+use trellis_rs::jobs::{is_terminal, job_event_subject, job_from_work_event, JobsRuntime};
 use trellis_rs::service::ServerError;
 
 use crate::storage::SqliteJobsStore;
@@ -80,14 +79,16 @@ pub fn map_dead_event_from_advisory_job(
         advisory.stream, advisory.consumer, advisory.deliveries
     );
 
-    let event = dead_event(
-        &work_job.service,
-        &work_job.job_type,
-        &work_job.id,
-        &work_job.context,
-        previous_state,
+    let event = dead(
+        EventMeta {
+            service: &work_job.service,
+            job_type: &work_job.job_type,
+            job_id: &work_job.id,
+            context: &work_job.context,
+            timestamp: &advisory.timestamp,
+        },
         tries,
-        &advisory.timestamp,
+        previous_state,
         &reason,
     );
     let subject = job_event_subject(

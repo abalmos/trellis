@@ -408,7 +408,7 @@ mod tests {
     use serde_json::json;
 
     use super::{apply_lifecycle_event, terminal_job_from_event};
-    use crate::jobs::events::{completed_event, started_event};
+    use crate::jobs::events::{completed, started, EventMeta};
     use crate::jobs::types::{Job, JobContext, JobState};
 
     fn sample_context() -> JobContext {
@@ -451,14 +451,16 @@ mod tests {
     #[test]
     fn apply_lifecycle_event_applies_legal_transition() {
         let job = sample_job();
-        let event = started_event(
-            &job.service,
-            &job.job_type,
-            &job.id,
-            &job.context,
-            JobState::Pending,
+        let event = started(
+            EventMeta {
+                service: &job.service,
+                job_type: &job.job_type,
+                job_id: &job.id,
+                context: &job.context,
+                timestamp: "2026-05-03T00:00:01.000Z",
+            },
             1,
-            "2026-05-03T00:00:01.000Z",
+            JobState::Pending,
         );
 
         let next = apply_lifecycle_event(&job, &event);
@@ -470,13 +472,15 @@ mod tests {
     #[test]
     fn terminal_job_from_event_handles_latest_terminal_event_without_prior_events() {
         let job = sample_job();
-        let event = completed_event(
-            &job.service,
-            &job.job_type,
-            &job.id,
-            &job.context,
+        let event = completed(
+            EventMeta {
+                service: &job.service,
+                job_type: &job.job_type,
+                job_id: &job.id,
+                context: &job.context,
+                timestamp: "2026-05-03T00:00:02.000Z",
+            },
             1,
-            "2026-05-03T00:00:02.000Z",
             json!({ "ok": true }),
         );
 

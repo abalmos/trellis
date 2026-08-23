@@ -180,6 +180,11 @@ https://raw.githubusercontent.com/qlever-llc/trellis/main/docs/static/llms.txt
   background work. Both inherit transport permissions compiled from the
   connected principal's current context; operation/job declarations and subject
   strings never create or widen grants.
+- In Rust, low-level Jobs lifecycle constructors live only under
+  `trellis_rs::jobs::events` and accept `events::EventMeta` for the five shared
+  lifecycle fields. Current-attempt constructors take `tries` separately;
+  zero-attempt constructors do not. Constructors are not flat re-exports from
+  `trellis_rs::jobs`.
 - Operations and job queues may declare one optional `update` schema. Keep
   `progress` for low-frequency durable telemetry/snapshots; updates are typed
   live-only, at-most-once content with no persistence, replay, admin, or Event

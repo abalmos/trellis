@@ -1444,7 +1444,7 @@ mod tests {
         ack_action_for_outcome, lifecycle_work_decision, ProjectedWorkDecision, WorkerAckAction,
         WorkerHostOptions,
     };
-    use crate::jobs::events::{cancelled_event, completed_event, started_event};
+    use crate::jobs::events::{cancelled, completed, created, started, EventMeta};
     use crate::jobs::manager::JobProcessOutcome;
     use crate::jobs::types::{Job, JobContext, JobState};
 
@@ -1508,14 +1508,16 @@ mod tests {
     #[test]
     fn lifecycle_work_decision_allows_when_latest_event_is_created() {
         let work = sample_job(JobState::Pending, 0);
-        let latest = crate::jobs::events::created_event(
-            &work.service,
-            &work.job_type,
-            &work.id,
-            &work.context,
+        let latest = created(
+            EventMeta {
+                service: &work.service,
+                job_type: &work.job_type,
+                job_id: &work.id,
+                context: &work.context,
+                timestamp: &work.created_at,
+            },
             work.payload.clone(),
             work.max_tries,
-            &work.created_at,
             None,
         );
 
@@ -1528,14 +1530,16 @@ mod tests {
     #[test]
     fn lifecycle_work_decision_skips_when_latest_event_is_cancelled() {
         let work = sample_job(JobState::Pending, 0);
-        let latest = cancelled_event(
-            &work.service,
-            &work.job_type,
-            &work.id,
-            &work.context,
-            JobState::Pending,
+        let latest = cancelled(
+            EventMeta {
+                service: &work.service,
+                job_type: &work.job_type,
+                job_id: &work.id,
+                context: &work.context,
+                timestamp: &work.updated_at,
+            },
             work.tries,
-            &work.updated_at,
+            JobState::Pending,
         );
 
         assert_eq!(
@@ -1547,14 +1551,16 @@ mod tests {
     #[test]
     fn lifecycle_work_decision_processes_when_latest_event_is_started_for_created_work() {
         let work = sample_job(JobState::Pending, 0);
-        let latest = started_event(
-            &work.service,
-            &work.job_type,
-            &work.id,
-            &work.context,
-            JobState::Pending,
+        let latest = started(
+            EventMeta {
+                service: &work.service,
+                job_type: &work.job_type,
+                job_id: &work.id,
+                context: &work.context,
+                timestamp: &work.updated_at,
+            },
             1,
-            &work.updated_at,
+            JobState::Pending,
         );
 
         assert_eq!(
@@ -1566,13 +1572,15 @@ mod tests {
     #[test]
     fn lifecycle_work_decision_skips_when_latest_event_is_terminal() {
         let work = sample_job(JobState::Retry, 0);
-        let latest = completed_event(
-            &work.service,
-            &work.job_type,
-            &work.id,
-            &work.context,
+        let latest = completed(
+            EventMeta {
+                service: &work.service,
+                job_type: &work.job_type,
+                job_id: &work.id,
+                context: &work.context,
+                timestamp: &work.updated_at,
+            },
             1,
-            &work.updated_at,
             serde_json::json!({ "ok": true }),
         );
 

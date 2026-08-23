@@ -231,23 +231,24 @@ fn trigger_kind_token(kind: JobTriggerKind) -> &'static str {
 #[cfg(test)]
 mod tests {
     use serde_json::json;
-    use trellis_rs::jobs::events::created_event;
+    use trellis_rs::jobs::events::{created, EventMeta};
     use trellis_rs::jobs::types::{JobContext, JobState};
 
     use super::*;
 
+    fn meta<'a>(context: &'a JobContext) -> EventMeta<'a> {
+        EventMeta {
+            service: "documents",
+            job_type: "document-process",
+            job_id: "job-1",
+            context,
+            timestamp: "2026-03-28T12:00:00.000Z",
+        }
+    }
+
     #[test]
     fn query_invalidation_matches_scalar_filters() {
-        let event = created_event(
-            "documents",
-            "document-process",
-            "job-1",
-            &context(),
-            json!({ "documentId": "doc-1" }),
-            3,
-            "2026-03-28T12:00:00.000Z",
-            None,
-        );
+        let event = created(meta(&context()), json!({ "documentId": "doc-1" }), 3, None);
         let query = JobsWatchInputQuery {
             group_by: None,
             limit: 50,
@@ -271,16 +272,7 @@ mod tests {
 
     #[test]
     fn query_invalidation_rejects_scalar_mismatches() {
-        let mut event = created_event(
-            "documents",
-            "document-process",
-            "job-1",
-            &context(),
-            json!({ "documentId": "doc-1" }),
-            3,
-            "2026-03-28T12:00:00.000Z",
-            None,
-        );
+        let mut event = created(meta(&context()), json!({ "documentId": "doc-1" }), 3, None);
         event.state = JobState::Failed;
         let query = JobsWatchInputQuery {
             group_by: None,
@@ -305,16 +297,7 @@ mod tests {
 
     #[test]
     fn query_invalidation_is_unknown_for_text_search() {
-        let event = created_event(
-            "documents",
-            "document-process",
-            "job-1",
-            &context(),
-            json!({ "documentId": "doc-1" }),
-            3,
-            "2026-03-28T12:00:00.000Z",
-            None,
-        );
+        let event = created(meta(&context()), json!({ "documentId": "doc-1" }), 3, None);
         let query = JobsWatchInputQuery {
             group_by: None,
             limit: 50,
@@ -338,16 +321,7 @@ mod tests {
 
     #[test]
     fn query_invalidation_is_unknown_for_missing_trigger_data() {
-        let event = created_event(
-            "documents",
-            "document-process",
-            "job-1",
-            &context(),
-            json!({ "documentId": "doc-1" }),
-            3,
-            "2026-03-28T12:00:00.000Z",
-            None,
-        );
+        let event = created(meta(&context()), json!({ "documentId": "doc-1" }), 3, None);
         let query = JobsWatchInputQuery {
             group_by: None,
             limit: 50,

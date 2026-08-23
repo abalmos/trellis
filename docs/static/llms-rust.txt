@@ -266,6 +266,11 @@ idempotent.
 
 ## Jobs
 
+- Low-level lifecycle event constructors live under `trellis_rs::jobs::events`.
+  Build their shared service, job type, job id, context, and timestamp fields
+  with `events::EventMeta`. Constructors for current-attempt events take `tries`
+  separately; constructors for zero-attempt events do not. Constructors are not
+  re-exported from `trellis_rs::jobs`.
 - Clone submission queues through `service.jobs_client()` for RPC handlers,
   operations, and background tasks.
 - Register workers through `service.jobs().<queue>().handle(...)` before

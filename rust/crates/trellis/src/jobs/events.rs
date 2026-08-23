@@ -1,3 +1,9 @@
+//! Constructors for Jobs lifecycle events.
+//!
+//! `EventMeta` borrows the common job identity, context, and timestamp fields
+//! used by each constructor. Constructors that represent a current attempt take
+//! its attempt count separately.
+
 use serde_json::Value;
 
 use crate::jobs::types::{
@@ -5,32 +11,39 @@ use crate::jobs::types::{
     JobLogEntry, JobProgress, JobQueuePolicy, JobState, JobWaitEdge,
 };
 
+/// Borrowed fields shared by every Jobs lifecycle event.
+#[derive(Debug, Clone, Copy)]
+pub struct EventMeta<'a> {
+    /// Service that owns the job.
+    pub service: &'a str,
+    /// Service-local job type.
+    pub job_type: &'a str,
+    /// Stable job identifier.
+    pub job_id: &'a str,
+    /// Correlation and trace context inherited by the job.
+    pub context: &'a JobContext,
+    /// RFC 3339 event timestamp.
+    pub timestamp: &'a str,
+}
+
 fn admin_action(reason: Option<&str>) -> Option<JobAdminAction> {
     reason.map(|reason| JobAdminAction {
         reason: Some(reason.to_string()),
     })
 }
 
-#[expect(
-    clippy::too_many_arguments,
-    reason = "job lifecycle events serialize independent protocol fields"
-)]
 fn base_event(
-    service: &str,
-    job_type: &str,
-    job_id: &str,
-    context: &JobContext,
+    meta: EventMeta<'_>,
     event_type: JobEventType,
     state: JobState,
     previous_state: Option<JobState>,
     tries: u64,
-    timestamp: &str,
 ) -> JobEvent {
     JobEvent {
-        job_id: job_id.to_string(),
-        context: context.clone(),
-        service: service.to_string(),
-        job_type: job_type.to_string(),
+        job_id: meta.job_id.to_string(),
+        context: meta.context.clone(),
+        service: meta.service.to_string(),
+        job_type: meta.job_type.to_string(),
         event_type,
         state,
         previous_state,
@@ -49,36 +62,18 @@ fn base_event(
         lineage: None,
         wait_edge: None,
         admin_action: None,
-        timestamp: timestamp.to_string(),
+        timestamp: meta.timestamp.to_string(),
     }
 }
 
-#[doc = concat!("Trellis API operation `", stringify!(created_event), "`.")]
-#[expect(
-    clippy::too_many_arguments,
-    reason = "job lifecycle events serialize independent protocol fields"
-)]
-pub fn created_event(
-    service: &str,
-    job_type: &str,
-    job_id: &str,
-    context: &JobContext,
+/// Construct a `created` lifecycle event.
+pub fn created(
+    meta: EventMeta<'_>,
     payload: Value,
     max_tries: u64,
-    timestamp: &str,
     deadline: Option<&str>,
 ) -> JobEvent {
-    let mut event = base_event(
-        service,
-        job_type,
-        job_id,
-        context,
-        JobEventType::Created,
-        JobState::Pending,
-        None,
-        0,
-        timestamp,
-    );
+    let mut event = base_event(meta, JobEventType::Created, JobState::Pending, None, 0);
     event.payload = Some(payload);
     event.max_tries = Some(max_tries);
     event.deadline = deadline.map(ToString::to_string);
@@ -86,540 +81,283 @@ pub fn created_event(
 }
 
 /// Construct a `created` lifecycle event with keyed concurrency policy metadata.
-#[doc = concat!("Trellis API operation `", stringify!(created_event_with_policy), "`.")]
-#[expect(
-    clippy::too_many_arguments,
-    reason = "job lifecycle events serialize independent protocol fields"
-)]
-pub fn created_event_with_policy(
-    service: &str,
-    job_type: &str,
-    job_id: &str,
-    context: &JobContext,
+pub fn created_with_policy(
+    meta: EventMeta<'_>,
     payload: Value,
     max_tries: u64,
-    timestamp: &str,
     deadline: Option<&str>,
     concurrency: Option<JobConcurrency>,
     queue_policy: Option<JobQueuePolicy>,
 ) -> JobEvent {
-    let mut event = created_event(
-        service, job_type, job_id, context, payload, max_tries, timestamp, deadline,
-    );
+    let mut event = created(meta, payload, max_tries, deadline);
     event.concurrency = concurrency;
     event.queue_policy = queue_policy;
     event
 }
 
-#[doc = concat!("Trellis API operation `", stringify!(started_event), "`.")]
-pub fn started_event(
-    service: &str,
-    job_type: &str,
-    job_id: &str,
-    context: &JobContext,
-    previous_state: JobState,
-    tries: u64,
-    timestamp: &str,
-) -> JobEvent {
+/// Construct a `started` lifecycle event.
+pub fn started(meta: EventMeta<'_>, tries: u64, previous_state: JobState) -> JobEvent {
     base_event(
-        service,
-        job_type,
-        job_id,
-        context,
+        meta,
         JobEventType::Started,
         JobState::Active,
         Some(previous_state),
         tries,
-        timestamp,
     )
 }
 
 /// Construct a `started` lifecycle event with active key ownership metadata.
-#[doc = concat!("Trellis API operation `", stringify!(started_event_with_concurrency), "`.")]
-#[expect(
-    clippy::too_many_arguments,
-    reason = "job lifecycle events serialize independent protocol fields"
-)]
-pub fn started_event_with_concurrency(
-    service: &str,
-    job_type: &str,
-    job_id: &str,
-    context: &JobContext,
-    previous_state: JobState,
+pub fn started_with_concurrency(
+    meta: EventMeta<'_>,
     tries: u64,
-    timestamp: &str,
+    previous_state: JobState,
     concurrency: JobConcurrency,
 ) -> JobEvent {
-    let mut event = started_event(
-        service,
-        job_type,
-        job_id,
-        context,
-        previous_state,
-        tries,
-        timestamp,
-    );
+    let mut event = started(meta, tries, previous_state);
     event.concurrency = Some(concurrency);
     event
 }
 
-#[doc = concat!("Trellis API operation `", stringify!(retry_event), "`.")]
-#[expect(
-    clippy::too_many_arguments,
-    reason = "job lifecycle events serialize independent protocol fields"
-)]
-pub fn retry_event(
-    service: &str,
-    job_type: &str,
-    job_id: &str,
-    context: &JobContext,
-    previous_state: JobState,
+/// Construct a `retry` lifecycle event.
+pub fn retry(
+    meta: EventMeta<'_>,
     tries: u64,
-    timestamp: &str,
+    previous_state: JobState,
     error: Option<&str>,
 ) -> JobEvent {
     let mut event = base_event(
-        service,
-        job_type,
-        job_id,
-        context,
+        meta,
         JobEventType::Retry,
         JobState::Retry,
         Some(previous_state),
         tries,
-        timestamp,
     );
     event.error = error.map(ToString::to_string);
     event.error_detail =
-        error.map(|message| JobErrorDetail::from_message(service, job_type, message));
+        error.map(|message| JobErrorDetail::from_message(meta.service, meta.job_type, message));
     event
 }
 
-#[doc = concat!("Trellis API operation `", stringify!(progress_event), "`.")]
-pub fn progress_event(
-    service: &str,
-    job_type: &str,
-    job_id: &str,
-    context: &JobContext,
-    tries: u64,
-    timestamp: &str,
-    progress: JobProgress,
-) -> JobEvent {
+/// Construct a `progress` lifecycle event.
+pub fn progress(meta: EventMeta<'_>, tries: u64, progress: JobProgress) -> JobEvent {
     let mut event = base_event(
-        service,
-        job_type,
-        job_id,
-        context,
+        meta,
         JobEventType::Progress,
         JobState::Active,
         Some(JobState::Active),
         tries,
-        timestamp,
     );
     event.progress = Some(progress);
     event
 }
 
-#[doc = concat!("Trellis API operation `", stringify!(logged_event), "`.")]
-pub fn logged_event(
-    service: &str,
-    job_type: &str,
-    job_id: &str,
-    context: &JobContext,
-    tries: u64,
-    timestamp: &str,
-    logs: Vec<JobLogEntry>,
-) -> JobEvent {
+/// Construct a `logged` lifecycle event.
+pub fn logged(meta: EventMeta<'_>, tries: u64, logs: Vec<JobLogEntry>) -> JobEvent {
     let mut event = base_event(
-        service,
-        job_type,
-        job_id,
-        context,
+        meta,
         JobEventType::Logged,
         JobState::Active,
         Some(JobState::Active),
         tries,
-        timestamp,
     );
     event.logs = Some(logs);
     event
 }
 
 /// Construct a `waiting` lifecycle evidence event without changing job state.
-#[doc = concat!("Trellis API operation `", stringify!(waiting_event), "`.")]
-pub fn waiting_event(
-    service: &str,
-    job_type: &str,
-    job_id: &str,
-    context: &JobContext,
-    tries: u64,
-    timestamp: &str,
-    wait_edge: JobWaitEdge,
-) -> JobEvent {
+pub fn waiting(meta: EventMeta<'_>, tries: u64, wait_edge: JobWaitEdge) -> JobEvent {
     let mut event = base_event(
-        service,
-        job_type,
-        job_id,
-        context,
+        meta,
         JobEventType::Waiting,
         JobState::Active,
         Some(JobState::Active),
         tries,
-        timestamp,
     );
     event.wait_edge = Some(wait_edge);
     event
 }
 
 /// Construct a `resumed` lifecycle evidence event without changing job state.
-#[doc = concat!("Trellis API operation `", stringify!(resumed_event), "`.")]
-pub fn resumed_event(
-    service: &str,
-    job_type: &str,
-    job_id: &str,
-    context: &JobContext,
-    tries: u64,
-    timestamp: &str,
-    wait_edge: JobWaitEdge,
-) -> JobEvent {
+pub fn resumed(meta: EventMeta<'_>, tries: u64, wait_edge: JobWaitEdge) -> JobEvent {
     let mut event = base_event(
-        service,
-        job_type,
-        job_id,
-        context,
+        meta,
         JobEventType::Resumed,
         JobState::Active,
         Some(JobState::Active),
         tries,
-        timestamp,
     );
     event.wait_edge = Some(wait_edge);
     event
 }
 
-#[doc = concat!("Trellis API operation `", stringify!(completed_event), "`.")]
-pub fn completed_event(
-    service: &str,
-    job_type: &str,
-    job_id: &str,
-    context: &JobContext,
-    tries: u64,
-    timestamp: &str,
-    result: Value,
-) -> JobEvent {
+/// Construct a `completed` lifecycle event.
+pub fn completed(meta: EventMeta<'_>, tries: u64, result: Value) -> JobEvent {
     let mut event = base_event(
-        service,
-        job_type,
-        job_id,
-        context,
+        meta,
         JobEventType::Completed,
         JobState::Completed,
         Some(JobState::Active),
         tries,
-        timestamp,
     );
     event.result = Some(result);
     event
 }
 
-#[doc = concat!("Trellis API operation `", stringify!(failed_event), "`.")]
-#[expect(
-    clippy::too_many_arguments,
-    reason = "job lifecycle events serialize independent protocol fields"
-)]
-pub fn failed_event(
-    service: &str,
-    job_type: &str,
-    job_id: &str,
-    context: &JobContext,
-    previous_state: JobState,
-    tries: u64,
-    timestamp: &str,
-    error: &str,
-) -> JobEvent {
+/// Construct a `failed` lifecycle event.
+pub fn failed(meta: EventMeta<'_>, tries: u64, previous_state: JobState, error: &str) -> JobEvent {
     let mut event = base_event(
-        service,
-        job_type,
-        job_id,
-        context,
+        meta,
         JobEventType::Failed,
         JobState::Failed,
         Some(previous_state),
         tries,
-        timestamp,
     );
     event.error = Some(error.to_string());
-    event.error_detail = Some(JobErrorDetail::from_message(service, job_type, error));
+    event.error_detail = Some(JobErrorDetail::from_message(
+        meta.service,
+        meta.job_type,
+        error,
+    ));
     event
 }
 
-#[doc = concat!("Trellis API operation `", stringify!(cancelled_event), "`.")]
-pub fn cancelled_event(
-    service: &str,
-    job_type: &str,
-    job_id: &str,
-    context: &JobContext,
-    previous_state: JobState,
-    tries: u64,
-    timestamp: &str,
-) -> JobEvent {
-    cancelled_event_with_admin_reason(
-        service,
-        job_type,
-        job_id,
-        context,
-        previous_state,
-        tries,
-        timestamp,
-        None,
-    )
+/// Construct a `cancelled` lifecycle event.
+pub fn cancelled(meta: EventMeta<'_>, tries: u64, previous_state: JobState) -> JobEvent {
+    cancelled_by_admin(meta, tries, previous_state, None)
 }
 
-#[doc = concat!("Trellis API operation `", stringify!(cancelled_event_with_admin_reason), "`.")]
-#[expect(
-    clippy::too_many_arguments,
-    reason = "job lifecycle events serialize independent protocol fields"
-)]
-pub fn cancelled_event_with_admin_reason(
-    service: &str,
-    job_type: &str,
-    job_id: &str,
-    context: &JobContext,
-    previous_state: JobState,
+/// Construct a `cancelled` lifecycle event with an optional admin reason.
+pub fn cancelled_by_admin(
+    meta: EventMeta<'_>,
     tries: u64,
-    timestamp: &str,
+    previous_state: JobState,
     reason: Option<&str>,
 ) -> JobEvent {
     let mut event = base_event(
-        service,
-        job_type,
-        job_id,
-        context,
+        meta,
         JobEventType::Cancelled,
         JobState::Cancelled,
         Some(previous_state),
         tries,
-        timestamp,
     );
     event.admin_action = admin_action(reason);
     event
 }
 
-#[doc = concat!("Trellis API operation `", stringify!(expired_event), "`.")]
-#[expect(
-    clippy::too_many_arguments,
-    reason = "job lifecycle events serialize independent protocol fields"
-)]
-pub fn expired_event(
-    service: &str,
-    job_type: &str,
-    job_id: &str,
-    context: &JobContext,
-    previous_state: JobState,
-    tries: u64,
-    timestamp: &str,
-    error: &str,
-) -> JobEvent {
+/// Construct an `expired` lifecycle event.
+pub fn expired(meta: EventMeta<'_>, tries: u64, previous_state: JobState, error: &str) -> JobEvent {
     let mut event = base_event(
-        service,
-        job_type,
-        job_id,
-        context,
+        meta,
         JobEventType::Expired,
         JobState::Expired,
         Some(previous_state),
         tries,
-        timestamp,
     );
     event.error = Some(error.to_string());
-    event.error_detail = Some(JobErrorDetail::from_message(service, job_type, error));
+    event.error_detail = Some(JobErrorDetail::from_message(
+        meta.service,
+        meta.job_type,
+        error,
+    ));
     event
 }
 
 /// Construct a `skipped` terminal lifecycle event for queued work replaced by policy.
-#[doc = concat!("Trellis API operation `", stringify!(skipped_event), "`.")]
-#[expect(
-    clippy::too_many_arguments,
-    reason = "job lifecycle events serialize independent protocol fields"
-)]
-pub fn skipped_event(
-    service: &str,
-    job_type: &str,
-    job_id: &str,
-    context: &JobContext,
-    previous_state: JobState,
-    tries: u64,
-    timestamp: &str,
-    reason: Option<&str>,
-) -> JobEvent {
+pub fn skipped(meta: EventMeta<'_>, previous_state: JobState, reason: Option<&str>) -> JobEvent {
     let mut event = base_event(
-        service,
-        job_type,
-        job_id,
-        context,
+        meta,
         JobEventType::Skipped,
         JobState::Skipped,
         Some(previous_state),
-        tries,
-        timestamp,
+        0,
     );
     event.error = reason.map(ToString::to_string);
     event.error_detail =
-        reason.map(|message| JobErrorDetail::from_message(service, job_type, message));
+        reason.map(|message| JobErrorDetail::from_message(meta.service, meta.job_type, message));
     event
 }
 
 /// Construct a `stale` terminal lifecycle event for active work that lost its key lease.
-#[doc = concat!("Trellis API operation `", stringify!(stale_event), "`.")]
-#[expect(
-    clippy::too_many_arguments,
-    reason = "job lifecycle events serialize independent protocol fields"
-)]
-pub fn stale_event(
-    service: &str,
-    job_type: &str,
-    job_id: &str,
-    context: &JobContext,
+pub fn stale(
+    meta: EventMeta<'_>,
     tries: u64,
-    timestamp: &str,
     reason: Option<&str>,
     concurrency: Option<JobConcurrency>,
 ) -> JobEvent {
     let mut event = base_event(
-        service,
-        job_type,
-        job_id,
-        context,
+        meta,
         JobEventType::Stale,
         JobState::Stale,
         Some(JobState::Active),
         tries,
-        timestamp,
     );
     event.error = reason.map(ToString::to_string);
     event.error_detail =
-        reason.map(|message| JobErrorDetail::from_message(service, job_type, message));
+        reason.map(|message| JobErrorDetail::from_message(meta.service, meta.job_type, message));
     event.concurrency = concurrency;
     event
 }
 
 /// Construct a keyed active-job heartbeat lifecycle event.
-#[doc = concat!("Trellis API operation `", stringify!(heartbeat_event), "`.")]
-pub fn heartbeat_event(
-    service: &str,
-    job_type: &str,
-    job_id: &str,
-    context: &JobContext,
-    tries: u64,
-    timestamp: &str,
-    concurrency: Option<JobConcurrency>,
-) -> JobEvent {
+pub fn heartbeat(meta: EventMeta<'_>, tries: u64, concurrency: Option<JobConcurrency>) -> JobEvent {
     let mut event = base_event(
-        service,
-        job_type,
-        job_id,
-        context,
+        meta,
         JobEventType::Heartbeat,
         JobState::Active,
         Some(JobState::Active),
         tries,
-        timestamp,
     );
     event.concurrency = concurrency;
     event
 }
 
 /// Construct an observability event for a stale worker completion that was ignored.
-#[doc = concat!("Trellis API operation `", stringify!(stale_completion_ignored_event), "`.")]
-#[expect(
-    clippy::too_many_arguments,
-    reason = "job lifecycle events serialize independent protocol fields"
-)]
-pub fn stale_completion_ignored_event(
-    service: &str,
-    job_type: &str,
-    job_id: &str,
-    context: &JobContext,
+pub fn stale_completion_ignored(
+    meta: EventMeta<'_>,
     tries: u64,
-    timestamp: &str,
     reason: Option<&str>,
     concurrency: Option<JobConcurrency>,
 ) -> JobEvent {
     let mut event = base_event(
-        service,
-        job_type,
-        job_id,
-        context,
+        meta,
         JobEventType::StaleCompletionIgnored,
         JobState::Active,
         Some(JobState::Active),
         tries,
-        timestamp,
     );
     event.error = reason.map(ToString::to_string);
     event.error_detail =
-        reason.map(|message| JobErrorDetail::from_message(service, job_type, message));
+        reason.map(|message| JobErrorDetail::from_message(meta.service, meta.job_type, message));
     event.concurrency = concurrency;
     event
 }
 
-#[doc = concat!("Trellis API operation `", stringify!(retried_event), "`.")]
-#[expect(
-    clippy::too_many_arguments,
-    reason = "job lifecycle events serialize independent protocol fields"
-)]
-pub fn retried_event(
-    service: &str,
-    job_type: &str,
-    job_id: &str,
-    context: &JobContext,
+/// Construct a `retried` lifecycle event.
+pub fn retried(
+    meta: EventMeta<'_>,
     previous_state: JobState,
-    timestamp: &str,
     payload: Option<Value>,
     max_tries: Option<u64>,
     deadline: Option<&str>,
 ) -> JobEvent {
-    retried_event_with_admin_reason(
-        service,
-        job_type,
-        job_id,
-        context,
-        previous_state,
-        timestamp,
-        payload,
-        max_tries,
-        deadline,
-        None,
-    )
+    retried_by_admin(meta, previous_state, payload, max_tries, deadline, None)
 }
 
-#[doc = concat!("Trellis API operation `", stringify!(retried_event_with_admin_reason), "`.")]
-#[expect(
-    clippy::too_many_arguments,
-    reason = "job lifecycle events serialize independent protocol fields"
-)]
-pub fn retried_event_with_admin_reason(
-    service: &str,
-    job_type: &str,
-    job_id: &str,
-    context: &JobContext,
+/// Construct a `retried` lifecycle event with an optional admin reason.
+pub fn retried_by_admin(
+    meta: EventMeta<'_>,
     previous_state: JobState,
-    timestamp: &str,
     payload: Option<Value>,
     max_tries: Option<u64>,
     deadline: Option<&str>,
     reason: Option<&str>,
 ) -> JobEvent {
     let mut event = base_event(
-        service,
-        job_type,
-        job_id,
-        context,
+        meta,
         JobEventType::Retried,
         JobState::Pending,
         Some(previous_state),
         0,
-        timestamp,
     );
     event.payload = payload;
     event.max_tries = max_tries;
@@ -628,66 +366,82 @@ pub fn retried_event_with_admin_reason(
     event
 }
 
-#[doc = concat!("Trellis API operation `", stringify!(dead_event), "`.")]
-#[expect(
-    clippy::too_many_arguments,
-    reason = "job lifecycle events serialize independent protocol fields"
-)]
-pub fn dead_event(
-    service: &str,
-    job_type: &str,
-    job_id: &str,
-    context: &JobContext,
-    previous_state: JobState,
-    tries: u64,
-    timestamp: &str,
-    error: &str,
-) -> JobEvent {
+/// Construct a `dead` lifecycle event.
+pub fn dead(meta: EventMeta<'_>, tries: u64, previous_state: JobState, error: &str) -> JobEvent {
     let mut event = base_event(
-        service,
-        job_type,
-        job_id,
-        context,
+        meta,
         JobEventType::Dead,
         JobState::Dead,
         Some(previous_state),
         tries,
-        timestamp,
     );
     event.error = Some(error.to_string());
-    event.error_detail = Some(JobErrorDetail::from_message(service, job_type, error));
+    event.error_detail = Some(JobErrorDetail::from_message(
+        meta.service,
+        meta.job_type,
+        error,
+    ));
     event
 }
 
-#[doc = concat!("Trellis API operation `", stringify!(dismissed_event), "`.")]
-#[expect(
-    clippy::too_many_arguments,
-    reason = "job lifecycle events serialize independent protocol fields"
-)]
-pub fn dismissed_event(
-    service: &str,
-    job_type: &str,
-    job_id: &str,
-    context: &JobContext,
-    previous_state: JobState,
+/// Construct a `dismissed` lifecycle event.
+pub fn dismissed(
+    meta: EventMeta<'_>,
     tries: u64,
-    timestamp: &str,
+    previous_state: JobState,
     reason: Option<&str>,
 ) -> JobEvent {
     let mut event = base_event(
-        service,
-        job_type,
-        job_id,
-        context,
+        meta,
         JobEventType::Dismissed,
         JobState::Dismissed,
         Some(previous_state),
         tries,
-        timestamp,
     );
     event.error = reason.map(ToString::to_string);
     event.error_detail =
-        reason.map(|message| JobErrorDetail::from_message(service, job_type, message));
+        reason.map(|message| JobErrorDetail::from_message(meta.service, meta.job_type, message));
     event.admin_action = admin_action(reason);
     event
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::*;
+
+    fn context() -> JobContext {
+        JobContext {
+            request_id: "request-1".to_string(),
+            trace_id: "0123456789abcdef0123456789abcdef".to_string(),
+            traceparent: "00-0123456789abcdef0123456789abcdef-0123456789abcdef-01".to_string(),
+            tracestate: None,
+        }
+    }
+
+    fn meta(context: &JobContext) -> EventMeta<'_> {
+        EventMeta {
+            service: "documents",
+            job_type: "document-process",
+            job_id: "job-1",
+            context,
+            timestamp: "2026-03-28T12:00:00Z",
+        }
+    }
+
+    #[test]
+    fn attempt_counts_follow_constructor_semantics() {
+        let context = context();
+        let zero_attempt_events = [
+            created(meta(&context), json!({}), 3, None),
+            created_with_policy(meta(&context), json!({}), 3, None, None, None),
+            skipped(meta(&context), JobState::Pending, None),
+            retried(meta(&context), JobState::Failed, None, None, None),
+            retried_by_admin(meta(&context), JobState::Dead, None, None, None, None),
+        ];
+
+        assert!(zero_attempt_events.iter().all(|event| event.tries == 0));
+        assert_eq!(started(meta(&context), 7, JobState::Retry).tries, 7);
+    }
 }

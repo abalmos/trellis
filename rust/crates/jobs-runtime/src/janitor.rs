@@ -1,8 +1,9 @@
 use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
+use trellis_rs::jobs::events::{expired, EventMeta};
 use trellis_rs::jobs::types::{Job, JobEvent};
 use trellis_rs::jobs::JobsRuntime;
-use trellis_rs::jobs::{expired_event, is_terminal, job_event_subject, job_key};
+use trellis_rs::jobs::{is_terminal, job_event_subject, job_key};
 use trellis_rs::service::ServerError;
 
 use crate::storage::{SqliteJobsStore, SqliteJobsStoreError};
@@ -82,14 +83,16 @@ pub fn plan_expired_events(
                 return None;
             }
 
-            let event = expired_event(
-                &job.service,
-                &job.job_type,
-                &job.id,
-                &job.context,
-                job.state,
+            let event = expired(
+                EventMeta {
+                    service: &job.service,
+                    job_type: &job.job_type,
+                    job_id: &job.id,
+                    context: &job.context,
+                    timestamp: now_iso,
+                },
                 job.tries,
-                now_iso,
+                job.state,
                 reason,
             );
             let subject = job_event_subject(&job.service, &job.job_type, &job.id, event.event_type);

@@ -143,6 +143,10 @@ commands.
   background execution. Both remain inside transport permissions compiled from
   the connected principal's current authorization context; subject names and
   operation/job declarations never create grants.
+- Rust low-level Jobs lifecycle constructors are module-scoped under
+  `trellis_rs::jobs::events` and take `events::EventMeta` for common metadata.
+  Current-attempt constructors take `tries` separately; zero-attempt
+  constructors do not. Do not import constructors from `trellis_rs::jobs`.
 - Operations and job queues may declare one optional `update` schema. Keep
   `progress` for low-frequency durable telemetry/snapshots; updates are typed
   live-only, at-most-once content with no persistence, replay, admin, or Event

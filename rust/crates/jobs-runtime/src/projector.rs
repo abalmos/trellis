@@ -393,9 +393,18 @@ fn optional_string(value: &Value, field: &str) -> Option<String> {
 mod tests {
     use serde_json::json;
     use trellis_rs::jobs::events::{
-        cancelled_event_with_admin_reason, created_event, failed_event, resumed_event,
-        started_event_with_concurrency, waiting_event,
+        cancelled_by_admin, created, failed, resumed, started_with_concurrency, waiting, EventMeta,
     };
+
+    fn meta<'a>(context: &'a JobContext, job_id: &'a str, timestamp: &'a str) -> EventMeta<'a> {
+        EventMeta {
+            service: "documents",
+            job_type: "document-process",
+            job_id,
+            context,
+            timestamp,
+        }
+    }
     use trellis_rs::jobs::types::{
         JobConcurrency, JobContext, JobLineage, JobState, JobTrigger, JobTriggerKind, JobWaitEdge,
         JobWaitTarget, JobWaitTargetKind,
@@ -414,14 +423,10 @@ mod tests {
     #[test]
     fn project_job_event_upserts_sql_projection() {
         let store = SqliteJobsStore::open_in_memory().expect("store should open");
-        let event = created_event(
-            "documents",
-            "document-process",
-            "job-1",
-            &context(),
+        let event = created(
+            meta(&context(), "job-1", "2026-03-28T12:00:00.000Z"),
             json!({ "documentId": "doc-1" }),
             3,
-            "2026-03-28T12:00:00.000Z",
             None,
         );
 
@@ -441,14 +446,10 @@ mod tests {
     #[test]
     fn project_terminal_event_without_created_keeps_evidence_visible() {
         let store = SqliteJobsStore::open_in_memory().expect("store should open");
-        let event = failed_event(
-            "documents",
-            "document-process",
-            "old-job",
-            &context(),
-            JobState::Active,
+        let event = failed(
+            meta(&context(), "old-job", "2026-03-28T12:05:00.000Z"),
             1,
-            "2026-03-28T12:05:00.000Z",
+            JobState::Active,
             "boom",
         );
 
@@ -470,14 +471,10 @@ mod tests {
     #[test]
     fn project_job_event_projects_keyed_concurrency_metadata() {
         let store = SqliteJobsStore::open_in_memory().expect("store should open");
-        let event = created_event(
-            "documents",
-            "document-process",
-            "job-1",
-            &context(),
+        let event = created(
+            meta(&context(), "job-1", "2026-03-28T12:00:00.000Z"),
             json!({ "documentId": "doc-1" }),
             3,
-            "2026-03-28T12:00:00.000Z",
             None,
         );
         let mut raw_event = serde_json::to_value(&event).expect("event should encode");
@@ -507,14 +504,10 @@ mod tests {
     #[test]
     fn project_job_event_projects_trigger_and_lineage() {
         let store = SqliteJobsStore::open_in_memory().expect("store should open");
-        let mut event = created_event(
-            "documents",
-            "document-process",
-            "child-job",
-            &context(),
+        let mut event = created(
+            meta(&context(), "child-job", "2026-03-28T12:00:00.000Z"),
             json!({ "documentId": "doc-1" }),
             3,
-            "2026-03-28T12:00:00.000Z",
             None,
         );
         event.trigger = Some(JobTrigger {
@@ -551,25 +544,17 @@ mod tests {
     #[test]
     fn project_started_event_projects_active_key_instance_id() {
         let store = SqliteJobsStore::open_in_memory().expect("store should open");
-        let created = created_event(
-            "documents",
-            "document-process",
-            "job-1",
-            &context(),
+        let created = created(
+            meta(&context(), "job-1", "2026-03-28T12:00:00.000Z"),
             json!({ "documentId": "doc-1" }),
             3,
-            "2026-03-28T12:00:00.000Z",
             None,
         );
         project_job_event(&store, &created).expect("created projection should succeed");
-        let started = started_event_with_concurrency(
-            "documents",
-            "document-process",
-            "job-1",
-            &context(),
-            JobState::Pending,
+        let started = started_with_concurrency(
+            meta(&context(), "job-1", "2026-03-28T12:01:00.000Z"),
             1,
-            "2026-03-28T12:01:00.000Z",
+            JobState::Pending,
             JobConcurrency {
                 key: "tenant-1:document:doc-1".to_string(),
                 key_hash: "hash-1".to_string(),
@@ -595,24 +580,16 @@ mod tests {
     #[test]
     fn project_job_event_records_timeline_in_sequence_order() {
         let store = SqliteJobsStore::open_in_memory().expect("store should open");
-        let created = created_event(
-            "documents",
-            "document-process",
-            "job-1",
-            &context(),
+        let created = created(
+            meta(&context(), "job-1", "2026-03-28T12:00:00.000Z"),
             json!({ "documentId": "doc-1" }),
             3,
-            "2026-03-28T12:00:00.000Z",
             None,
         );
-        let started = started_event_with_concurrency(
-            "documents",
-            "document-process",
-            "job-1",
-            &context(),
-            JobState::Pending,
+        let started = started_with_concurrency(
+            meta(&context(), "job-1", "2026-03-28T12:00:00.000Z"),
             1,
-            "2026-03-28T12:00:00.000Z",
+            JobState::Pending,
             JobConcurrency {
                 key: "tenant-1:document:doc-1".to_string(),
                 key_hash: "hash-1".to_string(),
@@ -641,24 +618,16 @@ mod tests {
     #[test]
     fn project_job_event_projects_and_clears_current_waits() {
         let store = SqliteJobsStore::open_in_memory().expect("store should open");
-        let created = created_event(
-            "documents",
-            "document-process",
-            "job-1",
-            &context(),
+        let created = created(
+            meta(&context(), "job-1", "2026-03-28T12:00:00.000Z"),
             json!({ "documentId": "doc-1" }),
             3,
-            "2026-03-28T12:00:00.000Z",
             None,
         );
-        let started = started_event_with_concurrency(
-            "documents",
-            "document-process",
-            "job-1",
-            &context(),
-            JobState::Pending,
+        let started = started_with_concurrency(
+            meta(&context(), "job-1", "2026-03-28T12:01:00.000Z"),
             1,
-            "2026-03-28T12:01:00.000Z",
+            JobState::Pending,
             JobConcurrency {
                 key: "tenant-1:document:doc-1".to_string(),
                 key_hash: "hash-1".to_string(),
@@ -690,13 +659,9 @@ mod tests {
         project_job_event(&store, &started).expect("started projection should succeed");
         project_job_event(
             &store,
-            &waiting_event(
-                "documents",
-                "document-process",
-                "job-1",
-                &context(),
+            &waiting(
+                meta(&context(), "job-1", "2026-03-28T12:02:00.000Z"),
                 1,
-                "2026-03-28T12:02:00.000Z",
                 wait_edge.clone(),
             ),
         )
@@ -715,13 +680,9 @@ mod tests {
 
         project_job_event(
             &store,
-            &resumed_event(
-                "documents",
-                "document-process",
-                "job-1",
-                &context(),
+            &resumed(
+                meta(&context(), "job-1", "2026-03-28T12:03:00.000Z"),
                 1,
-                "2026-03-28T12:03:00.000Z",
                 wait_edge,
             ),
         )
@@ -737,14 +698,11 @@ mod tests {
         let store = SqliteJobsStore::open_in_memory().expect("store should open");
         let events = (0..500)
             .map(|index| {
-                let event = created_event(
-                    "documents",
-                    "document-process",
-                    &format!("job-{index}"),
-                    &context(),
+                let job_id = format!("job-{index}");
+                let event = created(
+                    meta(&context(), &job_id, "2026-03-28T12:00:00.000Z"),
                     json!({ "documentId": format!("doc-{index}") }),
                     3,
-                    "2026-03-28T12:00:00.000Z",
                     None,
                 );
                 let raw_event = serde_json::to_value(&event).expect("event should encode");
@@ -767,25 +725,17 @@ mod tests {
     #[test]
     fn project_admin_reason_into_timeline_message() {
         let store = SqliteJobsStore::open_in_memory().expect("store should open");
-        let created = created_event(
-            "documents",
-            "document-process",
-            "job-1",
-            &context(),
+        let created = created(
+            meta(&context(), "job-1", "2026-03-28T12:00:00.000Z"),
             json!({ "documentId": "doc-1" }),
             3,
-            "2026-03-28T12:00:00.000Z",
             None,
         );
         project_job_event(&store, &created).expect("created projection should succeed");
-        let cancelled = cancelled_event_with_admin_reason(
-            "documents",
-            "document-process",
-            "job-1",
-            &context(),
-            JobState::Pending,
+        let cancelled = cancelled_by_admin(
+            meta(&context(), "job-1", "2026-03-28T12:01:00.000Z"),
             0,
-            "2026-03-28T12:01:00.000Z",
+            JobState::Pending,
             Some("operator requested maintenance"),
         );
 
@@ -808,14 +758,10 @@ mod tests {
     #[test]
     fn project_job_event_projects_queue_policy_reason_metadata() {
         let store = SqliteJobsStore::open_in_memory().expect("store should open");
-        let event = created_event(
-            "documents",
-            "document-process",
-            "job-2",
-            &context(),
+        let event = created(
+            meta(&context(), "job-2", "2026-03-28T12:00:00.000Z"),
             json!({ "documentId": "doc-2" }),
             3,
-            "2026-03-28T12:00:00.000Z",
             None,
         );
         let mut raw_event = serde_json::to_value(&event).expect("event should encode");
@@ -841,25 +787,17 @@ mod tests {
     #[test]
     fn project_job_event_projects_failed_error_detail_and_aggregate() {
         let store = SqliteJobsStore::open_in_memory().expect("store should open");
-        let created = created_event(
-            "documents",
-            "document-process",
-            "job-1",
-            &context(),
+        let created = created(
+            meta(&context(), "job-1", "2026-03-28T12:00:00.000Z"),
             json!({ "documentId": "doc-1" }),
             3,
-            "2026-03-28T12:00:00.000Z",
             None,
         );
         project_job_event(&store, &created).expect("created projection should succeed");
-        let started = started_event_with_concurrency(
-            "documents",
-            "document-process",
-            "job-1",
-            &context(),
-            JobState::Pending,
+        let started = started_with_concurrency(
+            meta(&context(), "job-1", "2026-03-28T12:01:00.000Z"),
             1,
-            "2026-03-28T12:01:00.000Z",
+            JobState::Pending,
             JobConcurrency {
                 key: "tenant-1:document:doc-1".to_string(),
                 key_hash: "hash-1".to_string(),
@@ -871,14 +809,10 @@ mod tests {
             },
         );
         project_job_event(&store, &started).expect("started projection should succeed");
-        let failed = failed_event(
-            "documents",
-            "document-process",
-            "job-1",
-            &context(),
-            JobState::Active,
+        let failed = failed(
+            meta(&context(), "job-1", "2026-03-28T12:02:00.000Z"),
             1,
-            "2026-03-28T12:02:00.000Z",
+            JobState::Active,
             "boom\njob id 123",
         );
 

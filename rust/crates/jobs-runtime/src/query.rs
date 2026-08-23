@@ -5,15 +5,13 @@ use std::time::{Duration, Instant};
 
 use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
+use trellis_rs::jobs::events::{cancelled_by_admin, dismissed, retried_by_admin, EventMeta};
 use trellis_rs::jobs::types::{
     Job, JobAdminAction, JobErrorDetail, JobEvent, JobState, JobTrigger, JobTriggerKind,
     JobWaitEdge,
 };
 use trellis_rs::jobs::JobsRuntime;
-use trellis_rs::jobs::{
-    cancelled_event_with_admin_reason, dismissed_event, is_terminal, job_event_subject,
-    reduce_job_event, retried_event_with_admin_reason,
-};
+use trellis_rs::jobs::{is_terminal, job_event_subject, reduce_job_event};
 
 use trellis_rs::sdk::jobs::types::{
     JobsCancelRequest, JobsCancelResponse, JobsDismissDLQRequest, JobsDismissDLQResponse,
@@ -470,14 +468,16 @@ impl JobsQuery {
                     job.state,
                     JobState::Pending | JobState::Retry | JobState::Active
                 ) {
-                    Some(cancelled_event_with_admin_reason(
-                        &job.service,
-                        &job.job_type,
-                        &job.id,
-                        &job.context,
-                        job.state,
+                    Some(cancelled_by_admin(
+                        EventMeta {
+                            service: &job.service,
+                            job_type: &job.job_type,
+                            job_id: &job.id,
+                            context: &job.context,
+                            timestamp: now,
+                        },
                         job.tries,
-                        now,
+                        job.state,
                         request.reason.as_deref(),
                     ))
                 } else {
@@ -509,13 +509,15 @@ impl JobsQuery {
         tracing::debug!(job_id = %request.id, "jobs rpc retry started");
         let job = self
             .transition_job(&request.id, "failed", |job, now| match job.state {
-                JobState::Failed => Some(retried_event_with_admin_reason(
-                    &job.service,
-                    &job.job_type,
-                    &job.id,
-                    &job.context,
+                JobState::Failed => Some(retried_by_admin(
+                    EventMeta {
+                        service: &job.service,
+                        job_type: &job.job_type,
+                        job_id: &job.id,
+                        context: &job.context,
+                        timestamp: now,
+                    },
                     job.state,
-                    now,
                     Some(job.payload.clone()),
                     Some(job.max_tries),
                     job.deadline.as_deref(),
@@ -600,13 +602,15 @@ impl JobsQuery {
         let job = self
             .transition_job(&request.id, "dead", |job, now| match job.state {
                 JobState::Dead => {
-                    let mut event = retried_event_with_admin_reason(
-                        &job.service,
-                        &job.job_type,
-                        &job.id,
-                        &job.context,
+                    let mut event = retried_by_admin(
+                        EventMeta {
+                            service: &job.service,
+                            job_type: &job.job_type,
+                            job_id: &job.id,
+                            context: &job.context,
+                            timestamp: now,
+                        },
                         job.state,
-                        now,
                         Some(job.payload.clone()),
                         Some(job.max_tries),
                         job.deadline.as_deref(),
@@ -657,14 +661,16 @@ impl JobsQuery {
         let job = self
             .transition_job(&request.id, "dead", |job, now| match job.state {
                 JobState::Dead => {
-                    let mut event = dismissed_event(
-                        &job.service,
-                        &job.job_type,
-                        &job.id,
-                        &job.context,
-                        JobState::Dead,
+                    let mut event = dismissed(
+                        EventMeta {
+                            service: &job.service,
+                            job_type: &job.job_type,
+                            job_id: &job.id,
+                            context: &job.context,
+                            timestamp: now,
+                        },
                         job.tries,
-                        now,
+                        JobState::Dead,
                         request.reason.as_deref().or(job.last_error.as_deref()),
                     );
                     event.admin_action = request.reason.as_ref().map(|reason| JobAdminAction {
@@ -1533,15 +1539,15 @@ fn sibling_event_subject(subject: &str, event_type: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use serde_json::json;
+    use trellis_rs::jobs::events::{cancelled, dismissed, retried, EventMeta};
     use trellis_rs::jobs::types::{
         Job, JobContext, JobEvent, JobState, JobWaitEdge, JobWaitTarget, JobWaitTargetKind,
     };
-    use trellis_rs::jobs::{cancelled_event, retried_event};
 
     use super::parse_since_filter;
     use super::{
-        dismissed_event, jobs_admin_resources, plan_mutation_response, reduce_job_event,
-        timeline_event_to_wire, workbench_entry_to_wire, JobsQueryError, MutationResponsePlan,
+        jobs_admin_resources, plan_mutation_response, reduce_job_event, timeline_event_to_wire,
+        workbench_entry_to_wire, JobsQueryError, MutationResponsePlan,
     };
     use crate::storage::{JobTimelineEvent, JobsWorkbenchEntry};
 
@@ -1612,14 +1618,16 @@ mod tests {
     #[test]
     fn cancel_response_plan_returns_predicted_job_when_projection_lags() {
         let job = sample_job(JobState::Pending);
-        let event = cancelled_event(
-            &job.service,
-            &job.job_type,
-            &job.id,
-            &job.context,
-            job.state,
+        let event = cancelled(
+            EventMeta {
+                service: &job.service,
+                job_type: &job.job_type,
+                job_id: &job.id,
+                context: &job.context,
+                timestamp: "2026-03-28T12:01:00Z",
+            },
             job.tries,
-            "2026-03-28T12:01:00Z",
+            job.state,
         );
         let predicted = predicted_job(&job, &event);
 
@@ -1633,13 +1641,15 @@ mod tests {
     #[test]
     fn retry_response_plan_returns_predicted_job_when_projection_lags() {
         let job = sample_job(JobState::Failed);
-        let event = retried_event(
-            &job.service,
-            &job.job_type,
-            &job.id,
-            &job.context,
+        let event = retried(
+            EventMeta {
+                service: &job.service,
+                job_type: &job.job_type,
+                job_id: &job.id,
+                context: &job.context,
+                timestamp: "2026-03-28T12:01:00Z",
+            },
             job.state,
-            "2026-03-28T12:01:00Z",
             Some(job.payload.clone()),
             Some(job.max_tries),
             job.deadline.as_deref(),
@@ -1656,13 +1666,15 @@ mod tests {
     #[test]
     fn replay_response_plan_returns_predicted_job_when_projection_lags() {
         let job = sample_job(JobState::Dead);
-        let event = retried_event(
-            &job.service,
-            &job.job_type,
-            &job.id,
-            &job.context,
+        let event = retried(
+            EventMeta {
+                service: &job.service,
+                job_type: &job.job_type,
+                job_id: &job.id,
+                context: &job.context,
+                timestamp: "2026-03-28T12:01:00Z",
+            },
             job.state,
-            "2026-03-28T12:01:00Z",
             Some(job.payload.clone()),
             Some(job.max_tries),
             job.deadline.as_deref(),
@@ -1679,14 +1691,16 @@ mod tests {
     #[test]
     fn dismiss_response_plan_returns_predicted_job_when_projection_lags() {
         let job = sample_job(JobState::Dead);
-        let event = dismissed_event(
-            &job.service,
-            &job.job_type,
-            &job.id,
-            &job.context,
-            JobState::Dead,
+        let event = dismissed(
+            EventMeta {
+                service: &job.service,
+                job_type: &job.job_type,
+                job_id: &job.id,
+                context: &job.context,
+                timestamp: "2026-03-28T12:01:00Z",
+            },
             job.tries,
-            "2026-03-28T12:01:00Z",
+            JobState::Dead,
             job.last_error.as_deref(),
         );
         let predicted = predicted_job(&job, &event);
@@ -1701,14 +1715,16 @@ mod tests {
     #[test]
     fn terminal_projection_race_returns_projected_terminal_job() {
         let job = sample_job(JobState::Pending);
-        let event = cancelled_event(
-            &job.service,
-            &job.job_type,
-            &job.id,
-            &job.context,
-            job.state,
+        let event = cancelled(
+            EventMeta {
+                service: &job.service,
+                job_type: &job.job_type,
+                job_id: &job.id,
+                context: &job.context,
+                timestamp: "2026-03-28T12:01:00Z",
+            },
             job.tries,
-            "2026-03-28T12:01:00Z",
+            job.state,
         );
         let predicted = predicted_job(&job, &event);
         let mut projected = job.clone();

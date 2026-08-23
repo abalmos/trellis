@@ -13,6 +13,7 @@ use crate::client::TrellisClient;
 pub mod active_job;
 pub mod api;
 pub mod bindings;
+/// Constructors for Jobs lifecycle events.
 pub mod events;
 #[doc(hidden)]
 pub mod keys;
@@ -34,12 +35,6 @@ pub use api::{
     JobSnapshot, JobSubmitOutcome, JobWorkerHost, JobsError, JobsFacade, JobsService, TerminalJob,
 };
 pub use bindings::{JobsBinding, JobsQueueBinding, JobsRuntimeBinding};
-pub use events::{
-    cancelled_event, cancelled_event_with_admin_reason, completed_event, created_event, dead_event,
-    dismissed_event, expired_event, failed_event, heartbeat_event, logged_event, progress_event,
-    resumed_event, retried_event, retried_event_with_admin_reason, retry_event, skipped_event,
-    stale_completion_ignored_event, stale_event, started_event, waiting_event,
-};
 pub use keys::{derive_key, job_key, key_hash, worker_presence_key, KeyDerivationError};
 pub use manager::{
     JobManager, JobManagerError, JobMetaSource, JobProcessError, JobProcessOutcome,

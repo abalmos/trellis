@@ -12,12 +12,7 @@ use ulid::Ulid;
 
 use crate::jobs::active_job::ActiveJob;
 use crate::jobs::bindings::{JobQueueWhenFull, JobsBinding, JobsQueueBinding};
-use crate::jobs::events::{
-    cancelled_event, completed_event, created_event, created_event_with_policy, failed_event,
-    logged_event, progress_event, resumed_event, retry_event, skipped_event,
-    stale_completion_ignored_event, stale_event, started_event, started_event_with_concurrency,
-    waiting_event,
-};
+use crate::jobs::events::{self, EventMeta};
 use crate::jobs::keys::{
     derive_job_key, AdmitJobInput, AdmitJobOutcome, JobKeyActiveSlot, JobKeyCoordinator,
     JobKeyPolicy, JobKeyQueuedEntry, KeyRejectReason,
@@ -564,26 +559,30 @@ where
         queue_policy: Option<JobQueuePolicy>,
     ) -> Result<(), JobManagerError<P::Error>> {
         let mut event = match concurrency.or_else(|| job.concurrency.clone()) {
-            Some(concurrency) => created_event_with_policy(
-                &job.service,
-                &job.job_type,
-                &job.id,
-                &job.context,
+            Some(concurrency) => events::created_with_policy(
+                EventMeta {
+                    service: &job.service,
+                    job_type: &job.job_type,
+                    job_id: &job.id,
+                    context: &job.context,
+                    timestamp: &job.created_at,
+                },
                 payload,
                 queue.max_deliver,
-                &job.created_at,
                 job.deadline.as_deref(),
                 Some(concurrency),
                 queue_policy.or_else(|| job.queue_policy.clone()),
             ),
-            None => created_event(
-                &job.service,
-                &job.job_type,
-                &job.id,
-                &job.context,
+            None => events::created(
+                EventMeta {
+                    service: &job.service,
+                    job_type: &job.job_type,
+                    job_id: &job.id,
+                    context: &job.context,
+                    timestamp: &job.created_at,
+                },
                 payload,
                 queue.max_deliver,
-                &job.created_at,
                 job.deadline.as_deref(),
             ),
         };
@@ -605,14 +604,16 @@ where
                 entry.job_id
             ))
         })?;
-        let event = skipped_event(
-            &self.inner.bindings.service_name,
-            &queue.queue_type,
-            &entry.job_id,
-            context,
+        let timestamp = self.now_iso();
+        let event = events::skipped(
+            EventMeta {
+                service: &self.inner.bindings.service_name,
+                job_type: &queue.queue_type,
+                job_id: &entry.job_id,
+                context,
+                timestamp: &timestamp,
+            },
             JobState::Pending,
-            0,
-            &self.now_iso(),
             Some(reason),
         );
         self.publish_queue_event(queue, &entry.job_id, event.event_type, &event)
@@ -631,13 +632,16 @@ where
         let Some(context) = slot.context.as_ref() else {
             return Ok(());
         };
-        let event = stale_event(
-            &self.inner.bindings.service_name,
-            queue_type,
-            &slot.job_id,
-            context,
+        let timestamp = self.now_iso();
+        let event = events::stale(
+            EventMeta {
+                service: &self.inner.bindings.service_name,
+                job_type: queue_type,
+                job_id: &slot.job_id,
+                context,
+                timestamp: &timestamp,
+            },
             slot.tries,
-            &self.now_iso(),
             Some(reason),
             None,
         );
@@ -683,24 +687,28 @@ where
         let tries = job.tries.saturating_add(1);
         let started_at = self.now_iso();
         let started = match job.concurrency.clone() {
-            Some(concurrency) => started_event_with_concurrency(
-                &job.service,
-                &job.job_type,
-                &job.id,
-                &job.context,
-                job.state,
+            Some(concurrency) => events::started_with_concurrency(
+                EventMeta {
+                    service: &job.service,
+                    job_type: &job.job_type,
+                    job_id: &job.id,
+                    context: &job.context,
+                    timestamp: &started_at,
+                },
                 tries,
-                &started_at,
+                job.state,
                 concurrency,
             ),
-            None => started_event(
-                &job.service,
-                &job.job_type,
-                &job.id,
-                &job.context,
-                job.state,
+            None => events::started(
+                EventMeta {
+                    service: &job.service,
+                    job_type: &job.job_type,
+                    job_id: &job.id,
+                    context: &job.context,
+                    timestamp: &started_at,
+                },
                 tries,
-                &started_at,
+                job.state,
             ),
         };
         self.publish_queue_event(queue, &job.id, started.event_type, &started)
@@ -740,13 +748,15 @@ where
                 }
                 let result_value = serde_json::to_value(result.clone())
                     .map_err(JobManagerError::SerializeResult)?;
-                let completed = completed_event(
-                    &job.service,
-                    &job.job_type,
-                    &job.id,
-                    &job.context,
+                let completed = events::completed(
+                    EventMeta {
+                        service: &job.service,
+                        job_type: &job.job_type,
+                        job_id: &job.id,
+                        context: &job.context,
+                        timestamp: &terminal_at,
+                    },
                     tries,
-                    &terminal_at,
                     result_value,
                 );
                 self.publish_queue_event(queue, &job.id, completed.event_type, &completed)
@@ -775,14 +785,16 @@ where
                 {
                     return Ok(JobProcessOutcome::StaleCompletionIgnored { tries });
                 }
-                let retry = retry_event(
-                    &job.service,
-                    &job.job_type,
-                    &job.id,
-                    &job.context,
-                    JobState::Active,
+                let retry = events::retry(
+                    EventMeta {
+                        service: &job.service,
+                        job_type: &job.job_type,
+                        job_id: &job.id,
+                        context: &job.context,
+                        timestamp: &terminal_at,
+                    },
                     tries,
-                    &terminal_at,
+                    JobState::Active,
                     Some(&error),
                 );
                 self.publish_queue_event(queue, &job.id, retry.event_type, &retry)
@@ -811,14 +823,16 @@ where
                 {
                     return Ok(JobProcessOutcome::StaleCompletionIgnored { tries });
                 }
-                let failed = failed_event(
-                    &job.service,
-                    &job.job_type,
-                    &job.id,
-                    &job.context,
-                    JobState::Active,
+                let failed = events::failed(
+                    EventMeta {
+                        service: &job.service,
+                        job_type: &job.job_type,
+                        job_id: &job.id,
+                        context: &job.context,
+                        timestamp: &terminal_at,
+                    },
                     tries,
-                    &terminal_at,
+                    JobState::Active,
                     &error,
                 );
                 self.publish_queue_event(queue, &job.id, failed.event_type, &failed)
@@ -860,13 +874,15 @@ where
             .await
             .map_err(JobManagerError::KeyCoordinator)?;
         if decision == TerminalPublishDecision::StaleCompletionIgnored {
-            let ignored = stale_completion_ignored_event(
-                &job.service,
-                &job.job_type,
-                &job.id,
-                &job.context,
+            let ignored = events::stale_completion_ignored(
+                EventMeta {
+                    service: &job.service,
+                    job_type: &job.job_type,
+                    job_id: &job.id,
+                    context: &job.context,
+                    timestamp: terminal_at,
+                },
                 tries,
-                terminal_at,
                 Some("lost key slot"),
                 job.concurrency.clone(),
             );
@@ -897,13 +913,16 @@ where
             });
         }
 
-        let event = progress_event(
-            &job.service,
-            &job.job_type,
-            &job.id,
-            &job.context,
+        let timestamp = self.now_iso();
+        let event = events::progress(
+            EventMeta {
+                service: &job.service,
+                job_type: &job.job_type,
+                job_id: &job.id,
+                context: &job.context,
+                timestamp: &timestamp,
+            },
             job.tries,
-            &self.now_iso(),
             progress,
         );
         self.publish_queue_event(queue, &job.id, event.event_type, &event)
@@ -988,13 +1007,16 @@ where
             });
         }
 
-        let event = logged_event(
-            &job.service,
-            &job.job_type,
-            &job.id,
-            &job.context,
+        let timestamp = self.now_iso();
+        let event = events::logged(
+            EventMeta {
+                service: &job.service,
+                job_type: &job.job_type,
+                job_id: &job.id,
+                context: &job.context,
+                timestamp: &timestamp,
+            },
             job.tries,
-            &self.now_iso(),
             vec![log],
         );
         self.publish_queue_event(queue, &job.id, event.event_type, &event)
@@ -1017,13 +1039,16 @@ where
             });
         }
 
-        let event = waiting_event(
-            &job.service,
-            &job.job_type,
-            &job.id,
-            &job.context,
+        let timestamp = self.now_iso();
+        let event = events::waiting(
+            EventMeta {
+                service: &job.service,
+                job_type: &job.job_type,
+                job_id: &job.id,
+                context: &job.context,
+                timestamp: &timestamp,
+            },
             job.tries,
-            &self.now_iso(),
             wait_edge,
         );
         self.publish_queue_event(queue, &job.id, event.event_type, &event)
@@ -1046,13 +1071,16 @@ where
             });
         }
 
-        let event = resumed_event(
-            &job.service,
-            &job.job_type,
-            &job.id,
-            &job.context,
+        let timestamp = self.now_iso();
+        let event = events::resumed(
+            EventMeta {
+                service: &job.service,
+                job_type: &job.job_type,
+                job_id: &job.id,
+                context: &job.context,
+                timestamp: &timestamp,
+            },
             job.tries,
-            &self.now_iso(),
             wait_edge,
         );
         self.publish_queue_event(queue, &job.id, event.event_type, &event)
@@ -1081,14 +1109,16 @@ where
         }
 
         let cancelled_at = self.now_iso();
-        let event = cancelled_event(
-            &job.service,
-            &job.job_type,
-            &job.id,
-            &job.context,
-            job.state,
+        let event = events::cancelled(
+            EventMeta {
+                service: &job.service,
+                job_type: &job.job_type,
+                job_id: &job.id,
+                context: &job.context,
+                timestamp: &cancelled_at,
+            },
             job.tries,
-            &cancelled_at,
+            job.state,
         );
         self.publish_queue_event(queue, &job.id, event.event_type, &event)
             .await?;
