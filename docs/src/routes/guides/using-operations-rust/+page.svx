@@ -136,8 +136,9 @@ consumes one ordered typed signal stream.
 ## 7. Transfers
 
 When an operation declares upload or download transfer behavior, use the transfer
-methods exposed by its typed operation reference. Provider handlers plan grants
-through `ServiceHandlerContext`, which already owns authenticated caller identity,
-service session material, and resolved store bindings.
+methods exposed by its typed operation reference. Provider methods receive
+`RequestContext` with authenticated caller and service session identity. Capture
+`service.generated_handle()` at registration when the provider needs resolved
+stores or other bound runtime resources.
 
 Do not build transfer subjects, read bindings, or access raw NATS.

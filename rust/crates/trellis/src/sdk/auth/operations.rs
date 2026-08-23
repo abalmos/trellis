@@ -1,5 +1,5 @@
 //! Typed operation descriptors for `trellis.auth@v1`.
-use crate::generated::OperationDescriptor;
+use crate::generated::{NoOperationUpdates, OperationDescriptor};
 use crate::service::OperationFailureLike;
 /// Descriptor for `Auth.DeviceUserAuthorities.Resolve`.
 pub struct AuthDeviceUserAuthoritiesResolveOperation;
@@ -7,6 +7,8 @@ impl OperationDescriptor for AuthDeviceUserAuthoritiesResolveOperation {
     type Input = super::types::AuthDeviceUserAuthoritiesResolveInput;
     type Progress = super::types::AuthDeviceUserAuthoritiesResolveProgress;
     type Output = super::types::AuthDeviceUserAuthoritiesResolveOutput;
+    type Update = serde_json::Value;
+    type UpdateEvidence = NoOperationUpdates;
     type Error = AuthDeviceUserAuthoritiesResolveOperationError;
     const INPUT_SCHEMA_JSON: &'static str =
         super::schemas::AUTH_DEVICE_USER_AUTHORITIES_RESOLVE_INPUT_SCHEMA_JSON;
@@ -14,6 +16,7 @@ impl OperationDescriptor for AuthDeviceUserAuthoritiesResolveOperation {
         Some(super::schemas::AUTH_DEVICE_USER_AUTHORITIES_RESOLVE_PROGRESS_SCHEMA_JSON);
     const OUTPUT_SCHEMA_JSON: &'static str =
         super::schemas::AUTH_DEVICE_USER_AUTHORITIES_RESOLVE_OUTPUT_SCHEMA_JSON;
+    const UPDATE_SCHEMA_JSON: Option<&'static str> = None;
     const SIGNAL_INPUT_SCHEMAS_JSON: &'static str =
         super::schemas::AUTH_DEVICE_USER_AUTHORITIES_RESOLVE_SIGNAL_INPUT_SCHEMAS_JSON;
     const ERRORS: &'static [&'static str] = &["AuthError", "UnexpectedError", "ValidationError"];

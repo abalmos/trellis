@@ -4,6 +4,7 @@ use std::time::{Duration, Instant};
 
 use bytes::Bytes;
 use futures_util::stream::{self, BoxStream};
+use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tokio::task::JoinHandle;
@@ -11,9 +12,8 @@ use trellis_rs::client::OperationState as ClientOpState;
 use trellis_rs::client::{OperationDescriptor, TransferOperationDescriptor};
 use trellis_rs::service::{
     AcceptedOperation, FileTransferInfo, OperationRefData, OperationSnapshot,
-    OperationState as ServiceOpState, ServerError, ServiceHandlerContext, ServiceRuntimeError,
-    TransferDownloadGrantArgs, TransferUploadGrantArgs, UploadTransferCompletion,
-    UploadTransferSession,
+    OperationState as ServiceOpState, ServerError, ServiceRuntimeError, TransferDownloadGrantArgs,
+    TransferUploadGrantArgs, UploadTransferCompletion, UploadTransferSession,
 };
 
 use crate::support::assertions::{assert_case_registered, assert_generated_service_contract};
@@ -159,6 +159,8 @@ impl trellis_rs::client::OperationDescriptor for FilesUploadOp {
     type Input = UploadInput;
     type Progress = Value;
     type Output = UploadOutput;
+    type Update = Value;
+    type UpdateEvidence = trellis_rs::client::NoOperationUpdates;
     type Error = trellis_rs::service::OperationFailure;
 
     const KEY: &'static str = "Files.Upload";
@@ -172,6 +174,7 @@ impl trellis_rs::client::OperationDescriptor for FilesUploadOp {
     const INPUT_SCHEMA_JSON: &'static str = r#"{"type":"object","required":["key"],"properties":{"key":{"type":"string"},"contentType":{"type":"string"}}}"#;
     const PROGRESS_SCHEMA_JSON: Option<&'static str> = None;
     const OUTPUT_SCHEMA_JSON: &'static str = r#"{"type":"object","required":["key","size"],"properties":{"key":{"type":"string"},"size":{"type":"integer"},"contentType":{"type":"string"}}}"#;
+    const UPDATE_SCHEMA_JSON: Option<&'static str> = None;
     const SIGNAL_INPUT_SCHEMAS_JSON: &'static str = "{}";
 }
 
@@ -197,6 +200,81 @@ struct SharedOpState {
         std::collections::HashMap<String, OperationSnapshot<Value, UploadOutput>>,
     >,
     stored_uploads: tokio::sync::Mutex<std::collections::HashMap<String, StoredUpload>>,
+}
+
+type UploadFuture<T> = futures_util::future::BoxFuture<'static, Result<T, ServerError>>;
+type UploadStart = Box<
+    dyn Fn(
+            trellis_rs::service::RequestContext,
+            UploadInput,
+        ) -> UploadFuture<AcceptedOperation<Value, UploadOutput>>
+        + Send
+        + Sync,
+>;
+type UploadSnapshot = Box<
+    dyn Fn(
+            trellis_rs::service::RequestContext,
+            String,
+        ) -> UploadFuture<OperationSnapshot<Value, UploadOutput>>
+        + Send
+        + Sync,
+>;
+type UploadWatch = Box<
+    dyn Fn(
+            trellis_rs::service::RequestContext,
+            String,
+        ) -> trellis_rs::service::OperationLiveWatch<Value, Value, UploadOutput>
+        + Send
+        + Sync,
+>;
+
+struct UploadProvider {
+    start: UploadStart,
+    get: UploadSnapshot,
+    watch: UploadWatch,
+}
+
+impl trellis_rs::service::ServiceOperationProvider<FilesUploadOp> for UploadProvider {
+    fn start(
+        &self,
+        context: trellis_rs::service::RequestContext,
+        input: UploadInput,
+    ) -> UploadFuture<AcceptedOperation<Value, UploadOutput>> {
+        (self.start)(context, input)
+    }
+    fn get(
+        &self,
+        context: trellis_rs::service::RequestContext,
+        operation_id: String,
+    ) -> UploadFuture<OperationSnapshot<Value, UploadOutput>> {
+        (self.get)(context, operation_id)
+    }
+    fn wait(
+        &self,
+        context: trellis_rs::service::RequestContext,
+        operation_id: String,
+    ) -> UploadFuture<OperationSnapshot<Value, UploadOutput>> {
+        let mut snapshots = self.watch(context, operation_id.clone());
+        Box::pin(async move {
+            while let Some(event) = snapshots.next().await {
+                if let trellis_rs::service::OperationLiveEvent::Snapshot(snapshot) = event? {
+                    if snapshot.state.is_terminal() {
+                        return Ok(snapshot);
+                    }
+                }
+            }
+            Err(ServerError::Nats(format!(
+                "operation {operation_id} watch ended before terminal state"
+            )))
+        })
+    }
+    fn watch(
+        &self,
+        context: trellis_rs::service::RequestContext,
+        operation_id: String,
+    ) -> trellis_rs::service::OperationLiveWatch<Value, Value, UploadOutput> {
+        (self.watch)(context, operation_id)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -331,15 +409,15 @@ fn register_upload_handler(
     service: &mut trellis_rs::service::ConnectedServiceRuntime<TransferServiceContract>,
     shared: Arc<SharedOpState>,
 ) {
-    service.register_operation_with_watch::<FilesUploadOp, _, _, _, _, _, _, _>(
-        {
+    let handle = service.generated_handle();
+    service.register_operation_provider::<FilesUploadOp, _>(UploadProvider {
+        start: Box::new({
             let shared = Arc::clone(&shared);
-            move |context: ServiceHandlerContext, input: UploadInput| {
+            move |context: trellis_rs::service::RequestContext, input: UploadInput| {
                 let shared = Arc::clone(&shared);
-                async move {
-                    let caller_session_key =
-                        context.request().session_key.clone().unwrap_or_default();
-                    let handle = context.handle();
+                let handle = handle.clone();
+                Box::pin(async move {
+                    let caller_session_key = context.session_key.clone().unwrap_or_default();
                     let service_session_key = handle.session_key().to_string();
                     let service_name = handle.service_name().to_string();
                     let resources = handle.resources().clone();
@@ -453,25 +531,25 @@ fn register_upload_handler(
                         snapshot: initial_snapshot,
                         transfer: Some(plan.grant),
                     })
-                }
+                })
             }
-        },
-        {
+        }),
+        get: Box::new({
             let shared = Arc::clone(&shared);
-            move |_context: ServiceHandlerContext, operation_id: String| {
+            move |_context: trellis_rs::service::RequestContext, operation_id: String| {
                 let shared = Arc::clone(&shared);
-                async move {
+                Box::pin(async move {
                     let snapshots = shared.snapshots.lock().await;
                     snapshots
                         .get(&operation_id)
                         .cloned()
                         .ok_or(ServerError::OperationNotFound { operation_id })
-                }
+                })
             }
-        },
-        {
+        }),
+        watch: Box::new({
             let shared = Arc::clone(&shared);
-            move |_context: ServiceHandlerContext, operation_id: String| {
+            move |_context: trellis_rs::service::RequestContext, operation_id: String| {
                 let shared = Arc::clone(&shared);
                 let op_id = operation_id;
                 let stream: BoxStream<
@@ -498,16 +576,12 @@ fn register_upload_handler(
                         Some((Ok(snapshot), (shared, op_id, count + 1)))
                     },
                 ));
-                stream
+                Box::pin(stream.map(|snapshot| {
+                    snapshot.map(trellis_rs::service::OperationLiveEvent::Snapshot)
+                }))
             }
-        },
-        |_context: ServiceHandlerContext, _operation_id: String| async move {
-            Err(ServerError::OperationUnsupportedControl {
-                operation: FilesUploadOp::KEY.to_string(),
-                action: "cancel".to_string(),
-            })
-        },
-    );
+        }),
+    });
 }
 
 fn register_download_handler(

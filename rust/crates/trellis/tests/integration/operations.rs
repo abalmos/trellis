@@ -154,6 +154,8 @@ impl trellis_rs::client::OperationDescriptor for EntityProcessOp {
     type Input = EntityProcessInput;
     type Progress = EntityProcessProgress;
     type Output = EntityProcessOutput;
+    type Update = EntityProcessUpdate;
+    type UpdateEvidence = trellis_rs::client::DeclaredOperationUpdates;
     type Error = trellis_rs::service::OperationFailure;
 
     const KEY: &'static str = "Entity.Process";
@@ -170,20 +172,10 @@ impl trellis_rs::client::OperationDescriptor for EntityProcessOp {
         r#"{"type":"object","required":["message","step"],"properties":{"message":{"type":"string"},"step":{"type":"integer"}}}"#,
     );
     const OUTPUT_SCHEMA_JSON: &'static str = r#"{"type":"object","required":["message","done"],"properties":{"message":{"type":"string"},"done":{"type":"boolean"}}}"#;
+    const UPDATE_SCHEMA_JSON: Option<&'static str> = Some(
+        r#"{"type":"object","required":["message","step"],"properties":{"message":{"type":"string"},"step":{"type":"integer"}}}"#,
+    );
     const SIGNAL_INPUT_SCHEMAS_JSON: &'static str = r##"{"appendMessage":{"type":"object","required":["suffix"],"properties":{"suffix":{"type":"string"}}},"updateMessage":{"type":"object","required":["suffix"],"properties":{"suffix":{"type":"string"}}}}"##;
-}
-
-impl trellis_rs::client::OperationUpdateDescriptor for EntityProcessOp {
-    type Update = EntityProcessUpdate;
-
-    const UPDATE_SCHEMA_JSON: &'static str = r#"{"type":"object","required":["message","step"],"properties":{"message":{"type":"string"},"step":{"type":"integer"}}}"#;
-}
-
-impl trellis_rs::service::OperationUpdateDescriptor for EntityProcessOp {
-    type Update = EntityProcessUpdate;
-
-    const UPDATE_SCHEMA_JSON: &'static str =
-        <Self as trellis_rs::client::OperationUpdateDescriptor>::UPDATE_SCHEMA_JSON;
 }
 
 struct EntityStatusOp;
@@ -192,6 +184,8 @@ impl trellis_rs::client::OperationDescriptor for EntityStatusOp {
     type Input = EntityProcessInput;
     type Progress = EntityProcessProgress;
     type Output = EntityProcessOutput;
+    type Update = Value;
+    type UpdateEvidence = trellis_rs::client::NoOperationUpdates;
     type Error = trellis_rs::service::OperationFailure;
 
     const KEY: &'static str = "Entity.Status";
@@ -208,6 +202,7 @@ impl trellis_rs::client::OperationDescriptor for EntityStatusOp {
         r#"{"type":"object","required":["message","step"],"properties":{"message":{"type":"string"},"step":{"type":"integer"}}}"#,
     );
     const OUTPUT_SCHEMA_JSON: &'static str = r#"{"type":"object","required":["message","done"],"properties":{"message":{"type":"string"},"done":{"type":"boolean"}}}"#;
+    const UPDATE_SCHEMA_JSON: Option<&'static str> = None;
     const SIGNAL_INPUT_SCHEMAS_JSON: &'static str = "{}";
 }
 
@@ -261,6 +256,116 @@ struct ObservedOperationRequest {
     request_id: Option<String>,
 }
 
+type ProviderFuture<T> = futures_util::future::BoxFuture<'static, Result<T, ServerError>>;
+type StartProvider<D> = Box<
+    dyn Fn(
+            trellis_rs::service::RequestContext,
+            <D as trellis_rs::service::OperationDescriptor>::Input,
+        ) -> ProviderFuture<
+            AcceptedOperation<
+                <D as trellis_rs::service::OperationDescriptor>::Progress,
+                <D as trellis_rs::service::OperationDescriptor>::Output,
+            >,
+        > + Send
+        + Sync,
+>;
+type SnapshotProvider<D> = Box<
+    dyn Fn(
+            trellis_rs::service::RequestContext,
+            String,
+        ) -> ProviderFuture<
+            OperationSnapshot<
+                <D as trellis_rs::service::OperationDescriptor>::Progress,
+                <D as trellis_rs::service::OperationDescriptor>::Output,
+            >,
+        > + Send
+        + Sync,
+>;
+type WatchProvider<D> = Box<
+    dyn Fn(
+            trellis_rs::service::RequestContext,
+            String,
+        ) -> trellis_rs::service::OperationLiveWatch<
+            <D as trellis_rs::service::OperationDescriptor>::Progress,
+            <D as trellis_rs::service::OperationDescriptor>::Update,
+            <D as trellis_rs::service::OperationDescriptor>::Output,
+        > + Send
+        + Sync,
+>;
+type SignalProvider<D> = Box<
+    dyn Fn(
+            trellis_rs::service::RequestContext,
+            String,
+            String,
+            Option<Value>,
+        ) -> ProviderFuture<
+            OperationSignalAccepted<
+                <D as trellis_rs::service::OperationDescriptor>::Progress,
+                <D as trellis_rs::service::OperationDescriptor>::Output,
+            >,
+        > + Send
+        + Sync,
+>;
+
+struct TestOperationProvider<D: trellis_rs::service::OperationDescriptor> {
+    start: StartProvider<D>,
+    get: SnapshotProvider<D>,
+    wait: SnapshotProvider<D>,
+    watch: WatchProvider<D>,
+    cancel: SnapshotProvider<D>,
+    signal: SignalProvider<D>,
+}
+
+impl<D> trellis_rs::service::ServiceOperationProvider<D> for TestOperationProvider<D>
+where
+    D: trellis_rs::service::OperationDescriptor + 'static,
+{
+    fn start(
+        &self,
+        context: trellis_rs::service::RequestContext,
+        input: D::Input,
+    ) -> ProviderFuture<AcceptedOperation<D::Progress, D::Output>> {
+        (self.start)(context, input)
+    }
+    fn get(
+        &self,
+        context: trellis_rs::service::RequestContext,
+        operation_id: String,
+    ) -> ProviderFuture<OperationSnapshot<D::Progress, D::Output>> {
+        (self.get)(context, operation_id)
+    }
+    fn wait(
+        &self,
+        context: trellis_rs::service::RequestContext,
+        operation_id: String,
+    ) -> ProviderFuture<OperationSnapshot<D::Progress, D::Output>> {
+        (self.wait)(context, operation_id)
+    }
+    fn watch(
+        &self,
+        context: trellis_rs::service::RequestContext,
+        operation_id: String,
+    ) -> trellis_rs::service::OperationLiveWatch<D::Progress, D::Update, D::Output> {
+        (self.watch)(context, operation_id)
+    }
+    fn cancel(
+        &self,
+        context: trellis_rs::service::RequestContext,
+        operation_id: String,
+    ) -> ProviderFuture<OperationSnapshot<D::Progress, D::Output>> {
+        (self.cancel)(context, operation_id)
+    }
+    fn signal(
+        &self,
+        context: trellis_rs::service::RequestContext,
+        operation_id: String,
+        signal: String,
+        input: Option<Value>,
+    ) -> ProviderFuture<OperationSignalAccepted<D::Progress, D::Output>> {
+        (self.signal)(context, operation_id, signal, input)
+    }
+}
+
 impl SharedOperationState {
     fn new() -> Arc<Self> {
         Arc::new(Self {
@@ -286,13 +391,12 @@ fn setup_operation_service(
     let shared_for_cancel = Arc::clone(shared);
     let shared_for_signal = Arc::clone(shared);
 
-    service.register_operation_with_watch_and_signal::<EntityProcessOp, _, _, _, _, _, _, _, _, _>(
-        {
+    service.register_operation_provider::<EntityProcessOp, _>(TestOperationProvider {
+        start: Box::new({
             let shared = shared_clone;
-            move |_context: trellis_rs::service::ServiceHandlerContext,
-                  input: EntityProcessInput| {
+            move |_context: trellis_rs::service::RequestContext, input: EntityProcessInput| {
                 let shared = Arc::clone(&shared);
-                async move {
+                Box::pin(async move {
                     let operation_id = format!("op-{}", input.message);
                     let initial_state = if spawn_completion {
                         ServiceOperationState::Pending
@@ -385,25 +489,40 @@ fn setup_operation_service(
                         },
                         transfer: None,
                     })
-                }
+                })
             }
-        },
-        {
+        }),
+        get: Box::new({
             let shared = shared_for_getter;
-            move |_context: trellis_rs::service::ServiceHandlerContext, operation_id: String| {
+            move |_context: trellis_rs::service::RequestContext, operation_id: String| {
                 let shared = Arc::clone(&shared);
-                async move {
+                Box::pin(async move {
                     let snapshots = shared.snapshots.lock().unwrap();
                     snapshots
                         .get(&operation_id)
                         .cloned()
                         .ok_or(ServerError::OperationNotFound { operation_id })
-                }
+                })
             }
-        },
-        {
+        }),
+        wait: Box::new({
+            let shared = Arc::clone(shared);
+            move |_context, operation_id| {
+                let shared = Arc::clone(&shared);
+                Box::pin(async move {
+                    shared
+                        .snapshots
+                        .lock()
+                        .unwrap()
+                        .get(&operation_id)
+                        .cloned()
+                        .ok_or(ServerError::OperationNotFound { operation_id })
+                })
+            }
+        }),
+        watch: Box::new({
             let shared = shared_for_watcher;
-            move |_context: trellis_rs::service::ServiceHandlerContext, operation_id: String| {
+            move |_context: trellis_rs::service::RequestContext, operation_id: String| {
                 let shared = Arc::clone(&shared);
                 let initial = shared
                     .snapshots
@@ -445,14 +564,16 @@ fn setup_operation_service(
                     )),
                     None => Box::pin(stream::once(async move { Ok(initial) })),
                 };
-                stream
+                Box::pin(stream.map(|snapshot| {
+                    snapshot.map(trellis_rs::service::OperationLiveEvent::Snapshot)
+                }))
             }
-        },
-        {
+        }),
+        cancel: Box::new({
             let shared = shared_for_cancel;
-            move |_context: trellis_rs::service::ServiceHandlerContext, operation_id: String| {
+            move |_context: trellis_rs::service::RequestContext, operation_id: String| {
                 let shared = Arc::clone(&shared);
-                async move {
+                Box::pin(async move {
                     let snapshot = OperationSnapshot {
                         revision: 2,
                         state: ServiceOperationState::Cancelled,
@@ -469,17 +590,17 @@ fn setup_operation_service(
                     shared.cancelled.lock().await.insert(operation_id, true);
                     shared.cancel_notify.notify_waiters();
                     Ok(snapshot)
-                }
+                })
             }
-        },
-        {
+        }),
+        signal: Box::new({
             let shared = shared_for_signal;
-            move |_context: trellis_rs::service::ServiceHandlerContext,
+            move |_context: trellis_rs::service::RequestContext,
                   operation_id: String,
                   signal_name: String,
                   input: Option<Value>| {
                 let shared = Arc::clone(&shared);
-                async move {
+                Box::pin(async move {
                     if let Some(state) = shared
                         .snapshots
                         .lock()
@@ -567,70 +688,89 @@ fn setup_operation_service(
                         accepted_at: "2026-01-01T00:00:00Z".to_string(),
                         snapshot: progress_snapshot,
                     })
-                }
+                })
             }
-        },
-    );
+        }),
+    });
 
     let shared_for_status_start = Arc::clone(shared);
     let shared_for_status_get = Arc::clone(shared);
     let shared_for_status_wait = Arc::clone(shared);
 
-    service.register_operation::<EntityStatusOp, _, _, _, _, _, _, _, _>(
-        move |_context: trellis_rs::service::ServiceHandlerContext, input: EntityProcessInput| {
-            let shared = Arc::clone(&shared_for_status_start);
-            async move {
-                let operation_id = format!("status-{}", input.message);
-                let snapshot = OperationSnapshot {
-                    revision: 1,
-                    state: ServiceOperationState::Running,
-                    ..Default::default()
-                };
-                shared
-                    .snapshots
-                    .lock()
-                    .unwrap()
-                    .insert(operation_id.clone(), snapshot.clone());
+    service.register_operation_provider::<EntityStatusOp, _>(TestOperationProvider {
+        start: Box::new(
+            move |_context: trellis_rs::service::RequestContext, input: EntityProcessInput| {
+                let shared = Arc::clone(&shared_for_status_start);
+                Box::pin(async move {
+                    let operation_id = format!("status-{}", input.message);
+                    let snapshot = OperationSnapshot {
+                        revision: 1,
+                        state: ServiceOperationState::Running,
+                        ..Default::default()
+                    };
+                    shared
+                        .snapshots
+                        .lock()
+                        .unwrap()
+                        .insert(operation_id.clone(), snapshot.clone());
 
-                Ok(AcceptedOperation {
-                    kind: "accepted".to_string(),
-                    operation_ref: OperationRefData {
-                        id: operation_id,
-                        service: "operations-fixture-service".to_string(),
-                        operation: EntityStatusOp::KEY.to_string(),
-                    },
-                    snapshot,
-                    transfer: None,
+                    Ok(AcceptedOperation {
+                        kind: "accepted".to_string(),
+                        operation_ref: OperationRefData {
+                            id: operation_id,
+                            service: "operations-fixture-service".to_string(),
+                            operation: EntityStatusOp::KEY.to_string(),
+                        },
+                        snapshot,
+                        transfer: None,
+                    })
                 })
-            }
-        },
-        move |_context: trellis_rs::service::ServiceHandlerContext, operation_id: String| {
-            let shared = Arc::clone(&shared_for_status_get);
-            async move {
-                let snapshots = shared.snapshots.lock().unwrap();
-                snapshots
-                    .get(&operation_id)
-                    .cloned()
-                    .ok_or(ServerError::OperationNotFound { operation_id })
-            }
-        },
-        move |_context: trellis_rs::service::ServiceHandlerContext, operation_id: String| {
-            let shared = Arc::clone(&shared_for_status_wait);
-            async move {
-                let snapshots = shared.snapshots.lock().unwrap();
-                snapshots
-                    .get(&operation_id)
-                    .cloned()
-                    .ok_or(ServerError::OperationNotFound { operation_id })
-            }
-        },
-        |_context: trellis_rs::service::ServiceHandlerContext, _operation_id: String| async move {
-            Err(ServerError::InvalidOperationControlAction {
-                subject: EntityStatusOp::SUBJECT.to_string(),
-                action: "cancel".to_string(),
+            },
+        ),
+        get: Box::new(
+            move |_context: trellis_rs::service::RequestContext, operation_id: String| {
+                let shared = Arc::clone(&shared_for_status_get);
+                Box::pin(async move {
+                    let snapshots = shared.snapshots.lock().unwrap();
+                    snapshots
+                        .get(&operation_id)
+                        .cloned()
+                        .ok_or(ServerError::OperationNotFound { operation_id })
+                })
+            },
+        ),
+        wait: Box::new(
+            move |_context: trellis_rs::service::RequestContext, operation_id: String| {
+                let shared = Arc::clone(&shared_for_status_wait);
+                Box::pin(async move {
+                    let snapshots = shared.snapshots.lock().unwrap();
+                    snapshots
+                        .get(&operation_id)
+                        .cloned()
+                        .ok_or(ServerError::OperationNotFound { operation_id })
+                })
+            },
+        ),
+        watch: Box::new(|_context, _operation_id| Box::pin(stream::empty())),
+        cancel: Box::new(
+            |_context: trellis_rs::service::RequestContext, _operation_id: String| {
+                Box::pin(async move {
+                    Err(ServerError::InvalidOperationControlAction {
+                        subject: EntityStatusOp::SUBJECT.to_string(),
+                        action: "cancel".to_string(),
+                    })
+                })
+            },
+        ),
+        signal: Box::new(|_context, operation_id, _signal, _input| {
+            Box::pin(async move {
+                Err(ServerError::InvalidOperationControlAction {
+                    subject: operation_id,
+                    action: "signal".to_string(),
+                })
             })
-        },
-    );
+        }),
+    });
 }
 
 fn setup_signal_consuming_operation_service(
@@ -647,101 +787,121 @@ fn setup_signal_consuming_operation_service(
     let operations_for_watch = operations.clone();
     let operations_for_cancel = operations.clone();
 
-    service.register_operation_with_watch_and_signal::<EntityProcessOp, _, _, _, _, _, _, _, _, _>(
-        move |_context: trellis_rs::service::ServiceHandlerContext, input: EntityProcessInput| {
-            let operations = operations_for_start.clone();
-            let shared = Arc::clone(&shared_for_start);
-            let release_signal_consumption = release_signal_consumption.clone();
-            async move {
-                let operation_message = input.message;
-                let accepted = operations.accept(format!("op-{operation_message}")).await?;
-                let operation_ref = accepted.operation_ref.clone();
-                let running = operations
-                    .control_ref(operation_ref.clone())
-                    .await?
-                    .started()
-                    .await?;
-                let mut signals = operations
-                    .control_ref(operation_ref.clone())
-                    .await?
-                    .signals()
-                    .await?;
-                let operations_for_consumer = operations.clone();
+    service.register_operation_provider::<EntityProcessOp, _>(TestOperationProvider {
+        start: Box::new(
+            move |_context: trellis_rs::service::RequestContext, input: EntityProcessInput| {
+                let operations = operations_for_start.clone();
+                let shared = Arc::clone(&shared_for_start);
+                let release_signal_consumption = release_signal_consumption.clone();
+                Box::pin(async move {
+                    let operation_message = input.message;
+                    let accepted = operations.accept(format!("op-{operation_message}")).await?;
+                    let operation_ref = accepted.operation_ref.clone();
+                    let running = operations
+                        .control_ref(operation_ref.clone())
+                        .await?
+                        .started()
+                        .await?;
+                    let mut signals = operations
+                        .control_ref(operation_ref.clone())
+                        .await?
+                        .signals()
+                        .await?;
+                    let operations_for_consumer = operations.clone();
 
-                tokio::spawn(async move {
-                    if let Some(mut release) = release_signal_consumption {
-                        while !*release.borrow() {
-                            if release.changed().await.is_err() {
+                    tokio::spawn(async move {
+                        if let Some(mut release) = release_signal_consumption {
+                            while !*release.borrow() {
+                                if release.changed().await.is_err() {
+                                    return;
+                                }
+                            }
+                        }
+
+                        while let Some(signal) = signals.next().await {
+                            let Ok(signal) = signal else {
+                                return;
+                            };
+                            let suffix = signal
+                                .input
+                                .as_ref()
+                                .and_then(|value| value.get("suffix"))
+                                .and_then(Value::as_str)
+                                .unwrap_or_default()
+                                .to_string();
+                            shared
+                                .signals
+                                .lock()
+                                .await
+                                .entry(signal.operation_id.clone())
+                                .or_default()
+                                .push(suffix.clone());
+                            shared.signal_notify.notify_waiters();
+
+                            if operation_message == "terminal-signal" {
+                                if let Ok(control) = operations_for_consumer
+                                    .control(signal.operation_id.clone())
+                                    .await
+                                {
+                                    let _ = control
+                                        .complete(EntityProcessOutput {
+                                            message: format!("{operation_message}:{suffix}"),
+                                            done: true,
+                                        })
+                                        .await;
+                                }
                                 return;
                             }
                         }
-                    }
+                    });
 
-                    while let Some(signal) = signals.next().await {
-                        let Ok(signal) = signal else {
-                            return;
-                        };
-                        let suffix = signal
-                            .input
-                            .as_ref()
-                            .and_then(|value| value.get("suffix"))
-                            .and_then(Value::as_str)
-                            .unwrap_or_default()
-                            .to_string();
-                        shared
-                            .signals
-                            .lock()
-                            .await
-                            .entry(signal.operation_id.clone())
-                            .or_default()
-                            .push(suffix.clone());
-                        shared.signal_notify.notify_waiters();
-
-                        if operation_message == "terminal-signal" {
-                            if let Ok(control) = operations_for_consumer
-                                .control(signal.operation_id.clone())
-                                .await
-                            {
-                                let _ = control
-                                    .complete(EntityProcessOutput {
-                                        message: format!("{operation_message}:{suffix}"),
-                                        done: true,
-                                    })
-                                    .await;
-                            }
-                            return;
-                        }
-                    }
-                });
-
-                Ok(AcceptedOperation {
-                    snapshot: running,
-                    ..accepted
+                    Ok(AcceptedOperation {
+                        snapshot: running,
+                        ..accepted
+                    })
                 })
-            }
-        },
-        move |_context: trellis_rs::service::ServiceHandlerContext, operation_id: String| {
-            let operations = operations_for_get.clone();
-            async move { operations.get(operation_id).await }
-        },
-        move |_context: trellis_rs::service::ServiceHandlerContext, operation_id: String| {
+            },
+        ),
+        get: Box::new(
+            move |_context: trellis_rs::service::RequestContext, operation_id: String| {
+                let operations = operations_for_get.clone();
+                Box::pin(async move { operations.get(operation_id).await })
+            },
+        ),
+        wait: Box::new({
             let operations = operations_for_watch.clone();
-            Box::pin(stream::once(
-                async move { operations.get(operation_id).await },
-            ))
-        },
-        move |_context: trellis_rs::service::ServiceHandlerContext, operation_id: String| {
-            let operations = operations_for_cancel.clone();
-            async move { operations.cancel(operation_id).await }
-        },
-        move |_context: trellis_rs::service::ServiceHandlerContext,
-              operation_id: String,
-              signal_name: String,
-              input: Option<Value>| {
-            let operations = operations.clone();
-            async move { operations.signal(operation_id, signal_name, input).await }
-        },
-    );
+            move |_context, operation_id| {
+                let operations = operations.clone();
+                Box::pin(async move { operations.wait(operation_id).await })
+            }
+        }),
+        watch: Box::new(
+            move |_context: trellis_rs::service::RequestContext, operation_id: String| {
+                let operations = operations_for_watch.clone();
+                Box::pin(stream::once(async move {
+                    operations
+                        .get(operation_id)
+                        .await
+                        .map(trellis_rs::service::OperationLiveEvent::Snapshot)
+                }))
+            },
+        ),
+        cancel: Box::new(
+            move |_context: trellis_rs::service::RequestContext, operation_id: String| {
+                let operations = operations_for_cancel.clone();
+                Box::pin(async move { operations.cancel(operation_id).await })
+            },
+        ),
+        signal: Box::new(
+            move |_context: trellis_rs::service::RequestContext,
+                  operation_id: String,
+                  signal_name: String,
+                  input: Option<Value>| {
+                let operations = operations.clone();
+                Box::pin(async move { operations.signal(operation_id, signal_name, input).await })
+            },
+        ),
+    });
 }
 
 fn setup_control_operation_service(
@@ -749,22 +909,21 @@ fn setup_control_operation_service(
     operations: trellis_rs::service::ServiceOperation<EntityProcessOp>,
     observed_requests: Option<Arc<tokio::sync::Mutex<Vec<ObservedOperationRequest>>>>,
 ) {
-    service.register_operation::<EntityProcessOp, _, _, _, _, _, _, _, _>(
-        {
+    service.register_operation_provider::<EntityProcessOp, _>(TestOperationProvider {
+        start: Box::new({
             let operations = operations.clone();
-            move |context: trellis_rs::service::ServiceHandlerContext, input: EntityProcessInput| {
+            move |context: trellis_rs::service::RequestContext, input: EntityProcessInput| {
                 let operations = operations.clone();
                 let observed_requests = observed_requests.clone();
-                async move {
+                Box::pin(async move {
                     if let Some(observed_requests) = observed_requests {
-                        let request = context.request();
                         observed_requests
                             .lock()
                             .await
                             .push(ObservedOperationRequest {
-                                caller: request.caller.clone(),
-                                session_key: request.session_key.clone(),
-                                request_id: request.request_id.clone(),
+                                caller: context.caller.clone(),
+                                session_key: context.session_key.clone(),
+                                request_id: context.request_id.clone(),
                             });
                     }
 
@@ -778,28 +937,50 @@ fn setup_control_operation_service(
                         snapshot: running,
                         ..accepted
                     })
-                }
+                })
             }
-        },
-        {
+        }),
+        get: Box::new({
             let operations = operations.clone();
-            move |_context: trellis_rs::service::ServiceHandlerContext, operation_id: String| {
+            move |_context: trellis_rs::service::RequestContext, operation_id: String| {
                 let operations = operations.clone();
-                async move { operations.get(operation_id).await }
+                Box::pin(async move { operations.get(operation_id).await })
             }
-        },
-        {
+        }),
+        wait: Box::new({
             let operations = operations.clone();
-            move |_context: trellis_rs::service::ServiceHandlerContext, operation_id: String| {
+            move |_context: trellis_rs::service::RequestContext, operation_id: String| {
                 let operations = operations.clone();
-                async move { operations.wait(operation_id).await }
+                Box::pin(async move { operations.wait(operation_id).await })
             }
-        },
-        move |_context: trellis_rs::service::ServiceHandlerContext, operation_id: String| {
+        }),
+        watch: Box::new({
             let operations = operations.clone();
-            async move { operations.cancel(operation_id).await }
-        },
-    );
+            move |_context, operation_id| {
+                let operations = operations.clone();
+                Box::pin(stream::once(async move {
+                    operations
+                        .wait(operation_id)
+                        .await
+                        .map(trellis_rs::service::OperationLiveEvent::Snapshot)
+                }))
+            }
+        }),
+        cancel: Box::new(
+            move |_context: trellis_rs::service::RequestContext, operation_id: String| {
+                let operations = operations.clone();
+                Box::pin(async move { operations.cancel(operation_id).await })
+            },
+        ),
+        signal: Box::new(|_context, operation_id, _signal, _input| {
+            Box::pin(async move {
+                Err(ServerError::InvalidOperationControlAction {
+                    subject: operation_id,
+                    action: "signal".to_string(),
+                })
+            })
+        }),
+    });
 }
 
 #[derive(Default)]
@@ -819,89 +1000,95 @@ fn setup_update_operation_service(
     let operations_for_watch = operations.clone();
     let operations_for_cancel = operations.clone();
 
-    service
-        .register_operation_with_updates_and_signal::<EntityProcessOp, _, _, _, _, _, _, _, _, _>(
-            {
+    service.register_operation_provider::<EntityProcessOp, _>(TestOperationProvider {
+        start: Box::new({
+            let gates = Arc::clone(&gates);
+            move |_context: trellis_rs::service::RequestContext, input: EntityProcessInput| {
+                let operations = operations_for_start.clone();
                 let gates = Arc::clone(&gates);
-                move |_context: trellis_rs::service::ServiceHandlerContext,
-                      input: EntityProcessInput| {
-                    let operations = operations_for_start.clone();
-                    let gates = Arc::clone(&gates);
-                    async move {
-                        let operation_id = format!("op-{}", input.message);
-                        let accepted = operations.accept(operation_id.clone()).await?;
-                        let control = operations.control(operation_id).await?;
-                        let running = control.started().await?;
+                Box::pin(async move {
+                    let operation_id = format!("op-{}", input.message);
+                    let accepted = operations.accept(operation_id.clone()).await?;
+                    let control = operations.control(operation_id).await?;
+                    let running = control.started().await?;
 
-                        tokio::spawn(async move {
-                            gates.release_updates.notified().await;
-                            control
-                                .emit_update(EntityProcessUpdate {
-                                    message: input.message.clone(),
-                                    step: 1,
-                                })
-                                .await
-                                .expect("emit first live operation update");
-                            control
-                                .emit_update(EntityProcessUpdate {
-                                    message: input.message,
-                                    step: 2,
-                                })
-                                .await
-                                .expect("emit second live operation update");
-                            gates.release_terminal.notified().await;
-                            control
-                                .complete(EntityProcessOutput {
-                                    message: "updates-complete".to_string(),
-                                    done: true,
-                                })
-                                .await
-                                .expect("complete live-update operation");
-                        });
+                    tokio::spawn(async move {
+                        gates.release_updates.notified().await;
+                        control
+                            .emit_update(EntityProcessUpdate {
+                                message: input.message.clone(),
+                                step: 1,
+                            })
+                            .await
+                            .expect("emit first live operation update");
+                        control
+                            .emit_update(EntityProcessUpdate {
+                                message: input.message,
+                                step: 2,
+                            })
+                            .await
+                            .expect("emit second live operation update");
+                        gates.release_terminal.notified().await;
+                        control
+                            .complete(EntityProcessOutput {
+                                message: "updates-complete".to_string(),
+                                done: true,
+                            })
+                            .await
+                            .expect("complete live-update operation");
+                    });
 
-                        Ok(AcceptedOperation {
-                            snapshot: running,
-                            ..accepted
-                        })
-                    }
-                }
-            },
-            move |_context: trellis_rs::service::ServiceHandlerContext, operation_id: String| {
+                    Ok(AcceptedOperation {
+                        snapshot: running,
+                        ..accepted
+                    })
+                })
+            }
+        }),
+        get: Box::new(
+            move |_context: trellis_rs::service::RequestContext, operation_id: String| {
                 let operations = operations_for_get.clone();
-                async move { operations.get(operation_id).await }
+                Box::pin(async move { operations.get(operation_id).await })
             },
-            {
+        ),
+        wait: Box::new({
+            let operations = operations_for_watch.clone();
+            move |_context, operation_id| {
+                let operations = operations.clone();
+                Box::pin(async move { operations.wait(operation_id).await })
+            }
+        }),
+        watch: Box::new({
+            let gates = Arc::clone(&gates);
+            move |_context: trellis_rs::service::RequestContext, operation_id: String| {
+                let operations = operations_for_watch.clone();
                 let gates = Arc::clone(&gates);
-                move |_context: trellis_rs::service::ServiceHandlerContext, operation_id: String| {
-                    let operations = operations_for_watch.clone();
-                    let gates = Arc::clone(&gates);
-                    let stream: trellis_rs::service::ServiceOperationLiveWatch<
-                        EntityProcessProgress,
-                        EntityProcessUpdate,
-                        EntityProcessOutput,
-                    > = Box::pin(
-                        stream::once(async move {
-                            let events = operations.live_events(operation_id).await?;
-                            gates.watch_opened.notify_one();
-                            Ok::<_, ServerError>(events)
-                        })
-                        .try_flatten(),
-                    );
-                    stream
-                }
-            },
-            move |_context: trellis_rs::service::ServiceHandlerContext, operation_id: String| {
+                Box::pin(
+                    stream::once(async move {
+                        let events = operations.live_events(operation_id).await?;
+                        gates.watch_opened.notify_one();
+                        Ok::<_, ServerError>(events)
+                    })
+                    .try_flatten(),
+                )
+            }
+        }),
+        cancel: Box::new(
+            move |_context: trellis_rs::service::RequestContext, operation_id: String| {
                 let operations = operations_for_cancel.clone();
-                async move { operations.cancel(operation_id).await }
+                Box::pin(async move { operations.cancel(operation_id).await })
             },
-            move |_context: trellis_rs::service::ServiceHandlerContext,
+        ),
+        signal: Box::new(
+            move |_context: trellis_rs::service::RequestContext,
                   operation_id: String,
                   signal_name: String,
                   input: Option<Value>| {
                 let operations = operations.clone();
-                async move { operations.signal(operation_id, signal_name, input).await }
+                Box::pin(async move { operations.signal(operation_id, signal_name, input).await })
             },
-        );
+        ),
+    });
 }
 
 struct ControlOperationFixture {
@@ -2192,15 +2379,14 @@ async fn operations_service_attach_job_waits_for_completion() {
             .operation::<EntityProcessOp>();
     let (release_attached_task, release_attached_task_rx) = watch::channel(false);
 
-    service.register_operation::<EntityProcessOp, _, _, _, _, _, _, _, _>(
-        {
+    service.register_operation_provider::<EntityProcessOp, _>(TestOperationProvider {
+        start: Box::new({
             let operations = operations.clone();
             let release_attached_task_rx = release_attached_task_rx.clone();
-            move |_context: trellis_rs::service::ServiceHandlerContext,
-                  input: EntityProcessInput| {
+            move |_context: trellis_rs::service::RequestContext, input: EntityProcessInput| {
                 let operations = operations.clone();
                 let release_attached_task_rx = release_attached_task_rx.clone();
-                async move {
+                Box::pin(async move {
                     let operation_id = format!("op-{}", input.message);
                     let accepted = operations.accept(operation_id).await?;
                     let operation_ref = accepted.operation_ref.clone();
@@ -2245,28 +2431,50 @@ async fn operations_service_attach_job_waits_for_completion() {
                         snapshot: running,
                         ..accepted
                     })
-                }
+                })
             }
-        },
-        {
+        }),
+        get: Box::new({
             let operations = operations.clone();
-            move |_context: trellis_rs::service::ServiceHandlerContext, operation_id: String| {
+            move |_context: trellis_rs::service::RequestContext, operation_id: String| {
                 let operations = operations.clone();
-                async move { operations.get(operation_id).await }
+                Box::pin(async move { operations.get(operation_id).await })
             }
-        },
-        {
+        }),
+        wait: Box::new({
             let operations = operations.clone();
-            move |_context: trellis_rs::service::ServiceHandlerContext, operation_id: String| {
+            move |_context: trellis_rs::service::RequestContext, operation_id: String| {
                 let operations = operations.clone();
-                async move { operations.wait(operation_id).await }
+                Box::pin(async move { operations.wait(operation_id).await })
             }
-        },
-        move |_context: trellis_rs::service::ServiceHandlerContext, operation_id: String| {
+        }),
+        watch: Box::new({
             let operations = operations.clone();
-            async move { operations.cancel(operation_id).await }
-        },
-    );
+            move |_context, operation_id| {
+                let operations = operations.clone();
+                Box::pin(stream::once(async move {
+                    operations
+                        .wait(operation_id)
+                        .await
+                        .map(trellis_rs::service::OperationLiveEvent::Snapshot)
+                }))
+            }
+        }),
+        cancel: Box::new(
+            move |_context: trellis_rs::service::RequestContext, operation_id: String| {
+                let operations = operations.clone();
+                Box::pin(async move { operations.cancel(operation_id).await })
+            },
+        ),
+        signal: Box::new(|_context, operation_id, _signal, _input| {
+            Box::pin(async move {
+                Err(ServerError::InvalidOperationControlAction {
+                    subject: operation_id,
+                    action: "signal".to_string(),
+                })
+            })
+        }),
+    });
 
     let service_task = AbortOnDrop::new(tokio::spawn(async move { service.run().await }));
 

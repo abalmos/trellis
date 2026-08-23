@@ -1,5 +1,6 @@
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use futures_util::future::BoxFuture;
 use serde_json::{json, Value};
 use trellis_rs::client::SessionAuth;
 use trellis_rs::sdk::auth::operations::AuthDeviceUserAuthoritiesResolveOperation;
@@ -9,7 +10,7 @@ use trellis_rs::sdk::auth::types::{
 };
 use trellis_rs::service::{
     AcceptedOperation, OperationRefData, OperationSnapshot, OperationState, RequestContext, Router,
-    ServerError,
+    ServerError, ServiceOperationProvider,
 };
 
 use super::auth::{
@@ -38,43 +39,8 @@ impl AuthOperationRuntime {
         verifier: super::auth::verifier::RuntimeAuthVerifier,
     ) -> Self {
         let mut router = Router::new();
-        let start_service = service.clone();
-        let get_service = service.clone();
-        let wait_service = service;
-        router.register_operation::<AuthDeviceUserAuthoritiesResolveOperation, _, _, _, _, _, _, _, _>(
-            move |context, input| {
-                let service = start_service.clone();
-                async move {
-                    let caller = caller_principal_id(&context)?;
-                    claim_activation(&service, caller, &input).await?;
-                    approve_unreviewed_activation(&service, caller, &input).await?;
-                    let snapshot = resolve_snapshot(&service, &context, &input.flow_id).await?;
-                    Ok(AcceptedOperation {
-                        kind: "accepted".to_owned(),
-                        operation_ref: OperationRefData {
-                            id: input.flow_id,
-                            service: "trellis.auth@v1".to_owned(),
-                            operation: OPERATION.to_owned(),
-                        },
-                        snapshot,
-                        transfer: None,
-                    })
-                }
-            },
-            move |context, operation_id| {
-                let service = get_service.clone();
-                async move { resolve_by_id(&service, &context, operation_id).await }
-            },
-            move |context, operation_id| {
-                let service = wait_service.clone();
-                async move { wait_for_resolution(&service, &context, operation_id).await }
-            },
-            |_context, operation_id| async move {
-                Err(ServerError::InvalidOperationControlAction {
-                    subject: operation_id,
-                    action: "cancel".to_owned(),
-                })
-            },
+        router.register_operation_provider::<AuthDeviceUserAuthoritiesResolveOperation, _>(
+            AuthResolveProvider { service },
         );
         Self {
             client,
@@ -97,6 +63,81 @@ impl AuthOperationRuntime {
             ) => result.map_err(|error| RuntimeError::Platform(error.to_string())),
             () = stop.stopped() => Ok(()),
         }
+    }
+}
+
+struct AuthResolveProvider {
+    service: AuthService<SqliteAuthorizationStore>,
+}
+
+impl ServiceOperationProvider<AuthDeviceUserAuthoritiesResolveOperation> for AuthResolveProvider {
+    fn start(
+        &self,
+        context: RequestContext,
+        input: AuthDeviceUserAuthoritiesResolveInput,
+    ) -> BoxFuture<
+        'static,
+        Result<
+            AcceptedOperation<
+                AuthDeviceUserAuthoritiesResolveProgress,
+                AuthDeviceUserAuthoritiesResolveOutput,
+            >,
+            ServerError,
+        >,
+    > {
+        let service = self.service.clone();
+        Box::pin(async move {
+            let caller = caller_principal_id(&context)?;
+            claim_activation(&service, caller, &input).await?;
+            approve_unreviewed_activation(&service, caller, &input).await?;
+            let snapshot = resolve_snapshot(&service, &context, &input.flow_id).await?;
+            Ok(AcceptedOperation {
+                kind: "accepted".to_owned(),
+                operation_ref: OperationRefData {
+                    id: input.flow_id,
+                    service: "trellis.auth@v1".to_owned(),
+                    operation: OPERATION.to_owned(),
+                },
+                snapshot,
+                transfer: None,
+            })
+        })
+    }
+
+    fn get(
+        &self,
+        context: RequestContext,
+        operation_id: String,
+    ) -> BoxFuture<
+        'static,
+        Result<
+            OperationSnapshot<
+                AuthDeviceUserAuthoritiesResolveProgress,
+                AuthDeviceUserAuthoritiesResolveOutput,
+            >,
+            ServerError,
+        >,
+    > {
+        let service = self.service.clone();
+        Box::pin(async move { resolve_by_id(&service, &context, operation_id).await })
+    }
+
+    fn wait(
+        &self,
+        context: RequestContext,
+        operation_id: String,
+    ) -> BoxFuture<
+        'static,
+        Result<
+            OperationSnapshot<
+                AuthDeviceUserAuthoritiesResolveProgress,
+                AuthDeviceUserAuthoritiesResolveOutput,
+            >,
+            ServerError,
+        >,
+    > {
+        let service = self.service.clone();
+        Box::pin(async move { wait_for_resolution(&service, &context, operation_id).await })
     }
 }
 

@@ -62,9 +62,9 @@ pub use local_validator::{
 pub use operations::{
     control_subject, AcceptedOperation, InMemoryOperationRuntime, OperationControl,
     OperationControlRequest, OperationDescriptor, OperationError, OperationFailure,
-    OperationFailureLike, OperationLiveEvent, OperationProvider, OperationRefData, OperationSignal,
-    OperationSignalAccepted, OperationSnapshot, OperationSnapshotFrame, OperationState,
-    OperationTransferProgress, OperationUpdateDescriptor, ServiceOperation,
+    OperationFailureLike, OperationLiveEvent, OperationLiveWatch, OperationRefData,
+    OperationSignal, OperationSignalAccepted, OperationSnapshot, OperationSnapshotFrame,
+    OperationState, OperationTransferProgress, ServiceOperation, ServiceOperationProvider,
 };
 #[doc(hidden)]
 pub use publisher::EventPublisher;
@@ -81,8 +81,7 @@ pub use runtime_facade::{
 pub use runtime_facade::{
     ServiceConnectOptions, ServiceEventListenOptions, ServiceEventListenerContext,
     ServiceEventListenerHandle, ServiceEventListenerMode, ServiceEventPublisherContext,
-    ServiceHandlerContext, ServiceOperationLiveWatch, ServiceOperationProvider,
-    ServiceOperationWatch, ServiceRuntimeError, DEFAULT_AUTHORITY_PENDING_TIMEOUT_MS,
+    ServiceHandlerContext, ServiceRuntimeError, DEFAULT_AUTHORITY_PENDING_TIMEOUT_MS,
     DEFAULT_RETRY_DELAY_MS, DEFAULT_TIMEOUT_MS,
 };
 #[doc(hidden)]

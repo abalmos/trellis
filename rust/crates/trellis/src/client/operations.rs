@@ -143,10 +143,32 @@ pub struct OperationUpdateEvent<TUpdate = Value> {
     pub update: TUpdate,
 }
 
+/// Compile-time evidence that an operation does not declare live updates.
+pub struct NoOperationUpdates;
+
+/// Compile-time evidence that an operation declares live updates.
+pub struct DeclaredOperationUpdates;
+
+/// Evidence carried by an operation descriptor's update type.
+pub trait OperationUpdateEvidence: Send + 'static {}
+
+impl OperationUpdateEvidence for NoOperationUpdates {}
+impl OperationUpdateEvidence for DeclaredOperationUpdates {}
+
+/// Evidence required by APIs that publish or decode declared live updates.
+pub trait HasOperationUpdates: OperationUpdateEvidence {}
+
+impl HasOperationUpdates for DeclaredOperationUpdates {}
+
+/// Static operation contract metadata shared by caller and service APIs.
 pub trait OperationDescriptor {
     type Input: Serialize;
     type Progress: DeserializeOwned + Send + 'static;
     type Output: DeserializeOwned + Send + 'static;
+    /// Contract-defined live update payload, or `Value` when updates are not declared.
+    type Update: Serialize + DeserializeOwned + Send + 'static;
+    /// Whether this descriptor authored a live update schema.
+    type UpdateEvidence: OperationUpdateEvidence;
     type Error: Send + 'static;
 
     const KEY: &'static str;
@@ -161,16 +183,9 @@ pub trait OperationDescriptor {
     const INPUT_SCHEMA_JSON: &'static str;
     const PROGRESS_SCHEMA_JSON: Option<&'static str>;
     const OUTPUT_SCHEMA_JSON: &'static str;
+    /// JSON Schema for declared live updates.
+    const UPDATE_SCHEMA_JSON: Option<&'static str>;
     const SIGNAL_INPUT_SCHEMAS_JSON: &'static str;
-}
-
-/// Descriptor extension implemented only by operations that declare live updates.
-pub trait OperationUpdateDescriptor {
-    /// Contract-defined cumulative live update payload.
-    type Update: DeserializeOwned + Send + 'static;
-
-    /// JSON Schema used to validate update payloads on both wire boundaries.
-    const UPDATE_SCHEMA_JSON: &'static str;
 }
 
 /// Marker trait for operations that declare an upload transfer.
@@ -601,7 +616,7 @@ where
         let response = self.transport.watch_json_value(control, body).await?;
         Ok(Box::pin(stream::try_unfold(
             (response, false),
-            |(mut response, done)| async move {
+            move |(mut response, done)| async move {
                 if done {
                     return Ok(None);
                 }
@@ -646,8 +661,11 @@ where
         TrellisClientError,
     >
     where
-        D: OperationUpdateDescriptor,
+        D::UpdateEvidence: HasOperationUpdates,
     {
+        let update_schema = D::UPDATE_SCHEMA_JSON.ok_or_else(|| {
+            TrellisClientError::OperationProtocol("operation does not declare live updates".into())
+        })?;
         let response = self
             .transport
             .watch_json_value(
@@ -661,7 +679,7 @@ where
             .await?;
         Ok(Box::pin(stream::try_unfold(
             (response, false),
-            |(mut response, done)| async move {
+            move |(mut response, done)| async move {
                 if done {
                     return Ok(None);
                 }
@@ -672,7 +690,7 @@ where
                     let Some(event) = decode_watch_frame::<D::Progress, D::Update, D::Output>(
                         frame?,
                         D::PROGRESS_SCHEMA_JSON,
-                        Some(D::UPDATE_SCHEMA_JSON),
+                        Some(update_schema),
                         D::OUTPUT_SCHEMA_JSON,
                     )?
                     else {
@@ -693,7 +711,7 @@ where
         TrellisClientError,
     >
     where
-        D: OperationUpdateDescriptor,
+        D::UpdateEvidence: HasOperationUpdates,
     {
         let events = self.watch_with_updates().await?;
         Ok(Box::pin(events.filter_map(|event| async move {
@@ -983,6 +1001,8 @@ mod tests {
         type Input = RefundInput;
         type Progress = RefundProgress;
         type Output = RefundOutput;
+        type Update = Value;
+        type UpdateEvidence = super::NoOperationUpdates;
         type Error = String;
 
         const KEY: &'static str = "Billing.Refund";
@@ -997,6 +1017,7 @@ mod tests {
         const PROGRESS_SCHEMA_JSON: Option<&'static str> = None;
         const OUTPUT_SCHEMA_JSON: &'static str =
             r#"{"type":"object","properties":{},"required":[]}"#;
+        const UPDATE_SCHEMA_JSON: Option<&'static str> = None;
         const SIGNAL_INPUT_SCHEMAS_JSON: &'static str = r#"{"selectWorkspace":{"type":"object","required":["workspaceId"],"properties":{"workspaceId":{"type":"string"}}}}"#;
     }
 

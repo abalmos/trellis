@@ -2834,27 +2834,36 @@ fn render_operations_rs(loaded: &trellis_contracts::LoadedApi) -> String {
     }
 
     lines.push(String::new());
-    if loaded
-        .render_model
-        .operations
-        .values()
-        .any(|operation| operation.transfer.is_some())
-    {
-        lines.push(
-            "use trellis_rs::generated::{OperationDescriptor, TransferOperationDescriptor};"
-                .to_string(),
-        );
-    } else {
-        lines.push("use trellis_rs::generated::OperationDescriptor;".to_string());
-    }
+    let mut operation_imports = vec!["OperationDescriptor"];
     if loaded
         .render_model
         .operations
         .values()
         .any(|operation| operation.update.is_some())
     {
-        lines.push("use trellis_rs::generated::OperationUpdateDescriptor;".to_string());
+        operation_imports.push("DeclaredOperationUpdates");
     }
+    if loaded
+        .render_model
+        .operations
+        .values()
+        .any(|operation| operation.update.is_none())
+    {
+        operation_imports.push("NoOperationUpdates");
+    }
+    if loaded
+        .render_model
+        .operations
+        .values()
+        .any(|operation| operation.transfer.is_some())
+    {
+        operation_imports.push("TransferOperationDescriptor");
+    }
+    operation_imports.sort_unstable();
+    lines.push(format!(
+        "use trellis_rs::generated::{{{}}};",
+        operation_imports.join(", ")
+    ));
     if loaded
         .render_model
         .operations
@@ -2905,6 +2914,25 @@ fn render_operations_rs(loaded: &trellis_contracts::LoadedApi) -> String {
         lines.push(format!("    type Input = {input_type};"));
         lines.push(format!("    type Progress = {progress_type};"));
         lines.push(format!("    type Output = {output_type};"));
+        let update_type = operation.update.as_ref().map_or_else(
+            || "serde_json::Value".to_string(),
+            |update| {
+                if is_empty_object_schema(resolve_schema_ref(loaded, &update.schema)) {
+                    "crate::rpc::Empty".to_string()
+                } else {
+                    format!("crate::types::{base}Update")
+                }
+            },
+        );
+        lines.push(format!("    type Update = {update_type};"));
+        lines.push(format!(
+            "    type UpdateEvidence = {};",
+            if operation.update.is_some() {
+                "DeclaredOperationUpdates"
+            } else {
+                "NoOperationUpdates"
+            }
+        ));
         lines.push(format!(
             "    type Error = {};",
             if error_types.is_empty() {
@@ -2926,6 +2954,13 @@ fn render_operations_rs(loaded: &trellis_contracts::LoadedApi) -> String {
         lines.push(format!(
             "    const OUTPUT_SCHEMA_JSON: &'static str = crate::schemas::{schema_base}_OUTPUT_SCHEMA_JSON;"
         ));
+        if operation.update.is_some() {
+            lines.push(format!(
+                "    const UPDATE_SCHEMA_JSON: Option<&'static str> = Some(crate::schemas::{schema_base}_UPDATE_SCHEMA_JSON);"
+            ));
+        } else {
+            lines.push("    const UPDATE_SCHEMA_JSON: Option<&'static str> = None;".to_string());
+        }
         lines.push(format!(
             "    const SIGNAL_INPUT_SCHEMAS_JSON: &'static str = crate::schemas::{schema_base}_SIGNAL_INPUT_SCHEMAS_JSON;"
         ));
@@ -3042,23 +3077,6 @@ fn render_operations_rs(loaded: &trellis_contracts::LoadedApi) -> String {
             lines.push(format!(
                 "impl TransferOperationDescriptor for {base}Operation {{}}"
             ));
-            lines.push(String::new());
-        }
-        if let Some(update) = &operation.update {
-            let update_type = if is_empty_object_schema(resolve_schema_ref(loaded, &update.schema))
-            {
-                "crate::rpc::Empty".to_string()
-            } else {
-                format!("crate::types::{base}Update")
-            };
-            lines.push(format!(
-                "impl OperationUpdateDescriptor for {base}Operation {{"
-            ));
-            lines.push(format!("    type Update = {update_type};"));
-            lines.push(format!(
-                "    const UPDATE_SCHEMA_JSON: &'static str = crate::schemas::{schema_base}_UPDATE_SCHEMA_JSON;"
-            ));
-            lines.push("}".to_string());
             lines.push(String::new());
         }
     }
@@ -4648,6 +4666,7 @@ mod tests {
                     "InfoOutput": {"type":"object","properties":{"status":{"type":"string"}},"required":["status"]},
                     "ProcessInput": {"type":"object","properties":{"amount":{"type":"string"}},"required":["amount"]},
                     "ProcessProgress": {"type":"object","properties":{"step":{"type":"string"}},"required":["step"]},
+                    "ProcessUpdate": {"type":"object","properties":{"message":{"type":"string"}},"required":["message"]},
                     "ProcessOutput": {"type":"object","properties":{"done":{"type":"boolean"}},"required":["done"]},
                     "AuthChangedEvent": {"type":"object","properties":{"status":{"type":"string"}},"required":["status"]},
                     "AuditFeedInput": {"type":"object","properties":{"since":{"type":"string"}},"required":["since"]},
@@ -4665,7 +4684,7 @@ mod tests {
                     "Trellis.Info": {"version":"v1","input":{"schema":"InfoInput"},"output":{"schema":"InfoOutput"}}
                 },
                 "operations": {
-                    "Trellis.Process": {"version":"v1","input":{"schema":"ProcessInput"},"progress":{"schema":"ProcessProgress"},"output":{"schema":"ProcessOutput"},"transfer":{"direction":"send"},"cancel":true},
+                    "Trellis.Process": {"version":"v1","input":{"schema":"ProcessInput"},"progress":{"schema":"ProcessProgress"},"update":{"schema":"ProcessUpdate"},"output":{"schema":"ProcessOutput"},"transfer":{"direction":"send"},"cancel":true},
                     "Trellis.Audit": {"version":"v1","input":{"schema":"ProcessInput"},"progress":{"schema":"ProcessProgress"},"output":{"schema":"ProcessOutput"}}
                 },
                 "events": {
@@ -5050,10 +5069,16 @@ mod tests {
         assert!(!rpc_rs.contains("TrellisBindingsGet"));
         assert!(rpc_rs.contains("type Input = Empty;"));
         assert!(operations_rs.contains("pub struct TrellisProcessOperation;"));
-        assert!(operations_rs.contains(
-            "use trellis_rs::generated::{OperationDescriptor, TransferOperationDescriptor};"
-        ));
+        assert!(operations_rs.contains("DeclaredOperationUpdates"));
+        assert!(operations_rs.contains("NoOperationUpdates"));
+        assert!(operations_rs.contains("TransferOperationDescriptor"));
         assert!(operations_rs.contains("impl OperationDescriptor for TrellisProcessOperation"));
+        assert!(operations_rs.contains("type Update = crate::types::TrellisProcessUpdate;"));
+        assert!(operations_rs.contains("type UpdateEvidence = DeclaredOperationUpdates;"));
+        assert!(operations_rs.contains("TRELLIS_PROCESS_UPDATE_SCHEMA_JSON"));
+        assert!(operations_rs.contains("type Update = serde_json::Value;"));
+        assert!(operations_rs.contains("type UpdateEvidence = NoOperationUpdates;"));
+        assert!(operations_rs.contains("const UPDATE_SCHEMA_JSON: Option<&'static str> = None;"));
         assert!(operations_rs
             .contains("impl TransferOperationDescriptor for TrellisProcessOperation {}"));
         assert!(operations_rs.contains("impl OperationDescriptor for TrellisAuditOperation"));
@@ -6124,6 +6149,8 @@ mod tests {
             fs::read_to_string(out_dir.join("generated/src/operations.rs")).unwrap();
 
         assert!(operations_rs.contains("impl OperationDescriptor for ExampleProcessOperation"));
+        assert!(operations_rs.contains("type Update = serde_json::Value;"));
+        assert!(operations_rs.contains("const UPDATE_SCHEMA_JSON: Option<&'static str> = None;"));
         assert!(operations_rs.contains("type Error = ExampleProcessOperationError;"));
         assert!(
             operations_rs.contains("const ERRORS: &'static [&'static str] = &[\"NotFoundError\"];")
@@ -6135,7 +6162,7 @@ mod tests {
         assert!(operations_rs.contains("NotFoundError(crate::types::NotFoundData),"));
         assert!(operations_rs.contains("impl trellis_rs::generated::DeclaredError"));
         assert!(!operations_rs.contains("Other"));
-        assert!(operations_rs.contains("use trellis_rs::generated::OperationDescriptor;"));
+        assert!(operations_rs.contains("NoOperationUpdates, OperationDescriptor"));
         assert!(operations_rs.contains("use trellis_rs::service::OperationFailureLike;"));
         assert!(!operations_rs.contains("TransferOperationDescriptor"));
 

@@ -1,11 +1,12 @@
 use std::collections::HashMap;
 use std::future::Future;
 use std::marker::PhantomData;
+use std::pin::Pin;
 use std::sync::Arc;
 
 use futures_util::future::BoxFuture;
 use futures_util::stream::{self, BoxStream};
-use futures_util::StreamExt;
+use futures_util::{Stream, StreamExt};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_json::Value;
 use time::format_description::well_known::Rfc3339;
@@ -263,6 +264,8 @@ pub trait OperationDescriptor {
     type Input: DeserializeOwned + Send + 'static;
     type Progress: Serialize + Send + 'static;
     type Output: Serialize + Send + 'static;
+    type Update: Serialize + DeserializeOwned + Send + 'static;
+    type UpdateEvidence: crate::client::OperationUpdateEvidence;
     type Error: OperationFailureLike + Send + 'static;
 
     const KEY: &'static str;
@@ -276,16 +279,8 @@ pub trait OperationDescriptor {
     const INPUT_SCHEMA_JSON: &'static str;
     const PROGRESS_SCHEMA_JSON: Option<&'static str>;
     const OUTPUT_SCHEMA_JSON: &'static str;
+    const UPDATE_SCHEMA_JSON: Option<&'static str>;
     const SIGNAL_INPUT_SCHEMAS_JSON: &'static str;
-}
-
-/// Service descriptor extension implemented only by operations that declare live updates.
-pub trait OperationUpdateDescriptor: OperationDescriptor {
-    /// Contract-defined cumulative update payload.
-    type Update: Serialize + DeserializeOwned + Send + 'static;
-
-    /// JSON Schema used to validate updates before publication.
-    const UPDATE_SCHEMA_JSON: &'static str;
 }
 
 impl<D> OperationDescriptor for D
@@ -299,6 +294,8 @@ where
     type Input = D::Input;
     type Progress = D::Progress;
     type Output = D::Output;
+    type Update = D::Update;
+    type UpdateEvidence = D::UpdateEvidence;
     type Error = D::Error;
 
     const KEY: &'static str = D::KEY;
@@ -312,6 +309,7 @@ where
     const INPUT_SCHEMA_JSON: &'static str = D::INPUT_SCHEMA_JSON;
     const PROGRESS_SCHEMA_JSON: Option<&'static str> = D::PROGRESS_SCHEMA_JSON;
     const OUTPUT_SCHEMA_JSON: &'static str = D::OUTPUT_SCHEMA_JSON;
+    const UPDATE_SCHEMA_JSON: Option<&'static str> = D::UPDATE_SCHEMA_JSON;
     const SIGNAL_INPUT_SCHEMAS_JSON: &'static str = D::SIGNAL_INPUT_SCHEMAS_JSON;
 }
 
@@ -331,9 +329,26 @@ type OperationSnapshotFuture<D> = BoxFuture<
 >;
 type OperationSnapshotStream<P, O> =
     BoxStream<'static, Result<OperationSnapshot<P, O>, ServerError>>;
+/// Stream returned by operation providers for snapshots and live updates.
+pub type OperationLiveWatch<TProgress, TUpdate, TOutput> = Pin<
+    Box<
+        dyn Stream<Item = Result<OperationLiveEvent<TProgress, TUpdate, TOutput>, ServerError>>
+            + Send,
+    >,
+>;
+type OperationSignalFuture<D> = BoxFuture<
+    'static,
+    Result<
+        OperationSignalAccepted<
+            <D as OperationDescriptor>::Progress,
+            <D as OperationDescriptor>::Output,
+        >,
+        ServerError,
+    >,
+>;
 
-/// Provider-style operation handler for generated service helpers.
-pub trait OperationProvider<D>: Send + Sync + 'static
+/// Descriptor-backed operation handler registered by owning services.
+pub trait ServiceOperationProvider<D>: Send + Sync + 'static
 where
     D: OperationDescriptor,
 {
@@ -343,11 +358,54 @@ where
     /// Return the current snapshot for an operation id.
     fn get(&self, context: RequestContext, operation_id: String) -> OperationSnapshotFuture<D>;
 
-    /// Wait for a later or terminal snapshot for an operation id.
+    /// Wait until the operation reaches a terminal snapshot.
     fn wait(&self, context: RequestContext, operation_id: String) -> OperationSnapshotFuture<D>;
 
+    /// Stream operation snapshots and optional live updates.
+    ///
+    /// The default preserves one-shot wait behavior for providers without a live stream.
+    fn watch(
+        &self,
+        context: RequestContext,
+        operation_id: String,
+    ) -> OperationLiveWatch<D::Progress, D::Update, D::Output> {
+        Box::pin(
+            futures_util::stream::once(self.wait(context, operation_id))
+                .map(|snapshot| snapshot.map(OperationLiveEvent::Snapshot)),
+        )
+    }
+
     /// Cancel an operation id and return the resulting snapshot.
-    fn cancel(&self, context: RequestContext, operation_id: String) -> OperationSnapshotFuture<D>;
+    fn cancel(
+        &self,
+        _context: RequestContext,
+        _operation_id: String,
+    ) -> OperationSnapshotFuture<D> {
+        Box::pin(async {
+            Err(ServerError::InvalidOperationControlAction {
+                subject: D::SUBJECT.to_owned(),
+                action: "cancel".to_owned(),
+            })
+        })
+    }
+
+    /// Apply a named operation signal.
+    ///
+    /// Providers without signal support return `InvalidOperationControlAction`.
+    fn signal(
+        &self,
+        _context: RequestContext,
+        _operation_id: String,
+        _signal: String,
+        _input: Option<Value>,
+    ) -> OperationSignalFuture<D> {
+        Box::pin(async {
+            Err(ServerError::InvalidOperationControlAction {
+                subject: D::SUBJECT.to_owned(),
+                action: "signal".to_owned(),
+            })
+        })
+    }
 }
 
 #[doc = concat!("Trellis API operation `", stringify!(control_subject), "`.")]
@@ -741,8 +799,7 @@ where
         ServerError,
     >
     where
-        D: OperationUpdateDescriptor,
-        D::Update: Serialize + DeserializeOwned + Send + 'static,
+        D::UpdateEvidence: crate::client::HasOperationUpdates,
     {
         let operation_id = operation_id.into();
         let (initial, receiver) = {
@@ -916,11 +973,16 @@ where
         update: D::Update,
     ) -> Result<crate::client::OperationUpdateEvent<D::Update>, ServerError>
     where
-        D: OperationUpdateDescriptor,
-        D::Update: Serialize + DeserializeOwned + Clone + Send + 'static,
+        D::UpdateEvidence: crate::client::HasOperationUpdates,
+        D::Update: Clone,
     {
+        let update_schema =
+            D::UPDATE_SCHEMA_JSON.ok_or_else(|| ServerError::InvalidOperationControlAction {
+                subject: D::SUBJECT.to_owned(),
+                action: "update".to_owned(),
+            })?;
         let update_value = serde_json::to_value(&update)?;
-        super::validate_input_schema(D::UPDATE_SCHEMA_JSON, &update_value)?;
+        super::validate_input_schema(update_schema, &update_value)?;
         let mut operations = self.operation.inner.operations.lock().await;
         let stored = operations.get_mut(&self.operation_ref.id).ok_or_else(|| {
             ServerError::OperationNotFound {

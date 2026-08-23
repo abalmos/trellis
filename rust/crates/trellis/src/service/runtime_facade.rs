@@ -14,7 +14,6 @@ use async_nats::header::HeaderMap;
 use bytes::Bytes;
 use futures_util::future::BoxFuture;
 use futures_util::{Stream, StreamExt};
-use serde_json::Value;
 use tokio::task::{AbortHandle, JoinError, JoinHandle};
 
 pub use super::core_bootstrap::CoreBootstrapBinding;
@@ -27,13 +26,13 @@ use super::transfer::{
     spawn_upload_transfer_endpoint_with_progress,
 };
 use super::{
-    bootstrap_service_host, control_subject, AcceptedOperation, BootstrapBindingInfo,
-    DownloadTransferGrantPlan, EventPublisher, FeedDescriptor, HandlerResult, JobsResourceBinding,
-    KvResourceBinding, OperationDescriptor, OperationLiveEvent, OperationProvider,
-    OperationSignalAccepted, OperationSnapshot, OperationTransferProgress, RequestContext, Router,
-    RpcDescriptor, ServerError, ServiceResourceBindings, StoreResourceBinding, StoreResourceClient,
-    UploadTransferCompletion, UploadTransferGrantPlan, UploadTransferSession,
+    bootstrap_service_host, control_subject, BootstrapBindingInfo, DownloadTransferGrantPlan,
+    EventPublisher, FeedDescriptor, HandlerResult, JobsResourceBinding, KvResourceBinding,
+    OperationDescriptor, OperationTransferProgress, RequestContext, Router, RpcDescriptor,
+    ServerError, ServiceOperationProvider, ServiceResourceBindings, StoreResourceBinding,
+    StoreResourceClient, UploadTransferCompletion, UploadTransferGrantPlan, UploadTransferSession,
 };
+
 use crate::client::{
     AuthorizationContextStore, EventMessage, EventReplayPolicy, EventSubscribeOptions,
     EventSubscriptionMode, ServiceConnectWithContractOptions, TrellisClient, TrellisClientError,
@@ -94,18 +93,6 @@ impl Drop for ServiceEventListenerRegistryCleanup {
         remove_service_event_listeners(&self.event_listeners);
     }
 }
-
-/// Stream returned by high-level operation watch handlers.
-pub type ServiceOperationWatch<TProgress, TOutput> =
-    Pin<Box<dyn Stream<Item = Result<OperationSnapshot<TProgress, TOutput>, ServerError>> + Send>>;
-
-/// Stream returned by operation handlers that opt in to live update events.
-pub type ServiceOperationLiveWatch<TProgress, TUpdate, TOutput> = Pin<
-    Box<
-        dyn Stream<Item = Result<OperationLiveEvent<TProgress, TUpdate, TOutput>, ServerError>>
-            + Send,
-    >,
->;
 
 /// Default request/connect timeout for service bootstrap and NATS RPC calls.
 pub const DEFAULT_TIMEOUT_MS: u64 = 5_000;
@@ -1254,342 +1241,7 @@ impl<C> ConnectedServiceRuntime<C> {
         D: OperationDescriptor + 'static,
         P: ServiceOperationProvider<D>,
     {
-        self.router
-            .register_operation_provider::<D, _>(OperationProviderAdapter {
-                handle: self.generated_handle(),
-                provider,
-                _descriptor: PhantomData,
-            });
-        self.registered_subjects
-            .insert(self.descriptor_subject(D::SUBJECT));
-        self.registered_subjects
-            .insert(control_subject(&self.descriptor_subject(D::SUBJECT)));
-    }
-
-    /// Register one operation handler with an explicit watch stream and record data/control subjects.
-    pub fn register_operation_with_watch<
-        D,
-        FStart,
-        FutStart,
-        FGet,
-        FutGet,
-        FWatch,
-        FCancel,
-        FutCancel,
-    >(
-        &mut self,
-        start: FStart,
-        get: FGet,
-        watch: FWatch,
-        cancel: FCancel,
-    ) where
-        D: OperationDescriptor + 'static,
-        FStart: Fn(ServiceHandlerContext, D::Input) -> FutStart + Send + Sync + 'static,
-        FutStart: Future<Output = Result<AcceptedOperation<D::Progress, D::Output>, ServerError>>
-            + Send
-            + 'static,
-        FGet: Fn(ServiceHandlerContext, String) -> FutGet + Send + Sync + 'static,
-        FutGet: Future<Output = Result<OperationSnapshot<D::Progress, D::Output>, ServerError>>
-            + Send
-            + 'static,
-        FWatch: Fn(ServiceHandlerContext, String) -> ServiceOperationWatch<D::Progress, D::Output>
-            + Send
-            + Sync
-            + 'static,
-        FCancel: Fn(ServiceHandlerContext, String) -> FutCancel + Send + Sync + 'static,
-        FutCancel: Future<Output = Result<OperationSnapshot<D::Progress, D::Output>, ServerError>>
-            + Send
-            + 'static,
-    {
-        let start_handle = self.generated_handle();
-        let get_handle = self.generated_handle();
-        let watch_handle = self.generated_handle();
-        let cancel_handle = self.generated_handle();
-        self.router
-            .register_operation_with_watch::<D, _, _, _, _, _, _, _>(
-                move |request, input| {
-                    start(
-                        ServiceHandlerContext::new(request, start_handle.clone()),
-                        input,
-                    )
-                },
-                move |request, operation_id| {
-                    get(
-                        ServiceHandlerContext::new(request, get_handle.clone()),
-                        operation_id,
-                    )
-                },
-                move |request, operation_id| {
-                    watch(
-                        ServiceHandlerContext::new(request, watch_handle.clone()),
-                        operation_id,
-                    )
-                },
-                move |request, operation_id| {
-                    cancel(
-                        ServiceHandlerContext::new(request, cancel_handle.clone()),
-                        operation_id,
-                    )
-                },
-            );
-        self.registered_subjects
-            .insert(self.descriptor_subject(D::SUBJECT));
-        self.registered_subjects
-            .insert(control_subject(&self.descriptor_subject(D::SUBJECT)));
-    }
-
-    /// Register one operation handler with a single wait snapshot and record data/control subjects.
-    pub fn register_operation<
-        D,
-        FStart,
-        FutStart,
-        FGet,
-        FutGet,
-        FWait,
-        FutWait,
-        FCancel,
-        FutCancel,
-    >(
-        &mut self,
-        start: FStart,
-        get: FGet,
-        wait: FWait,
-        cancel: FCancel,
-    ) where
-        D: OperationDescriptor + 'static,
-        FStart: Fn(ServiceHandlerContext, D::Input) -> FutStart + Send + Sync + 'static,
-        FutStart: Future<Output = Result<AcceptedOperation<D::Progress, D::Output>, ServerError>>
-            + Send
-            + 'static,
-        FGet: Fn(ServiceHandlerContext, String) -> FutGet + Send + Sync + 'static,
-        FutGet: Future<Output = Result<OperationSnapshot<D::Progress, D::Output>, ServerError>>
-            + Send
-            + 'static,
-        FWait: Fn(ServiceHandlerContext, String) -> FutWait + Send + Sync + 'static,
-        FutWait: Future<Output = Result<OperationSnapshot<D::Progress, D::Output>, ServerError>>
-            + Send
-            + 'static,
-        FCancel: Fn(ServiceHandlerContext, String) -> FutCancel + Send + Sync + 'static,
-        FutCancel: Future<Output = Result<OperationSnapshot<D::Progress, D::Output>, ServerError>>
-            + Send
-            + 'static,
-    {
-        let start_handle = self.generated_handle();
-        let get_handle = self.generated_handle();
-        let wait_handle = self.generated_handle();
-        let cancel_handle = self.generated_handle();
-        self.router.register_operation::<D, _, _, _, _, _, _, _, _>(
-            move |request, input| {
-                start(
-                    ServiceHandlerContext::new(request, start_handle.clone()),
-                    input,
-                )
-            },
-            move |request, operation_id| {
-                get(
-                    ServiceHandlerContext::new(request, get_handle.clone()),
-                    operation_id,
-                )
-            },
-            move |request, operation_id| {
-                wait(
-                    ServiceHandlerContext::new(request, wait_handle.clone()),
-                    operation_id,
-                )
-            },
-            move |request, operation_id| {
-                cancel(
-                    ServiceHandlerContext::new(request, cancel_handle.clone()),
-                    operation_id,
-                )
-            },
-        );
-        self.registered_subjects
-            .insert(self.descriptor_subject(D::SUBJECT));
-        self.registered_subjects
-            .insert(control_subject(&self.descriptor_subject(D::SUBJECT)));
-    }
-
-    /// Register one operation handler with watch and signal control support.
-    pub fn register_operation_with_watch_and_signal<
-        D,
-        FStart,
-        FutStart,
-        FGet,
-        FutGet,
-        FWatch,
-        FCancel,
-        FutCancel,
-        FSignal,
-        FutSignal,
-    >(
-        &mut self,
-        start: FStart,
-        get: FGet,
-        watch: FWatch,
-        cancel: FCancel,
-        signal: FSignal,
-    ) where
-        D: OperationDescriptor + 'static,
-        FStart: Fn(ServiceHandlerContext, D::Input) -> FutStart + Send + Sync + 'static,
-        FutStart: Future<Output = Result<AcceptedOperation<D::Progress, D::Output>, ServerError>>
-            + Send
-            + 'static,
-        FGet: Fn(ServiceHandlerContext, String) -> FutGet + Send + Sync + 'static,
-        FutGet: Future<Output = Result<OperationSnapshot<D::Progress, D::Output>, ServerError>>
-            + Send
-            + 'static,
-        FWatch: Fn(ServiceHandlerContext, String) -> ServiceOperationWatch<D::Progress, D::Output>
-            + Send
-            + Sync
-            + 'static,
-        FCancel: Fn(ServiceHandlerContext, String) -> FutCancel + Send + Sync + 'static,
-        FutCancel: Future<Output = Result<OperationSnapshot<D::Progress, D::Output>, ServerError>>
-            + Send
-            + 'static,
-        FSignal: Fn(ServiceHandlerContext, String, String, Option<Value>) -> FutSignal
-            + Send
-            + Sync
-            + 'static,
-        FutSignal: Future<Output = Result<OperationSignalAccepted<D::Progress, D::Output>, ServerError>>
-            + Send
-            + 'static,
-    {
-        let start_handle = self.generated_handle();
-        let get_handle = self.generated_handle();
-        let watch_handle = self.generated_handle();
-        let cancel_handle = self.generated_handle();
-        let signal_handle = self.generated_handle();
-        self.router
-            .register_operation_with_watch_and_signal::<D, _, _, _, _, _, _, _, _, _>(
-                move |request, input| {
-                    start(
-                        ServiceHandlerContext::new(request, start_handle.clone()),
-                        input,
-                    )
-                },
-                move |request, operation_id| {
-                    get(
-                        ServiceHandlerContext::new(request, get_handle.clone()),
-                        operation_id,
-                    )
-                },
-                move |request, operation_id| {
-                    watch(
-                        ServiceHandlerContext::new(request, watch_handle.clone()),
-                        operation_id,
-                    )
-                },
-                move |request, operation_id| {
-                    cancel(
-                        ServiceHandlerContext::new(request, cancel_handle.clone()),
-                        operation_id,
-                    )
-                },
-                move |request, operation_id, signal_name, input| {
-                    signal(
-                        ServiceHandlerContext::new(request, signal_handle.clone()),
-                        operation_id,
-                        signal_name,
-                        input,
-                    )
-                },
-            );
-        self.registered_subjects
-            .insert(self.descriptor_subject(D::SUBJECT));
-        self.registered_subjects
-            .insert(control_subject(&self.descriptor_subject(D::SUBJECT)));
-    }
-
-    /// Register one operation handler with typed live updates and signal control support.
-    pub fn register_operation_with_updates_and_signal<
-        D,
-        FStart,
-        FutStart,
-        FGet,
-        FutGet,
-        FWatch,
-        FCancel,
-        FutCancel,
-        FSignal,
-        FutSignal,
-    >(
-        &mut self,
-        start: FStart,
-        get: FGet,
-        watch: FWatch,
-        cancel: FCancel,
-        signal: FSignal,
-    ) where
-        D: super::OperationUpdateDescriptor + 'static,
-        D::Update: serde::Serialize + Send + 'static,
-        FStart: Fn(ServiceHandlerContext, D::Input) -> FutStart + Send + Sync + 'static,
-        FutStart: Future<Output = Result<AcceptedOperation<D::Progress, D::Output>, ServerError>>
-            + Send
-            + 'static,
-        FGet: Fn(ServiceHandlerContext, String) -> FutGet + Send + Sync + 'static,
-        FutGet: Future<Output = Result<OperationSnapshot<D::Progress, D::Output>, ServerError>>
-            + Send
-            + 'static,
-        FWatch: Fn(
-                ServiceHandlerContext,
-                String,
-            ) -> ServiceOperationLiveWatch<D::Progress, D::Update, D::Output>
-            + Send
-            + Sync
-            + 'static,
-        FCancel: Fn(ServiceHandlerContext, String) -> FutCancel + Send + Sync + 'static,
-        FutCancel: Future<Output = Result<OperationSnapshot<D::Progress, D::Output>, ServerError>>
-            + Send
-            + 'static,
-        FSignal: Fn(ServiceHandlerContext, String, String, Option<Value>) -> FutSignal
-            + Send
-            + Sync
-            + 'static,
-        FutSignal: Future<Output = Result<OperationSignalAccepted<D::Progress, D::Output>, ServerError>>
-            + Send
-            + 'static,
-    {
-        let start_handle = self.generated_handle();
-        let get_handle = self.generated_handle();
-        let watch_handle = self.generated_handle();
-        let cancel_handle = self.generated_handle();
-        let signal_handle = self.generated_handle();
-        self.router
-            .register_operation_with_updates_and_signal::<D, _, _, _, _, _, _, _, _, _>(
-                move |request, input| {
-                    start(
-                        ServiceHandlerContext::new(request, start_handle.clone()),
-                        input,
-                    )
-                },
-                move |request, operation_id| {
-                    get(
-                        ServiceHandlerContext::new(request, get_handle.clone()),
-                        operation_id,
-                    )
-                },
-                move |request, operation_id| {
-                    watch(
-                        ServiceHandlerContext::new(request, watch_handle.clone()),
-                        operation_id,
-                    )
-                },
-                move |request, operation_id| {
-                    cancel(
-                        ServiceHandlerContext::new(request, cancel_handle.clone()),
-                        operation_id,
-                    )
-                },
-                move |request, operation_id, signal_name, input| {
-                    signal(
-                        ServiceHandlerContext::new(request, signal_handle.clone()),
-                        operation_id,
-                        signal_name,
-                        input,
-                    )
-                },
-            );
+        self.router.register_operation_provider::<D, _>(provider);
         self.registered_subjects
             .insert(self.descriptor_subject(D::SUBJECT));
         self.registered_subjects
@@ -1726,111 +1378,6 @@ impl<C: GeneratedServiceContract> ConnectedServiceRuntime<C> {
             binding,
             C::PARTICIPANT_ID,
         ))
-    }
-}
-
-type ServiceAcceptedOperationFuture<D> = BoxFuture<
-    'static,
-    Result<
-        AcceptedOperation<<D as OperationDescriptor>::Progress, <D as OperationDescriptor>::Output>,
-        ServerError,
-    >,
->;
-type ServiceOperationSnapshotFuture<D> = BoxFuture<
-    'static,
-    Result<
-        OperationSnapshot<<D as OperationDescriptor>::Progress, <D as OperationDescriptor>::Output>,
-        ServerError,
-    >,
->;
-
-/// Provider-style operation handler using the high-level service handler context.
-pub trait ServiceOperationProvider<D>: Send + Sync + 'static
-where
-    D: OperationDescriptor,
-{
-    /// Start a new operation instance from decoded input.
-    fn start(
-        &self,
-        context: ServiceHandlerContext,
-        input: D::Input,
-    ) -> ServiceAcceptedOperationFuture<D>;
-
-    /// Return the current snapshot for an operation id.
-    fn get(
-        &self,
-        context: ServiceHandlerContext,
-        operation_id: String,
-    ) -> ServiceOperationSnapshotFuture<D>;
-
-    /// Wait for a later or terminal snapshot for an operation id.
-    fn wait(
-        &self,
-        context: ServiceHandlerContext,
-        operation_id: String,
-    ) -> ServiceOperationSnapshotFuture<D>;
-
-    /// Cancel an operation id and return the resulting snapshot.
-    fn cancel(
-        &self,
-        context: ServiceHandlerContext,
-        operation_id: String,
-    ) -> ServiceOperationSnapshotFuture<D>;
-}
-
-struct OperationProviderAdapter<D, P> {
-    handle: ServiceHandle,
-    provider: P,
-    _descriptor: PhantomData<fn() -> D>,
-}
-
-impl<D, P> OperationProvider<D> for OperationProviderAdapter<D, P>
-where
-    D: OperationDescriptor + 'static,
-    P: ServiceOperationProvider<D>,
-{
-    fn start(
-        &self,
-        context: RequestContext,
-        input: D::Input,
-    ) -> BoxFuture<'static, Result<AcceptedOperation<D::Progress, D::Output>, ServerError>> {
-        self.provider.start(
-            ServiceHandlerContext::new(context, self.handle.clone()),
-            input,
-        )
-    }
-
-    fn get(
-        &self,
-        context: RequestContext,
-        operation_id: String,
-    ) -> BoxFuture<'static, Result<OperationSnapshot<D::Progress, D::Output>, ServerError>> {
-        self.provider.get(
-            ServiceHandlerContext::new(context, self.handle.clone()),
-            operation_id,
-        )
-    }
-
-    fn wait(
-        &self,
-        context: RequestContext,
-        operation_id: String,
-    ) -> BoxFuture<'static, Result<OperationSnapshot<D::Progress, D::Output>, ServerError>> {
-        self.provider.wait(
-            ServiceHandlerContext::new(context, self.handle.clone()),
-            operation_id,
-        )
-    }
-
-    fn cancel(
-        &self,
-        context: RequestContext,
-        operation_id: String,
-    ) -> BoxFuture<'static, Result<OperationSnapshot<D::Progress, D::Output>, ServerError>> {
-        self.provider.cancel(
-            ServiceHandlerContext::new(context, self.handle.clone()),
-            operation_id,
-        )
     }
 }
 
@@ -2401,8 +1948,9 @@ fn is_missing_durable_event_consumer_error(error: &TrellisClientError) -> bool {
 mod tests {
     use super::*;
     use crate::service::{
-        BootstrapBinding, EventConsumerOrdering, EventConsumerReplay, EventConsumerResourceBinding,
-        KvResourceBinding, OperationFailure, StoreResourceBinding,
+        AcceptedOperation, BootstrapBinding, EventConsumerOrdering, EventConsumerReplay,
+        EventConsumerResourceBinding, KvResourceBinding, OperationFailure, OperationSnapshot,
+        StoreResourceBinding,
     };
     use futures_util::future::ready;
     use serde::{Deserialize, Serialize};
@@ -2482,6 +2030,8 @@ mod tests {
         type Input = OperationInput;
         type Progress = OperationProgress;
         type Output = OperationOutput;
+        type Update = serde_json::Value;
+        type UpdateEvidence = crate::client::NoOperationUpdates;
         type Error = OperationFailure;
 
         const KEY: &'static str = "Test.Operation";
@@ -2493,7 +2043,72 @@ mod tests {
         const PROGRESS_SCHEMA_JSON: Option<&'static str> = None;
         const OUTPUT_SCHEMA_JSON: &'static str =
             r#"{"type":"object","properties":{},"required":[]}"#;
+        const UPDATE_SCHEMA_JSON: Option<&'static str> = None;
         const SIGNAL_INPUT_SCHEMAS_JSON: &'static str = "{}";
+    }
+
+    struct TestOperationProvider;
+
+    impl ServiceOperationProvider<TestOperation> for TestOperationProvider {
+        fn start(
+            &self,
+            _context: RequestContext,
+            _input: OperationInput,
+        ) -> BoxFuture<
+            'static,
+            Result<AcceptedOperation<OperationProgress, OperationOutput>, ServerError>,
+        > {
+            Box::pin(async {
+                Ok(AcceptedOperation {
+                    kind: "accepted".to_string(),
+                    operation_ref: crate::service::OperationRefData {
+                        id: "op_123".to_string(),
+                        service: "test-service".to_string(),
+                        operation: "Test.Operation".to_string(),
+                    },
+                    snapshot: OperationSnapshot {
+                        revision: 1,
+                        state: crate::service::OperationState::Pending,
+                        ..Default::default()
+                    },
+                    transfer: None,
+                })
+            })
+        }
+
+        fn get(
+            &self,
+            _context: RequestContext,
+            _operation_id: String,
+        ) -> BoxFuture<
+            'static,
+            Result<OperationSnapshot<OperationProgress, OperationOutput>, ServerError>,
+        > {
+            Box::pin(async {
+                Ok(OperationSnapshot {
+                    revision: 1,
+                    state: crate::service::OperationState::Pending,
+                    ..Default::default()
+                })
+            })
+        }
+
+        fn wait(
+            &self,
+            _context: RequestContext,
+            _operation_id: String,
+        ) -> BoxFuture<
+            'static,
+            Result<OperationSnapshot<OperationProgress, OperationOutput>, ServerError>,
+        > {
+            Box::pin(async {
+                Ok(OperationSnapshot {
+                    revision: 2,
+                    state: crate::service::OperationState::Completed,
+                    ..Default::default()
+                })
+            })
+        }
     }
 
     struct TestContract;
@@ -2782,39 +2397,7 @@ mod tests {
         let mut runtime =
             ConnectedServiceRuntime::<TestContract>::from_test_binding("test-service", binding());
 
-        runtime.register_operation_with_watch::<TestOperation, _, _, _, _, _, _, _>(
-            |_ctx, _input| async move {
-                Ok(AcceptedOperation {
-                    kind: "accepted".to_string(),
-                    operation_ref: crate::service::OperationRefData {
-                        id: "op_123".to_string(),
-                        service: "test-service".to_string(),
-                        operation: "Test.Operation".to_string(),
-                    },
-                    snapshot: OperationSnapshot::<OperationProgress, OperationOutput> {
-                        revision: 1,
-                        state: crate::service::OperationState::Pending,
-                        ..Default::default()
-                    },
-                    transfer: None,
-                })
-            },
-            |_ctx, _operation_id| async move {
-                Ok(OperationSnapshot::<OperationProgress, OperationOutput> {
-                    revision: 1,
-                    state: crate::service::OperationState::Pending,
-                    ..Default::default()
-                })
-            },
-            |_ctx, _operation_id| Box::pin(futures_util::stream::empty()),
-            |_ctx, _operation_id| async move {
-                Ok(OperationSnapshot::<OperationProgress, OperationOutput> {
-                    revision: 2,
-                    state: crate::service::OperationState::Cancelled,
-                    ..Default::default()
-                })
-            },
-        );
+        runtime.register_operation_provider::<TestOperation, _>(TestOperationProvider);
 
         assert_eq!(
             runtime.registered_subjects(),

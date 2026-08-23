@@ -67,10 +67,11 @@ pub use events::{
     SqliteOutboxStore,
 };
 pub use operations::{
-    control_subject, OperationDescriptor, OperationEvent, OperationInputBuilder, OperationInvoker,
-    OperationRef, OperationRefData, OperationSignalAccepted, OperationSnapshot, OperationState,
+    control_subject, DeclaredOperationUpdates, HasOperationUpdates, NoOperationUpdates,
+    OperationDescriptor, OperationEvent, OperationInputBuilder, OperationInvoker, OperationRef,
+    OperationRefData, OperationSignalAccepted, OperationSnapshot, OperationState,
     OperationTransferInputBuilder, OperationTransferProgress, OperationTransferStartError,
-    OperationTransport, OperationUpdateDescriptor, OperationUpdateEvent, StartedOperationTransfer,
+    OperationTransport, OperationUpdateEvent, OperationUpdateEvidence, StartedOperationTransfer,
     TransferOperationDescriptor,
 };
 pub use proof::verify_event_proof;

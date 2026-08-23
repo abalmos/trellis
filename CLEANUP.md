@@ -190,7 +190,7 @@ Validation:
       one source of truth.
 - [x] Apply the same constructor simplification to device connection paths where
       equivalent duplication exists.
-- [ ] Collapse combinatorial operation-registration callback variants to one
+- [x] Collapse combinatorial operation-registration callback variants to one
       provider interface; generated code adapts to it.
 
 Validation:

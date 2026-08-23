@@ -19,9 +19,9 @@ use super::error::ValidationIssue;
 use super::request_loop::{HandlerResponse, ResponseStream};
 use super::schema_validation::validate_input_schema;
 use super::{
-    control_subject, AcceptedOperation, FeedDescriptor, HandlerResult, OperationControlRequest,
-    OperationDescriptor, OperationLiveEvent, OperationProvider, OperationSignalAccepted,
-    OperationSnapshot, OperationSnapshotFrame, RpcDescriptor, ServerError,
+    control_subject, FeedDescriptor, HandlerResult, OperationControlRequest, OperationDescriptor,
+    OperationLiveEvent, OperationLiveWatch, OperationSignalAccepted, OperationSnapshot,
+    OperationSnapshotFrame, RpcDescriptor, ServerError, ServiceOperationProvider,
 };
 
 /// Request metadata forwarded to mounted RPC handlers.
@@ -180,14 +180,6 @@ impl RouteCapabilities {
     }
 }
 
-type OperationWatch<TProgress, TOutput> =
-    Pin<Box<dyn Stream<Item = Result<OperationSnapshot<TProgress, TOutput>, ServerError>> + Send>>;
-type OperationLiveWatch<TProgress, TUpdate, TOutput> = Pin<
-    Box<
-        dyn Stream<Item = Result<OperationLiveEvent<TProgress, TUpdate, TOutput>, ServerError>>
-            + Send,
-    >,
->;
 const FEED_CANCEL_TOMBSTONE_TTL: Duration = Duration::from_secs(30);
 const MAX_FEED_CANCEL_TOMBSTONES: usize = 1_024;
 
@@ -436,284 +428,17 @@ impl Router {
         );
     }
 
-    /// Register one operation-backed handler pair.
-    pub fn register_operation<
-        D,
-        FStart,
-        FutStart,
-        FGet,
-        FutGet,
-        FWait,
-        FutWait,
-        FCancel,
-        FutCancel,
-    >(
-        &mut self,
-        start: FStart,
-        get: FGet,
-        wait: FWait,
-        cancel: FCancel,
-    ) where
+    fn register_operation_routes<D, P>(&mut self, provider: Arc<P>)
+    where
         D: OperationDescriptor + 'static,
-        FStart: Fn(RequestContext, D::Input) -> FutStart + Send + Sync + 'static,
-        FutStart: Future<Output = Result<AcceptedOperation<D::Progress, D::Output>, ServerError>>
-            + Send
-            + 'static,
-        FGet: Fn(RequestContext, String) -> FutGet + Send + Sync + 'static,
-        FutGet: Future<Output = Result<OperationSnapshot<D::Progress, D::Output>, ServerError>>
-            + Send
-            + 'static,
-        FWait: Fn(RequestContext, String) -> FutWait + Send + Sync + 'static,
-        FutWait: Future<Output = Result<OperationSnapshot<D::Progress, D::Output>, ServerError>>
-            + Send
-            + 'static,
-        FCancel: Fn(RequestContext, String) -> FutCancel + Send + Sync + 'static,
-        FutCancel: Future<Output = Result<OperationSnapshot<D::Progress, D::Output>, ServerError>>
-            + Send
-            + 'static,
+        P: ServiceOperationProvider<D>,
     {
-        let watch = {
-            let wait = Arc::new(wait);
-            move |ctx, operation_id| {
-                let wait = Arc::clone(&wait);
-                Box::pin(futures_util::stream::once(async move {
-                    wait(ctx, operation_id).await
-                })) as OperationWatch<D::Progress, D::Output>
-            }
-        };
-
-        self.register_operation_with_watch::<D, _, _, _, _, _, _, _>(start, get, watch, cancel);
-    }
-
-    /// Register one operation-backed handler pair with a watch snapshot stream.
-    pub fn register_operation_with_watch<
-        D,
-        FStart,
-        FutStart,
-        FGet,
-        FutGet,
-        FWatch,
-        FCancel,
-        FutCancel,
-    >(
-        &mut self,
-        start: FStart,
-        get: FGet,
-        watch: FWatch,
-        cancel: FCancel,
-    ) where
-        D: OperationDescriptor + 'static,
-        FStart: Fn(RequestContext, D::Input) -> FutStart + Send + Sync + 'static,
-        FutStart: Future<Output = Result<AcceptedOperation<D::Progress, D::Output>, ServerError>>
-            + Send
-            + 'static,
-        FGet: Fn(RequestContext, String) -> FutGet + Send + Sync + 'static,
-        FutGet: Future<Output = Result<OperationSnapshot<D::Progress, D::Output>, ServerError>>
-            + Send
-            + 'static,
-        FWatch: Fn(RequestContext, String) -> OperationWatch<D::Progress, D::Output>
-            + Send
-            + Sync
-            + 'static,
-        FCancel: Fn(RequestContext, String) -> FutCancel + Send + Sync + 'static,
-        FutCancel: Future<Output = Result<OperationSnapshot<D::Progress, D::Output>, ServerError>>
-            + Send
-            + 'static,
-    {
-        let start = Arc::new(start);
-        let get = Arc::new(get);
-        let watch = Arc::new(watch);
-        let cancel = Arc::new(cancel);
-        let subject = self.descriptor_subject(D::SUBJECT);
-
-        self.register_operation_with_watch_and_signal::<D, _, _, _, _, _, _, _, _, _>(
-            move |ctx, input| {
-                let start = Arc::clone(&start);
-                async move { start(ctx, input).await }
-            },
-            move |ctx, operation_id| {
-                let get = Arc::clone(&get);
-                async move { get(ctx, operation_id).await }
-            },
-            move |ctx, operation_id| watch(ctx, operation_id),
-            move |ctx, operation_id| {
-                let cancel = Arc::clone(&cancel);
-                async move { cancel(ctx, operation_id).await }
-            },
-            move |_ctx, _operation_id, _signal, _input| {
-                let subject = subject.clone();
-                async move {
-                    Err(ServerError::InvalidOperationControlAction {
-                        subject,
-                        action: "signal".to_string(),
-                    })
-                }
-            },
-        );
-    }
-
-    /// Register one operation-backed handler with watch and signal control support.
-    pub fn register_operation_with_watch_and_signal<
-        D,
-        FStart,
-        FutStart,
-        FGet,
-        FutGet,
-        FWatch,
-        FCancel,
-        FutCancel,
-        FSignal,
-        FutSignal,
-    >(
-        &mut self,
-        start: FStart,
-        get: FGet,
-        watch: FWatch,
-        cancel: FCancel,
-        signal: FSignal,
-    ) where
-        D: OperationDescriptor + 'static,
-        FStart: Fn(RequestContext, D::Input) -> FutStart + Send + Sync + 'static,
-        FutStart: Future<Output = Result<AcceptedOperation<D::Progress, D::Output>, ServerError>>
-            + Send
-            + 'static,
-        FGet: Fn(RequestContext, String) -> FutGet + Send + Sync + 'static,
-        FutGet: Future<Output = Result<OperationSnapshot<D::Progress, D::Output>, ServerError>>
-            + Send
-            + 'static,
-        FWatch: Fn(RequestContext, String) -> OperationWatch<D::Progress, D::Output>
-            + Send
-            + Sync
-            + 'static,
-        FCancel: Fn(RequestContext, String) -> FutCancel + Send + Sync + 'static,
-        FutCancel: Future<Output = Result<OperationSnapshot<D::Progress, D::Output>, ServerError>>
-            + Send
-            + 'static,
-        FSignal:
-            Fn(RequestContext, String, String, Option<Value>) -> FutSignal + Send + Sync + 'static,
-        FutSignal: Future<Output = Result<OperationSignalAccepted<D::Progress, D::Output>, ServerError>>
-            + Send
-            + 'static,
-    {
-        self.register_operation_with_live_watch_and_signal::<D, Value, _, _, _, _, _, _, _, _, _>(
-            start,
-            get,
-            move |context, operation_id| {
-                Box::pin(
-                    watch(context, operation_id)
-                        .map(|snapshot| snapshot.map(OperationLiveEvent::Snapshot)),
-                ) as OperationLiveWatch<D::Progress, Value, D::Output>
-            },
-            cancel,
-            signal,
-            None,
-        );
-    }
-
-    /// Register an operation handler whose watch stream includes declared live updates.
-    pub fn register_operation_with_updates_and_signal<
-        D,
-        FStart,
-        FutStart,
-        FGet,
-        FutGet,
-        FWatch,
-        FCancel,
-        FutCancel,
-        FSignal,
-        FutSignal,
-    >(
-        &mut self,
-        start: FStart,
-        get: FGet,
-        watch: FWatch,
-        cancel: FCancel,
-        signal: FSignal,
-    ) where
-        D: super::OperationUpdateDescriptor + 'static,
-        D::Update: serde::Serialize + Send + 'static,
-        FStart: Fn(RequestContext, D::Input) -> FutStart + Send + Sync + 'static,
-        FutStart: Future<Output = Result<AcceptedOperation<D::Progress, D::Output>, ServerError>>
-            + Send
-            + 'static,
-        FGet: Fn(RequestContext, String) -> FutGet + Send + Sync + 'static,
-        FutGet: Future<Output = Result<OperationSnapshot<D::Progress, D::Output>, ServerError>>
-            + Send
-            + 'static,
-        FWatch: Fn(RequestContext, String) -> OperationLiveWatch<D::Progress, D::Update, D::Output>
-            + Send
-            + Sync
-            + 'static,
-        FCancel: Fn(RequestContext, String) -> FutCancel + Send + Sync + 'static,
-        FutCancel: Future<Output = Result<OperationSnapshot<D::Progress, D::Output>, ServerError>>
-            + Send
-            + 'static,
-        FSignal:
-            Fn(RequestContext, String, String, Option<Value>) -> FutSignal + Send + Sync + 'static,
-        FutSignal: Future<Output = Result<OperationSignalAccepted<D::Progress, D::Output>, ServerError>>
-            + Send
-            + 'static,
-    {
-        self.register_operation_with_live_watch_and_signal::<D, D::Update, _, _, _, _, _, _, _, _, _>(
-            start,
-            get,
-            watch,
-            cancel,
-            signal,
-            Some(D::UPDATE_SCHEMA_JSON),
-        );
-    }
-
-    fn register_operation_with_live_watch_and_signal<
-        D,
-        TUpdate,
-        FStart,
-        FutStart,
-        FGet,
-        FutGet,
-        FWatch,
-        FCancel,
-        FutCancel,
-        FSignal,
-        FutSignal,
-    >(
-        &mut self,
-        start: FStart,
-        get: FGet,
-        watch: FWatch,
-        cancel: FCancel,
-        signal: FSignal,
-        update_schema_json: Option<&'static str>,
-    ) where
-        D: OperationDescriptor + 'static,
-        TUpdate: serde::Serialize + Send + 'static,
-        FStart: Fn(RequestContext, D::Input) -> FutStart + Send + Sync + 'static,
-        FutStart: Future<Output = Result<AcceptedOperation<D::Progress, D::Output>, ServerError>>
-            + Send
-            + 'static,
-        FGet: Fn(RequestContext, String) -> FutGet + Send + Sync + 'static,
-        FutGet: Future<Output = Result<OperationSnapshot<D::Progress, D::Output>, ServerError>>
-            + Send
-            + 'static,
-        FWatch: Fn(RequestContext, String) -> OperationLiveWatch<D::Progress, TUpdate, D::Output>
-            + Send
-            + Sync
-            + 'static,
-        FCancel: Fn(RequestContext, String) -> FutCancel + Send + Sync + 'static,
-        FutCancel: Future<Output = Result<OperationSnapshot<D::Progress, D::Output>, ServerError>>
-            + Send
-            + 'static,
-        FSignal:
-            Fn(RequestContext, String, String, Option<Value>) -> FutSignal + Send + Sync + 'static,
-        FutSignal: Future<Output = Result<OperationSignalAccepted<D::Progress, D::Output>, ServerError>>
-            + Send
-            + 'static,
-    {
-        let start = Arc::new(start);
-        let get = Arc::new(get);
-        let watch = Arc::new(watch);
-        let cancel = Arc::new(cancel);
-        let signal = Arc::new(signal);
+        let start = Arc::clone(&provider);
+        let get = Arc::clone(&provider);
+        let watch = Arc::clone(&provider);
+        let cancel = Arc::clone(&provider);
+        let signal = provider;
+        let update_schema_json = D::UPDATE_SCHEMA_JSON;
         let subject = self.descriptor_subject(D::SUBJECT);
         let handler_subject = subject.clone();
         let caller_capabilities = self.descriptor_capabilities(D::CALLER_CAPABILITIES);
@@ -735,7 +460,7 @@ impl Router {
                     let start = Arc::clone(&start);
                     Box::pin(async move {
                         let input = parse_validated_input::<D::Input>(&payload, D::INPUT_SCHEMA_JSON)?;
-                        let output = start(ctx, input).await?;
+                        let output = start.start(ctx, input).await?;
                         validate_operation_snapshot::<D>(&output.snapshot)?;
                         Ok(HandlerResponse::Frames(vec![Bytes::from(
                             serde_json::to_vec(&output)?,
@@ -774,10 +499,10 @@ impl Router {
                         );
                         let frames = match request.action.as_str() {
                             "get" => HandlerResponse::Frames(vec![snapshot_frame::<D>(
-                                get(ctx, request.operation_id).await?,
+                                get.get(ctx, request.operation_id).await?,
                             )?]),
                             "wait" => {
-                                let mut snapshots = watch(ctx, request.operation_id);
+                                let mut snapshots = watch.watch(ctx, request.operation_id);
                                 let mut terminal = None;
                                 while let Some(event) = snapshots.next().await {
                                     let event = event?;
@@ -804,15 +529,15 @@ impl Router {
                                         action: "watch:updates".to_string(),
                                     });
                                 }
-                                HandlerResponse::Stream(watch_response_stream::<D, TUpdate>(
-                                    watch(ctx, request.operation_id),
+                                HandlerResponse::Stream(watch_response_stream::<D, D::Update>(
+                                    watch.watch(ctx, request.operation_id),
                                     include_updates,
                                     update_schema_json,
                                 ))
                             }
                             "cancel" if D::CANCELABLE => {
                                 HandlerResponse::Frames(vec![snapshot_frame::<D>(
-                                    cancel(ctx, request.operation_id).await?,
+                                    cancel.cancel(ctx, request.operation_id).await?,
                                 )?])
                             }
                             "signal" => {
@@ -840,7 +565,7 @@ impl Router {
                                     ))?;
                                 validate_input_schema(&signal_schema_str, signal_value)?;
                                 HandlerResponse::Frames(vec![signal_frame::<D>(
-                                    signal(ctx, request.operation_id, signal_name, request.input)
+                                    signal.signal(ctx, request.operation_id, signal_name, request.input)
                                         .await?,
                                 )?])
                             }
@@ -863,24 +588,9 @@ impl Router {
     pub fn register_operation_provider<D, P>(&mut self, provider: P)
     where
         D: OperationDescriptor + 'static,
-        P: OperationProvider<D>,
+        P: ServiceOperationProvider<D>,
     {
-        let provider = Arc::new(provider);
-        self.register_operation::<D, _, _, _, _, _, _, _, _>(
-            {
-                let provider = Arc::clone(&provider);
-                move |context, input| provider.start(context, input)
-            },
-            {
-                let provider = Arc::clone(&provider);
-                move |context, operation_id| provider.get(context, operation_id)
-            },
-            {
-                let provider = Arc::clone(&provider);
-                move |context, operation_id| provider.wait(context, operation_id)
-            },
-            move |context, operation_id| provider.cancel(context, operation_id),
-        );
+        self.register_operation_routes::<D, P>(Arc::new(provider));
     }
 
     /// Dispatch one request to the registered handler for its subject.
@@ -1223,6 +933,103 @@ mod tests {
     use futures_util::{stream, StreamExt};
 
     use super::*;
+
+    struct TestOperation;
+
+    impl OperationDescriptor for TestOperation {
+        type Input = Value;
+        type Progress = Value;
+        type Output = Value;
+        type Update = Value;
+        type UpdateEvidence = crate::client::NoOperationUpdates;
+        type Error = super::super::OperationFailure;
+
+        const KEY: &'static str = "Test.Operation";
+        const SUBJECT: &'static str = "operations.v1.Test.Operation";
+        const CANCELABLE: bool = true;
+        const INPUT_SCHEMA_JSON: &'static str = r#"{"type":"object"}"#;
+        const PROGRESS_SCHEMA_JSON: Option<&'static str> = None;
+        const OUTPUT_SCHEMA_JSON: &'static str = r#"{"type":"object"}"#;
+        const UPDATE_SCHEMA_JSON: Option<&'static str> = None;
+        const SIGNAL_INPUT_SCHEMAS_JSON: &'static str = r#"{"resume":{"type":"object"}}"#;
+    }
+
+    struct DefaultControlProvider;
+
+    impl ServiceOperationProvider<TestOperation> for DefaultControlProvider {
+        fn start(
+            &self,
+            _context: RequestContext,
+            _input: Value,
+        ) -> BoxFuture<'static, Result<super::super::AcceptedOperation<Value, Value>, ServerError>>
+        {
+            unreachable!("start is not exercised")
+        }
+
+        fn get(
+            &self,
+            context: RequestContext,
+            operation_id: String,
+        ) -> BoxFuture<'static, Result<OperationSnapshot<Value, Value>, ServerError>> {
+            self.wait(context, operation_id)
+        }
+
+        fn wait(
+            &self,
+            _context: RequestContext,
+            _operation_id: String,
+        ) -> BoxFuture<'static, Result<OperationSnapshot<Value, Value>, ServerError>> {
+            Box::pin(async {
+                Ok(OperationSnapshot {
+                    revision: 2,
+                    state: super::super::OperationState::Completed,
+                    output: Some(serde_json::json!({})),
+                    ..Default::default()
+                })
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn provider_defaults_watch_terminal_and_reject_controls() {
+        let mut router = Router::new();
+        router.register_operation_provider::<TestOperation, _>(DefaultControlProvider);
+        let control = super::super::control_subject(TestOperation::SUBJECT);
+        let context = || RequestContext {
+            subject: control.clone(),
+            ..Default::default()
+        };
+
+        let response = router
+            .handle_request_response(
+                &control,
+                Bytes::from_static(br#"{"action":"watch","operationId":"op-1"}"#),
+                context(),
+            )
+            .await
+            .expect("open default watch");
+        let HandlerResponse::Stream(mut stream) = response else {
+            panic!("watch should stream");
+        };
+        let frame = stream.next().await.expect("terminal frame").expect("frame");
+        assert_eq!(
+            serde_json::from_slice::<Value>(&frame).unwrap()["snapshot"]["state"],
+            "completed"
+        );
+        assert!(stream.next().await.is_none());
+
+        for payload in [
+            br#"{"action":"cancel","operationId":"op-1"}"#.as_slice(),
+            br#"{"action":"signal","operationId":"op-1","signal":"resume","input":{}}"#.as_slice(),
+        ] {
+            assert!(matches!(
+                router
+                    .handle_request_response(&control, Bytes::copy_from_slice(payload), context())
+                    .await,
+                Err(ServerError::InvalidOperationControlAction { .. })
+            ));
+        }
+    }
 
     struct TestFeed;
 
