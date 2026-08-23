@@ -180,12 +180,113 @@ async fn client() -> (
         .await
         .expect("observe first admin bootstrap URL");
     let contract = state_contract(StateFixture::Client).expect("build State client contract");
-    let caller = runtime
-        .admin()
-        .connect_client(&bootstrap_url, &contract)
+    let caller = connect_clean_client(
+        &mut runtime.admin(),
+        &bootstrap_url,
+        &contract,
+        &["preferences", "drafts"],
+    )
+    .await;
+    (runtime, caller)
+}
+
+async fn connect_clean_client(
+    admin: &mut trellis_test::TrellisTestAdmin,
+    bootstrap_url: &str,
+    contract: &trellis_test::TrellisTestContract,
+    stores: &[&str],
+) -> trellis_rs::generated::Caller {
+    if stores.contains(&"drafts") {
+        let cleanup_contract =
+            state_contract(StateFixture::Migration).expect("build State cleanup contract");
+        let cleanup_caller = admin
+            .connect_client(bootstrap_url, &cleanup_contract)
+            .await
+            .expect("connect State cleanup client");
+        let user_id = cleanup_caller
+            .authorization_context()
+            .expect("read cleanup caller context")
+            .expect("cleanup caller context")
+            .context["principal"]["id"]
+            .as_str()
+            .expect("cleanup user principal id")
+            .to_owned();
+        let entries = admin
+            .state_admin_list(
+                bootstrap_url,
+                &StateAdminListRequest::UserApp {
+                    contract_digest: cleanup_contract.digest().to_owned(),
+                    contract_id: cleanup_contract.id().to_owned(),
+                    limit: 10_000,
+                    offset: None,
+                    prefix: None,
+                    store: "drafts".to_owned(),
+                    user_id: user_id.clone(),
+                },
+            )
+            .await
+            .expect("list persisted State entries");
+        for entry in entries.entries {
+            let key = match entry {
+                trellis_rs::sdk::state::types::StateAdminListResponseEntriesItem::Variant1 {
+                    key,
+                    ..
+                }
+                | trellis_rs::sdk::state::types::StateAdminListResponseEntriesItem::Variant2 {
+                    entry:
+                        trellis_rs::sdk::state::types::StateAdminListResponseEntriesItemVariant2Entry {
+                            key,
+                            ..
+                        },
+                    ..
+                } => key.expect("map State entry key"),
+            };
+            admin
+                .state_admin_delete(
+                    bootstrap_url,
+                    &StateAdminDeleteRequest::UserApp {
+                        contract_digest: cleanup_contract.digest().to_owned(),
+                        contract_id: cleanup_contract.id().to_owned(),
+                        expected_revision: None,
+                        key: Some(key),
+                        store: "drafts".to_owned(),
+                        user_id: user_id.clone(),
+                    },
+                )
+                .await
+                .expect("delete persisted map State entry");
+        }
+    }
+
+    let caller = admin
+        .connect_client(bootstrap_url, contract)
         .await
         .expect("connect State client");
-    (runtime, caller)
+    let user_id = caller
+        .authorization_context()
+        .expect("read caller context")
+        .expect("caller context")
+        .context["principal"]["id"]
+        .as_str()
+        .expect("user principal id")
+        .to_owned();
+    for store in stores.iter().filter(|store| **store != "drafts") {
+        admin
+            .state_admin_delete(
+                bootstrap_url,
+                &StateAdminDeleteRequest::UserApp {
+                    contract_digest: contract.digest().to_owned(),
+                    contract_id: contract.id().to_owned(),
+                    expected_revision: None,
+                    key: None,
+                    store: (*store).to_owned(),
+                    user_id: user_id.clone(),
+                },
+            )
+            .await
+            .expect("delete persisted value State entry");
+    }
+    caller
 }
 
 #[tokio::test]
@@ -337,6 +438,13 @@ async fn state_value_and_map_conflict_shapes_live() {
         .expect("bootstrap URL");
     let contract = state_contract(StateFixture::Client).expect("State client contract");
     let mut admin = runtime.admin();
+    connect_clean_client(
+        &mut admin,
+        &bootstrap_url,
+        &contract,
+        &["preferences", "drafts"],
+    )
+    .await;
     let (caller, first_session) = admin
         .connect_client_with_session_seed_reconnectable(
             &bootstrap_url,
@@ -1088,6 +1196,13 @@ async fn state_lineage_survives_compatible_contract_digest_change() {
         .await
         .expect("bootstrap URL");
     let contract = state_contract(StateFixture::Client).expect("v1 contract");
+    connect_clean_client(
+        &mut runtime.admin(),
+        &bootstrap_url,
+        &contract,
+        &["preferences", "drafts"],
+    )
+    .await;
     let (caller, reconnect) = runtime
         .admin()
         .connect_client_with_session_seed_reconnectable(
@@ -1144,11 +1259,13 @@ async fn state_contract_namespaces_are_isolated() {
         .await
         .expect("bootstrap URL");
     let other = state_contract(StateFixture::Other).expect("other contract");
-    let second = runtime
-        .admin()
-        .connect_client(&bootstrap_url, &other)
-        .await
-        .expect("connect other State contract");
+    let second = connect_clean_client(
+        &mut runtime.admin(),
+        &bootstrap_url,
+        &other,
+        &["preferences"],
+    )
+    .await;
     assert!(matches!(
         ValueStateStore::<_, Preferences>::new(&second, "preferences")
             .get()
@@ -1171,10 +1288,13 @@ async fn state_distinct_users_with_same_contract_are_isolated() {
         .expect("bootstrap URL");
     let contract = state_contract(StateFixture::Client).expect("State client contract");
     let mut admin = runtime.admin();
-    let user_a = admin
-        .connect_client(&bootstrap_url, &contract)
-        .await
-        .expect("connect user A");
+    let user_a = connect_clean_client(
+        &mut admin,
+        &bootstrap_url,
+        &contract,
+        &["preferences", "drafts"],
+    )
+    .await;
     let user_b = admin
         .connect_new_local_user(
             &bootstrap_url,
@@ -1239,10 +1359,13 @@ async fn state_exact_resource_permission_is_required() {
         .expect("bootstrap URL");
     let contract = state_contract(StateFixture::Client).expect("State client contract");
     let mut admin = runtime.admin();
-    let allowed = admin
-        .connect_client(&bootstrap_url, &contract)
-        .await
-        .expect("connect State client with exact resource atom");
+    let allowed = connect_clean_client(
+        &mut admin,
+        &bootstrap_url,
+        &contract,
+        &["preferences", "drafts"],
+    )
+    .await;
     assert!(matches!(
         ValueStateStore::<_, Preferences>::new(&allowed, "preferences")
             .get()

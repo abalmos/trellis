@@ -119,15 +119,21 @@ async fn event_consumers_durable_listen_without_declared_group_returns_err() {
         "event_consumers",
     );
 
-    let (_runtime, bootstrap_url, mut admin) = start_runtime().await;
+    let (runtime, bootstrap_url, mut admin) = start_runtime().await;
     let source_contract = test_contract(SOURCE_API_SOURCE_JSON);
     admin
-        .provision_service_instance(&bootstrap_url, &source_contract, Some("source"), None)
+        .provision_service_instance(
+            &bootstrap_url,
+            &source_contract,
+            Some(&runtime.integration_name("source")),
+            None,
+        )
         .await
         .expect("approve source contract");
     let consumer = connect_consumer(
+        &runtime,
         &mut admin,
-        _runtime.trellis_url(),
+        runtime.trellis_url(),
         &bootstrap_url,
         MISSING_GROUP_CONSUMER_JSON,
         "event-consumers-missing-group-rust",
@@ -164,10 +170,16 @@ async fn event_consumers_parallel_group_runs_messages_concurrently() {
     let (runtime, bootstrap_url, mut admin) = start_runtime().await;
     let source_contract = test_contract(SOURCE_API_SOURCE_JSON);
     admin
-        .provision_service_instance(&bootstrap_url, &source_contract, Some("source"), None)
+        .provision_service_instance(
+            &bootstrap_url,
+            &source_contract,
+            Some(&runtime.integration_name("source")),
+            None,
+        )
         .await
         .expect("approve source contract");
     let consumer = connect_consumer(
+        &runtime,
         &mut admin,
         runtime.trellis_url(),
         &bootstrap_url,
@@ -217,7 +229,13 @@ async fn event_consumers_parallel_group_runs_messages_concurrently() {
         )
         .await
         .expect("start parallel durable listener");
-    wait_for_waiting_count(&runtime, SourcePingedEvent::SUBJECT, 2).await;
+    wait_for_waiting_count(
+        &runtime,
+        SourcePingedEvent::SUBJECT,
+        bound_name(&consumer, "ingest"),
+        2,
+    )
+    .await;
 
     let conflicting = consumer
         .listen_event_with_api_id::<SourcePingedEvent, _, _>(
@@ -286,10 +304,16 @@ async fn event_consumers_handler_failure_redelivers_same_event() {
     let (runtime, bootstrap_url, mut admin) = start_runtime().await;
     let source_contract = test_contract(SOURCE_API_SOURCE_JSON);
     admin
-        .provision_service_instance(&bootstrap_url, &source_contract, Some("source"), None)
+        .provision_service_instance(
+            &bootstrap_url,
+            &source_contract,
+            Some(&runtime.integration_name("source")),
+            None,
+        )
         .await
         .expect("approve source contract");
     let consumer = connect_consumer(
+        &runtime,
         &mut admin,
         runtime.trellis_url(),
         &bootstrap_url,
@@ -328,7 +352,13 @@ async fn event_consumers_handler_failure_redelivers_same_event() {
         )
         .await
         .expect("start redelivery listener");
-    wait_for_waiting_count(&runtime, SourcePingedEvent::SUBJECT, 1).await;
+    wait_for_waiting_count(
+        &runtime,
+        SourcePingedEvent::SUBJECT,
+        bound_name(&consumer, "ingest"),
+        1,
+    )
+    .await;
 
     let publisher = admin
         .connect_client(&bootstrap_url, &publisher_contract())
@@ -361,10 +391,16 @@ async fn event_consumers_invalid_authorization_proof_terms() {
     let (runtime, bootstrap_url, mut admin) = start_runtime().await;
     let source_contract = test_contract(SOURCE_API_SOURCE_JSON);
     admin
-        .provision_service_instance(&bootstrap_url, &source_contract, Some("source"), None)
+        .provision_service_instance(
+            &bootstrap_url,
+            &source_contract,
+            Some(&runtime.integration_name("source")),
+            None,
+        )
         .await
         .expect("approve source contract");
     let consumer = connect_consumer(
+        &runtime,
         &mut admin,
         runtime.trellis_url(),
         &bootstrap_url,
@@ -399,10 +435,20 @@ async fn event_consumers_invalid_authorization_proof_terms() {
         )
         .await
         .expect("start authorization listener");
-    wait_for_waiting_count(&runtime, SourcePingedEvent::SUBJECT, 1).await;
-    let durable = matching_consumers(&runtime, SourcePingedEvent::SUBJECT)
-        .await
-        .remove(0);
+    wait_for_waiting_count(
+        &runtime,
+        SourcePingedEvent::SUBJECT,
+        bound_name(&consumer, "ingest"),
+        1,
+    )
+    .await;
+    let durable = matching_named_consumers(
+        &runtime,
+        SourcePingedEvent::SUBJECT,
+        bound_name(&consumer, "ingest"),
+    )
+    .await
+    .remove(0);
     let durable_name = consumer_name(&durable).to_owned();
     let mut raw_events = consumer
         .integration_test_nats()
@@ -493,10 +539,16 @@ async fn event_consumers_strict_group_rejects_parallel_workers() {
     let (runtime, bootstrap_url, mut admin) = start_runtime().await;
     let source_contract = test_contract(SOURCE_API_SOURCE_JSON);
     admin
-        .provision_service_instance(&bootstrap_url, &source_contract, Some("source"), None)
+        .provision_service_instance(
+            &bootstrap_url,
+            &source_contract,
+            Some(&runtime.integration_name("source")),
+            None,
+        )
         .await
         .expect("approve source contract");
     let consumer = connect_consumer(
+        &runtime,
         &mut admin,
         runtime.trellis_url(),
         &bootstrap_url,
@@ -533,15 +585,21 @@ async fn event_consumers_ambiguous_group_without_opts_group_returns_err_and_spec
         "event_consumers",
     );
 
-    let (_runtime, bootstrap_url, mut admin) = start_runtime().await;
+    let (runtime, bootstrap_url, mut admin) = start_runtime().await;
     let source_contract = test_contract(SOURCE_API_SOURCE_JSON);
     admin
-        .provision_service_instance(&bootstrap_url, &source_contract, Some("source"), None)
+        .provision_service_instance(
+            &bootstrap_url,
+            &source_contract,
+            Some(&runtime.integration_name("source")),
+            None,
+        )
         .await
         .expect("approve source contract");
     let consumer = connect_consumer(
+        &runtime,
         &mut admin,
-        _runtime.trellis_url(),
+        runtime.trellis_url(),
         &bootstrap_url,
         AMBIGUOUS_GROUP_CONSUMER_JSON,
         "event-consumers-ambiguous-group-rust",
@@ -616,15 +674,21 @@ async fn event_consumers_caller_provided_durable_name_returns_err() {
         "event_consumers",
     );
 
-    let (_runtime, bootstrap_url, mut admin) = start_runtime().await;
+    let (runtime, bootstrap_url, mut admin) = start_runtime().await;
     let source_contract = test_contract(SOURCE_API_SOURCE_JSON);
     admin
-        .provision_service_instance(&bootstrap_url, &source_contract, Some("source"), None)
+        .provision_service_instance(
+            &bootstrap_url,
+            &source_contract,
+            Some(&runtime.integration_name("source")),
+            None,
+        )
         .await
         .expect("approve source contract");
     let consumer = connect_consumer(
+        &runtime,
         &mut admin,
-        _runtime.trellis_url(),
+        runtime.trellis_url(),
         &bootstrap_url,
         DEPENDENCY_CONSUMER_JSON,
         "event-consumers-dependency-rust",
@@ -665,10 +729,16 @@ async fn event_consumers_bound_dependency_consumer_uses_trellis_provisioned_cons
     let (runtime, bootstrap_url, mut admin) = start_runtime().await;
     let source_contract = test_contract(SOURCE_API_SOURCE_JSON);
     admin
-        .provision_service_instance(&bootstrap_url, &source_contract, Some("source"), None)
+        .provision_service_instance(
+            &bootstrap_url,
+            &source_contract,
+            Some(&runtime.integration_name("source")),
+            None,
+        )
         .await
         .expect("approve source contract");
     let consumer = connect_consumer(
+        &runtime,
         &mut admin,
         runtime.trellis_url(),
         &bootstrap_url,
@@ -681,7 +751,12 @@ async fn event_consumers_bound_dependency_consumer_uses_trellis_provisioned_cons
         .event_consumers
         .get("ingest")
         .expect("ingest event consumer binding");
-    let before = matching_consumers(&runtime, SourcePingedEvent::SUBJECT).await;
+    let before = matching_named_consumers(
+        &runtime,
+        SourcePingedEvent::SUBJECT,
+        bound_name(&consumer, "ingest"),
+    )
+    .await;
     assert_eq!(before.len(), 1);
     assert_eq!(consumer_name(&before[0]), binding.consumer_name);
 
@@ -708,7 +783,12 @@ async fn event_consumers_bound_dependency_consumer_uses_trellis_provisioned_cons
         )
         .await
         .expect("start bound dependency listener");
-    let after = matching_consumers(&runtime, SourcePingedEvent::SUBJECT).await;
+    let after = matching_named_consumers(
+        &runtime,
+        SourcePingedEvent::SUBJECT,
+        bound_name(&consumer, "ingest"),
+    )
+    .await;
     assert_eq!(after.len(), 1);
     assert_eq!(consumer_name(&after[0]), consumer_name(&before[0]));
 
@@ -741,12 +821,23 @@ async fn event_consumers_transient_missing_consumer_retries_after_reconcile() {
     let (runtime, bootstrap_url, mut admin) = start_runtime().await;
     let source_contract = test_contract(SOURCE_API_SOURCE_JSON);
     admin
-        .provision_service_instance(&bootstrap_url, &source_contract, Some("source"), None)
+        .provision_service_instance(
+            &bootstrap_url,
+            &source_contract,
+            Some(&runtime.integration_name("source")),
+            None,
+        )
         .await
         .expect("approve source contract");
     let consumer_contract = test_contract(DEPENDENCY_CONSUMER_JSON);
+    let instance_name = runtime.integration_name("event-consumers-dependency-rust");
     let consumer_key = admin
-        .provision_service_instance(&bootstrap_url, &consumer_contract, None, None)
+        .provision_service_instance(
+            &bootstrap_url,
+            &consumer_contract,
+            Some(&instance_name),
+            None,
+        )
         .await
         .expect("provision event consumer service instance");
     let deployment_id = consumer_key.deployment_id.clone();
@@ -756,7 +847,12 @@ async fn event_consumers_transient_missing_consumer_retries_after_reconcile() {
     )
     .await
     .expect("connect event consumer service runtime");
-    let before = matching_consumers(&runtime, SourcePingedEvent::SUBJECT).await;
+    let before = matching_named_consumers(
+        &runtime,
+        SourcePingedEvent::SUBJECT,
+        bound_name(&consumer, "ingest"),
+    )
+    .await;
     assert_eq!(before.len(), 1);
     assert!(
         runtime
@@ -765,7 +861,13 @@ async fn event_consumers_transient_missing_consumer_retries_after_reconcile() {
             .expect("delete Trellis JetStream consumer"),
         "expected provisioned consumer to be deleted"
     );
-    wait_for_matching_consumer_count(&runtime, SourcePingedEvent::SUBJECT, 0).await;
+    wait_for_matching_consumer_count(
+        &runtime,
+        SourcePingedEvent::SUBJECT,
+        bound_name(&consumer, "ingest"),
+        0,
+    )
+    .await;
 
     let observed = Arc::new(Mutex::new(
         None::<(EventRecord, ServiceEventListenerContext)>,
@@ -799,7 +901,13 @@ async fn event_consumers_transient_missing_consumer_retries_after_reconcile() {
         .wait_ready(&bootstrap_url, &deployment_id)
         .await
         .expect("wait for test deployment ready");
-    wait_for_matching_consumer_count(&runtime, SourcePingedEvent::SUBJECT, 1).await;
+    wait_for_matching_consumer_count(
+        &runtime,
+        SourcePingedEvent::SUBJECT,
+        bound_name(&consumer, "ingest"),
+        1,
+    )
+    .await;
 
     let publisher_contract = publisher_contract();
     let publisher = admin
@@ -835,10 +943,16 @@ async fn event_consumers_readiness_lost_does_not_nak_delivered_group_message() {
     let (runtime, bootstrap_url, mut admin) = start_runtime().await;
     let source_contract = test_contract(SOURCE_API_SOURCE_JSON);
     admin
-        .provision_service_instance(&bootstrap_url, &source_contract, Some("source"), None)
+        .provision_service_instance(
+            &bootstrap_url,
+            &source_contract,
+            Some(&runtime.integration_name("source")),
+            None,
+        )
         .await
         .expect("approve source contract");
     let consumer = connect_consumer(
+        &runtime,
         &mut admin,
         runtime.trellis_url(),
         &bootstrap_url,
@@ -912,13 +1026,15 @@ async fn event_consumers_readiness_lost_does_not_nak_delivered_group_message() {
         &runtime,
         SourcePingedEvent::SUBJECT,
         SourcePongedEvent::SUBJECT,
+        bound_name(&consumer, "paired"),
         1,
     )
     .await;
-    let grouped_consumers = matching_grouped_consumers(
+    let grouped_consumers = matching_named_grouped_consumers(
         &runtime,
         SourcePingedEvent::SUBJECT,
         SourcePongedEvent::SUBJECT,
+        bound_name(&consumer, "paired"),
     )
     .await;
     let durable_name = consumer_name(&grouped_consumers[0]).to_string();
@@ -947,6 +1063,7 @@ async fn event_consumers_readiness_lost_does_not_nak_delivered_group_message() {
         &runtime,
         SourcePingedEvent::SUBJECT,
         SourcePongedEvent::SUBJECT,
+        bound_name(&consumer, "paired"),
         1,
         0,
     )
@@ -984,10 +1101,16 @@ async fn event_consumers_ephemeral_listener_avoids_durable_metadata_and_jetstrea
     let (runtime, bootstrap_url, mut admin) = start_runtime().await;
     let source_contract = test_contract(SOURCE_API_SOURCE_JSON);
     admin
-        .provision_service_instance(&bootstrap_url, &source_contract, Some("source"), None)
+        .provision_service_instance(
+            &bootstrap_url,
+            &source_contract,
+            Some(&runtime.integration_name("source")),
+            None,
+        )
         .await
         .expect("approve source contract");
     let consumer = connect_consumer(
+        &runtime,
         &mut admin,
         runtime.trellis_url(),
         &bootstrap_url,
@@ -995,9 +1118,9 @@ async fn event_consumers_ephemeral_listener_avoids_durable_metadata_and_jetstrea
         "event-consumers-missing-group-rust",
     )
     .await;
-    assert!(matching_consumers(&runtime, SourcePingedEvent::SUBJECT)
+    let durable_count = matching_consumers(&runtime, SourcePingedEvent::SUBJECT)
         .await
-        .is_empty());
+        .len();
 
     let observed = Arc::new(Mutex::new(Vec::<String>::new()));
     let handler_observed = Arc::clone(&observed);
@@ -1022,9 +1145,12 @@ async fn event_consumers_ephemeral_listener_avoids_durable_metadata_and_jetstrea
         )
         .await
         .expect("start ephemeral listener");
-    assert!(matching_consumers(&runtime, SourcePingedEvent::SUBJECT)
-        .await
-        .is_empty());
+    assert_eq!(
+        matching_consumers(&runtime, SourcePingedEvent::SUBJECT)
+            .await
+            .len(),
+        durable_count
+    );
 
     let publisher_contract = publisher_contract();
     let publisher = admin
@@ -1040,9 +1166,12 @@ async fn event_consumers_ephemeral_listener_avoids_durable_metadata_and_jetstrea
         .expect("publish source event");
 
     wait_for_observed_entry(&observed, "rust-event-consumers-ephemeral").await;
-    assert!(matching_consumers(&runtime, SourcePingedEvent::SUBJECT)
-        .await
-        .is_empty());
+    assert_eq!(
+        matching_consumers(&runtime, SourcePingedEvent::SUBJECT)
+            .await
+            .len(),
+        durable_count
+    );
     drop(listener);
 
     publisher
@@ -1067,10 +1196,16 @@ async fn event_consumers_duplicate_handlers_share_single_group_waiter() {
     let (runtime, bootstrap_url, mut admin) = start_runtime().await;
     let source_contract = test_contract(SOURCE_API_SOURCE_JSON);
     admin
-        .provision_service_instance(&bootstrap_url, &source_contract, Some("source"), None)
+        .provision_service_instance(
+            &bootstrap_url,
+            &source_contract,
+            Some(&runtime.integration_name("source")),
+            None,
+        )
         .await
         .expect("approve source contract");
     let consumer = connect_consumer(
+        &runtime,
         &mut admin,
         runtime.trellis_url(),
         &bootstrap_url,
@@ -1129,7 +1264,13 @@ async fn event_consumers_duplicate_handlers_share_single_group_waiter() {
         .await
         .expect("start second duplicate listener");
 
-    wait_for_waiting_count(&runtime, SourcePingedEvent::SUBJECT, 1).await;
+    wait_for_waiting_count(
+        &runtime,
+        SourcePingedEvent::SUBJECT,
+        bound_name(&consumer, "ingest"),
+        1,
+    )
+    .await;
 
     let publisher_contract = publisher_contract();
     let publisher = admin
@@ -1161,6 +1302,7 @@ async fn event_consumers_self_owned_durable_consumer_receives_self_published_eve
 
     let (runtime, bootstrap_url, mut admin) = start_runtime().await;
     let service = connect_consumer(
+        &runtime,
         &mut admin,
         runtime.trellis_url(),
         &bootstrap_url,
@@ -1234,6 +1376,7 @@ async fn event_consumers_abort_re_register_restarts_delivery() {
 
     let (runtime, bootstrap_url, mut admin) = start_runtime().await;
     let service = connect_consumer(
+        &runtime,
         &mut admin,
         runtime.trellis_url(),
         &bootstrap_url,
@@ -1358,10 +1501,16 @@ async fn event_consumers_stop_teardown_stops_durable_delivery() {
     let (runtime, bootstrap_url, mut admin) = start_runtime().await;
     let source_contract = test_contract(SOURCE_API_SOURCE_JSON);
     admin
-        .provision_service_instance(&bootstrap_url, &source_contract, Some("source"), None)
+        .provision_service_instance(
+            &bootstrap_url,
+            &source_contract,
+            Some(&runtime.integration_name("source")),
+            None,
+        )
         .await
         .expect("approve source contract");
     let consumer = connect_consumer(
+        &runtime,
         &mut admin,
         runtime.trellis_url(),
         &bootstrap_url,
@@ -1392,7 +1541,8 @@ async fn event_consumers_stop_teardown_stops_durable_delivery() {
         )
         .await
         .expect("start dependency durable listener");
-    wait_for_waiting_count(&runtime, SourcePingedEvent::SUBJECT, 1).await;
+    let durable_name = bound_name(&consumer, "ingest").to_owned();
+    wait_for_waiting_count(&runtime, SourcePingedEvent::SUBJECT, &durable_name, 1).await;
 
     let publisher_contract = publisher_contract();
     let publisher = admin
@@ -1409,7 +1559,7 @@ async fn event_consumers_stop_teardown_stops_durable_delivery() {
     wait_for_observed_entry(&observed, "rust-event-consumers-stop-before").await;
 
     drop(consumer);
-    wait_for_waiting_count(&runtime, SourcePingedEvent::SUBJECT, 0).await;
+    wait_for_waiting_count(&runtime, SourcePingedEvent::SUBJECT, &durable_name, 0).await;
     publisher
         .publish::<SourcePingedEvent>(&EventRecord {
             id: "rust-event-consumers-stop-after".to_string(),
@@ -1417,7 +1567,7 @@ async fn event_consumers_stop_teardown_stops_durable_delivery() {
         })
         .await
         .expect("publish event after service stop");
-    wait_for_pending_count(&runtime, SourcePingedEvent::SUBJECT, 1).await;
+    wait_for_pending_count(&runtime, SourcePingedEvent::SUBJECT, &durable_name, 1).await;
     assert_no_observed_entry(&observed, "rust-event-consumers-stop-after").await;
 
     listener.abort();
@@ -1435,10 +1585,16 @@ async fn event_consumers_grouped_consumer_waits_for_all_handlers_before_consumin
     let (runtime, bootstrap_url, mut admin) = start_runtime().await;
     let source_contract = test_contract(SOURCE_API_SOURCE_JSON);
     admin
-        .provision_service_instance(&bootstrap_url, &source_contract, Some("source"), None)
+        .provision_service_instance(
+            &bootstrap_url,
+            &source_contract,
+            Some(&runtime.integration_name("source")),
+            None,
+        )
         .await
         .expect("approve source contract");
     let consumer = connect_consumer(
+        &runtime,
         &mut admin,
         runtime.trellis_url(),
         &bootstrap_url,
@@ -1483,7 +1639,7 @@ async fn event_consumers_grouped_consumer_waits_for_all_handlers_before_consumin
         .await
         .expect("publish queued source event");
 
-    wait_for_grouped_pending_count(&runtime, 1).await;
+    wait_for_grouped_pending_count(&runtime, bound_name(&consumer, "paired"), 1).await;
     tokio::time::sleep(Duration::from_millis(300)).await;
     assert_eq!(*observed_ping.lock().await, None);
 
@@ -1520,6 +1676,7 @@ async fn event_consumers_self_owned_grouped_consumer_waits_for_all_handlers_befo
 
     let (runtime, bootstrap_url, mut admin) = start_runtime().await;
     let service = connect_consumer(
+        &runtime,
         &mut admin,
         runtime.trellis_url(),
         &bootstrap_url,
@@ -1634,11 +1791,12 @@ async fn assert_no_observed_entry(observed: &Arc<Mutex<Vec<String>>>, unexpected
 async fn wait_for_waiting_count(
     runtime: &trellis_test::TrellisTestRuntime,
     subject: &str,
+    consumer_name: &str,
     expected: usize,
 ) {
     let deadline = Instant::now() + Duration::from_secs(5);
     loop {
-        let consumers = matching_consumers(runtime, subject).await;
+        let consumers = matching_named_consumers(runtime, subject, consumer_name).await;
         if consumers.len() == 1 && consumers[0].num_waiting == expected {
             return;
         }
@@ -1653,11 +1811,12 @@ async fn wait_for_waiting_count(
 async fn wait_for_pending_count(
     runtime: &trellis_test::TrellisTestRuntime,
     subject: &str,
+    consumer_name: &str,
     expected: usize,
 ) {
     let deadline = Instant::now() + Duration::from_secs(5);
     loop {
-        let consumers = matching_consumers(runtime, subject).await;
+        let consumers = matching_named_consumers(runtime, subject, consumer_name).await;
         if consumers.len() == 1 && consumers[0].num_pending == expected {
             return;
         }
@@ -1672,11 +1831,16 @@ async fn wait_for_pending_count(
 async fn wait_for_matching_consumer_count(
     runtime: &trellis_test::TrellisTestRuntime,
     subject: &str,
+    consumer_name: &str,
     expected: usize,
 ) {
     let deadline = Instant::now() + Duration::from_secs(5);
     loop {
-        if matching_consumers(runtime, subject).await.len() == expected {
+        if matching_named_consumers(runtime, subject, consumer_name)
+            .await
+            .len()
+            == expected
+        {
             return;
         }
         assert!(
@@ -1689,12 +1853,14 @@ async fn wait_for_matching_consumer_count(
 
 async fn wait_for_grouped_pending_count(
     runtime: &trellis_test::TrellisTestRuntime,
+    consumer_name: &str,
     expected: usize,
 ) {
     wait_for_matching_grouped_pending_count(
         runtime,
         SourcePingedEvent::SUBJECT,
         SourcePongedEvent::SUBJECT,
+        consumer_name,
         expected,
     )
     .await;
@@ -1704,11 +1870,14 @@ async fn wait_for_matching_grouped_pending_count(
     runtime: &trellis_test::TrellisTestRuntime,
     first_subject: &str,
     second_subject: &str,
+    consumer_name: &str,
     expected: usize,
 ) {
     let deadline = Instant::now() + Duration::from_secs(5);
     loop {
-        let consumers = matching_grouped_consumers(runtime, first_subject, second_subject).await;
+        let consumers =
+            matching_named_grouped_consumers(runtime, first_subject, second_subject, consumer_name)
+                .await;
         if consumers.len() == 1 && consumers[0].num_pending == expected {
             return;
         }
@@ -1724,11 +1893,14 @@ async fn wait_for_matching_grouped_waiting_count(
     runtime: &trellis_test::TrellisTestRuntime,
     first_subject: &str,
     second_subject: &str,
+    consumer_name: &str,
     expected: usize,
 ) {
     let deadline = Instant::now() + Duration::from_secs(5);
     loop {
-        let consumers = matching_grouped_consumers(runtime, first_subject, second_subject).await;
+        let consumers =
+            matching_named_grouped_consumers(runtime, first_subject, second_subject, consumer_name)
+                .await;
         if consumers.len() == 1 && consumers[0].num_waiting == expected {
             return;
         }
@@ -1744,12 +1916,15 @@ async fn wait_for_matching_grouped_ack_pending_and_waiting_count(
     runtime: &trellis_test::TrellisTestRuntime,
     first_subject: &str,
     second_subject: &str,
+    consumer_name: &str,
     expected_ack_pending: usize,
     expected_waiting: usize,
 ) {
     let deadline = Instant::now() + Duration::from_secs(5);
     loop {
-        let consumers = matching_grouped_consumers(runtime, first_subject, second_subject).await;
+        let consumers =
+            matching_named_grouped_consumers(runtime, first_subject, second_subject, consumer_name)
+                .await;
         if consumers.len() == 1
             && consumers[0].num_ack_pending == expected_ack_pending
             && consumers[0].num_waiting == expected_waiting
@@ -1782,15 +1957,17 @@ async fn start_runtime() -> (
 }
 
 async fn connect_consumer(
+    runtime: &trellis_test::TrellisTestRuntime,
     admin: &mut trellis_test::TrellisTestAdmin,
     trellis_url: &str,
     bootstrap_url: &str,
     manifest_json: &str,
-    _service_name: &str,
+    service_name: &str,
 ) -> ConnectedServiceRuntime<EventConsumerContract> {
     let contract = test_contract(manifest_json);
+    let instance_name = runtime.integration_name(service_name);
     let service_key = admin
-        .provision_service_instance(bootstrap_url, &contract, None, None)
+        .provision_service_instance(bootstrap_url, &contract, Some(&instance_name), None)
         .await
         .expect("provision event consumer service instance");
     trellis_test::connect_service_runtime::<EventConsumerContract>(trellis_url, &service_key)
@@ -2012,6 +2189,25 @@ async fn matching_consumers(
         .collect()
 }
 
+async fn matching_named_consumers(
+    runtime: &trellis_test::TrellisTestRuntime,
+    subject: &str,
+    expected_name: &str,
+) -> Vec<trellis_test::TrellisJetStreamConsumerInfo> {
+    matching_consumers(runtime, subject)
+        .await
+        .into_iter()
+        .filter(|consumer| consumer_name(consumer) == expected_name)
+        .collect()
+}
+
+fn bound_name<'a>(
+    service: &'a ConnectedServiceRuntime<EventConsumerContract>,
+    group: &str,
+) -> &'a str {
+    &service.resources().event_consumers[group].consumer_name
+}
+
 fn consumer_name(consumer: &trellis_test::TrellisJetStreamConsumerInfo) -> &str {
     consumer.durable_name.as_deref().unwrap_or(&consumer.name)
 }
@@ -2038,5 +2234,18 @@ async fn matching_grouped_consumers(
                     .iter()
                     .any(|filter_subject| filter_subject == &second_subject)
         })
+        .collect()
+}
+
+async fn matching_named_grouped_consumers(
+    runtime: &trellis_test::TrellisTestRuntime,
+    first_subject: &str,
+    second_subject: &str,
+    expected_name: &str,
+) -> Vec<trellis_test::TrellisJetStreamConsumerInfo> {
+    matching_grouped_consumers(runtime, first_subject, second_subject)
+        .await
+        .into_iter()
+        .filter(|consumer| consumer_name(consumer) == expected_name)
         .collect()
 }
