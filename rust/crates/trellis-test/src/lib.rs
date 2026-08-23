@@ -2013,15 +2013,21 @@ impl TrellisTestAdmin {
                 Caller::connect_user(UserConnectOptions::new(
                     &state.trellis_url,
                     &state.servers,
-                    &state.bootstrap_jwt,
-                    &state.session_id,
                     &state.inbox_prefix,
-                    &state.session_seed,
-                    &state.participant_digest,
-                    state.authorization_context,
                     DEFAULT_ADMIN_RPC_TIMEOUT_MS,
-                    format!("test-admin:{}", state.trellis_url),
-                    Arc::new(trellis_rs::client::MemoryAuthorizationContextStore::default()),
+                    trellis_rs::client::UserSessionCredentials {
+                        bootstrap_jwt: &state.bootstrap_jwt,
+                        session_id: &state.session_id,
+                        session_key_seed_base64url: &state.session_seed,
+                        participant_digest: &state.participant_digest,
+                    },
+                    trellis_rs::client::UserAuthorizationContext {
+                        bundle: state.authorization_context,
+                        binding: format!("test-admin:{}", state.trellis_url),
+                        store: Arc::new(
+                            trellis_rs::client::MemoryAuthorizationContextStore::default(),
+                        ),
+                    },
                 ))
                 .await?,
             );
@@ -3655,15 +3661,19 @@ impl TrellisTestClientReconnect {
         let options = UserConnectOptions::new(
             &self.bound.trellis_url,
             &self.bound.nats_servers,
-            &self.bound.bootstrap_jwt,
-            &self.bound.session_id,
             &self.bound.inbox_prefix,
-            &self.session_seed,
-            &self.participant_digest,
-            self.bound.authorization_context.clone(),
             DEFAULT_ADMIN_RPC_TIMEOUT_MS,
-            format!("test-captured-admission:{}", self.bound.trellis_url),
-            Arc::new(trellis_rs::client::MemoryAuthorizationContextStore::default()),
+            trellis_rs::client::UserSessionCredentials {
+                bootstrap_jwt: &self.bound.bootstrap_jwt,
+                session_id: &self.bound.session_id,
+                session_key_seed_base64url: &self.session_seed,
+                participant_digest: &self.participant_digest,
+            },
+            trellis_rs::client::UserAuthorizationContext {
+                bundle: self.bound.authorization_context.clone(),
+                binding: format!("test-captured-admission:{}", self.bound.trellis_url),
+                store: Arc::new(trellis_rs::client::MemoryAuthorizationContextStore::default()),
+            },
         );
         Ok(trellis_rs::client::connect_captured_user_admission(options, context_digest).await?)
     }
@@ -4344,15 +4354,19 @@ async fn connect_bound_user(
     let options = UserConnectOptions::new(
         &bound.trellis_url,
         &bound.nats_servers,
-        &bootstrap_jwt,
-        &bound.session_id,
         &bound.inbox_prefix,
-        session_seed,
-        participant_digest,
-        authorization_context,
         DEFAULT_ADMIN_RPC_TIMEOUT_MS,
-        format!("test-admin:{}", bound.trellis_url),
-        authorization_context_store,
+        trellis_rs::client::UserSessionCredentials {
+            bootstrap_jwt: &bootstrap_jwt,
+            session_id: &bound.session_id,
+            session_key_seed_base64url: session_seed,
+            participant_digest,
+        },
+        trellis_rs::client::UserAuthorizationContext {
+            bundle: authorization_context,
+            binding: format!("test-admin:{}", bound.trellis_url),
+            store: authorization_context_store,
+        },
     );
     let options = if refresh_before_connect {
         options.with_refresh_before_connect()

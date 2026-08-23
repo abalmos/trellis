@@ -2,7 +2,8 @@ use super::{AdminSessionState, TrellisAuthError};
 use std::sync::Arc;
 
 use crate::client::{
-    AuthorizationContextStore, FileAuthorizationContextStore, SessionAuth, UserConnectOptions,
+    AuthorizationContextStore, FileAuthorizationContextStore, SessionAuth,
+    UserAuthorizationContext, UserConnectOptions, UserSessionCredentials,
 };
 use crate::generated::Caller;
 
@@ -28,15 +29,19 @@ pub(super) async fn connect_admin_client_with_context_store_async(
     Ok(Caller::connect_user(UserConnectOptions::new(
         &state.trellis_url,
         &state.servers,
-        &state.bootstrap_jwt,
-        &state.session_id,
         &state.inbox_prefix,
-        &state.session_seed,
-        &state.participant_digest,
-        state.authorization_context.clone(),
         5_000,
-        binding,
-        store,
+        UserSessionCredentials {
+            bootstrap_jwt: &state.bootstrap_jwt,
+            session_id: &state.session_id,
+            session_key_seed_base64url: &state.session_seed,
+            participant_digest: &state.participant_digest,
+        },
+        UserAuthorizationContext {
+            bundle: state.authorization_context.clone(),
+            binding,
+            store,
+        },
     ))
     .await?)
 }

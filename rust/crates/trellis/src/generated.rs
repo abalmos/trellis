@@ -21,7 +21,8 @@ pub use crate::client::{
     DownloadTransferGrant, EventDescriptor, FeedDescriptor, MapStateStore, NoDeclaredError,
     NoOperationUpdates, OperationDescriptor, OperationInvoker, OperationRef,
     OperationTransferStartError, RemoteErrorPayload, RpcDescriptor, StartedOperationTransfer,
-    TransferOperationDescriptor, TrellisClientError, UserConnectOptions, ValueStateStore,
+    TransferOperationDescriptor, TrellisClientError, UserAuthorizationContext, UserConnectOptions,
+    UserSessionCredentials, ValueStateStore,
 };
 
 /// Opaque authenticated caller handle used by generated crates.

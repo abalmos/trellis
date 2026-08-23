@@ -53,7 +53,7 @@ pub(crate) use connection::{
 };
 pub use connection::{
     DeviceConnectOptions, EventMessage, EventReplayPolicy, EventSubscribeOptions,
-    EventSubscriptionMode, UserConnectOptions,
+    EventSubscriptionMode, UserAuthorizationContext, UserConnectOptions, UserSessionCredentials,
 };
 #[cfg(feature = "test-support")]
 #[doc(hidden)]

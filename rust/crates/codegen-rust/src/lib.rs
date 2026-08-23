@@ -1489,7 +1489,7 @@ fn render_user_participant_connect_rs(mappings: &[ValidatedParticipantAlias]) ->
 
 use std::sync::Arc;
 
-use trellis_rs::generated::{AuthorizationContextBundle, AuthorizationContextStore, Caller, TrellisClientError, UserConnectOptions};
+use trellis_rs::generated::{AuthorizationContextBundle, AuthorizationContextStore, Caller, TrellisClientError, UserAuthorizationContext, UserConnectOptions, UserSessionCredentials};
 
 use crate::Client;
 
@@ -1527,15 +1527,19 @@ pub async fn connect(opts: ConnectOptions<'_>) -> Result<ConnectedClient, Trelli
         inner: Caller::connect_user(UserConnectOptions::new(
             opts.trellis_url,
             opts.servers,
-            opts.bootstrap_jwt,
-            opts.session_id,
             opts.inbox_prefix,
-            opts.session_key_seed_base64url,
-             crate::contract::CONTRACT_DIGEST,
-            opts.authorization_context,
             opts.timeout_ms,
-            format!("installation:{}", opts.trellis_url),
-            opts.authorization_context_store,
+            UserSessionCredentials {
+                bootstrap_jwt: opts.bootstrap_jwt,
+                session_id: opts.session_id,
+                session_key_seed_base64url: opts.session_key_seed_base64url,
+                participant_digest: crate::contract::CONTRACT_DIGEST,
+            },
+            UserAuthorizationContext {
+                bundle: opts.authorization_context,
+                binding: format!("installation:{}", opts.trellis_url),
+                store: opts.authorization_context_store,
+            },
         )).await?,
     })
 }

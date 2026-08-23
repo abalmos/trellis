@@ -1333,46 +1333,52 @@ async fn connect_bootstrapped_service(
 pub struct UserConnectOptions<'a> {
     trellis_url: &'a str,
     servers: &'a str,
-    bootstrap_jwt: &'a str,
-    session_id: &'a str,
     inbox_prefix: &'a str,
-    session_key_seed_base64url: &'a str,
-    participant_digest: &'a str,
-    authorization_context: AuthorizationContextBundle,
     timeout_ms: u64,
-    authorization_context_binding: String,
-    authorization_context_store: Arc<dyn AuthorizationContextStore>,
+    credentials: UserSessionCredentials<'a>,
+    authorization: UserAuthorizationContext,
     refresh_before_connect: bool,
+}
+
+/// Secret session credentials and participant identity for a user connection.
+pub struct UserSessionCredentials<'a> {
+    /// Bootstrap JWT used to establish or refresh NATS routing authorization.
+    pub bootstrap_jwt: &'a str,
+    /// Session identifier bound into the authorization context.
+    pub session_id: &'a str,
+    /// Base64url-encoded Ed25519 session key seed.
+    pub session_key_seed_base64url: &'a str,
+    /// Exact participant artifact digest authorized for the session.
+    pub participant_digest: &'a str,
+}
+
+/// Authorization context and persistent cache identity for a user connection.
+pub struct UserAuthorizationContext {
+    /// Signed authorization context supplied by session bootstrap.
+    pub bundle: AuthorizationContextBundle,
+    /// Stable identity used to bind the cached context to this installation or device.
+    pub binding: String,
+    /// Store used to persist authorization context and routing material.
+    pub store: Arc<dyn AuthorizationContextStore>,
 }
 
 impl<'a> UserConnectOptions<'a> {
     /// Create user-authenticated connection options.
-    #[allow(clippy::too_many_arguments)]
     pub fn new(
         trellis_url: &'a str,
         servers: &'a str,
-        bootstrap_jwt: &'a str,
-        session_id: &'a str,
         inbox_prefix: &'a str,
-        session_key_seed_base64url: &'a str,
-        participant_digest: &'a str,
-        authorization_context: AuthorizationContextBundle,
         timeout_ms: u64,
-        authorization_context_binding: impl Into<String>,
-        authorization_context_store: Arc<dyn AuthorizationContextStore>,
+        credentials: UserSessionCredentials<'a>,
+        authorization: UserAuthorizationContext,
     ) -> Self {
         Self {
             trellis_url,
             servers,
-            bootstrap_jwt,
-            session_id,
             inbox_prefix,
-            session_key_seed_base64url,
-            participant_digest,
-            authorization_context,
             timeout_ms,
-            authorization_context_binding: authorization_context_binding.into(),
-            authorization_context_store,
+            credentials,
+            authorization,
             refresh_before_connect: false,
         }
     }
@@ -1391,10 +1397,10 @@ pub async fn connect_captured_user_admission(
     opts: UserConnectOptions<'_>,
     context_digest: &str,
 ) -> Result<async_nats::Client, TrellisClientError> {
-    let auth = SessionAuth::from_seed_base64url(opts.session_key_seed_base64url)?;
+    let auth = SessionAuth::from_seed_base64url(opts.credentials.session_key_seed_base64url)?;
     let key_pair = std::sync::Arc::new(auth.nkey_pair()?);
     let session_nkey = key_pair.public_key();
-    let bootstrap_jwt = opts.bootstrap_jwt.to_owned();
+    let bootstrap_jwt = opts.credentials.bootstrap_jwt.to_owned();
     let context_digest = context_digest.to_owned();
     ConnectOptions::with_auth_callback(move |nonce| {
         let key_pair = key_pair.clone();
@@ -1599,15 +1605,19 @@ impl TrellisClient {
         let mut connected = Self::connect_user(UserConnectOptions::new(
             opts.trellis_url,
             &servers,
-            &nats_credential.jwt,
-            &session.session_id,
             &session.inbox_prefix,
-            &session_key_seed_base64url,
-            opts.contract.participant_digest,
-            authorization_context,
             opts.timeout_ms,
-            format!("device:{}", opts.public_identity_key),
-            opts.authorization_context_store,
+            UserSessionCredentials {
+                bootstrap_jwt: &nats_credential.jwt,
+                session_id: &session.session_id,
+                session_key_seed_base64url: &session_key_seed_base64url,
+                participant_digest: opts.contract.participant_digest,
+            },
+            UserAuthorizationContext {
+                bundle: authorization_context,
+                binding: format!("device:{}", opts.public_identity_key),
+                store: opts.authorization_context_store,
+            },
         ))
         .await?;
 
@@ -1638,25 +1648,25 @@ impl TrellisClient {
 
     /// Connect using reconnect-safe session-key runtime auth for one contract digest.
     pub async fn connect_user(opts: UserConnectOptions<'_>) -> Result<Self, TrellisClientError> {
-        let auth = SessionAuth::from_seed_base64url(opts.session_key_seed_base64url)?;
+        let auth = SessionAuth::from_seed_base64url(opts.credentials.session_key_seed_base64url)?;
         let inbox_prefix = opts.inbox_prefix;
         let callback_auth = std::sync::Arc::new(SessionAuth::from_seed_base64url(
-            opts.session_key_seed_base64url,
+            opts.credentials.session_key_seed_base64url,
         )?);
         let key_pair = std::sync::Arc::new(callback_auth.nkey_pair()?);
         let session_nkey = key_pair.public_key();
-        let bootstrap_jwt = opts.bootstrap_jwt.to_owned();
+        let bootstrap_jwt = opts.credentials.bootstrap_jwt.to_owned();
         let authorization_contexts = AuthorizationContextCache::new(
             opts.trellis_url,
-            opts.authorization_context_binding,
-            opts.authorization_context_store,
+            opts.authorization.binding,
+            opts.authorization.store,
         )?;
         let authorization_contexts = Arc::new(authorization_contexts);
         let now = now_context_seconds()?;
         if !authorization_contexts.restore(now).await?
             && !authorization_contexts
                 .install_recoverable(
-                    opts.authorization_context,
+                    opts.authorization.bundle,
                     AuthorizationRoutingMaterial {
                         bootstrap_jwt: bootstrap_jwt.clone(),
                         bootstrap_jwt_expires_at: jwt_expiry(&bootstrap_jwt)?,
@@ -1669,8 +1679,8 @@ impl TrellisClient {
         }
         let (context_session_id, _, context_participant_digest, _, _) =
             authorization_contexts.refresh_evidence()?;
-        if context_session_id != opts.session_id
-            || context_participant_digest != opts.participant_digest
+        if context_session_id != opts.credentials.session_id
+            || context_participant_digest != opts.credentials.participant_digest
         {
             return Err(TrellisClientError::Bootstrap(
                 "authorization context binding mismatch".into(),
