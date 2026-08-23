@@ -2796,26 +2796,21 @@ impl TrellisTestAdmin {
     }
 
     /// Register through a trusted portal using a deterministic session seed.
-    #[allow(clippy::too_many_arguments)]
-    pub async fn connect_new_trusted_local_user_with_session_seed_reconnectable(
+    pub async fn connect_trusted_local_user_reconnectable(
         &mut self,
         bootstrap_url: &str,
         contract: &TrellisTestContract,
-        portal_id: impl Into<String>,
-        username: impl Into<String>,
-        password: impl Into<String>,
-        direct_capabilities: Vec<String>,
-        session_seed: impl Into<String>,
+        registration: TrustedLocalUserRegistration,
     ) -> Result<(Caller, TrellisTestClientReconnect), TrellisTestError> {
         self.connect_client_with_registration(
             bootstrap_url,
             contract,
-            session_seed.into(),
+            registration.session_seed,
             LocalUserAuth::Register(LocalUserRegistration {
-                portal_id: portal_id.into(),
-                username: username.into(),
-                password: password.into(),
-                trusted_capabilities: direct_capabilities,
+                portal_id: registration.portal_id,
+                username: registration.username,
+                password: registration.password,
+                trusted_capabilities: registration.capabilities,
             }),
         )
         .await
@@ -3609,6 +3604,34 @@ impl TrellisTestAdmin {
                 .await?;
         }
         Ok(())
+    }
+}
+
+/// Registration options for a trusted local user with deterministic reconnect credentials.
+#[derive(Clone)]
+pub struct TrustedLocalUserRegistration {
+    /// Portal whose trusted policy grants the requested capabilities.
+    pub portal_id: String,
+    /// Local username to register.
+    pub username: String,
+    /// Sensitive local password to register; redacted from [`Debug`](fmt::Debug) output.
+    pub password: String,
+    /// Capabilities granted directly by the trusted portal.
+    pub capabilities: Vec<String>,
+    /// Sensitive base64url-encoded Ed25519 session seed; redacted from [`Debug`](fmt::Debug) output.
+    pub session_seed: String,
+}
+
+impl fmt::Debug for TrustedLocalUserRegistration {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("TrustedLocalUserRegistration")
+            .field("portal_id", &self.portal_id)
+            .field("username", &self.username)
+            .field("password", &"[REDACTED]")
+            .field("capabilities", &self.capabilities)
+            .field("session_seed", &"[REDACTED]")
+            .finish()
     }
 }
 
@@ -5358,7 +5381,8 @@ mod tests {
         flow_id_from_url, materialized_authority_failure, materialized_authority_is_current,
         parse_published_port, parse_trellis_bootstrap_url, pid_from_prefixed_name,
         remove_stale_marked_workdirs, repo_trellis_command, ContainerRuntime, MountMode,
-        ResolvedContainerRuntime, TrellisControlPlaneSqlite, WORKDIR_OWNER_MARKER,
+        ResolvedContainerRuntime, TrellisControlPlaneSqlite, TrustedLocalUserRegistration,
+        WORKDIR_OWNER_MARKER,
     };
     use rusqlite::params;
     use serde_json::{json, Value};
@@ -5607,5 +5631,24 @@ mod tests {
             ContainerRuntime::Docker.to_bootstrap(),
             trellis_local_bootstrap::ContainerRuntime::Docker
         );
+    }
+
+    #[test]
+    fn trusted_local_user_registration_debug_redacts_secrets() {
+        let registration = TrustedLocalUserRegistration {
+            portal_id: "trusted-portal".to_owned(),
+            username: "local-user".to_owned(),
+            password: "secret-password".to_owned(),
+            capabilities: vec!["documents.read".to_owned()],
+            session_seed: "secret-session-seed".to_owned(),
+        };
+
+        let debug = format!("{registration:?}");
+        assert!(debug.contains("trusted-portal"));
+        assert!(debug.contains("local-user"));
+        assert!(debug.contains("documents.read"));
+        assert!(!debug.contains("secret-password"));
+        assert!(!debug.contains("secret-session-seed"));
+        assert_eq!(debug.matches("[REDACTED]").count(), 2);
     }
 }

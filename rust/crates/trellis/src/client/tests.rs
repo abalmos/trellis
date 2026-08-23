@@ -8,7 +8,7 @@ use crate::client::verify_event_proof;
 use crate::client::{SessionAuth, TrellisClientError};
 use trellis_protocol::{
     build_authorization_event_proof_input, build_authorization_request_proof_input,
-    AuthorizationEventProof, AuthorizationRequestProof,
+    AuthorizationEventProof, AuthorizationRequestProof, AuthorizationRequestProofInput,
 };
 
 #[derive(Debug, Deserialize)]
@@ -163,56 +163,26 @@ fn request_proof_v1_matches_language_neutral_conformance_vector() {
         chain.request_proof_input_hex
     );
     assert_eq!(base64url_encode(input.digest()), chain.request_proof_digest);
-    assert!(verify_request_proof(
-        &auth.session_key,
-        &chain.context_digest,
-        &defaults.request.subject,
-        &defaults.request.reply,
-        payload,
-        defaults.request.iat,
-        &defaults.request.request_id,
-        proof.as_str(),
-    )
-    .unwrap());
+    assert!(verify_request_proof(&auth.session_key, &input, proof.as_str(),).unwrap());
     // A different reply subject breaks verification: the proof is bound to the
     // exact inbox the response arrives on.
-    assert!(!verify_request_proof(
-        &auth.session_key,
-        &chain.context_digest,
+    let altered_input = build_authorization_request_proof_input(
+        &context_digest,
         &defaults.request.subject,
-        "_INBOX.other.reply",
+        Some("_INBOX.other.reply"),
         payload,
         defaults.request.iat,
         &defaults.request.request_id,
-        proof.as_str(),
     )
-    .unwrap());
+    .unwrap();
+    assert!(!verify_request_proof(&auth.session_key, &altered_input, proof.as_str(),).unwrap());
 }
 
-#[allow(clippy::too_many_arguments)] // Mirrors the complete signed request tuple in tests.
 fn verify_request_proof(
     public_session_key: &str,
-    context_digest: &str,
-    subject: &str,
-    reply: &str,
-    payload: &[u8],
-    iat: i64,
-    request_id: &str,
+    input: &AuthorizationRequestProofInput,
     proof: &str,
 ) -> Result<bool, TrellisClientError> {
-    let context_digest = crate::client::proof::base64url_decode(context_digest)?;
-    let context_digest: [u8; 32] = context_digest.try_into().map_err(|_| {
-        TrellisClientError::Bootstrap("authorization context digest must encode 32 bytes".into())
-    })?;
-    let input = build_authorization_request_proof_input(
-        &context_digest,
-        subject,
-        Some(reply),
-        payload,
-        iat,
-        request_id,
-    )
-    .map_err(|error| TrellisClientError::Bootstrap(error.to_string()))?;
     use ed25519_dalek::{Signature, Verifier as _, VerifyingKey};
     let public_key = VerifyingKey::from_bytes(
         &crate::client::proof::base64url_decode(public_session_key)?

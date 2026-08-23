@@ -646,25 +646,20 @@ mod tests {
         SessionAuth::from_seed_base64url(&chain.session_seed).unwrap()
     }
 
-    #[allow(clippy::too_many_arguments)] // Keeps proof-vector inputs explicit in tests.
     fn request_context(
-        subject: &str,
-        reply: &str,
-        _payload: &[u8],
+        request: &RequestFixture,
         proof: &str,
         session_key: &str,
         context_digest: &str,
-        iat: i64,
-        request_id: &str,
         required_capabilities: Vec<String>,
     ) -> RequestContext {
         RequestContext {
-            subject: subject.to_string(),
+            subject: request.subject.clone(),
             session_key: Some(session_key.to_string()),
             proof: Some(proof.to_string()),
             authorization_context: Some(context_digest.to_string()),
-            iat: Some(iat),
-            request_id: Some(request_id.to_string()),
+            iat: Some(request.iat),
+            request_id: Some(request.request_id.clone()),
             required_capabilities: Some(required_capabilities),
             required_permission: Some(RoutePermission {
                 api: "documents@v1".to_owned(),
@@ -673,7 +668,7 @@ mod tests {
                 action: PermissionActionV1::Call,
                 signal: None,
             }),
-            reply_to: Some(reply.to_string()),
+            reply_to: Some(request.reply.clone()),
             ..Default::default()
         }
     }
@@ -700,14 +695,10 @@ mod tests {
                 &defaults.request.subject,
                 payload,
                 &request_context(
-                    &defaults.request.subject,
-                    &defaults.request.reply,
-                    payload,
+                    &defaults.request,
                     proof.as_str(),
                     &auth.session_key,
                     &chain.context_digest,
-                    defaults.request.iat,
-                    &defaults.request.request_id,
                     Vec::new(),
                 ),
             )
@@ -722,17 +713,14 @@ mod tests {
         assert_eq!(caller.participant.id, "documents-web");
         assert_eq!(validation.inbox_prefix.as_deref(), Some("_INBOX.test"));
 
-        let altered = request_context(
-            &defaults.request.subject,
-            "_INBOX.other.reply",
-            payload,
+        let mut altered = request_context(
+            &defaults.request,
             proof.as_str(),
             &auth.session_key,
             &chain.context_digest,
-            defaults.request.iat,
-            &defaults.request.request_id,
             Vec::new(),
         );
+        altered.reply_to = Some("_INBOX.other.reply".to_owned());
         assert!(
             !verifier
                 .verify_request(&defaults.request.subject, payload, &altered)
@@ -741,17 +729,14 @@ mod tests {
                 .allowed
         );
         // A proof bound to one subject is denied when presented on another.
-        let unknown_subject = request_context(
-            "rpc.v1.Documents.Delete",
-            &defaults.request.reply,
-            payload,
+        let mut unknown_subject = request_context(
+            &defaults.request,
             proof.as_str(),
             &auth.session_key,
             &chain.context_digest,
-            defaults.request.iat,
-            &defaults.request.request_id,
             Vec::new(),
         );
+        unknown_subject.subject = "rpc.v1.Documents.Delete".to_owned();
         assert!(
             !verifier
                 .verify_request("rpc.v1.Documents.Delete", payload, &unknown_subject)
@@ -778,14 +763,10 @@ mod tests {
             .unwrap();
         let verifier = verifier_at(&chain, &defaults, None, 1_100);
         let mut context = request_context(
-            &defaults.request.subject,
-            &defaults.request.reply,
-            payload,
+            &defaults.request,
             proof.as_str(),
             &auth.session_key,
             &chain.context_digest,
-            defaults.request.iat,
-            &defaults.request.request_id,
             Vec::new(),
         );
         context.required_permission = Some(RoutePermission {
@@ -821,14 +802,10 @@ mod tests {
             .unwrap();
         let verifier = verifier_at(&chain, &defaults, None, 1_100);
         let context = request_context(
-            &defaults.request.subject,
-            &defaults.request.reply,
-            payload,
+            &defaults.request,
             proof.as_str(),
             &auth.session_key,
             &chain.context_digest,
-            defaults.request.iat,
-            &defaults.request.request_id,
             Vec::new(),
         );
         assert!(
@@ -865,14 +842,10 @@ mod tests {
             .unwrap();
         let verifier = verifier_at(&chain, &defaults, None, 1_100);
         let forged_context = request_context(
-            &defaults.request.subject,
-            &defaults.request.reply,
-            payload,
+            &defaults.request,
             forged.as_str(),
             &auth.session_key,
             &chain.context_digest,
-            defaults.request.iat,
-            &defaults.request.request_id,
             Vec::new(),
         );
         assert!(
@@ -894,14 +867,10 @@ mod tests {
             )
             .unwrap();
         let valid_context = request_context(
-            &defaults.request.subject,
-            &defaults.request.reply,
-            payload,
+            &defaults.request,
             valid.as_str(),
             &auth.session_key,
             &chain.context_digest,
-            defaults.request.iat,
-            &defaults.request.request_id,
             Vec::new(),
         );
         assert!(
@@ -929,14 +898,10 @@ mod tests {
             )
             .unwrap();
         let context = request_context(
-            &defaults.request.subject,
-            &defaults.request.reply,
-            payload,
+            &defaults.request,
             proof.as_str(),
             &auth.session_key,
             &chain.context_digest,
-            defaults.request.iat,
-            &defaults.request.request_id,
             Vec::new(),
         );
         // The context window is [1100, 1300); outside it the cache fails closed.
@@ -976,14 +941,10 @@ mod tests {
             .unwrap();
         let verifier = verifier_at(&chain, &defaults, None, 1_100);
         let context = request_context(
-            &defaults.request.subject,
-            &defaults.request.reply,
-            payload,
+            &defaults.request,
             proof.as_str(),
             &auth.session_key,
             &chain.context_digest,
-            defaults.request.iat,
-            &defaults.request.request_id,
             vec!["missing.capability".to_owned()],
         );
         assert!(
@@ -1000,14 +961,10 @@ mod tests {
         let (chain, defaults) = fixture();
         let verifier = verifier_at(&chain, &defaults, None, 1_100);
         let missing_proof = request_context(
-            &defaults.request.subject,
-            &defaults.request.reply,
-            defaults.request.payload.as_bytes(),
+            &defaults.request,
             "",
             &signer(&chain).session_key,
             &chain.context_digest,
-            defaults.request.iat,
-            &defaults.request.request_id,
             Vec::new(),
         );
         assert!(matches!(
@@ -1020,17 +977,14 @@ mod tests {
                 .await,
             Err(ServerError::MissingProof { .. })
         ));
-        let missing_reply = request_context(
-            &defaults.request.subject,
-            "",
-            defaults.request.payload.as_bytes(),
+        let mut missing_reply = request_context(
+            &defaults.request,
             "proof",
             &signer(&chain).session_key,
             &chain.context_digest,
-            defaults.request.iat,
-            &defaults.request.request_id,
             Vec::new(),
         );
+        missing_reply.reply_to = Some(String::new());
         assert!(matches!(
             verifier
                 .verify_request(

@@ -1335,14 +1335,16 @@ async fn local_login_rebinds_with_updated_authority() {
     let session_seed = URL_SAFE_NO_PAD.encode([14_u8; 32]);
     let (first_client, first_reconnect) = fixture
         .admin
-        .connect_new_trusted_local_user_with_session_seed_reconnectable(
+        .connect_trusted_local_user_reconnectable(
             &fixture.bootstrap_url,
             &fixture.client_contract,
-            &fixture.portal_id,
-            username,
-            password,
-            vec![fixture.read_capability.clone()],
-            &session_seed,
+            trellis_test::TrustedLocalUserRegistration {
+                portal_id: fixture.portal_id.clone(),
+                username: username.to_owned(),
+                password: password.to_owned(),
+                capabilities: vec![fixture.read_capability.clone()],
+                session_seed: session_seed.clone(),
+            },
         )
         .await
         .expect("establish initial local-user authority");
