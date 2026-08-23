@@ -8,10 +8,6 @@ impl<'a> CoreClient<'a> {
     pub fn new(inner: &'a crate::generated::Caller) -> Self {
         Self { inner }
     }
-    #[allow(dead_code)]
-    pub(crate) fn inner(&self) -> &'a crate::generated::Caller {
-        self.inner
-    }
     /// Access typed RPC calls.
     pub fn rpc(&self) -> Rpc<'a> {
         Rpc { _inner: self.inner }

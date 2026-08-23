@@ -19,9 +19,9 @@ use trellis_rs::jobs;
 use trellis_rs::service::{
     AcceptedOperation, DownloadTransferGrant, FileTransferInfo, InMemoryOperationRuntime, KvHandle,
     OperationDescriptor, OperationFailure, OperationRefData, OperationSnapshot, OperationState,
-    OperationTransferProgress, RequestContext, ServerError, ServiceOperation,
-    ServiceOperationProvider, StoreHandle, StoreResourceClient, UploadTransferGrant,
-    UploadTransferSession,
+    OperationTransferProgress, RequestContext, ServerError, ServiceHandle, ServiceOperation,
+    ServiceOperationProvider, StoreHandle, StoreResourceClient, TransferUploadGrantArgs,
+    UploadTransferGrant, UploadTransferSession,
 };
 use trellis_sdk_demo_service::operations as sdk_operations;
 use trellis_sdk_demo_service::types::{
@@ -155,7 +155,7 @@ struct AppContext {
 
 type StartOperation<D> = Arc<
     dyn Fn(
-            ServiceHandlerContext,
+            RequestContext,
             <D as OperationDescriptor>::Input,
         ) -> BoxFuture<
             'static,
@@ -171,7 +171,7 @@ type StartOperation<D> = Arc<
 >;
 type ReadOperation<D> = Arc<
     dyn Fn(
-            ServiceHandlerContext,
+            RequestContext,
             String,
         ) -> BoxFuture<
             'static,
@@ -200,7 +200,7 @@ where
 {
     fn start(
         &self,
-        context: ServiceHandlerContext,
+        context: RequestContext,
         input: D::Input,
     ) -> BoxFuture<'static, Result<AcceptedOperation<D::Progress, D::Output>, ServerError>> {
         (self.start)(context, input)
@@ -208,7 +208,7 @@ where
 
     fn get(
         &self,
-        context: ServiceHandlerContext,
+        context: RequestContext,
         operation_id: String,
     ) -> BoxFuture<'static, Result<OperationSnapshot<D::Progress, D::Output>, ServerError>> {
         (self.get)(context, operation_id)
@@ -216,7 +216,7 @@ where
 
     fn wait(
         &self,
-        context: ServiceHandlerContext,
+        context: RequestContext,
         operation_id: String,
     ) -> BoxFuture<'static, Result<OperationSnapshot<D::Progress, D::Output>, ServerError>> {
         (self.wait)(context, operation_id)
@@ -224,7 +224,7 @@ where
 
     fn cancel(
         &self,
-        context: ServiceHandlerContext,
+        context: RequestContext,
         operation_id: String,
     ) -> BoxFuture<'static, Result<OperationSnapshot<D::Progress, D::Output>, ServerError>> {
         (self.cancel)(context, operation_id)
@@ -753,6 +753,7 @@ fn build_app_context_with_store(
 }
 
 fn register_demo_runtime_handlers(service: &mut ConnectedService, context: AppContext) {
+    let service_handle = service.generated_handle();
     service.handle().rpc().assignments().list({
         let state = Arc::clone(&context.state);
         move |_ctx, input| assignments_list(Arc::clone(&state), input)
@@ -790,13 +791,7 @@ fn register_demo_runtime_handlers(service: &mut ConnectedService, context: AppCo
             DemoOperationProvider::<sdk_operations::SitesRefreshOperation> {
                 start: Arc::new({
                     let context = context.clone();
-                    move |ctx, input| {
-                        Box::pin(sites_refresh_start(
-                            context.clone(),
-                            ctx.into_request_context(),
-                            input,
-                        ))
-                    }
+                    move |ctx, input| Box::pin(sites_refresh_start(context.clone(), ctx, input))
                 }),
                 get: Arc::new({
                     let operations = context.refresh_operations.clone();
@@ -830,13 +825,7 @@ fn register_demo_runtime_handlers(service: &mut ConnectedService, context: AppCo
             DemoOperationProvider::<sdk_operations::ReportsGenerateOperation> {
                 start: Arc::new({
                     let context = context.clone();
-                    move |ctx, input| {
-                        Box::pin(reports_generate_start(
-                            context.clone(),
-                            ctx.into_request_context(),
-                            input,
-                        ))
-                    }
+                    move |ctx, input| Box::pin(reports_generate_start(context.clone(), ctx, input))
                 }),
                 get: Arc::new({
                     let state = Arc::clone(&context.state);
@@ -860,7 +849,7 @@ fn register_demo_runtime_handlers(service: &mut ConnectedService, context: AppCo
                     Box::pin(operation_cancel::<
                         ReportsGenerateProgress,
                         ReportsGenerateOutput,
-                    >(ctx.into_request_context(), id))
+                    >(ctx, id))
                 }),
                 descriptor: PhantomData,
             },
@@ -873,7 +862,15 @@ fn register_demo_runtime_handlers(service: &mut ConnectedService, context: AppCo
             DemoOperationProvider::<sdk_operations::EvidenceUploadOperation> {
                 start: Arc::new({
                     let context = context.clone();
-                    move |ctx, input| Box::pin(evidence_upload_start(context.clone(), ctx, input))
+                    let service_handle = service_handle.clone();
+                    move |ctx, input| {
+                        Box::pin(evidence_upload_start(
+                            context.clone(),
+                            service_handle.clone(),
+                            ctx,
+                            input,
+                        ))
+                    }
                 }),
                 get: Arc::new({
                     let state = Arc::clone(&context.state);
@@ -901,7 +898,7 @@ fn register_demo_runtime_handlers(service: &mut ConnectedService, context: AppCo
                     Box::pin(operation_cancel::<
                         EvidenceUploadProgress,
                         EvidenceUploadOutput,
-                    >(ctx.into_request_context(), id))
+                    >(ctx, id))
                 }),
                 descriptor: PhantomData,
             },
@@ -1568,7 +1565,8 @@ async fn publish_activity_event(
 
 async fn evidence_upload_start(
     context: AppContext,
-    ctx: ServiceHandlerContext,
+    service_handle: ServiceHandle,
+    request: RequestContext,
     input: EvidenceUploadInput,
 ) -> Result<AcceptedOperation<EvidenceUploadProgress, EvidenceUploadOutput>, ServerError> {
     let (accepted, plan, evidence_id, operation_id) = {
@@ -1615,15 +1613,26 @@ async fn evidence_upload_start(
         );
         let transfer_id = allocate_transfer_id(&mut state, "upload");
 
-        let plan = ctx.plan_upload_transfer(
-            UPLOADS_STORE,
-            &input.key,
-            &transfer_id,
-            TRANSFER_EXPIRES_AT,
-            TRANSFER_CHUNK_BYTES,
-            Some(MAX_UPLOAD_BYTES as u64),
-            input.content_type.as_deref(),
-            metadata
+        let session_key =
+            request
+                .session_key
+                .as_deref()
+                .ok_or_else(|| ServerError::MissingSessionKey {
+                    subject: request.subject.clone(),
+                })?;
+        let plan = trellis_rs::service::plan_upload_transfer_grant(TransferUploadGrantArgs {
+            service_name: service_handle.service_name(),
+            session_key,
+            service_session_key: service_handle.session_key(),
+            resources: service_handle.resources(),
+            store: UPLOADS_STORE,
+            key: &input.key,
+            transfer_id: &transfer_id,
+            expires_at: TRANSFER_EXPIRES_AT,
+            chunk_bytes: TRANSFER_CHUNK_BYTES,
+            max_bytes: Some(MAX_UPLOAD_BYTES as u64),
+            content_type: input.content_type.as_deref(),
+            metadata: metadata
                 .into_iter()
                 .map(|(key, value)| {
                     let value = value
@@ -1633,7 +1642,7 @@ async fn evidence_upload_start(
                     (key, value)
                 })
                 .collect(),
-        )?;
+        })?;
 
         let accepted = accepted_with_transfer_state(
             &mut state,
@@ -1660,7 +1669,7 @@ async fn evidence_upload_start(
     let session = UploadTransferSession::new(plan, FIXED_NOW);
     let store = context.store.for_upload(evidence_id, operation_id.clone());
     let state = Arc::clone(&context.state);
-    ctx.handle()
+    service_handle
         .spawn_upload_transfer_endpoint_with_progress(session, store, move |progress| {
             let mut state = state.lock().expect("demo state lock");
             progress_upload_transfer_operation(&mut state, &operation_id, progress);
@@ -2211,44 +2220,6 @@ fn evidence_to_response(evidence: &Evidence) -> EvidenceListResponseEntriesItem 
         evidence_type: evidence.evidence_type.clone(),
         file_name: evidence.file_name.clone(),
         uploaded_at: evidence.uploaded_at.clone(),
-    }
-}
-
-#[allow(dead_code)]
-fn activity_event(message: impl Into<String>) -> AuditRecordedEvent {
-    AuditRecordedEvent {
-        activity_id: "activity-rust-demo".to_string(),
-        kind: "demo".to_string(),
-        message: message.into(),
-        occurred_at: FIXED_NOW.to_string(),
-        related_site_id: Some("site-north".to_string()),
-        related_inspection_id: Some("insp-1001".to_string()),
-    }
-}
-
-#[allow(dead_code)]
-fn report_published_event(report_id: String, inspection_id: String) -> ReportsPublishedEvent {
-    ReportsPublishedEvent {
-        report_id,
-        inspection_id,
-        site_id: Some("site-north".to_string()),
-        published_at: FIXED_NOW.to_string(),
-    }
-}
-
-#[allow(dead_code)]
-fn site_refreshed_event(site: &Site) -> SitesRefreshedEvent {
-    SitesRefreshedEvent {
-        refresh_id: format!("refresh-{}", site.site_id),
-        site: trellis_sdk_demo_service::types::SitesRefreshedEventSite {
-            site_id: site.site_id.clone(),
-            site_name: site.site_name.clone(),
-            open_inspections: site.open_inspections,
-            overdue_inspections: site.overdue_inspections,
-            latest_status: site.latest_status.clone(),
-            last_report_at: site.last_report_at.clone(),
-        },
-        refreshed_at: now_iso(),
     }
 }
 

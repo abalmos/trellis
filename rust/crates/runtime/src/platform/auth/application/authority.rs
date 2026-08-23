@@ -123,8 +123,6 @@ pub(crate) struct PortalPolicySnapshot {
 
 #[derive(Clone, Debug)]
 pub(crate) enum PortalBindingMutation {
-    #[allow(dead_code)]
-    Preserve,
     Set(PortalAuthoritySource),
     Clear,
     CompareAndSet {
@@ -388,7 +386,6 @@ where
             updated_at: input.decided_at,
         };
         let (portal_binding, expected_portal_binding) = match input.portal_binding {
-            PortalBindingMutation::Preserve => (None, None),
             PortalBindingMutation::Set(source) => (
                 Some(Some(portal_record(source))),
                 Some(current_portal_binding.clone()),

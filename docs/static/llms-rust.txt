@@ -290,8 +290,9 @@ idempotent.
 - Services use only the resolved handles returned by the connected facade; they
   do not fetch binding payloads or construct resource clients.
 - Transfer-capable operations expose transfer methods on the typed operation
-  reference. Providers plan grants through `ServiceHandlerContext`, which owns
-  caller identity, service session material, and resolved stores.
+  reference. Providers receive `RequestContext`; capture
+  `service.generated_handle()` at registration for resolved stores and other
+  bound runtime resources.
 
 ## Testing and verification
 

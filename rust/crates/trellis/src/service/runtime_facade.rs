@@ -29,7 +29,7 @@ use super::{
     EventPublisher, FeedDescriptor, HandlerResult, JobsResourceBinding, KvResourceBinding,
     OperationDescriptor, OperationTransferProgress, RequestContext, Router, RpcDescriptor,
     ServerError, ServiceOperationProvider, ServiceResourceBindings, StoreResourceBinding,
-    StoreResourceClient, UploadTransferCompletion, UploadTransferGrantPlan, UploadTransferSession,
+    StoreResourceClient, UploadTransferCompletion, UploadTransferSession,
 };
 
 use crate::client::{
@@ -762,42 +762,6 @@ impl ServiceHandlerContext {
     /// Return the cloneable service handle for outbound calls and bindings.
     pub fn handle(&self) -> &ServiceHandle {
         &self.handle
-    }
-
-    /// Plan an upload transfer using this request's authenticated caller and service bindings.
-    #[allow(clippy::too_many_arguments)]
-    pub fn plan_upload_transfer(
-        &self,
-        store: &str,
-        key: &str,
-        transfer_id: &str,
-        expires_at: &str,
-        chunk_bytes: u64,
-        max_bytes: Option<u64>,
-        content_type: Option<&str>,
-        metadata: BTreeMap<String, String>,
-    ) -> Result<UploadTransferGrantPlan, ServerError> {
-        let session_key =
-            self.request
-                .session_key
-                .as_deref()
-                .ok_or_else(|| ServerError::MissingSessionKey {
-                    subject: self.request.subject.clone(),
-                })?;
-        super::plan_upload_transfer_grant(super::TransferUploadGrantArgs {
-            service_name: self.handle.service_name(),
-            session_key,
-            service_session_key: self.handle.session_key(),
-            resources: self.handle.resources(),
-            store,
-            key,
-            transfer_id,
-            expires_at,
-            chunk_bytes,
-            max_bytes,
-            content_type,
-            metadata,
-        })
     }
 
     /// Plan a download transfer using this request's authenticated caller and service bindings.

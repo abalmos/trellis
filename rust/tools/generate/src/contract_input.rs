@@ -194,57 +194,6 @@ pub fn resolve_contract_input(
     resolve_image_contract(image.expect("validated image input"), image_api_path)
 }
 
-#[allow(dead_code)]
-pub fn resolve_contract_inputs(
-    apis: &[PathBuf],
-    sources: &[PathBuf],
-    images: &[String],
-    source_export: &str,
-    image_api_path: &str,
-) -> miette::Result<Vec<ResolvedNativeInput>> {
-    let total = apis.len() + sources.len() + images.len();
-    miette::ensure!(
-        total > 0,
-        "pass at least one of --api, --source, or --image"
-    );
-
-    let mut resolved = Vec::with_capacity(total);
-    for api in apis {
-        resolved.push(resolve_contract_input(
-            Some(api.as_path()),
-            None,
-            &[],
-            None,
-            None,
-            source_export,
-            image_api_path,
-        )?);
-    }
-    for source in sources {
-        resolved.push(resolve_contract_input(
-            None,
-            None,
-            &[],
-            Some(source.as_path()),
-            None,
-            source_export,
-            image_api_path,
-        )?);
-    }
-    for image in images {
-        resolved.push(resolve_contract_input(
-            None,
-            None,
-            &[],
-            None,
-            Some(image.as_str()),
-            source_export,
-            image_api_path,
-        )?);
-    }
-    Ok(resolved)
-}
-
 fn resolve_source_contract(
     source_path: &Path,
     source_export: &str,

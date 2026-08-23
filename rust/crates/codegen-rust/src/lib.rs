@@ -1345,7 +1345,7 @@ fn render_event_consumer_method(
     base: &str,
     api_identity: &str,
 ) -> String {
-    format!("    /// Register a typed `{base}` event handler.\n    pub async fn {method}<F, Fut>(&self, handler: F) -> Result<trellis_rs::service::ServiceEventListenerHandle, crate::ServiceRuntimeError> where F: Fn({sdk}::{base}Event, trellis_rs::service::ServiceEventListenerContext) -> Fut + Send + Sync + 'static, Fut: std::future::Future<Output = Result<(), trellis_rs::service::ServerError>> + Send + 'static {{ self.service.runtime().listen_event_with_api_id::<{sdk}::events::{base}EventDescriptor, _, _>({api_identity}, handler, trellis_rs::service::ServiceEventListenOptions {{ group: Some({group:?}.to_string()), ..Default::default() }}).await }}")
+    format!("    /// Register a typed `{base}` event handler.\n    pub async fn {method}<F, Fut>(&self, handler: F) -> Result<trellis_rs::service::ServiceEventListenerHandle, crate::ServiceRuntimeError> where F: Fn({sdk}::{base}Event, trellis_rs::service::ServiceEventListenerContext) -> Fut + Send + Sync + 'static, Fut: std::future::Future<Output = Result<(), trellis_rs::service::ServerError>> + Send + 'static {{ self.service.inner.listen_event_with_api_id::<{sdk}::events::{base}EventDescriptor, _, _>({api_identity}, handler, trellis_rs::service::ServiceEventListenOptions {{ group: Some({group:?}.to_string()), ..Default::default() }}).await }}")
 }
 
 fn render_participant_jobs_facade_rs(loaded: &LoadedParticipant) -> String {
@@ -1388,7 +1388,7 @@ fn render_participant_jobs_facade_rs(loaded: &LoadedParticipant) -> String {
         "    pub fn jobs(&mut self) -> Jobs<'_> { Jobs { service: self } }".to_string(),
         "    /// Clone a service-private job submission facade for handlers and background tasks."
             .to_string(),
-        "    pub fn jobs_client(&self) -> JobsClient { JobsClient { handle: self.runtime().generated_handle() } }"
+        "    pub fn jobs_client(&self) -> JobsClient { JobsClient { handle: self.inner.generated_handle() } }"
             .to_string(),
         "}".to_string(),
         String::new(),
@@ -1401,7 +1401,7 @@ fn render_participant_jobs_facade_rs(loaded: &LoadedParticipant) -> String {
             format!("/// Typed `{key}` jobs queue."),
             format!("pub struct {queue}<'a> {{ service: &'a mut crate::ConnectedService }}"),
             format!("impl {queue}<'_> {{"),
-            format!("    /// Submit one `{key}` job.\n    pub async fn submit(&self, payload: <{descriptor} as JobDescriptor>::Payload) -> Result<JobRef<<{descriptor} as JobDescriptor>::Payload, <{descriptor} as JobDescriptor>::Result>, JobsError> {{ self.service.runtime().generated_submit_job::<{descriptor}>(payload).await }}"),
+            format!("    /// Submit one `{key}` job.\n    pub async fn submit(&self, payload: <{descriptor} as JobDescriptor>::Payload) -> Result<JobRef<<{descriptor} as JobDescriptor>::Payload, <{descriptor} as JobDescriptor>::Result>, JobsError> {{ self.service.inner.generated_submit_job::<{descriptor}>(payload).await }}"),
             format!("    /// Register the worker handler for `{key}`.\n    pub async fn handle<H, Fut, E>(&mut self, handler: H) -> Result<(), crate::ServiceRuntimeError> where H: Fn(ActiveJob<<{descriptor} as JobDescriptor>::Payload, <{descriptor} as JobDescriptor>::Result>) -> Fut + Clone + Send + Sync + 'static, Fut: std::future::Future<Output = Result<<{descriptor} as JobDescriptor>::Result, E>> + Send + 'static, E: ToString + Send + 'static {{ self.service.runtime_mut().register_generated_job_worker::<{descriptor}, _, _, _>(handler).await }}"),
             "}".to_string(),
             String::new(),
@@ -1451,7 +1451,7 @@ impl trellis_rs::service::GeneratedServiceContract for Contract {
 
 /// Connected service runtime for this participant contract.
 pub struct ConnectedService {
-    inner: trellis_rs::service::ConnectedServiceRuntime<Contract>,
+    pub(crate) inner: trellis_rs::service::ConnectedServiceRuntime<Contract>,
 }
 
 impl ConnectedService {
@@ -1463,8 +1463,9 @@ impl ConnectedService {
     /// Access contract-shaped owned and used surfaces.
     pub fn service(&self) -> Service<'_> { Service::new(self.inner.caller()) }
 
-    #[allow(dead_code)]
-    pub(crate) fn runtime(&self) -> &trellis_rs::service::ConnectedServiceRuntime<Contract> { &self.inner }
+    /// Clone the service handle for providers that need resolved runtime resources.
+    pub fn generated_handle(&self) -> trellis_rs::service::ServiceHandle { self.inner.generated_handle() }
+
     pub(crate) fn runtime_mut(&mut self) -> &mut trellis_rs::service::ConnectedServiceRuntime<Contract> { &mut self.inner }
 
     /// Run all registered providers and service-private workers until shutdown.
@@ -1885,7 +1886,7 @@ fn render_participant_owned_rs(
             "pub struct Publisher { inner: trellis_rs::service::EventPublisher }".to_string(),
         );
         lines.push("impl crate::ConnectedService {".to_string());
-        lines.push("    /// Clone a typed publisher for owned events.\n    pub fn publisher(&self) -> Publisher { Publisher { inner: self.runtime().event_publisher() } }".to_string());
+        lines.push("    /// Clone a typed publisher for owned events.\n    pub fn publisher(&self) -> Publisher { Publisher { inner: self.inner.event_publisher() } }".to_string());
         lines.push("}".to_string());
         lines.push("impl Publisher {".to_string());
         for key in loaded.render_model.events.keys() {
@@ -1933,7 +1934,7 @@ fn render_participant_owned_rs(
         for key in loaded.render_model.events.keys() {
             let method = format!("publish_{}", key_to_snake(key));
             let base = key_to_pascal(key);
-            lines.push(format!("    pub async fn {method}(&self, event: &sdk::{base}Event) -> Result<(), trellis_rs::service::ServerError> {{ self.runtime().event_publisher().publish::<sdk::events::{base}EventDescriptor>(event).await }}"));
+            lines.push(format!("    pub async fn {method}(&self, event: &sdk::{base}Event) -> Result<(), trellis_rs::service::ServerError> {{ self.inner.event_publisher().publish::<sdk::events::{base}EventDescriptor>(event).await }}"));
         }
         for (key, feed) in &loaded.render_model.feeds {
             let method = format!("register_{}", key_to_snake(key));
@@ -1969,7 +1970,7 @@ fn render_participant_resource_surfaces(loaded: &LoadedParticipant, lines: &mut 
         for name in loaded.render_model.resources.kv.keys() {
             let method = rust_ident(&key_to_snake(name));
             lines.push(format!("    /// Open the `{name}` key-value resource."));
-            lines.push(format!("    pub async fn {method}(&self) -> Result<trellis_rs::service::KvHandle, trellis_rs::service::ServerError> {{ self.service.runtime().kv_client({}).await }}", string_literal(name)));
+            lines.push(format!("    pub async fn {method}(&self) -> Result<trellis_rs::service::KvHandle, trellis_rs::service::ServerError> {{ self.service.inner.kv_client({}).await }}", string_literal(name)));
         }
         lines.extend(["}".to_string(), String::new()]);
     }
@@ -1987,7 +1988,7 @@ fn render_participant_resource_surfaces(loaded: &LoadedParticipant, lines: &mut 
         for name in loaded.render_model.resources.store.keys() {
             let method = rust_ident(&key_to_snake(name));
             lines.push(format!("    /// Open the `{name}` object-store resource."));
-            lines.push(format!("    pub async fn {method}(&self) -> Result<trellis_rs::service::StoreHandle, trellis_rs::service::ServerError> {{ self.service.runtime().store_client({}).await }}", string_literal(name)));
+            lines.push(format!("    pub async fn {method}(&self) -> Result<trellis_rs::service::StoreHandle, trellis_rs::service::ServerError> {{ self.service.inner.store_client({}).await }}", string_literal(name)));
         }
         lines.extend(["}".to_string(), String::new()]);
     }
@@ -3260,10 +3261,6 @@ fn render_client_rs(loaded: &trellis_contracts::LoadedApi) -> String {
         "    pub fn new(inner: &'a trellis_rs::generated::Caller) -> Self {".to_string(),
         "        Self { inner }".to_string(),
         "    }".to_string(),
-        String::new(),
-        "    #[allow(dead_code)]".to_string(),
-        "    pub(crate) fn inner(&self) -> &'a trellis_rs::generated::Caller { self.inner }"
-            .to_string(),
         String::new(),
         "    /// Access typed RPC calls.".to_string(),
         "    pub fn rpc(&self) -> Rpc<'a> { Rpc { _inner: self.inner } }".to_string(),
@@ -5099,6 +5096,8 @@ mod tests {
         assert!(feeds_rs.contains("const SUBJECT: &'static str ="));
         assert!(feeds_rs.contains("SUBSCRIBE_CAPABILITIES"));
         assert!(client_rs.contains("pub struct CoreClient<'a>"));
+        assert!(!client_rs.contains("pub(crate) fn inner("));
+        assert!(!client_rs.contains("#[allow(dead_code)]"));
         assert!(client_rs.contains("pub fn rpc(&self) -> Rpc<'a>"));
         assert!(client_rs.contains("pub fn trellis(&self) -> TrellisRpc<'a>"));
         assert!(client_rs.contains("pub async fn info("));
@@ -5485,6 +5484,8 @@ mod tests {
             .contains("const PARTICIPANT_ID: &'static str = crate::contract::CONTRACT_ID",));
         assert!(connect_rs.contains("pub struct ConnectedService"));
         assert!(connect_rs.contains("trellis_rs::service::ConnectedServiceRuntime<Contract>"));
+        assert!(connect_rs.contains("pub fn generated_handle(&self)"));
+        assert!(!connect_rs.contains("pub(crate) fn runtime(&self)"));
         assert!(!connect_rs
             .contains("pub fn raw(&self) -> &trellis_rs::service::ConnectedServiceRuntime"));
         assert!(!connect_rs.contains("pub fn raw_mut(&mut self)"));
