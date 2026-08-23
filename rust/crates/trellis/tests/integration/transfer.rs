@@ -299,9 +299,8 @@ fn now_iso() -> Result<String, ServerError> {
         .map_err(|e| ServerError::Nats(e.to_string()))
 }
 
-#[allow(dead_code)]
 struct TransferFixture {
-    runtime: trellis_test::TrellisTestRuntime,
+    _runtime: trellis_test::TrellisTestRuntime,
     admin: trellis_test::TrellisTestAdmin,
     bootstrap_url: String,
     service_task: Option<JoinHandle<Result<(), ServiceRuntimeError>>>,
@@ -345,7 +344,7 @@ impl TransferFixture {
         let service_task = tokio::spawn(async move { service.run().await });
 
         TransferFixture {
-            runtime,
+            _runtime: runtime,
             admin,
             bootstrap_url,
             service_task: Some(service_task),

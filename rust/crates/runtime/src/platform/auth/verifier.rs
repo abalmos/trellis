@@ -17,10 +17,12 @@ use trellis_protocol::{ApiSurfaceKindV1, PermissionActionV1, PermissionTargetV1}
 use trellis_protocol::{
     AuthorizationEventPublisher, PermissionAtomV1, VerifiedAuthorizationContextV1,
 };
+#[cfg(test)]
+use trellis_rs::client::RuntimeAuthorizationIoCounters;
 use trellis_rs::client::{
     AuthorizationEventVerificationInput, AuthorizationProviderCache, AuthorizationRegistryBinding,
     AuthorizationRequestVerificationInput, AuthorizationVerificationCore,
-    RuntimeAuthorizationIoCounters, RuntimeAuthorizationTrust,
+    RuntimeAuthorizationTrust,
 };
 use trellis_rs::service::{
     RequestContext, RequestValidation, RequestValidator, ServerError, VerifiedCaller,
@@ -28,6 +30,7 @@ use trellis_rs::service::{
 
 use super::AuthorizationStateError;
 
+#[cfg(test)]
 type AuthorizationValidatorIoCounters = RuntimeAuthorizationIoCounters;
 
 #[derive(Clone, Copy, Debug)]
@@ -83,7 +86,7 @@ pub(crate) trait ValidatorContextSource: Send + Sync {
     fn now_seconds(&self) -> Result<i64, AuthorizationStateError>;
 
     /// Registry I/O counters observed since startup.
-    #[allow(dead_code)] // exercised by local verifier tests and live integration hooks
+    #[cfg(test)]
     fn io_counters(&self) -> AuthorizationValidatorIoCounters;
 
     /// Resolve an unknown context digest (coalesced; registry I/O).
@@ -131,6 +134,7 @@ impl ValidatorContextSource for AuthorizationProviderCache {
         now_seconds()
     }
 
+    #[cfg(test)]
     fn io_counters(&self) -> AuthorizationValidatorIoCounters {
         self.runtime_io_counters()
     }
@@ -197,7 +201,11 @@ impl RuntimeAuthVerifier {
     }
 
     /// Registry I/O counters observed by the backing context source.
-    #[allow(dead_code)] // exercised by local verifier tests and live integration hooks
+    #[cfg(test)]
+    #[expect(
+        dead_code,
+        reason = "retained for verifier tests that inspect aggregate source I/O"
+    )]
     pub(crate) fn io_counters(&self) -> AuthorizationValidatorIoCounters {
         self.source.io_counters()
     }

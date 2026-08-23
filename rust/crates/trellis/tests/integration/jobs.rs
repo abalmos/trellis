@@ -309,10 +309,8 @@ impl<T> Drop for AbortOnDrop<T> {
 }
 
 struct JobsFixture {
-    #[allow(dead_code)]
-    runtime: trellis_test::TrellisTestRuntime,
-    #[allow(dead_code)]
-    admin: trellis_test::TrellisTestAdmin,
+    _runtime: trellis_test::TrellisTestRuntime,
+    _admin: trellis_test::TrellisTestAdmin,
     bootstrap_url: String,
     worker_host: trellis_rs::jobs::WorkerHostHandle,
     service_task: AbortOnDrop<Result<(), trellis_rs::service::ServiceRuntimeError>>,
@@ -709,8 +707,8 @@ async fn setup_jobs_fixture() -> JobsFixture {
     );
 
     JobsFixture {
-        runtime,
-        admin,
+        _runtime: runtime,
+        _admin: admin,
         bootstrap_url,
         worker_host,
         service_task,
@@ -1323,7 +1321,7 @@ async fn jobs_terminal_local_job_edges_and_admin_rpcs() {
     let admin_contract = jobs_admin_client_contract().expect("build Jobs admin contract");
     let admin_participant_id = admin_contract.id().to_owned();
     fixture
-        .admin
+        ._admin
         .put_test_login_portal(
             &fixture.bootstrap_url,
             "jobs-admin-mutating",
@@ -1333,7 +1331,7 @@ async fn jobs_terminal_local_job_edges_and_admin_rpcs() {
         .await
         .expect("create Jobs admin test portal");
     let (admin_client, _) = fixture
-        .admin
+        ._admin
         .connect_new_trusted_local_user_reconnectable(
             &fixture.bootstrap_url,
             &admin_contract,
@@ -1404,7 +1402,7 @@ async fn jobs_failed_job_retries_then_dead() {
     let mut fixture = setup_jobs_fixture().await;
     let admin_contract = jobs_admin_client_contract().expect("build jobs admin client contract");
     let admin_client = fixture
-        .admin
+        ._admin
         .connect_client(&fixture.bootstrap_url, &admin_contract)
         .await
         .expect("connect live Rust jobs admin client");

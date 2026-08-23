@@ -11,6 +11,7 @@ use super::SqliteAuthorizationStore;
 
 #[async_trait]
 impl OutboxRepository for SqliteAuthorizationStore {
+    #[cfg(test)]
     async fn get_idempotency_result(
         &self,
         purpose: &str,

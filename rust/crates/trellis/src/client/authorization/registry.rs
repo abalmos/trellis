@@ -1,4 +1,6 @@
+#[cfg(feature = "test-support")]
 use std::sync::atomic::{AtomicU64, Ordering};
+#[cfg(feature = "test-support")]
 use std::sync::Arc;
 
 use async_nats::jetstream::{self, consumer, kv::Store};
@@ -93,7 +95,7 @@ impl futures_util::Stream for RegistryWatch {
 }
 
 /// Registry I/O counters observed since provider-cache start.
-#[allow(dead_code)] // exercised by live integration hooks
+#[cfg(feature = "test-support")]
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub(crate) struct AuthorizationRegistryIoCounters {
     /// Exact context fetches from the NATS KV context bucket.
@@ -116,8 +118,11 @@ pub(crate) struct AuthorizationRegistryReader {
     trust: Store,
     contexts: Store,
     binding: AuthorizationRegistryBinding,
+    #[cfg(feature = "test-support")]
     context_gets: Arc<AtomicU64>,
+    #[cfg(feature = "test-support")]
     trust_gets: Arc<AtomicU64>,
+    #[cfg(feature = "test-support")]
     revocation_watch_initializations: Arc<AtomicU64>,
 }
 
@@ -154,18 +159,25 @@ impl AuthorizationRegistryReader {
             trust,
             contexts,
             binding: binding.clone(),
+            #[cfg(feature = "test-support")]
             context_gets: Arc::new(AtomicU64::new(0)),
+            #[cfg(feature = "test-support")]
             trust_gets: Arc::new(AtomicU64::new(0)),
+            #[cfg(feature = "test-support")]
             revocation_watch_initializations: Arc::new(AtomicU64::new(0)),
         })
     }
 
-    #[allow(dead_code)] // exercised by live integration hooks
+    #[cfg(feature = "test-support")]
+    #[expect(
+        dead_code,
+        reason = "retained for test-support authorization registry inspection"
+    )]
     pub(crate) fn binding(&self) -> &AuthorizationRegistryBinding {
         &self.binding
     }
 
-    #[allow(dead_code)] // exercised by live integration hooks
+    #[cfg(feature = "test-support")]
     pub(crate) fn io_counters(&self) -> AuthorizationRegistryIoCounters {
         AuthorizationRegistryIoCounters {
             context_gets: self.context_gets.load(Ordering::Relaxed),
@@ -186,6 +198,7 @@ impl AuthorizationRegistryReader {
                 "authorization context digest is invalid".into(),
             ));
         }
+        #[cfg(feature = "test-support")]
         self.context_gets.fetch_add(1, Ordering::Relaxed);
         let value = self
             .contexts
@@ -205,6 +218,7 @@ impl AuthorizationRegistryReader {
         generation: u64,
     ) -> Result<Option<Vec<u8>>, TrellisClientError> {
         let key = format!("{MANIFEST_PREFIX}{generation}");
+        #[cfg(feature = "test-support")]
         self.trust_gets.fetch_add(1, Ordering::Relaxed);
         let value = self.trust.get(key.clone()).await.map_err(|error| {
             TrellisClientError::Bootstrap(format!("cannot read issuer manifest {key}: {error}"))
@@ -216,6 +230,7 @@ impl AuthorizationRegistryReader {
     pub(crate) async fn get_manifest_current(
         &self,
     ) -> Result<Option<(ManifestPointer, u64)>, TrellisClientError> {
+        #[cfg(feature = "test-support")]
         self.trust_gets.fetch_add(1, Ordering::Relaxed);
         let entry = self
             .trust
@@ -253,6 +268,7 @@ impl AuthorizationRegistryReader {
 
     /// Record a revocation watch initialization.
     pub(crate) fn record_revocation_watch_initialization(&self) {
+        #[cfg(feature = "test-support")]
         self.revocation_watch_initializations
             .fetch_add(1, Ordering::Relaxed);
     }

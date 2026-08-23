@@ -39,7 +39,7 @@ pub(crate) struct AuthorizationProviderCacheHealth {
 }
 
 /// Registry I/O counters observed since provider-cache start.
-#[allow(dead_code)] // exercised by local verifier tests and live integration hooks
+#[cfg(any(test, feature = "runtime-internals", feature = "test-support"))]
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub(crate) struct AuthorizationProviderIoCounters {
     /// Registry context reads performed by `resolve_context`.
@@ -325,7 +325,6 @@ impl AuthorizationProviderCache {
     }
 
     /// Wait until the provider cache is ready or `stop` closes.
-    #[allow(dead_code)] // exercised by live integration hooks
     pub(crate) async fn wait_ready(
         &self,
         mut stop: tokio::sync::watch::Receiver<()>,
@@ -457,7 +456,7 @@ impl AuthorizationProviderCache {
     }
 
     /// Return registry I/O counters observed since startup.
-    #[allow(dead_code)] // exercised by local verifier tests and live integration hooks
+    #[cfg(any(test, feature = "runtime-internals", feature = "test-support"))]
     pub(crate) fn io_counters(&self) -> AuthorizationProviderIoCounters {
         AuthorizationProviderIoCounters {
             context_resolves: self.context_resolves.load(Ordering::Relaxed),

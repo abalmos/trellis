@@ -1324,8 +1324,8 @@ async fn connect_bootstrapped_service(
         authorization_contexts: Some(authorization_contexts),
         authorization_context_refresh_task,
         authorization_provider: Some(provider.provider),
-        authorization_provider_stop: Some(provider.stop),
-        authorization_provider_task: Some(provider.task),
+        _authorization_provider_stop: Some(provider.stop),
+        _authorization_provider_task: Some(provider.task),
     })
 }
 
@@ -1437,10 +1437,8 @@ pub(crate) struct TrellisClient {
     authorization_provider: Option<AuthorizationProviderCache>,
     // RAII/join lifetime: dropping the stop sender ends the provider watch task;
     // the join handle keeps the task addressable.
-    #[allow(dead_code)]
-    authorization_provider_stop: Option<tokio::sync::watch::Sender<()>>,
-    #[allow(dead_code)]
-    authorization_provider_task: Option<JoinHandle<()>>,
+    _authorization_provider_stop: Option<tokio::sync::watch::Sender<()>>,
+    _authorization_provider_task: Option<JoinHandle<()>>,
 }
 
 impl TrellisClient {
@@ -1741,8 +1739,8 @@ impl TrellisClient {
             authorization_contexts: Some(authorization_contexts),
             authorization_context_refresh_task,
             authorization_provider: Some(provider.provider),
-            authorization_provider_stop: Some(provider.stop),
-            authorization_provider_task: Some(provider.task),
+            _authorization_provider_stop: Some(provider.stop),
+            _authorization_provider_task: Some(provider.task),
         })
     }
 
@@ -2166,10 +2164,10 @@ impl Drop for TrellisClient {
         if let Some(task) = self.authorization_context_refresh_task.take() {
             task.abort();
         }
-        if let Some(stop) = self.authorization_provider_stop.take() {
+        if let Some(stop) = self._authorization_provider_stop.take() {
             let _ = stop.send(());
         }
-        if let Some(task) = self.authorization_provider_task.take() {
+        if let Some(task) = self._authorization_provider_task.take() {
             task.abort();
         }
     }
