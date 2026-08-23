@@ -3,7 +3,7 @@ import { ValidationError } from "@qlever-llc/trellis/errors";
 import { assert, assertEquals, assertInstanceOf } from "@std/assert";
 import { Type } from "typebox";
 
-import { caseScopedContractId, caseScopedName } from "../_support/names.ts";
+import { integrationSlug } from "../_support/names.ts";
 import { liveTrellisTest, runtimeScopeForCase } from "../_support/runtime.ts";
 
 const CASE_ID = "state.client-rust-owner" as const;
@@ -16,7 +16,7 @@ const contract = defineAppContract(
     },
   },
   (ref) => ({
-    id: caseScopedContractId("trellis.integration.state-typescript", CASE_ID),
+    id: "trellis.integration.state-typescript.state-client-rust-owner@v1",
     displayName: "Trellis Integration TypeScript State Client",
     description: "Exercises the Rust-owned State runtime from TypeScript.",
     uses: [state({
@@ -37,7 +37,7 @@ liveTrellisTest({
   scope: runtimeScopeForCase(CASE_ID),
   async fn(runtime) {
     const client = await runtime.connectClient({
-      name: caseScopedName("state-typescript-client", CASE_ID),
+      name: `state-typescript-client-${integrationSlug(CASE_ID)}`,
       contract,
     });
     const created = await client.state.preferences.put(

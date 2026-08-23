@@ -11,8 +11,6 @@ import {
 import { TrellisService } from "@qlever-llc/trellis/service/deno";
 import { Type } from "typebox";
 import {
-  caseScopedContractId,
-  caseScopedName,
   integrationSlug,
   runtimeScopeForCase,
   trellisIntegrationTest,
@@ -29,7 +27,7 @@ const schemas = {
 } as const;
 
 const serviceContract = defineServiceContract({ schemas }, (ref) => ({
-  id: caseScopedContractId("external.fixture.rpc-service", CASE_ID),
+  id: "external.fixture.rpc-service" + "@v1",
   displayName: `External Fixture RPC Service (${slug})`,
   description:
     "Out-of-tree style service contract used by trellis-test smoke coverage.",
@@ -51,15 +49,15 @@ const serviceContract = defineServiceContract({ schemas }, (ref) => ({
 }));
 
 const clientContract = defineAppContract(() => ({
-  id: caseScopedContractId("external.fixture.rpc-client", CASE_ID),
+  id: "external.fixture.rpc-client" + "@v1",
   displayName: `External Fixture RPC Client (${slug})`,
   description:
     "Out-of-tree style app contract used by trellis-test smoke coverage.",
   uses: [serviceContract.EchoPing],
 }));
 
-const serviceName = caseScopedName("external-rpc-service", CASE_ID);
-const clientName = caseScopedName("external-rpc-client", CASE_ID);
+const serviceName = "external-rpc-service";
+const clientName = "external-rpc-client";
 
 trellisIntegrationTest({
   caseId: CASE_ID,

@@ -10,14 +10,7 @@ import type { AuthSessionsMeOutput } from "@qlever-llc/trellis/sdk/auth";
 import * as trellisAuth from "@qlever-llc/trellis/sdk/auth";
 import { Type } from "typebox";
 import type { LiveTrellisRuntime } from "../_support/runtime.ts";
-import {
-  aliasCaseScopedActions,
-  caseScopedActions,
-  caseScopedContractId,
-  caseScopedName,
-  caseScopedSubject,
-  integrationSlug,
-} from "../_support/names.ts";
+import { integrationSlug } from "../_support/names.ts";
 
 export function createAuthLocalLoginFixture(
   caseId: string,
@@ -40,13 +33,11 @@ export function createAuthLocalLoginFixture(
     ProbeEvent: Type.Object({ message: Type.String() }),
   } as const;
 
-  const serviceContractId = caseScopedContractId(
-    "trellis.integration.auth-local-login-service",
-    caseId,
-  );
+  const serviceContractId =
+    `trellis.integration.auth-local-login-service.${slug}@v1`;
   const pingCapability = serviceContractId.replace(/@v\d+$/, "") +
     "::authLocalLoginPing";
-  const deploymentId = caseScopedName("auth-local-login-deployment", caseId);
+  const deploymentId = `auth-local-login-deployment-${slug}`;
 
   const serviceContract = defineServiceContract({ schemas }, (ref) => ({
     id: serviceContractId,
@@ -63,11 +54,7 @@ export function createAuthLocalLoginFixture(
     rpc: {
       "AuthLogin.Ping": {
         version: "v1",
-        subject: caseScopedSubject(
-          "rpc.v1.Integration.AuthLocalLogin",
-          caseId,
-          "AuthLogin.Ping",
-        ),
+        subject: `rpc.v1.Integration.AuthLocalLogin.${slug}.AuthLogin.Ping`,
         input: ref.schema("PingInput"),
         output: ref.schema("PingOutput"),
         capabilities: { call: ["authLocalLoginPing"] },
@@ -76,91 +63,68 @@ export function createAuthLocalLoginFixture(
     },
   }));
 
-  const eventContract = aliasCaseScopedActions(
-    caseId,
-    defineServiceContract({ schemas }, (ref) => ({
-      id: caseScopedContractId(
-        "trellis.integration.auth-local-login-events",
-        caseId,
-      ),
-      displayName: `Trellis Integration Auth Local Login Events (${slug})`,
-      description: "Event API used to prove revoked event proofs fail closed.",
-      capabilities: {
-        publishAuthLocalLoginProbe: {
-          displayName: "Publish local-login probe",
-          description:
-            "Publish the event used by the auth local-login fixture.",
-        },
-        readAuthLocalLoginProbe: {
-          displayName: "Read local-login probes",
-          description:
-            "Subscribe to events used by the auth local-login fixture.",
+  const eventContract = defineServiceContract({ schemas }, (ref) => ({
+    id: `trellis.integration.auth-local-login-events.${slug}@v1`,
+    displayName: `Trellis Integration Auth Local Login Events (${slug})`,
+    description: "Event API used to prove revoked event proofs fail closed.",
+    capabilities: {
+      publishAuthLocalLoginProbe: {
+        displayName: "Publish local-login probe",
+        description: "Publish the event used by the auth local-login fixture.",
+      },
+      readAuthLocalLoginProbe: {
+        displayName: "Read local-login probes",
+        description:
+          "Subscribe to events used by the auth local-login fixture.",
+      },
+    },
+    events: {
+      "AuthLogin.Probe": {
+        version: "v1",
+        subject: `events.v1.Integration.AuthLocalLogin.${slug}.AuthLogin.Probe`,
+        event: ref.schema("ProbeEvent"),
+        capabilities: {
+          publish: ["publishAuthLocalLoginProbe"],
+          subscribe: ["readAuthLocalLoginProbe"],
         },
       },
-      events: caseScopedActions(caseId, {
-        "AuthLogin.Probe": {
-          version: "v1",
-          subject: caseScopedSubject(
-            "events.v1.Integration.AuthLocalLogin",
-            caseId,
-            "AuthLogin.Probe",
-          ),
-          event: ref.schema("ProbeEvent"),
-          capabilities: {
-            publish: ["publishAuthLocalLoginProbe"],
-            subscribe: ["readAuthLocalLoginProbe"],
-          },
-        },
-      }),
-    })),
-  );
+    },
+  }));
 
   const clientDisplayName =
     `Trellis Integration Auth Local Login Client (${slug})`;
   const agentDisplayName =
     `Trellis Integration Auth Local Login Agent (${slug})`;
 
-  const clientContract = aliasCaseScopedActions(
-    caseId,
-    defineAppContract(() => ({
-      id: caseScopedContractId(
-        "trellis.integration.auth-local-login-client",
-        caseId,
-      ),
-      displayName: clientDisplayName,
-      description: "App participant for the auth local-login binding fixture.",
-      uses: [
-        trellisAuth.AuthSessionsLogout,
-        trellisAuth.AuthSessionsMe,
-        ...(options.identityLink
-          ? [
-            trellisAuth.AuthUserIdentitiesList,
-            trellisAuth.AuthUsersIdentityLinkCreate,
-          ]
-          : []),
-        options.optionalPing
-          ? optional(serviceContract.AuthLoginPing)
-          : serviceContract.AuthLoginPing,
-        ...(options.eventProbe ? [eventContract.AuthLoginProbe.publish] : []),
-      ],
-    })),
-  );
+  const clientContract = defineAppContract(() => ({
+    id: `trellis.integration.auth-local-login-client.${slug}@v1`,
+    displayName: clientDisplayName,
+    description: "App participant for the auth local-login binding fixture.",
+    uses: [
+      trellisAuth.AuthSessionsLogout,
+      trellisAuth.AuthSessionsMe,
+      ...(options.identityLink
+        ? [
+          trellisAuth.AuthUserIdentitiesList,
+          trellisAuth.AuthUsersIdentityLinkCreate,
+        ]
+        : []),
+      options.optionalPing
+        ? optional(serviceContract.AuthLoginPing)
+        : serviceContract.AuthLoginPing,
+      ...(options.eventProbe ? [eventContract.AuthLoginProbe.publish] : []),
+    ],
+  }));
 
   const agentContract = defineAgentContract(() => ({
-    id: caseScopedContractId(
-      "trellis.integration.auth-local-login-agent",
-      caseId,
-    ),
+    id: `trellis.integration.auth-local-login-agent.${slug}@v1`,
     displayName: agentDisplayName,
     description: "Agent participant for the auth local-login binding fixture.",
     uses: [trellisAuth.AuthSessionsMe, serviceContract.AuthLoginPing],
   }));
 
   const sessionAdminContract = defineAppContract(() => ({
-    id: caseScopedContractId(
-      "trellis.integration.auth-session-revoke-admin",
-      caseId,
-    ),
+    id: `trellis.integration.auth-session-revoke-admin.${slug}@v1`,
     displayName: `Trellis Integration Auth Session Revoke Admin (${slug})`,
     description:
       "Admin participant for revoking app sessions through public Auth RPCs.",
@@ -195,11 +159,8 @@ export function createAuthLocalLoginFixture(
     ],
   }));
 
-  const serviceName = caseScopedName(
-    "auth-local-login-fixture-service",
-    caseId,
-  );
-  const clientName = caseScopedName("auth-local-login-fixture-client", caseId);
+  const serviceName = `auth-local-login-fixture-service-${slug}`;
+  const clientName = `auth-local-login-fixture-client-${slug}`;
 
   async function setupServiceWithKey(
     runtime: LiveTrellisRuntime,
@@ -255,7 +216,7 @@ export function createAuthLocalLoginFixture(
 
   async function setupSessionAdmin(runtime: LiveTrellisRuntime) {
     return await runtime.connectClient({
-      name: caseScopedName("auth-session-revoke-fixture-admin", caseId),
+      name: `auth-session-revoke-fixture-admin-${slug}`,
       contract: sessionAdminContract,
     });
   }
@@ -267,7 +228,7 @@ export function createAuthLocalLoginFixture(
     clientDisplayName,
     clientName,
     deploymentId,
-    pingMessage: caseScopedName("auth-local-login", caseId),
+    pingMessage: `auth-local-login-${slug}`,
     pingCapability,
     eventContract,
     publishProbeCapability: eventContract.CONTRACT_ID.replace(/@v\d+$/, "") +

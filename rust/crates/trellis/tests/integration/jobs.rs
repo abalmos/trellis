@@ -1321,12 +1321,7 @@ async fn jobs_terminal_local_job_edges_and_admin_rpcs() {
     );
 
     let admin_contract = jobs_admin_client_contract().expect("build Jobs admin contract");
-    let admin_participant_id = fixture
-        .runtime
-        .scoped_contract(&admin_contract)
-        .expect("scope Jobs admin contract")
-        .id()
-        .to_owned();
+    let admin_participant_id = admin_contract.id().to_owned();
     fixture
         .admin
         .put_test_login_portal(

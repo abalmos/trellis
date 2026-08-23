@@ -12,13 +12,11 @@ import { assertOperationCompleted } from "@qlever-llc/trellis-test";
 import { assert, assertEquals, assertInstanceOf } from "@std/assert";
 import { Type } from "typebox";
 
-import { caseScopedContractId, caseScopedName } from "../_support/names.ts";
 import type { LiveTrellisRuntime } from "../_support/runtime.ts";
 
-const CASE_ID = "state.activated-devices-rust-owner" as const;
-
 const adminContract = defineAppContract(() => ({
-  id: caseScopedContractId("trellis.integration.state-device-admin", CASE_ID),
+  id:
+    "trellis.integration.state-device-admin.state-activated-devices-rust-owner@v1",
   displayName: "Trellis Integration State Device Admin",
   description: "Provisions activated devices and inspects their State.",
   uses: [AuthDeviceUserAuthoritiesResolve],
@@ -32,7 +30,8 @@ const deviceContract = defineDeviceContract(
     },
   },
   (ref) => ({
-    id: caseScopedContractId("trellis.integration.state-device", CASE_ID),
+    id:
+      "trellis.integration.state-device.state-activated-devices-rust-owner@v1",
     displayName: "Trellis Integration State Device",
     description:
       "Exercises device-owned State through the public device client.",
@@ -45,10 +44,11 @@ const deviceContract = defineDeviceContract(
 
 export async function exerciseDeviceState(runtime: LiveTrellisRuntime) {
   const admin = await runtime.connectClient({
-    name: caseScopedName("state-device-admin", CASE_ID),
+    name: "state-device-admin-state-activated-devices-rust-owner",
     contract: adminContract,
   });
-  const deploymentName = caseScopedName("state-device-deployment", CASE_ID);
+  const deploymentName =
+    "state-device-deployment-state-activated-devices-rust-owner";
   await runtime.deployments.create({ id: deploymentName, kind: "device" });
   const approval = await runtime.contracts.approve({
     deployment: deploymentName,

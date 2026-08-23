@@ -191,7 +191,7 @@ fn activation_status(
 }
 
 /// Submit activation with controlled proof properties for live integration tests.
-#[cfg(feature = "integration-test-scoping")]
+#[cfg(feature = "test-support")]
 #[doc(hidden)]
 pub async fn check_device_activation_with_test_proof(
     options: &DeviceActivationOptions<'_>,

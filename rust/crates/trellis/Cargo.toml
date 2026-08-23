@@ -8,7 +8,6 @@ description = "Curated public Rust facade for Trellis clients and services."
 readme = "../../README.md"
 
 [features]
-integration-test-scoping = []
 runtime-internals = []
 test-support = []
 

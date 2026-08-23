@@ -16,7 +16,7 @@ pub use core::{
 };
 pub use own_context::AuthorizationContextCache;
 pub use provider_cache::AuthorizationProviderCache;
-#[cfg(feature = "integration-test-scoping")]
+#[cfg(feature = "test-support")]
 pub use provider_cache::IntegrationTestAuthorizationIoCounters;
 #[cfg(feature = "runtime-internals")]
 pub use provider_cache::{RuntimeAuthorizationIoCounters, RuntimeAuthorizationTrust};

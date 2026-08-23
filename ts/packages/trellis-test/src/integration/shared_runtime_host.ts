@@ -8,7 +8,7 @@ import {
 import { NatsTestContainer } from "../nats_container.ts";
 import { TrellisTestRuntime } from "../runtime.ts";
 import { readTrellisTestMetrics, TRELLIS_TEST_METRICS_ENV } from "./metrics.ts";
-import { caseScopeToken, integrationSlug } from "./names.ts";
+import { integrationSlug } from "./names.ts";
 import {
   TRELLIS_TEST_SHARED_RUNTIME_ENV,
   type TrellisIntegrationRuntimeAssignment,
@@ -21,7 +21,7 @@ const WORKDIR_PREFIX = "trellis-test-pool-";
 const WORKDIR_OWNER_MARKER = ".trellis-test-owner";
 const SHARED_TENANT = "shared";
 
-/** Shared NATS/Trellis host started for parallel integration workers. */
+/** Shared NATS/Trellis host started for serialized integration cases. */
 export type TrellisIntegrationSharedRuntimeHost = {
   /** Path to the private manifest passed to worker processes. */
   readonly manifestPath: string;
@@ -71,10 +71,6 @@ export async function startTrellisIntegrationSharedRuntimeHost(args: {
         integrationSlug(assignment.id)
       }`,
       tenantId,
-      scope: {
-        runToken: caseScopeToken(runId),
-        caseToken: caseScopeToken(assignment.id),
-      },
     };
   }
 
@@ -131,6 +127,7 @@ export async function startTrellisIntegrationSharedRuntimeHost(args: {
         manifest: nats.manifests[SHARED_TENANT],
       },
     });
+    await runtime.resetAcceptedIntegrationAuthorities();
     await runtime.deployments.create({ id: hostDeployment });
     const adminRpcServer = Deno.serve({
       hostname: "127.0.0.1",
@@ -178,6 +175,9 @@ export async function startTrellisIntegrationSharedRuntimeHost(args: {
             mode: body.input.mode,
           } as const;
           output = await runtime?.completeClientAuth(authInput);
+        } else if (body.method === "resetAcceptedIntegrationAuthorities") {
+          await runtime?.resetAcceptedIntegrationAuthorities();
+          output = {};
         } else if (body.method === "testOidcSetClaims") {
           if (typeof body.input !== "object" || body.input === null) {
             return Response.json({ ok: false, error: "invalid OIDC claims" }, {
@@ -216,7 +216,7 @@ export async function startTrellisIntegrationSharedRuntimeHost(args: {
     adminRpcFinished = adminRpcServer.finished;
 
     const manifest: TrellisIntegrationSharedRuntimeManifest = {
-      version: 4,
+      version: 5,
       runId,
       trellisUrl: runtime.trellisUrl,
       natsUrl: nats.natsUrl,

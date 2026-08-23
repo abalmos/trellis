@@ -5,12 +5,7 @@ import {
 } from "@qlever-llc/trellis";
 import { TrellisService } from "@qlever-llc/trellis/service/deno";
 import { Type } from "typebox";
-import {
-  caseScopedContractId,
-  caseScopedName,
-  caseScopedSubject,
-  integrationSlug,
-} from "../_support/names.ts";
+import { integrationSlug } from "../_support/names.ts";
 import type { LiveTrellisRuntime } from "../_support/runtime.ts";
 
 export function createOutboxFixture(caseId: string) {
@@ -27,7 +22,7 @@ export function createOutboxFixture(caseId: string) {
       },
     },
     (ref) => ({
-      id: caseScopedContractId("trellis.integration.outbox-service", caseId),
+      id: `trellis.integration.outbox-service.${slug}@v1`,
       displayName: `Trellis Integration Outbox Service (${slug})`,
       description: "Exercises live caller-owned SQL outbox dispatch.",
       capabilities: {
@@ -43,11 +38,7 @@ export function createOutboxFixture(caseId: string) {
       events: {
         "Record.Changed": {
           version: "v1",
-          subject: caseScopedSubject(
-            "events.v1.Integration.Outbox",
-            caseId,
-            "Record.Changed",
-          ),
+          subject: `events.v1.Integration.Outbox.${slug}.Record.Changed`,
           event: ref.schema("RecordChanged"),
           capabilities: {
             publish: ["publishRecords"],
@@ -64,18 +55,18 @@ export function createOutboxFixture(caseId: string) {
     }),
   );
   const captureContract = defineAppContract(() => ({
-    id: caseScopedContractId("trellis.integration.outbox-capture", caseId),
+    id: `trellis.integration.outbox-capture.${slug}@v1`,
     displayName: `Trellis Integration Outbox Capture (${slug})`,
     description: "Captures committed SQL outbox events.",
     uses: [serviceContract.RecordChanged.subscribe],
   }));
-  const serviceName = caseScopedName("outbox-service", caseId);
+  const serviceName = `outbox-service-${slug}`;
 
   return {
     serviceContract,
     captureContract,
     serviceName,
-    captureName: caseScopedName("outbox-capture", caseId),
+    captureName: `outbox-capture-${slug}`,
     async registerService(runtime: LiveTrellisRuntime) {
       return await runtime.registerService({
         name: serviceName,

@@ -7,14 +7,12 @@ export type TrellisIntegrationRuntimeAssignment = {
   readonly mode: "shared" | "isolated-process";
   readonly namespace: string;
   readonly tenantId: string;
-  /** Immutable contract namespace tokens passed to this case's connections. */
-  readonly scope: { readonly runToken: string; readonly caseToken: string };
 };
 
 /** Shared NATS/Trellis host and explicit worker assignments. */
 export type TrellisIntegrationSharedRuntimeManifest = {
   /** Manifest format version. */
-  readonly version: 4;
+  readonly version: 5;
   /** Unique identifier for this host lifecycle. */
   readonly runId: string;
   /** HTTP endpoint of the shared Trellis runtime. */

@@ -52,15 +52,14 @@ Rules:
   `@qlever-llc/trellis-test/integration/runner`: define
   `trellis.integration.ts` with an explicit `runtime.trellis.command`,
   `denoTestArgs`, and case descriptors; use `trellisIntegrationTest(...)`,
-  `runtimeScopeForCase(CASE_ID)`, case-scoped contract ids, subjects, participant
-  names, state/resource keys, contract approval/provisioning,
+  `runtimeScopeForCase(CASE_ID)`, fixed authored contract ids/actions/subjects,
+  case-slugged physical names and state/resource keys, contract approval/provisioning,
   `TrellisService.connect(...)`, `runtime.connectClient(...)`, and
-  `runtime.captureEvents(...)` when needed. Run serially with `--config`; run in
-  parallel with `--parallel --jobs <n>`. The runner maps `--jobs` to child
-  `DENO_JOBS`, not `deno test --jobs`. Parallel cases share one NATS server but
-  receive separate NATS accounts, Trellis processes, SQLite databases, and
-  service sidecars. Keep one case per module and avoid relying on execution
-  order. `trellis-test` runs NATS as a managed child process from pinned,
+  `runtime.captureEvents(...)` when needed. Run isolated cases with `--config`;
+  use shared mode with `--parallel --jobs 1`. Shared cases use one NATS account,
+  Trellis process, and SQLite set; the harness resets stale accepted authority
+  before attached authentication. Higher worker counts are rejected because
+  fixed protocol subjects share that account. `trellis-test` runs NATS as a managed child process from pinned,
   checksum-verified nats-server and nsc binaries (cached under
   `TRELLIS_TEST_CACHE_DIR`, default `~/.cache/trellis-test`; first use downloads them, requiring network; every reuse revalidates the cached archive sha256 against the pin and byte-checks the cached binary against a fresh extraction, so corrupted or replaced cache entries are reinstalled, and and `sh` must be on `PATH`); no container runtime is
   required.
@@ -280,10 +279,10 @@ For integration tests, prefer `@qlever-llc/trellis-test/integration` over raw
 NATS subjects or hand-built bootstrap responses. Serial runs isolate each
 selected test with the `runtime` option passed to `trellisIntegrationTest(...)`,
 usually imported from the same `trellis.integration.ts` module used by the runner
-config. Parallel runs share one NATS server but start a tenant-isolated Trellis
-runtime, SQLite database, and service sidecars for each selected case. Case-scoped
-deployments, contracts, subjects, participant names, and resource keys keep
-diagnostics deterministic. Configure runtime-wide authority-plan acceptance with the
+config. Shared runs use one NATS account, Trellis runtime, and SQLite set with one
+worker. Keep authored contracts, actions, subjects, and participant identities
+fixed; case-scope only physical deployments, resource keys, durable names, and
+domain records. Configure runtime-wide authority-plan acceptance with the
 top-level `authority.autoAccept` option. Allow migration plans only in tests that
 intentionally cover migrations, using per-approval `allowPlanClassifications` or
 explicit authority-plan helpers.

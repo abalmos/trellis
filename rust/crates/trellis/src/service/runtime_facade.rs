@@ -38,8 +38,6 @@ use crate::client::{
     AuthorizationContextStore, EventMessage, EventReplayPolicy, EventSubscribeOptions,
     EventSubscriptionMode, ServiceConnectWithContractOptions, TrellisClient, TrellisClientError,
 };
-#[cfg(feature = "integration-test-scoping")]
-use crate::integration_test_scoping::IntegrationTestScope;
 use crate::jobs::{
     start_worker_host_from_client, JobDescriptor, JobManager, JobProcessError, JobRef, JobsError,
     TrellisJobEventPublisher, TrellisJobMetaSource, WorkerHostHandle, WorkerHostOptions,
@@ -177,8 +175,6 @@ pub struct ServiceConnectOptions<'a> {
     authority_pending_timeout_ms: Option<u64>,
     /// Caller-owned durable context and trust-floor storage.
     authorization_context_store: Arc<dyn AuthorizationContextStore>,
-    #[cfg(feature = "integration-test-scoping")]
-    integration_test_scope: Option<IntegrationTestScope>,
 }
 
 impl<'a> ServiceConnectOptions<'a> {
@@ -219,8 +215,6 @@ impl<'a> ServiceConnectOptions<'a> {
             retry_delay_ms: DEFAULT_RETRY_DELAY_MS,
             authority_pending_timeout_ms: DEFAULT_AUTHORITY_PENDING_TIMEOUT_MS,
             authorization_context_store,
-            #[cfg(feature = "integration-test-scoping")]
-            integration_test_scope: None,
         }
     }
 
@@ -248,14 +242,6 @@ impl<'a> ServiceConnectOptions<'a> {
     /// Limit authority-pending bootstrap wait time, or use `None` to wait indefinitely.
     pub const fn with_authority_pending_timeout_ms(mut self, timeout_ms: Option<u64>) -> Self {
         self.authority_pending_timeout_ms = timeout_ms;
-        self
-    }
-
-    /// Apply an immutable integration-test contract namespace to this connection.
-    #[cfg(feature = "integration-test-scoping")]
-    #[doc(hidden)]
-    pub fn with_integration_test_scope(mut self, scope: IntegrationTestScope) -> Self {
-        self.integration_test_scope = Some(scope);
         self
     }
 }
@@ -936,7 +922,7 @@ impl<C> std::fmt::Debug for ConnectedServiceRuntime<C> {
 
 impl<C> ConnectedServiceRuntime<C> {
     /// Return the local provider cache for live integration assertions.
-    #[cfg(feature = "integration-test-scoping")]
+    #[cfg(feature = "test-support")]
     #[doc(hidden)]
     pub fn integration_test_authorization_provider(
         &self,
@@ -949,7 +935,7 @@ impl<C> ConnectedServiceRuntime<C> {
     }
 
     /// Return the connected NATS client for live reconnect assertions.
-    #[cfg(feature = "integration-test-scoping")]
+    #[cfg(feature = "test-support")]
     #[doc(hidden)]
     pub fn integration_test_nats(&self) -> async_nats::Client {
         self.client
@@ -959,7 +945,7 @@ impl<C> ConnectedServiceRuntime<C> {
     }
 
     /// Send one signed raw RPC request through the connected service session.
-    #[cfg(feature = "integration-test-scoping")]
+    #[cfg(feature = "test-support")]
     #[doc(hidden)]
     pub async fn integration_test_request_json_value(
         &self,
@@ -988,10 +974,6 @@ impl<C> ConnectedServiceRuntime<C> {
         let caller = crate::generated::Caller::new(Arc::clone(&client));
         let mut router = Router::new();
         router.set_api_id(api_id);
-        #[cfg(feature = "integration-test-scoping")]
-        let mut router = router;
-        #[cfg(feature = "integration-test-scoping")]
-        router.set_integration_test_scope(client.integration_test_scope().cloned());
         Self {
             client: Some(client),
             caller: Some(caller),
@@ -1770,8 +1752,6 @@ impl<C> ConnectedServiceRuntime<C> {
                 retry_delay_ms: options.retry_delay_ms,
                 authority_pending_timeout_ms: options.authority_pending_timeout_ms,
                 authorization_context_store: options.authorization_context_store.clone(),
-                #[cfg(feature = "integration-test-scoping")]
-                integration_test_scope: options.integration_test_scope.clone(),
             })
             .await?;
         let binding = parse_bootstrap_binding(&client)?;
@@ -2012,18 +1992,6 @@ where
         .iter()
         .map(|capability| (*capability).to_owned())
         .collect::<Vec<_>>();
-    #[cfg(feature = "integration-test-scoping")]
-    let (event_api_id, event_name, publish_capabilities) = match client.integration_test_scope() {
-        Some(scope) => (
-            scope.contract_id(&event_api_id),
-            scope.logical_name(&event_name),
-            publish_capabilities
-                .into_iter()
-                .map(|capability| scope.capability(&capability))
-                .collect(),
-        ),
-        None => (event_api_id, event_name, publish_capabilities),
-    };
     if let Some(durable_name) = options.durable_name.as_deref() {
         return Err(ServiceRuntimeError::CallerDurableName {
             durable_name: durable_name.to_string(),

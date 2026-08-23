@@ -16,7 +16,7 @@ pub use browser_login::{
     generate_session_keypair, start_admin_reauth, start_agent_login,
 };
 pub use client::{connect_admin_client_async, session_public_key};
-#[cfg(feature = "integration-test-scoping")]
+#[cfg(feature = "test-support")]
 #[doc(hidden)]
 pub use device_activation::check_device_activation_with_test_proof;
 pub use device_activation::{

@@ -258,14 +258,14 @@ commands.
   `/integration/runner`. External service repos provide
   `trellis.integration.ts` with an explicit `runtime.trellis.command`,
   `denoTestArgs`, and case descriptors. Tests use
-  `trellisIntegrationTest(...)`, `runtimeScopeForCase(CASE_ID)`, case-scoped
-  contract ids/subjects/names/resource keys, contract approval/provisioning,
+  `trellisIntegrationTest(...)`, `runtimeScopeForCase(CASE_ID)`, fixed authored
+  contract ids/actions/subjects, case-slugged physical names/resource keys, contract approval/provisioning,
   `TrellisService.connect(...)`, and `runtime.connectClient(...)`. Serial runs
-  call the runner with `--config`; parallel runs add `--parallel --jobs <n>`,
-  where `--jobs` maps to child `DENO_JOBS`, not a `deno test --jobs` flag.
-  Parallel cases share one NATS server but have separate NATS accounts, Trellis
-  processes, SQLite databases, and sidecars. Keep one case per module and do not
-  rely on execution order. `trellis-test` runs NATS as a managed child process
+  call the runner with `--config`; shared runs add `--parallel --jobs 1`.
+  Shared cases use one NATS account, Trellis process, and SQLite set; the harness
+  resets stale accepted authority before attached authentication. Higher worker
+  counts are rejected because fixed protocol subjects share that account. Keep
+  one case per module. `trellis-test` runs NATS as a managed child process
   from pinned, checksum-verified nats-server and nsc binaries (cached under
   `TRELLIS_TEST_CACHE_DIR`, default `~/.cache/trellis-test`; first use downloads them, requiring network; every reuse revalidates the cached archive sha256 against the pin and byte-checks the cached binary against a fresh extraction, so corrupted or replaced cache entries are reinstalled, and and `sh` must be on `PATH`); no container runtime is
   required.

@@ -333,10 +333,9 @@ async fn rpc_client_calls_service_success() {
         .connect_client(&bootstrap_url, &client_contract)
         .await
         .expect("connect live Rust RPC client");
-    let client_subject = client.integration_test_descriptor_subject(EntityGetRpc::SUBJECT);
-    let client_capability = client.integration_test_descriptor_capability(RPC_READ_CAPABILITY);
-    assert_eq!(service_subjects, [client_subject.as_str()]);
-    assert_ne!(client_subject, EntityGetRpc::SUBJECT);
+    let client_subject = EntityGetRpc::SUBJECT;
+    let client_capability = RPC_READ_CAPABILITY;
+    assert_eq!(service_subjects, [client_subject]);
     let output = call_entity_get_with_retry(&client, "entity-1").await;
 
     service_task.abort_and_wait().await;
@@ -345,7 +344,7 @@ async fn rpc_client_calls_service_success() {
     assert_eq!(observed_requests[0].subject, client_subject);
     assert_eq!(
         observed_requests[0].required_capabilities,
-        Some(vec![client_capability])
+        Some(vec![client_capability.to_owned()])
     );
     assert_eq!(
         output,
@@ -742,7 +741,7 @@ async fn rpc_client_receives_declared_error() {
         .connect_client(&bootstrap_url, &client_contract)
         .await
         .expect("connect live Rust RPC client");
-    let client_subject = client.integration_test_descriptor_subject(EntityGetRpc::SUBJECT);
+    let client_subject = EntityGetRpc::SUBJECT;
     let result = call_entity_get_expecting_error(&client, "entity-1").await;
     assert_eq!(result.error_type(), Some("NOT_FOUND"));
     let value = result.value().expect("declared error payload is JSON");

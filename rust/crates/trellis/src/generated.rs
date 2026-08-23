@@ -56,25 +56,8 @@ impl Caller {
         Self { client }
     }
 
-    /// Resolve a descriptor subject through this connection's integration-test scope.
-    #[cfg(all(feature = "integration-test-scoping", feature = "test-support"))]
-    #[doc(hidden)]
-    pub fn integration_test_descriptor_subject(&self, subject: &str) -> String {
-        self.client.descriptor_subject(subject)
-    }
-
-    /// Resolve a capability through this connection's integration-test scope.
-    #[cfg(all(feature = "integration-test-scoping", feature = "test-support"))]
-    #[doc(hidden)]
-    pub fn integration_test_descriptor_capability(&self, capability: &str) -> String {
-        self.client.integration_test_scope().map_or_else(
-            || capability.to_string(),
-            |scope| scope.capability(capability),
-        )
-    }
-
     /// Return the connected NATS client for live transport-boundary tests.
-    #[cfg(all(feature = "integration-test-scoping", feature = "test-support"))]
+    #[cfg(feature = "test-support")]
     #[doc(hidden)]
     #[must_use]
     pub fn integration_test_nats(&self) -> async_nats::Client {
@@ -272,9 +255,6 @@ pub async fn test_connect_service_runtime<C>(
     identity_seed: &str,
     participant_needs_digest: &str,
     session_seed: &str,
-    #[cfg(feature = "integration-test-scoping")] integration_test_scope: Option<
-        crate::integration_test_scoping::IntegrationTestScope,
-    >,
 ) -> Result<crate::service::ConnectedServiceRuntime<C>, crate::service::ServiceRuntimeError> {
     let client = crate::client::TrellisClient::connect_service_with_contract(
         crate::client::ServiceConnectWithContractOptions {
@@ -296,8 +276,6 @@ pub async fn test_connect_service_runtime<C>(
             authorization_context_store: Arc::new(
                 crate::client::MemoryAuthorizationContextStore::default(),
             ),
-            #[cfg(feature = "integration-test-scoping")]
-            integration_test_scope,
         },
     )
     .await?;

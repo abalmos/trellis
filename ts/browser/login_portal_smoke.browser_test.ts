@@ -39,7 +39,7 @@ import type { Browser, Page } from "playwright";
 import { chromium } from "playwright";
 import { ulid } from "ulid";
 
-import { caseScopedName } from "../integration/_support/names.ts";
+import { integrationSlug } from "../integration/_support/names.ts";
 import {
   type LiveTrellisRuntime,
   withTrellisRuntime,
@@ -58,14 +58,12 @@ const liveLocalLoginCaseId = "browser.login-portal-live-local-login";
 const liveLocalLoginFixture = createAuthLocalLoginFixture(
   liveLocalLoginCaseId,
 );
-const liveLocalLoginPortalId = caseScopedName(
-  "browser-login-portal",
-  liveLocalLoginCaseId,
-);
-const liveLocalLoginUsername = caseScopedName(
-  "browser-login-portal-user",
-  liveLocalLoginCaseId,
-);
+const liveLocalLoginPortalId = `browser-login-portal-${
+  integrationSlug(liveLocalLoginCaseId)
+}`;
+const liveLocalLoginUsername = `browser-login-portal-user-${
+  integrationSlug(liveLocalLoginCaseId)
+}`;
 const liveLocalLoginPassword =
   `trellis-integration-${liveLocalLoginCaseId}-password-2026`;
 const liveSessionRefreshCaseId =
@@ -73,14 +71,12 @@ const liveSessionRefreshCaseId =
 const liveSessionRefreshFixture = createAuthLocalLoginFixture(
   liveSessionRefreshCaseId,
 );
-const liveSessionRefreshPortalId = caseScopedName(
-  "browser-login-portal",
-  liveSessionRefreshCaseId,
-);
-const liveSessionRefreshUsername = caseScopedName(
-  "browser-login-portal-user",
-  liveSessionRefreshCaseId,
-);
+const liveSessionRefreshPortalId = `browser-login-portal-${
+  integrationSlug(liveSessionRefreshCaseId)
+}`;
+const liveSessionRefreshUsername = `browser-login-portal-user-${
+  integrationSlug(liveSessionRefreshCaseId)
+}`;
 const liveSessionRefreshPassword =
   `trellis-integration-${liveSessionRefreshCaseId}-password-2026`;
 const liveInvalidLocalLoginCaseId =
@@ -88,14 +84,12 @@ const liveInvalidLocalLoginCaseId =
 const liveInvalidLocalLoginFixture = createAuthLocalLoginFixture(
   liveInvalidLocalLoginCaseId,
 );
-const liveInvalidLocalLoginPortalId = caseScopedName(
-  "browser-login-portal",
-  liveInvalidLocalLoginCaseId,
-);
-const liveInvalidLocalLoginUsername = caseScopedName(
-  "browser-login-portal-user",
-  liveInvalidLocalLoginCaseId,
-);
+const liveInvalidLocalLoginPortalId = `browser-login-portal-${
+  integrationSlug(liveInvalidLocalLoginCaseId)
+}`;
+const liveInvalidLocalLoginUsername = `browser-login-portal-user-${
+  integrationSlug(liveInvalidLocalLoginCaseId)
+}`;
 const liveInvalidLocalLoginPassword =
   `trellis-integration-${liveInvalidLocalLoginCaseId}-password-2026`;
 const liveInactiveLocalLoginCaseId =
@@ -103,28 +97,24 @@ const liveInactiveLocalLoginCaseId =
 const liveInactiveLocalLoginFixture = createAuthLocalLoginFixture(
   liveInactiveLocalLoginCaseId,
 );
-const liveInactiveLocalLoginPortalId = caseScopedName(
-  "browser-login-portal",
-  liveInactiveLocalLoginCaseId,
-);
-const liveInactiveLocalLoginUsername = caseScopedName(
-  "browser-login-portal-user",
-  liveInactiveLocalLoginCaseId,
-);
+const liveInactiveLocalLoginPortalId = `browser-login-portal-${
+  integrationSlug(liveInactiveLocalLoginCaseId)
+}`;
+const liveInactiveLocalLoginUsername = `browser-login-portal-user-${
+  integrationSlug(liveInactiveLocalLoginCaseId)
+}`;
 const liveInactiveLocalLoginPassword =
   `trellis-integration-${liveInactiveLocalLoginCaseId}-password-2026`;
 const liveDeniedConsentCaseId = "browser.login-portal-live-denied-consent";
 const liveDeniedConsentFixture = createAuthLocalLoginFixture(
   liveDeniedConsentCaseId,
 );
-const liveDeniedConsentPortalId = caseScopedName(
-  "browser-login-portal",
-  liveDeniedConsentCaseId,
-);
-const liveDeniedConsentUsername = caseScopedName(
-  "browser-login-portal-user",
-  liveDeniedConsentCaseId,
-);
+const liveDeniedConsentPortalId = `browser-login-portal-${
+  integrationSlug(liveDeniedConsentCaseId)
+}`;
+const liveDeniedConsentUsername = `browser-login-portal-user-${
+  integrationSlug(liveDeniedConsentCaseId)
+}`;
 const liveDeniedConsentPassword =
   `trellis-integration-${liveDeniedConsentCaseId}-password-2026`;
 const liveInsufficientCapabilitiesCaseId =
@@ -133,20 +123,17 @@ const liveInsufficientCapabilitiesFixture = createAuthLocalLoginFixture(
   liveInsufficientCapabilitiesCaseId,
   { eventProbe: true, optionalPing: true },
 );
-const liveInsufficientCapabilitiesPortalId = caseScopedName(
-  "browser-login-portal",
-  liveInsufficientCapabilitiesCaseId,
-);
-const liveInsufficientCapabilitiesUsername = caseScopedName(
-  "browser-login-portal-user",
-  liveInsufficientCapabilitiesCaseId,
-);
+const liveInsufficientCapabilitiesPortalId = `browser-login-portal-${
+  integrationSlug(liveInsufficientCapabilitiesCaseId)
+}`;
+const liveInsufficientCapabilitiesUsername = `browser-login-portal-user-${
+  integrationSlug(liveInsufficientCapabilitiesCaseId)
+}`;
 const liveInsufficientCapabilitiesPassword =
   `trellis-integration-${liveInsufficientCapabilitiesCaseId}-password-2026`;
-const liveTrustedRegistrationUsername = caseScopedName(
-  "browser-login-portal-trusted-user",
-  liveInsufficientCapabilitiesCaseId,
-);
+const liveTrustedRegistrationUsername = `browser-login-portal-trusted-user-${
+  integrationSlug(liveInsufficientCapabilitiesCaseId)
+}`;
 const liveTrustedRegistrationPassword =
   `trellis-integration-${liveInsufficientCapabilitiesCaseId}-trusted-password-2026`;
 const liveOidcRoleCaseId = "browser.login-portal-live-oidc-role-mapping";
@@ -154,34 +141,28 @@ const liveOidcRoleFixture = createAuthLocalLoginFixture(liveOidcRoleCaseId, {
   identityLink: true,
   optionalPing: true,
 });
-const liveOidcRolePortalId = caseScopedName(
-  "browser-login-portal",
-  liveOidcRoleCaseId,
-);
-const liveAccountLinkUsername = caseScopedName(
-  "browser-account-link-user",
-  liveOidcRoleCaseId,
-);
+const liveOidcRolePortalId = `browser-login-portal-${
+  integrationSlug(liveOidcRoleCaseId)
+}`;
+const liveAccountLinkUsername = `browser-account-link-user-${
+  integrationSlug(liveOidcRoleCaseId)
+}`;
 const liveAccountLinkPassword =
   `trellis-integration-${liveOidcRoleCaseId}-linked-password-2026`;
-const liveAccountLinkDuplicateExistingUsername = caseScopedName(
-  "browser-account-link-existing-user",
-  liveOidcRoleCaseId,
-);
+const liveAccountLinkDuplicateExistingUsername =
+  `browser-account-link-existing-user-${integrationSlug(liveOidcRoleCaseId)}`;
 const liveAccountLinkDuplicatePassword =
   `trellis-integration-${liveOidcRoleCaseId}-duplicate-password-2026`;
 const liveAccountPasswordCaseId = "browser.login-portal-live-account-password";
 const liveAccountPasswordFixture = createAuthLocalLoginFixture(
   liveAccountPasswordCaseId,
 );
-const liveAccountPasswordPortalId = caseScopedName(
-  "browser-login-portal",
-  liveAccountPasswordCaseId,
-);
-const liveAccountPasswordUsername = caseScopedName(
-  "browser-account-password-user",
-  liveAccountPasswordCaseId,
-);
+const liveAccountPasswordPortalId = `browser-login-portal-${
+  integrationSlug(liveAccountPasswordCaseId)
+}`;
+const liveAccountPasswordUsername = `browser-account-password-user-${
+  integrationSlug(liveAccountPasswordCaseId)
+}`;
 const liveAccountPasswordInitialPassword =
   `trellis-integration-${liveAccountPasswordCaseId}-initial-password-2026`;
 const liveAccountPasswordNewPassword =
@@ -191,14 +172,13 @@ const liveAccountPasswordTooShortCaseId =
 const liveAccountPasswordTooShortFixture = createAuthLocalLoginFixture(
   liveAccountPasswordTooShortCaseId,
 );
-const liveAccountPasswordTooShortPortalId = caseScopedName(
-  "browser-login-portal",
-  liveAccountPasswordTooShortCaseId,
-);
-const liveAccountPasswordTooShortUsername = caseScopedName(
-  "browser-account-password-short-user",
-  liveAccountPasswordTooShortCaseId,
-);
+const liveAccountPasswordTooShortPortalId = `browser-login-portal-${
+  integrationSlug(liveAccountPasswordTooShortCaseId)
+}`;
+const liveAccountPasswordTooShortUsername =
+  `browser-account-password-short-user-${
+    integrationSlug(liveAccountPasswordTooShortCaseId)
+  }`;
 const liveAccountPasswordTooShortInitialPassword =
   `trellis-integration-${liveAccountPasswordTooShortCaseId}-initial-password-2026`;
 const liveMissingAccountFlowCaseId =
@@ -206,19 +186,17 @@ const liveMissingAccountFlowCaseId =
 const liveMissingAccountFlowFixture = createAuthLocalLoginFixture(
   liveMissingAccountFlowCaseId,
 );
-const liveMissingAccountFlowUsername = caseScopedName(
-  "browser-missing-account-flow-user",
-  liveMissingAccountFlowCaseId,
-);
+const liveMissingAccountFlowUsername = `browser-missing-account-flow-user-${
+  integrationSlug(liveMissingAccountFlowCaseId)
+}`;
 const liveReusedAccountFlowCaseId =
   "browser.login-portal-live-reused-account-flow";
 const liveReusedAccountFlowFixture = createAuthLocalLoginFixture(
   liveReusedAccountFlowCaseId,
 );
-const liveReusedAccountFlowUsername = caseScopedName(
-  "browser-reused-account-flow-user",
-  liveReusedAccountFlowCaseId,
-);
+const liveReusedAccountFlowUsername = `browser-reused-account-flow-user-${
+  integrationSlug(liveReusedAccountFlowCaseId)
+}`;
 const liveReusedAccountFlowInitialPassword =
   `trellis-integration-${liveReusedAccountFlowCaseId}-initial-password-2026`;
 const liveReusedAccountFlowNewPassword =
@@ -231,14 +209,12 @@ const liveDeviceActivationFixture = createDeviceActivationFixture(
 const liveDeviceActivationLoginFixture = createAuthLocalLoginFixture(
   `${liveDeviceActivationCaseId}.login`,
 );
-const liveDeviceActivationPortalId = caseScopedName(
-  "browser-device-activation-portal",
-  liveDeviceActivationCaseId,
-);
-const liveDeviceActivationUsername = caseScopedName(
-  "browser-device-activation-user",
-  liveDeviceActivationCaseId,
-);
+const liveDeviceActivationPortalId = `browser-device-activation-portal-${
+  integrationSlug(liveDeviceActivationCaseId)
+}`;
+const liveDeviceActivationUsername = `browser-device-activation-user-${
+  integrationSlug(liveDeviceActivationCaseId)
+}`;
 const liveDeviceActivationPassword =
   `trellis-integration-${liveDeviceActivationCaseId}-password-2026`;
 const liveDeviceActivationPendingCaseId =
@@ -249,14 +225,14 @@ const liveDeviceActivationPendingFixture = createDeviceActivationFixture(
 const liveDeviceActivationPendingLoginFixture = createAuthLocalLoginFixture(
   `${liveDeviceActivationPendingCaseId}.login`,
 );
-const liveDeviceActivationPendingPortalId = caseScopedName(
-  "browser-device-activation-pending-portal",
-  liveDeviceActivationPendingCaseId,
-);
-const liveDeviceActivationPendingUsername = caseScopedName(
-  "browser-device-activation-pending-user",
-  liveDeviceActivationPendingCaseId,
-);
+const liveDeviceActivationPendingPortalId =
+  `browser-device-activation-pending-portal-${
+    integrationSlug(liveDeviceActivationPendingCaseId)
+  }`;
+const liveDeviceActivationPendingUsername =
+  `browser-device-activation-pending-user-${
+    integrationSlug(liveDeviceActivationPendingCaseId)
+  }`;
 const liveDeviceActivationPendingPassword =
   `trellis-integration-${liveDeviceActivationPendingCaseId}-password-2026`;
 const liveDeviceActivationRejectedCaseId =
@@ -267,14 +243,14 @@ const liveDeviceActivationRejectedFixture = createDeviceActivationFixture(
 const liveDeviceActivationRejectedLoginFixture = createAuthLocalLoginFixture(
   `${liveDeviceActivationRejectedCaseId}.login`,
 );
-const liveDeviceActivationRejectedPortalId = caseScopedName(
-  "browser-device-activation-rejected-portal",
-  liveDeviceActivationRejectedCaseId,
-);
-const liveDeviceActivationRejectedUsername = caseScopedName(
-  "browser-device-activation-rejected-user",
-  liveDeviceActivationRejectedCaseId,
-);
+const liveDeviceActivationRejectedPortalId =
+  `browser-device-activation-rejected-portal-${
+    integrationSlug(liveDeviceActivationRejectedCaseId)
+  }`;
+const liveDeviceActivationRejectedUsername =
+  `browser-device-activation-rejected-user-${
+    integrationSlug(liveDeviceActivationRejectedCaseId)
+  }`;
 const liveDeviceActivationRejectedPassword =
   `trellis-integration-${liveDeviceActivationRejectedCaseId}-password-2026`;
 const deviceActivationPortalContractId = "trellis.portal.activation@v1";
@@ -431,7 +407,7 @@ withLivePortalPage(
           const approve = page.getByRole("button", { name: "Approve" });
           await page.waitForFunction(
             ({ callbackPrefix }) =>
-              window.location.href.startsWith(callbackPrefix) ||
+              globalThis.location.href.startsWith(callbackPrefix) ||
               [...document.querySelectorAll("button")].some((button) =>
                 button.textContent?.trim() === "Approve" &&
                 button.getBoundingClientRect().height > 0
@@ -821,11 +797,15 @@ withLivePortalPage(
     const fixture = liveInsufficientCapabilitiesFixture;
     const service = await fixture.setupService(runtime);
     await runtime.services.createInstance({
-      name: caseScopedName("auth-old-event-proof-provider", fixture.clientName),
+      name: `auth-old-event-proof-provider-${
+        integrationSlug(fixture.clientName)
+      }`,
       contract: fixture.eventContract,
     });
     const eventCapture = await runtime.captureEvents({
-      name: caseScopedName("auth-old-event-proof-capture", fixture.clientName),
+      name: `auth-old-event-proof-capture-${
+        integrationSlug(fixture.clientName)
+      }`,
       contract: fixture.eventContract,
       events: [fixture.probeEvent.subscribe],
     });
@@ -1902,7 +1882,7 @@ withLivePortalPage(
         accountFlowPortalUrl(
           portalOrigin,
           "/_trellis/portal/account/password",
-          caseScopedName("missing-flow", liveMissingAccountFlowCaseId),
+          `missing-flow-${integrationSlug(liveMissingAccountFlowCaseId)}`,
         ),
         { waitUntil: "networkidle" },
       );

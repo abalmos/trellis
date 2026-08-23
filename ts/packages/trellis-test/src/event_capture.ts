@@ -13,7 +13,6 @@ import type {
 import type { EventDesc } from "@qlever-llc/trellis/contracts";
 
 import type { WaitForOptions } from "./types.ts";
-import { unscopedCaseActionName } from "./integration/names.ts";
 
 export type TrellisTestEventAction = ActionDescriptor<
   string,
@@ -311,7 +310,7 @@ export async function startTrellisTestEventCapture<
       >;
       await listener((decoded, context) => {
         capture.recordCaptured({
-          event: unscopedCaseActionName(args.options.contract, event.name),
+          event: event.name,
           payload: decoded,
           context: { id: context.id, time: context.time, mode: "ephemeral" },
           receivedAt: new Date(),

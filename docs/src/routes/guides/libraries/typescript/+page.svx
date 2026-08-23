@@ -28,8 +28,8 @@ Common packages are:
 - `@qlever-llc/trellis-test`: Deno-first integration test helpers for service
   repositories that need isolated NATS/JetStream and a real Trellis
   control-plane process. Use its `/integration` helpers and `/integration/runner`
-  subpath for out-of-tree service-repo cases that can run serially or with one
-  tenant-isolated runtime per Deno parallel case.
+  subpath for out-of-tree service-repo cases that can run with isolated runtimes
+  or serially on one shared runtime.
 - `@qlever-llc/trellis-svelte`: Svelte and SvelteKit integration helpers.
 - generated SDK packages under `generated/packages/jsr/` and
   `generated/packages/npm/` for contracts in your project.
@@ -77,16 +77,15 @@ const order = await client.rpc.orders.get({ orderId: "ord_123" }).orThrow();
 Use `@qlever-llc/trellis-test/integration` when a service repository needs a
 live Trellis boundary test. The service repo supplies its own Trellis command in
 `trellis.integration.ts`, imports helpers such as `trellisIntegrationTest(...)`,
-`runtimeScopeForCase(...)`, `caseScopedContractId(...)`,
-`caseScopedSubject(...)`, and `caseScopedName(...)`, and runs cases through
+`runtimeScopeForCase(...)`, and `integrationSlug(...)`, and runs cases through
 `@qlever-llc/trellis-test/integration/runner`.
 
 Serial runs start an isolated runtime per selected test from the `runtime` option
 passed to `trellisIntegrationTest(...)`, commonly imported from the same
-`trellis.integration.ts` module used by the runner config. Parallel runs share
-one NATS server while giving each selected case its own NATS accounts, Trellis
-process, SQLite database, and service sidecars. The runner passes `DENO_JOBS`
-from its `--jobs` flag to bound concurrent case runtimes.
+`trellis.integration.ts` module used by the runner config. Shared runs use one
+NATS server, one Trellis process, and one SQLite set with `DENO_JOBS=1`. Keep
+authored protocol identities fixed and use `integrationSlug(...)` only for
+physical deployment, resource, state, durable, and domain names.
 
 See [Testing Trellis services](/guides/testing-trellis-services) for a complete
 out-of-tree config, one-case test module, serial and parallel commands, and

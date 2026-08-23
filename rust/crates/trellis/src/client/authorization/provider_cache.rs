@@ -54,7 +54,7 @@ pub struct RuntimeAuthorizationIoCounters {
 }
 
 /// Authorization-registry I/O counters exposed only to live integration tests.
-#[cfg(feature = "integration-test-scoping")]
+#[cfg(feature = "test-support")]
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct IntegrationTestAuthorizationIoCounters {
     /// Exact context reads.
@@ -465,7 +465,7 @@ impl AuthorizationProviderCache {
     }
 
     /// Return exact provider I/O counters for live integration assertions.
-    #[cfg(feature = "integration-test-scoping")]
+    #[cfg(feature = "test-support")]
     #[must_use]
     pub fn integration_test_io_counters(&self) -> IntegrationTestAuthorizationIoCounters {
         let registry = self
@@ -483,7 +483,7 @@ impl AuthorizationProviderCache {
 
     /// Return whether the provider cache is ready, for live integration
     /// assertions on the watch lifecycle.
-    #[cfg(feature = "integration-test-scoping")]
+    #[cfg(feature = "test-support")]
     #[doc(hidden)]
     #[must_use]
     pub fn integration_test_provider_ready(&self) -> bool {

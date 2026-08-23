@@ -130,7 +130,7 @@ async fn prepared_events_prepared_publish_preserves_custom_headers_and_annotates
     .await
     .expect("connect prepared-events listener runtime");
 
-    let raw_subject = runtime.integration_test_descriptor_subject(EntityChanged::SUBJECT);
+    let raw_subject = EntityChanged::SUBJECT;
     let mut raw_observer = async_nats::ConnectOptions::new()
         .credentials_file(runtime.workdir().join("nats/creds/trellis-auth.creds"))
         .await

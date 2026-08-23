@@ -1,14 +1,4 @@
-export {
-  aliasCaseScopedActions,
-  aliasCaseScopedRuntime,
-  caseDeploymentId,
-  caseScopedActionName,
-  caseScopedActions,
-  caseScopedContractId,
-  caseScopedName,
-  caseScopedSubject,
-  integrationSlug,
-} from "./src/integration/names.ts";
+export { caseDeploymentId, integrationSlug } from "./src/integration/names.ts";
 export {
   runtimeScopeForCase,
   runtimeScopeIsolated,

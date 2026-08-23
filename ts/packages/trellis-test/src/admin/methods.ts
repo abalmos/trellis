@@ -40,6 +40,11 @@ import {
   AuthDevicesProvision,
   AuthDevicesProvisionRequestSchema,
   AuthDevicesProvisionResponseSchema,
+  AuthIdentityAuthorityList,
+  AuthIdentityAuthorityRevoke,
+  AuthPortalsGet,
+  AuthPortalsGetRequestSchema,
+  AuthPortalsGetResponseSchema,
   AuthPortalsGrantOverridesPut,
   AuthPortalsGrantOverridesPutRequestSchema,
   AuthPortalsGrantOverridesPutResponseSchema,
@@ -64,6 +69,7 @@ import {
   AuthSessionsRevoke,
   AuthSessionsRevokeRequestSchema,
   AuthSessionsRevokeResponseSchema,
+  AuthUserIdentitiesList,
 } from "@qlever-llc/trellis/sdk/auth";
 import {
   StateAdminDelete,
@@ -81,7 +87,7 @@ import { API_DIGEST as STATE_API_DIGEST } from "@qlever-llc/trellis/sdk/state/ap
 import administrationParticipantSource from "../../../../../rust/crates/trellis/artifacts/trellis.admin.participant.json" with {
   type: "json",
 };
-import { type Static, type TSchema, Type } from "typebox";
+import type { Static, TSchema } from "typebox";
 
 export const ADMIN_USERNAME = "admin";
 const adminDescriptors = defineAppContract(() => ({
@@ -100,16 +106,20 @@ const adminDescriptors = defineAppContract(() => ({
     AuthDeploymentAuthorityReconcile,
     AuthDeploymentsCreate,
     AuthDevicesProvision,
+    AuthIdentityAuthorityList,
+    AuthIdentityAuthorityRevoke,
     AuthConnectionsList,
     AuthCapabilityGroupsPut,
     AuthPortalsList,
     AuthPortalsGrantOverridesPut,
+    AuthPortalsGet,
     AuthPortalsGrantOverridesRemove,
     AuthPortalsLoginSettingsUpdate,
     AuthPortalsPut,
     AuthPortalsRoutesPut,
     AuthServiceInstancesProvision,
     AuthSessionsRevoke,
+    AuthUserIdentitiesList,
     StateAdminDelete,
     StateAdminGet,
     StateAdminList,
@@ -190,6 +200,11 @@ export const adminMethods = {
     AuthPortalsGrantOverridesPutRequestSchema,
     AuthPortalsGrantOverridesPutResponseSchema,
     (client, input) => client.authPortalsGrantOverridesPut(input).orThrow(),
+  ),
+  authPortalsGet: adminMethod(
+    AuthPortalsGetRequestSchema,
+    AuthPortalsGetResponseSchema,
+    (client, input) => client.authPortalsGet(input).orThrow(),
   ),
   authPortalsList: adminMethod(
     AuthPortalsListRequestSchema,

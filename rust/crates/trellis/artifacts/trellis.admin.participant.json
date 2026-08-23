@@ -29,6 +29,8 @@
             "Auth.Users.IdentityLink.Create",
             "Auth.UserIdentities.List",
             "Auth.UserIdentities.Unlink",
+            "Auth.IdentityAuthority.List",
+            "Auth.IdentityAuthority.Revoke",
             "Auth.Deployments.Create",
             "Auth.Deployments.List",
             "Auth.Deployments.Enable",

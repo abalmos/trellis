@@ -227,8 +227,6 @@ pub struct Router {
     handlers: HashMap<String, Route>,
     feed_cancellations: FeedCancellations,
     api_id: Option<String>,
-    #[cfg(feature = "integration-test-scoping")]
-    integration_test_scope: Option<crate::integration_test_scoping::IntegrationTestScope>,
 }
 
 impl Router {
@@ -242,36 +240,11 @@ impl Router {
         self.api_id = Some(api_id.into());
     }
 
-    #[cfg(feature = "integration-test-scoping")]
-    pub(crate) fn set_integration_test_scope(
-        &mut self,
-        scope: Option<crate::integration_test_scoping::IntegrationTestScope>,
-    ) {
-        self.integration_test_scope = scope;
-    }
-
     fn descriptor_subject(&self, subject: &str) -> String {
-        #[cfg(feature = "integration-test-scoping")]
-        {
-            crate::integration_test_scoping::resolve_descriptor_subject(
-                self.integration_test_scope.as_ref(),
-                subject,
-            )
-            .expect("generated contract descriptor subjects are valid")
-            .into_owned()
-        }
-        #[cfg(not(feature = "integration-test-scoping"))]
         subject.to_string()
     }
 
     fn descriptor_capabilities(&self, capabilities: &[&str]) -> Vec<String> {
-        #[cfg(feature = "integration-test-scoping")]
-        if let Some(scope) = &self.integration_test_scope {
-            return capabilities
-                .iter()
-                .map(|capability| scope.capability(capability))
-                .collect();
-        }
         capabilities
             .iter()
             .map(|capability| (*capability).to_string())
@@ -279,10 +252,6 @@ impl Router {
     }
 
     fn descriptor_name(&self, name: &str) -> String {
-        #[cfg(feature = "integration-test-scoping")]
-        if let Some(scope) = &self.integration_test_scope {
-            return scope.logical_name(name);
-        }
         name.to_string()
     }
 

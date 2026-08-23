@@ -92,7 +92,7 @@ Validation:
 - [ ] Remove impossible disconnected/test-only `ConnectedServiceRuntime` states; make connected runtime values valid by construction.
 - [ ] Remove raw integration-test methods from production facades where tests can use normal product behavior instead.
 - [ ] Remove `runtime-internals` exposure that exists only to let tests reach implementation details.
-- [ ] Remove `integration-test-scoping` behavior that changes normal production semantics; retain only genuine product concepts.
+- [x] Remove `integration-test-scoping` behavior that changes normal production semantics; retain only genuine product concepts.
 - [ ] Stop building production runtime binaries with test-fault features once the remaining hooks are gone.
 
 ## 7. Jobs and constructors

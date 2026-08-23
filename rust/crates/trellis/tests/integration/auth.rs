@@ -301,21 +301,15 @@ async fn start_fixture(user_jwt_ttl_ms: Option<u64>, use_test_oidc_provider: boo
         .expect("build trusted-portal client contract");
     let read_capability = format!(
         "{}::read",
-        runtime
-            .scoped_contract(&service_contract)
-            .expect("scope trusted-portal service contract")
+        service_contract
             .id()
             .strip_suffix("@v1")
             .expect("versioned trusted-portal service ID")
     );
     let publish_capability = read_capability.replace("::read", "::publish");
     let mut admin = runtime.admin();
-    let participant_id = runtime
-        .scoped_contract(&client_contract)
-        .expect("scope trusted-portal client contract")
-        .id()
-        .to_owned();
-    let portal_id = format!("portal-{participant_id}");
+    let participant_id = client_contract.id().to_owned();
+    let portal_id = runtime.integration_name("portal");
     admin
         .put_test_login_portal(
             &bootstrap_url,
@@ -492,12 +486,7 @@ async fn local_login_binds_approved_client_and_calls_authorized_rpc() {
             &[&fixture.service_contract, &auth_api],
         )
         .expect("build approved client contract");
-    let participant_id = fixture
-        .runtime
-        .scoped_contract(&client_contract)
-        .expect("scope approved client contract")
-        .id()
-        .to_owned();
+    let participant_id = client_contract.id().to_owned();
     let client = fixture
         .admin
         .connect_new_local_user(
@@ -537,12 +526,7 @@ async fn portal_grant_override_binds_without_user_selected_capability() {
         "auth",
     );
     let mut fixture = start_fixture(None, false).await;
-    let participant_id = fixture
-        .runtime
-        .scoped_contract(&fixture.client_contract)
-        .expect("scope optional client contract")
-        .id()
-        .to_owned();
+    let participant_id = fixture.client_contract.id().to_owned();
     fixture
         .admin
         .put_portal_grant_override(
@@ -764,10 +748,7 @@ async fn session_and_connection_inventory_report_participant_metadata() {
         )
         .await
         .expect("connect inventoried session");
-    let expected_contract = fixture
-        .runtime
-        .scoped_contract(&fixture.client_contract)
-        .expect("scope inventoried participant");
+    let expected_contract = &fixture.client_contract;
     let expected_needs_digest = expected_contract.needs_digest();
     let service_caller = fixture.service_handle.caller();
     let auth = auth_sdk::AuthClient::new(&service_caller).rpc().auth();
@@ -1119,12 +1100,7 @@ async fn portal_route_selection_and_policy_drive_browser_flow() {
         })
         .await
         .expect("create custom portal");
-    let participant_id = fixture
-        .runtime
-        .scoped_contract(&fixture.client_contract)
-        .expect("scope routed client")
-        .id()
-        .to_owned();
+    let participant_id = fixture.client_contract.id().to_owned();
     let route = auth
         .portals_routes_put(&auth_sdk::AuthPortalsRoutesPutRequest {
             deployment_id: None,
@@ -2100,12 +2076,10 @@ async fn device_activation_events_follow_effective_state() {
         .connect(fixture.runtime.nats_url())
         .await
         .expect("connect event-order observer");
-    let event_subject = fixture
-        .runtime
-        .integration_test_descriptor_subject(&format!(
-            "events.v1.Auth.DeviceUserAuthorities.*.{}",
-            device.approval.deployment_id,
-        ));
+    let event_subject = format!(
+        "events.v1.Auth.DeviceUserAuthorities.*.{}",
+        device.approval.deployment_id,
+    );
     let mut events = observer
         .subscribe(event_subject)
         .await
@@ -2221,12 +2195,10 @@ async fn device_activation_events_follow_effective_state() {
         provision_device_activation_case(&mut fixture, "device-event-order-none", "none").await;
     let no_review_user =
         connect_device_activation_user(&mut fixture, "device-event-order-none").await;
-    let no_review_subject = fixture
-        .runtime
-        .integration_test_descriptor_subject(&format!(
-            "events.v1.Auth.DeviceUserAuthorities.*.{}",
-            no_review.approval.deployment_id,
-        ));
+    let no_review_subject = format!(
+        "events.v1.Auth.DeviceUserAuthorities.*.{}",
+        no_review.approval.deployment_id,
+    );
     let mut no_review_events = observer
         .subscribe(no_review_subject)
         .await
@@ -2333,13 +2305,11 @@ async fn device_activation_approved_unclaimed_cannot_complete_delegation() {
         .connect(fixture.runtime.nats_url())
         .await
         .expect("connect activation event observer");
-    let resolved_subject = fixture
-        .runtime
-        .integration_test_descriptor_subject(&format!(
-            "{}.{}",
-            auth_sdk::events::AuthDeviceUserAuthoritiesResolvedEventDescriptor::SUBJECT,
-            device.approval.deployment_id,
-        ));
+    let resolved_subject = format!(
+        "{}.{}",
+        auth_sdk::events::AuthDeviceUserAuthoritiesResolvedEventDescriptor::SUBJECT,
+        device.approval.deployment_id,
+    );
     let mut resolved_events = observer
         .subscribe(resolved_subject)
         .await
@@ -2458,13 +2428,11 @@ async fn device_activation_expired_review_is_terminal() {
         .connect(fixture.runtime.nats_url())
         .await
         .expect("connect expiry event observer");
-    let resolved_subject = fixture
-        .runtime
-        .integration_test_descriptor_subject(&format!(
-            "{}.{}",
-            auth_sdk::events::AuthDeviceUserAuthoritiesResolvedEventDescriptor::SUBJECT,
-            device.approval.deployment_id,
-        ));
+    let resolved_subject = format!(
+        "{}.{}",
+        auth_sdk::events::AuthDeviceUserAuthoritiesResolvedEventDescriptor::SUBJECT,
+        device.approval.deployment_id,
+    );
     let mut resolved_events = observer
         .subscribe(resolved_subject)
         .await
@@ -3056,12 +3024,7 @@ async fn update_policy(fixture: &mut Fixture, capabilities: Vec<String>) {
 }
 
 async fn update_portal_policy(fixture: &mut Fixture, portal_id: &str, capabilities: Vec<String>) {
-    let participant_id = fixture
-        .runtime
-        .scoped_contract(&fixture.client_contract)
-        .expect("scope trusted portal client")
-        .id()
-        .to_owned();
+    let participant_id = fixture.client_contract.id().to_owned();
     let version = portal_policy_version(&fixture.runtime, portal_id, &participant_id)
         .expect("trusted portal grant override");
     fixture
@@ -3310,12 +3273,7 @@ async fn portal_policy_removal_requires_new_login() {
         .await
         .expect("trusted local registration");
     let session_id = reconnect.session_id().to_owned();
-    let participant_id = fixture
-        .runtime
-        .scoped_contract(&fixture.client_contract)
-        .expect("scope trusted portal client")
-        .id()
-        .to_owned();
+    let participant_id = fixture.client_contract.id().to_owned();
     let version = portal_policy_version(&fixture.runtime, &fixture.portal_id, &participant_id)
         .expect("trusted portal grant override");
 
@@ -3445,12 +3403,7 @@ async fn portal_policy_snapshot_races_are_fenced() {
     let username_b = "snapshot-race-user-b";
     let password = "snapshot-race-password-123";
     let tested_portal_id = fixture.portal_id.clone();
-    let participant_id = fixture
-        .runtime
-        .scoped_contract(&fixture.client_contract)
-        .expect("scope trusted portal client")
-        .id()
-        .to_owned();
+    let participant_id = fixture.client_contract.id().to_owned();
     fixture
         .admin
         .put_portal_grant_override(
@@ -3922,19 +3875,11 @@ async fn hostile_old_context_is_denied_after_reduction() {
         .await
         .expect("connect trusted-portal raw observer");
     let mut rpc_observer = observer
-        .subscribe(
-            fixture
-                .runtime
-                .integration_test_descriptor_subject(ValueGet::SUBJECT),
-        )
+        .subscribe(ValueGet::SUBJECT)
         .await
         .expect("subscribe to raw RPC requests");
     let mut event_observer = observer
-        .subscribe(
-            fixture
-                .runtime
-                .integration_test_descriptor_subject(ValueChanged::SUBJECT),
-        )
+        .subscribe(ValueChanged::SUBJECT)
         .await
         .expect("subscribe to raw events");
     observer.flush().await.expect("flush raw observers");
@@ -4143,12 +4088,7 @@ async fn concurrent_portal_provenance_converges() {
 async fn oidc_role_mapping_converges_authority() {
     assert_runtime_case_registered("auth.oidc-role-mapping-converges-authority", "auth", "auth");
     let mut fixture = start_fixture(None, true).await;
-    let participant_id = fixture
-        .runtime
-        .scoped_contract(&fixture.client_contract)
-        .expect("scope trusted portal client")
-        .id()
-        .to_owned();
+    let participant_id = fixture.client_contract.id().to_owned();
     let suffix = ulid::Ulid::new().to_string().to_ascii_lowercase();
     let leaf = format!("oidc-leaf-{suffix}");
     let parent = format!("oidc-parent-{suffix}");

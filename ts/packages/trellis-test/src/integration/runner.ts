@@ -225,8 +225,8 @@ export async function runTrellisIntegrationTests(
     if (inheritedManifest !== undefined) {
       const env: Record<string, string> = {
         [TRELLIS_TEST_SHARED_RUNTIME_ENV]: inheritedManifest,
+        DENO_JOBS: "1",
       };
-      if (args.jobs !== undefined) env.DENO_JOBS = String(args.jobs);
       const run = await runDenoTestsWithEvents(commandRunner, {
         executable: Deno.execPath(),
         args: denoTestArgs({
@@ -264,10 +264,7 @@ export async function runTrellisIntegrationTests(
         };
       }),
     });
-    const env = { ...host.env };
-    if (args.jobs !== undefined) {
-      env.DENO_JOBS = String(args.jobs);
-    }
+    const env = { ...host.env, DENO_JOBS: "1" };
 
     try {
       const run = await runDenoTestsWithEvents(commandRunner, {
@@ -614,6 +611,9 @@ function parseRunnerArgs(args: readonly string[]): ParsedRunnerArgs {
     }
   }
 
+  if (jobs !== undefined && jobs !== 1) {
+    throw new Error("--jobs must be 1 for fixed shared protocol subjects");
+  }
   return {
     configPath,
     fixtureFilters,
@@ -1035,7 +1035,7 @@ Options:
   --coverage-dir <dir>  Collect Deno coverage under <dir>/raw and write <dir>/lcov.info.
   --inventory-only      Evaluate selected modules and validate registrations without running tests.
   --parallel            Run selected tests with one shared Trellis runtime.
-  --jobs <n>            Max parallel worker count via DENO_JOBS.
+  --jobs <n>            Shared mode requires 1 for fixed protocol subjects.
   --deno-test-arg <arg> Pass one argument through to child deno test. May be repeated.
   --                    Pass all remaining arguments through to child deno test.
   --skip-conformance    Skip the optional config conformance hook.

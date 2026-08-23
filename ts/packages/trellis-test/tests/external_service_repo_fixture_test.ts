@@ -128,7 +128,7 @@ Deno.test("external service repo fixture runs through generic runner serial mode
   ]);
 });
 
-Deno.test("external service repo fixture runs through generic runner parallel mode", async () => {
+Deno.test("external service repo fixture runs through generic runner shared mode", async () => {
   const commands: RunnerCommand[] = [];
   let stopCalls = 0;
 
@@ -138,7 +138,7 @@ Deno.test("external service repo fixture runs through generic runner parallel mo
       fixtureConfigPath,
       "--parallel",
       "--jobs",
-      "2",
+      "1",
       "--fixture",
       "external-service-repo",
     ],
@@ -167,7 +167,7 @@ Deno.test("external service repo fixture runs through generic runner parallel mo
       cwd: externalServiceRepoRoot,
       env: {
         [sharedRuntimeEnv]: "/tmp/external-service-repo-manifest.json",
-        DENO_JOBS: "2",
+        DENO_JOBS: "1",
       },
       args: [
         "test",

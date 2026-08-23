@@ -51,6 +51,9 @@ async function main(args: readonly string[]): Promise<number> {
     optionValue(args, "--jobs") ?? String(defaultLiveJobs()),
     "--jobs",
   );
+  if (jobs !== 1) {
+    throw new Error("--jobs must be 1 for fixed shared protocol subjects");
+  }
   const typescriptCases = selectTypeScriptCases(
     clientMatrix.cases,
     typescriptCase,

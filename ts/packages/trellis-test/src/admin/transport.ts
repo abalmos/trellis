@@ -31,7 +31,10 @@ export async function postJson(
 
 export async function postAdminRpc(
   proxy: { url: string; token: string },
-  method: TrellisTestAdminRpcMethod | "completeClientAuth",
+  method:
+    | TrellisTestAdminRpcMethod
+    | "completeClientAuth"
+    | "resetAcceptedIntegrationAuthorities",
   input: unknown,
 ): Promise<unknown> {
   const response = await fetch(proxy.url, {

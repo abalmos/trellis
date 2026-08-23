@@ -21,7 +21,7 @@ pub use auth::SessionAuth;
 pub use authorization::AuthorizationProviderCache;
 #[cfg(any(test, feature = "runtime-internals"))]
 pub use authorization::AuthorizationRegistryBinding;
-#[cfg(feature = "integration-test-scoping")]
+#[cfg(feature = "test-support")]
 pub use authorization::IntegrationTestAuthorizationIoCounters;
 pub use authorization::{
     AuthorizationClientState, AuthorizationClientTrustState, AuthorizationContextBundle,
@@ -36,14 +36,14 @@ pub use authorization::{RuntimeAuthorizationIoCounters, RuntimeAuthorizationTrus
 
 #[cfg(test)]
 pub(crate) use authorization::inject_own_verified_for_test;
-#[cfg(feature = "integration-test-scoping")]
+#[cfg(feature = "test-support")]
 #[doc(hidden)]
 pub use connection::connect_captured_user_admission;
 pub(crate) use connection::fetch_device_activation;
 pub(crate) use connection::ServiceBootstrapResponse;
 pub(crate) use connection::ServiceConnectWithContractOptions;
 pub(crate) use connection::TrellisClient;
-#[cfg(feature = "integration-test-scoping")]
+#[cfg(feature = "test-support")]
 pub(crate) use connection::{
     fetch_device_activation_with_test_proof, DeviceBootstrapProofOverrides,
 };

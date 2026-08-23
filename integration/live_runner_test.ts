@@ -25,12 +25,8 @@ Deno.test("live runner rejects empty TypeScript parent filters", () => {
   );
 });
 
-Deno.test("live jobs default to half the logical CPUs", () => {
-  assertEquals(defaultLiveJobs(1), 1);
-  assertEquals(defaultLiveJobs(2), 1);
-  assertEquals(defaultLiveJobs(3), 2);
-  assertEquals(defaultLiveJobs(22), 11);
-  assertEquals(defaultLiveJobs(0), 1);
+Deno.test("live jobs serialize fixed shared protocol subjects", () => {
+  assertEquals(defaultLiveJobs(), 1);
 });
 
 Deno.test("live worker allocation shares one global budget", () => {
@@ -65,8 +61,9 @@ Deno.test("live lanes overlap and teardown follows both", async () => {
     },
   ];
 
-  const running = orchestrateWorkerLanes(lanes, 8, async () => {
+  const running = orchestrateWorkerLanes(lanes, 8, () => {
     events.push("host:stop");
+    return Promise.resolve();
   });
   assertEquals(events, ["typescript:4", "rust:4"]);
   second.resolve();
@@ -84,9 +81,9 @@ Deno.test("live lane failure drains its sibling deterministically", async () => 
     [
       {
         name: "typescript",
-        run: async () => {
+        run: () => {
           events.push("typescript:failed");
-          return 7;
+          return Promise.resolve(7);
         },
       },
       {
@@ -99,8 +96,9 @@ Deno.test("live lane failure drains its sibling deterministically", async () => 
       },
     ],
     8,
-    async () => {
+    () => {
       events.push("host:stop");
+      return Promise.resolve();
     },
   );
 
@@ -115,9 +113,9 @@ Deno.test("one live worker serializes lanes", async () => {
   const events: string[] = [];
   const lanes = ["typescript", "rust"].map((name): WorkerLane => ({
     name,
-    run: async (jobs) => {
+    run: (jobs) => {
       events.push(`${name}:${jobs}`);
-      return 0;
+      return Promise.resolve(0);
     },
   }));
   assertEquals(await orchestrateWorkerLanes(lanes, 1), 0);

@@ -287,6 +287,10 @@ idempotent.
 
 - Test runtime-observable behavior with live integration tests. Do not use fake
   NATS, fake Trellis runtimes, fake auth, or fake generated clients.
+- Shared-host integration cases use one NATS account, Trellis process, and SQLite
+  set with one worker. Keep authored contract ids, actions, subjects, and
+  participant identities fixed; case-scope only physical deployments, resources,
+  durable names, state keys, and domain records.
 - In the Trellis repository, the complete TypeScript and Rust live matrices run
   against one host with `deno run -A -c ts/deno.json integration/live_runner.ts`.
   The harness runs NATS as a managed child process from pinned, checksum-verified

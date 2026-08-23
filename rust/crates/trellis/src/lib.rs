@@ -58,10 +58,6 @@ pub mod client;
 #[doc(hidden)]
 pub mod generated;
 
-#[cfg(feature = "integration-test-scoping")]
-#[doc(hidden)]
-pub mod integration_test_scoping;
-
 /// High-level service runtime and service-authoring support types.
 pub mod service;
 

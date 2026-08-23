@@ -9,6 +9,7 @@ import type {
 } from "../src/admin/methods.ts";
 import {
   adminMethods,
+  revokeStaleIntegrationAuthorities,
   TrellisTestAdminAutomation,
 } from "../src/admin_client.ts";
 
@@ -17,6 +18,7 @@ const expectedAdminMethods = [
   "authConnectionsList",
   "authPortalsGrantOverridesRemove",
   "authPortalsGrantOverridesPut",
+  "authPortalsGet",
   "authPortalsList",
   "authPortalsLoginSettingsUpdate",
   "authPortalsPut",
@@ -37,6 +39,69 @@ const expectedAdminMethods = [
   "authDeploymentAuthorityReject",
   "authSessionsRevoke",
 ] as const;
+
+Deno.test("shared runtime authority reset revokes stale accepted authority once", async () => {
+  const authorities = [
+    {
+      authorityId: "authority-old",
+      participantId: "trellis.test.old@v1",
+      version: 3,
+      state: "accepted",
+    },
+    {
+      authorityId: "authority-admin",
+      participantId: "trellis-platform-administration",
+      version: 7,
+      state: "accepted",
+    },
+  ];
+  const revoked: string[] = [];
+  const idempotencyKeys: string[] = [];
+  const port = {
+    listUserIdentities: (
+      _args: { cursor?: string; limit: number },
+    ) =>
+      Promise.resolve({
+        entries: [{ principalId: "principal-admin" }],
+        nextCursor: null,
+      }),
+    listAcceptedAuthorities: (
+      _args: { principalId: string; cursor?: string; limit: number },
+    ) =>
+      Promise.resolve({
+        entries: authorities.filter((authority) =>
+          authority.state === "accepted"
+        ),
+        nextCursor: null,
+      }),
+    revokeAuthority: (args: {
+      authorityId: string;
+      expectedVersion: number;
+      reason: string;
+      idempotencyKey: string;
+    }) => {
+      authorities.find((authority) =>
+        authority.authorityId === args.authorityId
+      )!.state = "revoked";
+      revoked.push(args.authorityId);
+      idempotencyKeys.push(args.idempotencyKey);
+      return Promise.resolve();
+    },
+  };
+
+  await revokeStaleIntegrationAuthorities(
+    port,
+    "trellis-platform-administration",
+  );
+  await revokeStaleIntegrationAuthorities(
+    port,
+    "trellis-platform-administration",
+  );
+
+  assertEquals(revoked, ["authority-old"]);
+  assertEquals(idempotencyKeys, ["trellis-test-reset:authority-old:3"]);
+  assertEquals(authorities[1].state, "accepted");
+});
 
 Deno.test("admin registry and local dispatch stay in parity", async () => {
   assertEquals(Object.keys(adminMethods), [...expectedAdminMethods]);

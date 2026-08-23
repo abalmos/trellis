@@ -59,8 +59,17 @@ Rules:
 
 Normal live cases share one NATS server, one `trellis-server` process, and one
 SQLite set. Built-in Jobs and Event Log run as subsystems of that process. Cases
-isolate their authored data through run- and case-scoped identifiers, not
-database resets.
+keep authored contract ids, participant ids, action names, versions, and
+protocol subjects fixed. Run and case slugs isolate only physical deployment
+ids, resource keys, state keys, durable names, and domain records. Before an
+attached case authenticates, the harness revokes accepted non-administration
+authority left by the prior case or run through public Auth APIs.
+
+Fixed protocol subjects share one NATS account, so shared-host cases execute
+with one worker. TypeScript and Rust lanes also execute sequentially. Do not
+restore parallelism by rewriting semantic identities or by adding test-only
+protocol behavior; parallel shared-host execution requires a production
+transport-level tenant namespace first.
 
 `isolated-process` is reserved for process- or deployment-global behavior such
 as restart, ownership loss, startup migration, destructive trust rotation, or

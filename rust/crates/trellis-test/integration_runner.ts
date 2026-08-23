@@ -206,6 +206,9 @@ export function parseIntegrationRunnerArgs(args: readonly string[]): {
       testArgs.push(arg);
     }
   }
+  if (jobs !== 1) {
+    throw new Error("--jobs must be 1 for fixed shared protocol subjects");
+  }
   return { jobs, testArgs };
 }
 

@@ -24,10 +24,15 @@ Deno.test("Rust integration runner uses the shared live worker default", () => {
   assertEquals(parseIntegrationRunnerArgs([]).jobs, defaultLiveJobs());
 });
 
-Deno.test("Rust integration runner parses worker and libtest arguments", () => {
+Deno.test("Rust integration runner requires one shared worker", () => {
   assertEquals(
-    parseIntegrationRunnerArgs(["--jobs", "3", "--", "--nocapture"]),
-    { jobs: 3, testArgs: ["--nocapture"] },
+    parseIntegrationRunnerArgs(["--jobs", "1", "--", "--nocapture"]),
+    { jobs: 1, testArgs: ["--nocapture"] },
+  );
+  assertThrows(
+    () => parseIntegrationRunnerArgs(["--jobs", "3"]),
+    Error,
+    "must be 1",
   );
   assertThrows(
     () => parseIntegrationRunnerArgs(["--jobs=0"]),

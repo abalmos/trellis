@@ -24,11 +24,12 @@ export function runtimeScopeIsolated(): TrellisIntegrationScope {
 }
 
 /**
- * Returns a case-scoped shared runtime scope for parallel-safe tests.
+ * Returns a case-scoped shared runtime scope.
  *
  * In shared-runtime mode, the case id determines the default deployment via the
- * shared run id. Tests must still use case-scoped contracts, subjects, names,
- * state keys, and resource keys for full parallel isolation.
+ * shared run id. Cases execute serially because fixed protocol actions derive
+ * shared NATS subjects; physical names, state keys, and resource keys must still
+ * include a deterministic case slug for persistent isolation.
  */
 export function runtimeScopeForCase(caseId: string): TrellisIntegrationScope {
   return { kind: "shared-case", caseId };

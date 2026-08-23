@@ -142,12 +142,12 @@ async fn event_consumers_durable_listen_without_declared_group_returns_err() {
         )
         .await;
 
-    let expected_subject = _runtime.integration_test_descriptor_subject(SourcePingedEvent::SUBJECT);
+    let expected_subject = SourcePingedEvent::SUBJECT;
     assert!(
         matches!(
             result,
             Err(ServiceRuntimeError::MissingEventConsumerGroup { ref subject })
-                if subject == &expected_subject
+                if subject == expected_subject
         ),
         "expected missing group error, got {result:?}"
     );
@@ -555,12 +555,12 @@ async fn event_consumers_ambiguous_group_without_opts_group_returns_err_and_spec
             ServiceEventListenOptions::default(),
         )
         .await;
-    let expected_subject = _runtime.integration_test_descriptor_subject(SourcePingedEvent::SUBJECT);
+    let expected_subject = SourcePingedEvent::SUBJECT;
     assert!(
         matches!(
             ambiguous,
             Err(ServiceRuntimeError::AmbiguousEventConsumerGroup { ref subject, ref groups })
-                if subject == &expected_subject
+                if subject == expected_subject
                     && groups.as_slice() == ["primary", "secondary"]
         ),
         "expected ambiguous group error, got {ambiguous:?}"
@@ -1997,7 +1997,7 @@ async fn matching_consumers(
     runtime: &trellis_test::TrellisTestRuntime,
     subject: &str,
 ) -> Vec<trellis_test::TrellisJetStreamConsumerInfo> {
-    let subject = runtime.integration_test_descriptor_subject(subject);
+    let subject = subject.to_owned();
     runtime
         .list_trellis_jetstream_consumers()
         .await
@@ -2021,8 +2021,8 @@ async fn matching_grouped_consumers(
     first_subject: &str,
     second_subject: &str,
 ) -> Vec<trellis_test::TrellisJetStreamConsumerInfo> {
-    let first_subject = runtime.integration_test_descriptor_subject(first_subject);
-    let second_subject = runtime.integration_test_descriptor_subject(second_subject);
+    let first_subject = first_subject.to_owned();
+    let second_subject = second_subject.to_owned();
     runtime
         .list_trellis_jetstream_consumers()
         .await

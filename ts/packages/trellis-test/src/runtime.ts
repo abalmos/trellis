@@ -13,7 +13,6 @@ import { dirname, join } from "@std/path";
 
 import { TrellisTestAdminAutomation } from "./admin_client.ts";
 import type { LocalNatsBootstrapManifest } from "./nats_bootstrap.ts";
-import { aliasCaseScopedRuntime } from "./integration/names.ts";
 import {
   removeStaleMarkedDirectories,
   writeTrellisTestOwnerMarker,
@@ -418,7 +417,7 @@ export class TrellisTestRuntime implements AsyncDisposable {
       bootstrapComplete: true,
       rpcProxy: args.adminRpcProxy,
     });
-    return new TrellisTestRuntime({
+    const runtime = new TrellisTestRuntime({
       trellisUrl: args.trellisUrl,
       workdir: args.workdir,
       deployment: args.deployment,
@@ -428,11 +427,18 @@ export class TrellisTestRuntime implements AsyncDisposable {
       nats,
       admin,
     });
+    await runtime.resetAcceptedIntegrationAuthorities();
+    return runtime;
   }
 
   /** @internal Forwards one low-level Auth RPC over the host admin session. */
   callAdminRpc(method: string, input: unknown): Promise<unknown> {
     return this.#admin.callAdminRpc(method, input);
+  }
+
+  /** Revokes accepted non-administration authority left by earlier shared test runs. */
+  async resetAcceptedIntegrationAuthorities(): Promise<void> {
+    await this.#admin.resetAcceptedIntegrationAuthorities();
   }
 
   /** Registers a service contract and creates a service instance key. */
@@ -526,10 +532,7 @@ export class TrellisTestRuntime implements AsyncDisposable {
       performance.now() - startedAt,
       { participantKind: "client", phase: "total" },
     );
-    return aliasCaseScopedRuntime(
-      args.contract,
-      client,
-    ) as TrellisTestConnectedClient<TContract>;
+    return client as TrellisTestConnectedClient<TContract>;
   }
 
   /**

@@ -2,15 +2,7 @@ import { defineAppContract, defineServiceContract } from "@qlever-llc/trellis";
 import { TrellisService } from "@qlever-llc/trellis/service/deno";
 import { Type } from "typebox";
 import type { LiveTrellisRuntime } from "../_support/runtime.ts";
-import {
-  aliasCaseScopedActions,
-  aliasCaseScopedRuntime,
-  caseScopedActions,
-  caseScopedContractId,
-  caseScopedName,
-  caseScopedSubject,
-  integrationSlug,
-} from "../_support/names.ts";
+import { integrationSlug } from "../_support/names.ts";
 
 export type FeedFrame = {
   readonly topic: string;
@@ -39,73 +31,57 @@ export function createFeedsFixture(caseId: string) {
     }),
   } as const;
 
-  const serviceContract = aliasCaseScopedActions(
-    caseId,
-    defineServiceContract(
-      { schemas: feedSchemas },
-      (ref) => ({
-        id: caseScopedContractId("trellis.integration.feeds-service", caseId),
-        displayName: `Trellis Integration Feeds Service (${slug})`,
-        description: "Exercises generated feed subscribe and handler surfaces.",
-        capabilities: {
-          readFeeds: {
-            displayName: "Read feeds",
-            description: "Subscribe to entity feed updates.",
-          },
+  const serviceContract = defineServiceContract(
+    { schemas: feedSchemas },
+    (ref) => ({
+      id: `trellis.integration.feeds-service.${slug}@v1`,
+      displayName: `Trellis Integration Feeds Service (${slug})`,
+      description: "Exercises generated feed subscribe and handler surfaces.",
+      capabilities: {
+        readFeeds: {
+          displayName: "Read feeds",
+          description: "Subscribe to entity feed updates.",
         },
-        feeds: caseScopedActions(caseId, {
-          "Entity.Live": {
-            version: "v1",
-            subject: caseScopedSubject(
-              "feeds.v1.Integration.Feeds",
-              caseId,
-              "Entity.Live",
-            ),
-            input: ref.schema("FeedInput"),
-            event: ref.schema("FeedFrame"),
-            capabilities: { subscribe: ["readFeeds"] },
-          },
-        }),
-      }),
-    ),
+      },
+      feeds: {
+        "Entity.Live": {
+          version: "v1",
+          subject: `feeds.v1.Integration.Feeds.${slug}.Entity.Live`,
+          input: ref.schema("FeedInput"),
+          event: ref.schema("FeedFrame"),
+          capabilities: { subscribe: ["readFeeds"] },
+        },
+      },
+    }),
   );
 
-  const clientContract = aliasCaseScopedActions(
-    caseId,
-    defineAppContract(() => ({
-      id: caseScopedContractId("trellis.integration.feeds-client", caseId),
-      displayName: `Trellis Integration Feeds Client (${slug})`,
-      description: "App/client participant for the feeds integration fixture.",
-      uses: [serviceContract.EntityLive],
-    })),
-  );
+  const clientContract = defineAppContract(() => ({
+    id: `trellis.integration.feeds-client.${slug}@v1`,
+    displayName: `Trellis Integration Feeds Client (${slug})`,
+    description: "App/client participant for the feeds integration fixture.",
+    uses: [serviceContract.EntityLive],
+  }));
 
   const unauthorizedClientContract = defineAppContract(() => ({
-    id: caseScopedContractId(
-      "trellis.integration.feeds-unauthorized-client",
-      caseId,
-    ),
+    id: `trellis.integration.feeds-unauthorized-client.${slug}@v1`,
     displayName: `Trellis Integration Feeds Unauthorized Client (${slug})`,
     description: "App/client participant without feed subscribe authority.",
   }));
 
   async function connectService(runtime: LiveTrellisRuntime) {
     const serviceKey = await runtime.registerService({
-      name: caseScopedName("feeds-fixture-service", caseId),
+      name: `feeds-fixture-service-${slug}`,
       contract: serviceContract,
     });
-    return aliasCaseScopedRuntime(
-      serviceContract,
-      await TrellisService.connect({
-        authorizationContextEphemeral: true,
-        trellisUrl: runtime.trellisUrl,
-        contract: serviceContract,
-        name: caseScopedName("feeds-fixture-service", caseId),
-        identity: serviceKey,
-        telemetry: false,
-        runtime: {},
-      }).orThrow(),
-    );
+    return await TrellisService.connect({
+      authorizationContextEphemeral: true,
+      trellisUrl: runtime.trellisUrl,
+      contract: serviceContract,
+      name: `feeds-fixture-service-${slug}`,
+      identity: serviceKey,
+      telemetry: false,
+      runtime: {},
+    }).orThrow();
   }
 
   return {
@@ -113,13 +89,10 @@ export function createFeedsFixture(caseId: string) {
     serviceContract,
     clientContract,
     unauthorizedClientContract,
-    serviceName: caseScopedName("feeds-fixture-service", caseId),
-    clientName: caseScopedName("feeds-fixture-client", caseId),
-    unauthorizedClientName: caseScopedName(
-      "feeds-fixture-unauthorized",
-      caseId,
-    ),
-    topic: caseScopedName("entity-feed", caseId),
+    serviceName: `feeds-fixture-service-${slug}`,
+    clientName: `feeds-fixture-client-${slug}`,
+    unauthorizedClientName: `feeds-fixture-unauthorized-${slug}`,
+    topic: `entity-feed-${slug}`,
     connectService,
   };
 }

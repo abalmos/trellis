@@ -32,8 +32,6 @@ use crate::client::{
     EventDescriptor, FeedDescriptor, PreparedTrellisEvent, RpcDescriptor, RpcErrorPayload,
     SessionAuth, TrellisClientError,
 };
-#[cfg(feature = "integration-test-scoping")]
-use crate::integration_test_scoping::IntegrationTestScope;
 use crate::service::{BootstrapBinding, CoreBootstrapBinding, ServiceResourceBindings};
 
 const HEALTH_HEARTBEAT_SUBJECT_PREFIX: &str = "health.v1.heartbeat";
@@ -113,8 +111,6 @@ pub(crate) struct ServiceConnectWithContractOptions<'a> {
     /// Optional maximum authority-pending wait time. `None` waits until authority is ready.
     pub(crate) authority_pending_timeout_ms: Option<u64>,
     pub(crate) authorization_context_store: Arc<dyn AuthorizationContextStore>,
-    #[cfg(feature = "integration-test-scoping")]
-    pub(crate) integration_test_scope: Option<IntegrationTestScope>,
 }
 
 /// Connection options for an activated device principal.
@@ -135,8 +131,6 @@ pub struct DeviceConnectOptions<'a> {
     timeout_ms: u64,
     authorization_context_store: Arc<dyn AuthorizationContextStore>,
     activation_bootstrap: Option<ServiceBootstrapResponse>,
-    #[cfg(feature = "integration-test-scoping")]
-    integration_test_scope: Option<IntegrationTestScope>,
 }
 
 impl<'a> DeviceConnectOptions<'a> {
@@ -176,8 +170,6 @@ impl<'a> DeviceConnectOptions<'a> {
             timeout_ms,
             authorization_context_store,
             activation_bootstrap: None,
-            #[cfg(feature = "integration-test-scoping")]
-            integration_test_scope: None,
         }
     }
 
@@ -188,14 +180,6 @@ impl<'a> DeviceConnectOptions<'a> {
 
     pub(crate) fn activation_bootstrap(mut self, bootstrap: ServiceBootstrapResponse) -> Self {
         self.activation_bootstrap = Some(bootstrap);
-        self
-    }
-
-    /// Apply an immutable integration-test contract namespace to this connection.
-    #[cfg(feature = "integration-test-scoping")]
-    #[doc(hidden)]
-    pub fn with_integration_test_scope(mut self, scope: IntegrationTestScope) -> Self {
-        self.integration_test_scope = Some(scope);
         self
     }
 }
@@ -795,7 +779,7 @@ pub(crate) async fn fetch_device_activation(
     .await
 }
 
-#[cfg(feature = "integration-test-scoping")]
+#[cfg(feature = "test-support")]
 pub(crate) async fn fetch_device_activation_with_test_proof(
     opts: &DeviceConnectOptions<'_>,
     challenge_digest: &str,
@@ -1224,8 +1208,6 @@ async fn connect_bootstrapped_service(
         authorization_provider: Some(provider.provider),
         authorization_provider_stop: Some(provider.stop),
         authorization_provider_task: Some(provider.task),
-        #[cfg(feature = "integration-test-scoping")]
-        integration_test_scope: opts.integration_test_scope.clone(),
     })
 }
 
@@ -1243,8 +1225,6 @@ pub struct UserConnectOptions<'a> {
     authorization_context_binding: String,
     authorization_context_store: Arc<dyn AuthorizationContextStore>,
     refresh_before_connect: bool,
-    #[cfg(feature = "integration-test-scoping")]
-    integration_test_scope: Option<IntegrationTestScope>,
 }
 
 impl<'a> UserConnectOptions<'a> {
@@ -1276,8 +1256,6 @@ impl<'a> UserConnectOptions<'a> {
             authorization_context_binding: authorization_context_binding.into(),
             authorization_context_store,
             refresh_before_connect: false,
-            #[cfg(feature = "integration-test-scoping")]
-            integration_test_scope: None,
         }
     }
 
@@ -1286,18 +1264,10 @@ impl<'a> UserConnectOptions<'a> {
         self.refresh_before_connect = true;
         self
     }
-
-    /// Apply an immutable integration-test contract namespace to this connection.
-    #[cfg(feature = "integration-test-scoping")]
-    #[doc(hidden)]
-    pub fn with_integration_test_scope(mut self, scope: IntegrationTestScope) -> Self {
-        self.integration_test_scope = Some(scope);
-        self
-    }
 }
 
 /// Attempt one NATS admission with the exact supplied routing material, without refresh.
-#[cfg(feature = "integration-test-scoping")]
+#[cfg(feature = "test-support")]
 #[doc(hidden)]
 pub async fn connect_captured_user_admission(
     opts: UserConnectOptions<'_>,
@@ -1353,28 +1323,11 @@ pub(crate) struct TrellisClient {
     authorization_provider_stop: Option<tokio::sync::watch::Sender<()>>,
     #[allow(dead_code)]
     authorization_provider_task: Option<JoinHandle<()>>,
-    #[cfg(feature = "integration-test-scoping")]
-    integration_test_scope: Option<IntegrationTestScope>,
 }
 
 impl TrellisClient {
     pub(crate) fn descriptor_subject(&self, subject: &str) -> String {
-        #[cfg(feature = "integration-test-scoping")]
-        {
-            crate::integration_test_scoping::resolve_descriptor_subject(
-                self.integration_test_scope.as_ref(),
-                subject,
-            )
-            .expect("generated contract descriptor subjects are valid")
-            .into_owned()
-        }
-        #[cfg(not(feature = "integration-test-scoping"))]
         subject.to_string()
-    }
-
-    #[cfg(feature = "integration-test-scoping")]
-    pub(crate) fn integration_test_scope(&self) -> Option<&IntegrationTestScope> {
-        self.integration_test_scope.as_ref()
     }
 
     pub(crate) fn nats(&self) -> &async_nats::Client {
@@ -1382,7 +1335,7 @@ impl TrellisClient {
     }
 
     /// Return the connected NATS client for live transport-boundary tests.
-    #[cfg(feature = "integration-test-scoping")]
+    #[cfg(feature = "test-support")]
     #[doc(hidden)]
     #[must_use]
     pub fn integration_test_nats(&self) -> async_nats::Client {
@@ -1669,8 +1622,6 @@ impl TrellisClient {
             authorization_provider: Some(provider.provider),
             authorization_provider_stop: Some(provider.stop),
             authorization_provider_task: Some(provider.task),
-            #[cfg(feature = "integration-test-scoping")]
-            integration_test_scope: opts.integration_test_scope.clone(),
         })
     }
 
@@ -1694,7 +1645,7 @@ impl TrellisClient {
     }
 
     /// Return the local provider cache for live I/O and readiness assertions.
-    #[cfg(feature = "integration-test-scoping")]
+    #[cfg(feature = "test-support")]
     #[doc(hidden)]
     pub fn integration_test_authorization_provider(
         &self,

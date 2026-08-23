@@ -400,7 +400,7 @@ Deno.test("runner constructs parallel commands with shared host env and DENO_JOB
   let stopCalls = 0;
 
   const code = await runTrellisIntegrationTests({
-    args: ["--parallel", "--jobs", "4", "--case", "orders.created"],
+    args: ["--parallel", "--jobs", "1", "--case", "orders.created"],
     config,
     commandRunner: (command) =>
       mockRun(
@@ -444,7 +444,7 @@ Deno.test("runner constructs parallel commands with shared host env and DENO_JOB
   ]);
   assertEquals(commands[0].env, {
     [TRELLIS_TEST_SHARED_RUNTIME_ENV]: "/tmp/manifest.json",
-    DENO_JOBS: "4",
+    DENO_JOBS: "1",
   });
 });
 

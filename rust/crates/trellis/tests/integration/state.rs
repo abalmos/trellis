@@ -746,9 +746,7 @@ async fn state_ttl_expiry_is_logically_absent() {
         .wait_for_bootstrap_url(Duration::from_secs(2))
         .await
         .expect("bootstrap URL");
-    let contract = runtime
-        .scoped_contract(&state_contract(StateFixture::Client).expect("client contract"))
-        .expect("scope client contract");
+    let contract = state_contract(StateFixture::Client).expect("client contract");
     assert!(
         !runtime
             .admin()
@@ -908,9 +906,7 @@ async fn state_migration_required_is_returned_live() {
         .await
         .expect("write v1 map State value");
     let old_map_revision = put_revision(&map_written);
-    let v1_contract = runtime
-        .scoped_contract(&state_contract(StateFixture::Client).expect("v1 contract"))
-        .expect("scope v1 contract");
+    let v1_contract = state_contract(StateFixture::Client).expect("v1 contract");
     let old_writer_digest = v1_contract.digest().to_owned();
     let context = caller_v1
         .authorization_context()
@@ -975,9 +971,6 @@ async fn state_migration_required_is_returned_live() {
                 && item.writer_contract_digest == old_writer_digest
     ));
 
-    let v2_contract = runtime
-        .scoped_contract(&v2_contract)
-        .expect("scope v2 contract");
     for (store, key, revision, current_version, value) in [
         (
             "preferences",
@@ -1343,9 +1336,6 @@ async fn state_admin_inspect_and_delete_state() {
         .expect("bootstrap URL");
     let mut admin = runtime.admin();
     let contract = state_contract(StateFixture::Client).expect("client contract");
-    let contract = runtime
-        .scoped_contract(&contract)
-        .expect("scope client contract");
     let target = StateAdminGetRequest::UserApp {
         contract_digest: contract.digest().to_owned(),
         contract_id: contract.id().to_owned(),
@@ -1445,9 +1435,7 @@ async fn state_admin_deletes_corrupt_state_entry() {
         .as_str()
         .expect("user principal id");
     let key = raw_value_state_key(&caller, "preferences");
-    let contract = runtime
-        .scoped_contract(&state_contract(StateFixture::Client).expect("client contract"))
-        .expect("scope client contract");
+    let contract = state_contract(StateFixture::Client).expect("client contract");
     runtime
         .seed_raw_state_entry(trellis_test::TrellisRawStateEntry {
             key: key.clone(),
@@ -1510,9 +1498,7 @@ async fn state_malformed_envelope_and_unknown_version_are_unexpected() {
         .wait_for_bootstrap_url(Duration::from_secs(2))
         .await
         .expect("bootstrap URL");
-    let contract = runtime
-        .scoped_contract(&state_contract(StateFixture::Client).expect("client contract"))
-        .expect("scope client contract");
+    let contract = state_contract(StateFixture::Client).expect("client contract");
     let target = |contract_digest: String| StateAdminDeleteRequest::UserApp {
         contract_digest,
         contract_id: contract.id().to_owned(),

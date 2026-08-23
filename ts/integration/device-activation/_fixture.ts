@@ -1,4 +1,4 @@
-import { assert, assertEquals } from "@std/assert";
+import { assertEquals } from "@std/assert";
 import {
   type CallerRuntime,
   defineAppContract,
@@ -13,11 +13,7 @@ import * as trellisAuth from "@qlever-llc/trellis/sdk/auth";
 import { nativeProtocolPresentation } from "../../packages/trellis/contract_support/protocol_artifacts.ts";
 import { resolveNativeProtocolPresentation } from "../../packages/trellis/contract_support/protocol_resolution.ts";
 import type { LiveTrellisRuntime } from "../_support/runtime.ts";
-import {
-  caseScopedContractId,
-  caseScopedName,
-  integrationSlug,
-} from "../_support/names.ts";
+import { integrationSlug } from "../_support/names.ts";
 
 type ProvisionedDevice = {
   readonly device: {
@@ -193,10 +189,7 @@ export function requireDeviceAuthorityList(
 export function createDeviceActivationFixture(caseId: string) {
   const slug = integrationSlug(caseId);
   const adminContract = defineAppContract(() => ({
-    id: caseScopedContractId(
-      "trellis.integration.device-activation-admin",
-      caseId,
-    ),
+    id: `trellis.integration.device-activation-admin.${slug}@v1`,
     displayName: `Trellis Integration Device Activation Admin (${slug})`,
     description:
       "Admin participant for the device activation integration fixture.",
@@ -229,10 +222,7 @@ export function createDeviceActivationFixture(caseId: string) {
   }));
 
   const deviceContract = defineDeviceContract(() => ({
-    id: caseScopedContractId(
-      "trellis.integration.device-activation-device",
-      caseId,
-    ),
+    id: `trellis.integration.device-activation-device.${slug}@v1`,
     displayName: `Trellis Integration Activated Device (${slug})`,
     description:
       "Activated device participant for the device activation integration fixture.",
@@ -246,13 +236,10 @@ export function createDeviceActivationFixture(caseId: string) {
     reviewMode: "none" | "required" = "none",
   ) {
     const admin = await runtime.connectClient({
-      name: caseScopedName("device-activation-fixture-admin", caseId),
+      name: `device-activation-fixture-admin-${slug}`,
       contract: adminContract,
     });
-    const deploymentName = caseScopedName(
-      `device-activation-${crypto.randomUUID()}`,
-      caseId,
-    );
+    const deploymentName = `device-activation-${crypto.randomUUID()}`;
 
     const deployment = await admin.authDeploymentsCreate({
       displayName: deploymentName,
@@ -301,7 +288,9 @@ export function createDeviceActivationFixture(caseId: string) {
     identity: Awaited<ReturnType<typeof deriveDeviceIdentity>>,
     instanceId: string,
   ) {
-    const presentation = resolveNativeProtocolPresentation(deviceContract);
+    const presentation = await resolveNativeProtocolPresentation(
+      deviceContract,
+    );
     const nonce = crypto.randomUUID();
     const confirmationCode = await deriveDeviceConfirmationCode({
       activationKey: identity.activationKey,

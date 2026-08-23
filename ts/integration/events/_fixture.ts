@@ -1,13 +1,6 @@
 import { defineAppContract, defineServiceContract } from "@qlever-llc/trellis";
 import { Type } from "typebox";
-import {
-  aliasCaseScopedActions,
-  caseScopedActions,
-  caseScopedContractId,
-  caseScopedName,
-  caseScopedSubject,
-  integrationSlug,
-} from "../_support/names.ts";
+import { integrationSlug } from "../_support/names.ts";
 
 export function createEventsFixture(caseId: string) {
   const slug = integrationSlug(caseId);
@@ -18,89 +11,64 @@ export function createEventsFixture(caseId: string) {
       header: Type.Optional(Type.String()),
     }),
   } as const;
-  const entityChangedSubject = caseScopedSubject(
-    "events.v1.Integration.Events",
-    caseId,
-    "Entity.Changed",
-  );
+  const entityChangedSubject =
+    `events.v1.Integration.Events.${slug}.Entity.Changed`;
 
-  const serviceContract = aliasCaseScopedActions(
-    caseId,
-    defineServiceContract(
-      { schemas: eventSchemas },
-      (ref) => ({
-        id: caseScopedContractId("trellis.integration.events-service", caseId),
-        displayName: `Trellis Integration Events Service (${slug})`,
-        description:
-          "Exercises generated event publish and subscribe surfaces.",
-        capabilities: {
-          publishRecords: {
-            displayName: "Publish records",
-            description: "Publish entity change records in the events fixture.",
-          },
-          readRecords: {
-            displayName: "Read records",
-            description:
-              "Subscribe to entity change records in the events fixture.",
+  const serviceContract = defineServiceContract(
+    { schemas: eventSchemas },
+    (ref) => ({
+      id: `trellis.integration.events-service.${slug}@v1`,
+      displayName: `Trellis Integration Events Service (${slug})`,
+      description: "Exercises generated event publish and subscribe surfaces.",
+      capabilities: {
+        publishRecords: {
+          displayName: "Publish records",
+          description: "Publish entity change records in the events fixture.",
+        },
+        readRecords: {
+          displayName: "Read records",
+          description:
+            "Subscribe to entity change records in the events fixture.",
+        },
+      },
+      events: {
+        "Entity.Changed": {
+          version: "v1",
+          subject: entityChangedSubject,
+          event: ref.schema("EntityChanged"),
+          capabilities: {
+            publish: ["publishRecords"],
+            subscribe: ["readRecords"],
           },
         },
-        events: caseScopedActions(caseId, {
-          "Entity.Changed": {
-            version: "v1",
-            subject: entityChangedSubject,
-            event: ref.schema("EntityChanged"),
-            capabilities: {
-              publish: ["publishRecords"],
-              subscribe: ["readRecords"],
-            },
-          },
-        }),
-      }),
-    ),
+      },
+    }),
   );
 
-  const pubSubClientContract = aliasCaseScopedActions(
-    caseId,
-    defineAppContract(() => ({
-      id: caseScopedContractId(
-        "trellis.integration.events-pubsub-client",
-        caseId,
-      ),
-      displayName: `Trellis Integration Events PubSub Client (${slug})`,
-      description:
-        "App/client participant with event publish and subscribe authority.",
-      uses: [
-        serviceContract.EntityChanged.publish,
-        serviceContract.EntityChanged.subscribe,
-      ],
-    })),
-  );
+  const pubSubClientContract = defineAppContract(() => ({
+    id: `trellis.integration.events-pubsub-client.${slug}@v1`,
+    displayName: `Trellis Integration Events PubSub Client (${slug})`,
+    description:
+      "App/client participant with event publish and subscribe authority.",
+    uses: [
+      serviceContract.EntityChanged.publish,
+      serviceContract.EntityChanged.subscribe,
+    ],
+  }));
 
-  const subscribeOnlyClientContract = aliasCaseScopedActions(
-    caseId,
-    defineAppContract(() => ({
-      id: caseScopedContractId(
-        "trellis.integration.events-subscribe-only-client",
-        caseId,
-      ),
-      displayName: `Trellis Integration Events Subscribe-Only Client (${slug})`,
-      description: "App/client participant without event publish authority.",
-      uses: [serviceContract.EntityChanged.subscribe],
-    })),
-  );
+  const subscribeOnlyClientContract = defineAppContract(() => ({
+    id: `trellis.integration.events-subscribe-only-client.${slug}@v1`,
+    displayName: `Trellis Integration Events Subscribe-Only Client (${slug})`,
+    description: "App/client participant without event publish authority.",
+    uses: [serviceContract.EntityChanged.subscribe],
+  }));
 
-  const publishOnlyClientContract = aliasCaseScopedActions(
-    caseId,
-    defineAppContract(() => ({
-      id: caseScopedContractId(
-        "trellis.integration.events-publish-only-client",
-        caseId,
-      ),
-      displayName: `Trellis Integration Events Publish-Only Client (${slug})`,
-      description: "App/client participant without event subscribe authority.",
-      uses: [serviceContract.EntityChanged.publish],
-    })),
-  );
+  const publishOnlyClientContract = defineAppContract(() => ({
+    id: `trellis.integration.events-publish-only-client.${slug}@v1`,
+    displayName: `Trellis Integration Events Publish-Only Client (${slug})`,
+    description: "App/client participant without event subscribe authority.",
+    uses: [serviceContract.EntityChanged.publish],
+  }));
 
   return {
     slug,
@@ -108,20 +76,14 @@ export function createEventsFixture(caseId: string) {
     pubSubClientContract,
     subscribeOnlyClientContract,
     publishOnlyClientContract,
-    captureName: caseScopedName("events-fixture-capture", caseId),
-    publisherName: caseScopedName("events-fixture-publisher", caseId),
-    authorizedPublisherName: caseScopedName(
-      "events-fixture-authorized-publisher",
-      caseId,
-    ),
-    subscribeOnlyName: caseScopedName(
-      "events-fixture-subscribe-only",
-      caseId,
-    ),
-    publishOnlyName: caseScopedName("events-fixture-publish-only", caseId),
+    captureName: `events-fixture-capture-${slug}`,
+    publisherName: `events-fixture-publisher-${slug}`,
+    authorizedPublisherName: `events-fixture-authorized-publisher-${slug}`,
+    subscribeOnlyName: `events-fixture-subscribe-only-${slug}`,
+    publishOnlyName: `events-fixture-publish-only-${slug}`,
     sourceSubject: entityChangedSubject,
-    publishedEntityId: caseScopedName("entity-events", caseId),
-    deniedPublishEntityId: caseScopedName("entity-denied", caseId),
-    deniedSubscribeEntityId: caseScopedName("entity-no-subscribe", caseId),
+    publishedEntityId: `entity-${slug}`,
+    deniedPublishEntityId: `entity-denied-${slug}`,
+    deniedSubscribeEntityId: `entity-no-subscribe-${slug}`,
   };
 }

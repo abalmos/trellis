@@ -6,10 +6,10 @@ operations, or live events.
 The out-of-tree workflow has two public entrypoints:
 
 - `@qlever-llc/trellis-test/integration` for test helpers such as
-  `trellisIntegrationTest`, `runtimeScopeForCase`, and case-scoped naming.
+  `trellisIntegrationTest`, `runtimeScopeForCase`, and `integrationSlug`.
 - `@qlever-llc/trellis-test/integration/runner` for a generic Deno runner that
-  can run selected cases serially or with tenant-isolated runtimes for parallel
-  workers.
+  runs selected cases serially against either isolated runtimes or one shared
+  runtime.
 
 External service repos provide their own Trellis command. The package does not
 assume the Trellis monorepo layout.
@@ -111,9 +111,6 @@ import {
 import { TrellisService } from "@qlever-llc/trellis/service/deno";
 import { Type } from "typebox";
 import {
-  caseScopedContractId,
-  caseScopedName,
-  caseScopedSubject,
   integrationSlug,
   runtimeScopeForCase,
   trellisIntegrationTest,
@@ -129,8 +126,8 @@ const schemas = {
 } as const;
 
 const billingServiceContract = defineServiceContract({ schemas }, (ref) => ({
-  id: caseScopedContractId("billing.invoice-service", CASE_ID),
-  displayName: `Billing Invoice Service (${slug})`,
+  id: "billing.invoice-service@v1",
+  displayName: "Billing Invoice Service",
   description: "Integration-test invoice service.",
   capabilities: {
     createInvoice: {
@@ -141,7 +138,7 @@ const billingServiceContract = defineServiceContract({ schemas }, (ref) => ({
   rpc: {
     "Invoice.Create": {
       version: "v1",
-      subject: caseScopedSubject("rpc.v1.billing", CASE_ID, "Invoice.Create"),
+      subject: "rpc.v1.billing.Invoice.Create",
       input: ref.schema("CreateInput"),
       output: ref.schema("CreateOutput"),
       capabilities: { call: ["createInvoice"] },
@@ -151,8 +148,8 @@ const billingServiceContract = defineServiceContract({ schemas }, (ref) => ({
 }));
 
 const billingClientContract = defineAppContract(() => ({
-  id: caseScopedContractId("billing.invoice-client", CASE_ID),
-  displayName: `Billing Invoice Client (${slug})`,
+  id: "billing.invoice-client@v1",
+  displayName: "Billing Invoice Client",
   description: "Integration-test invoice client.",
   uses: {
     required: {
@@ -161,9 +158,9 @@ const billingClientContract = defineAppContract(() => ({
   },
 }));
 
-const serviceName = caseScopedName("billing-invoice-service", CASE_ID);
-const clientName = caseScopedName("billing-invoice-client", CASE_ID);
-const invoiceId = caseScopedName("invoice", CASE_ID);
+const serviceName = `billing-invoice-service-${slug}`;
+const clientName = `billing-invoice-client-${slug}`;
+const invoiceId = `invoice-${slug}`;
 
 trellisIntegrationTest({
   name: "billing.invoice-created calls the invoice RPC",
@@ -216,7 +213,8 @@ Serial runs invoke `deno test` directly. Without a shared NATS manifest, each
 test starts its own isolated Trellis runtime from the `runtime` option passed to
 `trellisIntegrationTest(...)`. The usual pattern is to export that runtime object
 from `trellis.integration.ts` and import it into each test module, as shown above.
-Parallel mode uses the same runtime config for every tenant-isolated case.
+Shared mode uses the same runtime config, NATS account, Trellis process, and
+SQLite set for every serially executed case.
 
 ```sh
 deno run -A jsr:@qlever-llc/trellis-test/integration/runner \
@@ -232,41 +230,38 @@ deno run -A jsr:@qlever-llc/trellis-test/integration/runner \
   --case billing.invoice-created
 ```
 
-## 4. Run in parallel
+## 4. Run on the shared host
 
-Parallel mode starts one NATS server, provisions a separate Auth/Trellis NATS
-account pair for every selected case, and runs selected case files with
-`deno test --parallel`. Each `runtimeScopeForCase(CASE_ID)` test starts and owns
-its own Trellis control plane, SQLite database, and configured service sidecars
-against that case's NATS accounts.
+Shared mode starts one NATS server, one Trellis process, and one SQLite set for
+the selected cases. Authored protocol identities and subjects stay fixed, so the
+runner executes cases with one worker. Before each attached case authenticates,
+the harness revokes stale accepted non-administration authority through public
+Auth APIs.
 
 ```sh
 deno run -A jsr:@qlever-llc/trellis-test/integration/runner \
   --config trellis.integration.ts \
   --parallel \
   --fixture billing \
-  --jobs 4
+  --jobs 1
 ```
 
-`--jobs <n>` does not become a `deno test --jobs` flag. The runner maps it to the
-child process environment variable `DENO_JOBS=<n>`, which is how Deno controls
-parallel test worker count. If you omit `--jobs`, Deno uses its default worker
-count.
+Shared mode requires `--jobs 1` and sets `DENO_JOBS=1`. Higher values are
+rejected because fixed protocol subjects share one NATS account.
 
 ## Isolation contract
 
-Parallel cases share only the NATS server process. Accounts, Trellis processes,
-SQLite databases, resources, streams, and service sidecars are isolated per case.
+Shared cases keep semantic protocol identity fixed and isolate physical data.
 Keep case identity deterministic so filtering and diagnostics remain reliable:
 
 - keep one case per test module;
 - use `runtimeScopeForCase(CASE_ID)` for behavior tests;
-- scope contract ids with `caseScopedContractId(...)`;
-- scope NATS subjects with `caseScopedSubject(...)`;
-- scope service, client, resource, state, and business keys with
-  `caseScopedName(...)` or an equivalent case slug;
+- use fixed contract ids, participant ids, action names, versions, and protocol
+  subjects;
+- derive service, client, resource, state, durable, and business keys from
+  `integrationSlug(CASE_ID)`;
 - create the deployment and approve the contracts needed by the case;
-- do not rely on execution order.
+- do not use test scope to rewrite authored protocol identity.
 
 Case-scoped data is still useful for serial runs because it keeps reruns and
 debugging predictable.
@@ -296,12 +291,12 @@ should inspect and act on plans through
 - **Need to inspect generated runtime files**: set `TRELLIS_TEST_KEEP_WORKDIR=1`
   and have your config map that environment variable to `runtime.keepWorkdir`, as
   shown above. The workdir contains generated NATS config, Trellis config, logs,
-  and the shared-runtime manifest in parallel runs.
+  and the shared-runtime manifest in shared runs.
 - **Authority-plan failures**: check whether the failure is an ordinary update, a
   migration, or an incompatible contract change. Approve only the classifications
   the test is meant to cover, and prefer explicit authority-plan assertions when
   the plan itself is the behavior under test.
-- **Flaky parallel cases**: look for unscoped contract ids, subjects, participant
-  names, state keys, resource keys, or domain ids. Also confirm the module has
+- **State leaks between shared cases**: look for physical state keys, resource
+  keys, durable names, or domain ids that omit the case slug. Also confirm the module has
   only one `trellisIntegrationTest(...)` case and that the runner config's
   `testName` exactly matches the registered Deno test name.

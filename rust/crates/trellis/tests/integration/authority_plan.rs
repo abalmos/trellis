@@ -239,9 +239,6 @@ async fn accepted_resource_migration_binds_changed_kv_definition() {
         &serde_json::to_string(&changed_participant).expect("serialize changed participant"),
     )
     .expect("build changed resource service contract");
-    let changed = runtime
-        .scoped_contract(&changed)
-        .expect("scope changed resource contract");
     key.participant_json =
         serde_json::to_string(changed.participant()).expect("serialize changed participant");
     key.participant_digest = changed.digest().to_owned();
@@ -352,9 +349,6 @@ async fn invalid_authority_acceptance_preserves_desired_and_proposal_state() {
         trellis_rs::contracts::ContractKind::Service,
     )
     .expect("build additive invalid-acceptance contract");
-    let additive = runtime
-        .scoped_contract(&additive)
-        .expect("scope additive invalid-acceptance contract");
     key.participant_json =
         serde_json::to_string(additive.participant()).expect("serialize additive participant");
     key.participant_digest = additive.digest().to_owned();
@@ -483,9 +477,7 @@ async fn compatible_metadata_replacement_connects_without_approval() {
         .provision_service_instance(&bootstrap_url, &base, Some(DEPLOYMENT), None)
         .await
         .expect("provision base service identity");
-    let metadata = runtime
-        .scoped_contract(&metadata_source)
-        .expect("scope metadata-only service contract");
+    let metadata = &metadata_source;
     assert_eq!(key.participant_digest, metadata.digest());
     assert_eq!(key.participant_needs_digest, metadata.needs_digest());
     assert_eq!(key.api_digest, metadata.api_digest());
@@ -582,9 +574,7 @@ async fn accepted_incompatible_migration_replaces_service_contract() {
         .provision_service_instance(&bootstrap_url, &base, Some(DEPLOYMENT), None)
         .await
         .expect("provision base service identity");
-    let incompatible = runtime
-        .scoped_contract(&incompatible_source)
-        .expect("scope incompatible service contract");
+    let incompatible = &incompatible_source;
     assert_ne!(key.participant_digest, incompatible.digest());
     key.participant_id = incompatible.id().to_owned();
     key.participant_digest = incompatible.digest().to_owned();
@@ -710,9 +700,7 @@ async fn additive_approval_flow() {
         .provision_service_instance(&bootstrap_url, &base, Some(DEPLOYMENT), None)
         .await
         .expect("provision base service identity");
-    let additive = runtime
-        .scoped_contract(&additive_source)
-        .expect("scope additive service contract");
+    let additive = &additive_source;
     key.participant_id = additive.id().to_owned();
     key.participant_digest = additive.digest().to_owned();
     key.participant_needs_digest = additive.needs_digest().to_owned();

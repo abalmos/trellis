@@ -33,6 +33,81 @@ import type {
 
 export { adminMethods, type TrellisTestAdminRpcMethod };
 
+type IntegrationAuthorityResetPort = {
+  listUserIdentities(args: {
+    cursor?: string;
+    limit: number;
+  }): Promise<{
+    entries: readonly { principalId: string }[];
+    nextCursor: string | null;
+  }>;
+  listAcceptedAuthorities(args: {
+    principalId: string;
+    cursor?: string;
+    limit: number;
+  }): Promise<{
+    entries: readonly {
+      authorityId: string;
+      participantId: string;
+      version: number;
+    }[];
+    nextCursor: string | null;
+  }>;
+  revokeAuthority(args: {
+    authorityId: string;
+    expectedVersion: number;
+    reason: string;
+    idempotencyKey: string;
+  }): Promise<void>;
+};
+
+/** @internal Revokes accepted integration authority except the active administrator. */
+export async function revokeStaleIntegrationAuthorities(
+  port: IntegrationAuthorityResetPort,
+  adminParticipantId: string,
+): Promise<void> {
+  const principalIds = new Set<string>();
+  let cursor: string | undefined;
+  do {
+    const page = await port.listUserIdentities({
+      limit: 100,
+      ...(cursor === undefined ? {} : { cursor }),
+    });
+    for (const identity of page.entries) {
+      principalIds.add(identity.principalId);
+    }
+    cursor = page.nextCursor ?? undefined;
+  } while (cursor !== undefined);
+
+  const staleAuthorities = [];
+  for (const principalId of principalIds) {
+    cursor = undefined;
+    do {
+      const page = await port.listAcceptedAuthorities({
+        principalId,
+        limit: 100,
+        ...(cursor === undefined ? {} : { cursor }),
+      });
+      staleAuthorities.push(
+        ...page.entries.filter((authority) =>
+          authority.participantId !== adminParticipantId
+        ),
+      );
+      cursor = page.nextCursor ?? undefined;
+    } while (cursor !== undefined);
+  }
+
+  for (const authority of staleAuthorities) {
+    await port.revokeAuthority({
+      authorityId: authority.authorityId,
+      expectedVersion: authority.version,
+      reason: "Trellis shared integration runtime startup reset",
+      idempotencyKey:
+        `trellis-test-reset:${authority.authorityId}:${authority.version}`,
+    });
+  }
+}
+
 /** Internal public-surface admin automation used by `TrellisTestRuntime`. */
 export class TrellisTestAdminAutomation {
   readonly #trellisUrl: string;
@@ -175,6 +250,33 @@ export class TrellisTestAdminAutomation {
         }`,
       );
     }
+  }
+
+  /** Revokes accepted authority left by earlier integration runs for this administrator. */
+  async resetAcceptedIntegrationAuthorities(): Promise<void> {
+    if (this.#rpcProxy) {
+      await postAdminRpc(
+        this.#rpcProxy,
+        "resetAcceptedIntegrationAuthorities",
+        null,
+      );
+      return;
+    }
+    const client = await this.#client();
+    await revokeStaleIntegrationAuthorities({
+      listUserIdentities: (args) =>
+        client.authUserIdentitiesList(args).orThrow(),
+      listAcceptedAuthorities: ({ principalId, cursor, limit }) =>
+        client.authIdentityAuthorityList({
+          principalId,
+          state: "accepted",
+          limit,
+          ...(cursor === undefined ? {} : { cursor }),
+        }).orThrow(),
+      revokeAuthority: async (args) => {
+        await client.authIdentityAuthorityRevoke(args).orThrow();
+      },
+    }, ADMIN_PARTICIPANT.id);
   }
 
   async #rpc<M extends TrellisTestAdminRpcMethod>(
