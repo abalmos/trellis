@@ -76,8 +76,8 @@ impl Caller {
 
     /// Connect an activated-device generated participant.
     #[doc(hidden)]
-    pub async fn connect_device(
-        options: crate::client::DeviceConnectOptions<'_>,
+    pub async fn connect_device<C>(
+        options: crate::client::DeviceConnectOptions<'_, C>,
     ) -> Result<Self, crate::client::TrellisClientError> {
         Ok(Self::new(Arc::new(
             crate::client::TrellisClient::connect_device(options).await?,
@@ -181,6 +181,49 @@ impl Caller {
     {
         crate::client::OperationInvoker::new(self)
     }
+}
+
+/// Dynamic contract marker reserved for runtime-authored integration fixtures.
+#[cfg(feature = "test-support")]
+#[doc(hidden)]
+pub struct DynamicDeviceContract;
+
+/// Build dynamic-evidence device options for Trellis integration fixtures.
+#[cfg(feature = "test-support")]
+#[doc(hidden)]
+#[allow(clippy::too_many_arguments)]
+pub fn test_device_connect_options<'a>(
+    trellis_url: &'a str,
+    deployment_id: &'a str,
+    instance_id: &'a str,
+    participant_id: &'a str,
+    participant_digest: &'a str,
+    participant_needs_digest: &'a str,
+    participant_json: &'a str,
+    api_json: &'a str,
+    api_digest: &'a str,
+    referenced_api_artifacts: &[(&'a str, &'a str)],
+    public_identity_key: &'a str,
+    identity_seed_base64url: &'a str,
+    timeout_ms: u64,
+    authorization_context_store: Arc<dyn AuthorizationContextStore>,
+) -> DeviceConnectOptions<'a, DynamicDeviceContract> {
+    crate::client::test_device_connect_options(
+        trellis_url,
+        deployment_id,
+        instance_id,
+        participant_id,
+        participant_digest,
+        participant_needs_digest,
+        participant_json,
+        api_json,
+        api_digest,
+        referenced_api_artifacts,
+        public_identity_key,
+        identity_seed_base64url,
+        timeout_ms,
+        authorization_context_store,
+    )
 }
 
 impl crate::client::StateTransport for Caller {

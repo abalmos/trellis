@@ -535,6 +535,9 @@ Rules:
   identity derivation, confirmation-code construction, proof-bound activation
   status/wait, ready-evidence handoff, and runtime connection rather than
   hand-written HKDF, HMAC, bootstrap-proof, or connection logic
+- each Rust device bootstrap attempt generates a fresh Ed25519 session key;
+  pending attempts discard the private seed, while ready evidence retains the
+  successful seed for the exact activation-to-connection handoff
 - Rust callers may use lower-level generated SDK surfaces for authenticated
   portal-side activation until a small typed convenience wrapper is available,
   but those calls still follow the `Auth.DeviceUserAuthorities.Resolve`

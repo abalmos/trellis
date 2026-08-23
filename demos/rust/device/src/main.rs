@@ -6,7 +6,6 @@ use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine as _;
 use clap::Parser;
 use futures_util::StreamExt;
-use trellis_participant_demo_device::contract as device_contract;
 use trellis_participant_demo_device::state::{DraftInspectionState, SelectedSiteState};
 use trellis_participant_demo_device::ConnectedClient;
 use trellis_rs::{
@@ -14,10 +13,7 @@ use trellis_rs::{
         check_device_activation, derive_device_identity, wait_for_device_activation,
         DeviceActivationOptions, DeviceActivationStatus,
     },
-    client::{
-        download_transfer_grant_from_value, DeviceConnectOptions,
-        MemoryAuthorizationContextStore,
-    },
+    client::{download_transfer_grant_from_value, MemoryAuthorizationContextStore},
 };
 use trellis_sdk_demo_service::types::{
     AssignmentsListRequest, EvidenceDownloadRequest, EvidenceListRequest, EvidenceUploadInput,
@@ -94,25 +90,16 @@ async fn connect_device_if_configured(args: &Args) -> anyhow::Result<Option<Conn
             .ok_or_else(|| anyhow::anyhow!("--device requires --device-root-secret"))?,
     )?;
     let identity = derive_device_identity(&root_secret)?;
-    let session_seed = URL_SAFE_NO_PAD.encode(rand::random::<[u8; 32]>());
     let activation = DeviceActivationOptions::new(
-        DeviceConnectOptions::new(
+        trellis_rs::client::DeviceConnectOptions::<trellis_participant_demo_device::Contract>::new(
             trellis_url,
             deployment_id,
             instance_id,
-            device_contract::CONTRACT_ID,
-            device_contract::CONTRACT_DIGEST,
-            device_contract::PARTICIPANT_NEEDS_DIGEST,
-            device_contract::PARTICIPANT,
-            device_contract::API_JSON,
-            device_contract::API_DIGEST,
-            device_contract::REFERENCED_API_ARTIFACTS,
             &identity.public_identity_key,
             &identity.identity_seed_base64url,
-            &session_seed,
-            10_000,
             Arc::new(MemoryAuthorizationContextStore::default()),
-        ),
+        )
+        .with_timeout_ms(10_000),
         &identity.activation_key_base64url,
     );
     let session = match check_device_activation(&activation).await? {

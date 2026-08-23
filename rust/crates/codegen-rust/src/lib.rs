@@ -1253,8 +1253,11 @@ fn render_participant_shim_lib_rs(loaded: &LoadedParticipant) -> String {
         ContractKind::Service => {
             "pub use connect::{connect, ConnectedService, Contract, ServiceConnectOptions};\npub use trellis_rs::service::{GeneratedServiceContract, ServiceHandlerContext, ServiceRuntimeError};"
         }
-        ContractKind::App | ContractKind::Agent | ContractKind::Device => {
+        ContractKind::App | ContractKind::Agent => {
             "pub use connect::{connect, ConnectOptions, ConnectedClient};"
+        }
+        ContractKind::Device => {
+            "pub use connect::{connect, ConnectOptions, ConnectedClient, Contract};"
         }
     };
     format!(
@@ -1433,6 +1436,7 @@ use crate::Service;
 /// Runtime and credential options; contract evidence comes from [`Contract`].
 pub use trellis_rs::service::ServiceConnectOptions;
 
+/// Exact generated participant and API evidence used for service bootstrap.
 pub struct Contract;
 
 impl trellis_rs::service::GeneratedServiceContract for Contract {
@@ -1551,23 +1555,34 @@ use trellis_rs::generated::{AuthorizationContextStore, Caller, DeviceConnectOpti
 
 use crate::Client;
 
+/// Exact generated participant and API evidence used for device bootstrap.
+pub struct Contract;
+
+impl trellis_rs::service::GeneratedServiceContract for Contract {
+    const PARTICIPANT_ID: &'static str = crate::contract::CONTRACT_ID;
+    const CONTRACT_DIGEST: &'static str = crate::contract::CONTRACT_DIGEST;
+    const PARTICIPANT_NEEDS_DIGEST: &'static str = crate::contract::PARTICIPANT_NEEDS_DIGEST;
+    const PARTICIPANT_JSON: &'static str = crate::contract::PARTICIPANT;
+    const API_JSON: &'static str = crate::contract::API_JSON;
+    const API_DIGEST: &'static str = crate::contract::API_DIGEST;
+    const REFERENCED_API_ARTIFACTS: &'static [(&'static str, &'static str)] = crate::contract::REFERENCED_API_ARTIFACTS;
+}
+
 /// Activated-device participant connection options.
 pub struct ConnectOptions<'a> {
     trellis_url: &'a str,
     deployment_id: &'a str,
     instance_id: &'a str,
-    participant_needs_digest: &'a str,
     public_identity_key: &'a str,
     identity_seed_base64url: &'a str,
-    session_key_seed_base64url: &'a str,
     timeout_ms: u64,
     authorization_context_store: Arc<dyn AuthorizationContextStore>,
 }
 
 impl<'a> ConnectOptions<'a> {
     /// Create activated-device connection options.
-    pub fn new(trellis_url: &'a str, deployment_id: &'a str, instance_id: &'a str, participant_needs_digest: &'a str, public_identity_key: &'a str, identity_seed_base64url: &'a str, session_key_seed_base64url: &'a str, timeout_ms: u64, authorization_context_store: Arc<dyn AuthorizationContextStore>) -> Self {
-        Self { trellis_url, deployment_id, instance_id, participant_needs_digest, public_identity_key, identity_seed_base64url, session_key_seed_base64url, timeout_ms, authorization_context_store }
+    pub fn new(trellis_url: &'a str, deployment_id: &'a str, instance_id: &'a str, public_identity_key: &'a str, identity_seed_base64url: &'a str, timeout_ms: u64, authorization_context_store: Arc<dyn AuthorizationContextStore>) -> Self {
+        Self { trellis_url, deployment_id, instance_id, public_identity_key, identity_seed_base64url, timeout_ms, authorization_context_store }
     }
 }
 
@@ -1580,11 +1595,11 @@ impl ConnectedClient {
 
     /// Connect using the exact ready bootstrap evidence returned by device activation.
     pub async fn connect_activated(
-        options: trellis_rs::auth::DeviceActivationOptions<'_>,
+        options: trellis_rs::auth::DeviceActivationOptions<'_, Contract>,
         session: trellis_rs::auth::DeviceActivationSession,
-    ) -> Result<Self, TrellisClientError> {
+    ) -> Result<Self, trellis_rs::auth::DeviceActivationError> {
         Ok(Self {
-            inner: Caller::connect_device(options.into_connect_options(session)).await?,
+            inner: Caller::connect_device(options.into_connect_options(session)?).await?,
         })
     }
 }
@@ -1592,23 +1607,14 @@ impl ConnectedClient {
 /// Connect this activated device.
 pub async fn connect(opts: ConnectOptions<'_>) -> Result<ConnectedClient, TrellisClientError> {
     Ok(ConnectedClient {
-        inner: Caller::connect_device(DeviceConnectOptions::new(
+        inner: Caller::connect_device(DeviceConnectOptions::<Contract>::new(
             opts.trellis_url,
             opts.deployment_id,
             opts.instance_id,
-             crate::contract::CONTRACT_ID,
-             crate::contract::CONTRACT_DIGEST,
-            opts.participant_needs_digest,
-             crate::contract::PARTICIPANT,
-            crate::contract::API_JSON,
-            crate::contract::API_DIGEST,
-            crate::contract::REFERENCED_API_ARTIFACTS,
             opts.public_identity_key,
             opts.identity_seed_base64url,
-            opts.session_key_seed_base64url,
-            opts.timeout_ms,
             opts.authorization_context_store,
-        )).await?,
+        ).with_timeout_ms(opts.timeout_ms)).await?,
     })
 }
 "#
@@ -5719,6 +5725,20 @@ mod tests {
             let connect = fs::read_to_string(facade.join("src/connect.rs")).unwrap();
             assert!(connect.contains("pub async fn connect("));
             assert!(!connect.contains("connect_service"));
+            if kind == "device" {
+                let lib = fs::read_to_string(facade.join("src/lib.rs")).unwrap();
+                assert!(lib.contains("ConnectedClient, Contract"));
+                assert!(connect.contains(
+                    "/// Exact generated participant and API evidence used for device bootstrap."
+                ));
+                assert!(connect
+                    .contains("impl trellis_rs::service::GeneratedServiceContract for Contract"));
+                assert!(connect.contains("DeviceConnectOptions::<Contract>::new"));
+                assert!(connect.contains("DeviceActivationOptions<'_, Contract>"));
+                assert!(connect.contains("options.into_connect_options(session)?"));
+                assert!(!connect.contains("opts.participant_needs_digest"));
+                assert!(!connect.contains("session_key_seed_base64url"));
+            }
 
             cargo_check(&facade.join("Cargo.toml"));
         }

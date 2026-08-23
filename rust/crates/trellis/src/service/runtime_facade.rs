@@ -116,7 +116,9 @@ pub const DEFAULT_RETRY_DELAY_MS: u64 = 1_000;
 /// Default authority-pending wait limit. `None` waits until authority is ready.
 pub const DEFAULT_AUTHORITY_PENDING_TIMEOUT_MS: Option<u64> = None;
 
-/// Native participant and API evidence emitted by generated Rust service SDKs.
+/// Native participant and API evidence emitted by generated Rust participant facades.
+///
+/// Service and device facades use this as their sole source of exact contract evidence.
 pub trait GeneratedServiceContract {
     /// Trellis participant id, for example `example.service@v1`.
     const PARTICIPANT_ID: &'static str;

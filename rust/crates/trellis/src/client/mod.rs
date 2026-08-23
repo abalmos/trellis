@@ -40,6 +40,8 @@ pub(crate) use authorization::inject_own_verified_for_test;
 #[doc(hidden)]
 pub use connection::connect_captured_user_admission;
 pub(crate) use connection::fetch_device_activation;
+#[cfg(feature = "test-support")]
+pub(crate) use connection::test_device_connect_options;
 pub(crate) use connection::ServiceBootstrapResponse;
 pub(crate) use connection::ServiceConnectWithContractOptions;
 pub(crate) use connection::TrellisClient;

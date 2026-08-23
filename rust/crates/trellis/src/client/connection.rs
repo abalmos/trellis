@@ -8,6 +8,7 @@ use futures_util::stream::{self, BoxStream};
 use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use sha2::{Digest as _, Sha256};
 use std::marker::PhantomData;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
@@ -113,8 +114,140 @@ pub(crate) struct ServiceConnectWithContractOptions<'a> {
     pub(crate) authorization_context_store: Arc<dyn AuthorizationContextStore>,
 }
 
-/// Connection options for an activated device principal.
-pub struct DeviceConnectOptions<'a> {
+struct DeviceContractEvidence<'a> {
+    participant_id: &'a str,
+    participant_digest: &'a str,
+    participant_needs_digest: &'a str,
+    participant_json: &'a str,
+    api_json: &'a str,
+    api_digest: &'a str,
+    referenced_api_artifacts: Vec<(&'a str, &'a str)>,
+}
+
+/// Runtime and device-identity options for an activated device principal.
+///
+/// The type parameter `C` supplies the exact generated participant and API evidence through
+/// [`crate::service::GeneratedServiceContract`]; callers do not provide or duplicate that
+/// evidence.
+pub struct DeviceConnectOptions<'a, C> {
+    trellis_url: &'a str,
+    deployment_id: &'a str,
+    instance_id: &'a str,
+    contract: DeviceContractEvidence<'a>,
+    public_identity_key: &'a str,
+    identity_seed_base64url: &'a str,
+    timeout_ms: u64,
+    authorization_context_store: Arc<dyn AuthorizationContextStore>,
+    activation_bootstrap: Option<DeviceReadyBootstrap>,
+    contract_type: std::marker::PhantomData<C>,
+}
+
+impl<'a, C: crate::service::GeneratedServiceContract> DeviceConnectOptions<'a, C> {
+    /// Create activated-device connection options using the exact generated evidence from `C`.
+    ///
+    /// Runtime bootstrap generates fresh session keys internally; this constructor accepts only
+    /// runtime location, provisioned device identity, and authorization-context storage inputs.
+    pub fn new(
+        trellis_url: &'a str,
+        deployment_id: &'a str,
+        instance_id: &'a str,
+        public_identity_key: &'a str,
+        identity_seed_base64url: &'a str,
+        authorization_context_store: Arc<dyn AuthorizationContextStore>,
+    ) -> Self {
+        Self {
+            trellis_url,
+            deployment_id,
+            instance_id,
+            contract: DeviceContractEvidence {
+                participant_id: C::PARTICIPANT_ID,
+                participant_digest: C::CONTRACT_DIGEST,
+                participant_needs_digest: C::PARTICIPANT_NEEDS_DIGEST,
+                participant_json: C::PARTICIPANT_JSON,
+                api_json: C::API_JSON,
+                api_digest: C::API_DIGEST,
+                referenced_api_artifacts: C::REFERENCED_API_ARTIFACTS.to_vec(),
+            },
+            public_identity_key,
+            identity_seed_base64url,
+            timeout_ms: crate::service::DEFAULT_TIMEOUT_MS,
+            authorization_context_store,
+            activation_bootstrap: None,
+            contract_type: std::marker::PhantomData,
+        }
+    }
+}
+
+impl<C> DeviceConnectOptions<'_, C> {
+    /// Set the request/connect timeout in milliseconds.
+    pub const fn with_timeout_ms(mut self, timeout_ms: u64) -> Self {
+        self.timeout_ms = timeout_ms;
+        self
+    }
+
+    /// Return the device public identity key bound to these options.
+    pub fn public_identity_key(&self) -> &str {
+        self.public_identity_key
+    }
+
+    pub(crate) fn activation_origin_digest(
+        &self,
+        activation_key_base64url: &str,
+        nonce: &str,
+        session_key_seed_base64url: &str,
+    ) -> [u8; 32] {
+        let mut digest = Sha256::new();
+        for value in [
+            self.trellis_url,
+            self.deployment_id,
+            self.instance_id,
+            self.contract.participant_id,
+            self.contract.participant_digest,
+            self.contract.participant_needs_digest,
+            self.contract.participant_json,
+            self.contract.api_json,
+            self.contract.api_digest,
+            self.public_identity_key,
+            self.identity_seed_base64url,
+            activation_key_base64url,
+            nonce,
+            session_key_seed_base64url,
+        ] {
+            digest.update(value.len().to_be_bytes());
+            digest.update(value.as_bytes());
+        }
+        for (json, artifact_digest) in &self.contract.referenced_api_artifacts {
+            for value in [*json, *artifact_digest] {
+                digest.update(value.len().to_be_bytes());
+                digest.update(value.as_bytes());
+            }
+        }
+        digest.finalize().into()
+    }
+
+    pub(crate) fn activation_bootstrap(
+        mut self,
+        bootstrap: ServiceBootstrapResponse,
+        session_key_seed_base64url: String,
+    ) -> Self {
+        self.activation_bootstrap = Some(DeviceReadyBootstrap {
+            response: bootstrap,
+            session_key_seed_base64url,
+        });
+        self
+    }
+
+    #[cfg(test)]
+    pub(crate) fn activation_session_seed(&self) -> Option<&str> {
+        self.activation_bootstrap
+            .as_ref()
+            .map(|ready| ready.session_key_seed_base64url.as_str())
+    }
+}
+
+#[cfg(feature = "test-support")]
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn test_device_connect_options<'a>(
     trellis_url: &'a str,
     deployment_id: &'a str,
     instance_id: &'a str,
@@ -124,39 +257,17 @@ pub struct DeviceConnectOptions<'a> {
     participant_json: &'a str,
     api_json: &'a str,
     api_digest: &'a str,
-    referenced_api_artifacts: Vec<(&'a str, &'a str)>,
+    referenced_api_artifacts: &[(&'a str, &'a str)],
     public_identity_key: &'a str,
     identity_seed_base64url: &'a str,
-    session_key_seed_base64url: &'a str,
     timeout_ms: u64,
     authorization_context_store: Arc<dyn AuthorizationContextStore>,
-    activation_bootstrap: Option<ServiceBootstrapResponse>,
-}
-
-impl<'a> DeviceConnectOptions<'a> {
-    /// Create activated-device connection options.
-    #[allow(clippy::too_many_arguments)]
-    pub fn new(
-        trellis_url: &'a str,
-        deployment_id: &'a str,
-        instance_id: &'a str,
-        participant_id: &'a str,
-        participant_digest: &'a str,
-        participant_needs_digest: &'a str,
-        participant_json: &'a str,
-        api_json: &'a str,
-        api_digest: &'a str,
-        referenced_api_artifacts: &[(&'a str, &'a str)],
-        public_identity_key: &'a str,
-        identity_seed_base64url: &'a str,
-        session_key_seed_base64url: &'a str,
-        timeout_ms: u64,
-        authorization_context_store: Arc<dyn AuthorizationContextStore>,
-    ) -> Self {
-        Self {
-            trellis_url,
-            deployment_id,
-            instance_id,
+) -> DeviceConnectOptions<'a, crate::generated::DynamicDeviceContract> {
+    DeviceConnectOptions {
+        trellis_url,
+        deployment_id,
+        instance_id,
+        contract: DeviceContractEvidence {
             participant_id,
             participant_digest,
             participant_needs_digest,
@@ -164,24 +275,19 @@ impl<'a> DeviceConnectOptions<'a> {
             api_json,
             api_digest,
             referenced_api_artifacts: referenced_api_artifacts.to_vec(),
-            public_identity_key,
-            identity_seed_base64url,
-            session_key_seed_base64url,
-            timeout_ms,
-            authorization_context_store,
-            activation_bootstrap: None,
-        }
+        },
+        public_identity_key,
+        identity_seed_base64url,
+        timeout_ms,
+        authorization_context_store,
+        activation_bootstrap: None,
+        contract_type: std::marker::PhantomData,
     }
+}
 
-    /// Return the device public identity key bound to these options.
-    pub fn public_identity_key(&self) -> &str {
-        self.public_identity_key
-    }
-
-    pub(crate) fn activation_bootstrap(mut self, bootstrap: ServiceBootstrapResponse) -> Self {
-        self.activation_bootstrap = Some(bootstrap);
-        self
-    }
+struct DeviceReadyBootstrap {
+    response: ServiceBootstrapResponse,
+    session_key_seed_base64url: String,
 }
 
 /// Whether an event subscription uses a durable or ephemeral JetStream consumer.
@@ -586,10 +692,10 @@ async fn fetch_service_bootstrap_inner(
     }
 }
 
-async fn fetch_device_bootstrap(
+async fn fetch_device_bootstrap<C>(
     identity_auth: &SessionAuth,
     session_auth: &SessionAuth,
-    opts: &DeviceConnectOptions<'_>,
+    opts: &DeviceConnectOptions<'_, C>,
     activation: Option<DeviceActivationEvidence<'_>>,
     proof_overrides: DeviceBootstrapProofOverrides,
 ) -> Result<ServiceBootstrapResponse, TrellisClientError> {
@@ -612,26 +718,26 @@ async fn fetch_device_bootstrap(
             .ok_or_else(|| TrellisClientError::Bootstrap("device timestamp overflow".into()))?,
     };
     let session_nkey = session_auth.nkey_pair()?.public_key();
-    let participant_artifact: Value = serde_json::from_str(opts.participant_json)?;
+    let participant_artifact: Value = serde_json::from_str(opts.contract.participant_json)?;
     let parsed_participant = trellis_protocol::parse_participant_v1(&participant_artifact)
         .map_err(|error| TrellisClientError::Bootstrap(error.to_string()))?;
-    if parsed_participant.id() != opts.participant_id
+    if parsed_participant.id() != opts.contract.participant_id
         || parsed_participant
             .digest()
             .map_err(|error| TrellisClientError::Bootstrap(error.to_string()))?
-            != opts.participant_digest
+            != opts.contract.participant_digest
     {
         return Err(TrellisClientError::Bootstrap(
             "participant artifact identity mismatch".into(),
         ));
     }
-    let api_artifact: Value = serde_json::from_str(opts.api_json)?;
+    let api_artifact: Value = serde_json::from_str(opts.contract.api_json)?;
     let parsed_api = trellis_protocol::parse_api_v1(&api_artifact)
         .map_err(|error| TrellisClientError::Bootstrap(error.to_string()))?;
     if parsed_api
         .digest()
         .map_err(|error| TrellisClientError::Bootstrap(error.to_string()))?
-        != opts.api_digest
+        != opts.contract.api_digest
     {
         return Err(TrellisClientError::Bootstrap(
             "owned API artifact digest mismatch".into(),
@@ -640,6 +746,7 @@ async fn fetch_device_bootstrap(
     let mut participant_apis = std::collections::BTreeMap::new();
     participant_apis.insert(parsed_api.id().to_owned(), parsed_api.clone());
     let referenced_api_artifacts = opts
+        .contract
         .referenced_api_artifacts
         .iter()
         .map(|(json, digest)| {
@@ -665,7 +772,7 @@ async fn fetch_device_bootstrap(
         .needs()
         .digest()
         .map_err(|error| TrellisClientError::Bootstrap(error.to_string()))?
-        != opts.participant_needs_digest
+        != opts.contract.participant_needs_digest
     {
         return Err(TrellisClientError::Bootstrap(
             "participant needs digest mismatch".into(),
@@ -683,9 +790,9 @@ async fn fetch_device_bootstrap(
         expected_secret_version: None,
         new_session_public_key: session_auth.session_key.clone(),
         new_session_nkey: session_nkey.clone(),
-        participant_id: opts.participant_id.to_owned(),
-        participant_artifact_digest: opts.participant_digest.to_owned(),
-        participant_needs_digest: opts.participant_needs_digest.to_owned(),
+        participant_id: opts.contract.participant_id.to_owned(),
+        participant_artifact_digest: opts.contract.participant_digest.to_owned(),
+        participant_needs_digest: opts.contract.participant_needs_digest.to_owned(),
         participant_artifact,
         referenced_api_artifacts: std::iter::once(api_artifact)
             .chain(referenced_api_artifacts)
@@ -711,8 +818,8 @@ async fn fetch_device_bootstrap(
         identity_auth.key_id(),
         session_auth.session_key.clone(),
         session_nkey,
-        opts.participant_id,
-        opts.participant_digest,
+        opts.contract.participant_id,
+        opts.contract.participant_digest,
         activation
             .as_ref()
             .map(|activation| activation.challenge_digest.to_owned()),
@@ -754,8 +861,9 @@ async fn fetch_device_bootstrap(
     Ok(response)
 }
 
-pub(crate) async fn fetch_device_activation(
-    opts: &DeviceConnectOptions<'_>,
+pub(crate) async fn fetch_device_activation<C>(
+    opts: &DeviceConnectOptions<'_, C>,
+    session_auth: &SessionAuth,
     challenge_digest: &str,
     confirmation_code: &str,
 ) -> Result<ServiceBootstrapResponse, TrellisClientError> {
@@ -765,10 +873,9 @@ pub(crate) async fn fetch_device_activation(
             "device public identity key does not match identity seed".into(),
         ));
     }
-    let session_auth = SessionAuth::from_seed_base64url(opts.session_key_seed_base64url)?;
     fetch_device_bootstrap(
         &identity_auth,
-        &session_auth,
+        session_auth,
         opts,
         Some(DeviceActivationEvidence {
             challenge_digest,
@@ -780,17 +887,17 @@ pub(crate) async fn fetch_device_activation(
 }
 
 #[cfg(feature = "test-support")]
-pub(crate) async fn fetch_device_activation_with_test_proof(
-    opts: &DeviceConnectOptions<'_>,
+pub(crate) async fn fetch_device_activation_with_test_proof<C>(
+    opts: &DeviceConnectOptions<'_, C>,
+    session_auth: &SessionAuth,
     challenge_digest: &str,
     confirmation_code: &str,
     proof_overrides: DeviceBootstrapProofOverrides,
 ) -> Result<ServiceBootstrapResponse, TrellisClientError> {
     let identity_auth = SessionAuth::from_seed_base64url(opts.identity_seed_base64url)?;
-    let session_auth = SessionAuth::from_seed_base64url(opts.session_key_seed_base64url)?;
     fetch_device_bootstrap(
         &identity_auth,
-        &session_auth,
+        session_auth,
         opts,
         Some(DeviceActivationEvidence {
             challenge_digest,
@@ -1427,8 +1534,8 @@ impl TrellisClient {
     }
 
     /// Connect an activated device using refreshed auth-owned connect info.
-    pub async fn connect_device(
-        mut opts: DeviceConnectOptions<'_>,
+    pub async fn connect_device<C>(
+        mut opts: DeviceConnectOptions<'_, C>,
     ) -> Result<Self, TrellisClientError> {
         let identity_auth = SessionAuth::from_seed_base64url(opts.identity_seed_base64url)?;
         if identity_auth.session_key != opts.public_identity_key {
@@ -1436,20 +1543,23 @@ impl TrellisClient {
                 "device public identity key does not match identity seed".into(),
             ));
         }
-        let session_auth = SessionAuth::from_seed_base64url(opts.session_key_seed_base64url)?;
-        let response = match opts.activation_bootstrap.take() {
-            Some(response) => response,
+        let (response, session_key_seed_base64url) = match opts.activation_bootstrap.take() {
+            Some(ready) => (ready.response, ready.session_key_seed_base64url),
             None => {
-                fetch_device_bootstrap(
+                let (session_key_seed_base64url, _) = crate::auth::generate_session_keypair();
+                let session_auth = SessionAuth::from_seed_base64url(&session_key_seed_base64url)?;
+                let response = fetch_device_bootstrap(
                     &identity_auth,
                     &session_auth,
                     &opts,
                     None,
                     DeviceBootstrapProofOverrides::default(),
                 )
-                .await?
+                .await?;
+                (response, session_key_seed_base64url)
             }
         };
+        let session_auth = SessionAuth::from_seed_base64url(&session_key_seed_base64url)?;
         if response.state != "ready" {
             return Err(TrellisClientError::Bootstrap(format!(
                 "unexpected device bootstrap state '{}'",
@@ -1469,8 +1579,8 @@ impl TrellisClient {
             serde_json::from_value(response.authorization.ok_or_else(|| {
                 TrellisClientError::Bootstrap("missing device authorization evidence".into())
             })?)?;
-        if authorization.participant_id != opts.participant_id
-            || authorization.participant_artifact_digest != opts.participant_digest
+        if authorization.participant_id != opts.contract.participant_id
+            || authorization.participant_artifact_digest != opts.contract.participant_digest
         {
             return Err(TrellisClientError::Bootstrap(
                 "device authorization participant mismatch".into(),
@@ -1483,8 +1593,8 @@ impl TrellisClient {
             &nats_credential.jwt,
             &session.session_id,
             &session.inbox_prefix,
-            opts.session_key_seed_base64url,
-            opts.participant_digest,
+            &session_key_seed_base64url,
+            opts.contract.participant_digest,
             authorization_context,
             opts.timeout_ms,
             format!("device:{}", opts.public_identity_key),
@@ -1494,12 +1604,12 @@ impl TrellisClient {
 
         let health_heartbeat_config = HealthHeartbeatConfig {
             session_key: session_auth.session_key,
-            service_name: opts.participant_id.to_owned(),
+            service_name: opts.contract.participant_id.to_owned(),
             kind: HealthHeartbeatServiceKind::Device,
             deployment_id: opts.deployment_id.to_owned(),
             instance_id: opts.instance_id.to_owned(),
-            contract_id: opts.participant_id.to_owned(),
-            contract_digest: opts.participant_digest.to_owned(),
+            contract_id: opts.contract.participant_id.to_owned(),
+            contract_digest: opts.contract.participant_digest.to_owned(),
             started_at: now_rfc3339(),
             publish_interval_ms: HEALTH_HEARTBEAT_INTERVAL_MS,
         };

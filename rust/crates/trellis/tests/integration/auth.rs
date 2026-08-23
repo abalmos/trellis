@@ -14,9 +14,7 @@ use trellis_rs::auth::{
     wait_for_device_activation, DeviceActivationOptions, DeviceActivationStatus,
 };
 use trellis_rs::client::OperationState as ClientOperationState;
-use trellis_rs::client::{
-    DeviceConnectOptions, EventDescriptor, MemoryAuthorizationContextStore, RpcDescriptor,
-};
+use trellis_rs::client::{EventDescriptor, MemoryAuthorizationContextStore, RpcDescriptor};
 use trellis_rs::generated::Caller;
 use trellis_rs::sdk::auth as auth_sdk;
 use trellis_rs::service::{
@@ -118,11 +116,14 @@ struct DeviceActivationCase {
     identity: trellis_rs::auth::DeviceIdentity,
     instance_id: String,
     principal_id: String,
-    session_seed: String,
 }
 
 impl DeviceActivationCase {
-    fn connect_options<'a>(&'a self, trellis_url: &'a str) -> DeviceConnectOptions<'a> {
+    fn connect_options<'a>(
+        &'a self,
+        trellis_url: &'a str,
+    ) -> trellis_rs::client::DeviceConnectOptions<'a, trellis_rs::generated::DynamicDeviceContract>
+    {
         self.connect_options_for_deployment(trellis_url, &self.approval.deployment_id)
     }
 
@@ -130,33 +131,23 @@ impl DeviceActivationCase {
         &'a self,
         trellis_url: &'a str,
         deployment_id: &'a str,
-    ) -> DeviceConnectOptions<'a> {
-        let referenced = self
-            .approval
-            .referenced_api_artifacts
-            .iter()
-            .map(|(json, digest)| (json.as_str(), digest.as_str()))
-            .collect::<Vec<_>>();
-        DeviceConnectOptions::new(
+    ) -> trellis_rs::client::DeviceConnectOptions<'a, trellis_rs::generated::DynamicDeviceContract>
+    {
+        trellis_test::device_connect_options(
             trellis_url,
+            &self.approval,
             deployment_id,
             &self.instance_id,
-            &self.approval.participant_id,
-            &self.approval.participant_digest,
-            &self.approval.participant_needs_digest,
-            &self.approval.participant_json,
-            &self.approval.api_json,
-            &self.approval.api_digest,
-            &referenced,
-            &self.identity.public_identity_key,
-            &self.identity.identity_seed_base64url,
-            &self.session_seed,
-            10_000,
+            &self.identity,
             Arc::new(MemoryAuthorizationContextStore::default()),
         )
+        .with_timeout_ms(10_000)
     }
 
-    fn activation_options<'a>(&'a self, trellis_url: &'a str) -> DeviceActivationOptions<'a> {
+    fn activation_options<'a>(
+        &'a self,
+        trellis_url: &'a str,
+    ) -> DeviceActivationOptions<'a, trellis_rs::generated::DynamicDeviceContract> {
         DeviceActivationOptions::new(
             self.connect_options(trellis_url),
             &self.identity.activation_key_base64url,
@@ -419,7 +410,6 @@ async fn provision_device_activation_case_with_delegation(
         identity,
         instance_id: provisioned.instance_id,
         principal_id: provisioned.principal_id,
-        session_seed: URL_SAFE_NO_PAD.encode(rand::random::<[u8; 32]>()),
     }
 }
 
@@ -1773,9 +1763,13 @@ async fn run_device_activation_without_review(case_id: &str, runtime_case: bool)
         .await
         .expect("observe ready device activation");
 
-    let connected = Caller::connect_device(activation.into_connect_options(session))
-        .await
-        .expect("connect activated device");
+    let connected = Caller::connect_device(
+        activation
+            .into_connect_options(session)
+            .expect("activation session origin"),
+    )
+    .await
+    .expect("connect activated device");
     let session = auth_sdk::AuthClient::new(&connected)
         .rpc()
         .auth()
@@ -1894,9 +1888,13 @@ async fn device_activation_required_review_needs_privileged_decision() {
     let session = wait_for_device_activation(&activation, &pending, Duration::from_secs(20))
         .await
         .expect("observe approved activation");
-    Caller::connect_device(activation.into_connect_options(session))
-        .await
-        .expect("connect reviewed device");
+    Caller::connect_device(
+        activation
+            .into_connect_options(session)
+            .expect("activation session origin"),
+    )
+    .await
+    .expect("connect reviewed device");
 
     let rejected_device =
         provision_device_activation_case(&mut fixture, "device-required-rejected", "required")
@@ -2400,9 +2398,13 @@ async fn device_activation_approved_unclaimed_cannot_complete_delegation() {
         .await
         .expect("observe claimed activation completion");
     assert_eq!(terminal.state, ClientOperationState::Completed);
-    Caller::connect_device(activation.into_connect_options(session))
-        .await
-        .expect("connect activation completed by the claimant");
+    Caller::connect_device(
+        activation
+            .into_connect_options(session)
+            .expect("activation session origin"),
+    )
+    .await
+    .expect("connect activation completed by the claimant");
 }
 
 #[tokio::test]

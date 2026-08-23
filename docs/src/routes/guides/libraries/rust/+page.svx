@@ -110,19 +110,27 @@ exist.
 Activated devices use the generated device option type:
 
 ```rust
+use std::sync::Arc;
+
 use inspection_device_participant::{connect, ConnectOptions};
+use trellis_rs::client::MemoryAuthorizationContextStore;
 
 let connected = connect(ConnectOptions::new(
-    "nats://127.0.0.1:4222",
+    "http://127.0.0.1:8080",
+    deployment_id,
+    instance_id,
     public_identity_key,
     identity_seed_base64url,
     10_000,
+    Arc::new(MemoryAuthorizationContextStore::default()),
 ))
 .await?;
 ```
 
 The connected client exposes only APIs selected by the device contract. Device
-activation and identity persistence happen before this connection step.
+activation and identity persistence happen before this connection step. Device
+bootstrap generates a fresh session key for every attempt and carries only the
+successful ready attempt's private seed into connection.
 
 ## Call RPCs
 

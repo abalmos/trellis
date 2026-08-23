@@ -73,9 +73,14 @@ https://raw.githubusercontent.com/qlever-llc/trellis/main/docs/static/llms.txt
   provisioned_identity_seed_base64url, session_key_seed_base64url,
   authorization_context_store)` accepts runtime and credential inputs only;
   generated `GeneratedServiceContract` constants are the sole contract-evidence
-  source. Rust services use
+  source for service and device facades; callers provide only runtime and
+  credential inputs. Rust services use
   `ServiceConnectOptions::with_authority_pending_timeout_ms(Some(...))` only when
   startup needs an overall deadline; per-request timeouts remain bounded.
+- Generated Rust device connection options do not accept a session key seed.
+  Each activation/bootstrap attempt generates a fresh Ed25519 key, pending
+  attempts discard it, and only ready evidence carries the successful private
+  seed into the exact connection handoff.
 - The runtime `contracts` store is a digest-keyed manifest cache, not durable
   authority. Invalid cached manifests may be pruned without changing
   implementation offers, sessions, identity grants, deployment authority,

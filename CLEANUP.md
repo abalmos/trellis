@@ -188,7 +188,7 @@ Validation:
 - [x] Remove duplicate contract metadata from `ServiceConnectOptions` /
       generated service contract evidence; generated contract evidence must have
       one source of truth.
-- [ ] Apply the same constructor simplification to device connection paths where
+- [x] Apply the same constructor simplification to device connection paths where
       equivalent duplication exists.
 - [ ] Collapse combinatorial operation-registration callback variants to one
       provider interface; generated code adapts to it.

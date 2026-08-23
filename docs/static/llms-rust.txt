@@ -137,7 +137,12 @@ https://raw.githubusercontent.com/qlever-llc/trellis/main/docs/static/llms-full.
   provisioned_identity_seed_base64url, session_key_seed_base64url,
   authorization_context_store)` accepts runtime and credential inputs only.
   Generated `GeneratedServiceContract` constants are the sole source of service
-  participant, API, digest, needs-digest, and referenced-API evidence.
+  and device facade participant, API, digest, needs-digest, and referenced-API
+  evidence; callers provide only runtime and credential inputs.
+- Generated Rust device connection options do not accept a session key seed.
+  Every activation/bootstrap attempt generates a fresh Ed25519 session key;
+  pending attempts discard it, and only ready evidence carries the successful
+  private seed into the exact connection handoff.
 - Rust service bootstrap waits for pending deployment authority indefinitely by
   default. Use `ServiceConnectOptions::with_authority_pending_timeout_ms(...)`
   only when startup needs an overall deadline; `with_timeout_ms(...)` bounds each

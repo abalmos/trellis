@@ -381,6 +381,37 @@ pub async fn connect_service_runtime<C>(
     .await
 }
 
+/// Build device connection and activation options for a runtime-authored test contract.
+pub fn device_connect_options<'a>(
+    trellis_url: &'a str,
+    approval: &'a TrellisTestContractApproval,
+    deployment_id: &'a str,
+    instance_id: &'a str,
+    identity: &'a trellis_rs::auth::DeviceIdentity,
+    authorization_context_store: std::sync::Arc<dyn trellis_rs::client::AuthorizationContextStore>,
+) -> trellis_rs::client::DeviceConnectOptions<'a, trellis_rs::generated::DynamicDeviceContract> {
+    trellis_rs::generated::test_device_connect_options(
+        trellis_url,
+        deployment_id,
+        instance_id,
+        &approval.participant_id,
+        &approval.participant_digest,
+        &approval.participant_needs_digest,
+        &approval.participant_json,
+        &approval.api_json,
+        &approval.api_digest,
+        &approval
+            .referenced_api_artifacts
+            .iter()
+            .map(|(json, digest)| (json.as_str(), digest.as_str()))
+            .collect::<Vec<_>>(),
+        &identity.public_identity_key,
+        &identity.identity_seed_base64url,
+        trellis_rs::service::DEFAULT_TIMEOUT_MS,
+        authorization_context_store,
+    )
+}
+
 impl<E: std::fmt::Debug> From<trellis_rs::client::CallError<E>> for TrellisTestError {
     fn from(error: trellis_rs::client::CallError<E>) -> Self {
         Self::GeneratedCall(format!("{error:?}"))
