@@ -64,6 +64,12 @@ struct InvalidationChange {
     instance_id: String,
 }
 
+struct OwnerConfig {
+    projection_id: String,
+    invalidation_subject: String,
+    history_days: i64,
+}
+
 impl From<ProjectionCommit> for Invalidation {
     fn from(commit: ProjectionCommit) -> Self {
         Self {
@@ -105,9 +111,8 @@ pub(crate) async fn start(context: &RuntimeContext) -> Result<SubsystemHandle, R
         .and_then(|health| health.history_retention_days)
         .map(i64::from)
         .unwrap_or(DEFAULT_HISTORY_RETENTION_DAYS);
-    let event_auth_pair = load_event_auth(&context.config)?;
-    let event_context_digest = event_auth_pair.1;
-    let event_auth = Arc::new(event_auth_pair.0);
+    let (event_auth, event_context_digest) = load_event_auth(&context.config)?;
+    let event_auth = (Arc::new(event_auth), event_context_digest);
     let verifier: std::sync::Arc<dyn trellis_rs::service::RequestValidator> =
         match context.platform_verifier.get() {
             Some(verifier) => std::sync::Arc::new(verifier.clone()),
@@ -124,11 +129,12 @@ pub(crate) async fn start(context: &RuntimeContext) -> Result<SubsystemHandle, R
             jetstream,
             owner,
             store,
-            projection_id,
-            invalidation_subject,
-            history_days,
+            OwnerConfig {
+                projection_id,
+                invalidation_subject,
+                history_days,
+            },
             event_auth,
-            event_context_digest,
             task_stop.clone(),
         );
         let api_loop = run_builtin_authenticated_router(
@@ -278,20 +284,13 @@ async fn run_invalidation_subscriber(
     ))
 }
 
-#[expect(
-    clippy::too_many_arguments,
-    reason = "owner loop owns one complete projection runtime"
-)]
 async fn run_owner(
     nats: async_nats::Client,
     jetstream: jetstream::Context,
     owner: crate::ownership::OwnerContext,
     store: HealthStore,
-    projection_id: String,
-    invalidation_subject: String,
-    history_days: i64,
-    event_auth: Arc<SessionAuth>,
-    event_context_digest: String,
+    config: OwnerConfig,
+    event_auth: (Arc<SessionAuth>, String),
     stop: StopHandle,
 ) -> Result<(), RuntimeError> {
     tracing::debug!(
@@ -304,7 +303,7 @@ async fn run_owner(
         .get_stream(HEALTH_STREAM)
         .await
         .map_err(|error| RuntimeError::Health(error.to_string()))?;
-    let durable = format!("health-projector-{projection_id}").to_lowercase();
+    let durable = format!("health-projector-{}", config.projection_id).to_lowercase();
     let consumer = stream
         .get_or_create_consumer(
             &durable,
@@ -332,26 +331,26 @@ async fn run_owner(
                     return Err(RuntimeError::Health("health projector consumer ended".to_string()));
                 };
                 let message = message.map_err(|error| RuntimeError::Health(error.to_string()))?;
-                project_message(&nats, &store, &invalidation_subject, message).await?;
+                project_message(&nats, &store, &config.invalidation_subject, message).await?;
             }
             _ = deadlines.tick() => {
                 if let Some(commit) = store.expire_due(now_ns()).map_err(map_runtime_store_error)? {
-                    publish_invalidation(&nats, &invalidation_subject, commit).await?;
+                    publish_invalidation(&nats, &config.invalidation_subject, commit).await?;
                 }
             }
             _ = outbox.tick() => publish_outbox(
                 &nats,
                 &store,
-                &event_auth,
-                &event_context_digest,
+                &event_auth.0,
+                &event_auth.1,
             )
             .await?,
             _ = retention.tick() => {
                 let cutoff = now_ns().saturating_sub(
-                    history_days.saturating_mul(24 * 60 * 60 * 1_000_000_000),
+                    config.history_days.saturating_mul(24 * 60 * 60 * 1_000_000_000),
                 );
                 if let Some(commit) = store.cleanup(cutoff).map_err(map_runtime_store_error)? {
-                    publish_invalidation(&nats, &invalidation_subject, commit).await?;
+                    publish_invalidation(&nats, &config.invalidation_subject, commit).await?;
                 }
             }
             () = stop.stopped() => return Ok(()),

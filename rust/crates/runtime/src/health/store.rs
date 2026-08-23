@@ -73,6 +73,25 @@ struct CurrentInstance {
     checks_json: String,
 }
 
+struct IntervalRow<'a> {
+    started_at_ns: i64,
+    reported_status: &'a str,
+    effective_status: &'a str,
+    checks_json: &'a str,
+    reason: &'a str,
+}
+
+struct TransitionRow<'a> {
+    participant_name: &'a str,
+    previous_status: &'a str,
+    status: &'a str,
+    reported_status: &'a str,
+    reason: &'a str,
+    changed_at_ns: i64,
+    last_seen_at_ns: i64,
+    summary: Option<&'a str>,
+}
+
 impl HealthStore {
     pub(crate) fn new(connection: Connection) -> Result<Self, HealthStoreError> {
         let store = Self {
@@ -147,68 +166,80 @@ impl HealthStore {
                 insert_interval(
                     &transaction,
                     identity,
-                    current.heartbeat_deadline_ns,
-                    &current.reported_status,
-                    "offline",
-                    &current.checks_json,
-                    "deadline-expired",
+                    IntervalRow {
+                        started_at_ns: current.heartbeat_deadline_ns,
+                        reported_status: &current.reported_status,
+                        effective_status: "offline",
+                        checks_json: &current.checks_json,
+                        reason: "deadline-expired",
+                    },
                 )?;
                 insert_transition(
                     &transaction,
                     identity,
-                    &current.participant_name,
-                    &current.effective_status,
-                    "offline",
-                    &current.reported_status,
-                    "deadline-expired",
-                    current.heartbeat_deadline_ns,
-                    current.observed_at_ns,
-                    None,
+                    TransitionRow {
+                        participant_name: &current.participant_name,
+                        previous_status: &current.effective_status,
+                        status: "offline",
+                        reported_status: &current.reported_status,
+                        reason: "deadline-expired",
+                        changed_at_ns: current.heartbeat_deadline_ns,
+                        last_seen_at_ns: current.observed_at_ns,
+                        summary: None,
+                    },
                 )?;
                 close_interval(&transaction, identity, observed_at_ns)?;
                 insert_interval(
                     &transaction,
                     identity,
-                    observed_at_ns,
-                    sample.reported_status.as_str(),
-                    sample.reported_status.as_str(),
-                    &checks_json,
-                    "heartbeat-resumed",
+                    IntervalRow {
+                        started_at_ns: observed_at_ns,
+                        reported_status: sample.reported_status.as_str(),
+                        effective_status: sample.reported_status.as_str(),
+                        checks_json: &checks_json,
+                        reason: "heartbeat-resumed",
+                    },
                 )?;
                 insert_transition(
                     &transaction,
                     identity,
-                    &sample.participant.name,
-                    "offline",
-                    sample.reported_status.as_str(),
-                    sample.reported_status.as_str(),
-                    "heartbeat-resumed",
-                    observed_at_ns,
-                    observed_at_ns,
-                    sample.summary.as_deref(),
+                    TransitionRow {
+                        participant_name: &sample.participant.name,
+                        previous_status: "offline",
+                        status: sample.reported_status.as_str(),
+                        reported_status: sample.reported_status.as_str(),
+                        reason: "heartbeat-resumed",
+                        changed_at_ns: observed_at_ns,
+                        last_seen_at_ns: observed_at_ns,
+                        summary: sample.summary.as_deref(),
+                    },
                 )?;
             } else if current.effective_status == "offline" {
                 close_interval(&transaction, identity, observed_at_ns)?;
                 insert_interval(
                     &transaction,
                     identity,
-                    observed_at_ns,
-                    sample.reported_status.as_str(),
-                    sample.reported_status.as_str(),
-                    &checks_json,
-                    "heartbeat-resumed",
+                    IntervalRow {
+                        started_at_ns: observed_at_ns,
+                        reported_status: sample.reported_status.as_str(),
+                        effective_status: sample.reported_status.as_str(),
+                        checks_json: &checks_json,
+                        reason: "heartbeat-resumed",
+                    },
                 )?;
                 insert_transition(
                     &transaction,
                     identity,
-                    &sample.participant.name,
-                    "offline",
-                    sample.reported_status.as_str(),
-                    sample.reported_status.as_str(),
-                    "heartbeat-resumed",
-                    observed_at_ns,
-                    observed_at_ns,
-                    sample.summary.as_deref(),
+                    TransitionRow {
+                        participant_name: &sample.participant.name,
+                        previous_status: "offline",
+                        status: sample.reported_status.as_str(),
+                        reported_status: sample.reported_status.as_str(),
+                        reason: "heartbeat-resumed",
+                        changed_at_ns: observed_at_ns,
+                        last_seen_at_ns: observed_at_ns,
+                        summary: sample.summary.as_deref(),
+                    },
                 )?;
             } else if current.effective_status != sample.reported_status.as_str()
                 || current.checks_json != checks_json
@@ -217,24 +248,28 @@ impl HealthStore {
                 insert_interval(
                     &transaction,
                     identity,
-                    observed_at_ns,
-                    sample.reported_status.as_str(),
-                    sample.reported_status.as_str(),
-                    &checks_json,
-                    "heartbeat-change",
+                    IntervalRow {
+                        started_at_ns: observed_at_ns,
+                        reported_status: sample.reported_status.as_str(),
+                        effective_status: sample.reported_status.as_str(),
+                        checks_json: &checks_json,
+                        reason: "heartbeat-change",
+                    },
                 )?;
                 if current.effective_status != sample.reported_status.as_str() {
                     insert_transition(
                         &transaction,
                         identity,
-                        &sample.participant.name,
-                        &current.effective_status,
-                        sample.reported_status.as_str(),
-                        sample.reported_status.as_str(),
-                        "heartbeat-change",
-                        observed_at_ns,
-                        observed_at_ns,
-                        sample.summary.as_deref(),
+                        TransitionRow {
+                            participant_name: &sample.participant.name,
+                            previous_status: &current.effective_status,
+                            status: sample.reported_status.as_str(),
+                            reported_status: sample.reported_status.as_str(),
+                            reason: "heartbeat-change",
+                            changed_at_ns: observed_at_ns,
+                            last_seen_at_ns: observed_at_ns,
+                            summary: sample.summary.as_deref(),
+                        },
                     )?;
                 }
             }
@@ -242,11 +277,13 @@ impl HealthStore {
             insert_interval(
                 &transaction,
                 identity,
-                observed_at_ns,
-                sample.reported_status.as_str(),
-                sample.reported_status.as_str(),
-                &checks_json,
-                "first-sample",
+                IntervalRow {
+                    started_at_ns: observed_at_ns,
+                    reported_status: sample.reported_status.as_str(),
+                    effective_status: sample.reported_status.as_str(),
+                    checks_json: &checks_json,
+                    reason: "first-sample",
+                },
             )?;
         }
 
@@ -378,23 +415,27 @@ impl HealthStore {
             insert_interval(
                 &transaction,
                 &identity,
-                deadline,
-                &reported_status,
-                "offline",
-                "[]",
-                "deadline-expired",
+                IntervalRow {
+                    started_at_ns: deadline,
+                    reported_status: &reported_status,
+                    effective_status: "offline",
+                    checks_json: "[]",
+                    reason: "deadline-expired",
+                },
             )?;
             insert_transition(
                 &transaction,
                 &identity,
-                &participant_name,
-                &effective_status,
-                "offline",
-                &reported_status,
-                "deadline-expired",
-                deadline,
-                observed_at,
-                None,
+                TransitionRow {
+                    participant_name: &participant_name,
+                    previous_status: &effective_status,
+                    status: "offline",
+                    reported_status: &reported_status,
+                    reason: "deadline-expired",
+                    changed_at_ns: deadline,
+                    last_seen_at_ns: observed_at,
+                    summary: None,
+                },
             )?;
             transaction.execute(
                 "UPDATE health_latest SET effective_status = 'offline'
@@ -656,11 +697,7 @@ fn close_interval(
 fn insert_interval(
     transaction: &Transaction<'_>,
     identity: &HeartbeatIdentity,
-    started_at_ns: i64,
-    reported_status: &str,
-    effective_status: &str,
-    checks_json: &str,
-    reason: &str,
+    row: IntervalRow<'_>,
 ) -> Result<(), rusqlite::Error> {
     transaction.execute(
         "INSERT INTO health_status_intervals
@@ -672,34 +709,23 @@ fn insert_interval(
             identity.contract_id,
             identity.instance_id,
             identity.deployment_id,
-            started_at_ns,
-            reported_status,
-            effective_status,
-            checks_json,
-            reason
+            row.started_at_ns,
+            row.reported_status,
+            row.effective_status,
+            row.checks_json,
+            row.reason
         ],
     )?;
     Ok(())
 }
 
-#[expect(
-    clippy::too_many_arguments,
-    reason = "arguments define one transition event"
-)]
 fn insert_transition(
     transaction: &Transaction<'_>,
     identity: &HeartbeatIdentity,
-    participant_name: &str,
-    previous_status: &str,
-    status: &str,
-    reported_status: &str,
-    reason: &str,
-    changed_at_ns: i64,
-    last_seen_at_ns: i64,
-    summary: Option<&str>,
+    row: TransitionRow<'_>,
 ) -> Result<(), HealthStoreError> {
     let event_id = Ulid::new().to_string();
-    let changed_at = rfc3339(changed_at_ns)?;
+    let changed_at = rfc3339(row.changed_at_ns)?;
     let event = HealthStatusChangedEvent {
         header: HealthStatusChangedEventHeader {
             id: event_id.clone(),
@@ -710,15 +736,15 @@ fn insert_transition(
             contract_id: identity.contract_id.clone(),
             deployment_id: identity.deployment_id.clone(),
             instance_id: identity.instance_id.clone(),
-            name: participant_name.to_string(),
+            name: row.participant_name.to_string(),
         },
-        previous_status: wire(previous_status)?,
-        status: wire(status)?,
-        reported_status: wire(reported_status)?,
-        reason: wire(reason)?,
+        previous_status: wire(row.previous_status)?,
+        status: wire(row.status)?,
+        reported_status: wire(row.reported_status)?,
+        reason: wire(row.reason)?,
         changed_at,
-        last_seen_at: rfc3339(last_seen_at_ns)?,
-        summary: summary.map(ToString::to_string),
+        last_seen_at: rfc3339(row.last_seen_at_ns)?,
+        summary: row.summary.map(ToString::to_string),
     };
     transaction.execute(
         "INSERT INTO health_transition_outbox
@@ -730,7 +756,7 @@ fn insert_transition(
             identity.contract_id,
             identity.instance_id,
             serde_json::to_string(&event)?,
-            changed_at_ns
+            row.changed_at_ns
         ],
     )?;
     Ok(())
