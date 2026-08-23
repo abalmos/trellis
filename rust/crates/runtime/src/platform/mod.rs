@@ -1,5 +1,6 @@
 //! Platform subsystem scaffold.
 
+use std::path::Path;
 use std::sync::Arc;
 
 /// Rust-owned authorization state and materialization.
@@ -103,22 +104,8 @@ pub(crate) async fn start(context: &RuntimeContext) -> Result<SubsystemHandle, R
         authorization_config.maximum_bootstrap_jwt_lifetime_seconds,
     )
     .map_err(|error| RuntimeError::Platform(error.to_string()))?;
-    let auth_nats = async_nats::ConnectOptions::new()
-        .subscription_capacity(256)
-        .credentials_file(&nats.auth_creds_path)
-        .await
-        .map_err(|error| RuntimeError::Nats(error.to_string()))?
-        .connect(&nats.servers)
-        .await
-        .map_err(|error| RuntimeError::Nats(error.to_string()))?;
-    let system_nats = async_nats::ConnectOptions::new()
-        .subscription_capacity(256)
-        .credentials_file(&nats.system_creds_path)
-        .await
-        .map_err(|error| RuntimeError::Nats(error.to_string()))?
-        .connect(&nats.servers)
-        .await
-        .map_err(|error| RuntimeError::Nats(error.to_string()))?;
+    let auth_nats = connect_nats(&nats.servers, &nats.auth_creds_path).await?;
+    let system_nats = connect_nats(&nats.servers, &nats.system_creds_path).await?;
     let rpc_nats = context.trellis_nats.clone();
     let post_commit_nats = context.trellis_nats.clone();
     let rpc_system_nats = system_nats.clone();
@@ -190,40 +177,8 @@ pub(crate) async fn start(context: &RuntimeContext) -> Result<SubsystemHandle, R
         .unwrap_or_else(|| format!("http://localhost:{}", context.config.http_port()));
     let (native_nats_servers, websocket_nats_servers) =
         advertised_endpoints(&context.config, &nats, context.nats_override.as_ref());
-    let stop = StopHandle::new();
-    let validator_stop = stop.clone();
-    let validator_contexts = authorization_contexts.clone();
-    let mut validator_join =
-        tokio::spawn(async move { validator_contexts.run_validator_cache(validator_stop).await });
-    tokio::select! {
-        result = authorization_contexts.wait_for_validator_cache() => {
-            if let Err(error) = result {
-                stop.stop();
-                validator_join.abort();
-                return Err(error);
-            }
-        }
-        result = &mut validator_join => {
-            return match result {
-                Ok(result) => result.and_then(|_| Err(RuntimeError::Platform(
-                    "authorization validator cache exited during startup".to_owned(),
-                ))),
-                Err(error) => Err(RuntimeError::Platform(format!(
-                    "authorization validator cache task failed: {error}"
-                ))),
-            };
-        }
-    }
-    let verifier = auth::verifier::RuntimeAuthVerifier::new(Arc::new(
-        authorization_contexts.validator_cache(),
-    ));
-    if context.platform_verifier.set(verifier.clone()).is_err() {
-        stop.stop();
-        validator_join.abort();
-        return Err(RuntimeError::Platform(
-            "runtime-local auth verifier was already installed".to_owned(),
-        ));
-    }
+    let (stop, mut validator_join, verifier) =
+        start_validator_cache(context, &authorization_contexts).await?;
     let state = state::StateRuntime::start(
         context.trellis_nats.clone(),
         auth_store.clone(),
@@ -258,48 +213,14 @@ pub(crate) async fn start(context: &RuntimeContext) -> Result<SubsystemHandle, R
         event_context_digest,
         authorization_contexts.clone(),
     );
-    let bootstrap = if context.rotate_first_admin {
-        auth_service
-            .rotate_first_admin_flow(
-                &public_origin,
-                &FirstAdminAuthorityTarget {
-                    participant_id: administration.participant_id.clone(),
-                    participant_artifact_digest: administration.artifact_digest.clone(),
-                    participant_needs_digest: administration.needs_digest.clone(),
-                },
-                now,
-            )
-            .await
-    } else {
-        auth_service
-            .ensure_first_admin_flow(
-                &public_origin,
-                &FirstAdminAuthorityTarget {
-                    participant_id: administration.participant_id,
-                    participant_artifact_digest: administration.artifact_digest,
-                    participant_needs_digest: administration.needs_digest,
-                },
-                now,
-            )
-            .await
-    }
-    .map_err(|error| RuntimeError::Platform(error.to_string()))?;
-    if let Some(bootstrap) = bootstrap {
-        if let Some(bootstrap_url) = bootstrap.bootstrap_url {
-            tracing::warn!(
-                bootstrapUrl = %bootstrap_url,
-                expiresAt = bootstrap.expires_at,
-                "first administrator bootstrap required"
-            );
-        } else {
-            tracing::warn!(
-                status = "pending",
-                flowIdHash = %bootstrap.flow_id_hash,
-                expiresAt = bootstrap.expires_at,
-                "first administrator bootstrap already pending"
-            );
-        }
-    }
+    ensure_first_admin(
+        &auth_service,
+        &administration,
+        &public_origin,
+        context.rotate_first_admin,
+        now,
+    )
+    .await?;
     let http = context.config.http.as_ref();
     let oidc_providers =
         match auth::discover_oidc_providers(context.config.oauth.as_ref(), &public_origin).await {
@@ -373,6 +294,110 @@ pub(crate) async fn start(context: &RuntimeContext) -> Result<SubsystemHandle, R
         stop,
         join,
     })
+}
+
+async fn connect_nats(
+    servers: &str,
+    credentials: &Path,
+) -> Result<async_nats::Client, RuntimeError> {
+    async_nats::ConnectOptions::new()
+        .subscription_capacity(256)
+        .credentials_file(credentials)
+        .await
+        .map_err(|error| RuntimeError::Nats(error.to_string()))?
+        .connect(servers)
+        .await
+        .map_err(|error| RuntimeError::Nats(error.to_string()))
+}
+
+async fn start_validator_cache(
+    context: &RuntimeContext,
+    authorization_contexts: &auth::AuthorizationContextService,
+) -> Result<
+    (
+        StopHandle,
+        tokio::task::JoinHandle<Result<(), RuntimeError>>,
+        auth::verifier::RuntimeAuthVerifier,
+    ),
+    RuntimeError,
+> {
+    let stop = StopHandle::new();
+    let validator_stop = stop.clone();
+    let validator_contexts = authorization_contexts.clone();
+    let mut validator_join =
+        tokio::spawn(async move { validator_contexts.run_validator_cache(validator_stop).await });
+    tokio::select! {
+        result = authorization_contexts.wait_for_validator_cache() => {
+            if let Err(error) = result {
+                stop.stop();
+                validator_join.abort();
+                return Err(error);
+            }
+        }
+        result = &mut validator_join => {
+            return match result {
+                Ok(result) => result.and_then(|_| Err(RuntimeError::Platform(
+                    "authorization validator cache exited during startup".to_owned(),
+                ))),
+                Err(error) => Err(RuntimeError::Platform(format!(
+                    "authorization validator cache task failed: {error}"
+                ))),
+            };
+        }
+    }
+    let verifier = auth::verifier::RuntimeAuthVerifier::new(Arc::new(
+        authorization_contexts.validator_cache(),
+    ));
+    if context.platform_verifier.set(verifier.clone()).is_err() {
+        stop.stop();
+        validator_join.abort();
+        return Err(RuntimeError::Platform(
+            "runtime-local auth verifier was already installed".to_owned(),
+        ));
+    }
+    Ok((stop, validator_join, verifier))
+}
+
+async fn ensure_first_admin(
+    service: &AuthService<SqliteAuthorizationStore>,
+    administration: &ParticipantBindingRecord,
+    public_origin: &str,
+    rotate: bool,
+    now: i64,
+) -> Result<(), RuntimeError> {
+    let target = FirstAdminAuthorityTarget {
+        participant_id: administration.participant_id.clone(),
+        participant_artifact_digest: administration.artifact_digest.clone(),
+        participant_needs_digest: administration.needs_digest.clone(),
+    };
+    let bootstrap = if rotate {
+        service
+            .rotate_first_admin_flow(public_origin, &target, now)
+            .await
+    } else {
+        service
+            .ensure_first_admin_flow(public_origin, &target, now)
+            .await
+    }
+    .map_err(|error| RuntimeError::Platform(error.to_string()))?;
+
+    if let Some(bootstrap) = bootstrap {
+        if let Some(bootstrap_url) = bootstrap.bootstrap_url {
+            tracing::warn!(
+                bootstrapUrl = %bootstrap_url,
+                expiresAt = bootstrap.expires_at,
+                "first administrator bootstrap required"
+            );
+        } else {
+            tracing::warn!(
+                status = "pending",
+                flowIdHash = %bootstrap.flow_id_hash,
+                expiresAt = bootstrap.expires_at,
+                "first administrator bootstrap already pending"
+            );
+        }
+    }
+    Ok(())
 }
 
 async fn ensure_auth_event_session(

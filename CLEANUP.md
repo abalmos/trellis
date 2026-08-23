@@ -83,7 +83,7 @@ Validation:
 
 ## 5. Runtime composition
 
-- [ ] Split oversized runtime startup / `platform::start` responsibilities into a few explicit phases with clear ownership.
+- [x] Split oversized runtime startup / `platform::start` responsibilities into a few explicit phases with clear ownership.
 - [ ] Split the oversized service runtime facade along real responsibility boundaries (bootstrap/lifecycle, routing/operations, resources, event consumers/jobs) where doing so reduces coupling.
 - [ ] Do not introduce a DI container, generic actor framework, or abstract lifecycle framework.
 
