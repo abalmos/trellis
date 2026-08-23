@@ -8,6 +8,7 @@ use crate::artifacts::{
     generated_artifacts_are_fresh, generated_artifacts_metadata, infer_artifact_version,
     native_api_digest, native_api_json, resolve_contract, rust_runtime_deps, stage_npm_ts_sources,
     trellis_package_version, ts_package_name_from_id, ts_runtime_deps, write_contract_outputs,
+    ContractOutputPlan, NpmPackageBuild, NpmPackageManifest,
 };
 use crate::cli::{
     GenerateAllArgs, GenerateApiArgs, GenerateCargoPackageArgs, GenerateJsrPackageArgs,
@@ -79,16 +80,17 @@ pub fn npm_package(args: &GenerateNpmPackageArgs) -> miette::Result<()> {
         &package_name,
         &artifact_version,
     )?;
-    build_npm_package_from_ts_sources(
-        &npm_sources.root_dir,
-        &args.out,
-        &package_name,
-        &artifact_version,
-        &trellis_package_version(),
-        &resolved.api.render_model.id,
-        &npm_sources.dependency_packages,
-        None,
-    )?;
+    build_npm_package_from_ts_sources(&NpmPackageBuild {
+        src_dir: &npm_sources.root_dir,
+        npm_out: &args.out,
+        manifest: NpmPackageManifest {
+            package_name: &package_name,
+            package_version: &artifact_version,
+            trellis_runtime_version: &trellis_package_version(),
+            contract_id: &resolved.api.render_model.id,
+        },
+        runtime_repo_root: None,
+    })?;
     output::print_success(&format!("generated npm package at {}", args.out.display()));
     Ok(())
 }
@@ -145,19 +147,20 @@ pub fn all(args: &GenerateAllArgs, force: bool) -> miette::Result<()> {
         .clone()
         .unwrap_or_else(|| default_rust_crate_name_from_id(&resolved.api.render_model.id));
     let generator_fingerprint = current_generator_fingerprint();
-    let metadata = generated_artifacts_metadata(
-        &resolved,
-        &native_api_digest(&resolved)?,
-        &artifact_version,
-        args.runtime_source,
-        &trellis_package_version(),
-        args.jsr_out.is_some(),
-        args.npm_out.is_some(),
-        args.cargo_out.is_some(),
-        &package_name,
-        &crate_name,
+    let output_plan = ContractOutputPlan {
+        artifact_version: &artifact_version,
+        out_api: &args.out_api,
+        ts_out: args.jsr_out.as_deref(),
+        npm_out: args.npm_out.as_deref(),
+        rust_out: args.cargo_out.as_deref(),
+        package_name: &package_name,
+        crate_name: &crate_name,
+        runtime_source: args.runtime_source,
+        runtime_repo_root: args.runtime_repo_root.as_deref(),
         generator_fingerprint,
-    );
+    };
+    let metadata =
+        generated_artifacts_metadata(&resolved, &native_api_digest(&resolved)?, &output_plan);
     if !force
         && generated_artifacts_are_fresh(
             &metadata,
@@ -173,18 +176,5 @@ pub fn all(args: &GenerateAllArgs, force: bool) -> miette::Result<()> {
         ));
         return Ok(());
     }
-    write_contract_outputs(
-        &resolved,
-        artifact_version,
-        &args.out_api,
-        args.jsr_out.as_deref(),
-        args.npm_out.as_deref(),
-        args.cargo_out.as_deref(),
-        &package_name,
-        &crate_name,
-        args.runtime_source,
-        args.runtime_repo_root.clone(),
-        generator_fingerprint,
-        "generated contract artifacts",
-    )
+    write_contract_outputs(&resolved, &output_plan)
 }

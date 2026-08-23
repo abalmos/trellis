@@ -10,14 +10,15 @@ use trellis_contracts::ContractKind;
 use crate::artifacts::{
     current_generator_fingerprint, default_rust_crate_name_from_id, detect_output_root,
     detect_runtime_source, generated_artifacts_are_fresh, generated_artifacts_metadata,
-    native_api_digest, required_owner_version, sdk_output_stem, trellis_package_version,
+    native_api_digest, required_owner_version, rust_runtime_deps, sdk_output_stem,
     ts_package_name_from_id, write_contract_outputs, write_participant_facade_outputs,
-    write_protocol_participant,
+    write_protocol_participant, ContractOutputPlan,
 };
 use crate::cli::{PackageTarget, RuntimeSource};
 use crate::contract_input;
 use crate::discovery::{discover_contract_metadata, DiscoveredContractSource};
 use crate::output;
+use trellis_codegen_rust::GenerateRustParticipantFacadeOpts;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AutoAction {
@@ -398,18 +399,22 @@ pub fn execute_auto_plan(
                     )?),
                     (None, None) => None,
                 };
+                let output_plan = ContractOutputPlan {
+                    artifact_version: &artifact_version,
+                    out_api,
+                    ts_out: entry.jsr_out.as_deref(),
+                    npm_out: entry.npm_out.as_deref(),
+                    rust_out: entry.cargo_out.as_deref(),
+                    package_name: &package_name,
+                    crate_name: &crate_name,
+                    runtime_source: entry.runtime_source,
+                    runtime_repo_root: entry.runtime_repo_root.as_deref(),
+                    generator_fingerprint,
+                };
                 let metadata = generated_artifacts_metadata(
                     &resolved,
                     &native_api_digest(&resolved)?,
-                    &artifact_version,
-                    entry.runtime_source,
-                    &trellis_package_version(),
-                    entry.jsr_out.is_some(),
-                    entry.npm_out.is_some(),
-                    entry.cargo_out.is_some(),
-                    &package_name,
-                    &crate_name,
-                    generator_fingerprint,
+                    &output_plan,
                 );
                 if !force
                     && generated_artifacts_are_fresh(
@@ -438,20 +443,7 @@ pub fn execute_auto_plan(
                     continue;
                 }
                 print_auto_entry(entry);
-                write_contract_outputs(
-                    &resolved,
-                    artifact_version.clone(),
-                    out_api,
-                    entry.jsr_out.as_deref(),
-                    entry.npm_out.as_deref(),
-                    entry.cargo_out.as_deref(),
-                    &package_name,
-                    &crate_name,
-                    entry.runtime_source,
-                    entry.runtime_repo_root.clone(),
-                    generator_fingerprint,
-                    "generated contract artifacts",
-                )?;
+                write_contract_outputs(&resolved, &output_plan)?;
                 if let Some(cargo_participant_out) = &entry.cargo_participant_out {
                     let participant_source = resolved
                         .participant_path
@@ -459,22 +451,27 @@ pub fn execute_auto_plan(
                         .unwrap_or(&resolved.api.path);
                     let mappings = participant_alias_mappings(entry, plan, participant_source)?;
                     write_participant_facade_outputs(
-                        &resolved.api_path,
-                        participant_source,
                         protocol_participant_out.as_deref().ok_or_else(|| {
                             miette::miette!("missing protocol participant output")
                         })?,
-                        cargo_participant_out,
-                        &format!(
-                            "trellis-participant-{}",
-                            sdk_output_stem(&resolved.api.render_model.id)
-                        ),
-                        &artifact_version,
-                        entry.runtime_source,
-                        entry.runtime_repo_root.clone(),
-                        Some(crate_name.clone()),
-                        entry.cargo_out.clone(),
-                        mappings,
+                        GenerateRustParticipantFacadeOpts {
+                            api_path: resolved.api_path.clone(),
+                            participant_path: participant_source.to_path_buf(),
+                            out_dir: cargo_participant_out.clone(),
+                            crate_name: format!(
+                                "trellis-participant-{}",
+                                sdk_output_stem(&resolved.api.render_model.id)
+                            ),
+                            crate_version: artifact_version.clone(),
+                            runtime_deps: rust_runtime_deps(
+                                entry.runtime_source,
+                                artifact_version.clone(),
+                                entry.runtime_repo_root.clone(),
+                            ),
+                            owned_sdk_crate_name: Some(crate_name.clone()),
+                            owned_sdk_path: entry.cargo_out.clone(),
+                            alias_mappings: mappings,
+                        },
                     )?;
                 } else if let Some(protocol_participant_out) = protocol_participant_out.as_deref() {
                     write_protocol_participant(&resolved, protocol_participant_out)?;

@@ -1,4 +1,3 @@
-use std::collections::BTreeSet;
 use std::ffi::OsString;
 use std::fs;
 use std::io::Write;
@@ -10,8 +9,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use trellis_codegen_rust::{
     default_sdk_stem, rust_sdk_cargo_manifest_is_valid, GenerateRustParticipantFacadeOpts,
-    GenerateRustSdkOpts, ParticipantAliasMapping, RustRuntimeDeps,
-    RustRuntimeSource as CodegenRustRuntimeSource,
+    GenerateRustSdkOpts, RustRuntimeDeps, RustRuntimeSource as CodegenRustRuntimeSource,
 };
 use trellis_codegen_ts::{
     collect_ts_sdk_sources, GenerateTsSdkOpts, TsRuntimeDeps,
@@ -43,7 +41,46 @@ pub struct GeneratedArtifactsMetadata {
 
 pub struct NpmTsSources {
     pub root_dir: PathBuf,
-    pub dependency_packages: BTreeSet<String>,
+}
+
+pub(crate) struct ContractOutputPlan<'a> {
+    pub artifact_version: &'a str,
+    pub out_api: &'a Path,
+    pub ts_out: Option<&'a Path>,
+    pub npm_out: Option<&'a Path>,
+    pub rust_out: Option<&'a Path>,
+    pub package_name: &'a str,
+    pub crate_name: &'a str,
+    pub runtime_source: RuntimeSource,
+    pub runtime_repo_root: Option<&'a Path>,
+    pub generator_fingerprint: &'a str,
+}
+
+pub struct ContractShellOutputPlan<'a> {
+    pub contract_id: &'a str,
+    pub artifact_version: &'a str,
+    pub out_api: Option<&'a Path>,
+    pub ts_out: Option<&'a Path>,
+    pub npm_out: Option<&'a Path>,
+    pub rust_out: Option<&'a Path>,
+    pub package_name: &'a str,
+    pub crate_name: &'a str,
+    pub runtime_source: RuntimeSource,
+    pub runtime_repo_root: Option<&'a Path>,
+}
+
+pub(crate) struct NpmPackageManifest<'a> {
+    pub package_name: &'a str,
+    pub package_version: &'a str,
+    pub trellis_runtime_version: &'a str,
+    pub contract_id: &'a str,
+}
+
+pub(crate) struct NpmPackageBuild<'a> {
+    pub src_dir: &'a Path,
+    pub npm_out: &'a Path,
+    pub manifest: NpmPackageManifest<'a>,
+    pub runtime_repo_root: Option<&'a Path>,
 }
 
 impl GeneratedArtifactsMetadata {
@@ -92,119 +129,94 @@ pub fn resolve_contract(args: &ContractInputArgs) -> miette::Result<ResolvedNati
     Ok(resolved)
 }
 
-#[expect(
-    clippy::too_many_arguments,
-    reason = "the output matrix is the generator command boundary"
-)]
-pub fn write_contract_outputs(
+pub(crate) fn write_contract_outputs(
     resolved: &ResolvedNativeInput,
-    artifact_version: String,
-    out_api: &Path,
-    ts_out: Option<&Path>,
-    npm_out: Option<&Path>,
-    rust_out: Option<&Path>,
-    package_name: &str,
-    crate_name: &str,
-    runtime_source: RuntimeSource,
-    runtime_repo_root: Option<PathBuf>,
-    generator_fingerprint: &str,
-    success_message: &str,
+    plan: &ContractOutputPlan<'_>,
 ) -> miette::Result<()> {
     let api = native_api_artifact(resolved)?;
-    let metadata = generated_artifacts_metadata(
-        resolved,
-        &api.digest,
-        &artifact_version,
-        runtime_source,
-        &trellis_package_version(),
-        ts_out.is_some(),
-        npm_out.is_some(),
-        rust_out.is_some(),
-        package_name,
-        crate_name,
-        generator_fingerprint,
-    );
-    if let Some(parent) = out_api.parent() {
+    let metadata = generated_artifacts_metadata(resolved, &api.digest, plan);
+    if let Some(parent) = plan.out_api.parent() {
         fs::create_dir_all(parent).into_diagnostic()?;
     }
-    write_if_changed(out_api, &format!("{}\n", api.json))?;
+    write_if_changed(plan.out_api, &format!("{}\n", api.json))?;
 
-    if let Some(ts_out) = ts_out {
+    if let Some(ts_out) = plan.ts_out {
         trellis_codegen_ts::generate_ts_sdk(&GenerateTsSdkOpts {
-            api_path: out_api.to_path_buf(),
+            api_path: plan.out_api.to_path_buf(),
             out_dir: ts_out.to_path_buf(),
-            package_name: package_name.to_string(),
-            package_version: artifact_version.clone(),
+            package_name: plan.package_name.to_string(),
+            package_version: plan.artifact_version.to_string(),
             runtime_deps: ts_runtime_deps(
-                runtime_source,
+                plan.runtime_source,
                 trellis_package_version(),
-                runtime_repo_root.clone(),
+                plan.runtime_repo_root.map(Path::to_path_buf),
             ),
         })
         .into_diagnostic()?;
         rewrite_local_generated_ts_sdk_imports(
             ts_out,
-            runtime_source,
-            runtime_repo_root.as_deref(),
+            plan.runtime_source,
+            plan.runtime_repo_root,
         )?;
-        format_generated_typescript_artifacts(ts_out, runtime_repo_root.as_deref())?;
+        format_generated_typescript_artifacts(ts_out, plan.runtime_repo_root)?;
         copy_embedded_trellis_owned_ts_sdk(
             &resolved.api.render_model.id,
             ts_out,
-            runtime_source,
-            runtime_repo_root.as_deref(),
+            plan.runtime_source,
+            plan.runtime_repo_root,
         )?;
     }
 
-    if let Some(npm_out) = npm_out {
+    if let Some(npm_out) = plan.npm_out {
         let staging_dir = tempfile::tempdir().into_diagnostic()?;
         let npm_sources = stage_npm_ts_sources(
             &resolved.api.render_model.id,
-            out_api,
+            plan.out_api,
             staging_dir.path(),
-            package_name,
-            &artifact_version,
+            plan.package_name,
+            plan.artifact_version,
         )?;
-        build_npm_package_from_ts_sources(
-            &npm_sources.root_dir,
+        build_npm_package_from_ts_sources(&NpmPackageBuild {
+            src_dir: &npm_sources.root_dir,
             npm_out,
-            package_name,
-            &artifact_version,
-            &trellis_package_version(),
-            &resolved.api.render_model.id,
-            &npm_sources.dependency_packages,
-            runtime_repo_root.as_deref(),
-        )?;
+            manifest: NpmPackageManifest {
+                package_name: plan.package_name,
+                package_version: plan.artifact_version,
+                trellis_runtime_version: &trellis_package_version(),
+                contract_id: &resolved.api.render_model.id,
+            },
+            runtime_repo_root: plan.runtime_repo_root,
+        })?;
     }
 
-    if let Some(rust_out) = rust_out {
+    if let Some(rust_out) = plan.rust_out {
         trellis_codegen_rust::generate_rust_sdk(&GenerateRustSdkOpts {
-            api_path: out_api.to_path_buf(),
+            api_path: plan.out_api.to_path_buf(),
             out_dir: rust_out.to_path_buf(),
-            crate_name: crate_name.to_string(),
-            crate_version: artifact_version.clone(),
+            crate_name: plan.crate_name.to_string(),
+            crate_version: plan.artifact_version.to_string(),
             runtime_deps: rust_runtime_deps(
-                runtime_source,
-                artifact_version.clone(),
-                runtime_repo_root.clone(),
+                plan.runtime_source,
+                plan.artifact_version.to_string(),
+                plan.runtime_repo_root.map(Path::to_path_buf),
             ),
         })
         .into_diagnostic()?;
         copy_embedded_trellis_owned_rust_sdk(
             &resolved.api.render_model.id,
             rust_out,
-            runtime_source,
-            runtime_repo_root.as_deref(),
+            plan.runtime_source,
+            plan.runtime_repo_root,
         )?;
     }
 
-    write_generated_artifacts_metadata(out_api, &metadata)?;
+    write_generated_artifacts_metadata(plan.out_api, &metadata)?;
 
     output::print_success(&format!(
-        "{} for {}",
-        success_message, resolved.api.render_model.id
+        "generated contract artifacts for {}",
+        resolved.api.render_model.id
     ));
-    output::print_detail("api", out_api.display().to_string());
+    output::print_detail("api", plan.out_api.display().to_string());
     output::print_detail("digest", &api.digest);
     Ok(())
 }
@@ -233,49 +245,34 @@ fn native_api_artifact(resolved: &ResolvedNativeInput) -> miette::Result<NativeA
     })
 }
 
-#[expect(
-    clippy::too_many_arguments,
-    reason = "shell generation mirrors the optional output matrix"
-)]
-pub fn write_contract_shell_outputs(
-    contract_id: &str,
-    artifact_version: &str,
-    out_api: Option<&Path>,
-    ts_out: Option<&Path>,
-    npm_out: Option<&Path>,
-    rust_out: Option<&Path>,
-    package_name: &str,
-    crate_name: &str,
-    runtime_source: RuntimeSource,
-    runtime_repo_root: Option<PathBuf>,
-) -> miette::Result<()> {
-    if let Some(ts_out) = ts_out {
+pub fn write_contract_shell_outputs(plan: &ContractShellOutputPlan<'_>) -> miette::Result<()> {
+    if let Some(ts_out) = plan.ts_out {
         write_ts_sdk_shell(
-            contract_id,
-            artifact_version,
+            plan.contract_id,
+            plan.artifact_version,
             ts_out,
-            package_name,
-            runtime_source,
-            runtime_repo_root.clone(),
+            plan.package_name,
+            plan.runtime_source,
+            plan.runtime_repo_root.map(Path::to_path_buf),
         )?;
     }
 
-    if let Some(npm_out) = npm_out {
-        write_npm_package_shell(npm_out, package_name, artifact_version)?;
+    if let Some(npm_out) = plan.npm_out {
+        write_npm_package_shell(npm_out, plan.package_name, plan.artifact_version)?;
     }
 
-    if let Some(rust_out) = rust_out {
+    if let Some(rust_out) = plan.rust_out {
         write_rust_sdk_shell(
-            contract_id,
-            artifact_version,
+            plan.contract_id,
+            plan.artifact_version,
             rust_out,
-            crate_name,
-            runtime_source,
-            runtime_repo_root,
+            plan.crate_name,
+            plan.runtime_source,
+            plan.runtime_repo_root.map(Path::to_path_buf),
         )?;
     }
 
-    if let Some(out_api) = out_api {
+    if let Some(out_api) = plan.out_api {
         if let Some(parent) = out_api.parent() {
             fs::create_dir_all(parent).into_diagnostic()?;
         }
@@ -553,53 +550,22 @@ fn string_literal(value: &str) -> String {
     serde_json::to_string(value).expect("serializing a string cannot fail")
 }
 
-#[expect(
-    clippy::too_many_arguments,
-    reason = "participant generation receives the resolved CLI output settings"
-)]
-pub fn write_participant_facade_outputs(
-    api_path: &Path,
-    participant_path: &Path,
+pub(crate) fn write_participant_facade_outputs(
     protocol_participant_out: &Path,
-    rust_participant_out: &Path,
-    crate_name: &str,
-    crate_version: &str,
-    runtime_source: RuntimeSource,
-    runtime_repo_root: Option<PathBuf>,
-    owned_sdk_crate_name: Option<String>,
-    owned_sdk_path: Option<PathBuf>,
-    alias_mappings: Vec<ParticipantAliasMapping>,
+    opts: GenerateRustParticipantFacadeOpts,
 ) -> miette::Result<()> {
     let (participant_json, participant_digest) = trellis_codegen_rust::native_participant_artifact(
-        api_path,
-        participant_path,
-        &alias_mappings,
+        &opts.api_path,
+        &opts.participant_path,
+        &opts.alias_mappings,
     )
     .into_diagnostic()?;
     if let Some(parent) = protocol_participant_out.parent() {
         fs::create_dir_all(parent).into_diagnostic()?;
     }
     write_if_changed(protocol_participant_out, &format!("{participant_json}\n"))?;
-    trellis_codegen_rust::generate_rust_participant_facade(&GenerateRustParticipantFacadeOpts {
-        api_path: api_path.to_path_buf(),
-        participant_path: participant_path.to_path_buf(),
-        out_dir: rust_participant_out.to_path_buf(),
-        crate_name: crate_name.to_string(),
-        crate_version: crate_version.to_string(),
-        runtime_deps: rust_runtime_deps(
-            runtime_source,
-            crate_version.to_string(),
-            runtime_repo_root,
-        ),
-        owned_sdk_crate_name,
-        owned_sdk_path,
-        alias_mappings,
-    })
-    .into_diagnostic()?;
-    output::print_detail(
-        "rust participant",
-        rust_participant_out.display().to_string(),
-    );
+    trellis_codegen_rust::generate_rust_participant_facade(&opts).into_diagnostic()?;
+    output::print_detail("rust participant", opts.out_dir.display().to_string());
     output::print_detail(
         "participant",
         protocol_participant_out.display().to_string(),
@@ -641,24 +607,13 @@ pub fn write_protocol_participant(
     Ok(())
 }
 
-#[expect(
-    clippy::too_many_arguments,
-    reason = "npm package assembly receives one value per package manifest field"
-)]
-pub fn build_npm_package_from_ts_sources(
-    src_dir: &Path,
-    npm_out: &Path,
-    package_name: &str,
-    package_version: &str,
-    trellis_runtime_version: &str,
-    contract_id: &str,
-    dependency_packages: &BTreeSet<String>,
-    runtime_repo_root: Option<&Path>,
-) -> miette::Result<()> {
-    let npm_out = if npm_out.is_absolute() {
-        npm_out.to_path_buf()
+pub(crate) fn build_npm_package_from_ts_sources(plan: &NpmPackageBuild<'_>) -> miette::Result<()> {
+    let npm_out = if plan.npm_out.is_absolute() {
+        plan.npm_out.to_path_buf()
     } else {
-        std::env::current_dir().into_diagnostic()?.join(npm_out)
+        std::env::current_dir()
+            .into_diagnostic()?
+            .join(plan.npm_out)
     };
     if npm_out.exists() {
         fs::remove_dir_all(&npm_out).into_diagnostic()?;
@@ -666,47 +621,40 @@ pub fn build_npm_package_from_ts_sources(
     fs::create_dir_all(&npm_out).into_diagnostic()?;
     let esm_dir = npm_out.join("esm");
     write_if_changed(
-        &src_dir.join("tsconfig.json"),
+        &plan.src_dir.join("tsconfig.json"),
         &render_npm_tsconfig(&npm_out),
     )?;
     write_if_changed(
-        &src_dir.join("package.json"),
+        &plan.src_dir.join("package.json"),
         "{\n  \"type\": \"module\"\n}\n",
     )?;
     let tsc = resolve_tsc_bin()?;
     let output = Command::new(&tsc)
         .arg("-p")
-        .arg(src_dir.join("tsconfig.json"))
-        .current_dir(src_dir)
+        .arg(plan.src_dir.join("tsconfig.json"))
+        .current_dir(plan.src_dir)
         .output()
         .into_diagnostic()?;
     if !output.status.success() {
         return Err(miette::miette!(
             "npm package TypeScript build failed for {} using {:?}\nstdout:\n{}\nstderr:\n{}",
-            package_name,
+            plan.manifest.package_name,
             tsc,
             String::from_utf8_lossy(&output.stdout),
             String::from_utf8_lossy(&output.stderr)
         ));
     }
-    write_npm_package_json(
-        &npm_out,
-        package_name,
-        package_version,
-        trellis_runtime_version,
-        contract_id,
-        dependency_packages,
-    )?;
-    if let Ok(readme) = fs::read_to_string(src_dir.join("README.md")) {
+    write_npm_package_json(&npm_out, &plan.manifest)?;
+    if let Ok(readme) = fs::read_to_string(plan.src_dir.join("README.md")) {
         write_if_changed(&npm_out.join("README.md"), &readme)?;
     }
     if !esm_dir.join("mod.js").exists() || !esm_dir.join("mod.d.ts").exists() {
         return Err(miette::miette!(
             "npm package TypeScript build for {} did not emit esm/mod.js and esm/mod.d.ts",
-            package_name
+            plan.manifest.package_name
         ));
     }
-    format_generated_npm_artifacts(&npm_out, runtime_repo_root)?;
+    format_generated_npm_artifacts(&npm_out, plan.runtime_repo_root)?;
     Ok(())
 }
 
@@ -740,10 +688,7 @@ pub fn stage_npm_ts_sources(
             write_if_changed(&root_dir.join(source.path), &source.contents)?;
         }
     }
-    Ok(NpmTsSources {
-        root_dir,
-        dependency_packages: BTreeSet::new(),
-    })
+    Ok(NpmTsSources { root_dir })
 }
 
 fn render_npm_tsconfig(npm_out: &Path) -> String {
@@ -770,15 +715,8 @@ fn render_npm_tsconfig(npm_out: &Path) -> String {
     )
 }
 
-fn write_npm_package_json(
-    npm_out: &Path,
-    package_name: &str,
-    package_version: &str,
-    trellis_runtime_version: &str,
-    contract_id: &str,
-    _dependency_packages: &BTreeSet<String>,
-) -> miette::Result<()> {
-    let trellis_dependency = format!("^{}", trellis_runtime_version);
+fn write_npm_package_json(npm_out: &Path, manifest: &NpmPackageManifest<'_>) -> miette::Result<()> {
+    let trellis_dependency = format!("^{}", manifest.trellis_runtime_version);
     let mut peer_dependencies = serde_json::Map::new();
     peer_dependencies.insert(
         "@qlever-llc/trellis".to_string(),
@@ -789,9 +727,9 @@ fn write_npm_package_json(
         &format!(
             "{}\n",
             serde_json::to_string_pretty(&serde_json::json!({
-                "name": package_name,
-                "version": package_version,
-                "description": format!("Generated Trellis SDK for contract {contract_id}"),
+                "name": manifest.package_name,
+                "version": manifest.package_version,
+                "description": format!("Generated Trellis SDK for contract {}", manifest.contract_id),
                 "type": "module",
                 "license": "Apache-2.0",
                 "homepage": "https://github.com/Qlever-LLC/trellis#readme",
@@ -870,36 +808,24 @@ fn binary_is_available(binary: &OsString) -> bool {
     Command::new(binary).arg("--version").output().is_ok()
 }
 
-#[expect(
-    clippy::too_many_arguments,
-    reason = "metadata construction records the complete generated output matrix"
-)]
-pub fn generated_artifacts_metadata(
+pub(crate) fn generated_artifacts_metadata(
     resolved: &ResolvedNativeInput,
     api_digest: &str,
-    artifact_version: &str,
-    runtime_source: RuntimeSource,
-    jsr_runtime_version: &str,
-    has_jsr_package: bool,
-    has_npm_package: bool,
-    has_cargo_package: bool,
-    package_name: &str,
-    crate_name: &str,
-    generator_fingerprint: &str,
+    plan: &ContractOutputPlan<'_>,
 ) -> GeneratedArtifactsMetadata {
     GeneratedArtifactsMetadata {
         schema_version: GeneratedArtifactsMetadata::SCHEMA_VERSION,
         contract_id: resolved.api.render_model.id.clone(),
         api_digest: api_digest.to_owned(),
-        artifact_version: artifact_version.to_string(),
-        runtime_source,
-        jsr_runtime_version: jsr_runtime_version.to_string(),
-        has_jsr_package,
-        has_npm_package,
-        has_cargo_package,
-        package_name: package_name.to_string(),
-        crate_name: crate_name.to_string(),
-        generator_fingerprint: generator_fingerprint.to_string(),
+        artifact_version: plan.artifact_version.to_string(),
+        runtime_source: plan.runtime_source,
+        jsr_runtime_version: trellis_package_version(),
+        has_jsr_package: plan.ts_out.is_some(),
+        has_npm_package: plan.npm_out.is_some(),
+        has_cargo_package: plan.rust_out.is_some(),
+        package_name: plan.package_name.to_string(),
+        crate_name: plan.crate_name.to_string(),
+        generator_fingerprint: plan.generator_fingerprint.to_string(),
     }
 }
 
@@ -1449,6 +1375,7 @@ mod tests {
         generated_artifacts_metadata_path, render_npm_tsconfig, rewrite_embedded_rust_sdk_source,
         rewrite_embedded_trellis_owned_ts_sdk_source, rewrite_npm_ts_imports,
         trellis_package_version, ts_package_name_from_id, write_contract_shell_outputs,
+        ContractShellOutputPlan,
     };
 
     #[test]
@@ -1570,18 +1497,18 @@ mod tests {
         fs::write(&metadata, "{}\n").expect("write stale metadata");
         let ts_out = temp.path().join("generated/packages/jsr/demo");
 
-        write_contract_shell_outputs(
-            "demo@v1",
-            "0.0.0-shell",
-            Some(&manifest),
-            Some(&ts_out),
-            None,
-            None,
-            "@trellis-sdk/demo",
-            "trellis_sdk_demo",
-            RuntimeSource::Registry,
-            None,
-        )
+        write_contract_shell_outputs(&ContractShellOutputPlan {
+            contract_id: "demo@v1",
+            artifact_version: "0.0.0-shell",
+            out_api: Some(&manifest),
+            ts_out: Some(&ts_out),
+            npm_out: None,
+            rust_out: None,
+            package_name: "@trellis-sdk/demo",
+            crate_name: "trellis_sdk_demo",
+            runtime_source: RuntimeSource::Registry,
+            runtime_repo_root: None,
+        })
         .expect("write shell outputs");
 
         let shell_manifest = fs::read_to_string(ts_out.join("api.ts")).expect("read API shell");
@@ -1609,18 +1536,18 @@ mod tests {
         let temp = tempfile::tempdir().expect("create tempdir");
         let rust_out = temp.path().join("generated/packages/cargo/demo");
 
-        write_contract_shell_outputs(
-            "demo@v1",
-            "0.0.0-shell",
-            None,
-            None,
-            None,
-            Some(&rust_out),
-            "@trellis-sdk/demo",
-            "trellis_sdk_demo",
-            RuntimeSource::Registry,
-            None,
-        )
+        write_contract_shell_outputs(&ContractShellOutputPlan {
+            contract_id: "demo@v1",
+            artifact_version: "0.0.0-shell",
+            out_api: None,
+            ts_out: None,
+            npm_out: None,
+            rust_out: Some(&rust_out),
+            package_name: "@trellis-sdk/demo",
+            crate_name: "trellis_sdk_demo",
+            runtime_source: RuntimeSource::Registry,
+            runtime_repo_root: None,
+        })
         .expect("write shell outputs");
 
         let cargo = fs::read_to_string(rust_out.join("Cargo.toml")).expect("read cargo shell");
@@ -1636,18 +1563,18 @@ mod tests {
         let temp = tempfile::tempdir().expect("create tempdir");
         let rust_out = temp.path().join("generated/packages/cargo/trellis-core");
 
-        write_contract_shell_outputs(
-            "trellis.core@v1",
-            "0.0.0-shell",
-            None,
-            None,
-            None,
-            Some(&rust_out),
-            "@trellis-sdk/core",
-            "trellis_sdk_core",
-            RuntimeSource::Registry,
-            None,
-        )
+        write_contract_shell_outputs(&ContractShellOutputPlan {
+            contract_id: "trellis.core@v1",
+            artifact_version: "0.0.0-shell",
+            out_api: None,
+            ts_out: None,
+            npm_out: None,
+            rust_out: Some(&rust_out),
+            package_name: "@trellis-sdk/core",
+            crate_name: "trellis_sdk_core",
+            runtime_source: RuntimeSource::Registry,
+            runtime_repo_root: None,
+        })
         .expect("write shell outputs");
 
         let cargo = fs::read_to_string(rust_out.join("Cargo.toml")).expect("read cargo shell");
