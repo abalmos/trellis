@@ -2,7 +2,6 @@
 members = [
   "crates/trellis",
   "crates/local-bootstrap",
-  "crates/jobs",
   "crates/bootstrap",
   "crates/local-nats",
   "crates/jobs-runtime",
@@ -21,7 +20,6 @@ exclude = ["tools/generate"]
 default-members = [
   "crates/trellis",
   "crates/local-bootstrap",
-  "crates/jobs",
   "crates/bootstrap",
   "crates/local-nats",
   "crates/jobs-runtime",

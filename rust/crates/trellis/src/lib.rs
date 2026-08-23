@@ -124,7 +124,6 @@ mod tests {
             "codegen-ts/Cargo.toml",
             "bootstrap/Cargo.toml",
             "generate-runner/Cargo.toml",
-            "jobs/Cargo.toml",
             "local-bootstrap/Cargo.toml",
             "protocol-wasm/Cargo.toml",
             "runtime/Cargo.toml",

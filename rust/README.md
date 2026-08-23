@@ -23,7 +23,6 @@ behind modules of the public `trellis` facade.
 | `trellis-contracts`        | Contract manifest model and validation                           |
 | `trellis-core-bootstrap`   | Internal bootstrap helpers for infrastructure state              |
 | `trellis-generate-runner`  | Internal helper for invoking the bootstrap-safe generator        |
-| `trellis-jobs`             | Unpublished compatibility/test package for `trellis_rs::jobs`    |
 | `trellis-local-bootstrap`  | Internal local Trellis/NATS bootstrap bundle generation          |
 | `trellis-service`          | Unpublished compatibility/test package for `trellis_rs::service` |
 | `trellis-eventlog-runtime` | Internal built-in Event Log runtime                              |
