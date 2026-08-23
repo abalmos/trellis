@@ -69,6 +69,15 @@ struct SharedDurableEventListener {
     pull_abort_handles: Vec<AbortHandle>,
 }
 
+struct DurableEventPullConfig {
+    event_api_id: String,
+    event_name: String,
+    publish_capabilities: Vec<String>,
+    key: DurableEventListenerKey,
+    subscribe_options: EventSubscribeOptions,
+    context: ServiceEventListenerContext,
+}
+
 #[derive(Clone)]
 struct ServiceEventListenerRegistration {
     event_listeners: SharedDurableEventListeners,
@@ -1452,13 +1461,15 @@ where
             tokio::spawn(run_durable_event_pull_loop::<D>(
                 Arc::clone(client),
                 auth.clone(),
-                event_api_id.clone(),
-                event_name.clone(),
-                publish_capabilities.clone(),
                 Arc::clone(&event_listeners),
-                key.clone(),
-                subscribe_options.clone(),
-                context.clone(),
+                DurableEventPullConfig {
+                    event_api_id: event_api_id.clone(),
+                    event_name: event_name.clone(),
+                    publish_capabilities: publish_capabilities.clone(),
+                    key: key.clone(),
+                    subscribe_options: subscribe_options.clone(),
+                    context: context.clone(),
+                },
             ))
             .abort_handle()
         })
@@ -1549,29 +1560,23 @@ fn remove_service_event_listeners(event_listeners: &SharedDurableEventListeners)
     }
 }
 
-#[allow(clippy::too_many_arguments)] // Keeps one event-listener task spawn explicit and local.
 async fn run_durable_event_pull_loop<D>(
     client: Arc<TrellisClient>,
     auth: LocalAuthVerifier,
-    event_api_id: String,
-    event_name: String,
-    publish_capabilities: Vec<String>,
     event_listeners: SharedDurableEventListeners,
-    key: DurableEventListenerKey,
-    subscribe_options: EventSubscribeOptions,
-    context: ServiceEventListenerContext,
+    config: DurableEventPullConfig,
 ) where
     D: crate::client::EventDescriptor + 'static,
     D::Event: Send + 'static,
 {
     loop {
-        if !durable_listener_ready(&event_listeners, &key) {
+        if !durable_listener_ready(&event_listeners, &config.key) {
             tokio::time::sleep(Duration::from_millis(25)).await;
             continue;
         }
 
         let mut messages = match client
-            .subscribe_messages::<D>(subscribe_options.clone())
+            .subscribe_messages::<D>(config.subscribe_options.clone())
             .await
         {
             Ok(messages) => messages,
@@ -1581,7 +1586,7 @@ async fn run_durable_event_pull_loop<D>(
             }
             Err(error) => {
                 tracing::warn!(
-                    group = ?context.group,
+                    group = ?config.context.group,
                     error = %error,
                     "Durable event subscription failed; retrying"
                 );
@@ -1590,7 +1595,7 @@ async fn run_durable_event_pull_loop<D>(
             }
         };
 
-        while durable_listener_ready(&event_listeners, &key) {
+        while durable_listener_ready(&event_listeners, &config.key) {
             let Some(result) = messages.next().await else {
                 break;
             };
@@ -1603,7 +1608,7 @@ async fn run_durable_event_pull_loop<D>(
                 }
                 Err(error) => {
                     tracing::warn!(
-                        group = ?context.group,
+                        group = ?config.context.group,
                         error = %error,
                         "Durable event pull failed; retrying"
                     );
@@ -1612,11 +1617,11 @@ async fn run_durable_event_pull_loop<D>(
                     break;
                 }
             };
-            if !durable_listener_ready(&event_listeners, &key) {
+            if !durable_listener_ready(&event_listeners, &config.key) {
                 break;
             }
             let handlers = lock_service_event_listeners(&event_listeners)
-                .get(&key)
+                .get(&config.key)
                 .and_then(|listener| listener.handlers.get(message.subject()).cloned())
                 .unwrap_or_default();
             let publisher = match auth
@@ -1624,9 +1629,9 @@ async fn run_durable_event_pull_loop<D>(
                     message.subject(),
                     message.payload(),
                     message.headers(),
-                    &event_api_id,
-                    &event_name,
-                    &publish_capabilities,
+                    &config.event_api_id,
+                    &config.event_name,
+                    &config.publish_capabilities,
                 )
                 .await
             {
@@ -1651,8 +1656,8 @@ async fn run_durable_event_pull_loop<D>(
             let mut handled = true;
             for handler in handlers.values() {
                 let context = service_event_context_from_message(
-                    context.mode,
-                    context.group.clone(),
+                    config.context.mode,
+                    config.context.group.clone(),
                     &message,
                     Some(publisher.clone()),
                 );
@@ -1668,12 +1673,12 @@ async fn run_durable_event_pull_loop<D>(
             if !handled {
                 continue;
             }
-            if !durable_listener_ready(&event_listeners, &key) {
+            if !durable_listener_ready(&event_listeners, &config.key) {
                 break;
             }
             if let Err(error) = message.ack().await {
                 tracing::warn!(
-                    group = ?context.group,
+                    group = ?config.context.group,
                     error = %error,
                     "Durable event acknowledgement failed; retrying"
                 );
