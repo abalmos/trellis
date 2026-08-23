@@ -11,7 +11,9 @@ const deviceContract = defineDeviceContract(() => ({
   description: "Test device contract.",
 }));
 const rootSecret = new Uint8Array(32).fill(1);
-const devicePresentation = await resolveNativeProtocolPresentation(deviceContract);
+const devicePresentation = await resolveNativeProtocolPresentation(
+  deviceContract,
+);
 const identity = {
   deploymentId: "reader.default",
   instanceId: "dev_123",
