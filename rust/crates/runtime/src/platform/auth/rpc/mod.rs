@@ -20,6 +20,7 @@ use trellis_protocol::{
     parse_session_proof_v1, session_proof_request_digest_v1, verify_session_proof_v1,
     AuthorizationPrincipalKindV1, SessionProofInputV1, SessionProofPolicyV1,
 };
+#[cfg(test)]
 use trellis_rs::sdk::auth as trellis_sdk_auth;
 use trellis_rs::service::Router;
 use ulid::Ulid;
@@ -30,8 +31,8 @@ use super::{
     AuthEphemeralRepository, AuthService, AuthorityDecision, AuthorityDecisionOutcome,
     AuthorityDecisionRecord, AuthorityEvidenceRepository, AuthorityKind, AuthorityProposalKind,
     AuthorityProposalRecord, AuthorityProposalState, AuthorityRepository, AuthorityState,
-    AuthorityTarget, AuthorizationStateError, CapabilityGroupRecord, ContextRepository,
-    CreateAccountFlowInput, CreateAuthorityProposalInput, CreateUserInput,
+    AuthorityTarget, AuthorizationStateError, CapabilityGroupRecord, ChangePasswordInput,
+    ContextRepository, CreateAccountFlowInput, CreateAuthorityProposalInput, CreateUserInput,
     DecideActivationReviewInput, DecideAuthorityProposalInput, DeploymentAuthorityRecord,
     DeploymentProfileCreation, DeploymentProfileMutation, DeploymentProfileRecord,
     DeploymentProfileState, DeploymentRepository, DesiredAuthorityRecord,
@@ -58,17 +59,17 @@ pub(crate) struct AuthRpcRuntime {
 }
 
 #[derive(Clone)]
-struct AuthRpcProcessor {
-    client: async_nats::Client,
-    system_client: async_nats::Client,
-    service: AuthService<SqliteAuthorizationStore>,
-    ephemeral: NatsAuthEphemeralRepository,
-    public_origin: String,
-    native_nats_servers: Vec<String>,
-    websocket_nats_servers: Vec<String>,
-    verifier: crate::platform::auth::verifier::RuntimeAuthVerifier,
-    routes: Arc<Router>,
-    portal_reconciliation: PortalPolicyReconciliationHandle,
+pub(crate) struct AuthRpcProcessor {
+    pub(crate) client: async_nats::Client,
+    pub(crate) system_client: async_nats::Client,
+    pub(crate) service: AuthService<SqliteAuthorizationStore>,
+    pub(crate) ephemeral: NatsAuthEphemeralRepository,
+    pub(crate) public_origin: String,
+    pub(crate) native_nats_servers: Vec<String>,
+    pub(crate) websocket_nats_servers: Vec<String>,
+    pub(crate) verifier: crate::platform::auth::verifier::RuntimeAuthVerifier,
+    pub(crate) routes: Arc<Router>,
+    pub(crate) portal_reconciliation: PortalPolicyReconciliationHandle,
 }
 
 struct ValidatedRequest {
@@ -80,38 +81,17 @@ struct ValidatedRequest {
 }
 
 impl AuthRpcRuntime {
-    #[allow(clippy::too_many_arguments)] // Startup keeps the owned runtime resources explicit.
     pub(crate) async fn start(
-        client: async_nats::Client,
-        system_client: async_nats::Client,
-        service: AuthService<SqliteAuthorizationStore>,
-        ephemeral: NatsAuthEphemeralRepository,
-        public_origin: String,
-        native_nats_servers: Vec<String>,
-        websocket_nats_servers: Vec<String>,
-        verifier: crate::platform::auth::verifier::RuntimeAuthVerifier,
-        portal_reconciliation: PortalPolicyReconciliationHandle,
+        processor: AuthRpcProcessor,
     ) -> Result<Self, AuthorizationStateError> {
-        let subscriber = client
+        let subscriber = processor
+            .client
             .queue_subscribe("rpc.v1.Auth.>", "trellis-auth-rpc".to_owned())
             .await
             .map_err(|error| AuthorizationStateError::Storage(error.to_string()))?;
-        let mut routes = Router::new();
-        trellis_sdk_auth::api::register_rpc_metadata(&mut routes);
         Ok(Self {
             subscriber,
-            processor: AuthRpcProcessor {
-                client,
-                system_client,
-                service,
-                ephemeral,
-                public_origin,
-                native_nats_servers,
-                websocket_nats_servers,
-                verifier,
-                routes: Arc::new(routes),
-                portal_reconciliation,
-            },
+            processor,
         })
     }
 
@@ -3121,21 +3101,21 @@ impl AuthRpcProcessor {
         };
         match self
             .service
-            .change_password(
-                &caller.principal_id,
-                &caller.session_id,
-                required_string(&input, "currentPassword")?,
-                required_string(&input, "newPassword")?,
-                now,
-                rpc_idempotency(
+            .change_password(ChangePasswordInput {
+                principal_id: caller.principal_id.clone(),
+                current_session_id: caller.session_id.clone(),
+                current_password: required_string(&input, "currentPassword")?.to_owned(),
+                new_password: required_string(&input, "newPassword")?.to_owned(),
+                changed_at: now,
+                idempotency: rpc_idempotency(
                     "Auth.Users.Password.Change",
                     &caller.principal_id,
                     required_string(&input, "idempotencyKey")?,
                     &input,
                     now,
                 )?,
-                vec![action],
-            )
+                actions: vec![action],
+            })
             .await?
         {
             IdempotentOutcome::Applied(revoked) => Ok(json!({

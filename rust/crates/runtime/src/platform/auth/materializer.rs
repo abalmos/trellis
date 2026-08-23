@@ -19,6 +19,15 @@ use super::{
     ResourceBindingState,
 };
 
+struct MaterializationHeader {
+    effective_grant_set: GrantSetV1,
+    effective_capabilities: Vec<String>,
+    state: MaterializationState,
+    error: Option<String>,
+    expires_at: Option<i64>,
+    reconciled_at: i64,
+}
+
 pub(crate) fn materialize_authority(
     snapshot: &AuthorityMaterializationSnapshot,
     now: i64,
@@ -145,12 +154,14 @@ fn materialize_available(
         authority: materialization_header(
             authority,
             participant.participant_kind(),
-            effective,
-            capabilities,
-            MaterializationState::Available,
-            None,
-            expiry,
-            now,
+            MaterializationHeader {
+                effective_grant_set: effective,
+                effective_capabilities: capabilities,
+                state: MaterializationState::Available,
+                error: None,
+                expires_at: expiry,
+                reconciled_at: now,
+            },
         ),
         dependencies: snapshot.dependencies.clone(),
         resources: snapshot.resources.clone(),
@@ -201,32 +212,33 @@ fn unavailable(
         authority: materialization_header(
             authority,
             participant_kind,
-            GrantSetV1::new(Vec::new()),
-            Vec::new(),
-            state,
-            Some(error_category(error).to_owned()),
-            expires_at,
-            now,
+            MaterializationHeader {
+                effective_grant_set: GrantSetV1::new(Vec::new()),
+                effective_capabilities: Vec::new(),
+                state,
+                error: Some(error_category(error).to_owned()),
+                expires_at,
+                reconciled_at: now,
+            },
         ),
         dependencies: snapshot.dependencies.clone(),
         resources: snapshot.resources.clone(),
     }
 }
 
-#[expect(
-    clippy::too_many_arguments,
-    reason = "the header mirrors one durable row"
-)]
 fn materialization_header(
     authority: &DesiredAuthorityRecord,
     participant_kind: ParticipantKindV1,
-    effective_grant_set: GrantSetV1,
-    effective_capabilities: Vec<String>,
-    state: MaterializationState,
-    error: Option<String>,
-    expires_at: Option<i64>,
-    now: i64,
+    header: MaterializationHeader,
 ) -> MaterializedAuthorityRecord {
+    let MaterializationHeader {
+        effective_grant_set,
+        effective_capabilities,
+        state,
+        error,
+        expires_at,
+        reconciled_at,
+    } = header;
     let target = authority.target();
     MaterializedAuthorityRecord {
         materialization_id: format!(
@@ -249,7 +261,7 @@ fn materialization_header(
         effective_grant_set,
         effective_capabilities,
         state,
-        reconciled_at: Some(now),
+        reconciled_at: Some(reconciled_at),
         error,
         expires_at,
     }

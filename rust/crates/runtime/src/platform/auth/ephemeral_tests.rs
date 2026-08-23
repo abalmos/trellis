@@ -18,6 +18,11 @@ fn connection_kick_response_rejects_system_errors() {
 }
 
 fn browser_flow() -> AuthBrowserFlow {
+    let consent_view = serde_json::json!({ "title": "Authorize app" });
+    let required_grant_set = GrantSetV1::new(Vec::new());
+    let optional_grant_bundles = BTreeMap::new();
+    let required_capabilities = Vec::<String>::new();
+    let optional_capability_definitions = BTreeMap::new();
     AuthBrowserFlow {
         format: BROWSER_FLOW_FORMAT.to_owned(),
         flow_id: "flow-1".to_owned(),
@@ -28,17 +33,27 @@ fn browser_flow() -> AuthBrowserFlow {
         participant_id: "app-1".to_owned(),
         participant_artifact_digest: DIGEST.to_owned(),
         participant_needs_digest: DIGEST.to_owned(),
-        consent: BrowserConsentProposal::new(
-            "app-1".to_owned(),
-            DIGEST.to_owned(),
-            DIGEST.to_owned(),
-            serde_json::json!({ "title": "Authorize app" }),
-            GrantSetV1::new(Vec::new()),
-            BTreeMap::new(),
-            Vec::new(),
-            BTreeMap::new(),
-        )
-        .unwrap(),
+        consent: BrowserConsentProposal {
+            participant_id: "app-1".to_owned(),
+            participant_artifact_digest: DIGEST.to_owned(),
+            participant_needs_digest: DIGEST.to_owned(),
+            consent_view_digest: trellis_protocol::digest_json(&consent_view).unwrap(),
+            proposal_digest: trellis_protocol::digest_json(&serde_json::json!({
+                "participantId": "app-1",
+                "participantArtifactDigest": DIGEST,
+                "participantNeedsDigest": DIGEST,
+                "requiredGrantSet": required_grant_set,
+                "optionalGrantBundles": optional_grant_bundles,
+                "requiredCapabilities": required_capabilities,
+                "optionalCapabilityDefinitions": optional_capability_definitions,
+            }))
+            .unwrap(),
+            consent_view,
+            required_grant_set,
+            optional_grant_bundles,
+            required_capabilities,
+            optional_capability_definitions,
+        },
         session_public_key: "session-key".to_owned(),
         session_nkey: "USESSIONKEY".to_owned(),
         portal_id: "builtin".to_owned(),

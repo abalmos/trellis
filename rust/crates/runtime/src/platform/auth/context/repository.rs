@@ -1873,13 +1873,13 @@ mod tests {
 
         assert_eq!(
             service
-                .change_password(
-                    "usr_context",
-                    "ses_context",
-                    "current password",
-                    "current password",
-                    NOW_MS + 1,
-                    IdempotencyResultRecord {
+                .change_password(crate::platform::auth::ChangePasswordInput {
+                    principal_id: "usr_context".to_owned(),
+                    current_session_id: "ses_context".to_owned(),
+                    current_password: "current password".to_owned(),
+                    new_password: "current password".to_owned(),
+                    changed_at: NOW_MS + 1,
+                    idempotency: IdempotencyResultRecord {
                         scope_key: URL_SAFE_NO_PAD.encode([45; 32]),
                         purpose: "password.change".to_owned(),
                         signer_id: "usr_context".to_owned(),
@@ -1889,8 +1889,8 @@ mod tests {
                         created_at: NOW_MS,
                         expires_at: NOW_MS + 60_000,
                     },
-                    Vec::new(),
-                )
+                    actions: Vec::new(),
+                })
                 .await,
             Err(AuthorizationStateError::InvalidRecord(
                 "new password must differ from current password".to_owned()

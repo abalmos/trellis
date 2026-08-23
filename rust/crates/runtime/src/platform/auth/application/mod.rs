@@ -21,8 +21,8 @@ pub use account_flows::{
     FirstAdminFederatedRegistration, FirstAdminRegistration,
 };
 pub use accounts::{
-    CompletePasswordResetInput, CreateFederatedUserInput, CreateLocalUserInput, CreateUserInput,
-    LocalAuthentication, UpdateUserInput, UserAccount,
+    ChangePasswordInput, CompletePasswordResetInput, CreateFederatedUserInput,
+    CreateLocalUserInput, CreateUserInput, LocalAuthentication, UpdateUserInput, UserAccount,
 };
 pub(crate) use authority::{
     ApplyIdentityAuthoritySelectionInput, PortalAuthoritySource, PortalBindingMutation,

@@ -97,51 +97,74 @@ pub(crate) fn browser_consent_proposal(
     let proposal = resolved.proposal();
     let participant: Value = serde_json::from_str(&binding.participant_json)
         .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
-    BrowserConsentProposal::new(
-        binding.participant_id.clone(),
-        binding.artifact_digest.clone(),
-        binding.needs_digest.clone(),
-        json!({
-            "participant": {
-                "id": binding.participant_id,
-                "digest": binding.artifact_digest,
-                "displayName": participant.get("displayName").and_then(Value::as_str).unwrap_or(&binding.participant_id),
-                "description": participant.get("description").and_then(Value::as_str).unwrap_or("Trellis participant"),
-            },
-            "required": {
-                "permissions": proposal.required().grant_set().permissions(),
-                "capabilities": proposal.required().capabilities().iter().map(|capability| capability.name()).collect::<Vec<_>>(),
-            },
-            "optionalBundles": resolved.optional_apis().iter().map(|used| json!({
-                "id": used.alias(),
-                "apiId": used.api(),
-                "permissions": used.grant_set().permissions(),
-            })).collect::<Vec<_>>(),
-        }),
-        proposal.required().grant_set().clone(),
-        resolved
-            .optional_apis()
-            .iter()
-            .map(|used| (used.alias().to_owned(), used.grant_set().clone()))
-            .collect(),
-        proposal
-            .required()
-            .capabilities()
-            .iter()
-            .map(|capability| capability.name().to_owned())
-            .collect(),
-        proposal
-            .optional()
-            .capabilities()
-            .iter()
-            .map(|capability| {
-                (
-                    capability.name().to_owned(),
-                    GrantSetV1::new(capability.allows().to_vec()),
-                )
-            })
-            .collect(),
-    )
+    let consent_view = json!({
+        "participant": {
+            "id": binding.participant_id,
+            "digest": binding.artifact_digest,
+            "displayName": participant.get("displayName").and_then(Value::as_str).unwrap_or(&binding.participant_id),
+            "description": participant.get("description").and_then(Value::as_str).unwrap_or("Trellis participant"),
+        },
+        "required": {
+            "permissions": proposal.required().grant_set().permissions(),
+            "capabilities": proposal.required().capabilities().iter().map(|capability| capability.name()).collect::<Vec<_>>(),
+        },
+        "optionalBundles": resolved.optional_apis().iter().map(|used| json!({
+            "id": used.alias(),
+            "apiId": used.api(),
+            "permissions": used.grant_set().permissions(),
+        })).collect::<Vec<_>>(),
+    });
+    let required_grant_set = proposal.required().grant_set().clone();
+    let optional_grant_bundles = resolved
+        .optional_apis()
+        .iter()
+        .map(|used| (used.alias().to_owned(), used.grant_set().clone()))
+        .collect::<BTreeMap<_, _>>();
+    let mut required_capabilities = proposal
+        .required()
+        .capabilities()
+        .iter()
+        .map(|capability| capability.name().to_owned())
+        .collect::<Vec<_>>();
+    required_capabilities.sort();
+    required_capabilities.dedup();
+    let optional_capability_definitions = proposal
+        .optional()
+        .capabilities()
+        .iter()
+        .map(|capability| {
+            (
+                capability.name().to_owned(),
+                GrantSetV1::new(capability.allows().to_vec()),
+            )
+        })
+        .collect::<BTreeMap<_, _>>();
+    let consent_view_digest = trellis_protocol::digest_json(&consent_view)
+        .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
+    let proposal_digest = trellis_protocol::digest_json(&json!({
+        "participantId": binding.participant_id,
+        "participantArtifactDigest": binding.artifact_digest,
+        "participantNeedsDigest": binding.needs_digest,
+        "requiredGrantSet": required_grant_set,
+        "optionalGrantBundles": optional_grant_bundles,
+        "requiredCapabilities": required_capabilities,
+        "optionalCapabilityDefinitions": optional_capability_definitions,
+    }))
+    .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
+    let consent = BrowserConsentProposal {
+        participant_id: binding.participant_id.clone(),
+        participant_artifact_digest: binding.artifact_digest.clone(),
+        participant_needs_digest: binding.needs_digest.clone(),
+        consent_view,
+        consent_view_digest,
+        proposal_digest,
+        required_grant_set,
+        optional_grant_bundles,
+        required_capabilities,
+        optional_capability_definitions,
+    };
+    consent.validate()?;
+    Ok(consent)
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -295,20 +318,21 @@ mod tests {
 
     #[test]
     fn expands_nested_provider_scoped_roles_without_optional_bundles() {
-        let consent = BrowserConsentProposal::new(
-            "app".to_owned(),
-            "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA".to_owned(),
-            "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA".to_owned(),
-            json!({}),
-            grant("Required"),
-            BTreeMap::from([("bundle".to_owned(), grant("Bundle"))]),
-            vec!["required".to_owned()],
-            BTreeMap::from([
+        let consent = BrowserConsentProposal {
+            participant_id: "app".to_owned(),
+            participant_artifact_digest: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA".to_owned(),
+            participant_needs_digest: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA".to_owned(),
+            consent_view: json!({}),
+            consent_view_digest: String::new(),
+            proposal_digest: String::new(),
+            required_grant_set: grant("Required"),
+            optional_grant_bundles: BTreeMap::from([("bundle".to_owned(), grant("Bundle"))]),
+            required_capabilities: vec!["required".to_owned()],
+            optional_capability_definitions: BTreeMap::from([
                 ("app::read".to_owned(), grant("Read")),
                 ("app::write".to_owned(), grant("Write")),
             ]),
-        )
-        .unwrap();
+        };
         let policy = PortalGrantOverrideRecord {
             portal_id: "portal".to_owned(),
             participant_id: "app".to_owned(),
@@ -359,17 +383,21 @@ mod tests {
 
     #[test]
     fn roles_are_exact_and_order_independent() {
-        let consent = BrowserConsentProposal::new(
-            "app".to_owned(),
-            "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA".to_owned(),
-            "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA".to_owned(),
-            json!({}),
-            grant("Required"),
-            BTreeMap::new(),
-            vec!["required".to_owned()],
-            BTreeMap::from([("app::write".to_owned(), grant("Write"))]),
-        )
-        .unwrap();
+        let consent = BrowserConsentProposal {
+            participant_id: "app".to_owned(),
+            participant_artifact_digest: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA".to_owned(),
+            participant_needs_digest: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA".to_owned(),
+            consent_view: json!({}),
+            consent_view_digest: String::new(),
+            proposal_digest: String::new(),
+            required_grant_set: grant("Required"),
+            optional_grant_bundles: BTreeMap::new(),
+            required_capabilities: vec!["required".to_owned()],
+            optional_capability_definitions: BTreeMap::from([(
+                "app::write".to_owned(),
+                grant("Write"),
+            )]),
+        };
         let policy = PortalGrantOverrideRecord {
             portal_id: "portal".to_owned(),
             participant_id: "app".to_owned(),
@@ -431,17 +459,21 @@ mod tests {
 
     #[test]
     fn rejects_reserved_capabilities_outside_platform_administration() {
-        let consent = BrowserConsentProposal::new(
-            "app".to_owned(),
-            "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA".to_owned(),
-            "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA".to_owned(),
-            json!({}),
-            grant("Required"),
-            BTreeMap::new(),
-            vec![],
-            BTreeMap::from([("app::admin".to_owned(), grant("Admin"))]),
-        )
-        .unwrap();
+        let consent = BrowserConsentProposal {
+            participant_id: "app".to_owned(),
+            participant_artifact_digest: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA".to_owned(),
+            participant_needs_digest: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA".to_owned(),
+            consent_view: json!({}),
+            consent_view_digest: String::new(),
+            proposal_digest: String::new(),
+            required_grant_set: grant("Required"),
+            optional_grant_bundles: BTreeMap::new(),
+            required_capabilities: vec![],
+            optional_capability_definitions: BTreeMap::from([(
+                "app::admin".to_owned(),
+                grant("Admin"),
+            )]),
+        };
         let policy = PortalGrantOverrideRecord {
             portal_id: "portal".to_owned(),
             participant_id: "app".to_owned(),

@@ -25,12 +25,14 @@ use auth::{
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine as _;
 use trellis_rs::client::SessionAuth;
+use trellis_rs::sdk::auth as trellis_sdk_auth;
+use trellis_rs::service::Router;
 
 use crate::shutdown::StopHandle;
 use crate::supervisor::{NatsEndpointOverride, RuntimeContext, RuntimeError, SubsystemHandle};
 use crate::{ResolvedRuntimeNatsConfig, RuntimeConfig, SubsystemName};
-use auth::rpc::AuthRpcRuntime;
-use auth_callout::AuthCallout;
+use auth::rpc::{AuthRpcProcessor, AuthRpcRuntime};
+use auth_callout::{AuthCallout, CalloutKeys};
 use auth_operation::AuthOperationRuntime;
 use auth_post_commit::AuthPostCommitRuntime;
 
@@ -123,11 +125,14 @@ pub(crate) async fn start(context: &RuntimeContext) -> Result<SubsystemHandle, R
         system_nats,
         ephemeral.clone(),
         authorization_contexts.clone(),
-        &callout.issuer_signing_seed_file,
-        &callout.target_signing_seed_file,
-        &callout.xkey_seed_file,
-        &nats.auth_creds_path,
-        &nats.trellis_creds_path,
+        CalloutKeys::from_files(
+            &callout.issuer_signing_seed_file,
+            &callout.target_signing_seed_file,
+            &callout.xkey_seed_file,
+            &nats.auth_creds_path,
+            &nats.trellis_creds_path,
+        )
+        .map_err(|error| RuntimeError::Platform(error.to_string()))?,
         user_jwt_ttl_ms,
     )
     .await
@@ -191,17 +196,20 @@ pub(crate) async fn start(context: &RuntimeContext) -> Result<SubsystemHandle, R
         auth_service.clone(),
         verifier.clone(),
     );
-    let auth_rpc = AuthRpcRuntime::start(
-        rpc_nats,
-        rpc_system_nats,
-        auth_service.clone(),
-        ephemeral.clone(),
-        public_origin.clone(),
-        native_nats_servers.clone(),
-        websocket_nats_servers.clone(),
-        verifier.clone(),
-        portal_reconciliation.clone(),
-    )
+    let mut auth_rpc_routes = Router::new();
+    trellis_sdk_auth::api::register_rpc_metadata(&mut auth_rpc_routes);
+    let auth_rpc = AuthRpcRuntime::start(AuthRpcProcessor {
+        client: rpc_nats,
+        system_client: rpc_system_nats,
+        service: auth_service.clone(),
+        ephemeral: ephemeral.clone(),
+        public_origin: public_origin.clone(),
+        native_nats_servers: native_nats_servers.clone(),
+        websocket_nats_servers: websocket_nats_servers.clone(),
+        verifier: verifier.clone(),
+        routes: Arc::new(auth_rpc_routes),
+        portal_reconciliation: portal_reconciliation.clone(),
+    })
     .await
     .map_err(|error| RuntimeError::Platform(error.to_string()))?;
     let auth_post_commit = AuthPostCommitRuntime::new(

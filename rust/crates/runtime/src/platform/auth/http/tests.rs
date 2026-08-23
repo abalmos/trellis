@@ -43,17 +43,32 @@ fn consent_with_view(view: serde_json::Value) -> BrowserConsentProposal {
             .unwrap(),
         PermissionActionV1::Subscribe,
     );
-    BrowserConsentProposal::new(
-        "app-1".to_owned(),
-        DIGEST.to_owned(),
-        DIGEST.to_owned(),
-        view,
-        GrantSetV1::new(vec![required]),
-        BTreeMap::from([("events".to_owned(), GrantSetV1::new(vec![optional]))]),
-        vec!["read".to_owned()],
-        BTreeMap::new(),
-    )
-    .unwrap()
+    let required_grant_set = GrantSetV1::new(vec![required]);
+    let optional_grant_bundles =
+        BTreeMap::from([("events".to_owned(), GrantSetV1::new(vec![optional]))]);
+    let required_capabilities = vec!["read".to_owned()];
+    let optional_capability_definitions = BTreeMap::new();
+    BrowserConsentProposal {
+        participant_id: "app-1".to_owned(),
+        participant_artifact_digest: DIGEST.to_owned(),
+        participant_needs_digest: DIGEST.to_owned(),
+        consent_view_digest: trellis_protocol::digest_json(&view).unwrap(),
+        proposal_digest: trellis_protocol::digest_json(&serde_json::json!({
+            "participantId": "app-1",
+            "participantArtifactDigest": DIGEST,
+            "participantNeedsDigest": DIGEST,
+            "requiredGrantSet": required_grant_set,
+            "optionalGrantBundles": optional_grant_bundles,
+            "requiredCapabilities": required_capabilities,
+            "optionalCapabilityDefinitions": optional_capability_definitions,
+        }))
+        .unwrap(),
+        consent_view: view,
+        required_grant_set,
+        optional_grant_bundles,
+        required_capabilities,
+        optional_capability_definitions,
+    }
 }
 
 #[test]

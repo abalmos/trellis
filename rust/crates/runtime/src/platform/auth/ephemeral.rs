@@ -60,48 +60,7 @@ pub(crate) struct BrowserConsentProposal {
 }
 
 impl BrowserConsentProposal {
-    #[allow(clippy::too_many_arguments)]
-    pub(crate) fn new(
-        participant_id: String,
-        participant_artifact_digest: String,
-        participant_needs_digest: String,
-        consent_view: Value,
-        required_grant_set: GrantSetV1,
-        optional_grant_bundles: BTreeMap<String, GrantSetV1>,
-        mut required_capabilities: Vec<String>,
-        optional_capability_definitions: BTreeMap<String, GrantSetV1>,
-    ) -> Result<Self, AuthorizationStateError> {
-        required_capabilities.sort();
-        required_capabilities.dedup();
-        let consent_view_digest = digest_json(&consent_view)
-            .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
-        let proposal_digest = digest_json(&serde_json::json!({
-            "participantId": participant_id,
-            "participantArtifactDigest": participant_artifact_digest,
-            "participantNeedsDigest": participant_needs_digest,
-            "requiredGrantSet": required_grant_set,
-            "optionalGrantBundles": optional_grant_bundles,
-            "requiredCapabilities": required_capabilities,
-            "optionalCapabilityDefinitions": optional_capability_definitions,
-        }))
-        .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
-        let proposal = Self {
-            participant_id,
-            participant_artifact_digest,
-            participant_needs_digest,
-            consent_view,
-            consent_view_digest,
-            proposal_digest,
-            required_grant_set,
-            optional_grant_bundles,
-            required_capabilities,
-            optional_capability_definitions,
-        };
-        proposal.validate()?;
-        Ok(proposal)
-    }
-
-    fn validate(&self) -> Result<(), AuthorizationStateError> {
+    pub(crate) fn validate(&self) -> Result<(), AuthorizationStateError> {
         require_nonempty("consent participantId", &self.participant_id)?;
         require_digest(
             "consent participantArtifactDigest",

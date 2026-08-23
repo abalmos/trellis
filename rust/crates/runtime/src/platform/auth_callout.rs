@@ -62,7 +62,7 @@ struct DisconnectedClient {
 }
 
 #[derive(Clone, Debug)]
-struct CalloutKeys {
+pub(crate) struct CalloutKeys {
     auth_signing_key: Arc<KeyPair>,
     target_signing_key: Arc<KeyPair>,
     xkey: XKey,
@@ -71,7 +71,7 @@ struct CalloutKeys {
 }
 
 impl CalloutKeys {
-    fn from_files(
+    pub(crate) fn from_files(
         auth_signing_seed_file: &Path,
         target_signing_seed_file: &Path,
         xkey_seed_file: &Path,
@@ -234,26 +234,14 @@ impl Drop for CalloutPermit {
 }
 
 impl AuthCallout {
-    #[allow(clippy::too_many_arguments)]
     pub(crate) async fn start(
         client: async_nats::Client,
         system_client: async_nats::Client,
         ephemeral: NatsAuthEphemeralRepository,
         contexts: super::auth::AuthorizationContextService,
-        auth_signing_seed_file: &Path,
-        target_signing_seed_file: &Path,
-        xkey_seed_file: &Path,
-        auth_user_creds_file: &Path,
-        target_user_creds_file: &Path,
+        keys: CalloutKeys,
         user_jwt_ttl_ms: i64,
     ) -> Result<Self, AuthorizationStateError> {
-        let keys = CalloutKeys::from_files(
-            auth_signing_seed_file,
-            target_signing_seed_file,
-            xkey_seed_file,
-            auth_user_creds_file,
-            target_user_creds_file,
-        )?;
         let subscriber = client
             .queue_subscribe(AUTH_CALLOUT_SUBJECT, AUTH_CALLOUT_QUEUE.to_owned())
             .await

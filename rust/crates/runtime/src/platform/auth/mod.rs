@@ -72,7 +72,7 @@ pub(crate) use application::repository::{
 };
 pub(crate) use application::validation::validate_login_portal;
 pub(crate) use application::{
-    ApplyIdentityAuthoritySelectionInput, AuthService, AuthServiceConfig,
+    ApplyIdentityAuthoritySelectionInput, AuthService, AuthServiceConfig, ChangePasswordInput,
     ClaimActivationReviewInput, CompleteIdentityLinkInput, CompletePasswordResetInput,
     CreateAccountFlowInput, CreateActivationReviewInput, CreateAuthorityProposalInput,
     CreateFederatedUserInput, CreateLocalUserInput, CreateSessionInput, CreateUserInput,

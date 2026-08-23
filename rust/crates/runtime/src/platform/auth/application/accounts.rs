@@ -72,6 +72,25 @@ pub struct CompletePasswordResetInput {
     pub actions: Vec<PostCommitActionRecord>,
 }
 
+/// Input for an authenticated password change and sibling-session revocation.
+#[derive(Clone, Debug)]
+pub struct ChangePasswordInput {
+    /// User principal owning the credential.
+    pub principal_id: String,
+    /// Session that remains active after the password change.
+    pub current_session_id: String,
+    /// Plaintext current password retained only for this call.
+    pub current_password: String,
+    /// Plaintext replacement password retained only for this call.
+    pub new_password: String,
+    /// Password-change time in Unix milliseconds.
+    pub changed_at: i64,
+    /// Durable proof claim and replay result.
+    pub idempotency: IdempotencyResultRecord,
+    /// Deterministic post-commit actions.
+    pub actions: Vec<PostCommitActionRecord>,
+}
+
 /// OIDC-authenticated user registration input.
 #[derive(Clone, Debug)]
 pub struct CreateFederatedUserInput {
@@ -409,38 +428,40 @@ impl<R> AuthService<R>
 where
     R: AccountRepository + Clone,
 {
-    #[allow(clippy::too_many_arguments)]
     pub(crate) async fn change_password(
         &self,
-        principal_id: &str,
-        current_session_id: &str,
-        current_password: &str,
-        new_password: &str,
-        changed_at: i64,
-        idempotency: IdempotencyResultRecord,
-        actions: Vec<PostCommitActionRecord>,
+        input: ChangePasswordInput,
     ) -> Result<IdempotentOutcome<usize>, AuthorizationStateError> {
+        let ChangePasswordInput {
+            principal_id,
+            current_session_id,
+            current_password,
+            new_password,
+            changed_at,
+            idempotency,
+            actions,
+        } = input;
         super::validation::validate_idempotency_and_actions(&idempotency, &actions)?;
         super::super::domain::require_protocol_timestamp("changedAt", changed_at)?;
         let credential = self
             .repository
-            .get_local_credential(principal_id)
+            .get_local_credential(&principal_id)
             .await?
             .ok_or_else(|| {
                 AuthorizationStateError::InvalidRecord("local credential not found".to_owned())
             })?;
-        if !verify_password(&credential.password_hash, current_password) {
+        if !verify_password(&credential.password_hash, &current_password) {
             return Err(AuthorizationStateError::InvalidRecord(
                 "current password is invalid".to_owned(),
             ));
         }
-        if verify_password(&credential.password_hash, new_password) {
+        if verify_password(&credential.password_hash, &new_password) {
             return Err(AuthorizationStateError::InvalidRecord(
                 "new password must differ from current password".to_owned(),
             ));
         }
         let (password_hash, hash_profile) =
-            hash_password(new_password, Some(self.config.password_min_length))?;
+            hash_password(&new_password, Some(self.config.password_min_length))?;
         let replacement = LocalCredentialRecord {
             password_hash,
             hash_profile,
@@ -456,12 +477,12 @@ where
         super::validation::validate_replacement_credential(
             &credential,
             &replacement,
-            principal_id,
+            &principal_id,
         )?;
         self.repository
             .change_password(PasswordChange {
-                principal_id: principal_id.to_owned(),
-                current_session_id: current_session_id.to_owned(),
+                principal_id,
+                current_session_id,
                 credential: replacement,
                 expected_version: credential.version,
                 changed_at,
