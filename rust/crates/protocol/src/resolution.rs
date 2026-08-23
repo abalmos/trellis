@@ -1272,10 +1272,12 @@ fn validate_transfers(
         let input_name = string_at(definition.get("input").expect("operation input"), "schema");
         let root = &object_at(&api_value, "schemas")[input_name];
         validate_typed_pointer(
-            participant_id,
-            alias,
-            api.id(),
-            &path.with_trailing_token("key"),
+            PointerValidationContext {
+                participant_id,
+                alias,
+                api: api.id(),
+                authored_path: &path.with_trailing_token("key"),
+            },
             string_at(mapping, "key"),
             root,
             ExpectedSchemaType::String,
@@ -1287,10 +1289,12 @@ fn validate_transfers(
         ] {
             if let Some(pointer) = mapping.get(field).and_then(Value::as_str) {
                 validate_typed_pointer(
-                    participant_id,
-                    alias,
-                    api.id(),
-                    &path.with_trailing_token(field),
+                    PointerValidationContext {
+                        participant_id,
+                        alias,
+                        api: api.id(),
+                        authored_path: &path.with_trailing_token(field),
+                    },
                     pointer,
                     root,
                     expected,
@@ -1323,10 +1327,13 @@ fn validate_api_schema_pointers(
             array_strings(event.get("params").unwrap_or(&Value::Null)).enumerate()
         {
             validate_typed_pointer(
-                participant_id,
-                alias,
-                api.id(),
-                &pointer(["events", event_name, "params"]).with_trailing_token(index),
+                PointerValidationContext {
+                    participant_id,
+                    alias,
+                    api: api.id(),
+                    authored_path: &pointer(["events", event_name, "params"])
+                        .with_trailing_token(index),
+                },
                 pointer_value,
                 &schemas[schema_name],
                 ExpectedSchemaType::SubjectToken,
@@ -1354,11 +1361,13 @@ fn validate_job_pointers(
                 continue;
             }
             validate_typed_pointer(
-                participant_id,
-                "",
-                "",
-                &pointer(["jobQueues", queue_name, "keyConcurrency", "key"])
-                    .with_trailing_token(index),
+                PointerValidationContext {
+                    participant_id,
+                    alias: "",
+                    api: "",
+                    authored_path: &pointer(["jobQueues", queue_name, "keyConcurrency", "key"])
+                        .with_trailing_token(index),
+                },
                 pointer_value,
                 &schemas[payload_name],
                 ExpectedSchemaType::JobKey,
@@ -1378,12 +1387,15 @@ enum ExpectedSchemaType {
     JobKey,
 }
 
-#[allow(clippy::too_many_arguments)]
+struct PointerValidationContext<'a> {
+    participant_id: &'a str,
+    alias: &'a str,
+    api: &'a str,
+    authored_path: &'a PointerBuf,
+}
+
 fn validate_typed_pointer(
-    participant_id: &str,
-    alias: &str,
-    api: &str,
-    authored_path: &PointerBuf,
+    context: PointerValidationContext<'_>,
     pointer_value: &str,
     schema: &Value,
     expected: ExpectedSchemaType,
@@ -1402,10 +1414,10 @@ fn validate_typed_pointer(
     .ok_or_else(|| {
         resolution_error(
             ResolutionErrorCodeV1::UnresolvableSchemaPointer,
-            participant_id,
-            (!alias.is_empty()).then_some(alias),
-            (!api.is_empty()).then_some(api),
-            authored_path.clone(),
+            context.participant_id,
+            (!context.alias.is_empty()).then_some(context.alias),
+            (!context.api.is_empty()).then_some(context.api),
+            context.authored_path.clone(),
             format!("schema pointer '{pointer_value}' cannot be proven to resolve"),
         )
     })?;
@@ -1417,10 +1429,10 @@ fn validate_typed_pointer(
     } else {
         Err(resolution_error(
             ResolutionErrorCodeV1::SchemaPointerTypeMismatch,
-            participant_id,
-            (!alias.is_empty()).then_some(alias),
-            (!api.is_empty()).then_some(api),
-            authored_path.clone(),
+            context.participant_id,
+            (!context.alias.is_empty()).then_some(context.alias),
+            (!context.api.is_empty()).then_some(context.api),
+            context.authored_path.clone(),
             format!("schema pointer '{pointer_value}' does not prove the required value type"),
         ))
     }
@@ -1829,10 +1841,12 @@ mod tests {
                 other => panic!("{} has unknown expected type '{other}'", vector.name),
             };
             let result = validate_typed_pointer(
-                "fixture-participant",
-                "fixture-api",
-                "fixture@v1",
-                &pointer(["pointerProofs", &vector.name]),
+                PointerValidationContext {
+                    participant_id: "fixture-participant",
+                    alias: "fixture-api",
+                    api: "fixture@v1",
+                    authored_path: &pointer(["pointerProofs", &vector.name]),
+                },
                 &vector.pointer,
                 &vector.schema,
                 expected,
