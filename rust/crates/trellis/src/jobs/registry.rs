@@ -29,6 +29,25 @@ pub struct WorkerHeartbeatHandle {
     task: tokio::task::JoinHandle<Result<(), ServiceRegistryError>>,
 }
 
+/// Identity and scheduling options for one worker heartbeat loop.
+#[derive(Debug, Clone)]
+pub struct WorkerHeartbeatOptions {
+    /// Service name recorded in the heartbeat payload.
+    pub service: String,
+    /// Service namespace used in the heartbeat subject.
+    pub subject_service: String,
+    /// Queue type processed by the worker.
+    pub job_type: String,
+    /// Worker-host instance identifier.
+    pub instance_id: String,
+    /// Queue concurrency advertised by the worker host.
+    pub concurrency: Option<u32>,
+    /// Optional worker version advertised in the heartbeat.
+    pub version: Option<String>,
+    /// Delay between heartbeat publications.
+    pub interval: Duration,
+}
+
 impl WorkerHeartbeatHandle {
     /// Stop the heartbeat task and swallow expected cancellation shutdown.
     #[doc = concat!("Asynchronous Trellis API operation `", stringify!(stop), "`.")]
@@ -184,20 +203,19 @@ async fn publish_worker_heartbeat_for_subject(
 
 /// Start a background heartbeat loop for one worker-host queue type.
 #[doc = concat!("Asynchronous Trellis API operation `", stringify!(start_worker_heartbeat_loop), "`.")]
-#[expect(
-    clippy::too_many_arguments,
-    reason = "the heartbeat record has independent identity and scheduling fields"
-)]
 pub async fn start_worker_heartbeat_loop(
     nats: async_nats::Client,
-    service: String,
-    subject_service: String,
-    job_type: String,
-    instance_id: String,
-    concurrency: Option<u32>,
-    version: Option<String>,
-    interval: Duration,
+    options: WorkerHeartbeatOptions,
 ) -> Result<WorkerHeartbeatHandle, ServiceRegistryError> {
+    let WorkerHeartbeatOptions {
+        service,
+        subject_service,
+        job_type,
+        instance_id,
+        concurrency,
+        version,
+        interval,
+    } = options;
     let publish = move |nats: async_nats::Client, timestamp: String| {
         let heartbeat = new_worker_heartbeat(
             &service,

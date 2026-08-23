@@ -37,7 +37,7 @@ use crate::jobs::projection::job_from_work_event;
 use crate::jobs::publisher::{JobEventHeaders, JobEventPublisher};
 use crate::jobs::registry::{
     start_worker_heartbeat_loop, ActiveJobCancellationRegistry, ServiceRegistryError,
-    WorkerHeartbeatHandle,
+    WorkerHeartbeatHandle, WorkerHeartbeatOptions,
 };
 use crate::jobs::subjects::job_event_subject;
 use crate::jobs::types::{Job, JobConcurrency, JobEvent, JobEventType};
@@ -453,6 +453,20 @@ fn parse_work_payload_job(payload: &[u8]) -> Option<Job> {
     job_from_work_event(&event)
 }
 
+struct WorkerLoopResources<P, M>
+where
+    P: JobEventPublisher,
+    M: JobMetaSource,
+{
+    consumer: consumer::PullConsumer,
+    lifecycle_stream: stream::Stream<()>,
+    queue: JobsQueueBinding,
+    manager: JobManager<P, M>,
+    cancellation: JobCancellationToken,
+    cancellation_registry: ActiveJobCancellationRegistry,
+    key_coordinator: Option<NatsKeyCoordinator>,
+}
+
 /// Run one queue worker with explicit shutdown and active-job cancellation context.
 pub async fn run_single_queue_worker<P, M, H, Fut, E>(
     nats: async_nats::Client,
@@ -511,13 +525,15 @@ where
         let lifecycle_stream = lifecycle_stream(&jetstream).await?;
         let consumer = ensure_worker_consumer(&jetstream, work_stream, &queue).await?;
         run_prepared_queue_worker_loop(
-            consumer,
-            lifecycle_stream,
-            queue,
-            manager,
-            cancellation,
-            cancellation_registry,
-            key_coordinator,
+            WorkerLoopResources {
+                consumer,
+                lifecycle_stream,
+                queue,
+                manager,
+                cancellation,
+                cancellation_registry,
+                key_coordinator,
+            },
             handler,
         )
         .await
@@ -528,18 +544,8 @@ where
     result
 }
 
-#[expect(
-    clippy::too_many_arguments,
-    reason = "the prepared worker loop receives independently owned runtime resources"
-)]
 async fn run_prepared_queue_worker_loop<P, M, H, Fut, E>(
-    consumer: consumer::PullConsumer,
-    lifecycle_stream: stream::Stream<()>,
-    queue: JobsQueueBinding,
-    manager: JobManager<P, M>,
-    cancellation: JobCancellationToken,
-    cancellation_registry: ActiveJobCancellationRegistry,
-    key_coordinator: Option<NatsKeyCoordinator>,
+    resources: WorkerLoopResources<P, M>,
     handler: H,
 ) -> Result<(), RuntimeWorkerError>
 where
@@ -550,6 +556,15 @@ where
     Fut: Future<Output = Result<Value, JobProcessError<E>>> + Send,
     E: ToString + Send,
 {
+    let WorkerLoopResources {
+        consumer,
+        lifecycle_stream,
+        queue,
+        manager,
+        cancellation,
+        cancellation_registry,
+        key_coordinator,
+    } = resources;
     let mut messages = consumer
         .messages()
         .await
@@ -748,18 +763,9 @@ where
     Ok(())
 }
 
-#[expect(
-    clippy::too_many_arguments,
-    reason = "worker startup wires independently owned runtime resources"
-)]
 async fn run_prepared_queue_worker_with_cancellation<P, M, H, Fut, E>(
     nats: async_nats::Client,
-    consumer: consumer::PullConsumer,
-    lifecycle_stream: stream::Stream<()>,
-    queue: JobsQueueBinding,
-    manager: JobManager<P, M>,
-    cancellation: JobCancellationToken,
-    cancellation_registry: ActiveJobCancellationRegistry,
+    mut resources: WorkerLoopResources<P, M>,
     handler: H,
 ) -> Result<(), RuntimeWorkerError>
 where
@@ -770,7 +776,7 @@ where
     Fut: Future<Output = Result<Value, JobProcessError<E>>> + Send,
     E: ToString + Send,
 {
-    let cancellation_subject = format!("{}.*.cancelled", queue.publish_prefix);
+    let cancellation_subject = format!("{}.*.cancelled", resources.queue.publish_prefix);
     let mut cancellation_subscriber =
         nats.subscribe(cancellation_subject.clone())
             .await
@@ -779,7 +785,7 @@ where
                 details: error.to_string(),
             })?;
     let cancellation_task = {
-        let cancellation_registry = cancellation_registry.clone();
+        let cancellation_registry = resources.cancellation_registry.clone();
         tokio::spawn(async move {
             while let Some(message) = cancellation_subscriber.next().await {
                 let Ok(event) = serde_json::from_slice::<JobEvent>(&message.payload) else {
@@ -794,20 +800,13 @@ where
         })
     };
 
-    let key_coordinator =
-        key_coordinator_for_queue(nats.clone(), manager.bindings().namespace.as_str(), &queue)
-            .await?;
-    let result = run_prepared_queue_worker_loop(
-        consumer,
-        lifecycle_stream,
-        queue,
-        manager,
-        cancellation,
-        cancellation_registry,
-        key_coordinator,
-        handler,
+    resources.key_coordinator = key_coordinator_for_queue(
+        nats.clone(),
+        resources.manager.bindings().namespace.as_str(),
+        &resources.queue,
     )
-    .await;
+    .await?;
+    let result = run_prepared_queue_worker_loop(resources, handler).await;
     cancellation_task.abort();
     let _ = cancellation_task.await;
     result
@@ -1087,13 +1086,15 @@ where
         heartbeats.push(
             start_worker_heartbeat_loop(
                 nats.clone(),
-                binding.jobs.service_name.clone(),
-                binding.jobs.namespace.clone(),
-                queue_type.clone(),
-                instance_id.clone(),
-                Some(queue_concurrency[queue_type]),
-                options.version.clone(),
-                options.heartbeat_interval,
+                WorkerHeartbeatOptions {
+                    service: binding.jobs.service_name.clone(),
+                    subject_service: binding.jobs.namespace.clone(),
+                    job_type: queue_type.clone(),
+                    instance_id: instance_id.clone(),
+                    concurrency: Some(queue_concurrency[queue_type]),
+                    version: options.version.clone(),
+                    interval: options.heartbeat_interval,
+                },
             )
             .await?,
         );
@@ -1112,12 +1113,15 @@ where
             let manager = JobManager::new(worker_publisher, worker_jobs, worker_meta);
             run_prepared_queue_worker_with_cancellation(
                 worker_nats,
-                consumer,
-                lifecycle_stream,
-                queue,
-                manager,
-                worker_cancellation,
-                worker_cancellation_registry,
+                WorkerLoopResources {
+                    consumer,
+                    lifecycle_stream,
+                    queue,
+                    manager,
+                    cancellation: worker_cancellation,
+                    cancellation_registry: worker_cancellation_registry,
+                    key_coordinator: None,
+                },
                 worker_handler,
             )
             .await
