@@ -16,34 +16,23 @@ import {
   type TrellisServiceRuntimeFor,
 } from "./core.ts";
 import {
-  base64urlDecode,
   base64urlEncode,
   createAuth,
-  estimateMidpointClockOffsetMs,
-  SESSION_PROOF_FORMAT_V1,
-  sessionProofRequestDigestV1,
-  sha256,
   type TrellisAuth as SessionAuth,
 } from "../../auth.ts";
 import {
-  type AuthorizationContextBundle,
-  AuthorizationContextBundleSchema,
   AuthorizationContextCache,
   type AuthorizationContextPersistence,
   AuthorizationProviderCache,
   MemoryAuthorizationContextStore,
   startAuthorizationContextRefresh,
 } from "../../auth/authorization_context.ts";
-import {
-  ContractResourceBindingsSchema,
-  type InferSchemaType,
-} from "../../contracts.ts";
+import type { InferSchemaType } from "../../contracts.ts";
 import type {
   PermissionAtomV1,
   RuntimeApi,
 } from "../../contract_support/runtime.ts";
 import type { NativeProtocolContract } from "../../contract_support/protocol_artifacts.ts";
-import { resolveNativeProtocolPresentation } from "../../contract_support/protocol_resolution.ts";
 import type {
   ContractEventConsumers,
   ContractJobsMetadata,
@@ -70,7 +59,6 @@ import {
   type MaybeAsync,
   Result,
 } from "@qlever-llc/result";
-import { Type } from "typebox";
 import { Value } from "typebox/value";
 import {
   type ServiceHealth,
@@ -121,7 +109,6 @@ import {
 import {
   DEFAULT_RUNTIME_MAX_RECONNECT_ATTEMPTS,
   DEFAULT_SERVICE_RUNTIME_WAIT_ON_FIRST_CONNECT,
-  loadDefaultRuntimeTransport,
   selectRuntimeTransportServers,
 } from "../../runtime_transport.ts";
 import { serviceRuntimeLogger } from "./logger.ts";
@@ -181,7 +168,6 @@ import {
   observeNatsTrellisConnection,
   type TrellisConnection,
 } from "../../connection.ts";
-import { initTelemetry } from "../../telemetry/init.ts";
 import { recordTrellisDuration } from "../../telemetry/mod.ts";
 import {
   defaultSqlOutboxTables,
@@ -197,6 +183,11 @@ import {
   SqlOutboxRepository,
   type SqlOutboxTables,
 } from "../outbox_inbox.ts";
+import {
+  closeFailedServiceBootstrapConnection,
+  fetchServiceBootstrapInfo,
+  loadDefaultServiceRuntimeDeps,
+} from "./bootstrap.ts";
 
 type ExtraNatsConnectOpts = Omit<
   NatsConnectOpts,
@@ -311,79 +302,6 @@ type ResourceBindingEventConsumer = {
   backoffMs: number[];
 };
 
-type ServiceBootstrapConnectInfo = {
-  sessionId: string;
-  participantDigest: string;
-  instanceId: string;
-  deploymentId: string;
-  contractId: string;
-  contractDigest: string;
-  transports: {
-    native?: { natsServers: string[] };
-    websocket?: { natsServers: string[] };
-  };
-  jwt: string;
-  jwtExpiresAt: number;
-  authorizationContext: AuthorizationContextBundle;
-};
-
-type ServiceBootstrapResponse = {
-  status: "ready";
-  serverNow: number;
-  serverClockOffsetMs: number;
-  connectInfo: ServiceBootstrapConnectInfo;
-  binding: {
-    contractId: string;
-    digest: string;
-    resources: ResourceBindings;
-  };
-};
-
-type ServiceBootstrapFailure = {
-  reason: string;
-  message?: string;
-  serverNow?: number;
-  requestId?: string;
-  planId?: string;
-  deploymentId?: string;
-  dependencyAlias?: string;
-  dependencyContractId?: string;
-  dependencySurface?: string;
-  dependencyReason?: string;
-  dependencyKey?: string;
-  dependencyMessage?: string;
-};
-
-const DEFAULT_BOOTSTRAP_PENDING_RETRY_MS = 5_000;
-const MAX_BOOTSTRAP_PENDING_RETRY_MS = 60_000;
-const DEFAULT_BOOTSTRAP_UNAVAILABLE_INITIAL_RETRY_MS = 1_000;
-const MAX_BOOTSTRAP_UNAVAILABLE_RETRY_MS = 30_000;
-
-function dependencyWaitLogMessage(failure: ServiceBootstrapFailure): string {
-  if (failure.dependencyMessage) {
-    return `Service contract activation pending; ${failure.dependencyMessage}`;
-  }
-  if (failure.dependencyContractId) {
-    const dependency = failure.dependencyAlias
-      ? `dependency '${failure.dependencyAlias}' (${failure.dependencyContractId})`
-      : `dependency ${failure.dependencyContractId}`;
-    if (failure.dependencyReason === "dependency_not_active") {
-      return `Service contract activation pending; waiting for ${dependency} to have an active running implementation`;
-    }
-    if (failure.dependencyReason === "unknown") {
-      return `Service contract activation pending; waiting for ${dependency} to be installed or approved`;
-    }
-    if (failure.dependencyKey) {
-      return `Service contract activation pending; waiting for ${dependency} to provide required ${
-        failure.dependencySurface ?? "surface"
-      } '${failure.dependencyKey}'`;
-    }
-    return `Service contract activation pending; waiting for ${dependency}`;
-  }
-  return failure.message ??
-    "Service contract activation pending; waiting for dependency closure";
-}
-
 type RpcMethodName<TA extends RuntimeApi> = keyof TA["rpc"] & string;
 type RpcMethodInput<TA extends RuntimeApi, M extends RpcMethodName<TA>> =
   InferSchemaType<TA["rpc"][M]["input"]>;
@@ -476,437 +394,10 @@ const trellisServiceConstructorToken: unique symbol = Symbol(
   "TrellisService.constructorToken",
 );
 
-function getErrorCauseMessage(error: unknown): string {
-  if (error && typeof error === "object") {
-    const context = (error as { context?: Record<string, unknown> }).context;
-    if (
-      typeof context?.causeMessage === "string" &&
-      context.causeMessage.length > 0
-    ) {
-      return context.causeMessage;
-    }
-  }
-
-  return error instanceof Error ? error.message : String(error);
-}
-
-function delay(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-function bootstrapRetryDelayMs(response: Response): number {
-  const retryAfter = response.headers.get("retry-after");
-  if (retryAfter === null) return DEFAULT_BOOTSTRAP_PENDING_RETRY_MS;
-
-  const seconds = Number(retryAfter);
-  if (Number.isFinite(seconds) && seconds >= 0) {
-    return Math.min(seconds * 1_000, MAX_BOOTSTRAP_PENDING_RETRY_MS);
-  }
-
-  const retryAt = Date.parse(retryAfter);
-  if (Number.isNaN(retryAt)) return DEFAULT_BOOTSTRAP_PENDING_RETRY_MS;
-  return Math.min(
-    Math.max(0, retryAt - Date.now()),
-    MAX_BOOTSTRAP_PENDING_RETRY_MS,
-  );
-}
-
-function bootstrapUnavailableRetryDelayMs(attempt: number): number {
-  const exponent = Math.min(attempt, 10);
-  return Math.min(
-    DEFAULT_BOOTSTRAP_UNAVAILABLE_INITIAL_RETRY_MS * 2 ** exponent,
-    MAX_BOOTSTRAP_UNAVAILABLE_RETRY_MS,
-  );
-}
-
-class ServiceBootstrapEndpointUnavailableError extends Error {
-  constructor(cause: unknown) {
-    super("Service bootstrap endpoint is unavailable.", { cause });
-    this.name = "ServiceBootstrapEndpointUnavailableError";
-  }
-}
-
-async function loadDefaultServiceRuntimeDeps(): Promise<
-  TrellisServiceRuntimeDeps
-> {
-  const transport = await loadDefaultRuntimeTransport();
-  return {
-    initTelemetry,
-    connect: (
-      { servers, token, authenticator, inboxPrefix, ...extraOptions },
-    ) =>
-      transport.connect({
-        servers,
-        ...extraOptions,
-        ...(token ? { token } : {}),
-        ...(authenticator ? { authenticator: authenticator as never } : {}),
-        ...(inboxPrefix ? { inboxPrefix } : {}),
-      }),
-  };
-}
-
 function automaticTelemetryEnabled(
   telemetry: TrellisServiceConnectTelemetryOpts | undefined,
 ): boolean {
   return telemetry !== false && telemetry?.enabled !== false;
-}
-
-const ServiceBootstrapReadySchema = Type.Object({
-  serverNow: Type.Integer(),
-  state: Type.Literal("ready"),
-  session: Type.Object({
-    sessionId: Type.String({ minLength: 1 }),
-    inboxPrefix: Type.String({ minLength: 1 }),
-  }, { additionalProperties: true }),
-  authorization: Type.Object({
-    participantId: Type.String({ minLength: 1 }),
-    participantArtifactDigest: Type.String({ minLength: 1 }),
-    participantNeedsDigest: Type.String({ minLength: 1 }),
-    resourceRuntime: ContractResourceBindingsSchema,
-  }, { additionalProperties: true }),
-  nats: Type.Object({
-    jwt: Type.String({ minLength: 1 }),
-    jwtExpiresAt: Type.Integer({ minimum: 1 }),
-    servers: Type.Array(Type.String({ minLength: 1 }), { minItems: 1 }),
-  }),
-  authorizationContext: AuthorizationContextBundleSchema,
-}, { additionalProperties: true });
-
-const ServiceBootstrapFailureSchema = Type.Object({
-  reason: Type.String({ minLength: 1 }),
-  message: Type.Optional(Type.String({ minLength: 1 })),
-  serverNow: Type.Optional(Type.Integer()),
-}, { additionalProperties: true });
-
-async function fetchServiceBootstrapInfoOnce(args: {
-  bootstrapUrl: URL;
-  contractId: string;
-  contractDigest: string;
-  contract: ServiceContract<RuntimeApi, RuntimeApi | undefined>;
-  identityAuth: SessionAuth;
-  sessionAuth: SessionAuth;
-  identity: TrellisServiceConnectOpts["identity"];
-}): Promise<{
-  response: Response;
-  responseText: string;
-  payload: unknown;
-  requestStartedAtMs: number;
-  responseReceivedAtMs: number;
-}> {
-  const requestStartedAtMs = Date.now();
-  const requestId = ulid();
-  const issuedAt = args.identityAuth.currentIat() * 1_000;
-  const provisionedIdentityKeyId = base64urlEncode(
-    await sha256(base64urlDecode(args.identityAuth.sessionKey)),
-  );
-  const presentation = await resolveNativeProtocolPresentation(args.contract);
-  if (
-    args.identity.participantId !== args.contract.CONTRACT_ID ||
-    args.identity.participantArtifactDigest !== args.contract.CONTRACT_DIGEST ||
-    args.identity.participantNeedsDigest !==
-      presentation.participantNeedsDigest
-  ) {
-    throw new Error("Service participant identity does not match its contract");
-  }
-  const unsigned = {
-    requestId,
-    issuedAt,
-    deploymentId: args.identity.deploymentId,
-    instanceId: args.identity.instanceId,
-    provisionedIdentityKeyId,
-    newSessionPublicKey: args.sessionAuth.sessionKey,
-    newSessionNkey: args.sessionAuth.sessionNkey,
-    participantId: args.identity.participantId,
-    participantArtifactDigest: args.contract.CONTRACT_DIGEST,
-    participantNeedsDigest: presentation.participantNeedsDigest,
-    participantArtifact: presentation.participant,
-    referencedApiArtifacts: [presentation.api, ...presentation.referencedApis],
-    proof: { format: SESSION_PROOF_FORMAT_V1, signature: "" },
-  };
-  const requestDigest = await sessionProofRequestDigestV1(unsigned);
-  const body = JSON.stringify({
-    ...unsigned,
-    proof: await args.identityAuth.signSessionProof({
-      purpose: "serviceBootstrap",
-      requestId,
-      issuedAt,
-      deploymentId: args.identity.deploymentId,
-      instanceId: args.identity.instanceId,
-      provisionedIdentityKeyId,
-      newSessionPublicKey: args.sessionAuth.sessionKey,
-      newSessionNkey: args.sessionAuth.sessionNkey,
-      participantId: args.identity.participantId,
-      participantDigest: args.identity.participantArtifactDigest,
-      requestDigest,
-    }),
-  });
-  let response: Response;
-  try {
-    response = await fetch(args.bootstrapUrl, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body,
-    });
-  } catch (cause) {
-    throw new ServiceBootstrapEndpointUnavailableError(cause);
-  }
-  const responseReceivedAtMs = Date.now();
-
-  const responseText = await response.text();
-  let payload: unknown;
-  try {
-    payload = JSON.parse(responseText);
-  } catch {
-    payload = undefined;
-  }
-  return {
-    response,
-    responseText,
-    payload,
-    requestStartedAtMs,
-    responseReceivedAtMs,
-  };
-}
-
-async function fetchServiceBootstrapInfo(args: {
-  trellisUrl: string;
-  serviceName: string;
-  contractId: string;
-  contractDigest: string;
-  contract: ServiceContract<RuntimeApi, RuntimeApi | undefined>;
-  identityAuth: SessionAuth;
-  sessionAuth: SessionAuth;
-  identity: TrellisServiceConnectOpts["identity"];
-  log: LoggerLike;
-}): Promise<ServiceBootstrapResponse> {
-  const bootstrapUrl = new URL("/bootstrap/service", args.trellisUrl);
-  let unavailableAttempt = 0;
-  const loggedPendingRequests = new Set<string>();
-  while (true) {
-    let settled: Awaited<ReturnType<typeof fetchServiceBootstrapInfoOnce>>;
-    try {
-      settled = await fetchServiceBootstrapInfoOnce({
-        ...args,
-        bootstrapUrl,
-        contract: args.contract,
-      });
-      unavailableAttempt = 0;
-    } catch (cause) {
-      if (!(cause instanceof ServiceBootstrapEndpointUnavailableError)) {
-        throw cause;
-      }
-
-      const retryDelayMs = bootstrapUnavailableRetryDelayMs(unavailableAttempt);
-      unavailableAttempt += 1;
-      args.log.warn(
-        {
-          service: args.serviceName,
-          trellisUrl: args.trellisUrl,
-          contractId: args.contractId,
-          contractDigest: args.contractDigest,
-          attempt: unavailableAttempt,
-          retryDelayMs,
-          causeMessage: getErrorCauseMessage(cause.cause),
-        },
-        "Service bootstrap endpoint unavailable; retrying",
-      );
-      await delay(retryDelayMs);
-      continue;
-    }
-
-    if (
-      settled.payload !== undefined &&
-      Value.Check(ServiceBootstrapFailureSchema, settled.payload)
-    ) {
-      const failure = settled.payload as ServiceBootstrapFailure;
-      if (
-        failure.reason === "iat_out_of_range" &&
-        typeof failure.serverNow === "number"
-      ) {
-        args.identityAuth.setServerClockOffsetMs(
-          estimateMidpointClockOffsetMs({
-            requestStartedAtMs: settled.requestStartedAtMs,
-            responseReceivedAtMs: settled.responseReceivedAtMs,
-            serverNowSeconds: failure.serverNow / 1_000,
-          }),
-        );
-        continue;
-      }
-      if (
-        failure.reason === "authority_update_required" ||
-        failure.reason === "authority_migration_required" ||
-        failure.reason === "authority_reconciliation_pending"
-      ) {
-        const retryDelayMs = bootstrapRetryDelayMs(settled.response);
-        const pendingKey = failure.planId ?? failure.requestId ??
-          `${failure.deploymentId ?? "unknown"}:${args.contractDigest}`;
-        if (!loggedPendingRequests.has(pendingKey)) {
-          loggedPendingRequests.add(pendingKey);
-          args.log.info(
-            {
-              service: args.serviceName,
-              deploymentId: failure.deploymentId,
-              planId: failure.planId,
-              contractId: args.contractId,
-              contractDigest: args.contractDigest,
-              retryDelayMs,
-            },
-            failure.message ??
-              "Service deployment authority pending; waiting for approval or reconciliation",
-          );
-        }
-        await delay(retryDelayMs);
-        continue;
-      }
-      if (failure.reason === "contract_activation_pending") {
-        const retryDelayMs = bootstrapRetryDelayMs(settled.response);
-        const pendingKey = failure.requestId ??
-          `${failure.deploymentId ?? "unknown"}:${args.contractDigest}`;
-        if (!loggedPendingRequests.has(pendingKey)) {
-          loggedPendingRequests.add(pendingKey);
-          args.log.info(
-            {
-              service: args.serviceName,
-              deploymentId: failure.deploymentId,
-              requestId: failure.requestId,
-              contractId: args.contractId,
-              contractDigest: args.contractDigest,
-              dependencyAlias: failure.dependencyAlias,
-              dependencyContractId: failure.dependencyContractId,
-              dependencySurface: failure.dependencySurface,
-              dependencyReason: failure.dependencyReason,
-              dependencyKey: failure.dependencyKey,
-              retryDelayMs,
-            },
-            dependencyWaitLogMessage(failure),
-          );
-        }
-        await delay(retryDelayMs);
-        continue;
-      }
-      throw new TransportError({
-        code: "trellis.bootstrap.failed",
-        message: `Service bootstrap failed: ${
-          failure.message ?? failure.reason
-        }`,
-        hint:
-          "Retry the connection. If it keeps failing, check Trellis bootstrap availability and contract activation.",
-        context: {
-          trellisUrl: args.trellisUrl,
-          contractId: args.contractId,
-          contractDigest: args.contractDigest,
-          status: settled.response.status,
-          reason: failure.reason,
-        },
-      });
-    }
-
-    const bootstrapState =
-      settled.payload && typeof settled.payload === "object"
-        ? (settled.payload as { state?: unknown }).state
-        : undefined;
-    if (
-      bootstrapState === "authority_pending" ||
-      bootstrapState === "migration_required" ||
-      bootstrapState === "dependency_pending" ||
-      bootstrapState === "resource_pending"
-    ) {
-      const retryDelayMs = bootstrapRetryDelayMs(settled.response);
-      args.log.info(
-        {
-          service: args.serviceName,
-          contractId: args.contractId,
-          contractDigest: args.contractDigest,
-          state: bootstrapState,
-          retryDelayMs,
-        },
-        "Service deployment authority pending",
-      );
-      await delay(retryDelayMs);
-      continue;
-    }
-
-    if (!settled.response.ok) {
-      const detail = settled.responseText.trim();
-      throw new TransportError({
-        code: "trellis.bootstrap.failed",
-        message: detail.length > 0
-          ? `Service bootstrap failed with HTTP ${settled.response.status}: ${detail}`
-          : `Service bootstrap failed with HTTP ${settled.response.status}`,
-        hint:
-          "Retry the connection. If it keeps failing, check Trellis bootstrap availability.",
-        context: {
-          trellisUrl: args.trellisUrl,
-          contractId: args.contractId,
-          contractDigest: args.contractDigest,
-          status: settled.response.status,
-        },
-      });
-    }
-
-    if (settled.payload === undefined) {
-      throw new TransportError({
-        code: "trellis.bootstrap.invalid_response",
-        message: `Service bootstrap returned invalid JSON: ${
-          settled.responseText.trim() || "<empty body>"
-        }`,
-        hint:
-          "Retry the connection. If it keeps happening, check the Trellis deployment.",
-        context: {
-          trellisUrl: args.trellisUrl,
-          contractId: args.contractId,
-          contractDigest: args.contractDigest,
-        },
-      });
-    }
-
-    const response = Value.Parse(
-      ServiceBootstrapReadySchema,
-      settled.payload,
-    );
-    const serverClockOffsetMs = estimateMidpointClockOffsetMs({
-      requestStartedAtMs: settled.requestStartedAtMs,
-      responseReceivedAtMs: settled.responseReceivedAtMs,
-      serverNowSeconds: response.serverNow / 1_000,
-    });
-    args.identityAuth.setServerClockOffsetMs(serverClockOffsetMs);
-    args.sessionAuth.setServerClockOffsetMs(serverClockOffsetMs);
-    return {
-      status: "ready",
-      serverNow: response.serverNow / 1_000,
-      serverClockOffsetMs,
-      connectInfo: {
-        sessionId: response.session.sessionId,
-        participantDigest: response.authorization.participantArtifactDigest,
-        instanceId: args.identity.instanceId,
-        deploymentId: args.identity.deploymentId,
-        contractId: args.contractId,
-        contractDigest: args.contractDigest,
-        transports: { websocket: { natsServers: response.nats.servers } },
-        jwt: response.nats.jwt,
-        jwtExpiresAt: response.nats.jwtExpiresAt,
-        authorizationContext: response.authorizationContext,
-      },
-      binding: {
-        contractId: args.contractId,
-        digest: response.authorization.participantArtifactDigest,
-        resources: {
-          kv: response.authorization.resourceRuntime.kv ?? {},
-          store: response.authorization.resourceRuntime.store ?? {},
-          ...(response.authorization.resourceRuntime.jobs === undefined
-            ? {}
-            : { jobs: response.authorization.resourceRuntime.jobs }),
-          ...(response.authorization.resourceRuntime.eventConsumers ===
-              undefined
-            ? {}
-            : {
-              eventConsumers:
-                response.authorization.resourceRuntime.eventConsumers,
-            }),
-        },
-      },
-    };
-  }
 }
 
 export abstract class StoreHandle {
@@ -2766,20 +2257,6 @@ function createNoopJobWorkerHost(): JobWorkerHostAdapter {
     stop: () => AsyncResult.ok(undefined),
     join: () => AsyncResult.ok(undefined),
   });
-}
-
-async function closeFailedServiceBootstrapConnection(
-  nc: NatsConnection,
-): Promise<void> {
-  if (nc.isClosed()) {
-    return;
-  }
-
-  try {
-    await nc.drain();
-  } catch {
-    await nc.closed().catch(() => undefined);
-  }
 }
 
 function createJobsFacade<
