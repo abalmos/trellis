@@ -149,20 +149,6 @@ pub struct ServiceConnectOptions<'a> {
     name: &'a str,
     /// Deployment that owns the service instance.
     deployment_id: &'a str,
-    /// Stable participant ID accepted by deployment authority.
-    participant_id: &'a str,
-    /// Exact participant artifact digest accepted by deployment authority.
-    participant_digest: &'a str,
-    /// Exact participant needs digest accepted by deployment authority.
-    participant_needs_digest: &'a str,
-    /// Normalized native participant artifact.
-    participant_json: &'a str,
-    /// Normalized native owned API artifact.
-    api_json: &'a str,
-    /// Semantic digest of the owned API artifact.
-    api_digest: &'a str,
-    /// Exact referenced API JSON and digest evidence.
-    referenced_api_artifacts: Vec<(String, String)>,
     /// Base64url-encoded provisioned service identity seed.
     provisioned_identity_seed_base64url: &'a str,
     /// Base64url-encoded service session seed.
@@ -179,18 +165,10 @@ pub struct ServiceConnectOptions<'a> {
 
 impl<'a> ServiceConnectOptions<'a> {
     /// Create service connect options with ergonomic default timeouts.
-    #[allow(clippy::too_many_arguments)]
     pub fn new(
         trellis_url: &'a str,
         name: &'a str,
         deployment_id: &'a str,
-        participant_id: &'a str,
-        participant_digest: &'a str,
-        participant_needs_digest: &'a str,
-        participant_json: &'a str,
-        api_json: &'a str,
-        api_digest: &'a str,
-        referenced_api_artifacts: &[(&str, &str)],
         provisioned_identity_seed_base64url: &'a str,
         session_key_seed_base64url: &'a str,
         authorization_context_store: Arc<dyn AuthorizationContextStore>,
@@ -199,16 +177,6 @@ impl<'a> ServiceConnectOptions<'a> {
             trellis_url,
             name,
             deployment_id,
-            participant_id,
-            participant_digest,
-            participant_needs_digest,
-            participant_json,
-            api_json,
-            api_digest,
-            referenced_api_artifacts: referenced_api_artifacts
-                .iter()
-                .map(|(json, digest)| ((*json).to_owned(), (*digest).to_owned()))
-                .collect(),
             provisioned_identity_seed_base64url,
             session_key_seed_base64url: Cow::Borrowed(session_key_seed_base64url),
             timeout_ms: DEFAULT_TIMEOUT_MS,
@@ -1726,27 +1694,22 @@ impl<C> ConnectedServiceRuntime<C> {
     }
 }
 
-impl<C> ConnectedServiceRuntime<C> {
+impl<C: GeneratedServiceContract> ConnectedServiceRuntime<C> {
     /// Connect with generated contract constants and parse the returned bootstrap binding.
     pub async fn connect(options: ServiceConnectOptions<'_>) -> Result<Self, ServiceRuntimeError> {
-        let referenced_api_artifacts = options
-            .referenced_api_artifacts
-            .iter()
-            .map(|(json, digest)| (json.as_str(), digest.as_str()))
-            .collect::<Vec<_>>();
         let client =
             TrellisClient::connect_service_with_contract(ServiceConnectWithContractOptions {
                 trellis_url: options.trellis_url,
-                participant_id: options.participant_id,
-                participant_digest: options.participant_digest,
-                participant_json: options.participant_json,
-                api_json: options.api_json,
-                api_digest: options.api_digest,
-                referenced_api_artifacts: &referenced_api_artifacts,
+                participant_id: C::PARTICIPANT_ID,
+                participant_digest: C::CONTRACT_DIGEST,
+                participant_json: C::PARTICIPANT_JSON,
+                api_json: C::API_JSON,
+                api_digest: C::API_DIGEST,
+                referenced_api_artifacts: C::REFERENCED_API_ARTIFACTS,
                 deployment_id: options.deployment_id,
                 instance_id: options.name,
                 provisioned_identity_seed_base64url: options.provisioned_identity_seed_base64url,
-                participant_needs_digest: options.participant_needs_digest,
+                participant_needs_digest: C::PARTICIPANT_NEEDS_DIGEST,
                 session_key_seed_base64url: options.session_key_seed_base64url.as_ref(),
                 timeout_ms: options.timeout_ms,
                 retry_delay_ms: options.retry_delay_ms,
@@ -1759,7 +1722,7 @@ impl<C> ConnectedServiceRuntime<C> {
             options.name,
             Arc::new(client),
             binding,
-            options.participant_id,
+            C::PARTICIPANT_ID,
         ))
     }
 }
@@ -2450,13 +2413,6 @@ mod tests {
             "http://localhost:3000",
             "svc",
             "dep_1",
-            "svc@v1",
-            "participant-digest",
-            "participant-needs-digest",
-            "{\"format\":\"trellis.participant.v1\",\"id\":\"svc@v1\"}",
-            "{\"format\":\"trellis.api.v1\",\"id\":\"api@v1\"}",
-            "api-digest",
-            &[],
             "identity-seed",
             "session-seed",
             Arc::new(crate::client::MemoryAuthorizationContextStore::default()),

@@ -11,12 +11,15 @@ use tokio::task::JoinHandle;
 use trellis_rs::client::{
     OperationDescriptor, OperationEvent, OperationState as ClientOperationState,
 };
+use trellis_rs::service::GeneratedServiceContract;
 use trellis_rs::service::{
     AcceptedOperation, OperationRefData, OperationSignalAccepted, OperationSnapshot,
     OperationState as ServiceOperationState, ServerError,
 };
 
-use crate::support::assertions::{assert_case_registered, assert_runtime_case_registered};
+use crate::support::assertions::{
+    assert_case_registered, assert_generated_service_contract, assert_runtime_case_registered,
+};
 
 const OP_SERVICE_ID: &str = "trellis.integration.operations-service@v1";
 const OP_CLIENT_ID: &str = "trellis.integration.operations-client@v1";
@@ -102,8 +105,24 @@ const OP_SERVICE_API_SOURCE_JSON: &str = r#"{
 
 struct OperationsServiceContract;
 
-impl OperationsServiceContract {
+impl trellis_rs::service::GeneratedServiceContract for OperationsServiceContract {
+    const PARTICIPANT_ID: &'static str = OP_SERVICE_ID;
     const CONTRACT_DIGEST: &'static str = "59KjnB8x5ebK3UBJCTjDQevuImoyl2nB_jVia4nmJN4";
+    const PARTICIPANT_NEEDS_DIGEST: &'static str = "xICJDDI9RAIiahOdnITsHz_cLsLYxMcPBY-55rHnphI";
+    const PARTICIPANT_JSON: &'static str = r#"{"description":"Exercises client-to-service operation start and watch through generated surfaces.","displayName":"Trellis Integration Operations Service","format":"trellis.participant.v1","id":"trellis.integration.operations-service@v1","implements":{"self":{"api":"trellis.integration.operations-service@v1","apiDigest":"BmkTg3PvsBK3oTvqYNXramtBg_0kO73e46nrmiBVcBE"}},"kind":"service","schemas":{"OperationInput":{"properties":{"message":{"type":"string"}},"required":["message"],"type":"object"},"OperationOutput":{"properties":{"done":{"type":"boolean"},"message":{"type":"string"}},"required":["message","done"],"type":"object"},"OperationProgress":{"properties":{"message":{"type":"string"},"step":{"type":"integer"}},"required":["message","step"],"type":"object"},"OperationSignalInput":{"properties":{"suffix":{"type":"string"}},"required":["suffix"],"type":"object"},"OperationUpdate":{"properties":{"message":{"type":"string"},"step":{"type":"integer"}},"required":["message","step"],"type":"object"}}}"#;
+    const API_JSON: &'static str = r#"{"capabilities":{"cancelProcess":{"allows":[{"action":"cancel","target":{"api":"trellis.integration.operations-service@v1","kind":"apiSurface","name":"Entity.Process","surface":"operation"}}]},"process":{"allows":[{"action":"invoke","target":{"api":"trellis.integration.operations-service@v1","kind":"apiSurface","name":"Entity.Process","surface":"operation"}},{"action":"observe","target":{"api":"trellis.integration.operations-service@v1","kind":"apiSurface","name":"Entity.Process","surface":"operation"}},{"action":"invoke","target":{"api":"trellis.integration.operations-service@v1","kind":"apiSurface","name":"Entity.Status","surface":"operation"}},{"action":"observe","target":{"api":"trellis.integration.operations-service@v1","kind":"apiSurface","name":"Entity.Status","surface":"operation"}},{"action":"control","target":{"api":"trellis.integration.operations-service@v1","kind":"operationSignal","operation":"Entity.Process","signal":"appendMessage"}},{"action":"control","target":{"api":"trellis.integration.operations-service@v1","kind":"operationSignal","operation":"Entity.Process","signal":"updateMessage"}}]}},"description":"Exercises client-to-service operation start and watch through generated surfaces.","displayName":"Trellis Integration Operations Service","format":"trellis.api.v1","id":"trellis.integration.operations-service@v1","operations":{"Entity.Process":{"cancel":true,"input":{"schema":"OperationInput"},"output":{"schema":"OperationOutput"},"progress":{"schema":"OperationProgress"},"signals":{"appendMessage":{"input":{"schema":"OperationSignalInput"}},"updateMessage":{"input":{"schema":"OperationSignalInput"}}},"update":{"schema":"OperationUpdate"},"version":"v1"},"Entity.Status":{"input":{"schema":"OperationInput"},"output":{"schema":"OperationOutput"},"progress":{"schema":"OperationProgress"},"version":"v1"}},"schemas":{"OperationInput":{"properties":{"message":{"type":"string"}},"required":["message"],"type":"object"},"OperationOutput":{"properties":{"done":{"type":"boolean"},"message":{"type":"string"}},"required":["message","done"],"type":"object"},"OperationProgress":{"properties":{"message":{"type":"string"},"step":{"type":"integer"}},"required":["message","step"],"type":"object"},"OperationSignalInput":{"properties":{"suffix":{"type":"string"}},"required":["suffix"],"type":"object"},"OperationUpdate":{"properties":{"message":{"type":"string"},"step":{"type":"integer"}},"required":["message","step"],"type":"object"}}}"#;
+    const API_DIGEST: &'static str = "BmkTg3PvsBK3oTvqYNXramtBg_0kO73e46nrmiBVcBE";
+    const REFERENCED_API_ARTIFACTS: &'static [(&'static str, &'static str)] = &[];
+}
+
+#[test]
+fn operations_service_contract_evidence_is_exact() {
+    let contract = trellis_test::TrellisTestContract::from_native_api_json(
+        OP_SERVICE_API_SOURCE_JSON,
+        trellis_rs::contracts::ContractKind::Service,
+    )
+    .unwrap();
+    assert_generated_service_contract::<OperationsServiceContract>(&contract);
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

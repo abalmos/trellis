@@ -38,16 +38,24 @@ Callers do not supply those values.
 Service facades expose authenticated service bootstrap only:
 
 ```rust
+use std::sync::Arc;
+
 use orders_participant::{connect, ServiceConnectOptions};
+use trellis_rs::client::FileAuthorizationContextStore;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let seed = std::env::var("ORDERS_SERVICE_SESSION_KEY_SEED")?;
+    let deployment_id = std::env::var("TRELLIS_DEPLOYMENT_ID")?;
+    let identity_seed = std::env::var("ORDERS_SERVICE_IDENTITY_SEED")?;
+    let session_seed = std::env::var("ORDERS_SERVICE_SESSION_KEY_SEED")?;
     let mut service = connect(
         ServiceConnectOptions::new(
             "http://localhost:3000",
             "orders-service",
-            &seed,
+            &deployment_id,
+            &identity_seed,
+            &session_seed,
+            Arc::new(FileAuthorizationContextStore::new("./trellis-context.json")),
         )
         .with_timeout_ms(10_000),
     )
@@ -59,7 +67,8 @@ async fn main() -> anyhow::Result<()> {
 }
 ```
 
-Bootstrap authenticates the service, presents the embedded contract, waits for
+Bootstrap authenticates the service, presents the generated facade's embedded
+contract as the sole contract evidence, waits for
 deployment authority, resolves resource bindings, and owns the RPC/feed/worker
 lifecycle. Pending authority waits indefinitely by default. Use
 `with_authority_pending_timeout_ms(Some(...))` only when process startup needs an

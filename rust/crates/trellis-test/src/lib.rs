@@ -1768,17 +1768,6 @@ impl TrellisTestRuntime {
             &self.trellis_url,
             &service_key.instance_id,
             &service_key.deployment_id,
-            &service_key.participant_id,
-            &service_key.participant_digest,
-            &service_key.participant_needs_digest,
-            &service_key.participant_json,
-            &service_key.api_json,
-            &service_key.api_digest,
-            &service_key
-                .referenced_api_artifacts
-                .iter()
-                .map(|(json, digest)| (json.as_str(), digest.as_str()))
-                .collect::<Vec<_>>(),
             &service_key.identity_seed,
             &service_key.seed,
             Arc::new(trellis_rs::client::MemoryAuthorizationContextStore::default()),

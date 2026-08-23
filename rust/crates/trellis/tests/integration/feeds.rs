@@ -4,7 +4,7 @@ use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
 use tokio::task::JoinHandle;
 
-use crate::support::assertions::assert_case_registered;
+use crate::support::assertions::{assert_case_registered, assert_generated_service_contract};
 
 const FEEDS_SERVICE_ID: &str = "trellis.integration.feeds-service@v1";
 const FEEDS_CLIENT_ID: &str = "trellis.integration.feeds-client@v1";
@@ -45,6 +45,26 @@ const FEEDS_SERVICE_API_SOURCE_JSON: &str = r#"{
 }"#;
 
 struct FeedsServiceContract;
+
+impl trellis_rs::service::GeneratedServiceContract for FeedsServiceContract {
+    const PARTICIPANT_ID: &'static str = FEEDS_SERVICE_ID;
+    const CONTRACT_DIGEST: &'static str = "xOv1lbED0Vjv7E0k4QDIj9_r61H2hEl4wVilyWuQByI";
+    const PARTICIPANT_NEEDS_DIGEST: &'static str = "kT1qoEkOXt7g7rYKYLK7s9WR30UfrHVsKUt9ZNgINH0";
+    const PARTICIPANT_JSON: &'static str = r#"{"description":"Exercises generated feed subscribe and handler surfaces.","displayName":"Trellis Integration Feeds Service","format":"trellis.participant.v1","id":"trellis.integration.feeds-service@v1","implements":{"self":{"api":"trellis.integration.feeds-service@v1","apiDigest":"rd9dgL_KGJ2owNkSnklK4gIYMPdQICBiOFi1X98tSBk"}},"kind":"service","schemas":{"FeedFrame":{"properties":{"message":{"type":"string"},"sequence":{"type":"number"},"topic":{"type":"string"}},"required":["topic","message","sequence"],"type":"object"},"FeedInput":{"properties":{"topic":{"type":"string"}},"required":["topic"],"type":"object"}}}"#;
+    const API_JSON: &'static str = r#"{"capabilities":{"readFeeds":{"allows":[{"action":"subscribe","target":{"api":"trellis.integration.feeds-service@v1","kind":"apiSurface","name":"Entity.Live","surface":"feed"}}]}},"description":"Exercises generated feed subscribe and handler surfaces.","displayName":"Trellis Integration Feeds Service","feeds":{"Entity.Live":{"event":{"schema":"FeedFrame"},"input":{"schema":"FeedInput"},"version":"v1"}},"format":"trellis.api.v1","id":"trellis.integration.feeds-service@v1","schemas":{"FeedFrame":{"properties":{"message":{"type":"string"},"sequence":{"type":"number"},"topic":{"type":"string"}},"required":["topic","message","sequence"],"type":"object"},"FeedInput":{"properties":{"topic":{"type":"string"}},"required":["topic"],"type":"object"}}}"#;
+    const API_DIGEST: &'static str = "rd9dgL_KGJ2owNkSnklK4gIYMPdQICBiOFi1X98tSBk";
+    const REFERENCED_API_ARTIFACTS: &'static [(&'static str, &'static str)] = &[];
+}
+
+#[test]
+fn feeds_service_contract_evidence_is_exact() {
+    let contract = trellis_test::TrellisTestContract::from_native_api_json(
+        FEEDS_SERVICE_API_SOURCE_JSON,
+        trellis_rs::contracts::ContractKind::Service,
+    )
+    .unwrap();
+    assert_generated_service_contract::<FeedsServiceContract>(&contract);
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 struct EntityFeedInput {

@@ -40,9 +40,9 @@ use trellis_sdk_demo_service::types::{
 };
 
 #[cfg(any())]
-use std::pin::Pin;
-#[cfg(any())]
 use futures_util::Stream;
+#[cfg(any())]
+use std::pin::Pin;
 
 const SERVICE_NAME: &str = "rust-field-ops-demo";
 const FIXED_NOW: &str = "2026-05-02T00:00:00.000Z";
@@ -435,13 +435,6 @@ async fn run_authenticated_service(
         trellis_url,
         SERVICE_NAME,
         deployment_id,
-        trellis_participant_demo_service::contract::CONTRACT_ID,
-        trellis_participant_demo_service::contract::CONTRACT_DIGEST,
-        trellis_participant_demo_service::contract::PARTICIPANT_NEEDS_DIGEST,
-        trellis_participant_demo_service::contract::PARTICIPANT,
-        trellis_participant_demo_service::contract::API_JSON,
-        trellis_participant_demo_service::contract::API_DIGEST,
-        trellis_participant_demo_service::contract::REFERENCED_API_ARTIFACTS,
         seed,
         &session_seed,
         Arc::new(MemoryAuthorizationContextStore::default()),

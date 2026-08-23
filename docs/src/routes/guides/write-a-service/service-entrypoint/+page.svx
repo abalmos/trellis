@@ -62,8 +62,11 @@ Extracted handler modules should import generated handler aliases such as
 Create `src/main.rs`:
 
 ```rust
+use std::sync::Arc;
+
 use clap::Parser;
 use orders_participant::{connect, ServiceConnectOptions};
+use trellis_rs::client::FileAuthorizationContextStore;
 
 const SERVICE_NAME: &str = "orders-service";
 
@@ -72,8 +75,14 @@ struct Args {
     #[arg(long, env = "TRELLIS_URL")]
     trellis_url: String,
 
+    #[arg(long, env = "TRELLIS_DEPLOYMENT_ID")]
+    deployment_id: String,
+
+    #[arg(long, env = "ORDERS_SERVICE_IDENTITY_SEED")]
+    identity_seed: String,
+
     #[arg(long, env = "ORDERS_SERVICE_SESSION_KEY_SEED")]
-    seed: String,
+    session_seed: String,
 }
 
 #[tokio::main]
@@ -87,7 +96,10 @@ async fn main() -> anyhow::Result<()> {
     let mut service = connect(ServiceConnectOptions::new(
         &args.trellis_url,
         SERVICE_NAME,
-        &args.seed,
+        &args.deployment_id,
+        &args.identity_seed,
+        &args.session_seed,
+        Arc::new(FileAuthorizationContextStore::new("./trellis-context.json")),
     ))
     .await?;
 
@@ -98,7 +110,8 @@ async fn main() -> anyhow::Result<()> {
 ```
 
 The generated participant `connect(...)` helper authenticates the service
-instance, presents the embedded native contract artifacts, resolves deployment bindings,
+instance, presents its embedded native contract artifacts as the sole contract
+evidence, resolves deployment bindings,
 prepares authenticated request validation, and polls until pending deployment
 authority becomes ready. Rust service connections wait indefinitely by default;
 use `with_authority_pending_timeout_ms(Some(milliseconds))` only when startup

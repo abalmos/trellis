@@ -183,9 +183,9 @@ Validation:
 - [x] Remove `JobRef`'s `Arc<dyn Fn>` get/wait/cancel backend and mutable
       snapshot cache; use immutable seed + concrete `NatsJobWaiter` + concrete
       `JobManager`, with complete durable lifecycle projection (`73ad6df2`).
-- [ ] Collapse the remaining Jobs function/wrapper ladder to one implementation
+- [x] Collapse the remaining Jobs function/wrapper ladder to one implementation
       plus a small cohesive execution context/hooks where needed.
-- [ ] Remove duplicate contract metadata from `ServiceConnectOptions` /
+- [x] Remove duplicate contract metadata from `ServiceConnectOptions` /
       generated service contract evidence; generated contract evidence must have
       one source of truth.
 - [ ] Apply the same constructor simplification to device connection paths where

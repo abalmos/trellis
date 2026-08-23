@@ -69,7 +69,11 @@ https://raw.githubusercontent.com/qlever-llc/trellis/main/docs/static/llms.txt
   one record, changed pending semantics supersede, and terminal history never
   blocks later reproposal. Initial plans are visible before authority acceptance.
 - Service bootstrap polls pending deployment authority until it becomes ready by
-  default. Rust services use
+  default. Rust `ServiceConnectOptions::new(trellis_url, name, deployment_id,
+  provisioned_identity_seed_base64url, session_key_seed_base64url,
+  authorization_context_store)` accepts runtime and credential inputs only;
+  generated `GeneratedServiceContract` constants are the sole contract-evidence
+  source. Rust services use
   `ServiceConnectOptions::with_authority_pending_timeout_ms(Some(...))` only when
   startup needs an overall deadline; per-request timeouts remain bounded.
 - The runtime `contracts` store is a digest-keyed manifest cache, not durable

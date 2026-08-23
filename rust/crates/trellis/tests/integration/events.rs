@@ -5,7 +5,7 @@ use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
 use tokio::task::JoinHandle;
 
-use crate::support::assertions::assert_case_registered;
+use crate::support::assertions::{assert_case_registered, assert_generated_service_contract};
 
 fn events_service_contract() -> trellis_test::TrellisTestContract {
     let artifacts = trellis_rs::contracts::ContractBuilder::authoring(
@@ -71,6 +71,21 @@ impl trellis_rs::client::EventDescriptor for EntityChangedEventDescriptor {
 }
 
 struct EventsServiceContract;
+
+impl trellis_rs::service::GeneratedServiceContract for EventsServiceContract {
+    const PARTICIPANT_ID: &'static str = "trellis.integration.events-service@v1";
+    const CONTRACT_DIGEST: &'static str = "CUUoOdZ5fDKrzwiZ3MiJtHXeHUtsR6Y5byzKxIzkU5Q";
+    const PARTICIPANT_NEEDS_DIGEST: &'static str = "5YkXLSCAdq4DVcQgLlDO-9_CavqUycwSwRMZn8rfw3c";
+    const PARTICIPANT_JSON: &'static str = r#"{"description":"Exercises generated event publish and subscribe surfaces.","displayName":"Trellis Integration Events Service","format":"trellis.participant.v1","id":"trellis.integration.events-service@v1","implements":{"self":{"api":"trellis.integration.events-service@v1","apiDigest":"gqjD1EeOzOEfgtqr3-UY0U0dlJOJyFV7kLdZEBDDT6w"}},"kind":"service","schemas":{"EntityChanged":{"properties":{"id":{"type":"string"},"value":{"type":"string"}},"required":["id","value"],"type":"object"}}}"#;
+    const API_JSON: &'static str = r#"{"capabilities":{"trellis.integration.events-service::publishRecords":{"allows":[{"action":"publish","target":{"api":"trellis.integration.events-service@v1","kind":"apiSurface","name":"Entity.Changed","surface":"event"}}]},"trellis.integration.events-service::readRecords":{"allows":[{"action":"subscribe","target":{"api":"trellis.integration.events-service@v1","kind":"apiSurface","name":"Entity.Changed","surface":"event"}}]}},"consent":{"trellis.integration.events-service::publishRecords":{"consequence":"","description":"Publish entity change records in the events fixture.","title":"Publish records"},"trellis.integration.events-service::readRecords":{"consequence":"","description":"Subscribe to entity change records in the events fixture.","title":"Read records"}},"description":"Exercises generated event publish and subscribe surfaces.","displayName":"Trellis Integration Events Service","events":{"Entity.Changed":{"event":{"schema":"EntityChanged"},"version":"v1"}},"format":"trellis.api.v1","id":"trellis.integration.events-service@v1","schemas":{"EntityChanged":{"properties":{"id":{"type":"string"},"value":{"type":"string"}},"required":["id","value"],"type":"object"}}}"#;
+    const API_DIGEST: &'static str = "gqjD1EeOzOEfgtqr3-UY0U0dlJOJyFV7kLdZEBDDT6w";
+    const REFERENCED_API_ARTIFACTS: &'static [(&'static str, &'static str)] = &[];
+}
+
+#[test]
+fn events_service_contract_evidence_is_exact() {
+    assert_generated_service_contract::<EventsServiceContract>(&events_service_contract());
+}
 
 struct AbortOnDrop<T> {
     handle: Option<JoinHandle<T>>,

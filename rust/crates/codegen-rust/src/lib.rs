@@ -1430,6 +1430,7 @@ fn render_service_participant_connect_rs(mappings: &[ValidatedParticipantAlias])
 
 use crate::Service;
 
+/// Runtime and credential options; contract evidence comes from [`Contract`].
 pub use trellis_rs::service::ServiceConnectOptions;
 
 pub struct Contract;
@@ -5460,6 +5461,10 @@ mod tests {
             !connect_rs.contains("pub fn new(inner: trellis_rs::service::ConnectedServiceRuntime")
         );
         assert!(connect_rs.contains("pub use trellis_rs::service::ServiceConnectOptions"));
+        assert!(connect_rs.contains("contract evidence comes from [`Contract`]"));
+        assert!(!connect_rs.contains("opts.participant_"));
+        assert!(!connect_rs.contains("opts.api_"));
+        assert!(!connect_rs.contains("opts.referenced_api_artifacts"));
         assert!(connect_rs.contains("pub async fn connect("));
         assert!(connect_rs.contains("opts: ServiceConnectOptions<'_>"));
         assert!(connect_rs
