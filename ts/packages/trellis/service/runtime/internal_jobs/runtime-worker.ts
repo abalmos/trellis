@@ -81,8 +81,6 @@ type CancelSubscriptionLike = AsyncIterable<CancelMessageLike> & {
   unsubscribe(): void;
 };
 
-type WorkerStopHandle = { stop(): Promise<void> } | void;
-
 type ConsumerInfoLike = unknown;
 
 type StartNatsConsumerDeps = {
@@ -121,29 +119,18 @@ function isCustomNatsRuntimeDeps(
   return args.jsm !== undefined && args.js !== undefined;
 }
 
-type StartWorkerArgs = {
-  queueType: string;
-  workerIndex: number;
-  cancellation: JobCancellationToken;
-};
-
-type StartWorkerHostOptions = {
-  instanceId: string;
-  queueTypes?: string[];
-  queueConcurrency?: Record<string, number>;
-  heartbeatPublisher?: {
-    publish(subject: string, payload: Uint8Array): void | Promise<void>;
-  };
-  heartbeatIntervalMs?: number;
-  version?: string;
-  nowIso?: () => string;
-  startWorker: (args: StartWorkerArgs) => Promise<WorkerStopHandle>;
-};
-
 type StartNatsWorkerHostOptions<TResult> =
-  & Omit<StartWorkerHostOptions, "startWorker">
   & StartNatsRuntimeDeps
   & {
+    instanceId: string;
+    queueTypes?: string[];
+    queueConcurrency?: Record<string, number>;
+    heartbeatPublisher?: {
+      publish(subject: string, payload: Uint8Array): void | Promise<void>;
+    };
+    heartbeatIntervalMs?: number;
+    version?: string;
+    nowIso?: () => string;
     manager: JobManager<unknown, TResult>;
     getProjectedJob?: (
       job: Job<unknown, TResult>,
@@ -183,29 +170,6 @@ type StartQueueWorkerLoopOptions<TResult> = {
   instanceId?: string;
   deferralBackoffMs?: number;
 };
-
-type StartNatsQueueWorkerOptions<TResult> =
-  & StartNatsRuntimeDeps
-  & {
-    manager: JobManager<unknown, TResult>;
-    binding: JobsRuntimeBinding;
-    queueType: string;
-    hostCancellation?: JobCancellationToken;
-    getProjectedJob?: (
-      job: Job<unknown, TResult>,
-    ) => Promise<Job<unknown, TResult> | undefined>;
-    getLatestLifecycleEvent?: (
-      job: Job<unknown, TResult>,
-    ) => Promise<JobEvent | undefined>;
-    validatePayload?: (
-      args: PayloadValidationArgs<TResult>,
-    ) => Promise<void> | void;
-    validateResult?: (
-      args: ResultValidationArgs<TResult>,
-    ) => Promise<void> | void;
-    handler: (job: ActiveJob<unknown, TResult>) => Promise<TResult>;
-    instanceId?: string;
-  };
 
 function toWorkerConsumer(
   consumer: {
@@ -488,55 +452,9 @@ export async function startQueueWorkerLoop<TResult>(
   };
 }
 
-export async function startNatsQueueWorker<TResult>(
-  options: StartNatsQueueWorkerOptions<TResult>,
-): Promise<{ stop(): Promise<void> }> {
-  const queue = getQueueBinding(options.binding, options.queueType);
-  const jsm = isCustomNatsRuntimeDeps(options)
-    ? options.jsm
-    : await jetstreamManager(options.nats);
-  const js = isCustomNatsRuntimeDeps(options) ? options.js : {
-    consumers: {
-      getConsumerFromInfo(info: ConsumerInfoLike) {
-        return toWorkerConsumer(
-          jetstream(options.nats).consumers.getConsumerFromInfo(
-            info as ConsumerInfo,
-          ),
-        );
-      },
-    },
-  };
-  const info = await getConsumerInfo(jsm, options.binding.workStream, queue);
-  const consumer = js.consumers.getConsumerFromInfo(info);
-  const cancelSubscription = options.nats.subscribe(
-    `${queue.publishPrefix}.*.cancelled`,
-  ) as Subscription as CancelSubscriptionLike;
-  const direct = jsm.direct;
-
-  return await startQueueWorkerLoop({
-    manager: options.manager,
-    consumer,
-    cancelSubscription,
-    hostCancellation: options.hostCancellation,
-    getProjectedJob: options.getProjectedJob,
-    getLatestLifecycleEvent: options.getLatestLifecycleEvent ??
-      (direct
-        ? (job) =>
-          getLatestLifecycleEvent(direct, "JOBS", queue.publishPrefix, job)
-        : undefined),
-    payloadSchema: queue.payload,
-    validatePayload: options.validatePayload,
-    resultSchema: queue.result,
-    validateResult: options.validateResult,
-    handler: options.handler,
-    instanceId: options.instanceId,
-    deferralBackoffMs: queue.backoffMs[0] ?? 1_000,
-  });
-}
-
-export async function startWorkerHostFromBinding(
+export async function startNatsWorkerHostFromBinding<TResult>(
   binding: JobsRuntimeBinding,
-  options: StartWorkerHostOptions,
+  options: StartNatsWorkerHostOptions<TResult>,
 ): Promise<{ workerCount(): number; stop(): Promise<void> }> {
   const queueTypes = options.queueTypes ??
     Object.keys(binding.jobs.queues).sort();
@@ -580,26 +498,59 @@ export async function startWorkerHostFromBinding(
 
   const workers: Array<{ stop(): Promise<void> }> = [];
   for (const queueType of queueTypes) {
-    const queue = binding.jobs.queues[queueType];
-    if (!queue) {
-      throw new Error(`Worker queue '${queueType}' is not configured`);
-    }
+    const queue = getQueueBinding(binding, queueType);
     for (
       let workerIndex = 0;
       workerIndex < queueConcurrency[queueType]!;
       workerIndex += 1
     ) {
-      const handle = await options.startWorker({
-        queueType,
-        workerIndex,
-        cancellation,
-      });
-      if (
-        handle && typeof handle === "object" && "stop" in handle &&
-        typeof handle.stop === "function"
-      ) {
-        workers.push(handle);
-      }
+      const jsm = isCustomNatsRuntimeDeps(options)
+        ? options.jsm
+        : await jetstreamManager(options.nats);
+      const js = isCustomNatsRuntimeDeps(options) ? options.js : {
+        consumers: {
+          getConsumerFromInfo(info: ConsumerInfoLike) {
+            return toWorkerConsumer(
+              jetstream(options.nats).consumers.getConsumerFromInfo(
+                info as ConsumerInfo,
+              ),
+            );
+          },
+        },
+      };
+      const info = await getConsumerInfo(jsm, binding.workStream, queue);
+      const consumer = js.consumers.getConsumerFromInfo(info);
+      const cancelSubscription = options.nats.subscribe(
+        `${queue.publishPrefix}.*.cancelled`,
+      ) as Subscription as CancelSubscriptionLike;
+      const direct = jsm.direct;
+
+      workers.push(
+        await startQueueWorkerLoop({
+          manager: options.manager,
+          consumer,
+          cancelSubscription,
+          hostCancellation: cancellation,
+          getProjectedJob: options.getProjectedJob,
+          getLatestLifecycleEvent: options.getLatestLifecycleEvent ??
+            (direct
+              ? (job) =>
+                getLatestLifecycleEvent(
+                  direct,
+                  "JOBS",
+                  queue.publishPrefix,
+                  job,
+                )
+              : undefined),
+          payloadSchema: queue.payload,
+          validatePayload: options.validatePayload,
+          resultSchema: queue.result,
+          validateResult: options.validateResult,
+          handler: options.handler,
+          instanceId: options.instanceId,
+          deferralBackoffMs: queue.backoffMs[0] ?? 1_000,
+        }),
+      );
     }
   }
 
@@ -623,43 +574,6 @@ export async function startWorkerHostFromBinding(
       }
     },
   };
-}
-
-export async function startNatsWorkerHostFromBinding<TResult>(
-  binding: JobsRuntimeBinding,
-  options: StartNatsWorkerHostOptions<TResult>,
-): Promise<{ workerCount(): number; stop(): Promise<void> }> {
-  return await startWorkerHostFromBinding(binding, {
-    instanceId: options.instanceId,
-    queueTypes: options.queueTypes,
-    queueConcurrency: options.queueConcurrency,
-    heartbeatPublisher: options.heartbeatPublisher,
-    heartbeatIntervalMs: options.heartbeatIntervalMs,
-    version: options.version,
-    nowIso: options.nowIso,
-    startWorker: async ({ queueType, cancellation }) => {
-      const common = {
-        manager: options.manager,
-        binding,
-        queueType,
-        hostCancellation: cancellation,
-        getProjectedJob: options.getProjectedJob,
-        getLatestLifecycleEvent: options.getLatestLifecycleEvent,
-        validatePayload: options.validatePayload,
-        validateResult: options.validateResult,
-        handler: options.handler,
-        instanceId: options.instanceId,
-      };
-      return await (isCustomNatsRuntimeDeps(options)
-        ? startNatsQueueWorker({
-          ...common,
-          nats: options.nats,
-          jsm: options.jsm,
-          js: options.js,
-        })
-        : startNatsQueueWorker({ ...common, nats: options.nats }));
-    },
-  });
 }
 
 async function getConsumerInfo(

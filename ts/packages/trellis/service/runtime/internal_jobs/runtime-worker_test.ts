@@ -6,9 +6,8 @@ import type { JobKeyCoordinator, JobKeyState } from "./key-coordinator.ts";
 import {
   ackActionForOutcome,
   JobsInfrastructureMissingError,
-  startNatsQueueWorker,
+  startNatsWorkerHostFromBinding,
   startQueueWorkerLoop,
-  startWorkerHostFromBinding,
 } from "./runtime-worker.ts";
 import type { Job, JobContext } from "./types.ts";
 
@@ -66,34 +65,65 @@ const keyedJobsBinding = {
   },
 };
 
-Deno.test("startWorkerHostFromBinding uses per-queue implementation concurrency", async () => {
-  const workers: number[] = [];
-  const host = await startWorkerHostFromBinding(
+Deno.test("startNatsWorkerHostFromBinding uses per-queue implementation concurrency", async () => {
+  let workers = 0;
+  const host = await startNatsWorkerHostFromBinding(
     { jobs: jobsBinding, workStream: "JOBS_WORK" },
     {
+      nats: {
+        subscribe: () => cancelSubscription(() => {}) as never,
+      },
+      jsm: {
+        consumers: { info: () => Promise.resolve({ config: {} }) },
+      },
+      js: {
+        consumers: {
+          getConsumerFromInfo: () => ({
+            consume: () => {
+              workers += 1;
+              return Promise.resolve((async function* () {})());
+            },
+          }),
+        },
+      },
       instanceId: "worker-1",
       queueConcurrency: { refresh: 3 },
-      startWorker: ({ workerIndex }) => {
-        workers.push(workerIndex);
-        return Promise.resolve({ stop: () => Promise.resolve() });
-      },
+      manager: new JobManager({ nc: { publish: () => {} }, jobs: jobsBinding }),
+      handler: () => Promise.resolve({}),
     },
   );
 
-  assertEquals(workers, [0, 1, 2]);
+  assertEquals(workers, 3);
   assertEquals(host.workerCount(), 3);
   await host.stop();
 });
 
-Deno.test("startWorkerHostFromBinding rejects invalid implementation concurrency", async () => {
+Deno.test("startNatsWorkerHostFromBinding rejects invalid implementation concurrency", async () => {
   await assertRejects(
     () =>
-      startWorkerHostFromBinding(
+      startNatsWorkerHostFromBinding(
         { jobs: jobsBinding, workStream: "JOBS_WORK" },
         {
+          nats: {
+            subscribe: () => cancelSubscription(() => {}) as never,
+          },
+          jsm: {
+            consumers: { info: () => Promise.resolve({ config: {} }) },
+          },
+          js: {
+            consumers: {
+              getConsumerFromInfo: () => {
+                throw new Error("consumer should not be built");
+              },
+            },
+          },
           instanceId: "worker-1",
           queueConcurrency: { refresh: 0 },
-          startWorker: () => Promise.resolve({ stop: () => Promise.resolve() }),
+          manager: new JobManager({
+            nc: { publish: () => {} },
+            jobs: jobsBinding,
+          }),
+          handler: () => Promise.resolve({}),
         },
       ),
     Error,
@@ -714,11 +744,14 @@ Deno.test("startQueueWorkerLoop processes keyed manual retried work", async () =
   assertEquals(workEventTypes, ["retried"]);
 });
 
-Deno.test("startNatsQueueWorker reads approved existing consumer only", async () => {
+Deno.test("startNatsWorkerHostFromBinding reads approved existing consumer only", async () => {
   const requestedConsumers: Array<{ stream: string; consumerName: string }> =
     [];
 
-  const worker = await startNatsQueueWorker({
+  const worker = await startNatsWorkerHostFromBinding({
+    jobs: jobsBinding,
+    workStream: "JOBS_WORK",
+  }, {
     nats: {
       subscribe(): ReturnType<NatsConnection["subscribe"]> {
         return cancelSubscription(() => {}) as ReturnType<
@@ -746,8 +779,8 @@ Deno.test("startNatsQueueWorker reads approved existing consumer only", async ()
       },
     },
     manager: new JobManager({ nc: { publish: () => {} }, jobs: jobsBinding }),
-    binding: { jobs: jobsBinding, workStream: "JOBS_WORK" },
-    queueType: "refresh",
+    instanceId: "worker-1",
+    queueTypes: ["refresh"],
     handler: () => Promise.resolve({}),
   });
 
@@ -774,10 +807,13 @@ function createdEvent(job: Job) {
   };
 }
 
-Deno.test("startNatsQueueWorker fails closed when approved consumer is missing", async () => {
+Deno.test("startNatsWorkerHostFromBinding fails closed when approved consumer is missing", async () => {
   await assertRejects(
     () =>
-      startNatsQueueWorker({
+      startNatsWorkerHostFromBinding({
+        jobs: jobsBinding,
+        workStream: "JOBS_WORK",
+      }, {
         nats: {
           subscribe(): ReturnType<NatsConnection["subscribe"]> {
             return cancelSubscription(() => {}) as ReturnType<
@@ -805,8 +841,8 @@ Deno.test("startNatsQueueWorker fails closed when approved consumer is missing",
           nc: { publish: () => {} },
           jobs: jobsBinding,
         }),
-        binding: { jobs: jobsBinding, workStream: "JOBS_WORK" },
-        queueType: "refresh",
+        instanceId: "worker-1",
+        queueTypes: ["refresh"],
         handler: () => Promise.resolve({}),
       }),
     JobsInfrastructureMissingError,
