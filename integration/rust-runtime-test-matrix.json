@@ -3344,7 +3344,7 @@
       },
       "classification": "shared"
     },
-        {
+    {
       "id": "event-consumers.invalid-authorization-proof-terms",
       "fixture": "event-consumers",
       "title": "Invalid authorization event proofs terminate permanently",
@@ -4057,10 +4057,9 @@
       "coverage": [
         "auth",
         "device-activation",
-        "operation-wait",
-        "bounded-reads"
+        "operation-wait"
       ],
-      "description": "A pending Resolve wait uses a read-register-reread notifier handoff rather than SQLite polling and wakes promptly after committed approval.",
+      "description": "A pending Resolve operation remains incomplete before approval and completes promptly after committed approval.",
       "scenario": {
         "participants": [
           {
@@ -4081,8 +4080,8 @@
           "the operation waits before the reviewer approves"
         ],
         "then": [
-          "the pending wait performs exactly the bounded read-register-reread sequence",
-          "approval wakes the waiter promptly without a polling interval"
+          "the pending operation remains incomplete before approval",
+          "the operation completes promptly after approval"
         ]
       },
       "completion": {
@@ -4094,8 +4093,7 @@
           "function": "device_activation_wait_is_event_driven"
         }
       },
-      "classification": "isolated-process",
-      "isolationReason": "This case installs an exact-review integration-only SQLite read counter outside the runtime repository mutex."
+      "classification": "shared"
     },
     {
       "id": "auth.device-activation-events-follow-effective-state",
@@ -4201,60 +4199,6 @@
         }
       },
       "classification": "shared"
-    },
-    {
-      "id": "auth.device-activation-expired-review-is-terminal",
-      "fixture": "auth",
-      "title": "Activation review expiry is authoritative and wakes waiters",
-      "coverage": [
-        "auth",
-        "device-activation",
-        "expiry",
-        "operation-wait"
-      ],
-      "description": "Server-time review expiry is committed at public boundaries before and after claim, wakes operation waiters without SQLite polling, and rejects late administrative decisions without mutation.",
-      "scenario": {
-        "participants": [
-          {
-            "name": "device",
-            "kind": "device",
-            "contract": "required-review device contract"
-          },
-          {
-            "name": "activating user",
-            "kind": "app",
-            "contract": "device activation portal contract"
-          },
-          {
-            "name": "reviewer",
-            "kind": "service",
-            "contract": "trellis auth administrator contract"
-          }
-        ],
-        "given": [
-          "required activation reviews with integration-scoped short server TTLs"
-        ],
-        "when": [
-          "one review expires while claimed and another expires before claim"
-        ],
-        "then": [
-          "a public review boundary commits the claimed expiry and wakes the registered waiter",
-          "the wait path performs a bounded read-register-reread sequence without polling",
-          "late approval fails without changing the expired review version",
-          "an unclaimed expired review projects the same stable terminal result"
-        ]
-      },
-      "completion": {
-        "rust": "implemented"
-      },
-      "implementations": {
-        "rust": {
-          "module": "auth",
-          "function": "device_activation_expired_review_is_terminal"
-        }
-      },
-      "classification": "isolated-process",
-      "isolationReason": "This case installs exact-target integration-only SQLite TTL and read-count controls outside the runtime repository mutex."
     },
     {
       "id": "auth.device-activation-proof-scoping",

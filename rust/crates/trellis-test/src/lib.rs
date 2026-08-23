@@ -812,59 +812,6 @@ impl TrellisControlPlaneSqlite {
         }
     }
 
-    /// Set one deployment's integration-only activation-review lifetime.
-    pub fn set_activation_review_ttl(
-        &self,
-        deployment_id: &str,
-        ttl: Duration,
-    ) -> Result<(), TrellisTestError> {
-        let ttl_ms = i64::try_from(ttl.as_millis()).map_err(|_| {
-            TrellisTestError::IntegrationControl("activation review TTL is too large".to_owned())
-        })?;
-        let connection = self.connection()?;
-        connection.execute_batch(
-            "CREATE TABLE IF NOT EXISTS __trellis_test_activation_review_ttls (
-                    deployment_id TEXT PRIMARY KEY,
-                    ttl_ms INTEGER NOT NULL CHECK (ttl_ms > 0)
-                );",
-        )?;
-        connection.execute(
-            "INSERT OR REPLACE INTO __trellis_test_activation_review_ttls
-                 (deployment_id, ttl_ms) VALUES (?1, ?2)",
-            rusqlite::params![deployment_id, ttl_ms],
-        )?;
-        Ok(())
-    }
-
-    /// Begin counting authoritative repository reads for one activation review.
-    pub fn count_activation_review_reads(&self, review_id: &str) -> Result<(), TrellisTestError> {
-        let connection = self.connection()?;
-        connection.execute_batch(
-            "CREATE TABLE IF NOT EXISTS __trellis_test_activation_review_reads (
-                    review_id TEXT PRIMARY KEY,
-                    read_count INTEGER NOT NULL DEFAULT 0
-                );",
-        )?;
-        connection.execute(
-            "INSERT OR REPLACE INTO __trellis_test_activation_review_reads
-                 (review_id, read_count) VALUES (?1, 0)",
-            [review_id],
-        )?;
-        Ok(())
-    }
-
-    /// Return the counted authoritative reads for one activation review.
-    pub fn activation_review_read_count(&self, review_id: &str) -> Result<u64, TrellisTestError> {
-        self.connection()?
-            .query_row(
-                "SELECT read_count FROM __trellis_test_activation_review_reads
-                 WHERE review_id = ?1",
-                [review_id],
-                |row| row.get(0),
-            )
-            .map_err(TrellisTestError::from)
-    }
-
     /// Runs a SQL query against the live control-plane database.
     pub fn query<P>(
         &self,

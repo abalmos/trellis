@@ -22,39 +22,6 @@ use super::SqliteAuthorizationStore;
 
 #[async_trait]
 impl DeploymentRepository for SqliteAuthorizationStore {
-    #[cfg(feature = "integration-test-hooks")]
-    async fn activation_review_test_ttl_ms(
-        &self,
-        deployment_id: &str,
-    ) -> Result<Option<i64>, AuthorizationStateError> {
-        let deployment_id = deployment_id.to_owned();
-        self.run_read(move |connection| {
-            let exists = connection
-                .query_row(
-                    "SELECT EXISTS(SELECT 1 FROM sqlite_master
-                     WHERE type = 'table'
-                       AND name = '__trellis_test_activation_review_ttls')",
-                    [],
-                    |row| row.get::<_, bool>(0),
-                )
-                .map_err(sql_error)?;
-            if !exists {
-                return Ok(None);
-            }
-            connection
-                .query_row(
-                    "SELECT ttl_ms
-                     FROM __trellis_test_activation_review_ttls
-                     WHERE deployment_id = ?1",
-                    params![deployment_id],
-                    |row| row.get(0),
-                )
-                .optional()
-                .map_err(sql_error)
-        })
-        .await
-    }
-
     async fn create_deployment_profile(
         &self,
         command: DeploymentProfileCreation,

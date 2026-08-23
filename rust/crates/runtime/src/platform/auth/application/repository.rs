@@ -694,13 +694,6 @@ pub(crate) trait SessionRepository: Send + Sync {
 /// Persistence contract for deployment profiles and deployment evidence.
 #[async_trait]
 pub(crate) trait DeploymentRepository: Send + Sync {
-    /// Return an exact deployment-scoped activation-review TTL test override.
-    #[cfg(feature = "integration-test-hooks")]
-    async fn activation_review_test_ttl_ms(
-        &self,
-        deployment_id: &str,
-    ) -> Result<Option<i64>, AuthorizationStateError>;
-
     /// Create a deployment principal and profile atomically.
     async fn create_deployment_profile(
         &self,

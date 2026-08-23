@@ -21,6 +21,176 @@ use crate::platform::auth::{
 };
 use trellis_protocol::ParticipantKindV1;
 
+#[tokio::test]
+async fn sqlite_activation_review_expires_after_domain_ttl(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let store = SqliteAuthorizationStore::open_in_memory()?;
+    let fixture = participant_fixture_for(ParticipantKindV1::Device, "expiry.device")?;
+    store
+        .put_participant_binding(fixture.binding.clone())
+        .await?;
+    store
+        .put_deployment_authority(
+            DeploymentAuthorityRecord {
+                authority_id: "dpa_expiry".to_owned(),
+                deployment_id: "dep_expiry".to_owned(),
+                participant_id: fixture.binding.participant_id.clone(),
+                participant_kind: ParticipantKindV1::Device,
+                participant_artifact_digest: fixture.binding.artifact_digest.clone(),
+                accepted_needs_digest: fixture.binding.needs_digest.clone(),
+                desired_grant_set: fixture.all_grants,
+                desired_capabilities: Vec::new(),
+                state: AuthorityState::Accepted,
+                version: 1,
+                created_at: NOW,
+                updated_at: NOW,
+                expires_at: None,
+                decision: None,
+            },
+            None,
+        )
+        .await?;
+    store
+        .put_deployment_evidence(DeploymentRecord {
+            deployment_id: "dep_expiry".to_owned(),
+            participant_id: fixture.binding.participant_id,
+            participant_kind: ParticipantKindV1::Device,
+            active: true,
+            expires_at: None,
+        })
+        .await?;
+    store
+        .provision_device(DeviceProvisioning {
+            principal: PrincipalRecord {
+                principal_id: "dev_expiry".to_owned(),
+                kind: PrincipalKind::Device,
+                state: PrincipalState::Active,
+                created_at: NOW,
+                updated_at: NOW,
+                version: 1,
+                disabled_at: None,
+                revoked_at: None,
+            },
+            instance: RuntimeInstanceRecord {
+                instance_id: "inst_expiry".to_owned(),
+                deployment_id: "dep_expiry".to_owned(),
+                principal_id: "dev_expiry".to_owned(),
+                state: RuntimeInstanceState::Active,
+                created_at: NOW,
+                updated_at: NOW,
+                version: 1,
+            },
+            device: DeviceRecord {
+                principal_id: "dev_expiry".to_owned(),
+                deployment_id: "dep_expiry".to_owned(),
+                state: DeviceState::Pending,
+                created_at: NOW,
+                updated_at: NOW,
+                version: 1,
+            },
+            identity: None,
+            secret: DeviceProvisioningSecretRecord {
+                secret_id: "dps_expiry".to_owned(),
+                instance_id: "inst_expiry".to_owned(),
+                secret_hash: super::fixtures::digest(90),
+                state: ProvisioningSecretState::Pending,
+                created_at: NOW,
+                expires_at: NOW + crate::platform::auth::DEVICE_ACTIVATION_REVIEW_TTL_MS,
+                consumed_at: None,
+                version: 1,
+            },
+            idempotency: IdempotencyResultRecord {
+                scope_key: super::fixtures::digest(91),
+                purpose: "device.provision.expiry".to_owned(),
+                signer_id: "usr_admin".to_owned(),
+                request_id: "device-provision-expiry".to_owned(),
+                request_digest: super::fixtures::digest(92),
+                result: Value::Null,
+                created_at: NOW,
+                expires_at: NOW + crate::platform::auth::DEVICE_ACTIVATION_REVIEW_TTL_MS,
+            },
+            actions: Vec::new(),
+        })
+        .await?;
+    let expires_at = NOW + crate::platform::auth::DEVICE_ACTIVATION_REVIEW_TTL_MS;
+    store
+        .create_activation_review(ActivationReviewCreation {
+            review: DeviceActivationReviewRecord {
+                review_id: "dar_expiry".to_owned(),
+                principal_id: "dev_expiry".to_owned(),
+                deployment_id: "dep_expiry".to_owned(),
+                instance_id: "inst_expiry".to_owned(),
+                request_digest: super::fixtures::digest(93),
+                payload: Value::Null,
+                state: DeviceActivationReviewState::Pending,
+                requested_at: NOW,
+                expires_at,
+                activated_by_user_principal_id: None,
+                decided_at: None,
+                decided_by: None,
+                reason: None,
+                version: 1,
+            },
+            idempotency: IdempotencyResultRecord {
+                scope_key: super::fixtures::digest(94),
+                purpose: "device.review.expiry".to_owned(),
+                signer_id: "usr_admin".to_owned(),
+                request_id: "device-review-expiry".to_owned(),
+                request_digest: super::fixtures::digest(95),
+                result: Value::Null,
+                created_at: NOW,
+                expires_at,
+            },
+            actions: Vec::new(),
+        })
+        .await?;
+
+    let expired = store.expire_due_activation_reviews(expires_at + 1).await?;
+
+    assert_eq!(expired.len(), 1);
+    assert_eq!(expired[0].state, DeviceActivationReviewState::Expired);
+    assert_eq!(expired[0].version, 2);
+    let expired_review = store
+        .get_activation_review("dar_expiry")
+        .await?
+        .ok_or("missing expired review")?;
+    assert_eq!(expired_review.state, DeviceActivationReviewState::Expired,);
+    assert_eq!(
+        store
+            .decide_activation_review(ActivationReviewDecision {
+                review_id: "dar_expiry".to_owned(),
+                expected_version: expired_review.version,
+                state: DeviceActivationReviewState::Approved,
+                decided_at: expires_at + 2,
+                decided_by: "usr_admin".to_owned(),
+                reason: None,
+                delegation: None,
+                activate_device: false,
+                idempotency: IdempotencyResultRecord {
+                    scope_key: super::fixtures::digest(96),
+                    purpose: "device.review.decide-expired".to_owned(),
+                    signer_id: "usr_admin".to_owned(),
+                    request_id: "device-review-decide-expired".to_owned(),
+                    request_digest: super::fixtures::digest(97),
+                    result: Value::Null,
+                    created_at: expires_at + 2,
+                    expires_at: expires_at + 1_000,
+                },
+                actions: Vec::new(),
+            })
+            .await,
+        Err(AuthorizationStateError::StorageConflict),
+    );
+    assert_eq!(
+        store
+            .get_activation_review("dar_expiry")
+            .await?
+            .ok_or("missing expired review after decision conflict")?,
+        expired_review,
+    );
+    Ok(())
+}
+
 pub(super) async fn exercise_deployed_principals(
     store: SqliteAuthorizationStore,
 ) -> Result<(), Box<dyn std::error::Error>> {

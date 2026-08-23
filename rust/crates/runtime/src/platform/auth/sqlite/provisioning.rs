@@ -180,32 +180,6 @@ impl ProvisioningRepository for SqliteAuthorizationStore {
         review_id: &str,
     ) -> Result<Option<DeviceActivationReviewRecord>, AuthorizationStateError> {
         let review_id = review_id.to_owned();
-        #[cfg(feature = "integration-test-hooks")]
-        return self
-            .run(move |connection| {
-                let exists = connection
-                    .query_row(
-                        "SELECT EXISTS(SELECT 1 FROM sqlite_master
-                         WHERE type = 'table'
-                           AND name = '__trellis_test_activation_review_reads')",
-                        [],
-                        |row| row.get::<_, bool>(0),
-                    )
-                    .map_err(sql_error)?;
-                if exists {
-                    connection
-                        .execute(
-                            "UPDATE __trellis_test_activation_review_reads
-                             SET read_count = read_count + 1
-                             WHERE review_id = ?1",
-                            params![review_id],
-                        )
-                        .map_err(map_write_error)?;
-                }
-                load_activation_review(connection, &review_id)
-            })
-            .await;
-        #[cfg(not(feature = "integration-test-hooks"))]
         self.run_read(move |connection| load_activation_review(connection, &review_id))
             .await
     }

@@ -3,8 +3,6 @@ use super::*;
 use crate::platform::auth::{DeviceActivationReviewState, DeviceReviewMode};
 use ulid::Ulid;
 
-const DEVICE_ACTIVATION_REVIEW_TTL_MS: i64 = 15 * 60_000;
-
 fn device_activation_url(
     portal: &LoginPortalRecord,
     public_origin: &str,
@@ -483,17 +481,8 @@ where
                     "invalid_activation_confirmation_code",
                 ));
             }
-            #[cfg(feature = "integration-test-hooks")]
-            let review_ttl_ms = state
-                .service
-                .repository()
-                .activation_review_test_ttl_ms(&input.deployment_id)
-                .await?
-                .unwrap_or(DEVICE_ACTIVATION_REVIEW_TTL_MS);
-            #[cfg(not(feature = "integration-test-hooks"))]
-            let review_ttl_ms = DEVICE_ACTIVATION_REVIEW_TTL_MS;
             let expires_at = now
-                .checked_add(review_ttl_ms)
+                .checked_add(crate::platform::auth::DEVICE_ACTIVATION_REVIEW_TTL_MS)
                 .ok_or_else(|| HttpError::internal("device_activation_expiry_overflow"))?;
             let profile = state
                 .service
