@@ -89,6 +89,9 @@ jobs:
 
   wasm:
     name: Protocol WASM
+    # Both jobs share Cargo registry state on the self-hosted runner. Serialize
+    # their rust-cache lifecycle so one job cannot prune sources under the other.
+    needs: prepare
     runs-on: [self-hosted, Linux, X64]
     steps:
       - name: Check out repository
