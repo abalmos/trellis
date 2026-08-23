@@ -94,27 +94,29 @@ pub(crate) fn signed_headers(
 }
 
 /// Connection options for a Trellis service that presents native artifacts during bootstrap.
-pub(crate) struct ServiceConnectWithContractOptions<'a> {
-    pub(crate) trellis_url: &'a str,
-    pub(crate) participant_id: &'a str,
-    pub(crate) participant_digest: &'a str,
-    pub(crate) participant_json: &'a str,
-    pub(crate) api_json: &'a str,
-    pub(crate) api_digest: &'a str,
-    pub(crate) referenced_api_artifacts: &'a [(&'a str, &'a str)],
-    pub(crate) deployment_id: &'a str,
-    pub(crate) instance_id: &'a str,
-    pub(crate) provisioned_identity_seed_base64url: &'a str,
-    pub(crate) participant_needs_digest: &'a str,
-    pub(crate) session_key_seed_base64url: &'a str,
-    pub(crate) timeout_ms: u64,
-    pub(crate) retry_delay_ms: u64,
+#[cfg_attr(feature = "test-support", doc(hidden))]
+pub struct ServiceConnectWithContractOptions<'a> {
+    pub trellis_url: &'a str,
+    pub participant_id: &'a str,
+    pub participant_digest: &'a str,
+    pub participant_json: &'a str,
+    pub api_json: &'a str,
+    pub api_digest: &'a str,
+    pub referenced_api_artifacts: &'a [(&'a str, &'a str)],
+    pub deployment_id: &'a str,
+    pub instance_id: &'a str,
+    pub provisioned_identity_seed_base64url: &'a str,
+    pub participant_needs_digest: &'a str,
+    pub session_key_seed_base64url: &'a str,
+    pub timeout_ms: u64,
+    pub retry_delay_ms: u64,
     /// Optional maximum authority-pending wait time. `None` waits until authority is ready.
-    pub(crate) authority_pending_timeout_ms: Option<u64>,
-    pub(crate) authorization_context_store: Arc<dyn AuthorizationContextStore>,
+    pub authority_pending_timeout_ms: Option<u64>,
+    pub authorization_context_store: Arc<dyn AuthorizationContextStore>,
 }
 
-struct DeviceContractEvidence<'a> {
+#[doc(hidden)]
+pub struct DeviceContractEvidence<'a> {
     participant_id: &'a str,
     participant_digest: &'a str,
     participant_needs_digest: &'a str,
@@ -122,6 +124,30 @@ struct DeviceContractEvidence<'a> {
     api_json: &'a str,
     api_digest: &'a str,
     referenced_api_artifacts: Vec<(&'a str, &'a str)>,
+}
+
+#[cfg(feature = "test-support")]
+impl<'a> DeviceContractEvidence<'a> {
+    /// Build dynamic contract evidence for Trellis integration fixtures.
+    pub fn for_test(
+        participant_id: &'a str,
+        participant_digest: &'a str,
+        participant_needs_digest: &'a str,
+        participant_json: &'a str,
+        api_json: &'a str,
+        api_digest: &'a str,
+        referenced_api_artifacts: &[(&'a str, &'a str)],
+    ) -> Self {
+        Self {
+            participant_id,
+            participant_digest,
+            participant_needs_digest,
+            participant_json,
+            api_json,
+            api_digest,
+            referenced_api_artifacts: referenced_api_artifacts.to_vec(),
+        }
+    }
 }
 
 /// Runtime and device-identity options for an activated device principal.
@@ -246,39 +272,23 @@ impl<C> DeviceConnectOptions<'_, C> {
 }
 
 #[cfg(feature = "test-support")]
-#[allow(clippy::too_many_arguments)]
 pub(crate) fn test_device_connect_options<'a>(
     trellis_url: &'a str,
     deployment_id: &'a str,
     instance_id: &'a str,
-    participant_id: &'a str,
-    participant_digest: &'a str,
-    participant_needs_digest: &'a str,
-    participant_json: &'a str,
-    api_json: &'a str,
-    api_digest: &'a str,
-    referenced_api_artifacts: &[(&'a str, &'a str)],
+    contract: DeviceContractEvidence<'a>,
     public_identity_key: &'a str,
     identity_seed_base64url: &'a str,
-    timeout_ms: u64,
     authorization_context_store: Arc<dyn AuthorizationContextStore>,
 ) -> DeviceConnectOptions<'a, crate::generated::DynamicDeviceContract> {
     DeviceConnectOptions {
         trellis_url,
         deployment_id,
         instance_id,
-        contract: DeviceContractEvidence {
-            participant_id,
-            participant_digest,
-            participant_needs_digest,
-            participant_json,
-            api_json,
-            api_digest,
-            referenced_api_artifacts: referenced_api_artifacts.to_vec(),
-        },
+        contract,
         public_identity_key,
         identity_seed_base64url,
-        timeout_ms,
+        timeout_ms: crate::service::DEFAULT_TIMEOUT_MS,
         authorization_context_store,
         activation_bootstrap: None,
         contract_type: std::marker::PhantomData,

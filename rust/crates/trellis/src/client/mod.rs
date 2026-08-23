@@ -43,6 +43,7 @@ pub(crate) use connection::fetch_device_activation;
 #[cfg(feature = "test-support")]
 pub(crate) use connection::test_device_connect_options;
 pub(crate) use connection::ServiceBootstrapResponse;
+#[cfg(not(feature = "test-support"))]
 pub(crate) use connection::ServiceConnectWithContractOptions;
 pub(crate) use connection::TrellisClient;
 #[cfg(feature = "test-support")]
@@ -53,6 +54,9 @@ pub use connection::{
     DeviceConnectOptions, EventMessage, EventReplayPolicy, EventSubscribeOptions,
     EventSubscriptionMode, UserConnectOptions,
 };
+#[cfg(feature = "test-support")]
+#[doc(hidden)]
+pub use connection::{DeviceContractEvidence, ServiceConnectWithContractOptions};
 pub use descriptor::{EventDescriptor, FeedDescriptor, RpcDescriptor};
 pub use error::{
     AuthErrorPayload, AuthenticationError, CallError, DeclaredError, DeclaredErrorPayload,

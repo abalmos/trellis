@@ -361,22 +361,32 @@ pub async fn connect_service_runtime<C>(
 ) -> Result<trellis_rs::service::ConnectedServiceRuntime<C>, trellis_rs::service::ServiceRuntimeError>
 {
     let session_seed = random_session_seed();
+    let referenced_api_artifacts = key
+        .referenced_api_artifacts
+        .iter()
+        .map(|(json, digest)| (json.as_str(), digest.as_str()))
+        .collect::<Vec<_>>();
     trellis_rs::generated::test_connect_service_runtime(
-        trellis_url,
-        &key.participant_id,
-        &key.participant_digest,
-        &key.participant_json,
-        &key.api_json,
-        &key.api_digest,
-        &key.referenced_api_artifacts
-            .iter()
-            .map(|(json, digest)| (json.as_str(), digest.as_str()))
-            .collect::<Vec<_>>(),
-        &key.deployment_id,
-        &key.instance_id,
-        &key.identity_seed,
-        &key.participant_needs_digest,
-        &session_seed,
+        trellis_rs::client::ServiceConnectWithContractOptions {
+            trellis_url,
+            participant_id: &key.participant_id,
+            participant_digest: &key.participant_digest,
+            participant_json: &key.participant_json,
+            api_json: &key.api_json,
+            api_digest: &key.api_digest,
+            referenced_api_artifacts: &referenced_api_artifacts,
+            deployment_id: &key.deployment_id,
+            instance_id: &key.instance_id,
+            provisioned_identity_seed_base64url: &key.identity_seed,
+            participant_needs_digest: &key.participant_needs_digest,
+            session_key_seed_base64url: &session_seed,
+            timeout_ms: 30_000,
+            retry_delay_ms: trellis_rs::service::DEFAULT_RETRY_DELAY_MS,
+            authority_pending_timeout_ms: trellis_rs::service::DEFAULT_AUTHORITY_PENDING_TIMEOUT_MS,
+            authorization_context_store: std::sync::Arc::new(
+                trellis_rs::client::MemoryAuthorizationContextStore::default(),
+            ),
+        },
     )
     .await
 }
@@ -390,10 +400,7 @@ pub fn device_connect_options<'a>(
     identity: &'a trellis_rs::auth::DeviceIdentity,
     authorization_context_store: std::sync::Arc<dyn trellis_rs::client::AuthorizationContextStore>,
 ) -> trellis_rs::client::DeviceConnectOptions<'a, trellis_rs::generated::DynamicDeviceContract> {
-    trellis_rs::generated::test_device_connect_options(
-        trellis_url,
-        deployment_id,
-        instance_id,
+    let contract = trellis_rs::client::DeviceContractEvidence::for_test(
         &approval.participant_id,
         &approval.participant_digest,
         &approval.participant_needs_digest,
@@ -405,9 +412,14 @@ pub fn device_connect_options<'a>(
             .iter()
             .map(|(json, digest)| (json.as_str(), digest.as_str()))
             .collect::<Vec<_>>(),
+    );
+    trellis_rs::generated::test_device_connect_options(
+        trellis_url,
+        deployment_id,
+        instance_id,
+        contract,
         &identity.public_identity_key,
         &identity.identity_seed_base64url,
-        trellis_rs::service::DEFAULT_TIMEOUT_MS,
         authorization_context_store,
     )
 }

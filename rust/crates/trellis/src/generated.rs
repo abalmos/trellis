@@ -191,37 +191,22 @@ pub struct DynamicDeviceContract;
 /// Build dynamic-evidence device options for Trellis integration fixtures.
 #[cfg(feature = "test-support")]
 #[doc(hidden)]
-#[allow(clippy::too_many_arguments)]
 pub fn test_device_connect_options<'a>(
     trellis_url: &'a str,
     deployment_id: &'a str,
     instance_id: &'a str,
-    participant_id: &'a str,
-    participant_digest: &'a str,
-    participant_needs_digest: &'a str,
-    participant_json: &'a str,
-    api_json: &'a str,
-    api_digest: &'a str,
-    referenced_api_artifacts: &[(&'a str, &'a str)],
+    contract: crate::client::DeviceContractEvidence<'a>,
     public_identity_key: &'a str,
     identity_seed_base64url: &'a str,
-    timeout_ms: u64,
     authorization_context_store: Arc<dyn AuthorizationContextStore>,
 ) -> DeviceConnectOptions<'a, DynamicDeviceContract> {
     crate::client::test_device_connect_options(
         trellis_url,
         deployment_id,
         instance_id,
-        participant_id,
-        participant_digest,
-        participant_needs_digest,
-        participant_json,
-        api_json,
-        api_digest,
-        referenced_api_artifacts,
+        contract,
         public_identity_key,
         identity_seed_base64url,
-        timeout_ms,
         authorization_context_store,
     )
 }
@@ -284,43 +269,10 @@ impl crate::client::OperationTransport for Caller {
 /// Connect an ad hoc generated service runtime for Trellis integration tests.
 #[cfg(feature = "test-support")]
 #[doc(hidden)]
-#[allow(clippy::too_many_arguments)]
 pub async fn test_connect_service_runtime<C>(
-    trellis_url: &str,
-    participant_id: &str,
-    participant_digest: &str,
-    participant_json: &str,
-    api_json: &str,
-    api_digest: &str,
-    referenced_api_artifacts: &[(&str, &str)],
-    deployment_id: &str,
-    instance_id: &str,
-    identity_seed: &str,
-    participant_needs_digest: &str,
-    session_seed: &str,
+    options: crate::client::ServiceConnectWithContractOptions<'_>,
 ) -> Result<crate::service::ConnectedServiceRuntime<C>, crate::service::ServiceRuntimeError> {
-    let client = crate::client::TrellisClient::connect_service_with_contract(
-        crate::client::ServiceConnectWithContractOptions {
-            trellis_url,
-            participant_id,
-            participant_digest,
-            participant_json,
-            api_json,
-            api_digest,
-            referenced_api_artifacts,
-            deployment_id,
-            instance_id,
-            provisioned_identity_seed_base64url: identity_seed,
-            participant_needs_digest,
-            session_key_seed_base64url: session_seed,
-            timeout_ms: 30_000,
-            retry_delay_ms: crate::service::DEFAULT_RETRY_DELAY_MS,
-            authority_pending_timeout_ms: crate::service::DEFAULT_AUTHORITY_PENDING_TIMEOUT_MS,
-            authorization_context_store: Arc::new(
-                crate::client::MemoryAuthorizationContextStore::default(),
-            ),
-        },
-    )
-    .await?;
+    let participant_id = options.participant_id;
+    let client = crate::client::TrellisClient::connect_service_with_contract(options).await?;
     crate::service::ConnectedServiceRuntime::from_connected_client(participant_id, Arc::new(client))
 }
