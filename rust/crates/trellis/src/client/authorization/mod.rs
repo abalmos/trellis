@@ -11,6 +11,7 @@ mod registry;
 mod types;
 
 pub use core::{
+    AuthorizationEventVerificationInput, AuthorizationRequestVerificationInput,
     AuthorizationVerificationCore, AuthorizationVerificationError, VerifiedAuthorizationEvent,
     VerifiedAuthorizationRequest, VerifiedCaller,
 };

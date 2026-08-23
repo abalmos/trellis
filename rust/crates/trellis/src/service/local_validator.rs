@@ -15,7 +15,10 @@ use trellis_protocol::{
     ApiSurfaceKindV1, PermissionActionV1, PermissionAtomV1, PermissionTargetV1, ProtocolError,
 };
 
-use crate::client::{AuthorizationProviderCache, AuthorizationVerificationCore};
+use crate::client::{
+    AuthorizationEventVerificationInput, AuthorizationProviderCache,
+    AuthorizationRequestVerificationInput, AuthorizationVerificationCore,
+};
 use crate::service::{
     RequestContext, RequestValidation, RequestValidator, RoutePermission, ServerError,
 };
@@ -180,26 +183,29 @@ impl LocalAuthVerifier {
             }
         };
         let required_permissions = permission.as_slice();
-        let verified = match self.verification.verify_request(
-            &verified,
-            &session_key,
-            &authorization_context,
-            subject,
-            payload,
-            iat,
-            &request_id,
-            Some(&reply),
-            &proof,
-            &policy,
-            required_permissions,
-            &required_capabilities,
-        ) {
-            Ok(verified) => verified,
-            Err(error) => {
-                tracing::debug!(subject, %error, "local request proof rejected");
-                return Ok(RequestValidation::denied());
-            }
-        };
+        let verified =
+            match self
+                .verification
+                .verify_request(AuthorizationRequestVerificationInput {
+                    context: &verified,
+                    session_key: &session_key,
+                    context_digest: &authorization_context,
+                    subject,
+                    payload,
+                    iat,
+                    request_id: &request_id,
+                    reply_subject: Some(&reply),
+                    proof: &proof,
+                    policy: &policy,
+                    required_permissions,
+                    required_capabilities: &required_capabilities,
+                }) {
+                Ok(verified) => verified,
+                Err(error) => {
+                    tracing::debug!(subject, %error, "local request proof rejected");
+                    return Ok(RequestValidation::denied());
+                }
+            };
         let caller = verified.caller().clone();
         Ok(RequestValidation {
             allowed: true,
@@ -307,20 +313,20 @@ impl LocalAuthVerifier {
         };
         let verified_event = self
             .verification
-            .verify_event(
-                &context,
-                &session_key,
-                &authorization_context,
+            .verify_event(AuthorizationEventVerificationInput {
+                context: &context,
+                session_key: &session_key,
+                context_digest: &authorization_context,
                 subject,
                 payload,
-                &event_id,
-                &event_time,
-                &proof,
-                &policy,
-                &[permission],
+                event_id: &event_id,
+                event_time: &event_time,
+                proof: &proof,
+                policy: &policy,
+                required_permissions: &[permission],
                 required_capabilities,
                 revoked_at,
-            )
+            })
             .map_err(|error| {
                 tracing::debug!(subject, %error, "local event proof rejected");
                 EventVerificationFailure::rejected(format!("invalid event proof: {error}"))

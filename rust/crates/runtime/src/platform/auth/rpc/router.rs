@@ -37,16 +37,18 @@ pub(super) async fn dispatch(
     let verified = processor
         .verifier
         .verify_request(
-            subject,
-            &message.payload,
-            &session_key,
-            &proof,
-            &authorization_context,
-            iat,
-            &request_id,
-            message.reply.as_deref(),
-            &required_permission,
-            &[],
+            super::super::verifier::RuntimeAuthorizationRequestVerificationInput {
+                subject,
+                payload: &message.payload,
+                session_key: &session_key,
+                proof: &proof,
+                authorization_context: &authorization_context,
+                iat,
+                request_id: &request_id,
+                reply: message.reply.as_deref(),
+                required_permission: &required_permission,
+                required_capabilities: &[],
+            },
         )
         .await?;
     let validated = ValidatedRequest {

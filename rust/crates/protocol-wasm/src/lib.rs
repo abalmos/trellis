@@ -13,7 +13,8 @@ use trellis_protocol::{
     verify_authorization_event as verify_authorization_event_protocol,
     verify_authorization_request as verify_authorization_request_protocol,
     verify_issuer_manifest_v1, verify_session_proof_v1, AuthorizationEventProof,
-    AuthorizationEventPublisher, AuthorizationRequestProof, AuthorizationTrustRootV1,
+    AuthorizationEventPublisher, AuthorizationEventVerificationInputV1, AuthorizationRequestProof,
+    AuthorizationRequestVerificationInputV1, AuthorizationTrustRootV1,
     AuthorizationVerificationPolicyV1, PermissionAtomV1, ProtocolError, SessionProofInputV1,
     SessionProofPolicyV1, SessionProofV1, VerifiedAuthorizationContextV1,
 };
@@ -544,21 +545,22 @@ fn request_result(input: WireAuthorizationRequestV1) -> String {
         Ok(proof) => proof,
         Err(error) => return protocol_error_result(&error),
     };
-    let verified = match verify_authorization_request_protocol(
-        &context,
-        &input.subject,
-        input.reply.0.as_deref(),
-        &input.payload,
-        input.iat,
-        &input.request_id,
-        &proof,
-        &policy,
-        &input.required_permissions,
-        &input.required_capabilities,
-    ) {
-        Ok(verified) => verified,
-        Err(error) => return protocol_error_result(&error),
-    };
+    let verified =
+        match verify_authorization_request_protocol(AuthorizationRequestVerificationInputV1 {
+            context: &context,
+            subject: &input.subject,
+            reply_subject: input.reply.0.as_deref(),
+            raw_payload: &input.payload,
+            iat: input.iat,
+            request_id: &input.request_id,
+            proof: &proof,
+            policy: &policy,
+            required_permissions: &input.required_permissions,
+            required_capabilities: &input.required_capabilities,
+        }) {
+            Ok(verified) => verified,
+            Err(error) => return protocol_error_result(&error),
+        };
     let projection = match verified_context_projection(verified.context()) {
         Ok(projection) => projection,
         Err(error) => return protocol_error_result(&error),
@@ -591,21 +593,22 @@ fn event_result(input: WireAuthorizationEventV1) -> String {
         Ok(proof) => proof,
         Err(error) => return protocol_error_result(&error),
     };
-    let verified = match verify_authorization_event_protocol(
-        &context,
-        &input.subject,
-        &input.payload,
-        &input.event_id,
-        &input.event_time,
-        &proof,
-        &policy,
-        &input.required_permissions,
-        &input.required_capabilities,
-        input.revoked_at,
-    ) {
-        Ok(verified) => verified,
-        Err(error) => return protocol_error_result(&error),
-    };
+    let verified =
+        match verify_authorization_event_protocol(AuthorizationEventVerificationInputV1 {
+            context: &context,
+            subject: &input.subject,
+            raw_payload: &input.payload,
+            event_id: &input.event_id,
+            event_time: &input.event_time,
+            proof: &proof,
+            policy: &policy,
+            required_permissions: &input.required_permissions,
+            required_capabilities: &input.required_capabilities,
+            revoked_at: input.revoked_at,
+        }) {
+            Ok(verified) => verified,
+            Err(error) => return protocol_error_result(&error),
+        };
     let mut projection = match verified_context_projection(verified.context()) {
         Ok(projection) => projection,
         Err(error) => return protocol_error_result(&error),

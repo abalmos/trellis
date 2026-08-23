@@ -1,8 +1,9 @@
 use trellis_protocol::{
     verify_authorization_event, verify_authorization_request, AuthorizationEventProof,
-    AuthorizationEventPublisher, AuthorizationRequestProof, AuthorizationVerificationPolicyV1,
-    PermissionAtomV1, ProtocolError, VerifiedAuthorizationContextV1,
-    VerifiedAuthorizationEventProof, VerifiedAuthorizationRequestProof,
+    AuthorizationEventPublisher, AuthorizationEventVerificationInputV1, AuthorizationRequestProof,
+    AuthorizationRequestVerificationInputV1, AuthorizationVerificationPolicyV1, PermissionAtomV1,
+    ProtocolError, VerifiedAuthorizationContextV1, VerifiedAuthorizationEventProof,
+    VerifiedAuthorizationRequestProof,
 };
 
 /// Typed caller projection produced after a local authorization proof verifies.
@@ -91,6 +92,64 @@ impl VerifiedAuthorizationEvent {
 #[derive(Clone, Debug, Default)]
 pub struct AuthorizationVerificationCore {}
 
+/// Borrowed transport and authority inputs for shared request verification.
+#[derive(Clone, Copy, Debug)]
+pub struct AuthorizationRequestVerificationInput<'a> {
+    /// Resolved and cryptographically verified authorization context.
+    pub context: &'a VerifiedAuthorizationContextV1,
+    /// Session key presented by the transport.
+    pub session_key: &'a str,
+    /// Context digest presented by the transport.
+    pub context_digest: &'a str,
+    /// Exact routed subject.
+    pub subject: &'a str,
+    /// Exact received payload bytes.
+    pub payload: &'a [u8],
+    /// Signed proof issue time.
+    pub iat: i64,
+    /// Signed request identifier.
+    pub request_id: &'a str,
+    /// Actual reply subject.
+    pub reply_subject: Option<&'a str>,
+    /// Encoded request proof.
+    pub proof: &'a str,
+    /// Verification policy.
+    pub policy: &'a AuthorizationVerificationPolicyV1,
+    /// Required exact permissions.
+    pub required_permissions: &'a [PermissionAtomV1],
+    /// Required platform capabilities.
+    pub required_capabilities: &'a [String],
+}
+
+/// Borrowed transport and authority inputs for shared event verification.
+#[derive(Clone, Copy, Debug)]
+pub struct AuthorizationEventVerificationInput<'a> {
+    /// Resolved and cryptographically verified authorization context.
+    pub context: &'a VerifiedAuthorizationContextV1,
+    /// Session key presented by the transport.
+    pub session_key: &'a str,
+    /// Context digest presented by the transport.
+    pub context_digest: &'a str,
+    /// Exact published subject.
+    pub subject: &'a str,
+    /// Exact received payload bytes.
+    pub payload: &'a [u8],
+    /// Signed event identifier.
+    pub event_id: &'a str,
+    /// Signed event time.
+    pub event_time: &'a str,
+    /// Encoded event proof.
+    pub proof: &'a str,
+    /// Verification policy.
+    pub policy: &'a AuthorizationVerificationPolicyV1,
+    /// Required exact permissions.
+    pub required_permissions: &'a [PermissionAtomV1],
+    /// Required platform capabilities.
+    pub required_capabilities: &'a [String],
+    /// Context revocation time, when present.
+    pub revoked_at: Option<i64>,
+}
+
 impl AuthorizationVerificationCore {
     /// Create an empty local verification core.
     pub fn new() -> Self {
@@ -98,36 +157,38 @@ impl AuthorizationVerificationCore {
     }
 
     /// Verify one context-bound request proof.
-    #[allow(clippy::too_many_arguments)]
     pub fn verify_request(
         &self,
-        context: &VerifiedAuthorizationContextV1,
-        session_key: &str,
-        context_digest: &str,
-        subject: &str,
-        payload: &[u8],
-        iat: i64,
-        request_id: &str,
-        reply_subject: Option<&str>,
-        proof: &str,
-        policy: &AuthorizationVerificationPolicyV1,
-        required_permissions: &[PermissionAtomV1],
-        required_capabilities: &[String],
+        input: AuthorizationRequestVerificationInput<'_>,
     ) -> Result<VerifiedAuthorizationRequest, AuthorizationVerificationError> {
-        self.check_context_binding(context, session_key, context_digest)?;
-        let proof = AuthorizationRequestProof::parse(proof.to_owned())?;
-        let request = verify_authorization_request(
+        let AuthorizationRequestVerificationInput {
             context,
+            session_key,
+            context_digest,
             subject,
-            reply_subject,
             payload,
             iat,
             request_id,
-            &proof,
+            reply_subject,
+            proof,
             policy,
             required_permissions,
             required_capabilities,
-        )?;
+        } = input;
+        self.check_context_binding(context, session_key, context_digest)?;
+        let proof = AuthorizationRequestProof::parse(proof.to_owned())?;
+        let request = verify_authorization_request(AuthorizationRequestVerificationInputV1 {
+            context,
+            subject,
+            reply_subject,
+            raw_payload: payload,
+            iat,
+            request_id,
+            proof: &proof,
+            policy,
+            required_permissions,
+            required_capabilities,
+        })?;
         Ok(VerifiedAuthorizationRequest {
             caller: project_caller(session_key, request.context()),
             request,
@@ -135,36 +196,38 @@ impl AuthorizationVerificationCore {
     }
 
     /// Verify one context-bound event proof.
-    #[allow(clippy::too_many_arguments)]
     pub fn verify_event(
         &self,
-        context: &VerifiedAuthorizationContextV1,
-        session_key: &str,
-        context_digest: &str,
-        subject: &str,
-        payload: &[u8],
-        event_id: &str,
-        event_time: &str,
-        proof: &str,
-        policy: &AuthorizationVerificationPolicyV1,
-        required_permissions: &[PermissionAtomV1],
-        required_capabilities: &[String],
-        revoked_at: Option<i64>,
+        input: AuthorizationEventVerificationInput<'_>,
     ) -> Result<VerifiedAuthorizationEvent, AuthorizationVerificationError> {
-        self.check_context_binding(context, session_key, context_digest)?;
-        let proof = AuthorizationEventProof::parse(proof.to_owned())?;
-        let event = verify_authorization_event(
+        let AuthorizationEventVerificationInput {
             context,
+            session_key,
+            context_digest,
             subject,
             payload,
             event_id,
             event_time,
-            &proof,
+            proof,
             policy,
             required_permissions,
             required_capabilities,
             revoked_at,
-        )?;
+        } = input;
+        self.check_context_binding(context, session_key, context_digest)?;
+        let proof = AuthorizationEventProof::parse(proof.to_owned())?;
+        let event = verify_authorization_event(AuthorizationEventVerificationInputV1 {
+            context,
+            subject,
+            raw_payload: payload,
+            event_id,
+            event_time,
+            proof: &proof,
+            policy,
+            required_permissions,
+            required_capabilities,
+            revoked_at,
+        })?;
         Ok(VerifiedAuthorizationEvent { event })
     }
 

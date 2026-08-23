@@ -57,13 +57,15 @@ pub(crate) async fn start(context: &RuntimeContext) -> Result<SubsystemHandle, R
             Box::pin(async move {
                 verifier
                     .verify_event(
-                        &input.subject,
-                        &input.payload,
-                        &input.session_key,
-                        &input.proof,
-                        &input.authorization_context,
-                        &input.event_id,
-                        &input.event_time,
+                        crate::platform::auth::verifier::RuntimeAuthorizationEventVerificationInput {
+                            subject: &input.subject,
+                            payload: &input.payload,
+                            session_key: &input.session_key,
+                            proof: &input.proof,
+                            authorization_context: &input.authorization_context,
+                            event_id: &input.event_id,
+                            event_time: &input.event_time,
+                        },
                     )
                     .await
                     .map(|publisher| VerifiedEventPublisher {

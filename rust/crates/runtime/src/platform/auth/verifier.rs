@@ -18,7 +18,8 @@ use trellis_protocol::{
     AuthorizationEventPublisher, PermissionAtomV1, VerifiedAuthorizationContextV1,
 };
 use trellis_rs::client::{
-    AuthorizationProviderCache, AuthorizationRegistryBinding, AuthorizationVerificationCore,
+    AuthorizationEventVerificationInput, AuthorizationProviderCache, AuthorizationRegistryBinding,
+    AuthorizationRequestVerificationInput, AuthorizationVerificationCore,
     RuntimeAuthorizationIoCounters, RuntimeAuthorizationTrust,
 };
 use trellis_rs::service::{
@@ -28,6 +29,31 @@ use trellis_rs::service::{
 use super::AuthorizationStateError;
 
 type AuthorizationValidatorIoCounters = RuntimeAuthorizationIoCounters;
+
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct RuntimeAuthorizationRequestVerificationInput<'a> {
+    pub(crate) subject: &'a str,
+    pub(crate) payload: &'a [u8],
+    pub(crate) session_key: &'a str,
+    pub(crate) proof: &'a str,
+    pub(crate) authorization_context: &'a str,
+    pub(crate) iat: i64,
+    pub(crate) request_id: &'a str,
+    pub(crate) reply: Option<&'a str>,
+    pub(crate) required_permission: &'a PermissionAtomV1,
+    pub(crate) required_capabilities: &'a [String],
+}
+
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct RuntimeAuthorizationEventVerificationInput<'a> {
+    pub(crate) subject: &'a str,
+    pub(crate) payload: &'a [u8],
+    pub(crate) session_key: &'a str,
+    pub(crate) proof: &'a str,
+    pub(crate) authorization_context: &'a str,
+    pub(crate) event_id: &'a str,
+    pub(crate) event_time: &'a str,
+}
 
 /// Context and trust state consumed by the local verifier.
 ///
@@ -202,20 +228,22 @@ impl RuntimeAuthVerifier {
     /// `reply` must be the actual NATS reply inbox (`message.reply`); the
     /// proof is bound to it. Verification happens only after full proof, time,
     /// revocation, exact permission, and capability checks succeed.
-    #[allow(clippy::too_many_arguments)] // Mirrors the complete signed request tuple.
     pub(crate) async fn verify_request(
         &self,
-        subject: &str,
-        payload: &[u8],
-        session_key: &str,
-        proof: &str,
-        authorization_context: &str,
-        iat: i64,
-        request_id: &str,
-        reply: Option<&str>,
-        required_permission: &PermissionAtomV1,
-        required_capabilities: &[String],
+        input: RuntimeAuthorizationRequestVerificationInput<'_>,
     ) -> Result<VerifiedRequest, AuthorizationStateError> {
+        let RuntimeAuthorizationRequestVerificationInput {
+            subject,
+            payload,
+            session_key,
+            proof,
+            authorization_context,
+            iat,
+            request_id,
+            reply,
+            required_permission,
+            required_capabilities,
+        } = input;
         let now = self.source.now_seconds()?;
         if session_key.is_empty() || proof.is_empty() || authorization_context.is_empty() {
             return Err(denied("request proof headers are missing"));
@@ -243,20 +271,20 @@ impl RuntimeAuthVerifier {
         policy.now_unix_seconds = now;
         let verified = self
             .verification
-            .verify_request(
-                &context,
+            .verify_request(AuthorizationRequestVerificationInput {
+                context: &context,
                 session_key,
-                authorization_context,
+                context_digest: authorization_context,
                 subject,
                 payload,
                 iat,
                 request_id,
-                Some(reply),
+                reply_subject: Some(reply),
                 proof,
-                &policy,
-                std::slice::from_ref(required_permission),
+                policy: &policy,
+                required_permissions: std::slice::from_ref(required_permission),
                 required_capabilities,
-            )
+            })
             .map_err(|error| {
                 denied(format!(
                     "request is not granted by the active authority: {error}"
@@ -271,18 +299,21 @@ impl RuntimeAuthVerifier {
     ///
     /// Event eligibility is the strict signed window `[notBefore, expiresAt)`
     /// with `eventTime < revokedAt`; the full revocation timestamp is used.
-    #[allow(clippy::too_many_arguments)] // Mirrors the complete signed event tuple.
     pub(crate) async fn verify_event(
         &self,
-        subject: &str,
-        payload: &[u8],
-        session_key: &str,
-        proof: &str,
-        authorization_context: &str,
-        event_id: &str,
-        event_time: &str,
+        input: RuntimeAuthorizationEventVerificationInput<'_>,
     ) -> Result<AuthorizationEventPublisher, trellis_rs::service::EventVerificationFailure> {
         use trellis_rs::service::EventVerificationFailure;
+
+        let RuntimeAuthorizationEventVerificationInput {
+            subject,
+            payload,
+            session_key,
+            proof,
+            authorization_context,
+            event_id,
+            event_time,
+        } = input;
 
         let now = self
             .source
@@ -334,20 +365,20 @@ impl RuntimeAuthVerifier {
         policy.now_unix_seconds = now;
         let verified_event = self
             .verification
-            .verify_event(
-                &context,
+            .verify_event(AuthorizationEventVerificationInput {
+                context: &context,
                 session_key,
-                authorization_context,
+                context_digest: authorization_context,
                 subject,
                 payload,
                 event_id,
                 event_time,
                 proof,
-                &policy,
-                &[],
-                &[],
+                policy: &policy,
+                required_permissions: &[],
+                required_capabilities: &[],
                 revoked_at,
-            )
+            })
             .map_err(|error| {
                 EventVerificationFailure::Rejected(format!(
                     "event is not granted by the active authority: {error}"
@@ -502,18 +533,18 @@ impl RequestValidator for RuntimeAuthVerifier {
                 }
             };
             let verified = match self
-                .verify_request(
+                .verify_request(RuntimeAuthorizationRequestVerificationInput {
                     subject,
                     payload,
-                    &session_key,
-                    &proof,
-                    &authorization_context,
+                    session_key: &session_key,
+                    proof: &proof,
+                    authorization_context: &authorization_context,
                     iat,
-                    &request_id,
-                    context.reply_to.as_deref(),
-                    &required_permission,
-                    &required_capabilities,
-                )
+                    request_id: &request_id,
+                    reply: context.reply_to.as_deref(),
+                    required_permission: &required_permission,
+                    required_capabilities: &required_capabilities,
+                })
                 .await
             {
                 Ok(verified) => verified,
@@ -875,18 +906,18 @@ mod tests {
             .unwrap();
 
         let verified = verifier
-            .verify_request(
-                &defaults.request.subject,
+            .verify_request(RuntimeAuthorizationRequestVerificationInput {
+                subject: &defaults.request.subject,
                 payload,
-                &auth.session_key,
-                proof.as_str(),
-                &digest,
-                defaults.request.iat,
-                &defaults.request.request_id,
-                Some(&defaults.request.reply),
-                &documents_permission(),
-                &[],
-            )
+                session_key: &auth.session_key,
+                proof: proof.as_str(),
+                authorization_context: &digest,
+                iat: defaults.request.iat,
+                request_id: &defaults.request.request_id,
+                reply: Some(&defaults.request.reply),
+                required_permission: &documents_permission(),
+                required_capabilities: &[],
+            })
             .await
             .expect("valid request");
         assert_eq!(verified.caller.session_key, auth.session_key);
@@ -895,66 +926,66 @@ mod tests {
 
         // Altered reply subject denies: the proof is bound to the exact inbox.
         assert!(verifier
-            .verify_request(
-                &defaults.request.subject,
+            .verify_request(RuntimeAuthorizationRequestVerificationInput {
+                subject: &defaults.request.subject,
                 payload,
-                &auth.session_key,
-                proof.as_str(),
-                &digest,
-                defaults.request.iat,
-                &defaults.request.request_id,
-                Some("_INBOX.other.reply"),
-                &documents_permission(),
-                &[],
-            )
+                session_key: &auth.session_key,
+                proof: proof.as_str(),
+                authorization_context: &digest,
+                iat: defaults.request.iat,
+                request_id: &defaults.request.request_id,
+                reply: Some("_INBOX.other.reply"),
+                required_permission: &documents_permission(),
+                required_capabilities: &[],
+            })
             .await
             .is_err());
         // Altered subject denies: the proof is bound to the exact subject.
         assert!(verifier
-            .verify_request(
-                "rpc.v1.Documents.List",
+            .verify_request(RuntimeAuthorizationRequestVerificationInput {
+                subject: "rpc.v1.Documents.List",
                 payload,
-                &auth.session_key,
-                proof.as_str(),
-                &digest,
-                defaults.request.iat,
-                &defaults.request.request_id,
-                Some(&defaults.request.reply),
-                &documents_permission(),
-                &[],
-            )
+                session_key: &auth.session_key,
+                proof: proof.as_str(),
+                authorization_context: &digest,
+                iat: defaults.request.iat,
+                request_id: &defaults.request.request_id,
+                reply: Some(&defaults.request.reply),
+                required_permission: &documents_permission(),
+                required_capabilities: &[],
+            })
             .await
             .is_err());
         // Altered payload denies: the proof covers the payload digest.
         assert!(verifier
-            .verify_request(
-                &defaults.request.subject,
-                br#"{"tampered":true}"#,
-                &auth.session_key,
-                proof.as_str(),
-                &digest,
-                defaults.request.iat,
-                &defaults.request.request_id,
-                Some(&defaults.request.reply),
-                &documents_permission(),
-                &[],
-            )
+            .verify_request(RuntimeAuthorizationRequestVerificationInput {
+                subject: &defaults.request.subject,
+                payload: br#"{"tampered":true}"#,
+                session_key: &auth.session_key,
+                proof: proof.as_str(),
+                authorization_context: &digest,
+                iat: defaults.request.iat,
+                request_id: &defaults.request.request_id,
+                reply: Some(&defaults.request.reply),
+                required_permission: &documents_permission(),
+                required_capabilities: &[],
+            })
             .await
             .is_err());
         // Unknown subject denies without any context resolution.
         assert!(verifier
-            .verify_request(
-                "rpc.v1.Unknown.Surface",
+            .verify_request(RuntimeAuthorizationRequestVerificationInput {
+                subject: "rpc.v1.Unknown.Surface",
                 payload,
-                &auth.session_key,
-                proof.as_str(),
-                &digest,
-                defaults.request.iat,
-                &defaults.request.request_id,
-                Some(&defaults.request.reply),
-                &documents_permission(),
-                &[],
-            )
+                session_key: &auth.session_key,
+                proof: proof.as_str(),
+                authorization_context: &digest,
+                iat: defaults.request.iat,
+                request_id: &defaults.request.request_id,
+                reply: Some(&defaults.request.reply),
+                required_permission: &documents_permission(),
+                required_capabilities: &[],
+            })
             .await
             .is_err());
         assert_eq!(source.io_counters().context_resolves, 0);
@@ -977,34 +1008,34 @@ mod tests {
             )
             .unwrap();
         verifier
-            .verify_request(
-                &defaults.request.subject,
+            .verify_request(RuntimeAuthorizationRequestVerificationInput {
+                subject: &defaults.request.subject,
                 payload,
-                &auth.session_key,
-                proof.as_str(),
-                &digest,
-                defaults.request.iat,
-                &defaults.request.request_id,
-                Some(&defaults.request.reply),
-                &documents_permission(),
-                &[],
-            )
+                session_key: &auth.session_key,
+                proof: proof.as_str(),
+                authorization_context: &digest,
+                iat: defaults.request.iat,
+                request_id: &defaults.request.request_id,
+                reply: Some(&defaults.request.reply),
+                required_permission: &documents_permission(),
+                required_capabilities: &[],
+            })
             .await
             .expect("first use");
         // A repeated signed request remains valid.
         verifier
-            .verify_request(
-                &defaults.request.subject,
+            .verify_request(RuntimeAuthorizationRequestVerificationInput {
+                subject: &defaults.request.subject,
                 payload,
-                &auth.session_key,
-                proof.as_str(),
-                &digest,
-                defaults.request.iat,
-                &defaults.request.request_id,
-                Some(&defaults.request.reply),
-                &documents_permission(),
-                &[],
-            )
+                session_key: &auth.session_key,
+                proof: proof.as_str(),
+                authorization_context: &digest,
+                iat: defaults.request.iat,
+                request_id: &defaults.request.request_id,
+                reply: Some(&defaults.request.reply),
+                required_permission: &documents_permission(),
+                required_capabilities: &[],
+            })
             .await
             .expect("duplicate request id remains accepted");
 
@@ -1022,27 +1053,27 @@ mod tests {
             )
             .unwrap();
         verifier
-            .verify_event(
-                event_subject,
-                br#"{"id":"doc-1"}"#,
-                &auth.session_key,
-                event_proof.as_str(),
-                &digest,
+            .verify_event(RuntimeAuthorizationEventVerificationInput {
+                subject: event_subject,
+                payload: br#"{"id":"doc-1"}"#,
+                session_key: &auth.session_key,
+                proof: event_proof.as_str(),
+                authorization_context: &digest,
                 event_id,
                 event_time,
-            )
+            })
             .await
             .expect("first event");
         verifier
-            .verify_event(
-                event_subject,
-                br#"{"id":"doc-1"}"#,
-                &auth.session_key,
-                event_proof.as_str(),
-                &digest,
+            .verify_event(RuntimeAuthorizationEventVerificationInput {
+                subject: event_subject,
+                payload: br#"{"id":"doc-1"}"#,
+                session_key: &auth.session_key,
+                proof: event_proof.as_str(),
+                authorization_context: &digest,
                 event_id,
                 event_time,
-            )
+            })
             .await
             .expect("duplicate event id remains accepted");
     }
@@ -1064,18 +1095,18 @@ mod tests {
             )
             .unwrap();
         assert!(verifier
-            .verify_request(
-                &defaults.request.subject,
+            .verify_request(RuntimeAuthorizationRequestVerificationInput {
+                subject: &defaults.request.subject,
                 payload,
-                &auth.session_key,
-                proof.as_str(),
-                &digest,
-                defaults.request.iat,
-                &defaults.request.request_id,
-                Some(&defaults.request.reply),
-                &documents_permission(),
-                &[],
-            )
+                session_key: &auth.session_key,
+                proof: proof.as_str(),
+                authorization_context: &digest,
+                iat: defaults.request.iat,
+                request_id: &defaults.request.request_id,
+                reply: Some(&defaults.request.reply),
+                required_permission: &documents_permission(),
+                required_capabilities: &[],
+            })
             .await
             .is_err());
         let event_subject = "events.v1.Documents.Changed.doc-1";
@@ -1090,15 +1121,15 @@ mod tests {
             )
             .unwrap();
         assert!(verifier
-            .verify_event(
-                event_subject,
-                br#"{"id":"doc-1"}"#,
-                &auth.session_key,
-                before_proof.as_str(),
-                &digest,
-                "evt_before",
-                "1970-01-01T00:19:00Z",
-            )
+            .verify_event(RuntimeAuthorizationEventVerificationInput {
+                subject: event_subject,
+                payload: br#"{"id":"doc-1"}"#,
+                session_key: &auth.session_key,
+                proof: before_proof.as_str(),
+                authorization_context: &digest,
+                event_id: "evt_before",
+                event_time: "1970-01-01T00:19:00Z",
+            })
             .await
             .is_err());
         let after_proof = auth
@@ -1111,15 +1142,15 @@ mod tests {
             )
             .unwrap();
         assert!(verifier
-            .verify_event(
-                event_subject,
-                br#"{"id":"doc-1"}"#,
-                &auth.session_key,
-                after_proof.as_str(),
-                &digest,
-                "evt_after",
-                "1970-01-01T00:19:30Z",
-            )
+            .verify_event(RuntimeAuthorizationEventVerificationInput {
+                subject: event_subject,
+                payload: br#"{"id":"doc-1"}"#,
+                session_key: &auth.session_key,
+                proof: after_proof.as_str(),
+                authorization_context: &digest,
+                event_id: "evt_after",
+                event_time: "1970-01-01T00:19:30Z",
+            })
             .await
             .is_err());
     }
@@ -1153,18 +1184,18 @@ mod tests {
             .create_request_proof(&digest, subject, &reply, payload, 1100, "req_admin")
             .unwrap();
         assert!(verifier
-            .verify_request(
+            .verify_request(RuntimeAuthorizationRequestVerificationInput {
                 subject,
                 payload,
-                &auth.session_key,
-                proof.as_str(),
-                &digest,
-                1100,
-                "req_admin",
-                Some(&reply),
-                &required_permission,
-                &[],
-            )
+                session_key: &auth.session_key,
+                proof: proof.as_str(),
+                authorization_context: &digest,
+                iat: 1100,
+                request_id: "req_admin",
+                reply: Some(&reply),
+                required_permission: &required_permission,
+                required_capabilities: &[],
+            })
             .await
             .is_err());
         // The denial is local: no registry resolution was performed.
@@ -1185,34 +1216,34 @@ mod tests {
                 .unwrap()
         };
         verifier
-            .verify_request(
+            .verify_request(RuntimeAuthorizationRequestVerificationInput {
                 subject,
                 payload,
-                &auth.session_key,
-                proof("req_1").as_str(),
-                &digest,
-                now,
-                "req_1",
-                Some(&reply),
-                &documents_permission(),
-                &[],
-            )
+                session_key: &auth.session_key,
+                proof: proof("req_1").as_str(),
+                authorization_context: &digest,
+                iat: now,
+                request_id: "req_1",
+                reply: Some(&reply),
+                required_permission: &documents_permission(),
+                required_capabilities: &[],
+            })
             .await
             .expect("first cache hit");
         // A second cache-hit request performs no registry I/O.
         verifier
-            .verify_request(
+            .verify_request(RuntimeAuthorizationRequestVerificationInput {
                 subject,
                 payload,
-                &auth.session_key,
-                proof("req_2").as_str(),
-                &digest,
-                now,
-                "req_2",
-                Some(&reply),
-                &documents_permission(),
-                &[],
-            )
+                session_key: &auth.session_key,
+                proof: proof("req_2").as_str(),
+                authorization_context: &digest,
+                iat: now,
+                request_id: "req_2",
+                reply: Some(&reply),
+                required_permission: &documents_permission(),
+                required_capabilities: &[],
+            })
             .await
             .expect("second cache hit");
         assert_eq!(source.io_counters().context_resolves, 0);
@@ -1236,18 +1267,18 @@ mod tests {
                 .create_request_proof(&unknown_digest, subject, &reply, payload, now, request_id)
                 .unwrap();
             verifier
-                .verify_request(
+                .verify_request(RuntimeAuthorizationRequestVerificationInput {
                     subject,
                     payload,
-                    &auth.session_key,
-                    proof.as_str(),
-                    &unknown_digest,
-                    now,
+                    session_key: &auth.session_key,
+                    proof: proof.as_str(),
+                    authorization_context: &unknown_digest,
+                    iat: now,
                     request_id,
-                    Some(&reply),
-                    &documents_permission(),
-                    &[],
-                )
+                    reply: Some(&reply),
+                    required_permission: &documents_permission(),
+                    required_capabilities: &[],
+                })
                 .await
                 .expect("unknown context resolves");
         }
@@ -1274,18 +1305,18 @@ mod tests {
             )
             .unwrap();
         assert!(verifier
-            .verify_request(
-                &defaults.request.subject,
+            .verify_request(RuntimeAuthorizationRequestVerificationInput {
+                subject: &defaults.request.subject,
                 payload,
-                &auth.session_key,
-                proof.as_str(),
-                &digest,
-                defaults.request.iat,
-                &defaults.request.request_id,
-                Some(&defaults.request.reply),
-                &documents_permission(),
-                &[],
-            )
+                session_key: &auth.session_key,
+                proof: proof.as_str(),
+                authorization_context: &digest,
+                iat: defaults.request.iat,
+                request_id: &defaults.request.request_id,
+                reply: Some(&defaults.request.reply),
+                required_permission: &documents_permission(),
+                required_capabilities: &[],
+            })
             .await
             .is_err());
         assert_eq!(source.io_counters().context_resolves, 0);

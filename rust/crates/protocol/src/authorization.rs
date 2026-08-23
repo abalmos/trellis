@@ -32,6 +32,7 @@
 //!     AuthorizationAuthorityRefV1, AuthorizationIssuerManifestEntryV1,
 //!     AuthorizationParticipantV1,
 //!     AuthorizationPrincipalKindV1, AuthorizationPrincipalV1,
+//!     AuthorizationEventVerificationInputV1, AuthorizationRequestVerificationInputV1,
 //!     AuthorizationTrustRootV1, AuthorizationVerificationPolicyV1, GrantSetV1,
 //!     ParticipantKindV1, PermissionActionV1, PermissionAtomV1,
 //!     PermissionTargetV1, UnsignedAuthorizationContextV1,
@@ -123,18 +124,19 @@
 //!     "req_example",
 //!     &session_key,
 //! )?;
-//! let request = verify_authorization_request(
-//!     &context,
-//!     "rpc.v1.Documents.Get",
-//!     Some("_INBOX.example.reply"),
-//!     br#"{"id":"doc-1"}"#,
-//!     1_100,
-//!     "req_example",
-//!     &proof,
-//!     &policy,
-//!     &[permission.clone()],
-//!     &[],
-//! )?;
+//! let request_permissions = [permission.clone()];
+//! let request = verify_authorization_request(AuthorizationRequestVerificationInputV1 {
+//!     context: &context,
+//!     subject: "rpc.v1.Documents.Get",
+//!     reply_subject: Some("_INBOX.example.reply"),
+//!     raw_payload: br#"{"id":"doc-1"}"#,
+//!     iat: 1_100,
+//!     request_id: "req_example",
+//!     proof: &proof,
+//!     policy: &policy,
+//!     required_permissions: &request_permissions,
+//!     required_capabilities: &[],
+//! })?;
 //! assert_eq!(request.context().principal().id, "usr_example");
 //! let event_proof = sign_authorization_event(
 //!     context.context_digest(),
@@ -144,18 +146,19 @@
 //!     "1970-01-01T00:19:10Z",
 //!     &session_key,
 //! )?;
-//! let event = verify_authorization_event(
-//!     &context,
-//!     "events.v1.Documents.Changed.doc-1",
-//!     br#"{"id":"doc-1"}"#,
-//!     "evt_example",
-//!     "1970-01-01T00:19:10Z",
-//!     &event_proof,
-//!     &policy,
-//!     &[permission],
-//!     &[],
-//!     None,
-//! )?;
+//! let event_permissions = [permission];
+//! let event = verify_authorization_event(AuthorizationEventVerificationInputV1 {
+//!     context: &context,
+//!     subject: "events.v1.Documents.Changed.doc-1",
+//!     raw_payload: br#"{"id":"doc-1"}"#,
+//!     event_id: "evt_example",
+//!     event_time: "1970-01-01T00:19:10Z",
+//!     proof: &event_proof,
+//!     policy: &policy,
+//!     required_permissions: &event_permissions,
+//!     required_capabilities: &[],
+//!     revoked_at: None,
+//! })?;
 //! assert_eq!(event.publisher().participant_id, "documents-web");
 //! # Ok::<(), trellis_protocol::ProtocolError>(())
 //! ```
@@ -1759,6 +1762,35 @@ pub struct VerifiedAuthorizationRequestProof {
     context: VerifiedAuthorizationContextV1,
 }
 
+/// Borrowed inputs for verifying one context-bound request proof.
+///
+/// Unlike [`AuthorizationRequestProofInput`], which contains the canonical bytes
+/// and digest signed by a session key, this type groups the complete local
+/// verification decision, including context, policy, and required authority.
+#[derive(Clone, Copy, Debug)]
+pub struct AuthorizationRequestVerificationInputV1<'a> {
+    /// Verified authorization context that binds the session key and authority.
+    pub context: &'a VerifiedAuthorizationContextV1,
+    /// Exact routed NATS subject covered by the proof.
+    pub subject: &'a str,
+    /// Actual NATS reply subject covered by the proof, when present.
+    pub reply_subject: Option<&'a str>,
+    /// Exact received payload bytes covered by the proof.
+    pub raw_payload: &'a [u8],
+    /// Signed proof issue time in Unix seconds.
+    pub iat: i64,
+    /// Signed request identifier.
+    pub request_id: &'a str,
+    /// Session-key signature to verify.
+    pub proof: &'a AuthorizationRequestProof,
+    /// Verification time and protocol limits.
+    pub policy: &'a AuthorizationVerificationPolicyV1,
+    /// Exact permissions required by the routed operation.
+    pub required_permissions: &'a [PermissionAtomV1],
+    /// Platform capabilities required by the routed operation.
+    pub required_capabilities: &'a [String],
+}
+
 impl VerifiedAuthorizationRequestProof {
     /// Return verified caller context metadata.
     pub fn context(&self) -> &VerifiedAuthorizationContextV1 {
@@ -1773,22 +1805,21 @@ impl VerifiedAuthorizationRequestProof {
 ///
 /// Returns [`ProtocolError::Authorization`] for an invalid request id, reply
 /// subject, issue time, permission/capability subset, or session-key signature.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "the language-neutral proof API takes each signed request component explicitly"
-)]
 pub fn verify_authorization_request(
-    context: &VerifiedAuthorizationContextV1,
-    subject: &str,
-    reply_subject: Option<&str>,
-    raw_payload: &[u8],
-    iat: i64,
-    request_id: &str,
-    proof: &AuthorizationRequestProof,
-    policy: &AuthorizationVerificationPolicyV1,
-    required_permissions: &[PermissionAtomV1],
-    required_capabilities: &[String],
+    input: AuthorizationRequestVerificationInputV1<'_>,
 ) -> Result<VerifiedAuthorizationRequestProof, ProtocolError> {
+    let AuthorizationRequestVerificationInputV1 {
+        context,
+        subject,
+        reply_subject,
+        raw_payload,
+        iat,
+        request_id,
+        proof,
+        policy,
+        required_permissions,
+        required_capabilities,
+    } = input;
     validate_policy(policy)?;
     validate_safe_i64(iat, &["iat"])?;
     validate_text(request_id, &["request-id"])?;
@@ -1887,6 +1918,35 @@ pub fn verify_authorization_request(
 pub struct AuthorizationEventProofInput {
     bytes: Vec<u8>,
     digest: [u8; 32],
+}
+
+/// Borrowed inputs for verifying one context-bound event proof.
+///
+/// Unlike [`AuthorizationEventProofInput`], which contains the canonical bytes
+/// and digest signed by a session key, this type groups the complete historical
+/// verification decision, including context, policy, authority, and revocation.
+#[derive(Clone, Copy, Debug)]
+pub struct AuthorizationEventVerificationInputV1<'a> {
+    /// Verified authorization context that binds the session key and authority.
+    pub context: &'a VerifiedAuthorizationContextV1,
+    /// Exact published NATS subject covered by the proof.
+    pub subject: &'a str,
+    /// Exact received payload bytes covered by the proof.
+    pub raw_payload: &'a [u8],
+    /// Signed event identifier.
+    pub event_id: &'a str,
+    /// Signed canonical RFC 3339 event time.
+    pub event_time: &'a str,
+    /// Session-key signature to verify.
+    pub proof: &'a AuthorizationEventProof,
+    /// Verification policy and protocol limits.
+    pub policy: &'a AuthorizationVerificationPolicyV1,
+    /// Exact permissions required for the event.
+    pub required_permissions: &'a [PermissionAtomV1],
+    /// Platform capabilities required for the event.
+    pub required_capabilities: &'a [String],
+    /// Context revocation time when revocation evidence exists.
+    pub revoked_at: Option<i64>,
 }
 
 impl AuthorizationEventProofInput {
@@ -2080,22 +2140,21 @@ pub fn sign_authorization_event(
 /// Returns [`ProtocolError::Authorization`] for a non-canonical event time,
 /// an event outside the context window, a revoked event, missing
 /// permission/capability evidence, or an invalid session-key signature.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "the language-neutral proof API takes each signed event component explicitly"
-)]
 pub fn verify_authorization_event(
-    context: &VerifiedAuthorizationContextV1,
-    subject: &str,
-    raw_payload: &[u8],
-    event_id: &str,
-    event_time: &str,
-    proof: &AuthorizationEventProof,
-    policy: &AuthorizationVerificationPolicyV1,
-    required_permissions: &[PermissionAtomV1],
-    required_capabilities: &[String],
-    revoked_at: Option<i64>,
+    input: AuthorizationEventVerificationInputV1<'_>,
 ) -> Result<VerifiedAuthorizationEventProof, ProtocolError> {
+    let AuthorizationEventVerificationInputV1 {
+        context,
+        subject,
+        raw_payload,
+        event_id,
+        event_time,
+        proof,
+        policy,
+        required_permissions,
+        required_capabilities,
+        revoked_at,
+    } = input;
     validate_policy(policy)?;
     validate_text(event_id, &["event-id"])?;
     validate_text(subject, &["subject"])?;
@@ -2322,32 +2381,37 @@ mod phase_a_tests {
         .unwrap();
         assert_eq!(verified.context_digest(), &context.digest().unwrap());
 
-        verify_authorization_request(
-            &verified,
-            "rpc.v1.Documents.Get",
-            Some("_INBOX.test.reply"),
-            br#"{"id":"doc-1"}"#,
-            1_100,
-            "req_test",
-            &request_proof,
-            &policy,
-            &[permission()],
-            &["platform.read".to_owned()],
-        )
+        let request_permissions = [permission()];
+        let request_capabilities = ["platform.read".to_owned()];
+        verify_authorization_request(AuthorizationRequestVerificationInputV1 {
+            context: &verified,
+            subject: "rpc.v1.Documents.Get",
+            reply_subject: Some("_INBOX.test.reply"),
+            raw_payload: br#"{"id":"doc-1"}"#,
+            iat: 1_100,
+            request_id: "req_test",
+            proof: &request_proof,
+            policy: &policy,
+            required_permissions: &request_permissions,
+            required_capabilities: &request_capabilities,
+        })
         .unwrap();
 
-        verify_authorization_event(
-            &verified,
-            "events.v1.Documents.Changed.doc-1",
-            br#"{"id":"doc-1"}"#,
-            "evt_doc_1",
-            "1970-01-01T00:19:10Z",
-            &event_proof,
-            &AuthorizationVerificationPolicyV1::new(1_400, 30, 300, 16_384, 16, 16, 7).unwrap(),
-            &[permission()],
-            &[],
-            None,
-        )
+        let historical_policy =
+            AuthorizationVerificationPolicyV1::new(1_400, 30, 300, 16_384, 16, 16, 7).unwrap();
+        let event_permissions = [permission()];
+        verify_authorization_event(AuthorizationEventVerificationInputV1 {
+            context: &verified,
+            subject: "events.v1.Documents.Changed.doc-1",
+            raw_payload: br#"{"id":"doc-1"}"#,
+            event_id: "evt_doc_1",
+            event_time: "1970-01-01T00:19:10Z",
+            proof: &event_proof,
+            policy: &historical_policy,
+            required_permissions: &event_permissions,
+            required_capabilities: &[],
+            revoked_at: None,
+        })
         .unwrap();
     }
 
