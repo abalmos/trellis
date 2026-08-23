@@ -645,82 +645,6 @@ where
             .await
     }
 
-    pub async fn process<TResult, E, F, Fut>(
-        &self,
-        job: Job,
-        cancellation: JobCancellationToken,
-        process: F,
-    ) -> Result<JobProcessOutcome<TResult>, JobManagerError<P::Error>>
-    where
-        TResult: Serialize + Clone,
-        E: ToString,
-        F: FnOnce(ActiveJob<P, M>) -> Fut,
-        Fut: Future<Output = Result<TResult, JobProcessError<E>>>,
-    {
-        self.process_with_heartbeat(
-            job,
-            cancellation,
-            || async { Err("worker heartbeat unavailable".to_string()) },
-            process,
-        )
-        .await
-    }
-
-    pub async fn process_with_heartbeat<TResult, E, HB, HBFut, F, Fut>(
-        &self,
-        job: Job,
-        cancellation: JobCancellationToken,
-        heartbeat: HB,
-        process: F,
-    ) -> Result<JobProcessOutcome<TResult>, JobManagerError<P::Error>>
-    where
-        TResult: Serialize + Clone,
-        E: ToString,
-        HB: Fn() -> HBFut + Send + Sync + 'static,
-        HBFut: Future<Output = Result<(), String>> + Send + 'static,
-        F: FnOnce(ActiveJob<P, M>) -> Fut,
-        Fut: Future<Output = Result<TResult, JobProcessError<E>>>,
-    {
-        self.process_with_heartbeat_and_terminal_guard(
-            job,
-            cancellation,
-            heartbeat,
-            |_| async { Ok(TerminalPublishDecision::Publish) },
-            process,
-        )
-        .await
-    }
-
-    /// Process a job and run a guard before publishing normal terminal events.
-    pub async fn process_with_heartbeat_and_terminal_guard<TResult, E, HB, HBFut, G, GFut, F, Fut>(
-        &self,
-        job: Job,
-        cancellation: JobCancellationToken,
-        heartbeat: HB,
-        terminal_guard: G,
-        process: F,
-    ) -> Result<JobProcessOutcome<TResult>, JobManagerError<P::Error>>
-    where
-        TResult: Serialize + Clone,
-        E: ToString,
-        HB: Fn() -> HBFut + Send + Sync + 'static,
-        HBFut: Future<Output = Result<(), String>> + Send + 'static,
-        G: Fn(String) -> GFut + Send + Sync,
-        GFut: Future<Output = Result<TerminalPublishDecision, String>>,
-        F: FnOnce(ActiveJob<P, M>) -> Fut,
-        Fut: Future<Output = Result<TResult, JobProcessError<E>>>,
-    {
-        self.process_with_heartbeat_and_terminal_hooks(
-            job,
-            cancellation,
-            heartbeat,
-            terminal_guard,
-            |_| async { Ok(()) },
-            process,
-        )
-        .await
-    }
-
     /// Process a job with separate pre-publish guard and post-publish cleanup hooks.
     pub async fn process_with_heartbeat_and_terminal_hooks<
         TResult,
@@ -1210,25 +1134,6 @@ where
             }
             _ => Ok(()),
         }
-    }
-
-    pub async fn with_active_job<T, F, Fut>(
-        &self,
-        job: Job,
-        cancellation: JobCancellationToken,
-        f: F,
-    ) -> Result<T, JobManagerError<P::Error>>
-    where
-        F: FnOnce(ActiveJob<P, M>) -> Fut,
-        Fut: Future<Output = Result<T, JobManagerError<P::Error>>>,
-    {
-        self.with_active_job_and_heartbeat(
-            job,
-            cancellation,
-            || async { Err("worker heartbeat unavailable".to_string()) },
-            f,
-        )
-        .await
     }
 
     pub async fn with_active_job_and_heartbeat<T, HB, HBFut, F, Fut>(

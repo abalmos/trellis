@@ -373,92 +373,14 @@ impl Drop for CancelWorkersOnDrop {
     }
 }
 
-/// Decode a work payload and run it through a [`JobManager`].
-pub async fn process_work_payload<P, M, H, Fut, E>(
-    manager: &JobManager<P, M>,
-    payload: &[u8],
-    handler: H,
-) -> Result<Option<JobProcessOutcome<Value>>, RuntimeWorkerError>
-where
-    P: JobEventPublisher,
-    P::Error: std::fmt::Display,
-    M: JobMetaSource,
-    H: FnOnce(ActiveJob<P, M>) -> Fut,
-    Fut: Future<Output = Result<Value, JobProcessError<E>>>,
-    E: ToString,
-{
-    process_work_payload_with_context(manager, payload, JobCancellationToken::new(), handler).await
-}
-
-/// Decode a work payload and run it through a [`JobManager`] with cancellation context.
-pub async fn process_work_payload_with_context<P, M, H, Fut, E>(
-    manager: &JobManager<P, M>,
-    payload: &[u8],
-    cancellation: JobCancellationToken,
-    handler: H,
-) -> Result<Option<JobProcessOutcome<Value>>, RuntimeWorkerError>
-where
-    P: JobEventPublisher,
-    P::Error: std::fmt::Display,
-    M: JobMetaSource,
-    H: FnOnce(ActiveJob<P, M>) -> Fut,
-    Fut: Future<Output = Result<Value, JobProcessError<E>>>,
-    E: ToString,
-{
-    process_work_payload_with_context_and_heartbeat(
-        manager,
-        payload,
-        cancellation,
-        || Box::pin(async { Err("worker heartbeat unavailable".to_string()) }),
-        handler,
-    )
-    .await
-}
-
-/// Decode a work payload and run it through a [`JobManager`] with cancellation
-/// context and a custom heartbeat hook.
-pub async fn process_work_payload_with_context_and_heartbeat<P, M, HB, H, Fut, E>(
-    manager: &JobManager<P, M>,
-    payload: &[u8],
-    cancellation: JobCancellationToken,
-    heartbeat: HB,
-    handler: H,
-) -> Result<Option<JobProcessOutcome<Value>>, RuntimeWorkerError>
-where
-    P: JobEventPublisher,
-    P::Error: std::fmt::Display,
-    M: JobMetaSource,
-    HB: Fn() -> BoxFuture<'static, Result<(), String>> + Send + Sync + 'static,
-    H: FnOnce(ActiveJob<P, M>) -> Fut,
-    Fut: Future<Output = Result<Value, JobProcessError<E>>>,
-    E: ToString,
-{
-    process_work_payload_with_context_heartbeat_and_terminal_guard(
-        manager,
-        payload,
-        cancellation,
-        heartbeat,
-        |_| Box::pin(async { Ok(TerminalPublishDecision::Publish) }),
-        handler,
-    )
-    .await
-}
-
-/// Decode a work payload and run it through a manager with heartbeat and terminal hooks.
-pub async fn process_work_payload_with_context_heartbeat_and_terminal_guard<
-    P,
-    M,
-    HB,
-    G,
-    H,
-    Fut,
-    E,
->(
+/// Decode a work payload and run it through a manager with explicit runtime hooks.
+pub async fn process_work_payload<P, M, HB, G, C, H, Fut, E>(
     manager: &JobManager<P, M>,
     payload: &[u8],
     cancellation: JobCancellationToken,
     heartbeat: HB,
     terminal_guard: G,
+    terminal_cleanup: C,
     handler: H,
 ) -> Result<Option<JobProcessOutcome<Value>>, RuntimeWorkerError>
 where
@@ -467,6 +389,7 @@ where
     M: JobMetaSource,
     HB: Fn() -> BoxFuture<'static, Result<(), String>> + Send + Sync + 'static,
     G: Fn(String) -> BoxFuture<'static, Result<TerminalPublishDecision, String>> + Send + Sync,
+    C: Fn(String) -> BoxFuture<'static, Result<(), String>> + Send + Sync,
     H: FnOnce(ActiveJob<P, M>) -> Fut,
     Fut: Future<Output = Result<Value, JobProcessError<E>>>,
     E: ToString,
@@ -479,17 +402,17 @@ where
         return Ok(None);
     };
 
-    manager
-        .process_with_heartbeat_and_terminal_guard(
-            job,
-            cancellation,
-            heartbeat,
-            terminal_guard,
-            handler,
-        )
-        .await
-        .map(Some)
-        .map_err(|error| RuntimeWorkerError::Process(error.to_string()))
+    process_job_with_context_heartbeat_and_terminal_hooks(
+        manager,
+        job,
+        cancellation,
+        heartbeat,
+        terminal_guard,
+        terminal_cleanup,
+        handler,
+    )
+    .await
+    .map(Some)
 }
 
 async fn process_job_with_context_heartbeat_and_terminal_hooks<P, M, HB, G, C, H, Fut, E>(
@@ -530,66 +453,8 @@ fn parse_work_payload_job(payload: &[u8]) -> Option<Job> {
     job_from_work_event(&event)
 }
 
-/// Run one queue worker against a bound work stream.
-///
-/// Service registration is intentionally not owned here. Callers that want
-/// instance heartbeats should start them separately at the service-host level.
+/// Run one queue worker with explicit shutdown and active-job cancellation context.
 pub async fn run_single_queue_worker<P, M, H, Fut, E>(
-    nats: async_nats::Client,
-    work_stream: &str,
-    queue_type: &str,
-    manager: JobManager<P, M>,
-    handler: H,
-) -> Result<(), RuntimeWorkerError>
-where
-    P: JobEventPublisher + Send + Sync + 'static,
-    P::Error: std::fmt::Display,
-    M: JobMetaSource + Send + Sync + 'static,
-    H: Fn(ActiveJob<P, M>) -> Fut + Clone + Send + Sync + 'static,
-    Fut: Future<Output = Result<Value, JobProcessError<E>>> + Send,
-    E: ToString + Send,
-{
-    run_single_queue_worker_with_context(
-        nats,
-        work_stream,
-        queue_type,
-        manager,
-        JobCancellationToken::new(),
-        handler,
-    )
-    .await
-}
-
-/// Run one queue worker against a bound work stream with cancellation context.
-pub async fn run_single_queue_worker_with_context<P, M, H, Fut, E>(
-    nats: async_nats::Client,
-    work_stream: &str,
-    queue_type: &str,
-    manager: JobManager<P, M>,
-    cancellation: JobCancellationToken,
-    handler: H,
-) -> Result<(), RuntimeWorkerError>
-where
-    P: JobEventPublisher + Send + Sync + 'static,
-    P::Error: std::fmt::Display,
-    M: JobMetaSource + Send + Sync + 'static,
-    H: Fn(ActiveJob<P, M>) -> Fut + Clone + Send + Sync + 'static,
-    Fut: Future<Output = Result<Value, JobProcessError<E>>> + Send,
-    E: ToString + Send,
-{
-    run_single_queue_worker_with_context_and_registry(
-        nats,
-        work_stream,
-        queue_type,
-        manager,
-        cancellation,
-        ActiveJobCancellationRegistry::new(),
-        handler,
-    )
-    .await
-}
-
-async fn run_single_queue_worker_with_context_and_registry<P, M, H, Fut, E>(
     nats: async_nats::Client,
     work_stream: &str,
     queue_type: &str,
@@ -1136,57 +1001,6 @@ fn add_millis(timestamp: &str, millis: u64) -> Result<String, String> {
     (parsed + offset)
         .format(&Rfc3339)
         .map_err(|error| error.to_string())
-}
-
-/// Run one queue worker using a previously resolved jobs runtime binding.
-pub async fn run_single_queue_worker_from_binding<P, M, H, Fut, E>(
-    nats: async_nats::Client,
-    binding: JobsRuntimeBinding,
-    queue_type: &str,
-    publisher: P,
-    meta: M,
-    handler: H,
-) -> Result<(), RuntimeWorkerError>
-where
-    P: JobEventPublisher + Send + Sync + 'static,
-    P::Error: std::fmt::Display,
-    M: JobMetaSource + Send + Sync + 'static,
-    H: Fn(ActiveJob<P, M>) -> Fut + Clone + Send + Sync + 'static,
-    Fut: Future<Output = Result<Value, JobProcessError<E>>> + Send,
-    E: ToString + Send,
-{
-    let manager = JobManager::new(publisher, binding.jobs, meta);
-    run_single_queue_worker(nats, &binding.work_stream, queue_type, manager, handler).await
-}
-
-/// Run one queue worker from a resolved binding with cancellation context.
-pub async fn run_single_queue_worker_from_binding_with_context<P, M, H, Fut, E>(
-    nats: async_nats::Client,
-    binding: JobsRuntimeBinding,
-    queue_type: &str,
-    publisher: P,
-    meta: M,
-    cancellation: JobCancellationToken,
-    handler: H,
-) -> Result<(), RuntimeWorkerError>
-where
-    P: JobEventPublisher + Send + Sync + 'static,
-    P::Error: std::fmt::Display,
-    M: JobMetaSource + Send + Sync + 'static,
-    H: Fn(ActiveJob<P, M>) -> Fut + Clone + Send + Sync + 'static,
-    Fut: Future<Output = Result<Value, JobProcessError<E>>> + Send,
-    E: ToString + Send,
-{
-    let manager = JobManager::new(publisher, binding.jobs, meta);
-    run_single_queue_worker_with_context(
-        nats,
-        &binding.work_stream,
-        queue_type,
-        manager,
-        cancellation,
-        handler,
-    )
-    .await
 }
 
 /// Start a first-class worker host from a resolved runtime binding.

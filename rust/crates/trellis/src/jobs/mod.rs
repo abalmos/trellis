@@ -67,9 +67,7 @@ pub type NatsJobEventPublisher = TrellisJobEventPublisher;
 #[doc(hidden)]
 pub mod internal {
     pub use super::runtime_worker::{
-        process_work_payload, process_work_payload_with_context,
-        process_work_payload_with_context_and_heartbeat, start_worker_host_from_binding,
-        WorkerHostError,
+        process_work_payload, start_worker_host_from_binding, WorkerHostError,
     };
 
     pub fn typed_active_job<D>(
