@@ -49,7 +49,7 @@ pub use projection::{is_terminal, job_from_work_event, reduce_job_event};
 pub use publisher::{JobEventHeaders, JobEventPublisher};
 pub use registry::{
     new_worker_heartbeat, publish_worker_heartbeat, start_worker_heartbeat_loop,
-    ActiveJobCancellationRegistry, WorkerHeartbeatHandle,
+    ActiveJobCancellationRegistry, WorkerHeartbeatHandle, WorkerHeartbeatOptions,
 };
 pub use runtime::{JobsRuntime, JobsRuntimeMessage, JobsRuntimeMessageStream};
 pub use runtime_worker::{JobCancellationToken, WorkerHostHandle, WorkerHostOptions};
