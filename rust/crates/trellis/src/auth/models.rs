@@ -132,12 +132,11 @@ pub struct AdminLoginOutcome {
 
 /// Result of starting admin reauthentication for a changed contract.
 #[doc = concat!("Public Trellis value set `", stringify!(AdminReauthOutcome), "`.")]
-#[allow(clippy::large_enum_variant)]
 pub enum AdminReauthOutcome {
     /// Contract change was auto-approved and the session was rebound immediately.
-    Bound(AdminLoginOutcome),
+    Bound(Box<AdminLoginOutcome>),
     /// External interaction is still required to finish the agent auth flow.
-    Flow(AgentLoginChallenge),
+    Flow(Box<AgentLoginChallenge>),
 }
 
 /// Derived device identity material used to provision and bootstrap a device.

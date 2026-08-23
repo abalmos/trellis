@@ -926,7 +926,7 @@ mod tests {
             ) -> BoxFuture<'a, Result<Bytes, ServerError>> {
                 Box::pin(async {
                     Err(ServerError::SchemaValidation {
-                        issues: vec![SchemaValidationIssue {
+                        issues: Box::new(vec![SchemaValidationIssue {
                             path: "/items".to_string(),
                             schema_path: Some("#/properties/items".to_string()),
                             keyword: "minItems".to_string(),
@@ -941,7 +941,7 @@ mod tests {
                                     .into_iter()
                                     .collect(),
                             ),
-                        }],
+                        }]),
                     })
                 })
             }
@@ -986,10 +986,10 @@ mod tests {
             ) -> BoxFuture<'a, Result<Bytes, ServerError>> {
                 Box::pin(async {
                     Err(ServerError::Validation {
-                        issues: vec![ValidationIssue {
+                        issues: Box::new(vec![ValidationIssue {
                             path: "/name".to_string(),
                             message: "minLength: minimum length is 3".to_string(),
-                        }],
+                        }]),
                     })
                 })
             }

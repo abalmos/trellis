@@ -436,13 +436,13 @@ pub async fn start_admin_reauth(
         detached_login_redirect_to()?.trim_start_matches('/')
     );
     let response = start_auth_request(&state.trellis_url, &redirect_to, &auth).await?;
-    Ok(AdminReauthOutcome::Flow(AgentLoginChallenge {
+    Ok(AdminReauthOutcome::Flow(Box::new(AgentLoginChallenge {
         flow_id: response.flow_id,
         login_url: response.portal_url,
         session_seed: state.session_seed.clone(),
         participant_digest: administration_participant()?.digest,
         auth,
-    }))
+    })))
 }
 
 fn now_ms() -> Result<i64, TrellisAuthError> {

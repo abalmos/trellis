@@ -649,7 +649,7 @@ fn proof_error<'a>(
 ) -> ProtocolError {
     ProtocolError::SessionProof {
         code,
-        path: PointerBuf::from_tokens(tokens),
+        path: Box::new(PointerBuf::from_tokens(tokens)),
         message: message.into(),
     }
 }
@@ -778,7 +778,7 @@ fn validate_safe_json_integers(value: &Value, path: &mut Vec<String>) -> Result<
             if unsafe_integer {
                 return Err(ProtocolError::SessionProof {
                     code: SessionProofErrorCodeV1::UnsafeJsonInteger,
-                    path: PointerBuf::from_tokens(path.iter().map(String::as_str)),
+                    path: Box::new(PointerBuf::from_tokens(path.iter().map(String::as_str))),
                     message: "integer must be within the interoperable JSON safe-integer range"
                         .to_owned(),
                 });

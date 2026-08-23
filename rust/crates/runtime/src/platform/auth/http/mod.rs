@@ -479,7 +479,6 @@ fn now_ms() -> Result<i64, HttpError> {
         .map_err(|_| HttpError::internal("clock_overflow"))
 }
 
-#[allow(clippy::result_large_err)]
 fn checked_add(value: i64, duration: i64) -> Result<i64, HttpError> {
     value
         .checked_add(duration)
@@ -521,7 +520,6 @@ fn session_revocation_actions(
     .collect()
 }
 
-#[allow(clippy::result_large_err)]
 fn proof_request_digest(raw: &Value) -> Result<String, trellis_protocol::ProtocolError> {
     session_proof_request_digest_v1(raw)
 }

@@ -2254,7 +2254,7 @@ where
                     id: "local".to_string(),
                     error_type: "ValidationError".to_string(),
                     message: "Input validation failed".to_string(),
-                    issues: issues
+                    issues: (*issues)
                         .into_iter()
                         .map(|issue| crate::client::ValidationIssue {
                             path: issue.path,
@@ -2272,7 +2272,7 @@ where
                     id: "local".to_string(),
                     error_type: "SchemaValidationError".to_string(),
                     message: "Input validation failed".to_string(),
-                    issues: issues
+                    issues: (*issues)
                         .into_iter()
                         .map(|issue| crate::client::SchemaValidationIssue {
                             path: issue.path,

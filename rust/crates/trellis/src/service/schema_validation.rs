@@ -89,7 +89,7 @@ pub fn validate_input_schema(schema_json: &str, value: &Value) -> Result<(), Ser
 
     if !has_unannotated && !schema_validation_issues.is_empty() {
         Err(ServerError::SchemaValidation {
-            issues: schema_validation_issues,
+            issues: Box::new(schema_validation_issues),
         })
     } else {
         let issues: Vec<ValidationIssue> = errors
@@ -106,7 +106,9 @@ pub fn validate_input_schema(schema_json: &str, value: &Value) -> Result<(), Ser
                 }
             })
             .collect();
-        Err(ServerError::Validation { issues })
+        Err(ServerError::Validation {
+            issues: Box::new(issues),
+        })
     }
 }
 

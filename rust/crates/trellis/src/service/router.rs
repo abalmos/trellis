@@ -71,7 +71,6 @@ pub struct RoutePermission {
 
 impl RoutePermission {
     /// Convert generated route metadata into its exact permission atom.
-    #[allow(clippy::result_large_err)] // Protocol errors are immediately mapped at dispatch.
     pub fn permission_atom(&self) -> Result<PermissionAtomV1, ProtocolError> {
         let target = if self.action == PermissionActionV1::Control {
             PermissionTargetV1::operation_signal(
@@ -737,10 +736,10 @@ where
 {
     let value: serde_json::Value =
         serde_json::from_slice(payload).map_err(|error| ServerError::Validation {
-            issues: vec![ValidationIssue {
+            issues: Box::new(vec![ValidationIssue {
                 path: String::new(),
                 message: format!("Invalid JSON: {error}"),
-            }],
+            }]),
         })?;
 
     validate_input_schema(schema_json, &value)?;

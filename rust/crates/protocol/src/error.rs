@@ -185,7 +185,7 @@ pub enum ProtocolError {
         /// Canonical API identifier, when known.
         api: Option<String>,
         /// Exact authored RFC 6901 path.
-        path: PointerBuf,
+        path: Box<PointerBuf>,
         /// Specific validation failure.
         message: String,
     },
@@ -196,7 +196,7 @@ pub enum ProtocolError {
         /// Stable failure category.
         code: AuthorizationErrorCodeV1,
         /// Exact authored RFC 6901 path.
-        path: PointerBuf,
+        path: Box<PointerBuf>,
         /// Safe diagnostic that omits secrets and signed payloads.
         message: String,
     },
@@ -207,7 +207,7 @@ pub enum ProtocolError {
         /// Stable failure category.
         code: SessionProofErrorCodeV1,
         /// Exact authored RFC 6901 path.
-        path: PointerBuf,
+        path: Box<PointerBuf>,
         /// Safe diagnostic that omits secrets and signed payloads.
         message: String,
     },

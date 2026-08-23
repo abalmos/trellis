@@ -625,7 +625,6 @@ async fn resolve_snapshot(
     }
 }
 
-#[allow(clippy::result_large_err)]
 fn resolve_scope_key(purpose: &str, caller: &str, review_id: &str) -> Result<String, ServerError> {
     trellis_protocol::digest_json(&json!({
         "purpose": purpose,
@@ -660,7 +659,6 @@ fn snapshot(
     }
 }
 
-#[allow(clippy::result_large_err)]
 fn caller_principal_id(context: &RequestContext) -> Result<&str, ServerError> {
     let caller = context
         .caller
@@ -679,7 +677,6 @@ fn caller_principal_id(context: &RequestContext) -> Result<&str, ServerError> {
     Ok(&caller.principal.id)
 }
 
-#[allow(clippy::result_large_err)]
 fn requested_event(
     review: &DeviceActivationReviewRecord,
     caller: &str,
@@ -697,7 +694,6 @@ fn requested_event(
     )
 }
 
-#[allow(clippy::result_large_err)]
 fn approved_event(
     review: &DeviceActivationReviewRecord,
     caller: &str,
@@ -715,7 +711,6 @@ fn approved_event(
     )
 }
 
-#[allow(clippy::result_large_err)]
 fn resolved_event(
     review: &DeviceActivationReviewRecord,
     now: i64,
@@ -730,7 +725,6 @@ fn resolved_event(
     )
 }
 
-#[allow(clippy::result_large_err)]
 fn activation_event(
     review: &DeviceActivationReviewRecord,
     suffix: &str,
@@ -742,7 +736,6 @@ fn activation_event(
         .map_err(server_error)
 }
 
-#[allow(clippy::result_large_err)]
 fn now_ms() -> Result<i64, ServerError> {
     i64::try_from(
         SystemTime::now()

@@ -1108,10 +1108,10 @@ fn output<T: for<'de> Deserialize<'de>>(value: Value) -> Result<T, ServerError> 
 
 fn validation(path: &str, message: &str) -> ServerError {
     ServerError::Validation {
-        issues: vec![ValidationIssue {
+        issues: Box::new(vec![ValidationIssue {
             path: path.to_owned(),
             message: message.to_owned(),
-        }],
+        }]),
     }
 }
 

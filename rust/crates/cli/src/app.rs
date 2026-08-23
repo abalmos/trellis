@@ -236,7 +236,7 @@ async fn complete_admin_reauth(
             } else {
                 output::print_info(&render_agent_login_instructions(&login_url)?);
             }
-            map_admin_session_result(challenge.complete(&state.trellis_url).await)?.state
+            map_admin_session_result((*challenge).complete(&state.trellis_url).await)?.state
         }
         Err(error) => return Err(map_admin_session_error(error)),
     };

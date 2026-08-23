@@ -129,7 +129,7 @@ pub enum ServerError {
     #[error("schema validation failed: {} issues", .issues.len())]
     SchemaValidation {
         /// Annotated schema failures.
-        issues: Vec<SchemaValidationIssue>,
+        issues: Box<Vec<SchemaValidationIssue>>,
     },
 
     /// Schema validation of caller input failed with at least one
@@ -137,7 +137,7 @@ pub enum ServerError {
     #[error("validation failed: {} issues", .issues.len())]
     Validation {
         /// Structural validation failures.
-        issues: Vec<ValidationIssue>,
+        issues: Box<Vec<ValidationIssue>>,
     },
 
     /// JSON encoding or decoding failed.

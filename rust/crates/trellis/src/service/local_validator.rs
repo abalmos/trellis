@@ -412,7 +412,6 @@ pub fn payload_hash_base64url(payload: &[u8]) -> String {
     base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(sha2::Sha256::digest(payload))
 }
 
-#[allow(clippy::result_large_err)] // Protocol errors are immediately mapped to service errors.
 fn select_publish_permission(
     api_id: &str,
     event_name: &str,

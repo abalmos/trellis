@@ -448,7 +448,6 @@ pub fn resolve_participant_v1(participant_json: &str, apis_json: &str) -> Result
     .map_err(|error| JsError::new(&error.to_string()))
 }
 
-#[allow(clippy::result_large_err)] // Protocol errors are serialized immediately at the WASM boundary.
 fn verify_context_bundle(
     root_value: &Value,
     manifest_value: &Value,
@@ -470,7 +469,6 @@ fn verify_context_bundle(
     verify_authorization_context_v1(&root, &verified_manifest, &context, &verification_policy)
 }
 
-#[allow(clippy::result_large_err)] // Protocol errors are serialized immediately at the WASM boundary.
 fn verified_context_projection(
     context: &VerifiedAuthorizationContextV1,
 ) -> Result<Value, ProtocolError> {

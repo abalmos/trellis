@@ -1666,7 +1666,7 @@ fn resolution_error(
         participant: participant.to_owned(),
         alias: alias.map(str::to_owned),
         api: api.map(str::to_owned),
-        path,
+        path: Box::new(path),
         message,
     }
 }

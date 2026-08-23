@@ -428,7 +428,7 @@ struct StoredOperation {
 #[derive(Debug, Clone)]
 #[expect(
     clippy::large_enum_variant,
-    reason = "operation snapshots are retained inline in the in-memory event log"
+    reason = "the hot transition/broadcast path keeps snapshots inline to avoid a per-event allocation"
 )]
 enum StoredOperationEvent {
     Snapshot(OperationSnapshot<Value, Value>),
