@@ -8,7 +8,7 @@ use serde_json::Value;
 use subtle::ConstantTimeEq;
 use trellis_protocol::{
     parse_session_proof_v1, session_proof_request_digest_v1, verify_session_proof_v1,
-    SessionProofInputV1,
+    AuthorizationContextRefreshSessionProofInputV1, SessionProofInputV1,
 };
 
 use super::super::ephemeral::AuthEphemeralRepository;
@@ -96,16 +96,18 @@ where
     let request_digest = session_proof_request_digest_v1(&digest_value)
         .map_err(|_| HttpError::bad_request("invalid_context_refresh"))?;
     let input = SessionProofInputV1::authorization_context_refresh(
-        &request.request_id,
-        request.issued_at,
-        &request.session_id,
-        &session.session_key_id,
-        request.current_context_digest.0.clone(),
-        request.expected_participant_digest.clone(),
-        request.expected_needs_digest.clone(),
-        &request.known_root_key_id,
-        request.minimum_manifest_generation,
-        &request_digest,
+        AuthorizationContextRefreshSessionProofInputV1 {
+            request_id: request.request_id.clone(),
+            issued_at: request.issued_at,
+            session_id: request.session_id.clone(),
+            session_key_id: session.session_key_id.clone(),
+            current_context_digest: request.current_context_digest.0.clone(),
+            expected_participant_digest: request.expected_participant_digest.clone(),
+            expected_needs_digest: request.expected_needs_digest.clone(),
+            known_root_key_id: request.known_root_key_id.clone(),
+            minimum_manifest_generation: request.minimum_manifest_generation,
+            request_digest,
+        },
     )
     .map_err(|_| HttpError::unauthorized("invalid_proof"))?;
     verify_session_proof_v1(

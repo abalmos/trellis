@@ -19,7 +19,7 @@ use tokio::task::JoinHandle;
 use tokio::time::timeout;
 use trellis_protocol::{
     parse_participant_v1, resolve_participant_v1, session_proof_request_digest_v1,
-    SessionProofInputV1,
+    DeviceBootstrapSessionProofInputV1, ServiceBootstrapSessionProofInputV1, SessionProofInputV1,
 };
 
 use super::events::{EVENT_ID_HEADER, EVENT_TIME_HEADER};
@@ -619,19 +619,20 @@ async fn fetch_service_bootstrap_inner(
         });
         let request_digest = session_proof_request_digest_v1(&serde_json::to_value(&request)?)
             .map_err(|error| TrellisClientError::Bootstrap(error.to_string()))?;
-        let proof_input = SessionProofInputV1::service_bootstrap(
-            request.request_id.clone(),
-            request.issued_at,
-            request.deployment_id.clone(),
-            request.instance_id.clone(),
-            request.provisioned_identity_key_id.clone(),
-            request.new_session_public_key.clone(),
-            session_nkey.to_owned(),
-            request.participant_id.clone(),
-            request.participant_artifact_digest.clone(),
-            request_digest,
-        )
-        .map_err(|error| TrellisClientError::Bootstrap(error.to_string()))?;
+        let proof_input =
+            SessionProofInputV1::service_bootstrap(ServiceBootstrapSessionProofInputV1 {
+                request_id: request.request_id.clone(),
+                issued_at: request.issued_at,
+                deployment_id: request.deployment_id.clone(),
+                instance_id: request.instance_id.clone(),
+                provisioned_identity_key_id: request.provisioned_identity_key_id.clone(),
+                new_session_public_key: request.new_session_public_key.clone(),
+                new_session_nkey: session_nkey.to_owned(),
+                participant_id: request.participant_id.clone(),
+                participant_digest: request.participant_artifact_digest.clone(),
+                request_digest,
+            })
+            .map_err(|error| TrellisClientError::Bootstrap(error.to_string()))?;
         request.proof = serde_json::to_value(identity_auth.sign_session_proof(&proof_input)?)?;
         let request_started_at = now_context_millis()?;
         let response = client
@@ -820,21 +821,21 @@ async fn fetch_device_bootstrap<C>(
     })?;
     let request_digest = trellis_protocol::session_proof_request_digest_v1(&request)
         .map_err(|error| TrellisClientError::Bootstrap(error.to_string()))?;
-    let input = SessionProofInputV1::device_bootstrap(
+    let input = SessionProofInputV1::device_bootstrap(DeviceBootstrapSessionProofInputV1 {
         request_id,
         issued_at,
-        opts.deployment_id,
-        opts.instance_id,
-        identity_auth.key_id(),
-        session_auth.session_key.clone(),
-        session_nkey,
-        opts.contract.participant_id,
-        opts.contract.participant_digest,
-        activation
+        deployment_id: opts.deployment_id.to_owned(),
+        instance_id: opts.instance_id.to_owned(),
+        device_identity_key_id: identity_auth.key_id(),
+        new_session_public_key: session_auth.session_key.clone(),
+        new_session_nkey: session_nkey,
+        participant_id: opts.contract.participant_id.to_owned(),
+        participant_digest: opts.contract.participant_digest.to_owned(),
+        challenge_digest: activation
             .as_ref()
             .map(|activation| activation.challenge_digest.to_owned()),
         request_digest,
-    )
+    })
     .map_err(|error| TrellisClientError::Bootstrap(error.to_string()))?;
     request["proof"] = serde_json::to_value(identity_auth.sign_session_proof(&input)?)?;
     if proof_overrides.corrupt_signature {

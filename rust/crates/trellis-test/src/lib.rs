@@ -4201,26 +4201,30 @@ async fn start_auth_request(
         "referencedApiArtifacts": referenced_api_artifacts,
         "redirectTarget": redirect_to,
         "proof": auth.sign_session_proof(&trellis_protocol::SessionProofInputV1::user_auth_request(
-            request_id.clone(),
-            issued_at,
-            auth.session_key.clone(),
-            session_nkey.clone(),
-            participant_id.to_owned(),
-            participant_digest.clone(),
-            redirect_to.to_owned(),
-            participant_digest.clone(),
+            trellis_protocol::UserAuthRequestSessionProofInputV1 {
+                request_id: request_id.clone(),
+                issued_at,
+                session_public_key: auth.session_key.clone(),
+                session_nkey: session_nkey.clone(),
+                participant_id: participant_id.to_owned(),
+                participant_digest: participant_digest.clone(),
+                redirect_target: redirect_to.to_owned(),
+                request_digest: participant_digest.clone(),
+            },
         )?)?,
     });
     let request_digest = trellis_protocol::session_proof_request_digest_v1(&raw)?;
     let input = trellis_protocol::SessionProofInputV1::user_auth_request(
-        request_id,
-        issued_at,
-        auth.session_key.clone(),
-        session_nkey,
-        participant_id.to_owned(),
-        participant_digest,
-        redirect_to.to_owned(),
-        request_digest,
+        trellis_protocol::UserAuthRequestSessionProofInputV1 {
+            request_id,
+            issued_at,
+            session_public_key: auth.session_key.clone(),
+            session_nkey,
+            participant_id: participant_id.to_owned(),
+            participant_digest,
+            redirect_target: redirect_to.to_owned(),
+            request_digest,
+        },
     )?;
     raw["proof"] = serde_json::to_value(auth.sign_session_proof(&input)?)?;
     post_json(&format!("{}/auth/requests", trim_url(trellis_url)), &raw).await

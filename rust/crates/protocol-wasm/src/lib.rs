@@ -12,11 +12,13 @@ use trellis_protocol::{
     session_proof_signing_digest_v1, verify_authorization_context_v1,
     verify_authorization_event as verify_authorization_event_protocol,
     verify_authorization_request as verify_authorization_request_protocol,
-    verify_issuer_manifest_v1, verify_session_proof_v1, AuthorizationEventProof,
+    verify_issuer_manifest_v1, verify_session_proof_v1,
+    AuthorizationContextRefreshSessionProofInputV1, AuthorizationEventProof,
     AuthorizationEventPublisher, AuthorizationEventVerificationInputV1, AuthorizationRequestProof,
     AuthorizationRequestVerificationInputV1, AuthorizationTrustRootV1,
-    AuthorizationVerificationPolicyV1, PermissionAtomV1, ProtocolError, SessionProofInputV1,
-    SessionProofPolicyV1, SessionProofV1, VerifiedAuthorizationContextV1,
+    AuthorizationVerificationPolicyV1, DeviceBootstrapSessionProofInputV1, PermissionAtomV1,
+    ProtocolError, ServiceBootstrapSessionProofInputV1, SessionProofInputV1, SessionProofPolicyV1,
+    SessionProofV1, UserAuthRequestSessionProofInputV1, VerifiedAuthorizationContextV1,
 };
 use wasm_bindgen::prelude::*;
 
@@ -97,7 +99,7 @@ impl TryFrom<WireSessionProofInputV1> for SessionProofInputV1 {
                 participant_digest,
                 redirect_target,
                 request_digest,
-            } => Self::user_auth_request(
+            } => Self::user_auth_request(UserAuthRequestSessionProofInputV1 {
                 request_id,
                 issued_at,
                 session_public_key,
@@ -106,7 +108,7 @@ impl TryFrom<WireSessionProofInputV1> for SessionProofInputV1 {
                 participant_digest,
                 redirect_target,
                 request_digest,
-            ),
+            }),
             WireSessionProofInputV1::ServiceBootstrap {
                 request_id,
                 issued_at,
@@ -118,7 +120,7 @@ impl TryFrom<WireSessionProofInputV1> for SessionProofInputV1 {
                 participant_id,
                 participant_digest,
                 request_digest,
-            } => Self::service_bootstrap(
+            } => Self::service_bootstrap(ServiceBootstrapSessionProofInputV1 {
                 request_id,
                 issued_at,
                 deployment_id,
@@ -129,7 +131,7 @@ impl TryFrom<WireSessionProofInputV1> for SessionProofInputV1 {
                 participant_id,
                 participant_digest,
                 request_digest,
-            ),
+            }),
             WireSessionProofInputV1::DeviceBootstrap {
                 request_id,
                 issued_at,
@@ -142,7 +144,7 @@ impl TryFrom<WireSessionProofInputV1> for SessionProofInputV1 {
                 participant_digest,
                 challenge_digest,
                 request_digest,
-            } => Self::device_bootstrap(
+            } => Self::device_bootstrap(DeviceBootstrapSessionProofInputV1 {
                 request_id,
                 issued_at,
                 deployment_id,
@@ -152,9 +154,9 @@ impl TryFrom<WireSessionProofInputV1> for SessionProofInputV1 {
                 new_session_nkey,
                 participant_id,
                 participant_digest,
-                challenge_digest.0,
+                challenge_digest: challenge_digest.0,
                 request_digest,
-            ),
+            }),
             WireSessionProofInputV1::AuthorizationContextRefresh {
                 request_id,
                 issued_at,
@@ -167,16 +169,18 @@ impl TryFrom<WireSessionProofInputV1> for SessionProofInputV1 {
                 minimum_manifest_generation,
                 request_digest,
             } => Self::authorization_context_refresh(
-                request_id,
-                issued_at,
-                session_id,
-                session_key_id,
-                current_context_digest.0,
-                expected_participant_digest.0,
-                expected_needs_digest.0,
-                known_root_key_id,
-                minimum_manifest_generation,
-                request_digest,
+                AuthorizationContextRefreshSessionProofInputV1 {
+                    request_id,
+                    issued_at,
+                    session_id,
+                    session_key_id,
+                    current_context_digest: current_context_digest.0,
+                    expected_participant_digest: expected_participant_digest.0,
+                    expected_needs_digest: expected_needs_digest.0,
+                    known_root_key_id,
+                    minimum_manifest_generation,
+                    request_digest,
+                },
             ),
         }
     }

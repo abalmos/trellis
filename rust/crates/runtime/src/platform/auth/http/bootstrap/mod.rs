@@ -287,31 +287,35 @@ where
         return Err(HttpError::unauthorized("identity_not_found"));
     };
     let proof_input = match input.kind {
-        ProvisionedIdentityKind::Service => SessionProofInputV1::service_bootstrap(
-            input.request_id.clone(),
-            input.issued_at,
-            input.deployment_id.clone(),
-            input.instance_id.clone(),
-            input.identity_key_id.clone(),
-            input.new_session_public_key.clone(),
-            input.new_session_nkey.clone(),
-            input.participant_id.clone(),
-            input.participant_artifact_digest.clone(),
-            input.request_digest.clone(),
-        ),
-        ProvisionedIdentityKind::Device => SessionProofInputV1::device_bootstrap(
-            input.request_id.clone(),
-            input.issued_at,
-            input.deployment_id.clone(),
-            input.instance_id.clone(),
-            input.identity_key_id.clone(),
-            input.new_session_public_key.clone(),
-            input.new_session_nkey.clone(),
-            input.participant_id.clone(),
-            input.participant_artifact_digest.clone(),
-            input.challenge_digest.clone(),
-            input.request_digest.clone(),
-        ),
+        ProvisionedIdentityKind::Service => {
+            SessionProofInputV1::service_bootstrap(ServiceBootstrapSessionProofInputV1 {
+                request_id: input.request_id.clone(),
+                issued_at: input.issued_at,
+                deployment_id: input.deployment_id.clone(),
+                instance_id: input.instance_id.clone(),
+                provisioned_identity_key_id: input.identity_key_id.clone(),
+                new_session_public_key: input.new_session_public_key.clone(),
+                new_session_nkey: input.new_session_nkey.clone(),
+                participant_id: input.participant_id.clone(),
+                participant_digest: input.participant_artifact_digest.clone(),
+                request_digest: input.request_digest.clone(),
+            })
+        }
+        ProvisionedIdentityKind::Device => {
+            SessionProofInputV1::device_bootstrap(DeviceBootstrapSessionProofInputV1 {
+                request_id: input.request_id.clone(),
+                issued_at: input.issued_at,
+                deployment_id: input.deployment_id.clone(),
+                instance_id: input.instance_id.clone(),
+                device_identity_key_id: input.identity_key_id.clone(),
+                new_session_public_key: input.new_session_public_key.clone(),
+                new_session_nkey: input.new_session_nkey.clone(),
+                participant_id: input.participant_id.clone(),
+                participant_digest: input.participant_artifact_digest.clone(),
+                challenge_digest: input.challenge_digest.clone(),
+                request_digest: input.request_digest.clone(),
+            })
+        }
     }
     .map_err(|_| HttpError::unauthorized("invalid_proof"))?;
     let proof = parse_session_proof_v1(&input.proof)

@@ -25,8 +25,9 @@ use serde_json::{json, Value};
 use sha2::{Digest as _, Sha256};
 use trellis_protocol::{
     canonicalize_json, parse_api_v1, parse_participant_v1, parse_session_proof_v1,
-    resolve_participant_v1, session_proof_request_digest_v1, verify_session_proof_v1, GrantSetV1,
-    SessionProofInputV1, SessionProofPolicyV1,
+    resolve_participant_v1, session_proof_request_digest_v1, verify_session_proof_v1,
+    DeviceBootstrapSessionProofInputV1, GrantSetV1, ServiceBootstrapSessionProofInputV1,
+    SessionProofInputV1, SessionProofPolicyV1, UserAuthRequestSessionProofInputV1,
 };
 use trellis_rs::service::{
     EventConsumerOrdering, EventConsumerReplay, EventConsumerResourceBinding,

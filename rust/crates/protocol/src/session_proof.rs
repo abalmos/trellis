@@ -59,6 +59,104 @@ pub struct SessionProofInputV1 {
     nkey_binding: Option<NkeyBinding>,
 }
 
+/// Owned fields for a user browser-auth initiation proof.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct UserAuthRequestSessionProofInputV1 {
+    /// Caller-generated request identifier.
+    pub request_id: String,
+    /// Claimed Unix issue time in milliseconds.
+    pub issued_at: i64,
+    /// Unpadded base64url Ed25519 session public key.
+    pub session_public_key: String,
+    /// NATS User NKey encoding the session public key.
+    pub session_nkey: String,
+    /// Participant identifier requesting authorization.
+    pub participant_id: String,
+    /// Canonical participant artifact digest.
+    pub participant_digest: String,
+    /// Exact post-authentication redirect target.
+    pub redirect_target: String,
+    /// Digest of the complete request with its proof signature removed.
+    pub request_digest: String,
+}
+
+/// Owned fields for a provisioned service-instance bootstrap proof.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ServiceBootstrapSessionProofInputV1 {
+    /// Caller-generated request identifier.
+    pub request_id: String,
+    /// Claimed Unix issue time in milliseconds.
+    pub issued_at: i64,
+    /// Deployment containing the service instance.
+    pub deployment_id: String,
+    /// Service instance identifier.
+    pub instance_id: String,
+    /// Provisioned identity signing-key identifier.
+    pub provisioned_identity_key_id: String,
+    /// Unpadded base64url Ed25519 public key for the new session.
+    pub new_session_public_key: String,
+    /// NATS User NKey encoding the new session public key.
+    pub new_session_nkey: String,
+    /// Participant identifier presented by the service.
+    pub participant_id: String,
+    /// Canonical participant artifact digest.
+    pub participant_digest: String,
+    /// Digest of the complete request with its proof signature removed.
+    pub request_digest: String,
+}
+
+/// Owned fields for a provisioned or activated device bootstrap proof.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DeviceBootstrapSessionProofInputV1 {
+    /// Caller-generated request identifier.
+    pub request_id: String,
+    /// Claimed Unix issue time in milliseconds.
+    pub issued_at: i64,
+    /// Deployment containing the device instance.
+    pub deployment_id: String,
+    /// Device instance identifier.
+    pub instance_id: String,
+    /// Device identity signing-key identifier.
+    pub device_identity_key_id: String,
+    /// Unpadded base64url Ed25519 public key for the new session.
+    pub new_session_public_key: String,
+    /// NATS User NKey encoding the new session public key.
+    pub new_session_nkey: String,
+    /// Participant identifier presented by the device.
+    pub participant_id: String,
+    /// Canonical participant artifact digest.
+    pub participant_digest: String,
+    /// Optional digest of the activation challenge.
+    pub challenge_digest: Option<String>,
+    /// Digest of the complete request with its proof signature removed.
+    pub request_digest: String,
+}
+
+/// Owned fields for an authorization-context refresh proof.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AuthorizationContextRefreshSessionProofInputV1 {
+    /// Caller-generated request identifier.
+    pub request_id: String,
+    /// Claimed Unix issue time in milliseconds.
+    pub issued_at: i64,
+    /// Durable session identifier.
+    pub session_id: String,
+    /// Durable session signing-key identifier.
+    pub session_key_id: String,
+    /// Digest of the currently usable context, when one remains usable.
+    pub current_context_digest: Option<String>,
+    /// Expected canonical participant artifact digest, when known.
+    pub expected_participant_digest: Option<String>,
+    /// Expected canonical participant-needs digest, when known.
+    pub expected_needs_digest: Option<String>,
+    /// Pinned authorization root signing-key identifier.
+    pub known_root_key_id: String,
+    /// Lowest accepted issuer-manifest generation.
+    pub minimum_manifest_generation: i64,
+    /// Digest of the complete request with its proof signature removed.
+    pub request_digest: String,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 enum NkeyBinding {
     PublicKey {
@@ -76,24 +174,19 @@ impl SessionProofInputV1 {
     ///
     /// Returns [`ProtocolError::SessionProof`] when a field is noncanonical,
     /// unsafe, empty, malformed, or the NKey does not encode `session_public_key`.
-    #[allow(clippy::too_many_arguments)]
     pub fn user_auth_request(
-        request_id: impl Into<String>,
-        issued_at: i64,
-        session_public_key: impl Into<String>,
-        session_nkey: impl Into<String>,
-        participant_id: impl Into<String>,
-        participant_digest: impl Into<String>,
-        redirect_target: impl Into<String>,
-        request_digest: impl Into<String>,
+        input: UserAuthRequestSessionProofInputV1,
     ) -> Result<Self, ProtocolError> {
-        let request_id = request_id.into();
-        let session_public_key = session_public_key.into();
-        let session_nkey = session_nkey.into();
-        let participant_id = participant_id.into();
-        let participant_digest = participant_digest.into();
-        let redirect_target = redirect_target.into();
-        let request_digest = request_digest.into();
+        let UserAuthRequestSessionProofInputV1 {
+            request_id,
+            issued_at,
+            session_public_key,
+            session_nkey,
+            participant_id,
+            participant_digest,
+            redirect_target,
+            request_digest,
+        } = input;
         let key = decode_public_key(&session_public_key, &["sessionPublicKey"])?;
         let session_nkey_bytes = validate_nkey_binding(&session_nkey, &key, &["sessionNkey"])?;
         let signer_key_id = derived_key_id(&key);
@@ -124,28 +217,21 @@ impl SessionProofInputV1 {
     ///
     /// Returns [`ProtocolError::SessionProof`] when a field is noncanonical,
     /// unsafe, empty, malformed, or the NKey does not encode `new_session_public_key`.
-    #[allow(clippy::too_many_arguments)]
     pub fn service_bootstrap(
-        request_id: impl Into<String>,
-        issued_at: i64,
-        deployment_id: impl Into<String>,
-        instance_id: impl Into<String>,
-        provisioned_identity_key_id: impl Into<String>,
-        new_session_public_key: impl Into<String>,
-        new_session_nkey: impl Into<String>,
-        participant_id: impl Into<String>,
-        participant_digest: impl Into<String>,
-        request_digest: impl Into<String>,
+        input: ServiceBootstrapSessionProofInputV1,
     ) -> Result<Self, ProtocolError> {
-        let request_id = request_id.into();
-        let deployment_id = deployment_id.into();
-        let instance_id = instance_id.into();
-        let provisioned_identity_key_id = provisioned_identity_key_id.into();
-        let new_session_public_key = new_session_public_key.into();
-        let new_session_nkey = new_session_nkey.into();
-        let participant_id = participant_id.into();
-        let participant_digest = participant_digest.into();
-        let request_digest = request_digest.into();
+        let ServiceBootstrapSessionProofInputV1 {
+            request_id,
+            issued_at,
+            deployment_id,
+            instance_id,
+            provisioned_identity_key_id,
+            new_session_public_key,
+            new_session_nkey,
+            participant_id,
+            participant_digest,
+            request_digest,
+        } = input;
         validate_key_id(&provisioned_identity_key_id, &["provisionedIdentityKeyId"])?;
         let session_key = decode_public_key(&new_session_public_key, &["newSessionPublicKey"])?;
         let session_nkey_bytes =
@@ -179,29 +265,22 @@ impl SessionProofInputV1 {
     ///
     /// Returns [`ProtocolError::SessionProof`] when a field is noncanonical,
     /// unsafe, empty, malformed, or the NKey does not encode `new_session_public_key`.
-    #[allow(clippy::too_many_arguments)]
     pub fn device_bootstrap(
-        request_id: impl Into<String>,
-        issued_at: i64,
-        deployment_id: impl Into<String>,
-        instance_id: impl Into<String>,
-        device_identity_key_id: impl Into<String>,
-        new_session_public_key: impl Into<String>,
-        new_session_nkey: impl Into<String>,
-        participant_id: impl Into<String>,
-        participant_digest: impl Into<String>,
-        challenge_digest: Option<String>,
-        request_digest: impl Into<String>,
+        input: DeviceBootstrapSessionProofInputV1,
     ) -> Result<Self, ProtocolError> {
-        let request_id = request_id.into();
-        let deployment_id = deployment_id.into();
-        let instance_id = instance_id.into();
-        let device_identity_key_id = device_identity_key_id.into();
-        let new_session_public_key = new_session_public_key.into();
-        let new_session_nkey = new_session_nkey.into();
-        let participant_id = participant_id.into();
-        let participant_digest = participant_digest.into();
-        let request_digest = request_digest.into();
+        let DeviceBootstrapSessionProofInputV1 {
+            request_id,
+            issued_at,
+            deployment_id,
+            instance_id,
+            device_identity_key_id,
+            new_session_public_key,
+            new_session_nkey,
+            participant_id,
+            participant_digest,
+            challenge_digest,
+            request_digest,
+        } = input;
         validate_key_id(&device_identity_key_id, &["deviceIdentityKeyId"])?;
         let session_key = decode_public_key(&new_session_public_key, &["newSessionPublicKey"])?;
         let session_nkey_bytes =
@@ -236,24 +315,21 @@ impl SessionProofInputV1 {
     ///
     /// Returns [`ProtocolError::SessionProof`] when a field is noncanonical,
     /// unsafe, empty, or malformed.
-    #[allow(clippy::too_many_arguments)]
     pub fn authorization_context_refresh(
-        request_id: impl Into<String>,
-        issued_at: i64,
-        session_id: impl Into<String>,
-        session_key_id: impl Into<String>,
-        current_context_digest: Option<String>,
-        expected_participant_digest: Option<String>,
-        expected_needs_digest: Option<String>,
-        known_root_key_id: impl Into<String>,
-        minimum_manifest_generation: i64,
-        request_digest: impl Into<String>,
+        input: AuthorizationContextRefreshSessionProofInputV1,
     ) -> Result<Self, ProtocolError> {
-        let request_id = request_id.into();
-        let session_id = session_id.into();
-        let session_key_id = session_key_id.into();
-        let known_root_key_id = known_root_key_id.into();
-        let request_digest = request_digest.into();
+        let AuthorizationContextRefreshSessionProofInputV1 {
+            request_id,
+            issued_at,
+            session_id,
+            session_key_id,
+            current_context_digest,
+            expected_participant_digest,
+            expected_needs_digest,
+            known_root_key_id,
+            minimum_manifest_generation,
+            request_digest,
+        } = input;
         validate_key_id(&session_key_id, &["sessionKeyId"])?;
         validate_key_id(&known_root_key_id, &["knownRootKeyId"])?;
         if minimum_manifest_generation <= 0 {
@@ -880,16 +956,18 @@ mod tests {
     fn authorization_context_refresh_requires_positive_manifest_floor() -> Result<(), ProtocolError>
     {
         assert!(SessionProofInputV1::authorization_context_refresh(
-            "req_refresh_1",
-            1_735_689_600_000,
-            "ses_1",
-            DIGEST,
-            None,
-            None,
-            None,
-            DIGEST,
-            0,
-            DIGEST,
+            AuthorizationContextRefreshSessionProofInputV1 {
+                request_id: "req_refresh_1".to_owned(),
+                issued_at: 1_735_689_600_000,
+                session_id: "ses_1".to_owned(),
+                session_key_id: DIGEST.to_owned(),
+                current_context_digest: None,
+                expected_participant_digest: None,
+                expected_needs_digest: None,
+                known_root_key_id: DIGEST.to_owned(),
+                minimum_manifest_generation: 0,
+                request_digest: DIGEST.to_owned(),
+            },
         )
         .is_err());
         Ok(())
@@ -953,59 +1031,72 @@ mod tests {
         let value = case.get("request").unwrap_or(&case["input"]);
         let request_digest = case["requestDigest"].as_str();
         match vector_field(case, "purpose") {
-            "userAuthRequest" => SessionProofInputV1::user_auth_request(
-                vector_field(value, "requestId"),
-                vector_time(value),
-                vector_field(value, "sessionPublicKey"),
-                vector_field(value, "sessionNkey"),
-                vector_field(value, "participantId"),
-                vector_field(value, "participantDigest"),
-                vector_field(value, "redirectTarget"),
-                request_digest.expect("user request digest"),
-            ),
-            "serviceBootstrap" => SessionProofInputV1::service_bootstrap(
-                vector_field(value, "requestId"),
-                vector_time(value),
-                vector_field(value, "deploymentId"),
-                vector_field(value, "instanceId"),
-                vector_field(value, "provisionedIdentityKeyId"),
-                vector_field(value, "newSessionPublicKey"),
-                vector_field(value, "newSessionNkey"),
-                vector_field(value, "participantId"),
-                vector_field(value, "participantDigest"),
-                request_digest.expect("service request digest"),
-            ),
-            "deviceBootstrap" => SessionProofInputV1::device_bootstrap(
-                vector_field(value, "requestId"),
-                vector_time(value),
-                vector_field(value, "deploymentId"),
-                vector_field(value, "instanceId"),
-                vector_field(value, "deviceIdentityKeyId"),
-                vector_field(value, "newSessionPublicKey"),
-                vector_field(value, "newSessionNkey"),
-                vector_field(value, "participantId"),
-                vector_field(value, "participantDigest"),
-                value["challengeDigest"].as_str().map(str::to_owned),
-                request_digest.expect("device request digest"),
-            ),
+            "userAuthRequest" => {
+                SessionProofInputV1::user_auth_request(UserAuthRequestSessionProofInputV1 {
+                    request_id: vector_field(value, "requestId").to_owned(),
+                    issued_at: vector_time(value),
+                    session_public_key: vector_field(value, "sessionPublicKey").to_owned(),
+                    session_nkey: vector_field(value, "sessionNkey").to_owned(),
+                    participant_id: vector_field(value, "participantId").to_owned(),
+                    participant_digest: vector_field(value, "participantDigest").to_owned(),
+                    redirect_target: vector_field(value, "redirectTarget").to_owned(),
+                    request_digest: request_digest.expect("user request digest").to_owned(),
+                })
+            }
+            "serviceBootstrap" => {
+                SessionProofInputV1::service_bootstrap(ServiceBootstrapSessionProofInputV1 {
+                    request_id: vector_field(value, "requestId").to_owned(),
+                    issued_at: vector_time(value),
+                    deployment_id: vector_field(value, "deploymentId").to_owned(),
+                    instance_id: vector_field(value, "instanceId").to_owned(),
+                    provisioned_identity_key_id: vector_field(value, "provisionedIdentityKeyId")
+                        .to_owned(),
+                    new_session_public_key: vector_field(value, "newSessionPublicKey").to_owned(),
+                    new_session_nkey: vector_field(value, "newSessionNkey").to_owned(),
+                    participant_id: vector_field(value, "participantId").to_owned(),
+                    participant_digest: vector_field(value, "participantDigest").to_owned(),
+                    request_digest: request_digest.expect("service request digest").to_owned(),
+                })
+            }
+            "deviceBootstrap" => {
+                SessionProofInputV1::device_bootstrap(DeviceBootstrapSessionProofInputV1 {
+                    request_id: vector_field(value, "requestId").to_owned(),
+                    issued_at: vector_time(value),
+                    deployment_id: vector_field(value, "deploymentId").to_owned(),
+                    instance_id: vector_field(value, "instanceId").to_owned(),
+                    device_identity_key_id: vector_field(value, "deviceIdentityKeyId").to_owned(),
+                    new_session_public_key: vector_field(value, "newSessionPublicKey").to_owned(),
+                    new_session_nkey: vector_field(value, "newSessionNkey").to_owned(),
+                    participant_id: vector_field(value, "participantId").to_owned(),
+                    participant_digest: vector_field(value, "participantDigest").to_owned(),
+                    challenge_digest: value["challengeDigest"].as_str().map(str::to_owned),
+                    request_digest: request_digest.expect("device request digest").to_owned(),
+                })
+            }
             "authorizationContextRefresh" => SessionProofInputV1::authorization_context_refresh(
-                vector_field(value, "requestId"),
-                vector_time(value),
-                vector_field(value, "sessionId"),
-                derived_key_id(&decode_public_key(
-                    vector_field(case, "signerPublicKey"),
-                    &["signerPublicKey"],
-                )?),
-                value["currentContextDigest"].as_str().map(str::to_owned),
-                value["expectedParticipantDigest"]
-                    .as_str()
-                    .map(str::to_owned),
-                value["expectedNeedsDigest"].as_str().map(str::to_owned),
-                vector_field(value, "knownRootKeyId"),
-                value["minimumManifestGeneration"]
-                    .as_i64()
-                    .expect("minimum manifest generation"),
-                request_digest.expect("context refresh request digest"),
+                AuthorizationContextRefreshSessionProofInputV1 {
+                    request_id: vector_field(value, "requestId").to_owned(),
+                    issued_at: vector_time(value),
+                    session_id: vector_field(value, "sessionId").to_owned(),
+                    session_key_id: derived_key_id(&decode_public_key(
+                        vector_field(case, "signerPublicKey"),
+                        &["signerPublicKey"],
+                    )?),
+                    current_context_digest: value["currentContextDigest"]
+                        .as_str()
+                        .map(str::to_owned),
+                    expected_participant_digest: value["expectedParticipantDigest"]
+                        .as_str()
+                        .map(str::to_owned),
+                    expected_needs_digest: value["expectedNeedsDigest"].as_str().map(str::to_owned),
+                    known_root_key_id: vector_field(value, "knownRootKeyId").to_owned(),
+                    minimum_manifest_generation: value["minimumManifestGeneration"]
+                        .as_i64()
+                        .expect("minimum manifest generation"),
+                    request_digest: request_digest
+                        .expect("context refresh request digest")
+                        .to_owned(),
+                },
             ),
             purpose => panic!("unknown vector purpose {purpose}"),
         }
@@ -1068,17 +1159,25 @@ mod tests {
                 "devicePurpose" => {
                     let request = &base["request"];
                     let input = SessionProofInputV1::device_bootstrap(
-                        vector_field(request, "requestId"),
-                        vector_time(request),
-                        vector_field(request, "deploymentId"),
-                        vector_field(request, "instanceId"),
-                        vector_field(request, "provisionedIdentityKeyId"),
-                        vector_field(request, "newSessionPublicKey"),
-                        vector_field(request, "newSessionNkey"),
-                        vector_field(request, "participantId"),
-                        vector_field(request, "participantDigest"),
-                        None,
-                        vector_field(base, "requestDigest"),
+                        DeviceBootstrapSessionProofInputV1 {
+                            request_id: vector_field(request, "requestId").to_owned(),
+                            issued_at: vector_time(request),
+                            deployment_id: vector_field(request, "deploymentId").to_owned(),
+                            instance_id: vector_field(request, "instanceId").to_owned(),
+                            device_identity_key_id: vector_field(
+                                request,
+                                "provisionedIdentityKeyId",
+                            )
+                            .to_owned(),
+                            new_session_public_key: vector_field(request, "newSessionPublicKey")
+                                .to_owned(),
+                            new_session_nkey: vector_field(request, "newSessionNkey").to_owned(),
+                            participant_id: vector_field(request, "participantId").to_owned(),
+                            participant_digest: vector_field(request, "participantDigest")
+                                .to_owned(),
+                            challenge_digest: None,
+                            request_digest: vector_field(base, "requestDigest").to_owned(),
+                        },
                     )?;
                     verify_session_proof_v1(
                         &input,
@@ -1092,16 +1191,24 @@ mod tests {
                 "identityAsNewSession" => {
                     let request = &base["request"];
                     let input = SessionProofInputV1::service_bootstrap(
-                        vector_field(request, "requestId"),
-                        vector_time(request),
-                        vector_field(request, "deploymentId"),
-                        vector_field(request, "instanceId"),
-                        vector_field(request, "provisionedIdentityKeyId"),
-                        vector_field(&fixture, "identityPublicKey"),
-                        vector_field(&fixture, "identityNkey"),
-                        vector_field(request, "participantId"),
-                        vector_field(request, "participantDigest"),
-                        vector_field(base, "requestDigest"),
+                        ServiceBootstrapSessionProofInputV1 {
+                            request_id: vector_field(request, "requestId").to_owned(),
+                            issued_at: vector_time(request),
+                            deployment_id: vector_field(request, "deploymentId").to_owned(),
+                            instance_id: vector_field(request, "instanceId").to_owned(),
+                            provisioned_identity_key_id: vector_field(
+                                request,
+                                "provisionedIdentityKeyId",
+                            )
+                            .to_owned(),
+                            new_session_public_key: vector_field(&fixture, "identityPublicKey")
+                                .to_owned(),
+                            new_session_nkey: vector_field(&fixture, "identityNkey").to_owned(),
+                            participant_id: vector_field(request, "participantId").to_owned(),
+                            participant_digest: vector_field(request, "participantDigest")
+                                .to_owned(),
+                            request_digest: vector_field(base, "requestDigest").to_owned(),
+                        },
                     )?;
                     verify_session_proof_v1(
                         &input,
@@ -1144,16 +1251,19 @@ mod tests {
                 }
                 "paddedPublicKey" => {
                     let request = &base["request"];
-                    SessionProofInputV1::user_auth_request(
-                        vector_field(request, "requestId"),
-                        vector_time(request),
-                        format!("{}=", vector_field(request, "sessionPublicKey")),
-                        vector_field(request, "sessionNkey"),
-                        vector_field(request, "participantId"),
-                        vector_field(request, "participantDigest"),
-                        vector_field(request, "redirectTarget"),
-                        vector_field(base, "requestDigest"),
-                    )
+                    SessionProofInputV1::user_auth_request(UserAuthRequestSessionProofInputV1 {
+                        request_id: vector_field(request, "requestId").to_owned(),
+                        issued_at: vector_time(request),
+                        session_public_key: format!(
+                            "{}=",
+                            vector_field(request, "sessionPublicKey")
+                        ),
+                        session_nkey: vector_field(request, "sessionNkey").to_owned(),
+                        participant_id: vector_field(request, "participantId").to_owned(),
+                        participant_digest: vector_field(request, "participantDigest").to_owned(),
+                        redirect_target: vector_field(request, "redirectTarget").to_owned(),
+                        request_digest: vector_field(base, "requestDigest").to_owned(),
+                    })
                     .expect_err("padded public key must fail")
                 }
                 "signature" => {

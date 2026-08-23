@@ -18,7 +18,8 @@ use std::time::{Duration, Instant};
 use serde_json::{json, Value};
 use trellis_protocol::{
     parse_session_proof_v1, session_proof_request_digest_v1, verify_session_proof_v1,
-    AuthorizationPrincipalKindV1, SessionProofInputV1, SessionProofPolicyV1,
+    AuthorizationPrincipalKindV1, DeviceBootstrapSessionProofInputV1, SessionProofInputV1,
+    SessionProofPolicyV1,
 };
 #[cfg(test)]
 use trellis_rs::sdk::auth as trellis_sdk_auth;
@@ -724,20 +725,21 @@ impl AuthRpcProcessor {
             .insert("proof".to_owned(), Value::Null);
         let request_digest = session_proof_request_digest_v1(&proof_request)
             .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
-        let proof_input = SessionProofInputV1::device_bootstrap(
-            required_string(&input, "requestId")?,
-            required_i64(&input, "issuedAt")?,
-            deployment_id,
-            instance_id,
-            identity_key_id,
-            required_string(&input, "newSessionPublicKey")?,
-            required_string(&input, "newSessionNkey")?,
-            participant_id,
-            participant_digest,
-            Some(required_string(&input, "challengeDigest")?.to_owned()),
-            &request_digest,
-        )
-        .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
+        let proof_input =
+            SessionProofInputV1::device_bootstrap(DeviceBootstrapSessionProofInputV1 {
+                request_id: required_string(&input, "requestId")?.to_owned(),
+                issued_at: required_i64(&input, "issuedAt")?,
+                deployment_id: deployment_id.to_owned(),
+                instance_id: instance_id.to_owned(),
+                device_identity_key_id: identity_key_id.to_owned(),
+                new_session_public_key: required_string(&input, "newSessionPublicKey")?.to_owned(),
+                new_session_nkey: required_string(&input, "newSessionNkey")?.to_owned(),
+                participant_id: participant_id.to_owned(),
+                participant_digest: participant_digest.to_owned(),
+                challenge_digest: Some(required_string(&input, "challengeDigest")?.to_owned()),
+                request_digest,
+            })
+            .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
         let now = now_millis()?;
         verify_session_proof_v1(
             &proof_input,

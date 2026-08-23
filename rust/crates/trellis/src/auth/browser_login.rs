@@ -9,7 +9,7 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 use trellis_protocol::{
     parse_api_v1, parse_participant_v1, resolve_participant_v1, session_proof_request_digest_v1,
-    SessionProofInputV1,
+    SessionProofInputV1, UserAuthRequestSessionProofInputV1,
 };
 
 use super::client::{connect_admin_client_async, connect_admin_client_with_context_store_async};
@@ -119,27 +119,29 @@ async fn start_auth_request(
         "referencedApiArtifacts": [],
         "redirectTarget": redirect_to,
         "proof": auth.sign_session_proof(&SessionProofInputV1::user_auth_request(
-            request_id.clone(),
-            issued_at,
-            auth.session_key.clone(),
-            session_nkey.clone(),
-            participant.id.clone(),
-            participant.digest.clone(),
-            redirect_to.to_owned(),
-            participant.digest.clone(),
+            UserAuthRequestSessionProofInputV1 {
+                request_id: request_id.clone(),
+                issued_at,
+                session_public_key: auth.session_key.clone(),
+                session_nkey: session_nkey.clone(),
+                participant_id: participant.id.clone(),
+                participant_digest: participant.digest.clone(),
+                redirect_target: redirect_to.to_owned(),
+                request_digest: participant.digest.clone(),
+            },
         )?)?,
     });
     let request_digest = session_proof_request_digest_v1(&request)?;
-    let input = SessionProofInputV1::user_auth_request(
+    let input = SessionProofInputV1::user_auth_request(UserAuthRequestSessionProofInputV1 {
         request_id,
         issued_at,
-        auth.session_key.clone(),
+        session_public_key: auth.session_key.clone(),
         session_nkey,
-        participant.id,
-        participant.digest,
-        redirect_to.to_owned(),
+        participant_id: participant.id,
+        participant_digest: participant.digest,
+        redirect_target: redirect_to.to_owned(),
         request_digest,
-    )?;
+    })?;
     request["proof"] = serde_json::to_value(auth.sign_session_proof(&input)?)?;
     let client = HttpClient::builder().build()?;
     let response = client

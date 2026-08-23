@@ -54,16 +54,16 @@ where
         tracing::warn!(%error, "invalid auth request proof envelope");
         HttpError::bad_request("invalid_auth_request")
     })?;
-    let input = SessionProofInputV1::user_auth_request(
-        request.request_id.clone(),
-        request.issued_at,
-        request.session_public_key.clone(),
-        request.session_nkey.clone(),
-        request.participant_id.clone(),
-        request.participant_artifact_digest.clone(),
-        request.redirect_target.clone(),
-        request_digest.clone(),
-    )
+    let input = SessionProofInputV1::user_auth_request(UserAuthRequestSessionProofInputV1 {
+        request_id: request.request_id.clone(),
+        issued_at: request.issued_at,
+        session_public_key: request.session_public_key.clone(),
+        session_nkey: request.session_nkey.clone(),
+        participant_id: request.participant_id.clone(),
+        participant_digest: request.participant_artifact_digest.clone(),
+        redirect_target: request.redirect_target.clone(),
+        request_digest: request_digest.clone(),
+    })
     .map_err(|_| HttpError::unauthorized("invalid_proof"))?;
     let proof = parse_session_proof_v1(&request.proof)
         .map_err(|_| HttpError::unauthorized("invalid_proof"))?;

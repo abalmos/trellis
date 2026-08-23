@@ -2,7 +2,10 @@ use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use trellis_protocol::{session_proof_request_digest_v1, SessionProofInputV1};
+use trellis_protocol::{
+    session_proof_request_digest_v1, AuthorizationContextRefreshSessionProofInputV1,
+    SessionProofInputV1,
+};
 
 use super::super::{proof::new_request_id, SessionAuth, TrellisClientError};
 use super::own_context::AuthorizationContextCache;
@@ -88,16 +91,18 @@ pub(crate) async fn refresh(
     let request_digest = session_proof_request_digest_v1(&request_value)
         .map_err(|error| TrellisClientError::Bootstrap(error.to_string()))?;
     let input = SessionProofInputV1::authorization_context_refresh(
-        &request.request_id,
-        request.issued_at,
-        &request.session_id,
-        auth.key_id(),
-        request.current_context_digest.clone(),
-        request.expected_participant_digest.clone(),
-        request.expected_needs_digest.clone(),
-        &request.known_root_key_id,
-        request.minimum_manifest_generation,
-        &request_digest,
+        AuthorizationContextRefreshSessionProofInputV1 {
+            request_id: request.request_id.clone(),
+            issued_at: request.issued_at,
+            session_id: request.session_id.clone(),
+            session_key_id: auth.key_id(),
+            current_context_digest: request.current_context_digest.clone(),
+            expected_participant_digest: request.expected_participant_digest.clone(),
+            expected_needs_digest: request.expected_needs_digest.clone(),
+            known_root_key_id: request.known_root_key_id.clone(),
+            minimum_manifest_generation: request.minimum_manifest_generation,
+            request_digest,
+        },
     )
     .map_err(|error| TrellisClientError::Bootstrap(error.to_string()))?;
     request.proof = serde_json::to_value(auth.sign_session_proof(&input)?)?;

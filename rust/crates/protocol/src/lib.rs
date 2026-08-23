@@ -323,8 +323,10 @@ pub use resolution::{
 };
 pub use session_proof::{
     parse_session_proof_v1, session_proof_request_digest_v1, session_proof_signing_digest_v1,
-    sign_session_proof_v1, verify_session_proof_v1, SessionProofInputV1, SessionProofPolicyV1,
-    SessionProofPurposeV1, SessionProofV1, SESSION_PROOF_FORMAT_V1,
+    sign_session_proof_v1, verify_session_proof_v1, AuthorizationContextRefreshSessionProofInputV1,
+    DeviceBootstrapSessionProofInputV1, ServiceBootstrapSessionProofInputV1, SessionProofInputV1,
+    SessionProofPolicyV1, SessionProofPurposeV1, SessionProofV1,
+    UserAuthRequestSessionProofInputV1, SESSION_PROOF_FORMAT_V1,
 };
 pub use subjects::{
     derive_event_subject, derive_event_wildcard_subject, derive_feed_subject,
