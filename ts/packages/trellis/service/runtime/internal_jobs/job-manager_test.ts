@@ -105,9 +105,10 @@ Deno.test("JobManager creates and publishes job context", async () => {
     job.context.traceparent,
   );
 
-  const outcome = await manager.process(
+  const outcome = await manager.processWithHeartbeat(
     job,
     new JobCancellationToken(),
+    async () => {},
     async (activeJob) => {
       assertEquals(activeJob.context(), job.context);
       return { ok: true };
@@ -176,9 +177,10 @@ Deno.test("JobManager preserves structured failure error string", async () => {
     reason: "forbidden",
   });
 
-  const outcome = await manager.process(
+  const outcome = await manager.processWithHeartbeat(
     job,
     new JobCancellationToken(),
+    async () => {},
     async () => {
       throw JobProcessError.failed(serializedError);
     },
@@ -245,9 +247,10 @@ Deno.test("JobManager child jobs inherit active job lineage", async () => {
     lineage: { rootJobId: "root-1", operationId: "operation-1" },
   };
 
-  const outcome = await manager.process(
+  const outcome = await manager.processWithHeartbeat(
     parent,
     new JobCancellationToken(),
+    async () => {},
     async () => {
       await manager.create("refresh", { siteId: "child" });
       return { ok: true };
@@ -325,9 +328,10 @@ Deno.test("JobManager active waitFor publishes wait edge and preserves result or
     maxTries: 3,
   };
 
-  const value = await manager.withActiveJob(
+  const value = await manager.withActiveJobAndHeartbeat(
     active,
     new JobCancellationToken(),
+    async () => {},
     (job) => job.waitFor({ kind: "external", label: "remote API" }, () => 7),
   );
   assertEquals(value, 7);
@@ -336,9 +340,10 @@ Deno.test("JobManager active waitFor publishes wait edge and preserves result or
   published.length = 0;
   const thrown = await assertRejects(
     () =>
-      manager.withActiveJob(
+      manager.withActiveJobAndHeartbeat(
         active,
         new JobCancellationToken(),
+        async () => {},
         (job) =>
           job.waitFor({ kind: "external", label: "remote API" }, () => {
             throw new Error("external failed");
@@ -436,9 +441,10 @@ Deno.test("JobManager marks retryable failure dead at max tries", async () => {
   });
   const job = await manager.create("refresh", { siteId: "site-1" });
 
-  const outcome = await manager.process(
+  const outcome = await manager.processWithHeartbeat(
     job,
     new JobCancellationToken(),
+    async () => {},
     async () => {
       throw JobProcessError.retryable("try again");
     },

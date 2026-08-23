@@ -242,78 +242,6 @@ function toWorkerConsumer(
   };
 }
 
-export async function processWorkPayloadWithContextAndHeartbeat<TResult>(
-  manager: JobManager<unknown, TResult>,
-  payload: Uint8Array,
-  cancellation: JobCancellationToken,
-  heartbeat: () => Promise<void>,
-  handler: (job: ActiveJob<unknown, TResult>) => Promise<TResult>,
-  validation?: {
-    payloadSchema?: SchemaRef;
-    validatePayload?: (
-      args: PayloadValidationArgs<TResult>,
-    ) => Promise<void> | void;
-    resultSchema?: SchemaRef;
-    validateResult?: (
-      args: ResultValidationArgs<TResult>,
-    ) => Promise<void> | void;
-  },
-  runtime?: {
-    latestState?: Job["state"];
-    latestTries?: number;
-    workEventType?: JobEvent["eventType"];
-    redeliveryCount?: number;
-  },
-  instanceId?: string,
-): Promise<JobProcessOutcome<TResult> | undefined> {
-  const event = parseWorkPayloadEvent(payload);
-  if (!event) {
-    return undefined;
-  }
-  const job = jobFromWorkEvent(event) as Job<unknown, TResult> | undefined;
-  if (!job) {
-    return undefined;
-  }
-  const currentJob = runtime?.latestState !== undefined &&
-      runtime.latestTries !== undefined
-    ? { ...job, state: runtime.latestState, tries: runtime.latestTries }
-    : job;
-  return await manager.processWithHeartbeat(
-    currentJob,
-    cancellation,
-    heartbeat,
-    async (activeJob) => {
-      try {
-        await validation?.validatePayload?.({
-          schema: validation.payloadSchema,
-          job: activeJob.job(),
-        });
-      } catch (error) {
-        throw JobProcessError.failed(
-          error instanceof Error ? error.message : String(error),
-        );
-      }
-      return await handler(activeJob);
-    },
-    {
-      latestState: runtime?.latestState,
-      workEventType: runtime?.workEventType,
-      redeliveryCount: runtime?.redeliveryCount,
-      instanceId,
-    },
-    {
-      validateResult: validation?.validateResult
-        ? (result: TResult, resultJob: Job<unknown, TResult>) =>
-          validation.validateResult!({
-            schema: validation.resultSchema,
-            result,
-            job: resultJob,
-          })
-        : undefined,
-    },
-  );
-}
-
 export function projectedWorkDecision(
   projected: Job | undefined,
   _work: Job,
@@ -450,27 +378,48 @@ export async function startQueueWorkerLoop<TResult>(
         activeTokens.add(token);
         const guard = registry.register(key, token);
         try {
-          const outcome = await processWorkPayloadWithContextAndHeartbeat(
-            options.manager,
-            msg.data,
+          const currentJob = latestLifecycle
+            ? {
+              ...job,
+              state: latestLifecycle.state,
+              tries: latestLifecycle.tries,
+            }
+            : job;
+          const outcome = await options.manager.processWithHeartbeat(
+            currentJob,
             token,
             async () => {
               await msg.inProgress();
             },
-            options.handler,
-            {
-              payloadSchema: options.payloadSchema,
-              validatePayload: options.validatePayload,
-              resultSchema: options.resultSchema,
-              validateResult: options.validateResult,
+            async (activeJob) => {
+              try {
+                await options.validatePayload?.({
+                  schema: options.payloadSchema,
+                  job: activeJob.job(),
+                });
+              } catch (error) {
+                throw JobProcessError.failed(
+                  error instanceof Error ? error.message : String(error),
+                );
+              }
+              return await options.handler(activeJob);
             },
             {
               latestState: latestLifecycle?.state,
-              latestTries: latestLifecycle?.tries,
               workEventType: event.eventType,
               redeliveryCount: msg.info?.redeliveryCount,
+              instanceId: options.instanceId,
             },
-            options.instanceId,
+            {
+              validateResult: options.validateResult
+                ? (result, resultJob) =>
+                  options.validateResult!({
+                    schema: options.resultSchema,
+                    result,
+                    job: resultJob,
+                  })
+                : undefined,
+            },
           );
           if (ackActionForOutcome(outcome) === "ack") {
             await msg.ack();

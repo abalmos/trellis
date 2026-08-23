@@ -2284,6 +2284,11 @@ function createJobsFacade<
   const jobsBinding = args.jobsBinding
     ? normalizeResourceJobsBinding(args.jobsBinding)
     : undefined;
+  const manager = new InternalJobManager<unknown, unknown>({
+    nc: args.nc,
+    jobs: jobsBinding,
+    keyCoordinator,
+  });
   let activeHost: JobWorkerHostAdapter | undefined;
   let startupPromise:
     | Promise<Result<JobWorkerHostAdapter, BaseError>>
@@ -2332,11 +2337,6 @@ function createJobsFacade<
               ));
             }
 
-            const manager = new InternalJobManager<unknown, unknown>({
-              nc: args.nc,
-              jobs: jobsBinding,
-              keyCoordinator,
-            });
             const created = await manager.create(queueType, payload);
             return Result.ok(createJobRef({
               nc: args.nc,
@@ -2371,11 +2371,6 @@ function createJobsFacade<
               ));
             }
 
-            const manager = new InternalJobManager<unknown, unknown>({
-              nc: args.nc,
-              jobs: jobsBinding,
-              keyCoordinator,
-            });
             const outcome = await manager.submit(queueType, payload);
             if (outcome.kind === "accepted") {
               return Result.ok({
@@ -2506,11 +2501,6 @@ function createJobsFacade<
               );
             }
 
-            const manager = new InternalJobManager<unknown, unknown>({
-              nc: args.nc,
-              jobs: jobsBinding,
-              keyCoordinator,
-            });
             const host = await startNatsWorkerHostFromBinding<unknown>({
               jobs: jobsBinding,
               workStream,
