@@ -164,7 +164,7 @@ Validation:
 
 ## 6. Production / test boundary
 
-- [ ] Remove impossible disconnected/test-only `ConnectedServiceRuntime` states;
+- [x] Remove impossible disconnected/test-only `ConnectedServiceRuntime` states;
       make connected runtime values valid by construction.
 - [ ] Remove raw integration-test methods from production facades where tests
       can use normal product behavior instead.

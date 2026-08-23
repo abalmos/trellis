@@ -17,7 +17,6 @@ use futures_util::{Stream, StreamExt};
 use tokio::task::{AbortHandle, JoinError, JoinHandle};
 
 pub use super::core_bootstrap::CoreBootstrapBinding;
-use super::request_loop::RequestHandler;
 use super::resources::{validate_kv_binding, validate_store_binding, ResourceRuntimeClient};
 use super::resources::{KvHandle, KvResourceHandle, StoreHandle, StoreResourceHandle};
 use super::runtime::run_multi_subject_service;
@@ -246,10 +245,6 @@ pub enum ServiceRuntimeError {
         queue_type: String,
     },
 
-    /// The runtime was built without a client and cannot use the default runner.
-    #[error("service runtime is missing a Trellis client")]
-    MissingClient,
-
     /// A durable event listener supplied a caller-owned durable name.
     #[error(
         "durable event consumer names are provisioned by Trellis event consumer bindings; remove caller durable name '{durable_name}'"
@@ -475,7 +470,7 @@ impl Future for ServiceEventListenerHandle {
 /// Cloneable handle exposed to registered service handlers.
 #[derive(Clone)]
 pub struct ServiceHandle {
-    client: Option<Arc<TrellisClient>>,
+    client: Arc<TrellisClient>,
     service_name: Arc<str>,
     binding: CoreBootstrapBinding,
     resources: ServiceResourceBindings,
@@ -495,27 +490,16 @@ impl std::fmt::Debug for ServiceHandle {
 impl ServiceHandle {
     /// Return the opaque caller used for generated outbound calls.
     pub fn caller(&self) -> crate::generated::Caller {
-        crate::generated::Caller::from_client(Arc::clone(
-            self.client
-                .as_ref()
-                .expect("connected service handles always include a Trellis client"),
-        ))
+        crate::generated::Caller::from_client(Arc::clone(&self.client))
     }
 
     /// Return the authenticated service session's public key.
     pub fn session_key(&self) -> &str {
-        &self
-            .client
-            .as_ref()
-            .expect("connected service handles always include a Trellis client")
-            .auth()
-            .session_key
+        &self.client.auth().session_key
     }
 
     fn client(&self) -> &Arc<TrellisClient> {
-        self.client
-            .as_ref()
-            .expect("connected service handles always include a Trellis client")
+        &self.client
     }
 
     /// Return the service instance name used during bootstrap.
@@ -853,8 +837,8 @@ impl ServiceHandlerContext {
 
 /// Connected high-level service runtime for one generated service contract.
 pub struct ConnectedServiceRuntime<C> {
-    client: Option<Arc<TrellisClient>>,
-    caller: Option<crate::generated::Caller>,
+    client: Arc<TrellisClient>,
+    caller: crate::generated::Caller,
     binding: CoreBootstrapBinding,
     resources: ServiceResourceBindings,
     event_listeners: SharedDurableEventListeners,
@@ -885,8 +869,6 @@ impl<C> ConnectedServiceRuntime<C> {
         &self,
     ) -> crate::client::AuthorizationProviderCache {
         self.client
-            .as_ref()
-            .expect("connected service client is present")
             .integration_test_authorization_provider()
             .expect("connected service authorization provider is present")
     }
@@ -895,10 +877,7 @@ impl<C> ConnectedServiceRuntime<C> {
     #[cfg(feature = "test-support")]
     #[doc(hidden)]
     pub fn integration_test_nats(&self) -> async_nats::Client {
-        self.client
-            .as_ref()
-            .expect("connected service client is present")
-            .integration_test_nats()
+        self.client.integration_test_nats()
     }
 
     /// Send one signed raw RPC request through the connected service session.
@@ -909,11 +888,7 @@ impl<C> ConnectedServiceRuntime<C> {
         subject: &str,
         input: &serde_json::Value,
     ) -> Result<serde_json::Value, crate::client::TrellisClientError> {
-        self.client
-            .as_ref()
-            .expect("connected service client is present")
-            .request_json_value(subject, input)
-            .await
+        self.client.request_json_value(subject, input).await
     }
 
     /// Build a connected runtime from an injected client and bootstrap binding.
@@ -932,8 +907,8 @@ impl<C> ConnectedServiceRuntime<C> {
         let mut router = Router::new();
         router.set_api_id(api_id);
         Self {
-            client: Some(client),
-            caller: Some(caller),
+            client,
+            caller,
             binding,
             resources,
             event_listeners: Arc::clone(&event_listeners),
@@ -965,24 +940,17 @@ impl<C> ConnectedServiceRuntime<C> {
 
     /// Return the internal Trellis client owned by this runtime.
     pub(crate) fn client(&self) -> &Arc<TrellisClient> {
-        self.client
-            .as_ref()
-            .expect("connected service runtimes always include a Trellis client")
+        &self.client
     }
 
     fn descriptor_subject(&self, subject: &str) -> String {
-        self.client.as_ref().map_or_else(
-            || subject.to_owned(),
-            |client| client.descriptor_subject(subject),
-        )
+        crate::client::OperationTransport::descriptor_subject(&self.caller, subject)
     }
 
     /// Return the opaque caller handle consumed by generated facades.
     #[doc(hidden)]
     pub fn caller(&self) -> &crate::generated::Caller {
-        self.caller
-            .as_ref()
-            .expect("connected service runtimes always include a caller handle")
+        &self.caller
     }
 
     /// Return the parsed core bootstrap binding supplied by service bootstrap.
@@ -1250,100 +1218,46 @@ impl<C> ConnectedServiceRuntime<C> {
 
     /// Run registered subjects using the default NATS request loop.
     pub async fn run(self) -> Result<(), ServiceRuntimeError> {
-        self.run_with_runner(DefaultServiceRunner).await
-    }
-
-    /// Run registered subjects using an injected runner seam.
-    pub(crate) async fn run_with_runner<R>(self, runner: R) -> Result<(), ServiceRuntimeError>
-    where
-        R: ServiceRuntimeRunner,
-    {
         let subjects = self.registered_subjects.into_iter().collect::<Vec<_>>();
         let job_hosts = self.job_hosts;
-        let auth = self.auth;
-        if let Some(client) = self.client {
-            let host = bootstrap_service_host(
-                &self.service_name,
-                self.binding.bootstrap_binding(),
-                self.router,
-                auth,
-            );
-            if job_hosts.is_empty() {
-                return runner
-                    .run(Some(client), subjects, host)
-                    .await
-                    .map_err(ServiceRuntimeError::from);
+        let host = bootstrap_service_host(
+            &self.service_name,
+            self.binding.bootstrap_binding(),
+            self.router,
+            self.auth,
+        );
+        let serve = async {
+            if subjects.is_empty() {
+                std::future::pending::<()>().await;
             }
-            let serve = async {
-                runner
-                    .run(Some(client), subjects, host)
-                    .await
-                    .map_err(ServiceRuntimeError::from)
-            };
-            let workers = async {
-                futures_util::future::try_join_all(
-                    job_hosts.into_iter().map(WorkerHostHandle::join),
-                )
-                .await
-                .map_err(ServiceRuntimeError::JobWorker)?;
-                Ok(())
-            };
-            tokio::try_join!(serve, workers)?;
-            return Ok(());
-        }
-
-        #[cfg(test)]
-        {
-            runner
-                .run(None, subjects, EmptyHandler)
+            let subject_refs = subjects.iter().map(String::as_str).collect::<Vec<_>>();
+            run_multi_subject_service(self.client.nats().clone(), &subject_refs, host)
                 .await
                 .map_err(ServiceRuntimeError::from)
+        };
+        if job_hosts.is_empty() {
+            return serve.await;
         }
-
-        #[cfg(not(test))]
-        {
-            Err(ServiceRuntimeError::MissingClient)
-        }
+        let workers = async {
+            futures_util::future::try_join_all(job_hosts.into_iter().map(WorkerHostHandle::join))
+                .await
+                .map_err(ServiceRuntimeError::JobWorker)?;
+            Ok(())
+        };
+        tokio::try_join!(serve, workers)?;
+        Ok(())
     }
 
     /// Return a cloneable service handle for generated participant code.
     #[doc(hidden)]
     pub fn generated_handle(&self) -> ServiceHandle {
         ServiceHandle {
-            client: self.client.as_ref().map(Arc::clone),
+            client: Arc::clone(&self.client),
             service_name: Arc::from(self.service_name.as_str()),
             binding: self.binding.clone(),
             resources: self.resources.clone(),
             event_listeners: Arc::clone(&self.event_listeners),
             auth: self.auth.clone(),
-        }
-    }
-
-    #[cfg(test)]
-    fn from_test_binding(service_name: impl Into<String>, binding: CoreBootstrapBinding) -> Self
-    where
-        C: GeneratedServiceContract,
-    {
-        let resources = binding.resource_bindings();
-        let event_listeners = SharedDurableEventListeners::default();
-        let auth = LocalAuthVerifier::new(None, C::PARTICIPANT_ID);
-        Self {
-            client: None,
-            caller: None,
-            binding,
-            resources,
-            event_listeners: Arc::clone(&event_listeners),
-            auth,
-            _event_listener_cleanup: ServiceEventListenerRegistryCleanup::new(event_listeners),
-            router: {
-                let mut router = Router::new();
-                router.set_api_id(C::PARTICIPANT_ID);
-                router
-            },
-            service_name: service_name.into(),
-            registered_subjects: BTreeSet::new(),
-            job_hosts: Vec::new(),
-            _contract: PhantomData,
         }
     }
 }
@@ -1378,66 +1292,6 @@ impl<C: GeneratedServiceContract> ConnectedServiceRuntime<C> {
             binding,
             C::PARTICIPANT_ID,
         ))
-    }
-}
-
-/// Runner seam for tests and alternate service loop implementations.
-pub(crate) trait ServiceRuntimeRunner {
-    /// Future returned by the runner.
-    type RunFuture: Future<Output = Result<(), ServerError>>;
-
-    /// Run a prepared authenticated host for the exact registered subjects.
-    fn run<H>(
-        self,
-        client: Option<Arc<TrellisClient>>,
-        subjects: Vec<String>,
-        host: H,
-    ) -> Self::RunFuture
-    where
-        H: RequestHandler + Send + Sync + 'static;
-}
-
-/// Default runner backed by the local multi-subject NATS loop.
-#[derive(Debug, Clone, Copy, Default)]
-pub(crate) struct DefaultServiceRunner;
-
-impl ServiceRuntimeRunner for DefaultServiceRunner {
-    type RunFuture = BoxFuture<'static, Result<(), ServerError>>;
-
-    fn run<H>(
-        self,
-        client: Option<Arc<TrellisClient>>,
-        subjects: Vec<String>,
-        host: H,
-    ) -> Self::RunFuture
-    where
-        H: RequestHandler + Send + Sync + 'static,
-    {
-        Box::pin(async move {
-            let client = client.ok_or(ServerError::Nats(
-                "service runtime is missing a Trellis client".to_string(),
-            ))?;
-            if subjects.is_empty() {
-                std::future::pending::<()>().await;
-            }
-            let subject_refs = subjects.iter().map(String::as_str).collect::<Vec<_>>();
-            run_multi_subject_service(client.nats().clone(), &subject_refs, host).await
-        })
-    }
-}
-
-#[cfg(test)]
-struct EmptyHandler;
-
-#[cfg(test)]
-impl RequestHandler for EmptyHandler {
-    fn handle<'a>(
-        &'a self,
-        _subject: &'a str,
-        _payload: Bytes,
-        _context: RequestContext,
-    ) -> BoxFuture<'a, Result<Bytes, ServerError>> {
-        Box::pin(async { Err(ServerError::Nats("empty test handler".to_string())) })
     }
 }
 
@@ -1948,14 +1802,10 @@ fn is_missing_durable_event_consumer_error(error: &TrellisClientError) -> bool {
 mod tests {
     use super::*;
     use crate::service::{
-        AcceptedOperation, BootstrapBinding, EventConsumerOrdering, EventConsumerReplay,
-        EventConsumerResourceBinding, KvResourceBinding, OperationFailure, OperationSnapshot,
-        StoreResourceBinding,
+        BootstrapBinding, EventConsumerOrdering, EventConsumerReplay, EventConsumerResourceBinding,
+        KvResourceBinding, StoreResourceBinding,
     };
-    use futures_util::future::ready;
-    use serde::{Deserialize, Serialize};
     use std::collections::BTreeMap;
-    use std::sync::Mutex;
 
     #[test]
     fn service_connect_waits_indefinitely_for_authority_by_default() {
@@ -1969,180 +1819,6 @@ mod tests {
         );
 
         assert_eq!(options.authority_pending_timeout_ms, None);
-    }
-
-    #[derive(Debug, Clone, Serialize, Deserialize)]
-    struct PingInput {
-        value: String,
-    }
-
-    #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-    struct PingOutput {
-        echoed: String,
-    }
-
-    struct PingRpc;
-
-    impl RpcDescriptor for PingRpc {
-        type Input = PingInput;
-        type Output = PingOutput;
-
-        const KEY: &'static str = "Ping";
-        const SUBJECT: &'static str = "rpc.v1.Ping";
-        const INPUT_SCHEMA_JSON: &'static str =
-            r#"{"type":"object","properties":{},"required":[]}"#;
-        const OUTPUT_SCHEMA_JSON: &'static str =
-            r#"{"type":"object","properties":{},"required":[]}"#;
-    }
-
-    #[derive(Debug, Clone, Serialize, Deserialize)]
-    struct FeedInput;
-
-    #[derive(Debug, Clone, Serialize, Deserialize)]
-    struct FeedEvent;
-
-    struct StatusFeed;
-
-    impl FeedDescriptor for StatusFeed {
-        type Input = FeedInput;
-        type Event = FeedEvent;
-
-        const KEY: &'static str = "Status";
-        const SUBJECT: &'static str = "feed.v1.Status";
-        const INPUT_SCHEMA_JSON: &'static str =
-            r#"{"type":"object","properties":{},"required":[]}"#;
-        const EVENT_SCHEMA_JSON: &'static str =
-            r#"{"type":"object","properties":{},"required":[]}"#;
-    }
-
-    #[derive(Debug, Clone, Serialize, Deserialize)]
-    struct OperationInput;
-
-    #[derive(Debug, Clone, Serialize, Deserialize)]
-    struct OperationProgress;
-
-    #[derive(Debug, Clone, Serialize, Deserialize)]
-    struct OperationOutput;
-
-    struct TestOperation;
-
-    impl OperationDescriptor for TestOperation {
-        type Input = OperationInput;
-        type Progress = OperationProgress;
-        type Output = OperationOutput;
-        type Update = serde_json::Value;
-        type UpdateEvidence = crate::client::NoOperationUpdates;
-        type Error = OperationFailure;
-
-        const KEY: &'static str = "Test.Operation";
-        const SUBJECT: &'static str = "op.v1.TestOperation";
-        const CANCELABLE: bool = true;
-        const ERRORS: &'static [&'static str] = &[];
-        const INPUT_SCHEMA_JSON: &'static str =
-            r#"{"type":"object","properties":{},"required":[]}"#;
-        const PROGRESS_SCHEMA_JSON: Option<&'static str> = None;
-        const OUTPUT_SCHEMA_JSON: &'static str =
-            r#"{"type":"object","properties":{},"required":[]}"#;
-        const UPDATE_SCHEMA_JSON: Option<&'static str> = None;
-        const SIGNAL_INPUT_SCHEMAS_JSON: &'static str = "{}";
-    }
-
-    struct TestOperationProvider;
-
-    impl ServiceOperationProvider<TestOperation> for TestOperationProvider {
-        fn start(
-            &self,
-            _context: RequestContext,
-            _input: OperationInput,
-        ) -> BoxFuture<
-            'static,
-            Result<AcceptedOperation<OperationProgress, OperationOutput>, ServerError>,
-        > {
-            Box::pin(async {
-                Ok(AcceptedOperation {
-                    kind: "accepted".to_string(),
-                    operation_ref: crate::service::OperationRefData {
-                        id: "op_123".to_string(),
-                        service: "test-service".to_string(),
-                        operation: "Test.Operation".to_string(),
-                    },
-                    snapshot: OperationSnapshot {
-                        revision: 1,
-                        state: crate::service::OperationState::Pending,
-                        ..Default::default()
-                    },
-                    transfer: None,
-                })
-            })
-        }
-
-        fn get(
-            &self,
-            _context: RequestContext,
-            _operation_id: String,
-        ) -> BoxFuture<
-            'static,
-            Result<OperationSnapshot<OperationProgress, OperationOutput>, ServerError>,
-        > {
-            Box::pin(async {
-                Ok(OperationSnapshot {
-                    revision: 1,
-                    state: crate::service::OperationState::Pending,
-                    ..Default::default()
-                })
-            })
-        }
-
-        fn wait(
-            &self,
-            _context: RequestContext,
-            _operation_id: String,
-        ) -> BoxFuture<
-            'static,
-            Result<OperationSnapshot<OperationProgress, OperationOutput>, ServerError>,
-        > {
-            Box::pin(async {
-                Ok(OperationSnapshot {
-                    revision: 2,
-                    state: crate::service::OperationState::Completed,
-                    ..Default::default()
-                })
-            })
-        }
-    }
-
-    struct TestContract;
-
-    impl GeneratedServiceContract for TestContract {
-        const PARTICIPANT_ID: &'static str = "example.service@v1";
-        const CONTRACT_DIGEST: &'static str = "sha256:test";
-        const PARTICIPANT_NEEDS_DIGEST: &'static str = "sha256:needs";
-        const PARTICIPANT_JSON: &'static str =
-            r#"{"format":"trellis.participant.v1","id":"example.service@v1"}"#;
-        const API_JSON: &'static str = r#"{"format":"trellis.api.v1","id":"example.service@v1"}"#;
-        const API_DIGEST: &'static str = "sha256:api";
-        const REFERENCED_API_ARTIFACTS: &'static [(&'static str, &'static str)] = &[];
-    }
-
-    struct RecordingRunner {
-        subjects: Arc<Mutex<Vec<String>>>,
-    }
-
-    impl ServiceRuntimeRunner for RecordingRunner {
-        type RunFuture = BoxFuture<'static, Result<(), ServerError>>;
-
-        fn run<H>(
-            self,
-            _client: Option<Arc<TrellisClient>>,
-            subjects: Vec<String>,
-            _host: H,
-        ) -> Self::RunFuture
-        where
-            H: RequestHandler + Send + Sync + 'static,
-        {
-            *self.subjects.lock().expect("lock subjects") = subjects;
-            Box::pin(ready(Ok(())))
-        }
     }
 
     fn binding() -> CoreBootstrapBinding {
@@ -2372,114 +2048,5 @@ mod tests {
         assert!(!is_missing_durable_event_consumer_error(
             &TrellisClientError::Timeout
         ));
-    }
-
-    #[test]
-    fn registration_records_subjects() {
-        let mut runtime =
-            ConnectedServiceRuntime::<TestContract>::from_test_binding("test-service", binding());
-
-        runtime.register_rpc::<PingRpc, _, _>(|_ctx, input| async move {
-            Ok(PingOutput {
-                echoed: input.value,
-            })
-        });
-        runtime.register_feed::<StatusFeed, _, _>(|_ctx, _input| futures_util::stream::empty());
-
-        assert_eq!(
-            runtime.registered_subjects(),
-            vec!["feed.v1.Status", "rpc.v1.Ping"]
-        );
-    }
-
-    #[test]
-    fn watch_operation_registration_records_data_and_control_subjects() {
-        let mut runtime =
-            ConnectedServiceRuntime::<TestContract>::from_test_binding("test-service", binding());
-
-        runtime.register_operation_provider::<TestOperation, _>(TestOperationProvider);
-
-        assert_eq!(
-            runtime.registered_subjects(),
-            vec!["op.v1.TestOperation", "op.v1.TestOperation.control"]
-        );
-    }
-
-    #[test]
-    fn resource_binding_accessors_return_typed_resources() {
-        let runtime =
-            ConnectedServiceRuntime::<TestContract>::from_test_binding("test-service", binding());
-
-        assert_eq!(runtime.resources().kv.len(), 1);
-        assert_eq!(
-            runtime.resources().event_consumers["projection"].consumer_name,
-            "svc-projection"
-        );
-        assert_eq!(
-            runtime.kv_binding("drafts").expect("kv binding").bucket,
-            "svc_drafts"
-        );
-        assert_eq!(
-            runtime
-                .store_binding("evidence")
-                .expect("store binding")
-                .name,
-            "svc_evidence"
-        );
-        assert!(matches!(
-            runtime.kv_binding("missing"),
-            Err(ServerError::MissingResourceBinding { resource_kind, resource_name, .. })
-                if resource_kind == "kv" && resource_name == "missing"
-        ));
-
-        let handle = runtime.generated_handle();
-        assert_eq!(handle.resources().store.len(), 1);
-        assert_eq!(
-            handle
-                .store_binding("evidence")
-                .expect("handle store binding")
-                .name,
-            "svc_evidence"
-        );
-    }
-
-    #[tokio::test]
-    async fn run_passes_registered_subjects_to_runner() {
-        let mut runtime =
-            ConnectedServiceRuntime::<TestContract>::from_test_binding("test-service", binding());
-        runtime.register_rpc::<PingRpc, _, _>(|_ctx, input| async move {
-            Ok(PingOutput {
-                echoed: input.value,
-            })
-        });
-
-        let subjects = Arc::new(Mutex::new(Vec::new()));
-        runtime
-            .run_with_runner(RecordingRunner {
-                subjects: Arc::clone(&subjects),
-            })
-            .await
-            .expect("runtime runs with injected runner");
-
-        assert_eq!(
-            *subjects.lock().expect("lock subjects"),
-            vec!["rpc.v1.Ping".to_string()]
-        );
-    }
-
-    #[test]
-    fn injected_client_and_binding_path_builds_runtime() {
-        let runtime =
-            ConnectedServiceRuntime::<TestContract>::from_test_binding("test-service", binding());
-
-        assert_eq!(runtime.service_name(), "test-service");
-        assert_eq!(
-            runtime.binding().bootstrap_binding().contract_id,
-            "example.service@v1"
-        );
-        assert_eq!(
-            runtime.kv_binding("drafts").expect("kv binding").bucket,
-            "svc_drafts"
-        );
     }
 }
