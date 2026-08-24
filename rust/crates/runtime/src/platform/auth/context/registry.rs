@@ -3,7 +3,7 @@ use std::time::Duration;
 use async_nats::jetstream::{self, kv};
 use bytes::Bytes;
 use serde::{Deserialize, Serialize};
-use trellis_protocol::{canonicalize_json, parse_authorization_context_v1};
+use trellis_protocol::{canonicalize_json, parse_authorization_context};
 
 use super::{
     trust::VerifiedTrustMaterial, AuthorizationContextRecord, AuthorizationTrustStateRecord,
@@ -25,11 +25,11 @@ struct ManifestPointer {
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub(crate) struct AuthorizationContextRevocationV1 {
+pub(crate) struct AuthorizationContextRevocation {
     pub(crate) revoked_at: i64,
 }
 
-impl AuthorizationContextRevocationV1 {
+impl AuthorizationContextRevocation {
     fn validate(&self) -> Result<(), AuthorizationStateError> {
         if self.revoked_at <= 0 {
             return Err(storage("authorization context revocation is invalid"));
@@ -241,7 +241,7 @@ impl AuthorizationContextRegistry {
         &self,
         trust: &AuthorizationTrustBundle,
     ) -> Result<(), AuthorizationStateError> {
-        let manifest = trellis_protocol::parse_issuer_manifest_v1(&trust.manifest)
+        let manifest = trellis_protocol::parse_issuer_manifest(&trust.manifest)
             .map_err(|error| storage(format!("cannot parse issuer manifest: {error}")))?;
         let pointer = manifest_pointer(
             manifest.unsigned.generation,
@@ -258,7 +258,7 @@ impl AuthorizationContextRegistry {
     ) -> Result<(), AuthorizationStateError> {
         let value: serde_json::Value = serde_json::from_str(&context.signed_context_json)
             .map_err(|error| storage(format!("cannot parse authorization context: {error}")))?;
-        let signed = parse_authorization_context_v1(&value)
+        let signed = parse_authorization_context(&value)
             .map_err(|error| storage(format!("cannot parse authorization context: {error}")))?;
         let canonical = canonicalize_json(&value).map_err(|error| {
             storage(format!(
@@ -280,7 +280,7 @@ impl AuthorizationContextRegistry {
         &self,
         context: &AuthorizationContextRecord,
     ) -> Result<(), AuthorizationStateError> {
-        let record = AuthorizationContextRevocationV1 {
+        let record = AuthorizationContextRevocation {
             revoked_at: context
                 .revoked_at
                 .ok_or_else(|| storage("revoked context has no revocation time"))?,
@@ -678,7 +678,7 @@ mod tests {
         );
         assert_eq!(
             canonicalize_json(
-                &serde_json::to_value(AuthorizationContextRevocationV1 { revoked_at: 42 }).unwrap()
+                &serde_json::to_value(AuthorizationContextRevocation { revoked_at: 42 }).unwrap()
             )
             .unwrap(),
             r#"{"revokedAt":42}"#
@@ -690,7 +690,7 @@ mod tests {
         }))
         .is_ok());
         assert!(
-            serde_json::from_value::<AuthorizationContextRevocationV1>(json!({
+            serde_json::from_value::<AuthorizationContextRevocation>(json!({
                 "revokedAt": 42,
                 "extra": true
             }))

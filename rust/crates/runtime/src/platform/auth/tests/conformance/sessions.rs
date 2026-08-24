@@ -1,6 +1,6 @@
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
-use trellis_protocol::ParticipantKindV1;
+use trellis_protocol::ParticipantKind;
 
 use super::fixtures::{
     digest, evidence_scope, participant_fixture, session_public_key, test_session_creation,
@@ -62,7 +62,7 @@ async fn invalid_session_relationship_errors(
         principal_id: "svc_invalid_relationship".to_owned(),
         principal_kind: PrincipalKind::User,
         participant_id: fixture.binding.participant_id.clone(),
-        participant_kind: ParticipantKindV1::App,
+        participant_kind: ParticipantKind::App,
         participant_artifact_digest: fixture.binding.artifact_digest.clone(),
         participant_needs_digest: fixture.binding.needs_digest.clone(),
         session_public_key: session_public_key(32),
@@ -93,7 +93,7 @@ async fn invalid_session_relationship_errors(
     let mut participant_kind = base.clone();
     participant_kind.session_id = "ses_invalid_participant_kind".to_owned();
     participant_kind.principal_id = "usr_invalid_relationship".to_owned();
-    participant_kind.participant_kind = ParticipantKindV1::Agent;
+    participant_kind.participant_kind = ParticipantKind::Agent;
     participant_kind.session_public_key = session_public_key(33);
     participant_kind.session_key_id = digest_key(&participant_kind.session_public_key)?;
     errors.push(
@@ -173,7 +173,7 @@ async fn exercise_session_denials(
             principal_id: "usr_session_denials".to_owned(),
             principal_kind: PrincipalKind::User,
             participant_id: fixture.binding.participant_id.clone(),
-            participant_kind: ParticipantKindV1::App,
+            participant_kind: ParticipantKind::App,
             participant_artifact_digest: fixture.binding.artifact_digest.clone(),
             participant_needs_digest: fixture.binding.needs_digest.clone(),
             session_public_key: session_public_key(seed),

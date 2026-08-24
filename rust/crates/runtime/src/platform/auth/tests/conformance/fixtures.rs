@@ -6,9 +6,8 @@ use ed25519_dalek::SigningKey;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use trellis_protocol::{
-    authorization_context_signing_digest_v1, parse_api_v1, parse_participant_v1,
-    resolve_participant_v1, GrantSetV1, ParticipantKindV1, UnsignedAuthorizationContextV1,
-    AUTHORIZATION_CONTEXT_FORMAT_V1,
+    authorization_context_signing_digest, parse_api, parse_participant, resolve_participant,
+    GrantSet, ParticipantKind, UnsignedAuthorizationContext, AUTHORIZATION_CONTEXT_FORMAT_V1,
 };
 
 use crate::platform::auth::application::repository::{SessionCreation, SessionRevocation};
@@ -23,29 +22,29 @@ pub(super) const NOW: i64 = 1_800_000_000_000;
 
 pub(super) struct ParticipantFixture {
     pub(super) binding: ParticipantBindingRecord,
-    pub(super) required_grants: GrantSetV1,
-    pub(super) all_grants: GrantSetV1,
+    pub(super) required_grants: GrantSet,
+    pub(super) all_grants: GrantSet,
     pub(super) required_dependency: DependencyEvidence,
     pub(super) optional_dependency: DependencyEvidence,
 }
 
 pub(super) fn participant_fixture() -> Result<ParticipantFixture, Box<dyn std::error::Error>> {
-    participant_fixture_for(ParticipantKindV1::App, "example.app")
+    participant_fixture_for(ParticipantKind::App, "example.app")
 }
 
 pub(super) fn participant_fixture_for(
-    kind: ParticipantKindV1,
+    kind: ParticipantKind,
     participant_id: &str,
 ) -> Result<ParticipantFixture, Box<dyn std::error::Error>> {
     participant_fixture_with_resources(kind, participant_id, false)
 }
 
 pub(super) fn participant_fixture_with_resources(
-    kind: ParticipantKindV1,
+    kind: ParticipantKind,
     participant_id: &str,
     include_resources: bool,
 ) -> Result<ParticipantFixture, Box<dyn std::error::Error>> {
-    let required_api = parse_api_v1(&json!({
+    let required_api = parse_api(&json!({
         "format": "trellis.api.v1",
         "id": "required.api@v1",
         "displayName": "Required API",
@@ -59,7 +58,7 @@ pub(super) fn participant_fixture_with_resources(
             }
         }
     }))?;
-    let optional_api = parse_api_v1(&json!({
+    let optional_api = parse_api(&json!({
         "format": "trellis.api.v1",
         "id": "optional.api@v1",
         "displayName": "Optional API",
@@ -76,10 +75,10 @@ pub(super) fn participant_fixture_with_resources(
     let required_digest = required_api.digest()?;
     let optional_digest = optional_api.digest()?;
     let kind_name = match kind {
-        ParticipantKindV1::Service => "service",
-        ParticipantKindV1::App => "app",
-        ParticipantKindV1::Device => "device",
-        ParticipantKindV1::Agent => "agent",
+        ParticipantKind::Service => "service",
+        ParticipantKind::App => "app",
+        ParticipantKind::Device => "device",
+        ParticipantKind::Agent => "agent",
     };
     let mut participant_value = json!({
         "format": "trellis.participant.v1",
@@ -122,13 +121,13 @@ pub(super) fn participant_fixture_with_resources(
             }
         });
     }
-    let participant = parse_participant_v1(&participant_value)?;
+    let participant = parse_participant(&participant_value)?;
     let mut apis = BTreeMap::new();
     apis.insert(required_api.id().to_owned(), required_api.clone());
     apis.insert(optional_api.id().to_owned(), optional_api.clone());
-    let resolved = resolve_participant_v1(&participant, &apis)?;
+    let resolved = resolve_participant(&participant, &apis)?;
     let required_grants = resolved.needs().required().grant_set().clone();
-    let all_grants = GrantSetV1::new(
+    let all_grants = GrantSet::new(
         required_grants
             .permissions()
             .iter()
@@ -297,7 +296,7 @@ pub(super) fn session_public_key(seed: u8) -> String {
 pub(super) fn assert_issuable_context_valid(
     state: &IssuableAuthorizationState,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    authorization_context_signing_digest_v1(&UnsignedAuthorizationContextV1 {
+    authorization_context_signing_digest(&UnsignedAuthorizationContext {
         format: AUTHORIZATION_CONTEXT_FORMAT_V1.to_owned(),
         authority: "test-authority".to_owned(),
         issuer_key_id: URL_SAFE_NO_PAD.encode([99_u8; 32]),

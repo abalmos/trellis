@@ -1,5 +1,5 @@
 use serde_json::json;
-use trellis_protocol::ParticipantKindV1;
+use trellis_protocol::ParticipantKind;
 
 use super::fixtures::{digest, participant_fixture_for, session_public_key, NOW};
 use crate::platform::auth::application::repository::{
@@ -27,7 +27,7 @@ pub(super) async fn exercise_provisioning(
         created_at: NOW,
         expires_at: NOW + 1_000,
     };
-    let device_fixture = participant_fixture_for(ParticipantKindV1::Device, "example.device")?;
+    let device_fixture = participant_fixture_for(ParticipantKind::Device, "example.device")?;
     store
         .put_participant_binding(device_fixture.binding.clone())
         .await?;
@@ -35,7 +35,7 @@ pub(super) async fn exercise_provisioning(
         .put_deployment_evidence(DeploymentRecord {
             deployment_id: "dep_companion".to_owned(),
             participant_id: device_fixture.binding.participant_id.clone(),
-            participant_kind: ParticipantKindV1::Device,
+            participant_kind: ParticipantKind::Device,
             active: true,
             expires_at: None,
         })
@@ -202,7 +202,7 @@ pub(super) async fn exercise_provisioning(
         IdempotentOutcome::Applied(_)
     ));
 
-    let service_fixture = participant_fixture_for(ParticipantKindV1::Service, "example.service")?;
+    let service_fixture = participant_fixture_for(ParticipantKind::Service, "example.service")?;
     store
         .put_participant_binding(service_fixture.binding.clone())
         .await?;
@@ -210,7 +210,7 @@ pub(super) async fn exercise_provisioning(
         .put_deployment_evidence(DeploymentRecord {
             deployment_id: "dep_service_companion".to_owned(),
             participant_id: service_fixture.binding.participant_id.clone(),
-            participant_kind: ParticipantKindV1::Service,
+            participant_kind: ParticipantKind::Service,
             active: true,
             expires_at: None,
         })

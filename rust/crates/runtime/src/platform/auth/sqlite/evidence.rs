@@ -539,10 +539,10 @@ pub(in crate::platform::auth) fn validate_sql_runtime_instance_relationships(
         (principal.kind, deployment.participant_kind),
         (
             PrincipalKind::Service,
-            trellis_protocol::ParticipantKindV1::Service
+            trellis_protocol::ParticipantKind::Service
         ) | (
             PrincipalKind::Device,
-            trellis_protocol::ParticipantKindV1::Device
+            trellis_protocol::ParticipantKind::Device
         )
     );
     if !kind_matches {
@@ -562,7 +562,7 @@ pub(in crate::platform::auth) fn validate_sql_device_relationships(
     let principal = load_principal(connection, &device.principal_id)?
         .ok_or(AuthorizationStateError::PrincipalMissing)?;
     if principal.kind != PrincipalKind::Device
-        || deployment.participant_kind != trellis_protocol::ParticipantKindV1::Device
+        || deployment.participant_kind != trellis_protocol::ParticipantKind::Device
     {
         return Err(AuthorizationStateError::InvalidRecord(
             "device evidence requires a device principal and deployment".to_owned(),

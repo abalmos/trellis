@@ -865,11 +865,11 @@ pub(in crate::platform::auth) fn validate_sql_identity_relationships(
         (
             ProvisionedIdentityKind::Service,
             PrincipalKind::Service,
-            trellis_protocol::ParticipantKindV1::Service
+            trellis_protocol::ParticipantKind::Service
         ) | (
             ProvisionedIdentityKind::Device,
             PrincipalKind::Device,
-            trellis_protocol::ParticipantKindV1::Device
+            trellis_protocol::ParticipantKind::Device
         )
     );
     let device_matches = identity.kind != ProvisionedIdentityKind::Device
@@ -893,8 +893,8 @@ pub(in crate::platform::auth) fn validate_sql_new_runtime_relationships(
     kind: ProvisionedIdentityKind,
 ) -> Result<(), AuthorizationStateError> {
     let participant_kind = match kind {
-        ProvisionedIdentityKind::Service => trellis_protocol::ParticipantKindV1::Service,
-        ProvisionedIdentityKind::Device => trellis_protocol::ParticipantKindV1::Device,
+        ProvisionedIdentityKind::Service => trellis_protocol::ParticipantKind::Service,
+        ProvisionedIdentityKind::Device => trellis_protocol::ParticipantKind::Device,
     };
     if load_deployment(connection, &instance.deployment_id)?
         .is_none_or(|deployment| deployment.participant_kind != participant_kind)

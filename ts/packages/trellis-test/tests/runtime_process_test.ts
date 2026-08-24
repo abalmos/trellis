@@ -118,7 +118,7 @@ const entitySubscriberContract = defineServiceContract(
   }),
 );
 
-const migrationContractV1 = defineServiceContract(
+const migrationContract = defineServiceContract(
   { schemas: entitySchemas },
   (ref) => ({
     id: "trellis.test.mutable-resource@v1",
@@ -326,7 +326,7 @@ Deno.test({
 
     try {
       const first = await runtime.contracts.approve({
-        contract: migrationContractV1,
+        contract: migrationContract,
       });
       const second = await runtime.contracts.approve({
         contract: migrationContractV2,

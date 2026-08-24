@@ -28,7 +28,7 @@ import { estimateMidpointClockOffsetMs } from "./auth/time.ts";
 import { createAuth } from "./auth/session_auth.ts";
 import {
   SESSION_PROOF_FORMAT_V1,
-  sessionProofRequestDigestV1,
+  sessionProofRequestDigest,
 } from "./auth/session_proof.ts";
 import type { RuntimeApi } from "./contract_support/runtime.ts";
 import {
@@ -603,7 +603,7 @@ async function fetchDeviceBootstrap(args: {
       }),
       proof: { format: SESSION_PROOF_FORMAT_V1, signature: "" },
     };
-    const requestDigest = await sessionProofRequestDigestV1(unsigned);
+    const requestDigest = await sessionProofRequestDigest(unsigned);
     const response = await fetch(
       new URL("/bootstrap/device", args.trellisUrl),
       {

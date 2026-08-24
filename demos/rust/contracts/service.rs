@@ -1,6 +1,6 @@
 use serde_json::{json, Value};
 use trellis_contracts::{
-    event, feed, job_queue, kv, operation, rpc, schema_ref, store, ApiArtifactV1,
+    event, feed, job_queue, kv, operation, rpc, schema_ref, store, ApiArtifact,
     ContractArtifacts, ContractBuilder, ContractKind, ContractsError,
 };
 
@@ -699,7 +699,7 @@ fn builder() -> ContractBuilder {
 }
 
 /// Build the Rust-authored Field Ops demo service native API.
-pub fn api_artifact() -> Result<ApiArtifactV1, ContractsError> {
+pub fn api_artifact() -> Result<ApiArtifact, ContractsError> {
     Ok(builder().build()?.api().clone())
 }
 

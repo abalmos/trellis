@@ -23,29 +23,28 @@ use sha2::{Digest as _, Sha256};
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use trellis_protocol::{
-    ApiSurfaceKindV1, GrantSetV1, ParticipantResourceKindV1, PermissionActionV1, PermissionAtomV1,
-    PermissionTargetV1,
+    ApiSurfaceKind, GrantSet, ParticipantResourceKind, PermissionAction, PermissionAtom,
+    PermissionTarget,
 };
 
 const DIGEST: &str = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
 
-fn permission(target: PermissionTargetV1, action: PermissionActionV1) -> PermissionAtomV1 {
-    PermissionAtomV1::new(target, action).unwrap()
+fn permission(target: PermissionTarget, action: PermissionAction) -> PermissionAtom {
+    PermissionAtom::new(target, action).unwrap()
 }
 
 fn consent_with_view(view: serde_json::Value) -> BrowserConsentProposal {
     let required = permission(
-        PermissionTargetV1::api_surface("example.api@v1", ApiSurfaceKindV1::Rpc, "Read").unwrap(),
-        PermissionActionV1::Call,
+        PermissionTarget::api_surface("example.api@v1", ApiSurfaceKind::Rpc, "Read").unwrap(),
+        PermissionAction::Call,
     );
     let optional = permission(
-        PermissionTargetV1::api_surface("example.api@v1", ApiSurfaceKindV1::Event, "Updated")
-            .unwrap(),
-        PermissionActionV1::Subscribe,
+        PermissionTarget::api_surface("example.api@v1", ApiSurfaceKind::Event, "Updated").unwrap(),
+        PermissionAction::Subscribe,
     );
-    let required_grant_set = GrantSetV1::new(vec![required]);
+    let required_grant_set = GrantSet::new(vec![required]);
     let optional_grant_bundles =
-        BTreeMap::from([("events".to_owned(), GrantSetV1::new(vec![optional]))]);
+        BTreeMap::from([("events".to_owned(), GrantSet::new(vec![optional]))]);
     let required_capabilities = vec!["read".to_owned()];
     let optional_capability_definitions = BTreeMap::new();
     BrowserConsentProposal {
@@ -112,32 +111,24 @@ fn browser_approval_accepts_only_server_owned_optional_bundles() {
 fn browser_approval_wire_ignores_caller_authored_machine_authority() {
     for atom in [
         permission(
-            PermissionTargetV1::api_surface("unrelated.api@v1", ApiSurfaceKindV1::Rpc, "Admin")
+            PermissionTarget::api_surface("unrelated.api@v1", ApiSurfaceKind::Rpc, "Admin")
                 .unwrap(),
-            PermissionActionV1::Call,
+            PermissionAction::Call,
         ),
         permission(
-            PermissionTargetV1::api_surface(
-                "unrelated.api@v1",
-                ApiSurfaceKindV1::Event,
-                "Published",
-            )
-            .unwrap(),
-            PermissionActionV1::Publish,
-        ),
-        permission(
-            PermissionTargetV1::api_surface("unrelated.api@v1", ApiSurfaceKindV1::State, "records")
+            PermissionTarget::api_surface("unrelated.api@v1", ApiSurfaceKind::Event, "Published")
                 .unwrap(),
-            PermissionActionV1::Write,
+            PermissionAction::Publish,
         ),
         permission(
-            PermissionTargetV1::participant_resource(
-                "app-1",
-                ParticipantResourceKindV1::Kv,
-                "secrets",
-            )
-            .unwrap(),
-            PermissionActionV1::Write,
+            PermissionTarget::api_surface("unrelated.api@v1", ApiSurfaceKind::State, "records")
+                .unwrap(),
+            PermissionAction::Write,
+        ),
+        permission(
+            PermissionTarget::participant_resource("app-1", ParticipantResourceKind::Kv, "secrets")
+                .unwrap(),
+            PermissionAction::Write,
         ),
     ] {
         assert_eq!(
@@ -146,7 +137,7 @@ fn browser_approval_wire_ignores_caller_authored_machine_authority() {
                 "consentViewDigest": DIGEST,
                 "selectedOptionalBundles": [],
                 "idempotencyKey": "request-1",
-                "grantSet": GrantSetV1::new(vec![atom]),
+                "grantSet": GrantSet::new(vec![atom]),
             }))
             .unwrap()
             .selected_optional_bundles,

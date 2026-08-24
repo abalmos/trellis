@@ -7,7 +7,7 @@ import {
   base64urlEncode,
   estimateMidpointClockOffsetMs,
   SESSION_PROOF_FORMAT_V1,
-  sessionProofRequestDigestV1,
+  sessionProofRequestDigest,
   sha256,
   type TrellisAuth as SessionAuth,
 } from "../../auth.ts";
@@ -245,7 +245,7 @@ async function fetchServiceBootstrapInfoOnce(args: {
     referencedApiArtifacts: [presentation.api, ...presentation.referencedApis],
     proof: { format: SESSION_PROOF_FORMAT_V1, signature: "" },
   };
-  const requestDigest = await sessionProofRequestDigestV1(unsigned);
+  const requestDigest = await sessionProofRequestDigest(unsigned);
   const body = JSON.stringify({
     ...unsigned,
     proof: await args.identityAuth.signSessionProof({

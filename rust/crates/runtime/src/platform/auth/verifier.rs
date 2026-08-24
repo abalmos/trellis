@@ -13,16 +13,13 @@ use std::sync::Arc;
 use bytes::Bytes;
 use futures_util::future::BoxFuture;
 #[cfg(test)]
-use trellis_protocol::{ApiSurfaceKindV1, PermissionActionV1, PermissionTargetV1};
-use trellis_protocol::{
-    AuthorizationEventPublisher, PermissionAtomV1, VerifiedAuthorizationContextV1,
-};
+use trellis_protocol::{ApiSurfaceKind, PermissionAction, PermissionTarget};
+use trellis_protocol::{AuthorizationEventPublisher, PermissionAtom, VerifiedAuthorizationContext};
 #[cfg(test)]
 use trellis_rs::client::RuntimeAuthorizationIoCounters;
 use trellis_rs::client::{
-    AuthorizationEventVerificationInput, AuthorizationProviderCache, AuthorizationRegistryBinding,
-    AuthorizationRequestVerificationInput, AuthorizationVerificationCore,
-    RuntimeAuthorizationTrust,
+    AuthorizationProviderCache, AuthorizationRegistryBinding, AuthorizationVerificationCore,
+    EventVerificationInput, RequestVerificationInput, RuntimeAuthorizationTrust,
 };
 use trellis_rs::service::{
     RequestContext, RequestValidation, RequestValidator, ServerError, VerifiedCaller,
@@ -43,7 +40,7 @@ pub(crate) struct RuntimeAuthorizationRequestVerificationInput<'a> {
     pub(crate) iat: i64,
     pub(crate) request_id: &'a str,
     pub(crate) reply: Option<&'a str>,
-    pub(crate) required_permission: &'a PermissionAtomV1,
+    pub(crate) required_permission: &'a PermissionAtom,
     pub(crate) required_capabilities: &'a [String],
 }
 
@@ -69,7 +66,7 @@ pub(crate) trait ValidatorContextSource: Send + Sync {
     fn verified_context(
         &self,
         digest: &str,
-    ) -> Result<Option<VerifiedAuthorizationContextV1>, AuthorizationStateError>;
+    ) -> Result<Option<VerifiedAuthorizationContext>, AuthorizationStateError>;
 
     /// Return the full revocation timestamp for a digest, when revoked.
     fn revocation_time(&self, digest: &str) -> Result<Option<i64>, AuthorizationStateError>;
@@ -77,7 +74,7 @@ pub(crate) trait ValidatorContextSource: Send + Sync {
     /// Return the verification policy bound to the current trust material.
     fn policy(
         &self,
-    ) -> Result<trellis_protocol::AuthorizationVerificationPolicyV1, AuthorizationStateError>;
+    ) -> Result<trellis_protocol::AuthorizationVerificationPolicy, AuthorizationStateError>;
 
     /// Whether the registry watches are healthy (fail closed when not).
     fn healthy(&self) -> Result<bool, AuthorizationStateError>;
@@ -94,7 +91,7 @@ pub(crate) trait ValidatorContextSource: Send + Sync {
         &self,
         digest: &str,
         now: i64,
-    ) -> BoxFuture<'_, Result<VerifiedAuthorizationContextV1, AuthorizationStateError>>;
+    ) -> BoxFuture<'_, Result<VerifiedAuthorizationContext, AuthorizationStateError>>;
 
     /// Resolve an unknown context against its retained historical trust evidence.
     fn resolve_event_context(
@@ -103,7 +100,7 @@ pub(crate) trait ValidatorContextSource: Send + Sync {
         event_time: i64,
     ) -> BoxFuture<
         '_,
-        Result<VerifiedAuthorizationContextV1, trellis_rs::service::EventVerificationFailure>,
+        Result<VerifiedAuthorizationContext, trellis_rs::service::EventVerificationFailure>,
     >;
 }
 
@@ -111,7 +108,7 @@ impl ValidatorContextSource for AuthorizationProviderCache {
     fn verified_context(
         &self,
         digest: &str,
-    ) -> Result<Option<VerifiedAuthorizationContextV1>, AuthorizationStateError> {
+    ) -> Result<Option<VerifiedAuthorizationContext>, AuthorizationStateError> {
         self.runtime_verified_context_raw(digest)
             .map_err(provider_error)
     }
@@ -122,7 +119,7 @@ impl ValidatorContextSource for AuthorizationProviderCache {
 
     fn policy(
         &self,
-    ) -> Result<trellis_protocol::AuthorizationVerificationPolicyV1, AuthorizationStateError> {
+    ) -> Result<trellis_protocol::AuthorizationVerificationPolicy, AuthorizationStateError> {
         self.runtime_policy().map_err(provider_error)
     }
 
@@ -143,7 +140,7 @@ impl ValidatorContextSource for AuthorizationProviderCache {
         &self,
         digest: &str,
         now: i64,
-    ) -> BoxFuture<'_, Result<VerifiedAuthorizationContextV1, AuthorizationStateError>> {
+    ) -> BoxFuture<'_, Result<VerifiedAuthorizationContext, AuthorizationStateError>> {
         let digest = digest.to_owned();
         Box::pin(async move {
             self.resolve_admission_context(&digest, now)
@@ -158,7 +155,7 @@ impl ValidatorContextSource for AuthorizationProviderCache {
         event_time: i64,
     ) -> BoxFuture<
         '_,
-        Result<VerifiedAuthorizationContextV1, trellis_rs::service::EventVerificationFailure>,
+        Result<VerifiedAuthorizationContext, trellis_rs::service::EventVerificationFailure>,
     > {
         let digest = digest.to_owned();
         Box::pin(async move {
@@ -175,7 +172,7 @@ fn provider_error(error: trellis_rs::client::TrellisClientError) -> Authorizatio
 /// Verified request material handed to Auth RPC handlers.
 pub(crate) struct VerifiedRequest {
     pub(crate) caller: VerifiedCaller,
-    pub(crate) context: VerifiedAuthorizationContextV1,
+    pub(crate) context: VerifiedAuthorizationContext,
 }
 
 /// Runtime-local verifier shared by the Auth RPC provider and built-in routers.
@@ -204,7 +201,7 @@ impl RuntimeAuthVerifier {
     pub(crate) fn require_cached_permission(
         &self,
         context_digest: &str,
-        permission: &PermissionAtomV1,
+        permission: &PermissionAtom,
     ) -> Result<(), AuthorizationStateError> {
         self.require_healthy()?;
         if self.source.revocation_time(context_digest)?.is_some() {
@@ -269,7 +266,7 @@ impl RuntimeAuthVerifier {
         policy.now_unix_seconds = now;
         let verified = self
             .verification
-            .verify_request(AuthorizationRequestVerificationInput {
+            .verify_request(RequestVerificationInput {
                 context: &context,
                 session_key,
                 context_digest: authorization_context,
@@ -363,7 +360,7 @@ impl RuntimeAuthVerifier {
         policy.now_unix_seconds = now;
         let verified_event = self
             .verification
-            .verify_event(AuthorizationEventVerificationInput {
+            .verify_event(EventVerificationInput {
                 context: &context,
                 session_key,
                 context_digest: authorization_context,
@@ -594,9 +591,9 @@ mod tests {
     use std::collections::BTreeMap;
     use std::sync::Arc;
     use trellis_protocol::{
-        parse_authorization_context_v1, parse_issuer_manifest_v1, verify_authorization_context_v1,
-        verify_issuer_manifest_v1, AuthorizationTrustRootV1, AuthorizationVerificationPolicyV1,
-        VerifiedAuthorizationContextV1,
+        parse_authorization_context, parse_issuer_manifest, verify_authorization_context,
+        verify_issuer_manifest, AuthorizationTrustRoot, AuthorizationVerificationPolicy,
+        VerifiedAuthorizationContext,
     };
 
     use super::*;
@@ -643,10 +640,10 @@ mod tests {
     /// In-memory context source recording every registry resolution.
     #[derive(Default)]
     struct StubSource {
-        contexts: std::sync::Mutex<BTreeMap<String, VerifiedAuthorizationContextV1>>,
-        registry: std::sync::Mutex<BTreeMap<String, VerifiedAuthorizationContextV1>>,
+        contexts: std::sync::Mutex<BTreeMap<String, VerifiedAuthorizationContext>>,
+        registry: std::sync::Mutex<BTreeMap<String, VerifiedAuthorizationContext>>,
         revocations: std::sync::Mutex<BTreeMap<String, i64>>,
-        policy: std::sync::Mutex<Option<AuthorizationVerificationPolicyV1>>,
+        policy: std::sync::Mutex<Option<AuthorizationVerificationPolicy>>,
         now: std::sync::Mutex<Option<i64>>,
         resolves: std::sync::atomic::AtomicU64,
         healthy: std::sync::atomic::AtomicBool,
@@ -655,8 +652,8 @@ mod tests {
     impl StubSource {
         fn install(
             &self,
-            context: VerifiedAuthorizationContextV1,
-            policy: AuthorizationVerificationPolicyV1,
+            context: VerifiedAuthorizationContext,
+            policy: AuthorizationVerificationPolicy,
         ) {
             let digest = context.context_digest().to_owned();
             let now = policy.now_unix_seconds;
@@ -671,7 +668,7 @@ mod tests {
                 .store(true, std::sync::atomic::Ordering::SeqCst);
         }
 
-        fn seed_registry_only(&self, context: VerifiedAuthorizationContextV1) {
+        fn seed_registry_only(&self, context: VerifiedAuthorizationContext) {
             self.registry
                 .lock()
                 .unwrap()
@@ -683,7 +680,7 @@ mod tests {
         fn verified_context(
             &self,
             digest: &str,
-        ) -> Result<Option<VerifiedAuthorizationContextV1>, AuthorizationStateError> {
+        ) -> Result<Option<VerifiedAuthorizationContext>, AuthorizationStateError> {
             Ok(self.contexts.lock().unwrap().get(digest).cloned())
         }
 
@@ -693,7 +690,7 @@ mod tests {
 
         fn policy(
             &self,
-        ) -> Result<trellis_protocol::AuthorizationVerificationPolicyV1, AuthorizationStateError>
+        ) -> Result<trellis_protocol::AuthorizationVerificationPolicy, AuthorizationStateError>
         {
             Ok(self
                 .policy
@@ -723,8 +720,7 @@ mod tests {
             &self,
             digest: &str,
             _now: i64,
-        ) -> BoxFuture<'_, Result<VerifiedAuthorizationContextV1, AuthorizationStateError>>
-        {
+        ) -> BoxFuture<'_, Result<VerifiedAuthorizationContext, AuthorizationStateError>> {
             self.resolves
                 .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             let digest = digest.to_owned();
@@ -755,7 +751,7 @@ mod tests {
             event_time: i64,
         ) -> BoxFuture<
             '_,
-            Result<VerifiedAuthorizationContextV1, trellis_rs::service::EventVerificationFailure>,
+            Result<VerifiedAuthorizationContext, trellis_rs::service::EventVerificationFailure>,
         > {
             let digest = digest.to_owned();
             Box::pin(async move {
@@ -784,14 +780,14 @@ mod tests {
     fn fixture_context_with_grants(
         chain: &ChainFixture,
         defaults: &VectorDefaults,
-        grants: Vec<PermissionAtomV1>,
+        grants: Vec<PermissionAtom>,
     ) -> (
-        VerifiedAuthorizationContextV1,
-        AuthorizationVerificationPolicyV1,
+        VerifiedAuthorizationContext,
+        AuthorizationVerificationPolicy,
         String,
     ) {
         use base64::Engine as _;
-        let policy = AuthorizationVerificationPolicyV1::new(
+        let policy = AuthorizationVerificationPolicy::new(
             defaults.policy.now_unix_seconds,
             defaults.policy.allowed_clock_skew_seconds,
             defaults.policy.maximum_context_lifetime_seconds,
@@ -801,56 +797,55 @@ mod tests {
             defaults.policy.minimum_manifest_generation,
         )
         .unwrap();
-        let root = AuthorizationTrustRootV1::parse(
+        let root = AuthorizationTrustRoot::parse(
             &serde_json::from_str(&chain.root_canonical_json).unwrap(),
         )
         .unwrap();
-        let manifest = parse_issuer_manifest_v1(
-            &serde_json::from_str(&chain.manifest_canonical_json).unwrap(),
-        )
-        .unwrap();
-        let verified_manifest = verify_issuer_manifest_v1(&root, &manifest, &policy).unwrap();
-        let fixture = parse_authorization_context_v1(
+        let manifest =
+            parse_issuer_manifest(&serde_json::from_str(&chain.manifest_canonical_json).unwrap())
+                .unwrap();
+        let verified_manifest = verify_issuer_manifest(&root, &manifest, &policy).unwrap();
+        let fixture = parse_authorization_context(
             &serde_json::from_str(&chain.context_canonical_json).unwrap(),
         )
         .unwrap();
         let mut unsigned = fixture.unsigned.clone();
-        unsigned.grant_set = trellis_protocol::GrantSetV1::new(grants);
+        unsigned.grant_set = trellis_protocol::GrantSet::new(grants);
         let seed = base64::engine::general_purpose::URL_SAFE_NO_PAD
             .decode(&chain.issuer_seed)
             .expect("issuer seed");
         let issuer_key = ed25519_dalek::SigningKey::from_bytes(
             seed.as_slice().try_into().expect("issuer seed bytes"),
         );
-        let signed = trellis_protocol::sign_authorization_context_v1(unsigned, &issuer_key)
+        let signed = trellis_protocol::sign_authorization_context(unsigned, &issuer_key)
             .expect("sign granted context");
-        let verified = verify_authorization_context_v1(&root, &verified_manifest, &signed, &policy)
+        let verified = verify_authorization_context(&root, &verified_manifest, &signed, &policy)
             .expect("verify granted context");
         let digest = signed.digest().expect("granted context digest");
         (verified, policy, digest)
     }
 
-    fn documents_grants() -> (PermissionAtomV1, PermissionAtomV1) {
-        let call = PermissionAtomV1::new(
-            PermissionTargetV1::api_surface("documents@v1", ApiSurfaceKindV1::Rpc, "Documents.Get")
+    fn documents_grants() -> (PermissionAtom, PermissionAtom) {
+        let call = PermissionAtom::new(
+            PermissionTarget::api_surface("documents@v1", ApiSurfaceKind::Rpc, "Documents.Get")
                 .unwrap(),
-            PermissionActionV1::Call,
+            PermissionAction::Call,
         )
         .unwrap();
-        let publish = PermissionAtomV1::new(
-            PermissionTargetV1::api_surface(
+        let publish = PermissionAtom::new(
+            PermissionTarget::api_surface(
                 "documents@v1",
-                ApiSurfaceKindV1::Event,
+                ApiSurfaceKind::Event,
                 "Documents.Changed",
             )
             .unwrap(),
-            PermissionActionV1::Publish,
+            PermissionAction::Publish,
         )
         .unwrap();
         (call, publish)
     }
 
-    fn documents_permission() -> PermissionAtomV1 {
+    fn documents_permission() -> PermissionAtom {
         documents_grants().0
     }
 
@@ -1168,14 +1163,14 @@ mod tests {
         let source = Arc::new(StubSource::default());
         source.install(verified, policy);
         let verifier = RuntimeAuthVerifier::new(source.clone());
-        let required_permission = PermissionAtomV1::new(
-            PermissionTargetV1::api_surface(
+        let required_permission = PermissionAtom::new(
+            PermissionTarget::api_surface(
                 "trellis.auth@v1",
-                ApiSurfaceKindV1::Rpc,
+                ApiSurfaceKind::Rpc,
                 "Auth.Sessions.Me",
             )
             .unwrap(),
-            PermissionActionV1::Call,
+            PermissionAction::Call,
         )
         .unwrap();
         let proof = auth

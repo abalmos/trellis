@@ -2,12 +2,12 @@ import { assertEquals, assertRejects } from "@std/assert";
 
 import { importEd25519PrivateKeyFromSeedBase64url } from "./keys.ts";
 import {
-  buildSessionProofTranscriptV1,
-  parseSessionProofV1,
-  type SessionProofInputV1,
-  sessionProofRequestDigestV1,
-  signSessionProofV1,
-  verifySessionProofV1,
+  buildSessionProofTranscript,
+  parseSessionProof,
+  type SessionProofInput,
+  sessionProofRequestDigest,
+  signSessionProof,
+  verifySessionProof,
 } from "./session_proof.ts";
 import { base64urlEncode, sha256 } from "./utils.ts";
 
@@ -15,7 +15,7 @@ type JsonRecord = Record<string, unknown>;
 
 type VectorCase = {
   name: string;
-  purpose: SessionProofInputV1["purpose"];
+  purpose: SessionProofInput["purpose"];
   signerPublicKey: string;
   request?: JsonRecord;
   input?: JsonRecord;
@@ -75,7 +75,7 @@ function proofSource(vector: VectorCase): JsonRecord {
 function vectorInput(
   fixture: Fixture,
   vector: VectorCase,
-): SessionProofInputV1 {
+): SessionProofInput {
   const value = proofSource(vector);
   const common = {
     requestId: field(value, "requestId"),
@@ -156,21 +156,21 @@ Deno.test("shared session-proof vectors match TypeScript", async () => {
     const source = proofSource(vector);
     if (vector.requestDigest !== null) {
       assertEquals(
-        await sessionProofRequestDigestV1(source),
+        await sessionProofRequestDigest(source),
         vector.requestDigest,
       );
     }
     const input = vectorInput(vectors, vector);
-    const proof = parseSessionProofV1(source.proof);
+    const proof = parseSessionProof(source.proof);
     assertEquals(
-      await signSessionProofV1(input, privateKey, vector.signerPublicKey),
+      await signSessionProof(input, privateKey, vector.signerPublicKey),
       proof,
     );
     assertEquals(
-      base64urlEncode(await sha256(buildSessionProofTranscriptV1(input))),
+      base64urlEncode(await sha256(buildSessionProofTranscript(input))),
       vector.transcriptDigest,
     );
-    await verifySessionProofV1(
+    await verifySessionProof(
       input,
       proof,
       vector.signerPublicKey,
@@ -194,7 +194,7 @@ Deno.test("shared invalid session-proof vectors fail safely", async () => {
 
     if (invalid.mutation === "unknownProofField") {
       await assertRejects(async () => {
-        parseSessionProofV1({
+        parseSessionProof({
           ...(source.proof as JsonRecord),
           unknown: true,
         });
@@ -225,24 +225,24 @@ Deno.test("shared invalid session-proof vectors fail safely", async () => {
         source.requestId = `changed-${field(source, "requestId")}`;
       }
 
-      let input: SessionProofInputV1;
+      let input: SessionProofInput;
       if (invalid.mutation === "devicePurpose") {
         input = {
           ...vectorInput(vectors, base),
           purpose: "deviceBootstrap",
           deviceIdentityKeyId: field(source, "provisionedIdentityKeyId"),
           challengeDigest: null,
-        } as SessionProofInputV1;
+        } as SessionProofInput;
       } else {
         input = vectorInput(vectors, base);
       }
-      const parsedProof = parseSessionProofV1(source.proof);
+      const parsedProof = parseSessionProof(source.proof);
       const now = invalid.mutation === "expiredNow"
         ? input.issuedAt + 30_001
         : invalid.mutation === "futureNow"
         ? input.issuedAt - 30_001
         : input.issuedAt;
-      await verifySessionProofV1(
+      await verifySessionProof(
         input,
         parsedProof,
         base.signerPublicKey,
@@ -263,11 +263,11 @@ Deno.test("session-proof boundaries reject cross-language asymmetry", async () =
 
   const weakSession = vectorInput(vectors, service);
   await assertRejects(async () => {
-    await signSessionProofV1(
+    await signSessionProof(
       {
         ...weakSession,
         newSessionPublicKey: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
-      } as SessionProofInputV1,
+      } as SessionProofInput,
       await importEd25519PrivateKeyFromSeedBase64url(vectors.identitySeed),
       vectors.identityPublicKey,
     );
@@ -275,13 +275,13 @@ Deno.test("session-proof boundaries reject cross-language asymmetry", async () =
 
   const request = structuredClone(proofSource(service));
   request.nonJson = new Date(0);
-  await assertRejects(() => sessionProofRequestDigestV1(request));
+  await assertRejects(() => sessionProofRequestDigest(request));
   request.nonJson = Array(1);
-  await assertRejects(() => sessionProofRequestDigestV1(request));
+  await assertRejects(() => sessionProofRequestDigest(request));
 
   await assertRejects(async () => {
-    await signSessionProofV1(
-      { ...weakSession, requestId: "\u0085req" } as SessionProofInputV1,
+    await signSessionProof(
+      { ...weakSession, requestId: "\u0085req" } as SessionProofInput,
       await importEd25519PrivateKeyFromSeedBase64url(vectors.identitySeed),
       vectors.identityPublicKey,
     );

@@ -31,7 +31,7 @@ import { defineAppContract } from "@qlever-llc/trellis";
 import { Type } from "@sinclair/typebox";
 
 const schemas = {
-  PreferencesV1: Type.Object({ theme: Type.String() }),
+  Preferences: Type.Object({ theme: Type.String() }),
   Preferences: Type.Object({ theme: Type.String(), compact: Type.Boolean() }),
   Draft: Type.Object({ body: Type.String() }),
 } as const;
@@ -46,7 +46,7 @@ export const notesApp = defineAppContract({ schemas }, (ref) => ({
       schema: ref.schema("Preferences"),
       stateVersion: "preferences.v2",
       acceptedVersions: {
-        "preferences.v1": ref.schema("PreferencesV1"),
+        "preferences.v1": ref.schema("Preferences"),
       },
     },
     drafts: {
@@ -105,10 +105,10 @@ schema but does not run app migration code server-side.
 ```ts
 const prefs = await trellis.state.preferences.get().orThrow();
 
-type PreferencesV1 = { theme: string };
+type Preferences = { theme: string };
 
 if ("migrationRequired" in prefs && prefs.stateVersion === "preferences.v1") {
-  const legacy = prefs.entry.value as PreferencesV1;
+  const legacy = prefs.entry.value as Preferences;
   const migrated = {
     theme: legacy.theme,
     compact: false,

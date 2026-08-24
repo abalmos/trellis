@@ -1,4 +1,4 @@
-use trellis_protocol::ParticipantKindV1;
+use trellis_protocol::ParticipantKind;
 
 use super::authority::exercise_store;
 use super::fixtures::{
@@ -26,7 +26,7 @@ async fn exercise_deployment_isolation(
     store: SqliteAuthorizationStore,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let fixture =
-        participant_fixture_with_resources(ParticipantKindV1::Service, "shared.service", true)?;
+        participant_fixture_with_resources(ParticipantKind::Service, "shared.service", true)?;
     store
         .put_participant_binding(fixture.binding.clone())
         .await?;
@@ -55,7 +55,7 @@ async fn exercise_deployment_isolation(
                     authority_id: authority_id.clone(),
                     deployment_id: deployment_id.clone(),
                     participant_id: fixture.binding.participant_id.clone(),
-                    participant_kind: ParticipantKindV1::Service,
+                    participant_kind: ParticipantKind::Service,
                     participant_artifact_digest: fixture.binding.artifact_digest.clone(),
                     accepted_needs_digest: fixture.binding.needs_digest.clone(),
                     desired_grant_set: fixture.all_grants.clone(),
@@ -78,7 +78,7 @@ async fn exercise_deployment_isolation(
             .put_deployment_evidence(DeploymentRecord {
                 deployment_id: deployment_id.clone(),
                 participant_id: fixture.binding.participant_id.clone(),
-                participant_kind: ParticipantKindV1::Service,
+                participant_kind: ParticipantKind::Service,
                 active: true,
                 expires_at: None,
             })
@@ -99,7 +99,7 @@ async fn exercise_deployment_isolation(
             principal_id,
             principal_kind: PrincipalKind::Service,
             participant_id: fixture.binding.participant_id.clone(),
-            participant_kind: ParticipantKindV1::Service,
+            participant_kind: ParticipantKind::Service,
             participant_artifact_digest: fixture.binding.artifact_digest.clone(),
             participant_needs_digest: fixture.binding.needs_digest.clone(),
             session_public_key: session_public_key(key_seed),
@@ -188,7 +188,7 @@ async fn exercise_deployment_isolation(
             .put_deployment_evidence(DeploymentRecord {
                 deployment_id: "dep_a".to_owned(),
                 participant_id: "different.service".to_owned(),
-                participant_kind: ParticipantKindV1::Service,
+                participant_kind: ParticipantKind::Service,
                 active: true,
                 expires_at: None,
             })
@@ -247,7 +247,7 @@ async fn exercise_typed_authority_ids(
     store: SqliteAuthorizationStore,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let store = exercise_store(store).await?;
-    let fixture = participant_fixture_for(ParticipantKindV1::Service, "collision.service")?;
+    let fixture = participant_fixture_for(ParticipantKind::Service, "collision.service")?;
     store
         .put_participant_binding(fixture.binding.clone())
         .await?;
@@ -268,7 +268,7 @@ async fn exercise_typed_authority_ids(
         principal_id: "svc_collision".to_owned(),
         principal_kind: PrincipalKind::Service,
         participant_id: fixture.binding.participant_id.clone(),
-        participant_kind: ParticipantKindV1::Service,
+        participant_kind: ParticipantKind::Service,
         participant_artifact_digest: fixture.binding.artifact_digest.clone(),
         participant_needs_digest: fixture.binding.needs_digest.clone(),
         session_public_key: session_public_key(23),
@@ -282,7 +282,7 @@ async fn exercise_typed_authority_ids(
                 authority_id: "ida_01".to_owned(),
                 deployment_id: "dep_collision".to_owned(),
                 participant_id: fixture.binding.participant_id.clone(),
-                participant_kind: ParticipantKindV1::Service,
+                participant_kind: ParticipantKind::Service,
                 participant_artifact_digest: fixture.binding.artifact_digest.clone(),
                 accepted_needs_digest: fixture.binding.needs_digest.clone(),
                 desired_grant_set: fixture.all_grants.clone(),
@@ -305,7 +305,7 @@ async fn exercise_typed_authority_ids(
         .put_deployment_evidence(DeploymentRecord {
             deployment_id: "dep_collision".to_owned(),
             participant_id: fixture.binding.participant_id.clone(),
-            participant_kind: ParticipantKindV1::Service,
+            participant_kind: ParticipantKind::Service,
             active: true,
             expires_at: None,
         })

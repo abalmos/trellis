@@ -226,8 +226,8 @@ pub(in crate::platform::auth) fn upsert_deployment_profile_evidence(
         return Ok(());
     };
     let participant_kind = match profile.kind {
-        PrincipalKind::Service => trellis_protocol::ParticipantKindV1::Service,
-        PrincipalKind::Device => trellis_protocol::ParticipantKindV1::Device,
+        PrincipalKind::Service => trellis_protocol::ParticipantKind::Service,
+        PrincipalKind::Device => trellis_protocol::ParticipantKind::Device,
         PrincipalKind::User => {
             return Err(AuthorizationStateError::InvalidRecord(
                 "deployment profile cannot use user kind".to_owned(),

@@ -12,7 +12,7 @@ import {
 } from "@nats-io/nats-core";
 import { ulid } from "ulid";
 
-import type { PermissionAtomV1 } from "../../contract_support/runtime.ts";
+import type { PermissionAtom } from "../../contract_support/runtime.ts";
 import {
   type OperationTransferHandle,
   type RuntimeOperationTransferProgress,
@@ -40,7 +40,7 @@ export type TransferStoreHandle = {
 
 export type InitiateUploadArgs = {
   sessionKey: string;
-  permission: PermissionAtomV1 | undefined;
+  permission: PermissionAtom | undefined;
   requiredCapabilities: readonly string[];
   store: string;
   key: string;
@@ -63,7 +63,7 @@ export type OperationUploadTransfer = {
 
 export type InitiateDownloadArgs = {
   sessionKey: string;
-  permission: PermissionAtomV1;
+  permission: PermissionAtom;
   requiredCapabilities?: readonly string[];
   inboxPrefix: string;
   store: string;
@@ -92,7 +92,7 @@ type UploadSession = {
   subject: string;
   transferId: string;
   sessionKey: string;
-  permission: PermissionAtomV1 | undefined;
+  permission: PermissionAtom | undefined;
   requiredCapabilities: readonly string[];
   expiresAtMs: number;
   store: TypedStore;
@@ -119,7 +119,7 @@ type DownloadSession = {
   subject: string;
   transferId: string;
   sessionKey: string;
-  permission: PermissionAtomV1;
+  permission: PermissionAtom;
   requiredCapabilities: readonly string[];
   inboxPrefix: string;
   expiresAtMs: number;

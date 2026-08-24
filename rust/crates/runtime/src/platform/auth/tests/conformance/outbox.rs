@@ -1,4 +1,4 @@
-use trellis_protocol::ParticipantKindV1;
+use trellis_protocol::ParticipantKind;
 
 use super::fixtures::{digest, participant_fixture, session_public_key};
 use crate::platform::auth::authority::validate_identity_authority;
@@ -42,7 +42,7 @@ fn protocol_integer_boundaries_are_enforced() -> Result<(), Box<dyn std::error::
             principal_id: "usr_boundary".to_owned(),
             principal_kind: PrincipalKind::User,
             participant_id: "example.app".to_owned(),
-            participant_kind: ParticipantKindV1::App,
+            participant_kind: ParticipantKind::App,
             participant_artifact_digest: digest(1),
             participant_needs_digest: digest(2),
             session_public_key: session_public_key(31),

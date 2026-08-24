@@ -1,8 +1,8 @@
 use trellis_protocol::{
     verify_authorization_event, verify_authorization_request, AuthorizationEventProof,
-    AuthorizationEventPublisher, AuthorizationEventVerificationInputV1, AuthorizationRequestProof,
-    AuthorizationRequestVerificationInputV1, AuthorizationVerificationPolicyV1, PermissionAtomV1,
-    ProtocolError, VerifiedAuthorizationContextV1, VerifiedAuthorizationEventProof,
+    AuthorizationEventPublisher, AuthorizationEventVerificationInput, AuthorizationRequestProof,
+    AuthorizationRequestVerificationInput, AuthorizationVerificationPolicy, PermissionAtom,
+    ProtocolError, VerifiedAuthorizationContext, VerifiedAuthorizationEventProof,
     VerifiedAuthorizationRequestProof,
 };
 
@@ -18,9 +18,9 @@ pub struct VerifiedCaller {
     /// Signed stable session id.
     pub session_id: String,
     /// Signed principal identity.
-    pub principal: trellis_protocol::AuthorizationPrincipalV1,
+    pub principal: trellis_protocol::AuthorizationPrincipal,
     /// Signed participant identity and artifact evidence.
-    pub participant: trellis_protocol::AuthorizationParticipantV1,
+    pub participant: trellis_protocol::AuthorizationParticipant,
     /// Signed deployment identity, when present.
     pub deployment_id: Option<String>,
     /// Signed runtime instance identity, when present.
@@ -61,7 +61,7 @@ impl VerifiedAuthorizationRequest {
     }
 
     /// Return the verified signed authorization context.
-    pub fn context(&self) -> &VerifiedAuthorizationContextV1 {
+    pub fn context(&self) -> &VerifiedAuthorizationContext {
         self.request.context()
     }
 }
@@ -79,7 +79,7 @@ impl VerifiedAuthorizationEvent {
     }
 
     /// Return the verified signed authorization context.
-    pub fn context(&self) -> &VerifiedAuthorizationContextV1 {
+    pub fn context(&self) -> &VerifiedAuthorizationContext {
         self.event.context()
     }
 }
@@ -94,9 +94,9 @@ pub struct AuthorizationVerificationCore {}
 
 /// Borrowed transport and authority inputs for shared request verification.
 #[derive(Clone, Copy, Debug)]
-pub struct AuthorizationRequestVerificationInput<'a> {
+pub struct RequestVerificationInput<'a> {
     /// Resolved and cryptographically verified authorization context.
-    pub context: &'a VerifiedAuthorizationContextV1,
+    pub context: &'a VerifiedAuthorizationContext,
     /// Session key presented by the transport.
     pub session_key: &'a str,
     /// Context digest presented by the transport.
@@ -114,18 +114,18 @@ pub struct AuthorizationRequestVerificationInput<'a> {
     /// Encoded request proof.
     pub proof: &'a str,
     /// Verification policy.
-    pub policy: &'a AuthorizationVerificationPolicyV1,
+    pub policy: &'a AuthorizationVerificationPolicy,
     /// Required exact permissions.
-    pub required_permissions: &'a [PermissionAtomV1],
+    pub required_permissions: &'a [PermissionAtom],
     /// Required platform capabilities.
     pub required_capabilities: &'a [String],
 }
 
 /// Borrowed transport and authority inputs for shared event verification.
 #[derive(Clone, Copy, Debug)]
-pub struct AuthorizationEventVerificationInput<'a> {
+pub struct EventVerificationInput<'a> {
     /// Resolved and cryptographically verified authorization context.
-    pub context: &'a VerifiedAuthorizationContextV1,
+    pub context: &'a VerifiedAuthorizationContext,
     /// Session key presented by the transport.
     pub session_key: &'a str,
     /// Context digest presented by the transport.
@@ -141,9 +141,9 @@ pub struct AuthorizationEventVerificationInput<'a> {
     /// Encoded event proof.
     pub proof: &'a str,
     /// Verification policy.
-    pub policy: &'a AuthorizationVerificationPolicyV1,
+    pub policy: &'a AuthorizationVerificationPolicy,
     /// Required exact permissions.
-    pub required_permissions: &'a [PermissionAtomV1],
+    pub required_permissions: &'a [PermissionAtom],
     /// Required platform capabilities.
     pub required_capabilities: &'a [String],
     /// Context revocation time, when present.
@@ -159,9 +159,9 @@ impl AuthorizationVerificationCore {
     /// Verify one context-bound request proof.
     pub fn verify_request(
         &self,
-        input: AuthorizationRequestVerificationInput<'_>,
+        input: RequestVerificationInput<'_>,
     ) -> Result<VerifiedAuthorizationRequest, AuthorizationVerificationError> {
-        let AuthorizationRequestVerificationInput {
+        let RequestVerificationInput {
             context,
             session_key,
             context_digest,
@@ -177,7 +177,7 @@ impl AuthorizationVerificationCore {
         } = input;
         self.check_context_binding(context, session_key, context_digest)?;
         let proof = AuthorizationRequestProof::parse(proof.to_owned())?;
-        let request = verify_authorization_request(AuthorizationRequestVerificationInputV1 {
+        let request = verify_authorization_request(AuthorizationRequestVerificationInput {
             context,
             subject,
             reply_subject,
@@ -198,9 +198,9 @@ impl AuthorizationVerificationCore {
     /// Verify one context-bound event proof.
     pub fn verify_event(
         &self,
-        input: AuthorizationEventVerificationInput<'_>,
+        input: EventVerificationInput<'_>,
     ) -> Result<VerifiedAuthorizationEvent, AuthorizationVerificationError> {
-        let AuthorizationEventVerificationInput {
+        let EventVerificationInput {
             context,
             session_key,
             context_digest,
@@ -216,7 +216,7 @@ impl AuthorizationVerificationCore {
         } = input;
         self.check_context_binding(context, session_key, context_digest)?;
         let proof = AuthorizationEventProof::parse(proof.to_owned())?;
-        let event = verify_authorization_event(AuthorizationEventVerificationInputV1 {
+        let event = verify_authorization_event(AuthorizationEventVerificationInput {
             context,
             subject,
             raw_payload: payload,
@@ -233,7 +233,7 @@ impl AuthorizationVerificationCore {
 
     fn check_context_binding(
         &self,
-        context: &VerifiedAuthorizationContextV1,
+        context: &VerifiedAuthorizationContext,
         session_key: &str,
         context_digest: &str,
     ) -> Result<(), AuthorizationVerificationError> {
@@ -247,7 +247,7 @@ impl AuthorizationVerificationCore {
     }
 }
 
-fn project_caller(session_key: &str, context: &VerifiedAuthorizationContextV1) -> VerifiedCaller {
+fn project_caller(session_key: &str, context: &VerifiedAuthorizationContext) -> VerifiedCaller {
     VerifiedCaller {
         session_key: session_key.to_owned(),
         inbox_prefix: context.inbox_prefix().to_owned(),

@@ -12,7 +12,7 @@ type JsonObject = { [key: string]: JsonValue };
 const protocolWasm = protocolWasmModule;
 
 /** Verification policy accepted by the Rust authorization protocol. */
-export type AuthorizationVerificationPolicyV1 = {
+export type AuthorizationVerificationPolicy = {
   nowUnixSeconds: number;
   allowedClockSkewSeconds: number;
   maximumContextLifetimeSeconds: number;
@@ -23,8 +23,8 @@ export type AuthorizationVerificationPolicyV1 = {
 };
 
 /** Context verification policy fields used to schedule refresh. */
-export type AuthorizationContextVerificationPolicyV1 =
-  & AuthorizationVerificationPolicyV1
+export type AuthorizationContextVerificationPolicy =
+  & AuthorizationVerificationPolicy
   & {
     refreshLeadSeconds: number;
     refreshJitterSeconds: number;
@@ -38,7 +38,7 @@ export type AuthorizationContextVerificationInput = {
 };
 
 /** One exact API or participant-resource permission target. */
-export type PermissionTargetV1 =
+export type PermissionTarget =
   | {
     kind: "apiSurface";
     api: string;
@@ -59,8 +59,8 @@ export type PermissionTargetV1 =
   };
 
 /** One exact machine-enforceable permission atom. */
-export type PermissionAtomV1 = {
-  target: PermissionTargetV1;
+export type PermissionAtom = {
+  target: PermissionTarget;
   action:
     | "call"
     | "invoke"
@@ -78,32 +78,32 @@ export type PermissionAtomV1 = {
 };
 
 /** Grant set projection returned by local authorization verification. */
-export type GrantSetV1 = {
+export type GrantSet = {
   format: "trellis.grant-set.v1";
-  permissions: PermissionAtomV1[];
+  permissions: PermissionAtom[];
 };
 
 /** Native participant resolution returned by the Rust protocol boundary. */
-export type ResolvedParticipantV1 = {
+export type ResolvedParticipant = {
   apiArtifacts: Record<string, JsonObject>;
   apiDigests: Record<string, string>;
   participant: JsonObject;
   participantDigest: string;
   participantNeeds: JsonObject;
   participantNeedsDigest: string;
-  requiredGrants: GrantSetV1;
-  optionalGrants: GrantSetV1;
+  requiredGrants: GrantSet;
+  optionalGrants: GrantSet;
   authorityProposal: JsonObject;
 };
 
 /** Stable principal projection returned by the protocol verifier. */
-export type AuthorizationPrincipalV1 = {
+export type AuthorizationPrincipal = {
   kind: "user" | "service" | "device";
   id: string;
 };
 
 /** Exact participant projection returned by the protocol verifier. */
-export type AuthorizationParticipantV1 = {
+export type AuthorizationParticipant = {
   kind: "service" | "app" | "device" | "agent";
   id: string;
   artifactDigest: string;
@@ -111,7 +111,7 @@ export type AuthorizationParticipantV1 = {
 };
 
 /** Durable authority reference bound into a signed context. */
-export type AuthorizationAuthorityRefV1 = {
+export type AuthorizationAuthorityRef = {
   kind: "identity" | "deployment";
   id: string;
   version: number;
@@ -120,9 +120,9 @@ export type AuthorizationAuthorityRefV1 = {
 /** Complete verified context metadata returned by request/event verification. */
 export type VerifiedAuthorizationContextProjection = {
   authority: string;
-  authorityRef: AuthorizationAuthorityRefV1;
-  principal: AuthorizationPrincipalV1;
-  participant: AuthorizationParticipantV1;
+  authorityRef: AuthorizationAuthorityRef;
+  principal: AuthorizationPrincipal;
+  participant: AuthorizationParticipant;
   deploymentId: string | null;
   instanceId: string | null;
   issuerKeyId: string;
@@ -132,7 +132,7 @@ export type VerifiedAuthorizationContextProjection = {
   issuedAt: number;
   notBefore: number;
   expiresAt: number;
-  grantSet: GrantSetV1;
+  grantSet: GrantSet;
   grantDigest: string;
   capabilities: string[];
   extensions: Record<string, unknown>;
@@ -218,9 +218,9 @@ export type VerifyAuthorizationRequestArgs = {
   iat: number;
   requestId: string;
   proof: string;
-  requiredPermissions: PermissionAtomV1[];
+  requiredPermissions: PermissionAtom[];
   requiredCapabilities: string[];
-  policy: AuthorizationVerificationPolicyV1;
+  policy: AuthorizationVerificationPolicy;
 };
 
 /** Arguments for local context-bound event authorization. */
@@ -231,9 +231,9 @@ export type VerifyAuthorizationEventArgs = {
   eventId: string;
   eventTime: string;
   proof: string;
-  requiredPermissions: PermissionAtomV1[];
+  requiredPermissions: PermissionAtom[];
   requiredCapabilities: string[];
-  policy: AuthorizationVerificationPolicyV1;
+  policy: AuthorizationVerificationPolicy;
   revokedAt?: number | null;
 };
 
@@ -341,14 +341,14 @@ function initializeSync(): void {
 export function resolveParticipantV1WasmSync(args: {
   participant: unknown;
   apis: Record<string, unknown>;
-}): ResolvedParticipantV1 {
+}): ResolvedParticipant {
   initializeSync();
   return JSON.parse(
-    protocolWasm.resolve_participant_v1(
+    protocolWasm.resolve_participant(
       JSON.stringify(args.participant),
       JSON.stringify(args.apis),
     ),
-  ) as ResolvedParticipantV1;
+  ) as ResolvedParticipant;
 }
 
 /** Verify a complete signed authorization context through Rust/WASM. */
@@ -356,7 +356,7 @@ export async function verifyAuthorizationContextWasm(args: {
   root: unknown;
   manifest: unknown;
   context: unknown;
-  policy: AuthorizationContextVerificationPolicyV1;
+  policy: AuthorizationContextVerificationPolicy;
 }): Promise<VerifiedAuthorizationContextTokenProjection> {
   const { handle, verified } = await createAuthorizationContextHandleWasm(args);
   handle.free();
@@ -368,7 +368,7 @@ export async function createAuthorizationContextHandleWasm(args: {
   root: unknown;
   manifest: unknown;
   context: unknown;
-  policy: AuthorizationContextVerificationPolicyV1;
+  policy: AuthorizationContextVerificationPolicy;
   historical?: boolean;
 }): Promise<{
   handle: AuthorizationContextHandle;
@@ -407,7 +407,7 @@ export async function createAuthorizationContextHandleWasm(args: {
 /** Require an opaque verified context to be currently eligible. */
 export function assertAuthorizationContextHandleCurrentWasm(
   handle: AuthorizationContextHandle,
-  policy: AuthorizationContextVerificationPolicyV1,
+  policy: AuthorizationContextVerificationPolicy,
 ): void {
   handle.assert_current(JSON.stringify(wasmVerificationPolicy(policy)));
 }
@@ -416,7 +416,7 @@ export function assertAuthorizationContextHandleCurrentWasm(
 export async function verifyAuthorizationManifestWasm(args: {
   root: unknown;
   manifest: unknown;
-  policy: AuthorizationVerificationPolicyV1;
+  policy: AuthorizationVerificationPolicy;
 }): Promise<{
   authority: string;
   rootKeyId: string;
@@ -471,8 +471,8 @@ export async function verifyAuthorizationEventWasm(
 }
 
 function wasmVerificationPolicy(
-  policy: AuthorizationVerificationPolicyV1,
-): AuthorizationVerificationPolicyV1 {
+  policy: AuthorizationVerificationPolicy,
+): AuthorizationVerificationPolicy {
   return {
     nowUnixSeconds: policy.nowUnixSeconds,
     allowedClockSkewSeconds: policy.allowedClockSkewSeconds,

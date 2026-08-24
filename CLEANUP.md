@@ -88,43 +88,43 @@ Validation:
 
 ## 3. First public protocol version
 
-- [ ] Treat the current request/event authorization proof wire format as the
+- [x] Treat the current request/event authorization proof wire format as the
       first public `v1`.
-- [ ] Remove unreleased `AuthorizationRequestProofV2`,
+- [x] Remove unreleased `AuthorizationRequestProofV2`,
       `AuthorizationEventProofV2`, V2 input/verified type names, and `*_v2`
       implementation function names.
-- [ ] Change unreleased `.v2` proof domains to the first public `.v1` domains.
-- [ ] Remove unpublished aliases, fallback subjects, dual read/write paths,
+- [x] Change unreleased `.v2` proof domains to the first public `.v1` domains.
+- [x] Remove unpublished aliases, fallback subjects, dual read/write paths,
       obsolete parsers/schemas/vectors, and never-released migrations.
-- [ ] Keep serialized format-version fields where they are actual wire-version
+- [x] Keep serialized format-version fields where they are actual wire-version
       identifiers.
-- [ ] Prefer unversioned implementation names (`ApiArtifact`, `PermissionAtom`,
+- [x] Prefer unversioned implementation names (`ApiArtifact`, `PermissionAtom`,
       `AuthorizationContext`, `AuthorizationRequestProof`, etc.) until a real
       second public implementation version exists.
-- [ ] Regenerate final conformance vectors and generated artifacts after the
+- [x] Regenerate final conformance vectors and generated artifacts after the
       clean break.
 
 ### TS protocol WASM boundary
 
-- [ ] Keep the Rust protocol crate as the single authoritative implementation
+- [x] Keep the Rust protocol crate as the single authoritative implementation
       for substantial authorization verification; do not duplicate the
       trust/context verifier in TypeScript.
-- [ ] Stop committing protocol-WASM binary/bindgen/base64 output as normal
+- [x] Stop committing protocol-WASM binary/bindgen/base64 output as normal
       source state. Build it only for TS tests/package assembly/release and
       transfer it as a CI/package artifact where needed.
-- [ ] Make Rust-only `check`/test paths independent of protocol-WASM generation.
-- [ ] Make the canonical preparation/build order work from a clean checkout:
+- [x] Make Rust-only `check`/test paths independent of protocol-WASM generation.
+- [x] Make the canonical preparation/build order work from a clean checkout:
       generate SDK dependencies before any WASM build that loads the Rust
       workspace.
-- [ ] Replace per-message root + manifest + context JSON round-trips with an
+- [x] Replace per-message root + manifest + context JSON round-trips with an
       opaque WASM verified-context handle. Verify each context/trust chain once;
       request/event hot paths verify only their proof and authorization
       requirements against the already-verified context.
-- [ ] Preserve manifest/revocation invalidation in the TS provider cache and
+- [x] Preserve manifest/revocation invalidation in the TS provider cache and
       discard/rebuild verified-context handles when their trust epoch changes.
-- [ ] Keep simple request/event proof-input construction/signing native in TS;
+- [x] Keep simple request/event proof-input construction/signing native in TS;
       WASM is for the substantial verifier, not every cryptographic helper.
-- [ ] Validate the boundary with shared Rust/TS conformance vectors and a
+- [x] Validate the boundary with shared Rust/TS conformance vectors and a
       focused repeated-message test that proves one context verification can
       serve many request/event verifications without re-verifying the trust
       chain.

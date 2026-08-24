@@ -4,8 +4,8 @@ use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
 use sha2::{Digest, Sha256};
 use trellis_protocol::{
-    AuthorizationAuthorityKindV1, AuthorizationPrincipalKindV1, GrantSetV1, ParticipantKindV1,
-    ParticipantResourceKindV1, PermissionAtomV1,
+    AuthorizationAuthorityKind, AuthorizationPrincipalKind, GrantSet, ParticipantKind,
+    ParticipantResourceKind, PermissionAtom,
 };
 
 use super::authority::{
@@ -20,7 +20,7 @@ use super::{
 };
 
 struct MaterializationHeader {
-    effective_grant_set: GrantSetV1,
+    effective_grant_set: GrantSet,
     effective_capabilities: Vec<String>,
     state: MaterializationState,
     error: Option<String>,
@@ -109,7 +109,7 @@ fn materialize_available(
             .cloned(),
     );
     let accepted = authority.grant_set().permissions();
-    let effective = GrantSetV1::new(
+    let effective = GrantSet::new(
         requested
             .into_iter()
             .filter(|permission| accepted.contains(permission))
@@ -193,7 +193,7 @@ fn unavailable(
         DesiredAuthorityRecord::Identity(_) => snapshot
             .participant
             .as_ref()
-            .map_or(ParticipantKindV1::App, |binding| binding.participant_kind),
+            .map_or(ParticipantKind::App, |binding| binding.participant_kind),
         DesiredAuthorityRecord::Deployment(record) => record.participant_kind,
     };
     let expires_at = match (authority, snapshot.subject.as_ref()) {
@@ -213,7 +213,7 @@ fn unavailable(
             authority,
             participant_kind,
             MaterializationHeader {
-                effective_grant_set: GrantSetV1::new(Vec::new()),
+                effective_grant_set: GrantSet::new(Vec::new()),
                 effective_capabilities: Vec::new(),
                 state,
                 error: Some(error_category(error).to_owned()),
@@ -228,7 +228,7 @@ fn unavailable(
 
 fn materialization_header(
     authority: &DesiredAuthorityRecord,
-    participant_kind: ParticipantKindV1,
+    participant_kind: ParticipantKind,
     header: MaterializationHeader,
 ) -> MaterializedAuthorityRecord {
     let MaterializationHeader {
@@ -336,7 +336,7 @@ fn validate_subject(
 }
 
 fn require_dependency(
-    dependency: &trellis_protocol::ResolvedUsedApiV1,
+    dependency: &trellis_protocol::ResolvedUsedApi,
     required: bool,
     evidence: &[DependencyEvidence],
 ) -> Result<(), AuthorizationStateError> {
@@ -350,7 +350,7 @@ fn require_dependency(
 }
 
 fn dependency_available(
-    dependency: &trellis_protocol::ResolvedUsedApiV1,
+    dependency: &trellis_protocol::ResolvedUsedApi,
     required: bool,
     evidence: &[DependencyEvidence],
 ) -> bool {
@@ -365,7 +365,7 @@ fn dependency_available(
 
 fn require_resource_needs(
     participant_id: &str,
-    resources: &trellis_protocol::ParticipantResourceNeedsV1,
+    resources: &trellis_protocol::ParticipantResourceNeeds,
     evidence: &[ResourceBindingEvidence],
 ) -> Result<(), AuthorizationStateError> {
     for (resource_kind, entries) in [
@@ -394,18 +394,18 @@ fn require_resource_needs(
 
 fn optional_resource_available(
     participant_id: &str,
-    permission: &PermissionAtomV1,
+    permission: &PermissionAtom,
     evidence: &[ResourceBindingEvidence],
 ) -> bool {
     let Some((owner, kind, local_name)) = permission.target().as_participant_resource() else {
         return false;
     };
     let resource_kind = match kind {
-        ParticipantResourceKindV1::State => "state",
-        ParticipantResourceKindV1::JobQueue => "jobQueue",
-        ParticipantResourceKindV1::EventConsumer => "eventConsumer",
-        ParticipantResourceKindV1::Kv => "kv",
-        ParticipantResourceKindV1::Store => "store",
+        ParticipantResourceKind::State => "state",
+        ParticipantResourceKind::JobQueue => "jobQueue",
+        ParticipantResourceKind::EventConsumer => "eventConsumer",
+        ParticipantResourceKind::Kv => "kv",
+        ParticipantResourceKind::Store => "store",
     };
     owner == participant_id
         && evidence.iter().any(|item| {
@@ -503,18 +503,18 @@ fn transition_event_id(
     Ok(URL_SAFE_NO_PAD.encode(Sha256::digest(identity)))
 }
 
-pub(crate) fn protocol_principal_kind(kind: PrincipalKind) -> AuthorizationPrincipalKindV1 {
+pub(crate) fn protocol_principal_kind(kind: PrincipalKind) -> AuthorizationPrincipalKind {
     match kind {
-        PrincipalKind::User => AuthorizationPrincipalKindV1::User,
-        PrincipalKind::Service => AuthorizationPrincipalKindV1::Service,
-        PrincipalKind::Device => AuthorizationPrincipalKindV1::Device,
+        PrincipalKind::User => AuthorizationPrincipalKind::User,
+        PrincipalKind::Service => AuthorizationPrincipalKind::Service,
+        PrincipalKind::Device => AuthorizationPrincipalKind::Device,
     }
 }
 
-pub(crate) fn protocol_authority_kind(kind: AuthorityKind) -> AuthorizationAuthorityKindV1 {
+pub(crate) fn protocol_authority_kind(kind: AuthorityKind) -> AuthorizationAuthorityKind {
     match kind {
-        AuthorityKind::Identity => AuthorizationAuthorityKindV1::Identity,
-        AuthorityKind::Deployment => AuthorizationAuthorityKindV1::Deployment,
+        AuthorityKind::Identity => AuthorizationAuthorityKind::Identity,
+        AuthorityKind::Deployment => AuthorizationAuthorityKind::Deployment,
     }
 }
 

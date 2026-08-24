@@ -13,8 +13,8 @@ use serde_json::{Map, Value};
 use sha2::Digest as _;
 use thiserror::Error;
 use trellis_protocol::{
-    canonicalize_json, sign_issuer_manifest_v1, AuthorizationIssuerManifestEntryV1,
-    AuthorizationTrustRootV1, UnsignedAuthorizationIssuerManifestV1,
+    canonicalize_json, sign_issuer_manifest, AuthorizationIssuerManifestEntry,
+    AuthorizationTrustRoot, UnsignedAuthorizationIssuerManifest,
     AUTHORIZATION_ISSUER_MANIFEST_FORMAT_V1,
 };
 
@@ -1125,7 +1125,7 @@ pub fn generate_local_authorization_trust(
     let issuer_seed: [u8; 32] = rand::random();
     let root_key = SigningKey::from_bytes(&root_seed);
     let issuer_key = SigningKey::from_bytes(&issuer_seed);
-    let root = AuthorizationTrustRootV1::new(
+    let root = AuthorizationTrustRoot::new(
         authority.to_owned(),
         URL_SAFE_NO_PAD.encode(root_key.verifying_key().to_bytes()),
     )
@@ -1142,8 +1142,8 @@ pub fn generate_local_authorization_trust(
     })?;
     let issuer_key_id =
         URL_SAFE_NO_PAD.encode(sha2::Sha256::digest(issuer_key.verifying_key().as_bytes()));
-    let manifest = sign_issuer_manifest_v1(
-        UnsignedAuthorizationIssuerManifestV1 {
+    let manifest = sign_issuer_manifest(
+        UnsignedAuthorizationIssuerManifest {
             format: AUTHORIZATION_ISSUER_MANIFEST_FORMAT_V1.to_owned(),
             authority: root.authority().to_owned(),
             root_key_id: root.key_id().to_owned(),
@@ -1151,7 +1151,7 @@ pub fn generate_local_authorization_trust(
             issued_at: now,
             not_before: now.saturating_sub(300),
             expires_at,
-            issuers: vec![AuthorizationIssuerManifestEntryV1 {
+            issuers: vec![AuthorizationIssuerManifestEntry {
                 key_id: issuer_key_id,
                 public_key: URL_SAFE_NO_PAD.encode(issuer_key.verifying_key().to_bytes()),
             }],

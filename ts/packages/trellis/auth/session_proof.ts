@@ -16,7 +16,7 @@ import {
 export const SESSION_PROOF_FORMAT_V1 = "trellis.session-proof.v1" as const;
 
 /** One fixed session-proof signature domain. */
-export type SessionProofPurposeV1 =
+export type SessionProofPurpose =
   | "userAuthRequest"
   | "serviceBootstrap"
   | "deviceBootstrap"
@@ -28,7 +28,7 @@ type CommonInput = {
 };
 
 /** Validated purpose-specific values used to construct one session proof. */
-export type SessionProofInputV1 =
+export type SessionProofInput =
   | CommonInput & {
     purpose: "userAuthRequest";
     sessionPublicKey: string;
@@ -74,13 +74,13 @@ export type SessionProofInputV1 =
   };
 
 /** One strict session-proof signature envelope. */
-export type SessionProofV1 = {
+export type SessionProof = {
   format: typeof SESSION_PROOF_FORMAT_V1;
   signature: string;
 };
 
 /** Freshness policy applied by the pure TypeScript verifier. */
-export type SessionProofPolicyV1 = {
+export type SessionProofPolicy = {
   maximumAgeMs: number;
   maximumFutureSkewMs: number;
 };
@@ -188,7 +188,7 @@ function concat(parts: Uint8Array[]): Uint8Array {
   return output;
 }
 
-function signerKeyId(input: SessionProofInputV1): Promise<string> | string {
+function signerKeyId(input: SessionProofInput): Promise<string> | string {
   switch (input.purpose) {
     case "userAuthRequest":
       return sha256(assertPublicKey(input.sessionPublicKey, "sessionPublicKey"))
@@ -203,7 +203,7 @@ function signerKeyId(input: SessionProofInputV1): Promise<string> | string {
 }
 
 function assertSignerPublicKey(
-  input: SessionProofInputV1,
+  input: SessionProofInput,
   signerPublicKey: string,
 ): void {
   if (
@@ -217,8 +217,8 @@ function assertSignerPublicKey(
 }
 
 /** Build the exact deterministic length-prefixed bytes hashed by session proofs. */
-export function buildSessionProofTranscriptV1(
-  input: SessionProofInputV1,
+export function buildSessionProofTranscript(
+  input: SessionProofInput,
 ): Uint8Array {
   if (!Number.isSafeInteger(input.issuedAt)) {
     throw new Error("issuedAt must be a safe integer");
@@ -383,7 +383,7 @@ function assertJsonValue(value: unknown, path = ""): void {
 }
 
 /** Parse one strict session-proof signature envelope. */
-export function parseSessionProofV1(value: unknown): SessionProofV1 {
+export function parseSessionProof(value: unknown): SessionProof {
   if (value === null || typeof value !== "object" || Array.isArray(value)) {
     throw new Error("session proof must be an object");
   }
@@ -403,7 +403,7 @@ export function parseSessionProofV1(value: unknown): SessionProofV1 {
 }
 
 /** Hash one complete proof-bearing request after removing only `proof.signature`. */
-export async function sessionProofRequestDigestV1(
+export async function sessionProofRequestDigest(
   request: Record<string, unknown>,
 ): Promise<string> {
   assertJsonValue(request);
@@ -424,13 +424,13 @@ export async function sessionProofRequestDigestV1(
 }
 
 /** Sign one purpose-specific session proof with an Ed25519 private key. */
-export async function signSessionProofV1(
-  input: SessionProofInputV1,
+export async function signSessionProof(
+  input: SessionProofInput,
   privateKey: CryptoKey,
   signerPublicKey: string,
-): Promise<SessionProofV1> {
+): Promise<SessionProof> {
   assertSignerPublicKey(input, signerPublicKey);
-  const digest = await sha256(buildSessionProofTranscriptV1(input));
+  const digest = await sha256(buildSessionProofTranscript(input));
   const publicBytes = assertPublicKey(signerPublicKey, "signerPublicKey");
   const expectedKeyId = base64urlEncode(await sha256(publicBytes));
   if (await signerKeyId(input) !== expectedKeyId) {
@@ -462,17 +462,17 @@ export async function signSessionProofV1(
 }
 
 /** Verify one session proof. */
-export async function verifySessionProofV1(
-  input: SessionProofInputV1,
-  proof: SessionProofV1,
+export async function verifySessionProof(
+  input: SessionProofInput,
+  proof: SessionProof,
   signerPublicKey: string,
   nowMs: number,
-  policy: SessionProofPolicyV1 = {
+  policy: SessionProofPolicy = {
     maximumAgeMs: 30_000,
     maximumFutureSkewMs: 30_000,
   },
 ): Promise<void> {
-  const parsedProof = parseSessionProofV1(proof);
+  const parsedProof = parseSessionProof(proof);
   assertSignerPublicKey(input, signerPublicKey);
   if (
     !Number.isSafeInteger(nowMs) ||
@@ -497,7 +497,7 @@ export async function verifySessionProofV1(
   if (await signerKeyId(input) !== expectedKeyId) {
     throw new Error("signer key ID mismatch");
   }
-  const transcriptDigest = await sha256(buildSessionProofTranscriptV1(input));
+  const transcriptDigest = await sha256(buildSessionProofTranscript(input));
   const signature = decodeFixed(parsedProof.signature, 64, "proof.signature");
   const publicKey = await importEd25519PublicKeyFromBase64url(signerPublicKey);
   if (

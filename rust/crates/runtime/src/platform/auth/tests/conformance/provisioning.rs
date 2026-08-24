@@ -19,13 +19,13 @@ use crate::platform::auth::{
     ProvisioningSecretState, RuntimeInstanceRecord, RuntimeInstanceState, SessionRecord,
     SessionRuntimeBinding, SqliteAuthorizationStore,
 };
-use trellis_protocol::ParticipantKindV1;
+use trellis_protocol::ParticipantKind;
 
 #[tokio::test]
 async fn sqlite_activation_review_expires_after_domain_ttl(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let store = SqliteAuthorizationStore::open_in_memory()?;
-    let fixture = participant_fixture_for(ParticipantKindV1::Device, "expiry.device")?;
+    let fixture = participant_fixture_for(ParticipantKind::Device, "expiry.device")?;
     store
         .put_participant_binding(fixture.binding.clone())
         .await?;
@@ -35,7 +35,7 @@ async fn sqlite_activation_review_expires_after_domain_ttl(
                 authority_id: "dpa_expiry".to_owned(),
                 deployment_id: "dep_expiry".to_owned(),
                 participant_id: fixture.binding.participant_id.clone(),
-                participant_kind: ParticipantKindV1::Device,
+                participant_kind: ParticipantKind::Device,
                 participant_artifact_digest: fixture.binding.artifact_digest.clone(),
                 accepted_needs_digest: fixture.binding.needs_digest.clone(),
                 desired_grant_set: fixture.all_grants,
@@ -54,7 +54,7 @@ async fn sqlite_activation_review_expires_after_domain_ttl(
         .put_deployment_evidence(DeploymentRecord {
             deployment_id: "dep_expiry".to_owned(),
             participant_id: fixture.binding.participant_id,
-            participant_kind: ParticipantKindV1::Device,
+            participant_kind: ParticipantKind::Device,
             active: true,
             expires_at: None,
         })
@@ -194,7 +194,7 @@ async fn sqlite_activation_review_expires_after_domain_ttl(
 pub(super) async fn exercise_deployed_principals(
     store: SqliteAuthorizationStore,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let service_fixture = participant_fixture_for(ParticipantKindV1::Service, "example.service")?;
+    let service_fixture = participant_fixture_for(ParticipantKind::Service, "example.service")?;
     store
         .put_participant_binding(service_fixture.binding.clone())
         .await?;
@@ -214,7 +214,7 @@ pub(super) async fn exercise_deployed_principals(
         principal_id: service_principal.principal_id.clone(),
         principal_kind: PrincipalKind::Service,
         participant_id: service_fixture.binding.participant_id.clone(),
-        participant_kind: ParticipantKindV1::Service,
+        participant_kind: ParticipantKind::Service,
         participant_artifact_digest: service_fixture.binding.artifact_digest.clone(),
         participant_needs_digest: service_fixture.binding.needs_digest.clone(),
         session_public_key: session_public_key(9),
@@ -228,7 +228,7 @@ pub(super) async fn exercise_deployed_principals(
                 authority_id: "dpa_service".to_owned(),
                 deployment_id: "dep_service".to_owned(),
                 participant_id: service_fixture.binding.participant_id.clone(),
-                participant_kind: ParticipantKindV1::Service,
+                participant_kind: ParticipantKind::Service,
                 participant_artifact_digest: service_fixture.binding.artifact_digest.clone(),
                 accepted_needs_digest: service_fixture.binding.needs_digest.clone(),
                 desired_grant_set: service_fixture.all_grants.clone(),
@@ -251,7 +251,7 @@ pub(super) async fn exercise_deployed_principals(
         .put_deployment_evidence(DeploymentRecord {
             deployment_id: "dep_service".to_owned(),
             participant_id: service_fixture.binding.participant_id.clone(),
-            participant_kind: ParticipantKindV1::Service,
+            participant_kind: ParticipantKind::Service,
             active: true,
             expires_at: Some(NOW + 800),
         })
@@ -330,7 +330,7 @@ pub(super) async fn exercise_deployed_principals(
         .put_deployment_evidence(DeploymentRecord {
             deployment_id: "dep_service".to_owned(),
             participant_id: service_fixture.binding.participant_id.clone(),
-            participant_kind: ParticipantKindV1::Service,
+            participant_kind: ParticipantKind::Service,
             active: true,
             expires_at: None,
         })
@@ -359,7 +359,7 @@ pub(super) async fn exercise_deployed_principals(
         .put_deployment_evidence(DeploymentRecord {
             deployment_id: "dep_service".to_owned(),
             participant_id: service_fixture.binding.participant_id.clone(),
-            participant_kind: ParticipantKindV1::Service,
+            participant_kind: ParticipantKind::Service,
             active: true,
             expires_at: Some(NOW + 800),
         })
@@ -398,7 +398,7 @@ pub(super) async fn exercise_deployed_principals(
         .put_deployment_evidence(DeploymentRecord {
             deployment_id: "dep_service".to_owned(),
             participant_id: service_fixture.binding.participant_id.clone(),
-            participant_kind: ParticipantKindV1::Service,
+            participant_kind: ParticipantKind::Service,
             active: false,
             expires_at: Some(NOW + 700),
         })
@@ -423,7 +423,7 @@ pub(super) async fn exercise_deployed_principals(
         .put_deployment_evidence(DeploymentRecord {
             deployment_id: "dep_service".to_owned(),
             participant_id: service_fixture.binding.participant_id.clone(),
-            participant_kind: ParticipantKindV1::Service,
+            participant_kind: ParticipantKind::Service,
             active: false,
             expires_at: Some(NOW + 600),
         })
@@ -444,7 +444,7 @@ pub(super) async fn exercise_deployed_principals(
         unavailable_version + 1
     );
 
-    let device_fixture = participant_fixture_for(ParticipantKindV1::Device, "example.device")?;
+    let device_fixture = participant_fixture_for(ParticipantKind::Device, "example.device")?;
     store
         .put_participant_binding(device_fixture.binding.clone())
         .await?;
@@ -454,7 +454,7 @@ pub(super) async fn exercise_deployed_principals(
                 authority_id: "dpa_device".to_owned(),
                 deployment_id: "dep_device".to_owned(),
                 participant_id: device_fixture.binding.participant_id.clone(),
-                participant_kind: ParticipantKindV1::Device,
+                participant_kind: ParticipantKind::Device,
                 participant_artifact_digest: device_fixture.binding.artifact_digest.clone(),
                 accepted_needs_digest: device_fixture.binding.needs_digest.clone(),
                 desired_grant_set: device_fixture.all_grants.clone(),
@@ -477,7 +477,7 @@ pub(super) async fn exercise_deployed_principals(
         .put_deployment_evidence(DeploymentRecord {
             deployment_id: "dep_device".to_owned(),
             participant_id: device_fixture.binding.participant_id.clone(),
-            participant_kind: ParticipantKindV1::Device,
+            participant_kind: ParticipantKind::Device,
             active: true,
             expires_at: Some(NOW + 750),
         })
@@ -584,7 +584,7 @@ pub(super) async fn exercise_deployed_principals(
         principal_id: "dev_01".to_owned(),
         principal_kind: PrincipalKind::Device,
         participant_id: device_fixture.binding.participant_id.clone(),
-        participant_kind: ParticipantKindV1::Device,
+        participant_kind: ParticipantKind::Device,
         participant_artifact_digest: device_fixture.binding.artifact_digest.clone(),
         participant_needs_digest: device_fixture.binding.needs_digest.clone(),
         session_public_key: session_public_key(10),

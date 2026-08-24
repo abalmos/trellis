@@ -12,12 +12,12 @@
 use bytes::Bytes;
 use futures_util::future::BoxFuture;
 use trellis_protocol::{
-    ApiSurfaceKindV1, PermissionActionV1, PermissionAtomV1, PermissionTargetV1, ProtocolError,
+    ApiSurfaceKind, PermissionAction, PermissionAtom, PermissionTarget, ProtocolError,
 };
 
 use crate::client::{
-    AuthorizationEventVerificationInput, AuthorizationProviderCache,
-    AuthorizationRequestVerificationInput, AuthorizationVerificationCore,
+    AuthorizationProviderCache, AuthorizationVerificationCore, EventVerificationInput,
+    RequestVerificationInput,
 };
 use crate::service::{
     RequestContext, RequestValidation, RequestValidator, RoutePermission, ServerError,
@@ -183,29 +183,26 @@ impl LocalAuthVerifier {
             }
         };
         let required_permissions = permission.as_slice();
-        let verified =
-            match self
-                .verification
-                .verify_request(AuthorizationRequestVerificationInput {
-                    context: &verified,
-                    session_key: &session_key,
-                    context_digest: &authorization_context,
-                    subject,
-                    payload,
-                    iat,
-                    request_id: &request_id,
-                    reply_subject: Some(&reply),
-                    proof: &proof,
-                    policy: &policy,
-                    required_permissions,
-                    required_capabilities: &required_capabilities,
-                }) {
-                Ok(verified) => verified,
-                Err(error) => {
-                    tracing::debug!(subject, %error, "local request proof rejected");
-                    return Ok(RequestValidation::denied());
-                }
-            };
+        let verified = match self.verification.verify_request(RequestVerificationInput {
+            context: &verified,
+            session_key: &session_key,
+            context_digest: &authorization_context,
+            subject,
+            payload,
+            iat,
+            request_id: &request_id,
+            reply_subject: Some(&reply),
+            proof: &proof,
+            policy: &policy,
+            required_permissions,
+            required_capabilities: &required_capabilities,
+        }) {
+            Ok(verified) => verified,
+            Err(error) => {
+                tracing::debug!(subject, %error, "local request proof rejected");
+                return Ok(RequestValidation::denied());
+            }
+        };
         let caller = verified.caller().clone();
         Ok(RequestValidation {
             allowed: true,
@@ -313,7 +310,7 @@ impl LocalAuthVerifier {
         };
         let verified_event = self
             .verification
-            .verify_event(AuthorizationEventVerificationInput {
+            .verify_event(EventVerificationInput {
                 context: &context,
                 session_key: &session_key,
                 context_digest: &authorization_context,
@@ -421,10 +418,10 @@ pub fn payload_hash_base64url(payload: &[u8]) -> String {
 fn select_publish_permission(
     api_id: &str,
     event_name: &str,
-) -> Result<PermissionAtomV1, ProtocolError> {
-    PermissionAtomV1::new(
-        PermissionTargetV1::api_surface(api_id, ApiSurfaceKindV1::Event, event_name)?,
-        PermissionActionV1::Publish,
+) -> Result<PermissionAtom, ProtocolError> {
+    PermissionAtom::new(
+        PermissionTarget::api_surface(api_id, ApiSurfaceKind::Event, event_name)?,
+        PermissionAction::Publish,
     )
 }
 
@@ -438,11 +435,11 @@ mod tests {
     use ed25519_dalek::SigningKey;
     use serde::Deserialize;
     use trellis_protocol::{
-        canonicalize_json, parse_authorization_context_v1, parse_issuer_manifest_v1,
-        sign_authorization_context_v1, verify_authorization_context_v1, verify_issuer_manifest_v1,
-        ApiSurfaceKindV1, AuthorizationTrustRootV1, AuthorizationVerificationPolicyV1, GrantSetV1,
-        PermissionActionV1, PermissionAtomV1, PermissionTargetV1, SignedAuthorizationContextV1,
-        VerifiedAuthorizationContextV1,
+        canonicalize_json, parse_authorization_context, parse_issuer_manifest,
+        sign_authorization_context, verify_authorization_context, verify_issuer_manifest,
+        ApiSurfaceKind, AuthorizationTrustRoot, AuthorizationVerificationPolicy, GrantSet,
+        PermissionAction, PermissionAtom, PermissionTarget, SignedAuthorizationContext,
+        VerifiedAuthorizationContext,
     };
 
     use super::*;
@@ -501,14 +498,12 @@ mod tests {
         )
     }
 
-    fn context(chain: &ChainFixture) -> SignedAuthorizationContextV1 {
-        parse_authorization_context_v1(
-            &serde_json::from_str(&chain.context_canonical_json).unwrap(),
-        )
-        .unwrap()
+    fn context(chain: &ChainFixture) -> SignedAuthorizationContext {
+        parse_authorization_context(&serde_json::from_str(&chain.context_canonical_json).unwrap())
+            .unwrap()
     }
 
-    fn update_context(chain: &mut ChainFixture, context: &SignedAuthorizationContextV1) {
+    fn update_context(chain: &mut ChainFixture, context: &SignedAuthorizationContext) {
         chain.context_canonical_json =
             canonicalize_json(&serde_json::to_value(context).unwrap()).unwrap();
         chain.context_digest = context.digest().unwrap();
@@ -518,11 +513,11 @@ mod tests {
         chain: &ChainFixture,
         defaults: &VectorDefaults,
     ) -> (
-        VerifiedAuthorizationContextV1,
-        AuthorizationVerificationPolicyV1,
+        VerifiedAuthorizationContext,
+        AuthorizationVerificationPolicy,
         AuthorizationContextBundle,
     ) {
-        let policy = AuthorizationVerificationPolicyV1::new(
+        let policy = AuthorizationVerificationPolicy::new(
             defaults.policy.now_unix_seconds,
             defaults.policy.allowed_clock_skew_seconds,
             defaults.policy.maximum_context_lifetime_seconds,
@@ -532,18 +527,17 @@ mod tests {
             defaults.policy.minimum_manifest_generation,
         )
         .unwrap();
-        let root = AuthorizationTrustRootV1::parse(
+        let root = AuthorizationTrustRoot::parse(
             &serde_json::from_str(&chain.root_canonical_json).unwrap(),
         )
         .unwrap();
-        let manifest = parse_issuer_manifest_v1(
-            &serde_json::from_str(&chain.manifest_canonical_json).unwrap(),
-        )
-        .unwrap();
-        let verified_manifest = verify_issuer_manifest_v1(&root, &manifest, &policy).unwrap();
+        let manifest =
+            parse_issuer_manifest(&serde_json::from_str(&chain.manifest_canonical_json).unwrap())
+                .unwrap();
+        let verified_manifest = verify_issuer_manifest(&root, &manifest, &policy).unwrap();
         let context = context(chain);
         let verified =
-            verify_authorization_context_v1(&root, &verified_manifest, &context, &policy).unwrap();
+            verify_authorization_context(&root, &verified_manifest, &context, &policy).unwrap();
         assert_eq!(verified.context_digest(), chain.context_digest);
         let bundle = AuthorizationContextBundle {
             context: serde_json::from_str(&chain.context_canonical_json).unwrap(),
@@ -596,15 +590,14 @@ mod tests {
         cache.set_server_clock_offset_ms(offset_ms);
         inject_own_verified_for_test(&cache, bundle, verified.clone(), policy.clone()).unwrap();
         let input = cache.provider_trust_input().unwrap();
-        let root = AuthorizationTrustRootV1::parse(
+        let root = AuthorizationTrustRoot::parse(
             &serde_json::from_str(&chain.root_canonical_json).unwrap(),
         )
         .unwrap();
-        let manifest = parse_issuer_manifest_v1(
-            &serde_json::from_str(&chain.manifest_canonical_json).unwrap(),
-        )
-        .unwrap();
-        let verified_manifest = verify_issuer_manifest_v1(&root, &manifest, &policy).unwrap();
+        let manifest =
+            parse_issuer_manifest(&serde_json::from_str(&chain.manifest_canonical_json).unwrap())
+                .unwrap();
+        let verified_manifest = verify_issuer_manifest(&root, &manifest, &policy).unwrap();
         let provider = AuthorizationProviderCache::new_for_test(
             std::sync::Arc::new(cache),
             input,
@@ -622,21 +615,21 @@ mod tests {
     fn event_fixture() -> (ChainFixture, VectorDefaults) {
         let (mut chain, defaults) = fixture();
         let mut context = context(&chain);
-        let publish = PermissionAtomV1::new(
-            PermissionTargetV1::api_surface(
+        let publish = PermissionAtom::new(
+            PermissionTarget::api_surface(
                 "documents@v1",
-                ApiSurfaceKindV1::Event,
+                ApiSurfaceKind::Event,
                 "Documents.Changed",
             )
             .unwrap(),
-            PermissionActionV1::Publish,
+            PermissionAction::Publish,
         )
         .unwrap();
         let mut permissions = context.unsigned.grant_set.permissions().to_vec();
         permissions.push(publish);
-        context.unsigned.grant_set = GrantSetV1::new(permissions);
+        context.unsigned.grant_set = GrantSet::new(permissions);
         let context =
-            sign_authorization_context_v1(context.unsigned, &SigningKey::from_bytes(&[2; 32]))
+            sign_authorization_context(context.unsigned, &SigningKey::from_bytes(&[2; 32]))
                 .unwrap();
         update_context(&mut chain, &context);
         (chain, defaults)
@@ -663,9 +656,9 @@ mod tests {
             required_capabilities: Some(required_capabilities),
             required_permission: Some(RoutePermission {
                 api: "documents@v1".to_owned(),
-                surface: ApiSurfaceKindV1::Rpc,
+                surface: ApiSurfaceKind::Rpc,
                 name: "Documents.Get".to_owned(),
-                action: PermissionActionV1::Call,
+                action: PermissionAction::Call,
                 signal: None,
             }),
             reply_to: Some(request.reply.clone()),
@@ -771,9 +764,9 @@ mod tests {
         );
         context.required_permission = Some(RoutePermission {
             api: "documents@v1".to_owned(),
-            surface: ApiSurfaceKindV1::Rpc,
+            surface: ApiSurfaceKind::Rpc,
             name: "Documents.Delete".to_owned(),
-            action: PermissionActionV1::Call,
+            action: PermissionAction::Call,
             signal: None,
         });
         assert!(

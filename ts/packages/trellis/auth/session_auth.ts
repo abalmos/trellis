@@ -10,9 +10,9 @@ import {
 } from "./keys.ts";
 import { createProof } from "./proof.ts";
 import {
-  type SessionProofInputV1,
-  type SessionProofV1,
-  signSessionProofV1,
+  type SessionProof,
+  type SessionProofInput,
+  signSessionProof,
 } from "./session_proof.ts";
 import { correctedIatSeconds } from "./time.ts";
 import {
@@ -54,7 +54,7 @@ export type TrellisAuth = {
     requestId?: string,
     iat?: number,
   ) => Promise<string>;
-  signSessionProof: (input: SessionProofInputV1) => Promise<SessionProofV1>;
+  signSessionProof: (input: SessionProofInput) => Promise<SessionProof>;
   natsConnectOptions: (
     opts: {
       sessionId: string;
@@ -142,7 +142,7 @@ export async function createAuth(
         requestId: requestId ?? ulid(),
       }),
     signSessionProof: (input) =>
-      signSessionProofV1(input, privateKey, sessionKey),
+      signSessionProof(input, privateKey, sessionKey),
     natsConnectOptions: (options) => {
       return Promise.resolve({
         authenticator: [

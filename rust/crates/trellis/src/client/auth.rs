@@ -1,8 +1,8 @@
 use ed25519_dalek::{Signature, Signer, SigningKey};
 use nkeys::{KeyPair, KeyPairType};
 use trellis_protocol::{
-    sign_authorization_event, sign_authorization_request, sign_session_proof_v1,
-    AuthorizationEventProof, AuthorizationRequestProof, SessionProofInputV1, SessionProofV1,
+    sign_authorization_event, sign_authorization_request, sign_session_proof,
+    AuthorizationEventProof, AuthorizationRequestProof, SessionProof, SessionProofInput,
 };
 
 use crate::client::proof::{base64url_decode, base64url_encode, sha256};
@@ -63,9 +63,9 @@ impl SessionAuth {
     /// Sign one canonical protocol-owned session proof input.
     pub fn sign_session_proof(
         &self,
-        input: &SessionProofInputV1,
-    ) -> Result<SessionProofV1, TrellisClientError> {
-        sign_session_proof_v1(input, &self.signing_key)
+        input: &SessionProofInput,
+    ) -> Result<SessionProof, TrellisClientError> {
+        sign_session_proof(input, &self.signing_key)
             .map_err(|error| TrellisClientError::Bootstrap(error.to_string()))
     }
 

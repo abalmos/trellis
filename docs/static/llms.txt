@@ -88,7 +88,7 @@ commands.
   manifest, present the canonical participant/API artifacts again instead of editing runtime
   authority or implementation-offer records.
 - Physical resource bindings never grant access. Exact resource permission atoms
-  must be in `GrantSetV1`, and optional evidence contributes only optional atoms.
+  must be in `GrantSet`, and optional evidence contributes only optional atoms.
 - Browser approval submits only the server consent digest, selected server-issued
   optional bundle ids, decision, and idempotency key. OIDC callbacks require the
   state-specific browser cookie and current portal policy. Consent is immutable

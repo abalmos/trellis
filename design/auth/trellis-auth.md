@@ -52,7 +52,7 @@ Every authority and session binding pins:
 - participant id and kind
 - exact participant artifact digest
 - exact accepted needs digest
-- effective `GrantSetV1`
+- effective `GrantSet`
 - effective expiry
 
 ## Principals

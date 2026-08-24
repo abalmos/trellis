@@ -2,7 +2,7 @@ import { Type } from "typebox";
 import { Value } from "typebox/value";
 
 import type {
-  AuthorizationContextVerificationPolicyV1,
+  AuthorizationContextVerificationPolicy,
 } from "../protocol_wasm.ts";
 import { canonicalizeJsonValue } from "../utils.ts";
 import {
@@ -32,7 +32,7 @@ export class AuthorizationContextCache {
   #runtime?: AuthorizationRuntimeBinding;
   #routing?: AuthorizationRoutingMaterial;
   #manifest?: unknown;
-  #verificationPolicy?: AuthorizationContextVerificationPolicyV1;
+  #verificationPolicy?: AuthorizationContextVerificationPolicy;
   #clockOffsetMs = 0;
   #operation = 0;
   #refreshRequest?: () => void;
@@ -433,7 +433,7 @@ export function authorizationContextVerificationPolicy(
   trust: AuthorizationTrustBundle["policy"],
   nowUnixSeconds: number,
   minimumManifestGeneration: number,
-): AuthorizationContextVerificationPolicyV1 {
+): AuthorizationContextVerificationPolicy {
   return {
     nowUnixSeconds,
     allowedClockSkewSeconds: trust.allowedClockSkewSeconds,
@@ -451,7 +451,7 @@ export function authorizationContextVerificationPolicy(
 export async function verifyAuthorizationContext(args: {
   bundle: AuthorizationContextBundle;
   manifest: unknown;
-  policy: AuthorizationContextVerificationPolicyV1;
+  policy: AuthorizationContextVerificationPolicy;
 }): Promise<VerifiedAuthorizationContext> {
   const { verifyAuthorizationContextWasm } = await import(
     "../protocol_wasm.ts"

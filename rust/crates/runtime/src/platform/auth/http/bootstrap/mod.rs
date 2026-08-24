@@ -116,7 +116,7 @@ struct BootstrapAuthorization {
     participant_artifact_digest: String,
     participant_needs_digest: String,
     participant_json: String,
-    effective_grants: GrantSetV1,
+    effective_grants: GrantSet,
     resource_bindings: Vec<ResourceBindingEvidence>,
     resource_runtime: ServiceResourceBindings,
     effective_authority_expires_at: Option<i64>,
@@ -288,7 +288,7 @@ where
     };
     let proof_input = match input.kind {
         ProvisionedIdentityKind::Service => {
-            SessionProofInputV1::service_bootstrap(ServiceBootstrapSessionProofInputV1 {
+            SessionProofInput::service_bootstrap(ServiceBootstrapSessionProofInput {
                 request_id: input.request_id.clone(),
                 issued_at: input.issued_at,
                 deployment_id: input.deployment_id.clone(),
@@ -302,7 +302,7 @@ where
             })
         }
         ProvisionedIdentityKind::Device => {
-            SessionProofInputV1::device_bootstrap(DeviceBootstrapSessionProofInputV1 {
+            SessionProofInput::device_bootstrap(DeviceBootstrapSessionProofInput {
                 request_id: input.request_id.clone(),
                 issued_at: input.issued_at,
                 deployment_id: input.deployment_id.clone(),
@@ -318,9 +318,9 @@ where
         }
     }
     .map_err(|_| HttpError::unauthorized("invalid_proof"))?;
-    let proof = parse_session_proof_v1(&input.proof)
-        .map_err(|_| HttpError::unauthorized("invalid_proof"))?;
-    verify_session_proof_v1(
+    let proof =
+        parse_session_proof(&input.proof).map_err(|_| HttpError::unauthorized("invalid_proof"))?;
+    verify_session_proof(
         &proof_input,
         &proof,
         &verifying_public_key,

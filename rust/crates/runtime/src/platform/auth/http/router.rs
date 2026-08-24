@@ -297,7 +297,7 @@ where
         native_nats_servers: options.native_nats_servers,
         websocket_nats_servers: options.websocket_nats_servers,
         oidc_providers: options.oidc_providers,
-        proof_policy: trellis_protocol::SessionProofPolicyV1::default(),
+        proof_policy: trellis_protocol::SessionProofPolicy::default(),
         portal_override_dir: options.portal_override_dir,
     };
     let mut routes: Router<AuthHttpState<R, E>> = Router::new();

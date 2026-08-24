@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 
 mod validation;
 use serde_json::Value;
-use trellis_protocol::GrantSetV1;
+use trellis_protocol::GrantSet;
 pub(crate) use validation::{validate_provisioned_identity, validate_user_account_replacement};
 
 use super::domain::PrincipalKind;
@@ -297,7 +297,7 @@ pub struct AuthorityProposalRecord {
     /// Exact participant needs digest.
     pub participant_needs_digest: String,
     /// Proposed exact grants.
-    pub proposed_grant_set: GrantSetV1,
+    pub proposed_grant_set: GrantSet,
     /// Proposed user-facing capability labels.
     pub proposed_capabilities: Vec<String>,
     /// Digest of the immutable proposal payload.

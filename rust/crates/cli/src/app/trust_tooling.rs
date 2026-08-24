@@ -11,10 +11,10 @@ use serde_json::{Map, Value};
 use sha2::{Digest as _, Sha256};
 use time::OffsetDateTime;
 use trellis_protocol::{
-    canonicalize_json, parse_issuer_manifest_v1, sign_issuer_manifest_v1,
-    verify_issuer_manifest_v1, AuthorizationIssuerManifestEntryV1, AuthorizationTrustRootV1,
-    AuthorizationVerificationPolicyV1, SignedAuthorizationIssuerManifestV1,
-    UnsignedAuthorizationIssuerManifestV1, AUTHORIZATION_ISSUER_MANIFEST_FORMAT_V1,
+    canonicalize_json, parse_issuer_manifest, sign_issuer_manifest, verify_issuer_manifest,
+    AuthorizationIssuerManifestEntry, AuthorizationTrustRoot, AuthorizationVerificationPolicy,
+    SignedAuthorizationIssuerManifest, UnsignedAuthorizationIssuerManifest,
+    AUTHORIZATION_ISSUER_MANIFEST_FORMAT_V1,
 };
 use ulid::Ulid;
 
@@ -77,7 +77,7 @@ fn initialize(args: &InfraTrustInitArgs) -> miette::Result<TrustToolSummary> {
             "authorization root and issuer keys must be distinct"
         ));
     }
-    let root = AuthorizationTrustRootV1::new(
+    let root = AuthorizationTrustRoot::new(
         args.authority.clone(),
         URL_SAFE_NO_PAD.encode(root_key.verifying_key().to_bytes()),
     )
@@ -89,7 +89,7 @@ fn initialize(args: &InfraTrustInitArgs) -> miette::Result<TrustToolSummary> {
         1,
         now,
         args.manifest_lifetime_seconds,
-        vec![AuthorizationIssuerManifestEntryV1 {
+        vec![AuthorizationIssuerManifestEntry {
             key_id: key_id(&issuer_key),
             public_key: URL_SAFE_NO_PAD.encode(issuer_key.verifying_key().to_bytes()),
         }],
@@ -138,7 +138,7 @@ fn rotate_issuer(args: &InfraTrustRotateIssuerArgs) -> miette::Result<TrustToolS
     validate_lifetime(args.manifest_lifetime_seconds)?;
     let now = OffsetDateTime::now_utc().unix_timestamp();
     let root_value = read_canonical(&args.dir.join(ROOT_FILE))?;
-    let root = AuthorizationTrustRootV1::parse(&root_value)
+    let root = AuthorizationTrustRoot::parse(&root_value)
         .map_err(|_| miette!("authorization trust root is invalid"))?;
     let root_key = read_signing_key(&args.dir.join(ROOT_SEED_FILE))?;
     if root
@@ -151,10 +151,10 @@ fn rotate_issuer(args: &InfraTrustRotateIssuerArgs) -> miette::Result<TrustToolS
         ));
     }
     let manifest_value = read_canonical(&args.dir.join(MANIFEST_FILE))?;
-    let current_manifest = parse_issuer_manifest_v1(&manifest_value)
+    let current_manifest = parse_issuer_manifest(&manifest_value)
         .map_err(|_| miette!("authorization issuer manifest is invalid"))?;
     let policy = verification_policy(now, current_manifest.unsigned.generation)?;
-    verify_issuer_manifest_v1(&root, &current_manifest, &policy)
+    verify_issuer_manifest(&root, &current_manifest, &policy)
         .map_err(|_| miette!("authorization issuer manifest verification failed"))?;
     let generation = current_manifest
         .unsigned
@@ -171,7 +171,7 @@ fn rotate_issuer(args: &InfraTrustRotateIssuerArgs) -> miette::Result<TrustToolS
         true,
         true,
     )?;
-    entries.push(AuthorizationIssuerManifestEntryV1 {
+    entries.push(AuthorizationIssuerManifestEntry {
         key_id: active_issuer_key_id.clone(),
         public_key: URL_SAFE_NO_PAD.encode(issuer_key.verifying_key().to_bytes()),
     });
@@ -200,18 +200,18 @@ fn rotate_issuer(args: &InfraTrustRotateIssuerArgs) -> miette::Result<TrustToolS
 }
 
 fn sign_manifest(
-    root: &AuthorizationTrustRootV1,
+    root: &AuthorizationTrustRoot,
     root_key: &SigningKey,
     generation: u64,
     now: i64,
     lifetime: i64,
-    issuers: Vec<AuthorizationIssuerManifestEntryV1>,
-) -> miette::Result<SignedAuthorizationIssuerManifestV1> {
+    issuers: Vec<AuthorizationIssuerManifestEntry>,
+) -> miette::Result<SignedAuthorizationIssuerManifest> {
     let expires_at = now
         .checked_add(lifetime)
         .ok_or_else(|| miette!("issuer manifest expiry overflow"))?;
-    sign_issuer_manifest_v1(
-        UnsignedAuthorizationIssuerManifestV1 {
+    sign_issuer_manifest(
+        UnsignedAuthorizationIssuerManifest {
             format: AUTHORIZATION_ISSUER_MANIFEST_FORMAT_V1.to_owned(),
             authority: root.authority().to_owned(),
             root_key_id: root.key_id().to_owned(),
@@ -231,8 +231,8 @@ fn sign_manifest(
 fn verification_policy(
     now: i64,
     minimum_generation: u64,
-) -> miette::Result<AuthorizationVerificationPolicyV1> {
-    AuthorizationVerificationPolicyV1::new(now, 30, 3_600, 16_384, 4_096, 256, minimum_generation)
+) -> miette::Result<AuthorizationVerificationPolicy> {
+    AuthorizationVerificationPolicy::new(now, 30, 3_600, 16_384, 4_096, 256, minimum_generation)
         .map_err(|_| miette!("failed to construct authorization verification policy"))
 }
 
@@ -370,7 +370,7 @@ mod tests {
             rotated.active_issuer_key_id
         );
         let manifest =
-            parse_issuer_manifest_v1(&read_canonical(&rotated.manifest_file).unwrap()).unwrap();
+            parse_issuer_manifest(&read_canonical(&rotated.manifest_file).unwrap()).unwrap();
         assert_eq!(manifest.unsigned.issuers.len(), 2);
         assert!(manifest
             .unsigned

@@ -12,8 +12,8 @@ use serde_json::{json, Value};
 use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
 use trellis_protocol::{
-    parse_api_v1, AuthorizationPrincipalKindV1, ParticipantKindV1, ParticipantResourceKindV1,
-    PermissionActionV1, PermissionAtomV1, PermissionTargetV1, StateKindV1,
+    parse_api, AuthorizationPrincipalKind, ParticipantKind, ParticipantResourceKind,
+    PermissionAction, PermissionAtom, PermissionTarget, StateKind,
 };
 use trellis_rs::sdk::state::rpc::{
     StateAdminDeleteRpc, StateAdminGetRpc, StateAdminListRpc, StateDeleteRpc, StateGetRpc,
@@ -76,7 +76,7 @@ struct Declaration {
     contract_id: String,
     contract_digest: String,
     store: String,
-    kind: StateKindV1,
+    kind: StateKind,
     schema: Value,
     state_version: String,
     accepted_versions: BTreeMap<String, Value>,
@@ -251,7 +251,7 @@ impl StateRuntime {
     async fn get(&self, context: RequestContext, value: Value) -> Result<Value, ServerError> {
         let request: Request = serde_json::from_value(value)?;
         let declaration = self.normal_declaration(&context, &request.store).await?;
-        self.require_resource(&context, &declaration, PermissionActionV1::Read)?;
+        self.require_resource(&context, &declaration, PermissionAction::Read)?;
         self.validate_key(&declaration, request.key.as_deref(), false)?;
         self.get_at(&declaration, request.key.as_deref()).await
     }
@@ -259,7 +259,7 @@ impl StateRuntime {
     async fn put(&self, context: RequestContext, value: Value) -> Result<Value, ServerError> {
         let request: Request = serde_json::from_value(value)?;
         let declaration = self.normal_declaration(&context, &request.store).await?;
-        self.require_resource(&context, &declaration, PermissionActionV1::Write)?;
+        self.require_resource(&context, &declaration, PermissionAction::Write)?;
         self.validate_key(&declaration, request.key.as_deref(), false)?;
         let value = request
             .value
@@ -360,7 +360,7 @@ impl StateRuntime {
     async fn delete(&self, context: RequestContext, value: Value) -> Result<Value, ServerError> {
         let request: Request = serde_json::from_value(value)?;
         let declaration = self.normal_declaration(&context, &request.store).await?;
-        self.require_resource(&context, &declaration, PermissionActionV1::Delete)?;
+        self.require_resource(&context, &declaration, PermissionAction::Delete)?;
         self.validate_key(&declaration, request.key.as_deref(), false)?;
         let expected = request
             .expected_revision
@@ -374,7 +374,7 @@ impl StateRuntime {
     async fn list(&self, context: RequestContext, value: Value) -> Result<Value, ServerError> {
         let request: Request = serde_json::from_value(value)?;
         let declaration = self.normal_declaration(&context, &request.store).await?;
-        self.require_resource(&context, &declaration, PermissionActionV1::Read)?;
+        self.require_resource(&context, &declaration, PermissionAction::Read)?;
         self.validate_key(&declaration, request.prefix.as_deref(), true)?;
         self.list_at(
             &declaration,
@@ -424,8 +424,8 @@ impl StateRuntime {
     ) -> Result<Declaration, ServerError> {
         let caller = context.caller.as_ref().ok_or_else(auth_denied)?;
         let scope = match (caller.principal.kind, caller.participant.kind) {
-            (AuthorizationPrincipalKindV1::User, ParticipantKindV1::App) => Scope::UserApp,
-            (AuthorizationPrincipalKindV1::Device, ParticipantKindV1::Device) => Scope::DeviceApp,
+            (AuthorizationPrincipalKind::User, ParticipantKind::App) => Scope::UserApp,
+            (AuthorizationPrincipalKind::Device, ParticipantKind::Device) => Scope::DeviceApp,
             _ => return Err(auth_denied()),
         };
         let binding = self
@@ -544,16 +544,16 @@ impl StateRuntime {
         &self,
         context: &RequestContext,
         declaration: &Declaration,
-        action: PermissionActionV1,
+        action: PermissionAction,
     ) -> Result<(), ServerError> {
         let caller = context.caller.as_ref().ok_or_else(auth_denied)?;
-        let target = PermissionTargetV1::participant_resource(
+        let target = PermissionTarget::participant_resource(
             caller.participant.id.clone(),
-            ParticipantResourceKindV1::State,
+            ParticipantResourceKind::State,
             declaration.store.clone(),
         )
         .map_err(unexpected)?;
-        let atom = PermissionAtomV1::new(target, action).map_err(unexpected)?;
+        let atom = PermissionAtom::new(target, action).map_err(unexpected)?;
         self.verifier
             .require_cached_permission(&caller.context_digest, &atom)
             .map_err(|_| auth_denied())
@@ -566,19 +566,17 @@ impl StateRuntime {
         list: bool,
     ) -> Result<(), ServerError> {
         match declaration.kind {
-            StateKindV1::Value if list => {
-                Err(validation("/store", "value stores cannot be listed"))
-            }
-            StateKindV1::Value if key.is_some() => {
+            StateKind::Value if list => Err(validation("/store", "value stores cannot be listed")),
+            StateKind::Value if key.is_some() => {
                 Err(validation("/key", "value stores do not use keys"))
             }
-            StateKindV1::Map if !list && key.is_none() => {
+            StateKind::Map if !list && key.is_none() => {
                 Err(validation("/key", "map key is required"))
             }
-            StateKindV1::Map => key.map_or(Ok(()), |path| {
+            StateKind::Map => key.map_or(Ok(()), |path| {
                 validate_path(path, if list { "/prefix" } else { "/key" })
             }),
-            StateKindV1::Value => Ok(()),
+            StateKind::Value => Ok(()),
         }
     }
 
@@ -665,7 +663,7 @@ impl StateRuntime {
         offset: u64,
         limit: u64,
     ) -> Result<Value, ServerError> {
-        if declaration.kind != StateKindV1::Map {
+        if declaration.kind != StateKind::Map {
             return Err(validation("/store", "only map stores can be listed"));
         }
         let physical_prefix = map_prefix(declaration, prefix)?;
@@ -797,7 +795,7 @@ fn declaration_from_binding(
     let api = api_values
         .get(&contract_id)
         .ok_or_else(|| validation("/store", "contract API artifact was not found"))?;
-    let api = parse_api_v1(api).map_err(unexpected)?;
+    let api = parse_api(api).map_err(unexpected)?;
     let definition = api
         .state_definition(store)
         .ok_or_else(|| validation("/store", "State store is not declared"))?;
@@ -914,8 +912,8 @@ fn physical_key(
     let namespace = namespace_digest(declaration)?;
     let store = URL_SAFE_NO_PAD.encode(declaration.store.as_bytes());
     match declaration.kind {
-        StateKindV1::Value => Ok(format!("value.{namespace}.{store}")),
-        StateKindV1::Map => Ok(format!(
+        StateKind::Value => Ok(format!("value.{namespace}.{store}")),
+        StateKind::Map => Ok(format!(
             "map.{namespace}.{store}.{}",
             encode_path(logical_key.expect("validated map key"))
         )),
@@ -1151,7 +1149,7 @@ fn kv_error(error: impl std::fmt::Display) -> ServerError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use trellis_protocol::{parse_participant_v1, resolve_participant_v1};
+    use trellis_protocol::{parse_participant, resolve_participant};
 
     fn test_declaration(digest: &str) -> Declaration {
         Declaration {
@@ -1160,7 +1158,7 @@ mod tests {
             contract_id: "example.device@v1".into(),
             contract_digest: digest.into(),
             store: "preferences".into(),
-            kind: StateKindV1::Value,
+            kind: StateKind::Value,
             schema: json!({"type": "string"}),
             state_version: "v1".into(),
             accepted_versions: BTreeMap::new(),
@@ -1245,7 +1243,7 @@ mod tests {
             "schemas": {"State": {"type": "string"}},
             "state": {"preferences": {"kind": "value", "schema": {"schema": "State"}}}
         });
-        let parsed_api = parse_api_v1(&api).expect("API");
+        let parsed_api = parse_api(&api).expect("API");
         let api_digest = parsed_api.digest().expect("API digest");
         let participant = json!({
             "format": "trellis.participant.v1",
@@ -1255,16 +1253,16 @@ mod tests {
             "kind": "device",
             "implements": {"self": {"api": "example.device@v1", "apiDigest": api_digest}}
         });
-        let parsed_participant = parse_participant_v1(&participant).expect("participant");
+        let parsed_participant = parse_participant(&participant).expect("participant");
         let participant_digest = parsed_participant.digest().expect("participant digest");
-        let resolved = resolve_participant_v1(
+        let resolved = resolve_participant(
             &parsed_participant,
             &BTreeMap::from([("example.device@v1".to_owned(), parsed_api)]),
         )
         .expect("resolved participant");
         let binding = ParticipantBindingRecord {
             participant_id: "example.device@v1".to_owned(),
-            participant_kind: ParticipantKindV1::Device,
+            participant_kind: ParticipantKind::Device,
             artifact_digest: participant_digest.clone(),
             needs_digest: resolved.needs().digest().expect("needs digest"),
             participant_json: serde_json::to_string(&participant).expect("participant JSON"),

@@ -2,7 +2,7 @@ import { Value } from "typebox/value";
 import { ulid } from "ulid";
 
 import { base64urlDecode, base64urlEncode, sha256 } from "../utils.ts";
-import { sessionProofRequestDigestV1 } from "../session_proof.ts";
+import { sessionProofRequestDigest } from "../session_proof.ts";
 import type { TrellisAuth } from "../session_auth.ts";
 import type { AuthorizationContextCache } from "./client_context.ts";
 import type {
@@ -59,7 +59,7 @@ export async function refreshAuthorizationContextWithMetadata(args: {
     minimumManifestGeneration: durable.trust.minimumManifestGeneration,
     proof: { format: "trellis.session-proof.v1", signature: "" } as const,
   };
-  const requestDigest = await sessionProofRequestDigestV1(request);
+  const requestDigest = await sessionProofRequestDigest(request);
   const proof = await args.auth.signSessionProof({
     purpose: "authorizationContextRefresh",
     requestId: request.requestId,

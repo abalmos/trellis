@@ -8,7 +8,7 @@ use serde::{de, Deserialize, Deserializer, Serialize};
 use serde_json::Value;
 use sha2::{Digest as _, Sha256};
 
-use crate::{canonicalize_json, ProtocolError, SessionProofErrorCodeV1};
+use crate::{canonicalize_json, ProtocolError, SessionProofErrorCode};
 
 /// Strict wire format for auth, bootstrap, and authorization-context refresh proofs.
 pub const SESSION_PROOF_FORMAT_V1: &str = "trellis.session-proof.v1";
@@ -20,7 +20,7 @@ const MAXIMUM_PROOF_WINDOW_MS: i64 = 5 * 60 * 1_000;
 
 /// One fixed signature domain within [`SESSION_PROOF_FORMAT_V1`].
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum SessionProofPurposeV1 {
+pub enum SessionProofPurpose {
     /// Start a user app or agent browser-auth request.
     UserAuthRequest,
     /// Bootstrap a provisioned service instance.
@@ -31,7 +31,7 @@ pub enum SessionProofPurposeV1 {
     AuthorizationContextRefresh,
 }
 
-impl SessionProofPurposeV1 {
+impl SessionProofPurpose {
     fn as_str(self) -> &'static str {
         match self {
             Self::UserAuthRequest => "userAuthRequest",
@@ -42,7 +42,7 @@ impl SessionProofPurposeV1 {
     }
 }
 
-impl fmt::Display for SessionProofPurposeV1 {
+impl fmt::Display for SessionProofPurpose {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter.write_str(self.as_str())
     }
@@ -50,8 +50,8 @@ impl fmt::Display for SessionProofPurposeV1 {
 
 /// Validated purpose-specific input to one session proof.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct SessionProofInputV1 {
-    purpose: SessionProofPurposeV1,
+pub struct SessionProofInput {
+    purpose: SessionProofPurpose,
     request_id: String,
     issued_at: i64,
     signer_key_id: String,
@@ -61,7 +61,7 @@ pub struct SessionProofInputV1 {
 
 /// Owned fields for a user browser-auth initiation proof.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct UserAuthRequestSessionProofInputV1 {
+pub struct UserAuthRequestSessionProofInput {
     /// Caller-generated request identifier.
     pub request_id: String,
     /// Claimed Unix issue time in milliseconds.
@@ -82,7 +82,7 @@ pub struct UserAuthRequestSessionProofInputV1 {
 
 /// Owned fields for a provisioned service-instance bootstrap proof.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ServiceBootstrapSessionProofInputV1 {
+pub struct ServiceBootstrapSessionProofInput {
     /// Caller-generated request identifier.
     pub request_id: String,
     /// Claimed Unix issue time in milliseconds.
@@ -107,7 +107,7 @@ pub struct ServiceBootstrapSessionProofInputV1 {
 
 /// Owned fields for a provisioned or activated device bootstrap proof.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct DeviceBootstrapSessionProofInputV1 {
+pub struct DeviceBootstrapSessionProofInput {
     /// Caller-generated request identifier.
     pub request_id: String,
     /// Claimed Unix issue time in milliseconds.
@@ -134,7 +134,7 @@ pub struct DeviceBootstrapSessionProofInputV1 {
 
 /// Owned fields for an authorization-context refresh proof.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct AuthorizationContextRefreshSessionProofInputV1 {
+pub struct AuthorizationContextRefreshSessionProofInput {
     /// Caller-generated request identifier.
     pub request_id: String,
     /// Claimed Unix issue time in milliseconds.
@@ -165,19 +165,19 @@ enum NkeyBinding {
     },
 }
 
-impl SessionProofInputV1 {
+impl SessionProofInput {
     /// Build a user browser-auth initiation proof input.
     ///
-    /// `request_digest` is the output of [`session_proof_request_digest_v1`].
+    /// `request_digest` is the output of [`session_proof_request_digest`].
     ///
     /// # Errors
     ///
     /// Returns [`ProtocolError::SessionProof`] when a field is noncanonical,
     /// unsafe, empty, malformed, or the NKey does not encode `session_public_key`.
     pub fn user_auth_request(
-        input: UserAuthRequestSessionProofInputV1,
+        input: UserAuthRequestSessionProofInput,
     ) -> Result<Self, ProtocolError> {
-        let UserAuthRequestSessionProofInputV1 {
+        let UserAuthRequestSessionProofInput {
             request_id,
             issued_at,
             session_public_key,
@@ -192,7 +192,7 @@ impl SessionProofInputV1 {
         let signer_key_id = derived_key_id(&key);
 
         Self::new(
-            SessionProofPurposeV1::UserAuthRequest,
+            SessionProofPurpose::UserAuthRequest,
             request_id,
             issued_at,
             signer_key_id,
@@ -218,9 +218,9 @@ impl SessionProofInputV1 {
     /// Returns [`ProtocolError::SessionProof`] when a field is noncanonical,
     /// unsafe, empty, malformed, or the NKey does not encode `new_session_public_key`.
     pub fn service_bootstrap(
-        input: ServiceBootstrapSessionProofInputV1,
+        input: ServiceBootstrapSessionProofInput,
     ) -> Result<Self, ProtocolError> {
-        let ServiceBootstrapSessionProofInputV1 {
+        let ServiceBootstrapSessionProofInput {
             request_id,
             issued_at,
             deployment_id,
@@ -238,7 +238,7 @@ impl SessionProofInputV1 {
             validate_nkey_binding(&new_session_nkey, &session_key, &["newSessionNkey"])?;
 
         Self::new(
-            SessionProofPurposeV1::ServiceBootstrap,
+            SessionProofPurpose::ServiceBootstrap,
             request_id,
             issued_at,
             provisioned_identity_key_id.clone(),
@@ -266,9 +266,9 @@ impl SessionProofInputV1 {
     /// Returns [`ProtocolError::SessionProof`] when a field is noncanonical,
     /// unsafe, empty, malformed, or the NKey does not encode `new_session_public_key`.
     pub fn device_bootstrap(
-        input: DeviceBootstrapSessionProofInputV1,
+        input: DeviceBootstrapSessionProofInput,
     ) -> Result<Self, ProtocolError> {
-        let DeviceBootstrapSessionProofInputV1 {
+        let DeviceBootstrapSessionProofInput {
             request_id,
             issued_at,
             deployment_id,
@@ -287,7 +287,7 @@ impl SessionProofInputV1 {
             validate_nkey_binding(&new_session_nkey, &session_key, &["newSessionNkey"])?;
 
         Self::new(
-            SessionProofPurposeV1::DeviceBootstrap,
+            SessionProofPurpose::DeviceBootstrap,
             request_id,
             issued_at,
             device_identity_key_id.clone(),
@@ -316,9 +316,9 @@ impl SessionProofInputV1 {
     /// Returns [`ProtocolError::SessionProof`] when a field is noncanonical,
     /// unsafe, empty, or malformed.
     pub fn authorization_context_refresh(
-        input: AuthorizationContextRefreshSessionProofInputV1,
+        input: AuthorizationContextRefreshSessionProofInput,
     ) -> Result<Self, ProtocolError> {
-        let AuthorizationContextRefreshSessionProofInputV1 {
+        let AuthorizationContextRefreshSessionProofInput {
             request_id,
             issued_at,
             session_id,
@@ -334,7 +334,7 @@ impl SessionProofInputV1 {
         validate_key_id(&known_root_key_id, &["knownRootKeyId"])?;
         if minimum_manifest_generation <= 0 {
             return Err(proof_error(
-                SessionProofErrorCodeV1::InvalidFormat,
+                SessionProofErrorCode::InvalidFormat,
                 ["minimumManifestGeneration"],
                 "minimum manifest generation must be positive",
             ));
@@ -342,7 +342,7 @@ impl SessionProofInputV1 {
         validate_safe_integer(minimum_manifest_generation, &["minimumManifestGeneration"])?;
 
         Self::new(
-            SessionProofPurposeV1::AuthorizationContextRefresh,
+            SessionProofPurpose::AuthorizationContextRefresh,
             request_id,
             issued_at,
             session_key_id.clone(),
@@ -364,7 +364,7 @@ impl SessionProofInputV1 {
     }
 
     fn new(
-        purpose: SessionProofPurposeV1,
+        purpose: SessionProofPurpose,
         request_id: String,
         issued_at: i64,
         signer_key_id: String,
@@ -385,7 +385,7 @@ impl SessionProofInputV1 {
 
     /// Return the fixed signature purpose.
     #[must_use]
-    pub fn purpose(&self) -> SessionProofPurposeV1 {
+    pub fn purpose(&self) -> SessionProofPurpose {
         self.purpose
     }
 
@@ -422,7 +422,7 @@ impl SessionProofInputV1 {
     fn validate_signer(&self, key: &VerifyingKey) -> Result<(), ProtocolError> {
         if self.signer_key_id != derived_key_id(key) {
             return Err(proof_error(
-                SessionProofErrorCodeV1::InvalidKeyId,
+                SessionProofErrorCode::InvalidKeyId,
                 ["signerKeyId"],
                 "signer key id does not match the verification key",
             ));
@@ -439,29 +439,29 @@ impl SessionProofInputV1 {
 /// One strict session-proof signature envelope.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct SessionProofV1 {
+pub struct SessionProof {
     format: String,
     signature: String,
 }
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
-struct WireSessionProofV1 {
+struct WireSessionProof {
     format: String,
     signature: String,
 }
 
-impl<'de> Deserialize<'de> for SessionProofV1 {
+impl<'de> Deserialize<'de> for SessionProof {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: Deserializer<'de>,
     {
-        let wire = WireSessionProofV1::deserialize(deserializer)?;
+        let wire = WireSessionProof::deserialize(deserializer)?;
         parse_wire_proof(wire).map_err(de::Error::custom)
     }
 }
 
-impl SessionProofV1 {
+impl SessionProof {
     /// Return the proof format identifier.
     #[must_use]
     pub fn format(&self) -> &str {
@@ -477,12 +477,12 @@ impl SessionProofV1 {
 
 /// Freshness limits applied while verifying session proofs.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct SessionProofPolicyV1 {
+pub struct SessionProofPolicy {
     maximum_age_ms: i64,
     maximum_future_skew_ms: i64,
 }
 
-impl SessionProofPolicyV1 {
+impl SessionProofPolicy {
     /// Construct bounded proof freshness policy.
     ///
     /// # Errors
@@ -494,7 +494,7 @@ impl SessionProofPolicyV1 {
             || !(0..=MAXIMUM_PROOF_WINDOW_MS).contains(&maximum_future_skew_ms)
         {
             return Err(proof_error(
-                SessionProofErrorCodeV1::InvalidFormat,
+                SessionProofErrorCode::InvalidFormat,
                 std::iter::empty::<&str>(),
                 "proof age and future skew must be between zero and five minutes",
             ));
@@ -503,7 +503,7 @@ impl SessionProofPolicyV1 {
             .checked_add(maximum_future_skew_ms)
             .ok_or_else(|| {
                 proof_error(
-                    SessionProofErrorCodeV1::InvalidFormat,
+                    SessionProofErrorCode::InvalidFormat,
                     std::iter::empty::<&str>(),
                     "proof validity window overflows",
                 )
@@ -527,7 +527,7 @@ impl SessionProofPolicyV1 {
     }
 }
 
-impl Default for SessionProofPolicyV1 {
+impl Default for SessionProofPolicy {
     fn default() -> Self {
         Self {
             maximum_age_ms: 30_000,
@@ -542,10 +542,10 @@ impl Default for SessionProofPolicyV1 {
 ///
 /// Returns [`ProtocolError::SessionProof`] when the value has an unknown member,
 /// wrong format, or noncanonical signature encoding.
-pub fn parse_session_proof_v1(value: &Value) -> Result<SessionProofV1, ProtocolError> {
-    let wire: WireSessionProofV1 = serde_json::from_value(value.clone()).map_err(|error| {
+pub fn parse_session_proof(value: &Value) -> Result<SessionProof, ProtocolError> {
+    let wire: WireSessionProof = serde_json::from_value(value.clone()).map_err(|error| {
         proof_error(
-            SessionProofErrorCodeV1::InvalidFormat,
+            SessionProofErrorCode::InvalidFormat,
             std::iter::empty::<&str>(),
             error.to_string(),
         )
@@ -563,11 +563,11 @@ pub fn parse_session_proof_v1(value: &Value) -> Result<SessionProofV1, ProtocolE
 ///
 /// Returns [`ProtocolError::SessionProof`] when the request/proof shape is wrong,
 /// the proof format differs, or canonicalization fails.
-pub fn session_proof_request_digest_v1(request: &Value) -> Result<String, ProtocolError> {
+pub fn session_proof_request_digest(request: &Value) -> Result<String, ProtocolError> {
     let mut unsigned = request.clone();
     let object = unsigned.as_object_mut().ok_or_else(|| {
         proof_error(
-            SessionProofErrorCodeV1::InvalidFormat,
+            SessionProofErrorCode::InvalidFormat,
             std::iter::empty::<&str>(),
             "proof-bearing request must be an object",
         )
@@ -577,21 +577,21 @@ pub fn session_proof_request_digest_v1(request: &Value) -> Result<String, Protoc
         .and_then(Value::as_object_mut)
         .ok_or_else(|| {
             proof_error(
-                SessionProofErrorCodeV1::InvalidFormat,
+                SessionProofErrorCode::InvalidFormat,
                 ["proof"],
                 "proof must be an object",
             )
         })?;
     if proof.get("format").and_then(Value::as_str) != Some(SESSION_PROOF_FORMAT_V1) {
         return Err(proof_error(
-            SessionProofErrorCodeV1::InvalidFormat,
+            SessionProofErrorCode::InvalidFormat,
             ["proof", "format"],
             format!("format must equal '{SESSION_PROOF_FORMAT_V1}'"),
         ));
     }
     if proof.remove("signature").is_none() {
         return Err(proof_error(
-            SessionProofErrorCodeV1::InvalidFormat,
+            SessionProofErrorCode::InvalidFormat,
             ["proof", "signature"],
             "signature member is required",
         ));
@@ -610,9 +610,7 @@ pub fn session_proof_request_digest_v1(request: &Value) -> Result<String, Protoc
 ///
 /// Returns [`ProtocolError::SessionProof`] if a length-prefixed transcript
 /// component cannot be encoded.
-pub fn session_proof_signing_digest_v1(
-    input: &SessionProofInputV1,
-) -> Result<String, ProtocolError> {
+pub fn session_proof_signing_digest(input: &SessionProofInput) -> Result<String, ProtocolError> {
     Ok(encode_base64url(&input.digest()?))
 }
 
@@ -622,13 +620,13 @@ pub fn session_proof_signing_digest_v1(
 ///
 /// Returns [`ProtocolError::SessionProof`] when the supplied signing key does not
 /// match the input's signer identity or a transcript component cannot be encoded.
-pub fn sign_session_proof_v1(
-    input: &SessionProofInputV1,
+pub fn sign_session_proof(
+    input: &SessionProofInput,
     signing_key: &SigningKey,
-) -> Result<SessionProofV1, ProtocolError> {
+) -> Result<SessionProof, ProtocolError> {
     input.validate_signer(&signing_key.verifying_key())?;
     let digest = input.digest()?;
-    Ok(SessionProofV1 {
+    Ok(SessionProof {
         format: SESSION_PROOF_FORMAT_V1.to_owned(),
         signature: encode_base64url(&signing_key.sign(&digest).to_bytes()),
     })
@@ -640,24 +638,24 @@ pub fn sign_session_proof_v1(
 ///
 /// Returns [`ProtocolError::SessionProof`] when signer identity, proof format,
 /// freshness, transcript encoding, or signature verification fails.
-pub fn verify_session_proof_v1(
-    input: &SessionProofInputV1,
-    proof: &SessionProofV1,
+pub fn verify_session_proof(
+    input: &SessionProofInput,
+    proof: &SessionProof,
     expected_signer_public_key: &str,
     now_ms: i64,
-    policy: SessionProofPolicyV1,
+    policy: SessionProofPolicy,
 ) -> Result<(), ProtocolError> {
     validate_safe_integer(now_ms, &["now"])?;
     if proof.format != SESSION_PROOF_FORMAT_V1 {
         return Err(proof_error(
-            SessionProofErrorCodeV1::InvalidFormat,
+            SessionProofErrorCode::InvalidFormat,
             ["proof", "format"],
             format!("format must equal '{SESSION_PROOF_FORMAT_V1}'"),
         ));
     }
     let oldest = now_ms.checked_sub(policy.maximum_age_ms).ok_or_else(|| {
         proof_error(
-            SessionProofErrorCodeV1::ProofIatOutOfRange,
+            SessionProofErrorCode::ProofIatOutOfRange,
             ["issuedAt"],
             "proof age calculation underflowed",
         )
@@ -666,14 +664,14 @@ pub fn verify_session_proof_v1(
         .checked_add(policy.maximum_future_skew_ms)
         .ok_or_else(|| {
             proof_error(
-                SessionProofErrorCodeV1::ProofIatOutOfRange,
+                SessionProofErrorCode::ProofIatOutOfRange,
                 ["issuedAt"],
                 "proof future-skew calculation overflowed",
             )
         })?;
     if !(oldest..=newest).contains(&input.issued_at) {
         return Err(proof_error(
-            SessionProofErrorCodeV1::ProofIatOutOfRange,
+            SessionProofErrorCode::ProofIatOutOfRange,
             ["issuedAt"],
             "proof issue time is outside the accepted policy window",
         ));
@@ -685,12 +683,12 @@ pub fn verify_session_proof_v1(
     let signature = decode_base64url::<64>(
         &proof.signature,
         &["proof", "signature"],
-        SessionProofErrorCodeV1::InvalidSignature,
+        SessionProofErrorCode::InvalidSignature,
     )?;
     key.verify_strict(&digest, &Signature::from_bytes(&signature))
         .map_err(|_| {
             proof_error(
-                SessionProofErrorCodeV1::InvalidSignature,
+                SessionProofErrorCode::InvalidSignature,
                 ["proof", "signature"],
                 "signature verification failed",
             )
@@ -699,10 +697,10 @@ pub fn verify_session_proof_v1(
     Ok(())
 }
 
-fn parse_wire_proof(wire: WireSessionProofV1) -> Result<SessionProofV1, ProtocolError> {
+fn parse_wire_proof(wire: WireSessionProof) -> Result<SessionProof, ProtocolError> {
     if wire.format != SESSION_PROOF_FORMAT_V1 {
         return Err(proof_error(
-            SessionProofErrorCodeV1::InvalidFormat,
+            SessionProofErrorCode::InvalidFormat,
             ["format"],
             format!("format must equal '{SESSION_PROOF_FORMAT_V1}'"),
         ));
@@ -710,16 +708,16 @@ fn parse_wire_proof(wire: WireSessionProofV1) -> Result<SessionProofV1, Protocol
     decode_base64url::<64>(
         &wire.signature,
         &["signature"],
-        SessionProofErrorCodeV1::InvalidSignature,
+        SessionProofErrorCode::InvalidSignature,
     )?;
-    Ok(SessionProofV1 {
+    Ok(SessionProof {
         format: wire.format,
         signature: wire.signature,
     })
 }
 
 fn proof_error<'a>(
-    code: SessionProofErrorCodeV1,
+    code: SessionProofErrorCode,
     tokens: impl IntoIterator<Item = &'a str>,
     message: impl Into<String>,
 ) -> ProtocolError {
@@ -741,18 +739,18 @@ fn encode_base64url(bytes: &[u8]) -> String {
 fn decode_base64url<const N: usize>(
     encoded: &str,
     path: &[&str],
-    code: SessionProofErrorCodeV1,
+    code: SessionProofErrorCode,
 ) -> Result<[u8; N], ProtocolError> {
     if encoded.contains('=') {
         return Err(proof_error(
-            SessionProofErrorCodeV1::InvalidEncoding,
+            SessionProofErrorCode::InvalidEncoding,
             path.iter().copied(),
             "padded base64url is not accepted",
         ));
     }
     let decoded = URL_SAFE_NO_PAD.decode(encoded).map_err(|_| {
         proof_error(
-            SessionProofErrorCodeV1::InvalidEncoding,
+            SessionProofErrorCode::InvalidEncoding,
             path.iter().copied(),
             "value is not unpadded base64url",
         )
@@ -777,18 +775,18 @@ fn decode_public_key(encoded: &str, path: &[&str]) -> Result<VerifyingKey, Proto
     let key = VerifyingKey::from_bytes(&decode_base64url::<32>(
         encoded,
         path,
-        SessionProofErrorCodeV1::InvalidPublicKey,
+        SessionProofErrorCode::InvalidPublicKey,
     )?)
     .map_err(|_| {
         proof_error(
-            SessionProofErrorCodeV1::InvalidPublicKey,
+            SessionProofErrorCode::InvalidPublicKey,
             path.iter().copied(),
             "value is not a valid Ed25519 public key",
         )
     })?;
     if key.is_weak() {
         return Err(proof_error(
-            SessionProofErrorCodeV1::InvalidPublicKey,
+            SessionProofErrorCode::InvalidPublicKey,
             path.iter().copied(),
             "weak Ed25519 public keys are not accepted",
         ));
@@ -801,20 +799,20 @@ fn derived_key_id(key: &VerifyingKey) -> String {
 }
 
 fn validate_key_id(value: &str, path: &[&str]) -> Result<(), ProtocolError> {
-    decode_base64url::<32>(value, path, SessionProofErrorCodeV1::InvalidKeyId).map(|_| ())
+    decode_base64url::<32>(value, path, SessionProofErrorCode::InvalidKeyId).map(|_| ())
 }
 
 fn validate_nkey(value: &str, path: &[&str]) -> Result<[u8; 32], ProtocolError> {
     let (kind, bytes) = nkeys::from_public_key(value).map_err(|_| {
         proof_error(
-            SessionProofErrorCodeV1::InvalidNatsKey,
+            SessionProofErrorCode::InvalidNatsKey,
             path.iter().copied(),
             "value is not a canonical NATS public key",
         )
     })?;
     if KeyPairType::from(kind) != KeyPairType::User {
         return Err(proof_error(
-            SessionProofErrorCodeV1::InvalidNatsKey,
+            SessionProofErrorCode::InvalidNatsKey,
             path.iter().copied(),
             "value must be a NATS User NKey",
         ));
@@ -832,7 +830,7 @@ fn validate_nkey_binding(
         Ok(nkey_bytes)
     } else {
         Err(proof_error(
-            SessionProofErrorCodeV1::InvalidNatsKey,
+            SessionProofErrorCode::InvalidNatsKey,
             path.iter().copied(),
             "NATS User NKey does not encode the session public key",
         ))
@@ -853,7 +851,7 @@ fn validate_safe_json_integers(value: &Value, path: &mut Vec<String>) -> Result<
             };
             if unsafe_integer {
                 return Err(ProtocolError::SessionProof {
-                    code: SessionProofErrorCodeV1::UnsafeJsonInteger,
+                    code: SessionProofErrorCode::UnsafeJsonInteger,
                     path: Box::new(PointerBuf::from_tokens(path.iter().map(String::as_str))),
                     message: "integer must be within the interoperable JSON safe-integer range"
                         .to_owned(),
@@ -884,7 +882,7 @@ fn validate_safe_integer(value: i64, path: &[&str]) -> Result<(), ProtocolError>
         Ok(())
     } else {
         Err(proof_error(
-            SessionProofErrorCodeV1::UnsafeJsonInteger,
+            SessionProofErrorCode::UnsafeJsonInteger,
             path.iter().copied(),
             "integer must be within the interoperable JSON safe-integer range",
         ))
@@ -897,7 +895,7 @@ fn validate_request_id(value: &str) -> Result<(), ProtocolError> {
         Ok(())
     } else {
         Err(proof_error(
-            SessionProofErrorCodeV1::InvalidFormat,
+            SessionProofErrorCode::InvalidFormat,
             ["requestId"],
             "request ID exceeds 256 UTF-8 bytes",
         ))
@@ -911,7 +909,7 @@ fn validate_text(value: &str, path: &[&str]) -> Result<(), ProtocolError> {
         || value.chars().any(|character| character.is_ascii_control())
     {
         return Err(proof_error(
-            SessionProofErrorCodeV1::InvalidFormat,
+            SessionProofErrorCode::InvalidFormat,
             path.iter().copied(),
             "value must be bounded, nonempty protocol-safe text",
         ));
@@ -925,7 +923,7 @@ fn text(value: &str, path: &[&str]) -> Result<Vec<u8>, ProtocolError> {
 }
 
 fn digest(value: &str, path: &[&str]) -> Result<Vec<u8>, ProtocolError> {
-    Ok(decode_base64url::<32>(value, path, SessionProofErrorCodeV1::InvalidEncoding)?.to_vec())
+    Ok(decode_base64url::<32>(value, path, SessionProofErrorCode::InvalidEncoding)?.to_vec())
 }
 
 fn optional_digest(value: Option<&str>, path: &[&str]) -> Result<Vec<u8>, ProtocolError> {
@@ -935,7 +933,7 @@ fn optional_digest(value: Option<&str>, path: &[&str]) -> Result<Vec<u8>, Protoc
 fn push_length_prefixed(output: &mut Vec<u8>, bytes: &[u8]) -> Result<(), ProtocolError> {
     let length = u32::try_from(bytes.len()).map_err(|_| {
         proof_error(
-            SessionProofErrorCodeV1::InvalidFormat,
+            SessionProofErrorCode::InvalidFormat,
             std::iter::empty::<&str>(),
             "signature input component exceeds u32 length",
         )
@@ -955,8 +953,8 @@ mod tests {
     #[test]
     fn authorization_context_refresh_requires_positive_manifest_floor() -> Result<(), ProtocolError>
     {
-        assert!(SessionProofInputV1::authorization_context_refresh(
-            AuthorizationContextRefreshSessionProofInputV1 {
+        assert!(SessionProofInput::authorization_context_refresh(
+            AuthorizationContextRefreshSessionProofInput {
                 request_id: "req_refresh_1".to_owned(),
                 issued_at: 1_735_689_600_000,
                 session_id: "ses_1".to_owned(),
@@ -986,8 +984,8 @@ mod tests {
             "requestId": "req_1"
         });
         assert_eq!(
-            session_proof_request_digest_v1(&first)?,
-            session_proof_request_digest_v1(&second)?
+            session_proof_request_digest(&first)?,
+            session_proof_request_digest(&second)?
         );
         Ok(())
     }
@@ -1002,16 +1000,16 @@ mod tests {
             "nested": {"counter": 9_007_199_254_740_992_u64}
         });
         assert!(matches!(
-            session_proof_request_digest_v1(&unsafe_request),
+            session_proof_request_digest(&unsafe_request),
             Err(ProtocolError::SessionProof {
-                code: SessionProofErrorCodeV1::UnsafeJsonInteger,
+                code: SessionProofErrorCode::UnsafeJsonInteger,
                 ..
             })
         ));
         assert!(matches!(
             decode_public_key(&encode_base64url(&[0; 32]), &["sessionPublicKey"]),
             Err(ProtocolError::SessionProof {
-                code: SessionProofErrorCodeV1::InvalidPublicKey,
+                code: SessionProofErrorCode::InvalidPublicKey,
                 ..
             })
         ));
@@ -1027,12 +1025,12 @@ mod tests {
         value["issuedAt"].as_i64().expect("vector issuedAt")
     }
 
-    fn vector_input(case: &Value) -> Result<SessionProofInputV1, ProtocolError> {
+    fn vector_input(case: &Value) -> Result<SessionProofInput, ProtocolError> {
         let value = case.get("request").unwrap_or(&case["input"]);
         let request_digest = case["requestDigest"].as_str();
         match vector_field(case, "purpose") {
             "userAuthRequest" => {
-                SessionProofInputV1::user_auth_request(UserAuthRequestSessionProofInputV1 {
+                SessionProofInput::user_auth_request(UserAuthRequestSessionProofInput {
                     request_id: vector_field(value, "requestId").to_owned(),
                     issued_at: vector_time(value),
                     session_public_key: vector_field(value, "sessionPublicKey").to_owned(),
@@ -1044,7 +1042,7 @@ mod tests {
                 })
             }
             "serviceBootstrap" => {
-                SessionProofInputV1::service_bootstrap(ServiceBootstrapSessionProofInputV1 {
+                SessionProofInput::service_bootstrap(ServiceBootstrapSessionProofInput {
                     request_id: vector_field(value, "requestId").to_owned(),
                     issued_at: vector_time(value),
                     deployment_id: vector_field(value, "deploymentId").to_owned(),
@@ -1059,7 +1057,7 @@ mod tests {
                 })
             }
             "deviceBootstrap" => {
-                SessionProofInputV1::device_bootstrap(DeviceBootstrapSessionProofInputV1 {
+                SessionProofInput::device_bootstrap(DeviceBootstrapSessionProofInput {
                     request_id: vector_field(value, "requestId").to_owned(),
                     issued_at: vector_time(value),
                     deployment_id: vector_field(value, "deploymentId").to_owned(),
@@ -1073,8 +1071,8 @@ mod tests {
                     request_digest: request_digest.expect("device request digest").to_owned(),
                 })
             }
-            "authorizationContextRefresh" => SessionProofInputV1::authorization_context_refresh(
-                AuthorizationContextRefreshSessionProofInputV1 {
+            "authorizationContextRefresh" => SessionProofInput::authorization_context_refresh(
+                AuthorizationContextRefreshSessionProofInput {
                     request_id: vector_field(value, "requestId").to_owned(),
                     issued_at: vector_time(value),
                     session_id: vector_field(value, "sessionId").to_owned(),
@@ -1110,26 +1108,26 @@ mod tests {
         let seed = decode_base64url::<32>(
             vector_field(&fixture, "identitySeed"),
             &["identitySeed"],
-            SessionProofErrorCodeV1::InvalidEncoding,
+            SessionProofErrorCode::InvalidEncoding,
         )?;
         let signing_key = SigningKey::from_bytes(&seed);
         for case in fixture["cases"].as_array().expect("vector cases") {
             let value = case.get("request").unwrap_or(&case["input"]);
             if let Some(expected) = case["requestDigest"].as_str() {
-                assert_eq!(session_proof_request_digest_v1(value)?, expected);
+                assert_eq!(session_proof_request_digest(value)?, expected);
             }
             let input = vector_input(case)?;
-            let proof = parse_session_proof_v1(&value["proof"])?;
-            assert_eq!(sign_session_proof_v1(&input, &signing_key)?, proof);
-            verify_session_proof_v1(
+            let proof = parse_session_proof(&value["proof"])?;
+            assert_eq!(sign_session_proof(&input, &signing_key)?, proof);
+            verify_session_proof(
                 &input,
                 &proof,
                 vector_field(case, "signerPublicKey"),
                 input.issued_at(),
-                SessionProofPolicyV1::default(),
+                SessionProofPolicy::default(),
             )?;
             assert_eq!(
-                session_proof_signing_digest_v1(&input)?,
+                session_proof_signing_digest(&input)?,
                 vector_field(case, "transcriptDigest")
             );
             assert_eq!(proof.signature(), vector_field(case, "signature"));
@@ -1153,13 +1151,13 @@ mod tests {
         for invalid in fixture["invalidCases"].as_array().expect("invalid cases") {
             let base = find(vector_field(invalid, "base"));
             let value = base.get("request").unwrap_or(&base["input"]);
-            let proof = parse_session_proof_v1(&value["proof"])?;
+            let proof = parse_session_proof(&value["proof"])?;
             let mutation = vector_field(invalid, "mutation");
             let error = match mutation {
                 "devicePurpose" => {
                     let request = &base["request"];
-                    let input = SessionProofInputV1::device_bootstrap(
-                        DeviceBootstrapSessionProofInputV1 {
+                    let input =
+                        SessionProofInput::device_bootstrap(DeviceBootstrapSessionProofInput {
                             request_id: vector_field(request, "requestId").to_owned(),
                             issued_at: vector_time(request),
                             deployment_id: vector_field(request, "deploymentId").to_owned(),
@@ -1177,21 +1175,20 @@ mod tests {
                                 .to_owned(),
                             challenge_digest: None,
                             request_digest: vector_field(base, "requestDigest").to_owned(),
-                        },
-                    )?;
-                    verify_session_proof_v1(
+                        })?;
+                    verify_session_proof(
                         &input,
                         &proof,
                         public_key,
                         input.issued_at(),
-                        SessionProofPolicyV1::default(),
+                        SessionProofPolicy::default(),
                     )
                     .expect_err("wrong purpose must fail")
                 }
                 "identityAsNewSession" => {
                     let request = &base["request"];
-                    let input = SessionProofInputV1::service_bootstrap(
-                        ServiceBootstrapSessionProofInputV1 {
+                    let input =
+                        SessionProofInput::service_bootstrap(ServiceBootstrapSessionProofInput {
                             request_id: vector_field(request, "requestId").to_owned(),
                             issued_at: vector_time(request),
                             deployment_id: vector_field(request, "deploymentId").to_owned(),
@@ -1208,14 +1205,13 @@ mod tests {
                             participant_digest: vector_field(request, "participantDigest")
                                 .to_owned(),
                             request_digest: vector_field(base, "requestDigest").to_owned(),
-                        },
-                    )?;
-                    verify_session_proof_v1(
+                        })?;
+                    verify_session_proof(
                         &input,
                         &proof,
                         public_key,
                         input.issued_at(),
-                        SessionProofPolicyV1::default(),
+                        SessionProofPolicy::default(),
                     )
                     .expect_err("modified session must fail")
                 }
@@ -1240,18 +1236,18 @@ mod tests {
                         }),
                     );
                     let input = vector_input(&changed)?;
-                    verify_session_proof_v1(
+                    verify_session_proof(
                         &input,
                         &proof,
                         public_key,
                         input.issued_at(),
-                        SessionProofPolicyV1::default(),
+                        SessionProofPolicy::default(),
                     )
                     .expect_err("modified field must fail")
                 }
                 "paddedPublicKey" => {
                     let request = &base["request"];
-                    SessionProofInputV1::user_auth_request(UserAuthRequestSessionProofInputV1 {
+                    SessionProofInput::user_auth_request(UserAuthRequestSessionProofInput {
                         request_id: vector_field(request, "requestId").to_owned(),
                         issued_at: vector_time(request),
                         session_public_key: format!(
@@ -1268,16 +1264,16 @@ mod tests {
                 }
                 "signature" => {
                     let input = vector_input(base)?;
-                    let bad = parse_session_proof_v1(&json!({
+                    let bad = parse_session_proof(&json!({
                         "format": SESSION_PROOF_FORMAT_V1,
                         "signature": encode_base64url(&[0; 64])
                     }))?;
-                    verify_session_proof_v1(
+                    verify_session_proof(
                         &input,
                         &bad,
                         public_key,
                         input.issued_at(),
-                        SessionProofPolicyV1::default(),
+                        SessionProofPolicy::default(),
                     )
                     .expect_err("bad signature must fail")
                 }
@@ -1288,19 +1284,19 @@ mod tests {
                     } else {
                         input.issued_at() - 30_001
                     };
-                    verify_session_proof_v1(
+                    verify_session_proof(
                         &input,
                         &proof,
                         public_key,
                         now,
-                        SessionProofPolicyV1::default(),
+                        SessionProofPolicy::default(),
                     )
                     .expect_err("out-of-window proof must fail")
                 }
                 "unknownProofField" => {
                     let mut unknown = value["proof"].clone();
                     unknown["unknown"] = Value::Bool(true);
-                    parse_session_proof_v1(&unknown).expect_err("unknown proof field must fail")
+                    parse_session_proof(&unknown).expect_err("unknown proof field must fail")
                 }
                 other => panic!("unknown invalid-vector mutation {other}"),
             };

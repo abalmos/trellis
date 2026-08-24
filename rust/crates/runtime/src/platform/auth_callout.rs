@@ -17,7 +17,7 @@ use nats_jwt_rs::Claims;
 use nkeys::{KeyPair, KeyPairType, XKey};
 use serde::Deserialize;
 use subtle::ConstantTimeEq;
-use trellis_protocol::{AuthorizationPrincipalKindV1, VerifiedAuthorizationContextV1};
+use trellis_protocol::{AuthorizationPrincipalKind, VerifiedAuthorizationContext};
 
 use super::auth::{
     AuthConnectionPresence, AuthEphemeralRepository, AuthorizationContextService,
@@ -132,7 +132,7 @@ impl CalloutKeys {
     fn authorized_user_jwt(
         &self,
         user_nkey: &str,
-        principal_kind: AuthorizationPrincipalKindV1,
+        principal_kind: AuthorizationPrincipalKind,
         permissions: super::auth::TransportPermissions,
         expires_at_seconds: i64,
     ) -> Result<String, AuthorizationStateError> {
@@ -149,7 +149,7 @@ impl CalloutKeys {
                 allow: permissions.subscribe,
                 deny: Vec::new(),
             },
-            resp: (principal_kind == AuthorizationPrincipalKindV1::Service).then_some(
+            resp: (principal_kind == AuthorizationPrincipalKind::Service).then_some(
                 ResponsePermission {
                     max_messages: 65_535,
                     ttl: Duration::ZERO,
@@ -655,7 +655,7 @@ fn verify_nats_nonce_signature(
 
 fn verify_connect_nkey_matches_context(
     session_nkey: &str,
-    context: &VerifiedAuthorizationContextV1,
+    context: &VerifiedAuthorizationContext,
 ) -> Result<(), AuthorizationStateError> {
     // NATS User NKeys encode the same raw 32-byte Ed25519 public key bound by
     // the verified authorization context.
@@ -845,7 +845,7 @@ mod tests {
         let issued_user_nkey = KeyPair::new_user().public_key();
         let issued = keys.authorized_user_jwt(
             &issued_user_nkey,
-            AuthorizationPrincipalKindV1::Service,
+            AuthorizationPrincipalKind::Service,
             TransportPermissions {
                 publish: vec!["rpc.v1.Example".to_owned()],
                 subscribe: vec!["_INBOX.example.>".to_owned()],

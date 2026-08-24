@@ -8,8 +8,8 @@ use reqwest::Client as HttpClient;
 use serde::Deserialize;
 use serde_json::{json, Value};
 use trellis_protocol::{
-    parse_api_v1, parse_participant_v1, resolve_participant_v1, session_proof_request_digest_v1,
-    SessionProofInputV1, UserAuthRequestSessionProofInputV1,
+    parse_api, parse_participant, resolve_participant, session_proof_request_digest,
+    SessionProofInput, UserAuthRequestSessionProofInput,
 };
 
 use super::client::{connect_admin_client_async, connect_admin_client_with_context_store_async};
@@ -38,22 +38,22 @@ struct AdministrationParticipant {
     id: String,
     digest: String,
     needs_digest: String,
-    required_grants: trellis_protocol::GrantSetV1,
+    required_grants: trellis_protocol::GrantSet,
 }
 
 fn administration_participant() -> Result<AdministrationParticipant, TrellisAuthError> {
     let participant_value: Value = serde_json::from_str(include_str!(
         "../../artifacts/trellis.admin.participant.json"
     ))?;
-    let participant = parse_participant_v1(&participant_value)?;
+    let participant = parse_participant(&participant_value)?;
     let api_value: Value = serde_json::from_str(crate::sdk::auth::api::API_JSON)?;
-    let api = parse_api_v1(&api_value)?;
+    let api = parse_api(&api_value)?;
     let mut apis = BTreeMap::new();
     apis.insert(api.id().to_owned(), api.clone());
     let state_api_value: Value = serde_json::from_str(crate::sdk::state::api::API_JSON)?;
-    let state_api = parse_api_v1(&state_api_value)?;
+    let state_api = parse_api(&state_api_value)?;
     apis.insert(state_api.id().to_owned(), state_api);
-    let resolved = resolve_participant_v1(&participant, &apis)?;
+    let resolved = resolve_participant(&participant, &apis)?;
     Ok(AdministrationParticipant {
         id: participant.id().to_owned(),
         digest: participant.digest()?,
@@ -68,8 +68,7 @@ pub fn administration_participant_digest() -> Result<String, TrellisAuthError> {
 }
 
 /// Return the exact required grants declared by the built-in administration participant.
-pub fn administration_participant_grants() -> Result<trellis_protocol::GrantSetV1, TrellisAuthError>
-{
+pub fn administration_participant_grants() -> Result<trellis_protocol::GrantSet, TrellisAuthError> {
     Ok(administration_participant()?.required_grants)
 }
 
@@ -81,7 +80,7 @@ fn base64url_encode(bytes: &[u8]) -> String {
 #[doc = concat!("Trellis API operation `", stringify!(contract_digest), "`.")]
 pub fn contract_digest(api_source_json: &str) -> Result<String, TrellisAuthError> {
     let value = serde_json::from_str(api_source_json)?;
-    Ok(trellis_protocol::parse_api_v1(&value)?.digest()?)
+    Ok(trellis_protocol::parse_api(&value)?.digest()?)
 }
 
 /// Generate a new base64url-encoded Ed25519 session seed and public key.
@@ -102,7 +101,7 @@ async fn start_auth_request(
     trellis_url: &str,
     redirect_to: &str,
     auth: &SessionAuth,
-) -> Result<AuthStartResponseV1, TrellisAuthError> {
+) -> Result<AuthStartResponse, TrellisAuthError> {
     let participant = administration_participant()?;
     let request_id = ulid::Ulid::new().to_string();
     let issued_at = now_ms()?;
@@ -118,8 +117,8 @@ async fn start_auth_request(
         "participantArtifact": null,
         "referencedApiArtifacts": [],
         "redirectTarget": redirect_to,
-        "proof": auth.sign_session_proof(&SessionProofInputV1::user_auth_request(
-            UserAuthRequestSessionProofInputV1 {
+        "proof": auth.sign_session_proof(&SessionProofInput::user_auth_request(
+            UserAuthRequestSessionProofInput {
                 request_id: request_id.clone(),
                 issued_at,
                 session_public_key: auth.session_key.clone(),
@@ -131,8 +130,8 @@ async fn start_auth_request(
             },
         )?)?,
     });
-    let request_digest = session_proof_request_digest_v1(&request)?;
-    let input = SessionProofInputV1::user_auth_request(UserAuthRequestSessionProofInputV1 {
+    let request_digest = session_proof_request_digest(&request)?;
+    let input = SessionProofInput::user_auth_request(UserAuthRequestSessionProofInput {
         request_id,
         issued_at,
         session_public_key: auth.session_key.clone(),
@@ -160,12 +159,12 @@ async fn start_auth_request(
             text,
         ));
     }
-    Ok(serde_json::from_str::<AuthStartResponseV1>(&text)?)
+    Ok(serde_json::from_str::<AuthStartResponse>(&text)?)
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct AuthStartResponseV1 {
+struct AuthStartResponse {
     flow_id: String,
     portal_url: String,
 }

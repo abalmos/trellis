@@ -43,7 +43,7 @@ pub use pagination::{PageRequest, PageResponse};
 pub use source_parser::{
     load_json_value, load_participant_source, load_sdk_source, source_paths_in_dir,
 };
-pub use trellis_protocol::ApiArtifactV1;
+pub use trellis_protocol::ApiArtifact;
 
 #[cfg(test)]
 mod tests;

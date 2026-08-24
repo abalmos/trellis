@@ -5,9 +5,9 @@ use std::time::Duration;
 
 use futures_util::StreamExt;
 use trellis_protocol::{
-    parse_authorization_context_v1, parse_issuer_manifest_v1, verify_authorization_context_v1,
-    verify_issuer_manifest_v1, AuthorizationTrustRootV1, AuthorizationVerificationPolicyV1,
-    VerifiedAuthorizationContextV1, VerifiedAuthorizationIssuerManifestV1,
+    parse_authorization_context, parse_issuer_manifest, verify_authorization_context,
+    verify_issuer_manifest, AuthorizationTrustRoot, AuthorizationVerificationPolicy,
+    VerifiedAuthorizationContext, VerifiedAuthorizationIssuerManifest,
 };
 
 use super::super::TrellisClientError;
@@ -21,11 +21,11 @@ use super::types::AuthorizationRegistryBinding;
 #[doc(hidden)]
 #[derive(Clone, Debug)]
 pub struct RuntimeAuthorizationTrust {
-    pub root: AuthorizationTrustRootV1,
-    pub policy: AuthorizationVerificationPolicyV1,
+    pub root: AuthorizationTrustRoot,
+    pub policy: AuthorizationVerificationPolicy,
     pub minimum_manifest_generation: u64,
     pub minimum_manifest_digest: String,
-    pub manifest: VerifiedAuthorizationIssuerManifestV1,
+    pub manifest: VerifiedAuthorizationIssuerManifest,
     pub manifest_digest: String,
 }
 
@@ -73,10 +73,10 @@ struct PendingContext {
 }
 
 struct AuthorizationProviderState {
-    root: Option<AuthorizationTrustRootV1>,
-    policy_floor: Option<(AuthorizationVerificationPolicyV1, u64, String)>,
-    manifest: Option<(VerifiedAuthorizationIssuerManifestV1, String)>,
-    verified_contexts: HashMap<String, VerifiedAuthorizationContextV1>,
+    root: Option<AuthorizationTrustRoot>,
+    policy_floor: Option<(AuthorizationVerificationPolicy, u64, String)>,
+    manifest: Option<(VerifiedAuthorizationIssuerManifest, String)>,
+    verified_contexts: HashMap<String, VerifiedAuthorizationContext>,
     retention_deadlines: HashMap<String, i64>,
     revocations: HashMap<String, i64>,
     health: AuthorizationProviderCacheHealth,
@@ -174,11 +174,11 @@ impl AuthorizationProviderCache {
     pub(crate) fn new_for_test(
         own: Arc<AuthorizationContextCache>,
         input: ProviderTrustInput,
-        root: AuthorizationTrustRootV1,
-        manifest: VerifiedAuthorizationIssuerManifestV1,
+        root: AuthorizationTrustRoot,
+        manifest: VerifiedAuthorizationIssuerManifest,
         manifest_digest: String,
     ) -> Result<Self, TrellisClientError> {
-        let policy = AuthorizationVerificationPolicyV1::new(
+        let policy = AuthorizationVerificationPolicy::new(
             own.corrected_now_seconds()?,
             input.policy.allowed_clock_skew_seconds,
             input.policy.maximum_context_lifetime_seconds,
@@ -234,7 +234,7 @@ impl AuthorizationProviderCache {
                     TrellisClientError::Bootstrap("authorization trust floor is unavailable".into())
                 })?
         } else {
-            let manifest = parse_issuer_manifest_v1(&own.bundle()?.trust.manifest)
+            let manifest = parse_issuer_manifest(&own.bundle()?.trust.manifest)
                 .map_err(|error| TrellisClientError::Bootstrap(error.to_string()))?;
             manifest
                 .digest()
@@ -245,12 +245,12 @@ impl AuthorizationProviderCache {
                 "authorization trust floor digest is empty".into(),
             ));
         }
-        let root = AuthorizationTrustRootV1::parse(&input.root)
+        let root = AuthorizationTrustRoot::parse(&input.root)
             .map_err(|error| TrellisClientError::Bootstrap(error.to_string()))?;
         let root_digest = root
             .digest()
             .map_err(|error| TrellisClientError::Bootstrap(error.to_string()))?;
-        let policy = AuthorizationVerificationPolicyV1::new(
+        let policy = AuthorizationVerificationPolicy::new(
             own.corrected_now_seconds()?,
             input.policy.allowed_clock_skew_seconds,
             input.policy.maximum_context_lifetime_seconds,
@@ -383,14 +383,14 @@ impl AuthorizationProviderCache {
     pub(crate) fn verified_context_raw(
         &self,
         digest: &str,
-    ) -> Result<Option<VerifiedAuthorizationContextV1>, TrellisClientError> {
+    ) -> Result<Option<VerifiedAuthorizationContext>, TrellisClientError> {
         Ok(self.read_state()?.verified_contexts.get(digest).cloned())
     }
 
     fn active_context_raw(
         &self,
         digest: &str,
-    ) -> Result<Option<VerifiedAuthorizationContextV1>, TrellisClientError> {
+    ) -> Result<Option<VerifiedAuthorizationContext>, TrellisClientError> {
         Ok(self.read_state()?.verified_contexts.get(digest).cloned())
     }
 
@@ -399,7 +399,7 @@ impl AuthorizationProviderCache {
     pub fn runtime_verified_context_raw(
         &self,
         digest: &str,
-    ) -> Result<Option<VerifiedAuthorizationContextV1>, TrellisClientError> {
+    ) -> Result<Option<VerifiedAuthorizationContext>, TrellisClientError> {
         self.verified_context_raw(digest)
     }
 
@@ -439,7 +439,7 @@ impl AuthorizationProviderCache {
     }
 
     /// Return the verification policy bound to the current trust material.
-    pub(crate) fn policy(&self) -> Result<AuthorizationVerificationPolicyV1, TrellisClientError> {
+    pub(crate) fn policy(&self) -> Result<AuthorizationVerificationPolicy, TrellisClientError> {
         let policy_floor = self.read_state()?.policy_floor.clone().ok_or_else(|| {
             TrellisClientError::Bootstrap("authorization context unavailable".into())
         })?;
@@ -451,7 +451,7 @@ impl AuthorizationProviderCache {
 
     #[cfg(feature = "runtime-internals")]
     #[doc(hidden)]
-    pub fn runtime_policy(&self) -> Result<AuthorizationVerificationPolicyV1, TrellisClientError> {
+    pub fn runtime_policy(&self) -> Result<AuthorizationVerificationPolicy, TrellisClientError> {
         self.policy()
     }
 
@@ -670,7 +670,7 @@ impl AuthorizationProviderCache {
                 })?;
             let json: serde_json::Value = serde_json::from_slice(&value)
                 .map_err(|error| TrellisClientError::Bootstrap(error.to_string()))?;
-            let manifest = parse_issuer_manifest_v1(&json)
+            let manifest = parse_issuer_manifest(&json)
                 .map_err(|error| TrellisClientError::Bootstrap(error.to_string()))?;
             let digest = manifest
                 .digest()
@@ -684,7 +684,7 @@ impl AuthorizationProviderCache {
             policy.now_unix_seconds = self.now_seconds()?;
             policy.minimum_manifest_generation =
                 policy.minimum_manifest_generation.max(current_generation);
-            let verified = verify_issuer_manifest_v1(&self.root_value()?, &manifest, &policy)
+            let verified = verify_issuer_manifest(&self.root_value()?, &manifest, &policy)
                 .map_err(|error| {
                     TrellisClientError::Bootstrap(format!(
                         "issuer manifest {key} is not trusted: {error}"
@@ -810,7 +810,7 @@ impl AuthorizationProviderCache {
         .map_err(|_| TrellisClientError::Bootstrap("provider time overflow".into()))
     }
 
-    fn root_value(&self) -> Result<AuthorizationTrustRootV1, TrellisClientError> {
+    fn root_value(&self) -> Result<AuthorizationTrustRoot, TrellisClientError> {
         self.read_state()?.root.clone().ok_or_else(|| {
             TrellisClientError::Bootstrap("authorization context unavailable".into())
         })
@@ -846,7 +846,7 @@ impl AuthorizationProviderCache {
         &self,
         digest: &str,
         now: i64,
-    ) -> Result<VerifiedAuthorizationContextV1, TrellisClientError> {
+    ) -> Result<VerifiedAuthorizationContext, TrellisClientError> {
         self.resolve_context_for(digest, now, false).await
     }
 
@@ -856,7 +856,7 @@ impl AuthorizationProviderCache {
         &self,
         digest: &str,
         now: i64,
-    ) -> Result<VerifiedAuthorizationContextV1, TrellisClientError> {
+    ) -> Result<VerifiedAuthorizationContext, TrellisClientError> {
         if !self.health()?.healthy || self.revocation_time(digest)?.is_some() {
             return Err(TrellisClientError::Bootstrap(
                 "authorization context is not admissible".into(),
@@ -879,7 +879,7 @@ impl AuthorizationProviderCache {
         &self,
         digest: &str,
         event_time: i64,
-    ) -> Result<VerifiedAuthorizationContextV1, TrellisClientError> {
+    ) -> Result<VerifiedAuthorizationContext, TrellisClientError> {
         self.resolve_context_for(digest, event_time, true).await
     }
 
@@ -887,7 +887,7 @@ impl AuthorizationProviderCache {
         &self,
         digest: &str,
         event_time: i64,
-    ) -> Result<VerifiedAuthorizationContextV1, crate::service::EventVerificationFailure> {
+    ) -> Result<VerifiedAuthorizationContext, crate::service::EventVerificationFailure> {
         self.resolve_event_context(digest, event_time)
             .await
             .map_err(classify_event_resolution_failure)
@@ -899,7 +899,7 @@ impl AuthorizationProviderCache {
         &self,
         digest: &str,
         event_time: i64,
-    ) -> Result<VerifiedAuthorizationContextV1, TrellisClientError> {
+    ) -> Result<VerifiedAuthorizationContext, TrellisClientError> {
         self.resolve_event_context(digest, event_time).await
     }
 
@@ -909,7 +909,7 @@ impl AuthorizationProviderCache {
         &self,
         digest: &str,
         event_time: i64,
-    ) -> Result<VerifiedAuthorizationContextV1, crate::service::EventVerificationFailure> {
+    ) -> Result<VerifiedAuthorizationContext, crate::service::EventVerificationFailure> {
         self.resolve_event_context_for_verification(digest, event_time)
             .await
     }
@@ -918,7 +918,7 @@ impl AuthorizationProviderCache {
     #[doc(hidden)]
     pub fn runtime_current_manifest(
         &self,
-    ) -> Result<VerifiedAuthorizationIssuerManifestV1, TrellisClientError> {
+    ) -> Result<VerifiedAuthorizationIssuerManifest, TrellisClientError> {
         self.read_state()?
             .manifest
             .as_ref()
@@ -931,7 +931,7 @@ impl AuthorizationProviderCache {
         digest: &str,
         verification_time: i64,
         historical: bool,
-    ) -> Result<VerifiedAuthorizationContextV1, TrellisClientError> {
+    ) -> Result<VerifiedAuthorizationContext, TrellisClientError> {
         self.prune_contexts(self.now_seconds()?)?;
         let known = self.active_context_raw(digest)?;
         if let Some(context) = known {
@@ -1004,7 +1004,7 @@ impl AuthorizationProviderCache {
         digest: &str,
         verification_time: i64,
         historical: bool,
-    ) -> Result<VerifiedAuthorizationContextV1, TrellisClientError> {
+    ) -> Result<VerifiedAuthorizationContext, TrellisClientError> {
         let Some(registry) = self.registry.as_ref() else {
             return Err(TrellisClientError::Bootstrap(
                 "authorization registry is unavailable".into(),
@@ -1019,7 +1019,7 @@ impl AuthorizationProviderCache {
         })?;
         let json: serde_json::Value = serde_json::from_slice(&value)
             .map_err(|error| TrellisClientError::Bootstrap(error.to_string()))?;
-        let context = parse_authorization_context_v1(&json)
+        let context = parse_authorization_context(&json)
             .map_err(|error| TrellisClientError::Bootstrap(error.to_string()))?;
         if context
             .digest()
@@ -1062,7 +1062,7 @@ impl AuthorizationProviderCache {
                 &mut policy,
             )
             .await?;
-        verify_authorization_context_v1(&self.root_value()?, &manifest, &context, &policy).map_err(
+        verify_authorization_context(&self.root_value()?, &manifest, &context, &policy).map_err(
             |error| {
                 TrellisClientError::Bootstrap(format!(
                     "authorization context is not trusted: {error}"
@@ -1077,8 +1077,8 @@ impl AuthorizationProviderCache {
         issuer_key_id: &str,
         generation: u64,
         historical: bool,
-        policy: &mut AuthorizationVerificationPolicyV1,
-    ) -> Result<VerifiedAuthorizationIssuerManifestV1, TrellisClientError> {
+        policy: &mut AuthorizationVerificationPolicy,
+    ) -> Result<VerifiedAuthorizationIssuerManifest, TrellisClientError> {
         if let Some((manifest, digest)) = self
             .read_state()?
             .manifest
@@ -1105,7 +1105,7 @@ impl AuthorizationProviderCache {
         })?;
         let manifest_json: serde_json::Value = serde_json::from_slice(&manifest_value)
             .map_err(|error| TrellisClientError::Bootstrap(error.to_string()))?;
-        let manifest = parse_issuer_manifest_v1(&manifest_json)
+        let manifest = parse_issuer_manifest(&manifest_json)
             .map_err(|error| TrellisClientError::Bootstrap(error.to_string()))?;
         let digest = manifest
             .digest()
@@ -1118,7 +1118,7 @@ impl AuthorizationProviderCache {
         if !historical {
             self.check_manifest_floor(generation, &digest)?;
         }
-        let manifest = verify_issuer_manifest_v1(&self.root_value()?, &manifest, policy)
+        let manifest = verify_issuer_manifest(&self.root_value()?, &manifest, policy)
             .map_err(|error| TrellisClientError::Bootstrap(error.to_string()))?;
         if !manifest
             .manifest()
@@ -1157,7 +1157,7 @@ impl AuthorizationProviderCache {
     pub(crate) fn inject_verified_for_test(
         &self,
         digest: &str,
-        verified: VerifiedAuthorizationContextV1,
+        verified: VerifiedAuthorizationContext,
         revoked_at: Option<i64>,
     ) -> Result<(), TrellisClientError> {
         let mut state = self.write_state()?;

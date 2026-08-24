@@ -33,7 +33,7 @@ import {
 } from "./auth/authorization_context.ts";
 import {
   SESSION_PROOF_FORMAT_V1,
-  sessionProofRequestDigestV1,
+  sessionProofRequestDigest,
 } from "./auth/session_proof.ts";
 import { estimateMidpointClockOffsetMs } from "./auth/time.ts";
 import { sha256, toArrayBuffer, utf8 } from "./auth/browser.ts";
@@ -839,7 +839,7 @@ async function buildSessionKeyLoginUrl(args: {
     redirectTarget: args.redirectTo,
     proof: { format: SESSION_PROOF_FORMAT_V1, signature: "" },
   };
-  const requestDigest = await sessionProofRequestDigestV1(unsigned);
+  const requestDigest = await sessionProofRequestDigest(unsigned);
   const response = await fetch(`${args.trellisUrl}/auth/requests`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },

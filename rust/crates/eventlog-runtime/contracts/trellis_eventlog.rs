@@ -2,7 +2,7 @@
 
 use serde_json::{json, Value};
 use trellis_contracts::{
-    ApiArtifactV1, ApiBuilder, ContractArtifacts, ContractBuilder, ContractCapabilityMetadata,
+    ApiArtifact, ApiBuilder, ContractArtifacts, ContractBuilder, ContractCapabilityMetadata,
     ContractKind, ContractsError,
 };
 
@@ -13,7 +13,7 @@ const VALIDATION_ERROR: &str = "ValidationError";
 const NOT_FOUND_ERROR: &str = "NotFoundError";
 
 /// Build the canonical Event Log API artifact.
-pub fn api_artifact() -> Result<ApiArtifactV1, ContractsError> {
+pub fn api_artifact() -> Result<ApiArtifact, ContractsError> {
     ApiBuilder::authoring(
         "trellis.eventlog@v1",
         "Trellis Event Log",

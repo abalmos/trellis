@@ -11,22 +11,22 @@ use crate::{
         validate_nonempty_text, validate_protocol_identifier, validate_version,
     },
     schema_profile::{
-        lint_api_authoring, validate_api_runtime_structure, validate_embedded_schema,
-        validate_wire_schema_additive,
+        lint_api_authoring as lint_api_schema, validate_api_runtime_structure,
+        validate_embedded_schema, validate_wire_schema_additive,
     },
     subjects::{
         derive_event_subject, derive_event_wildcard_subject, derive_feed_subject,
-        derive_operation_subject, derive_rpc_subject, DerivedApiSubjectsV1, DerivedEventSubjectsV1,
+        derive_operation_subject, derive_rpc_subject, DerivedApiSubjects, DerivedEventSubjects,
     },
-    ApiSurfaceKindV1, CapabilityDefinitionV1, ConsentMetadataV1, PermissionActionV1, ProtocolError,
+    ApiSurfaceKind, CapabilityDefinition, ConsentMetadata, PermissionAction, ProtocolError,
 };
 
 mod compatibility;
 mod schema_compatibility;
 
 pub use compatibility::{
-    compare_api_replacement_v1, ApiCompatibilityIssueCodeV1, ApiCompatibilityIssueV1,
-    ApiCompatibilityReportV1,
+    compare_api_replacement, ApiCompatibilityIssue, ApiCompatibilityIssueCode,
+    ApiCompatibilityReport,
 };
 
 /// The first canonical Trellis API artifact format.
@@ -45,9 +45,9 @@ pub const API_AUTHORING_SCHEMA_V1_JSON: &str =
 ///
 /// Returns [`ProtocolError::ApiValidation`] when the closed authoring schema or
 /// the API's semantic invariants are violated.
-pub fn lint_api_v1_authoring(value: &Value) -> Result<(), ProtocolError> {
-    lint_api_authoring(value)?;
-    parse_api_v1(value).map(|_| ())
+pub fn lint_api_authoring(value: &Value) -> Result<(), ProtocolError> {
+    lint_api_schema(value)?;
+    parse_api(value).map(|_| ())
 }
 
 /// One validated, normalized `trellis.api.v1` artifact.
@@ -57,40 +57,40 @@ pub fn lint_api_v1_authoring(value: &Value) -> Result<(), ProtocolError> {
 /// retained in normalized values but omitted from [`Self::digest_projection`].
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct ApiArtifactV1 {
+pub struct ApiArtifact {
     format: String,
     id: String,
     display_name: String,
     description: String,
     #[serde(skip_serializing_if = "Option::is_none")]
-    docs: Option<DocumentationV1>,
+    docs: Option<Documentation>,
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
     schemas: BTreeMap<String, Value>,
-    #[serde(skip_serializing_if = "ExportsV1::is_empty")]
-    exports: ExportsV1,
+    #[serde(skip_serializing_if = "Exports::is_empty")]
+    exports: Exports,
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
-    errors: BTreeMap<String, ErrorDefinitionV1>,
+    errors: BTreeMap<String, ErrorDefinition>,
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
-    rpc: BTreeMap<String, RpcDefinitionV1>,
+    rpc: BTreeMap<String, RpcDefinition>,
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
-    operations: BTreeMap<String, OperationDefinitionV1>,
+    operations: BTreeMap<String, OperationDefinition>,
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
-    events: BTreeMap<String, EventDefinitionV1>,
+    events: BTreeMap<String, EventDefinition>,
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
-    feeds: BTreeMap<String, FeedDefinitionV1>,
+    feeds: BTreeMap<String, FeedDefinition>,
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
-    state: BTreeMap<String, StateDefinitionV1>,
+    state: BTreeMap<String, StateDefinition>,
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
-    capabilities: BTreeMap<String, CapabilityDefinitionV1>,
+    capabilities: BTreeMap<String, CapabilityDefinition>,
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
-    consent: BTreeMap<String, ConsentMetadataV1>,
+    consent: BTreeMap<String, ConsentMetadata>,
 }
 
 /// Validate and parse one raw `trellis.api.v1` JSON value.
 ///
 /// Unknown object members are ignored and do not affect normalization,
 /// compatibility, capabilities, or the semantic digest. Use
-/// [`lint_api_v1_authoring`] before parsing in authoring tools that must reject
+/// [`lint_api_authoring`] before parsing in authoring tools that must reject
 /// unknown members.
 ///
 /// # Errors
@@ -98,21 +98,21 @@ pub struct ApiArtifactV1 {
 /// Returns [`ProtocolError::ApiValidation`] with an RFC 6901 path when the
 /// artifact or an embedded schema violates the API profile, or
 /// [`ProtocolError::Json`] when the value cannot be decoded.
-pub fn parse_api_v1(value: &Value) -> Result<ApiArtifactV1, ProtocolError> {
+pub fn parse_api(value: &Value) -> Result<ApiArtifact, ProtocolError> {
     validate_api_runtime_structure(value)?;
-    let wire: WireApiArtifactV1 =
+    let wire: WireApiArtifact =
         serde_json::from_value(value.clone()).map_err(|error| api_error("", error.to_string()))?;
-    ApiArtifactV1::from_wire(wire)
+    ApiArtifact::from_wire(wire)
 }
 
-impl ApiArtifactV1 {
+impl ApiArtifact {
     /// Return the stable versioned API lineage identifier.
     pub fn id(&self) -> &str {
         &self.id
     }
 
     /// Return one declared State definition by name.
-    pub fn state_definition(&self, name: &str) -> Option<&StateDefinitionV1> {
+    pub fn state_definition(&self, name: &str) -> Option<&StateDefinition> {
         self.state.get(name)
     }
 
@@ -188,7 +188,7 @@ impl ApiArtifactV1 {
     ///
     /// Returns an API validation error if a stored version or logical name
     /// cannot be converted to a canonical NATS subject.
-    pub fn derived_subjects(&self) -> Result<DerivedApiSubjectsV1, ProtocolError> {
+    pub fn derived_subjects(&self) -> Result<DerivedApiSubjects, ProtocolError> {
         let rpc = self
             .rpc
             .iter()
@@ -212,7 +212,7 @@ impl ApiArtifactV1 {
             .map(|(name, definition)| {
                 Ok((
                     name.clone(),
-                    DerivedEventSubjectsV1 {
+                    DerivedEventSubjects {
                         base: derive_event_subject(&definition.version, name)?,
                         wildcard: derive_event_wildcard_subject(
                             &definition.version,
@@ -233,7 +233,7 @@ impl ApiArtifactV1 {
                 ))
             })
             .collect::<Result<_, ProtocolError>>()?;
-        Ok(DerivedApiSubjectsV1 {
+        Ok(DerivedApiSubjects {
             rpc,
             operations,
             events,
@@ -241,7 +241,7 @@ impl ApiArtifactV1 {
         })
     }
 
-    fn from_wire(mut wire: WireApiArtifactV1) -> Result<Self, ProtocolError> {
+    fn from_wire(mut wire: WireApiArtifact) -> Result<Self, ProtocolError> {
         if wire.format != API_FORMAT_V1 {
             return Err(api_error(
                 "/format",
@@ -291,7 +291,7 @@ impl ApiArtifactV1 {
             if definition
                 .transfer
                 .as_ref()
-                .is_some_and(|transfer| transfer.direction != TransferDirectionV1::Receive)
+                .is_some_and(|transfer| transfer.direction != TransferDirection::Receive)
             {
                 return Err(api_error(
                     format!("{path}/transfer/direction"),
@@ -322,7 +322,7 @@ impl ApiArtifactV1 {
             if definition
                 .transfer
                 .as_ref()
-                .is_some_and(|transfer| transfer.direction != TransferDirectionV1::Send)
+                .is_some_and(|transfer| transfer.direction != TransferDirection::Send)
             {
                 return Err(api_error(
                     format!("{path}/transfer/direction"),
@@ -495,11 +495,11 @@ impl ApiArtifactV1 {
                     ));
                 }
                 let exists = match surface {
-                    ApiSurfaceKindV1::Rpc => wire.rpc.contains_key(name),
-                    ApiSurfaceKindV1::Operation => wire.operations.contains_key(name),
-                    ApiSurfaceKindV1::Event => wire.events.contains_key(name),
-                    ApiSurfaceKindV1::Feed => wire.feeds.contains_key(name),
-                    ApiSurfaceKindV1::State => wire.state.contains_key(name),
+                    ApiSurfaceKind::Rpc => wire.rpc.contains_key(name),
+                    ApiSurfaceKind::Operation => wire.operations.contains_key(name),
+                    ApiSurfaceKind::Event => wire.events.contains_key(name),
+                    ApiSurfaceKind::Feed => wire.feeds.contains_key(name),
+                    ApiSurfaceKind::State => wire.state.contains_key(name),
                 };
                 if !exists {
                     return Err(api_error(
@@ -507,9 +507,9 @@ impl ApiArtifactV1 {
                         format!("capability targets missing {surface:?} surface '{name}'"),
                     ));
                 }
-                if surface == ApiSurfaceKindV1::Operation {
+                if surface == ApiSurfaceKind::Operation {
                     let operation = &wire.operations[name];
-                    if atom.action() == PermissionActionV1::Cancel && !operation.cancel {
+                    if atom.action() == PermissionAction::Cancel && !operation.cancel {
                         return Err(api_error(
                             &atom_path,
                             "cancel permission requires a cancelable operation",
@@ -562,138 +562,138 @@ impl ApiArtifactV1 {
     }
 }
 
-impl<'de> Deserialize<'de> for ApiArtifactV1 {
+impl<'de> Deserialize<'de> for ApiArtifact {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: Deserializer<'de>,
     {
         let value = Value::deserialize(deserializer)?;
-        parse_api_v1(&value).map_err(D::Error::custom)
+        parse_api(&value).map_err(D::Error::custom)
     }
 }
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct WireApiArtifactV1 {
+struct WireApiArtifact {
     format: String,
     id: String,
     display_name: String,
     description: String,
     #[serde(default)]
-    docs: Option<DocumentationV1>,
+    docs: Option<Documentation>,
     #[serde(default)]
     schemas: BTreeMap<String, Value>,
     #[serde(default)]
-    exports: ExportsV1,
+    exports: Exports,
     #[serde(default)]
-    errors: BTreeMap<String, ErrorDefinitionV1>,
+    errors: BTreeMap<String, ErrorDefinition>,
     #[serde(default)]
-    rpc: BTreeMap<String, RpcDefinitionV1>,
+    rpc: BTreeMap<String, RpcDefinition>,
     #[serde(default)]
-    operations: BTreeMap<String, OperationDefinitionV1>,
+    operations: BTreeMap<String, OperationDefinition>,
     #[serde(default)]
-    events: BTreeMap<String, EventDefinitionV1>,
+    events: BTreeMap<String, EventDefinition>,
     #[serde(default)]
-    feeds: BTreeMap<String, FeedDefinitionV1>,
+    feeds: BTreeMap<String, FeedDefinition>,
     #[serde(default)]
-    state: BTreeMap<String, StateDefinitionV1>,
+    state: BTreeMap<String, StateDefinition>,
     #[serde(default)]
-    capabilities: BTreeMap<String, CapabilityDefinitionV1>,
+    capabilities: BTreeMap<String, CapabilityDefinition>,
     #[serde(default)]
-    consent: BTreeMap<String, ConsentMetadataV1>,
+    consent: BTreeMap<String, ConsentMetadata>,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-struct DocumentationV1 {
+struct Documentation {
     #[serde(skip_serializing_if = "Option::is_none")]
     summary: Option<String>,
     markdown: String,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
-struct ExportsV1 {
+struct Exports {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     schemas: Vec<String>,
 }
 
-impl ExportsV1 {
+impl Exports {
     fn is_empty(&self) -> bool {
         self.schemas.is_empty()
     }
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-struct SchemaReferenceV1 {
+struct SchemaReference {
     schema: String,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
-enum TransferDirectionV1 {
+enum TransferDirection {
     Send,
     Receive,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-struct TransferDefinitionV1 {
-    direction: TransferDirectionV1,
+struct TransferDefinition {
+    direction: TransferDirection,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-struct ErrorDefinitionV1 {
+struct ErrorDefinition {
     #[serde(skip_serializing_if = "Option::is_none")]
-    schema: Option<SchemaReferenceV1>,
+    schema: Option<SchemaReference>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    docs: Option<DocumentationV1>,
+    docs: Option<Documentation>,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-struct RpcDefinitionV1 {
+struct RpcDefinition {
     version: String,
-    input: SchemaReferenceV1,
-    output: SchemaReferenceV1,
+    input: SchemaReference,
+    output: SchemaReference,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     errors: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    transfer: Option<TransferDefinitionV1>,
+    transfer: Option<TransferDefinition>,
     #[serde(default, skip_serializing_if = "is_false")]
     internal: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
-    docs: Option<DocumentationV1>,
+    docs: Option<Documentation>,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-struct OperationSignalV1 {
-    input: SchemaReferenceV1,
+struct OperationSignal {
+    input: SchemaReference,
     #[serde(skip_serializing_if = "Option::is_none")]
-    docs: Option<DocumentationV1>,
+    docs: Option<Documentation>,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-struct OperationDefinitionV1 {
+struct OperationDefinition {
     version: String,
-    input: SchemaReferenceV1,
+    input: SchemaReference,
     #[serde(skip_serializing_if = "Option::is_none")]
-    progress: Option<SchemaReferenceV1>,
+    progress: Option<SchemaReference>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    update: Option<SchemaReferenceV1>,
+    update: Option<SchemaReference>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    output: Option<SchemaReferenceV1>,
+    output: Option<SchemaReference>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     errors: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    transfer: Option<TransferDefinitionV1>,
+    transfer: Option<TransferDefinition>,
     #[serde(default, skip_serializing_if = "is_false")]
     cancel: bool,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    signals: BTreeMap<String, OperationSignalV1>,
+    signals: BTreeMap<String, OperationSignal>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    docs: Option<DocumentationV1>,
+    docs: Option<Documentation>,
 }
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
-enum EventClassV1 {
+enum EventClass {
     #[default]
     Domain,
     Audit,
@@ -701,30 +701,30 @@ enum EventClassV1 {
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-struct EventDefinitionV1 {
+struct EventDefinition {
     version: String,
-    event: SchemaReferenceV1,
+    event: SchemaReference,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     params: Vec<String>,
     #[serde(default, skip_serializing_if = "is_domain")]
-    class: EventClassV1,
+    class: EventClass,
     #[serde(skip_serializing_if = "Option::is_none")]
-    docs: Option<DocumentationV1>,
+    docs: Option<Documentation>,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-struct FeedDefinitionV1 {
+struct FeedDefinition {
     version: String,
-    input: SchemaReferenceV1,
-    event: SchemaReferenceV1,
+    input: SchemaReference,
+    event: SchemaReference,
     #[serde(skip_serializing_if = "Option::is_none")]
-    docs: Option<DocumentationV1>,
+    docs: Option<Documentation>,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 /// Storage shape of one declared State store.
-pub enum StateKindV1 {
+pub enum StateKind {
     /// One value without a logical key.
     Value,
     /// Values addressed by canonical slash-path keys.
@@ -734,20 +734,20 @@ pub enum StateKindV1 {
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 /// One validated State store declaration from an API artifact.
-pub struct StateDefinitionV1 {
-    kind: StateKindV1,
-    schema: SchemaReferenceV1,
+pub struct StateDefinition {
+    kind: StateKind,
+    schema: SchemaReference,
     #[serde(skip_serializing_if = "Option::is_none")]
     state_version: Option<String>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    accepted_versions: BTreeMap<String, SchemaReferenceV1>,
+    accepted_versions: BTreeMap<String, SchemaReference>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    docs: Option<DocumentationV1>,
+    docs: Option<Documentation>,
 }
 
-impl StateDefinitionV1 {
+impl StateDefinition {
     /// Return whether this declaration stores one value or a map of values.
-    pub fn kind(&self) -> StateKindV1 {
+    pub fn kind(&self) -> StateKind {
         self.kind
     }
 
@@ -769,7 +769,7 @@ impl StateDefinitionV1 {
     }
 }
 
-fn validate_docs(path: &str, docs: &DocumentationV1) -> Result<(), ProtocolError> {
+fn validate_docs(path: &str, docs: &Documentation) -> Result<(), ProtocolError> {
     validate_nonempty_text(&format!("{path}/markdown"), &docs.markdown, api_error)?;
     if let Some(summary) = &docs.summary {
         validate_nonempty_text(&format!("{path}/summary"), summary, api_error)?;
@@ -784,7 +784,7 @@ fn validate_surface(path: &str, name: &str, version: &str) -> Result<(), Protoco
 
 fn require_schema(
     schemas: &BTreeMap<String, Value>,
-    reference: &SchemaReferenceV1,
+    reference: &SchemaReference,
     path: &str,
 ) -> Result<(), ProtocolError> {
     validate_protocol_identifier(&format!("{path}/schema"), &reference.schema, api_error)?;
@@ -793,7 +793,7 @@ fn require_schema(
 
 fn validate_optional_schema_ref(
     schemas: &BTreeMap<String, Value>,
-    reference: Option<&SchemaReferenceV1>,
+    reference: Option<&SchemaReference>,
     path: &str,
 ) -> Result<(), ProtocolError> {
     if let Some(reference) = reference {
@@ -803,7 +803,7 @@ fn validate_optional_schema_ref(
 }
 
 fn validate_error_refs(
-    errors: &BTreeMap<String, ErrorDefinitionV1>,
+    errors: &BTreeMap<String, ErrorDefinition>,
     references: &mut Vec<String>,
     path: &str,
 ) -> Result<(), ProtocolError> {
@@ -894,7 +894,7 @@ fn validate_unique_subjects<'a>(
 }
 
 fn validate_event_subjects(
-    events: &BTreeMap<String, DerivedEventSubjectsV1>,
+    events: &BTreeMap<String, DerivedEventSubjects>,
 ) -> Result<(), ProtocolError> {
     let events = events.iter().collect::<Vec<_>>();
     for (index, (left_name, left)) in events.iter().enumerate() {
@@ -927,8 +927,8 @@ fn is_false(value: &bool) -> bool {
     !*value
 }
 
-fn is_domain(value: &EventClassV1) -> bool {
-    *value == EventClassV1::Domain
+fn is_domain(value: &EventClass) -> bool {
+    *value == EventClass::Domain
 }
 
 #[cfg(test)]
@@ -981,7 +981,7 @@ mod tests {
                 "authoring lint result for {}",
                 vector.name
             );
-            let parsed = parse_api_v1(&vector.input);
+            let parsed = parse_api(&vector.input);
             if let (Err(error), Some(schema), Some(path)) =
                 (&parsed, &vector.error_schema, &vector.error_path)
             {
@@ -1006,7 +1006,7 @@ mod tests {
                 vector.name
             );
             assert_eq!(
-                serde_json::from_value::<ApiArtifactV1>(vector.input.clone()).is_ok(),
+                serde_json::from_value::<ApiArtifact>(vector.input.clone()).is_ok(),
                 vector.valid,
                 "direct deserialization result for {}",
                 vector.name
@@ -1076,7 +1076,7 @@ mod tests {
             "displayName": "Documents",
             "description": "Invalid API identifier."
         });
-        match parse_api_v1(&value).unwrap_err() {
+        match parse_api(&value).unwrap_err() {
             ProtocolError::ApiValidation { path, .. } => assert_eq!(path, "/id"),
             error => panic!("expected API validation error, received {error:?}"),
         }
@@ -1182,7 +1182,7 @@ mod tests {
                     }
                 }
             });
-            let error = parse_api_v1(&value).expect_err("closed wire schema must fail");
+            let error = parse_api(&value).expect_err("closed wire schema must fail");
             assert_schema_profile(error, "Input", expected_path);
         }
 
@@ -1203,7 +1203,7 @@ mod tests {
                 }
             }
         });
-        assert!(parse_api_v1(&private).is_ok());
+        assert!(parse_api(&private).is_ok());
     }
 
     #[test]
@@ -1217,7 +1217,7 @@ mod tests {
                 "Export": true, "RpcInput": true, "RpcOutput": true, "RpcError": true,
                 "OpInput": true, "OpProgress": true, "OpUpdate": true, "OpOutput": true,
                 "OpSignal": true, "OpError": true, "Event": true, "FeedInput": true,
-                "FeedEvent": true, "State": true, "StateV1": true
+                "FeedEvent": true, "State": true, "State": true
             },
             "exports": { "schemas": ["Export"] },
             "errors": {
@@ -1248,11 +1248,11 @@ mod tests {
             "state": {
                 "Settings": {
                     "kind": "value", "schema": { "schema": "State" },
-                    "acceptedVersions": { "v1": { "schema": "StateV1" } }
+                    "acceptedVersions": { "v1": { "schema": "State" } }
                 }
             }
         });
-        assert!(parse_api_v1(&base).is_ok());
+        assert!(parse_api(&base).is_ok());
 
         for name in [
             "Export",
@@ -1269,11 +1269,11 @@ mod tests {
             "FeedInput",
             "FeedEvent",
             "State",
-            "StateV1",
+            "State",
         ] {
             let mut value = base.clone();
             value["schemas"][name] = json!({ "type": "object", "additionalProperties": false });
-            let error = parse_api_v1(&value).expect_err("closed wire schema must fail");
+            let error = parse_api(&value).expect_err("closed wire schema must fail");
             assert_schema_profile(error, name, "/additionalProperties");
         }
     }
@@ -1322,9 +1322,9 @@ mod tests {
         extended["capabilities"]["read"]["allows"][0]["target"]["extension"] = json!(true);
         extended["consent"]["read"]["extension"] = json!(true);
 
-        assert!(lint_api_v1_authoring(&extended).is_err());
-        let base = parse_api_v1(&base).unwrap();
-        let extended = parse_api_v1(&extended).unwrap();
+        assert!(lint_api_authoring(&extended).is_err());
+        let base = parse_api(&base).unwrap();
+        let extended = parse_api(&extended).unwrap();
         assert_eq!(
             extended.normalized_value().unwrap(),
             base.normalized_value().unwrap()
@@ -1333,7 +1333,7 @@ mod tests {
     }
 
     fn assert_api_error(value: &Value, expected_path: &str) {
-        match parse_api_v1(value).unwrap_err() {
+        match parse_api(value).unwrap_err() {
             ProtocolError::ApiValidation { path, .. } => assert_eq!(path, expected_path),
             error => panic!("expected API validation error, received {error:?}"),
         }

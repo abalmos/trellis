@@ -4,7 +4,7 @@ use std::time::Duration;
 use async_nats::jetstream::{self, consumer, kv, object_store};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
-use trellis_protocol::{parse_api_v1, parse_participant_v1};
+use trellis_protocol::{parse_api, parse_participant};
 
 use super::authority::{validate_dependency_evidence, validate_resource_evidence};
 use super::{
@@ -25,18 +25,18 @@ where
     let participant_value: Value = serde_json::from_str(&binding.participant_json)
         .map_err(|error| invalid(error.to_string()))?;
     let participant =
-        parse_participant_v1(&participant_value).map_err(|error| invalid(error.to_string()))?;
+        parse_participant(&participant_value).map_err(|error| invalid(error.to_string()))?;
     let api_values: BTreeMap<String, Value> = serde_json::from_str(&binding.api_artifacts_json)
         .map_err(|error| invalid(error.to_string()))?;
     let apis = api_values
         .values()
         .map(|value| {
-            parse_api_v1(value)
+            parse_api(value)
                 .map(|api| (api.id().to_owned(), api))
                 .map_err(|error| invalid(error.to_string()))
         })
         .collect::<Result<BTreeMap<_, _>, _>>()?;
-    let resolved = trellis_protocol::resolve_participant_v1(&participant, &apis)
+    let resolved = trellis_protocol::resolve_participant(&participant, &apis)
         .map_err(|error| invalid(error.to_string()))?;
 
     let mut providers = Vec::new();
@@ -47,7 +47,7 @@ where
         let provider_participant_value: Value =
             serde_json::from_str(&provider_binding.participant_json)
                 .map_err(|error| invalid(error.to_string()))?;
-        let provider_participant = parse_participant_v1(&provider_participant_value)
+        let provider_participant = parse_participant(&provider_participant_value)
             .map_err(|error| invalid(error.to_string()))?;
         let provider_api_values: BTreeMap<String, Value> =
             serde_json::from_str(&provider_binding.api_artifacts_json)
@@ -55,14 +55,13 @@ where
         let provider_apis = provider_api_values
             .values()
             .map(|value| {
-                parse_api_v1(value)
+                parse_api(value)
                     .map(|api| (api.id().to_owned(), api))
                     .map_err(|error| invalid(error.to_string()))
             })
             .collect::<Result<BTreeMap<_, _>, _>>()?;
-        let provider =
-            trellis_protocol::resolve_participant_v1(&provider_participant, &provider_apis)
-                .map_err(|error| invalid(error.to_string()))?;
+        let provider = trellis_protocol::resolve_participant(&provider_participant, &provider_apis)
+            .map_err(|error| invalid(error.to_string()))?;
         providers.extend(provider.implemented_apis().iter().map(|implementation| {
             (
                 implementation.provided().api().to_owned(),
@@ -128,7 +127,7 @@ where
 {
     let participant: Value = serde_json::from_str(&binding.participant_json)
         .map_err(|error| invalid(error.to_string()))?;
-    parse_participant_v1(&participant).map_err(|error| invalid(error.to_string()))?;
+    parse_participant(&participant).map_err(|error| invalid(error.to_string()))?;
     let api_values: BTreeMap<String, Value> = serde_json::from_str(&binding.api_artifacts_json)
         .map_err(|error| invalid(error.to_string()))?;
     let jetstream = jetstream::new(client.clone());
@@ -318,7 +317,7 @@ where
                 ))
             })?;
             let api =
-                parse_api_v1(api_values.get(api_id).ok_or_else(|| {
+                parse_api(api_values.get(api_id).ok_or_else(|| {
                     invalid(format!("event consumer API {api_id} is unavailable"))
                 })?)
                 .map_err(|error| invalid(error.to_string()))?;
@@ -436,7 +435,7 @@ where
 {
     let participant: Value = serde_json::from_str(&binding.participant_json)
         .map_err(|error| invalid(error.to_string()))?;
-    parse_participant_v1(&participant).map_err(|error| invalid(error.to_string()))?;
+    parse_participant(&participant).map_err(|error| invalid(error.to_string()))?;
     let mut evidence = Vec::new();
     add_state_evidence(&mut evidence, binding, principal_id, &participant, now);
     validate_resource_evidence(&evidence)?;

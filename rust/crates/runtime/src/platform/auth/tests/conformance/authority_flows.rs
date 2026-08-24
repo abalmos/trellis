@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 
 use serde_json::{json, Value};
-use trellis_protocol::{parse_api_v1, ParticipantKindV1};
+use trellis_protocol::{parse_api, ParticipantKind};
 
 use super::fixtures::{digest, participant_fixture_for, NOW};
 use crate::platform::auth::application::repository::{
@@ -43,8 +43,8 @@ pub(super) async fn exercise_authority_flows(
         claimed_until: None,
         last_error: None,
     };
-    let device_fixture = participant_fixture_for(ParticipantKindV1::Device, "example.device")?;
-    let service_fixture = participant_fixture_for(ParticipantKindV1::Service, "example.service")?;
+    let device_fixture = participant_fixture_for(ParticipantKind::Device, "example.device")?;
+    let service_fixture = participant_fixture_for(ParticipantKind::Service, "example.service")?;
     let device_principal = store
         .get_principal("dev_companion")
         .await?
@@ -221,7 +221,7 @@ pub(super) async fn exercise_authority_flows(
         authority_id: superseded_proposal.authority_id.clone(),
         deployment_id: "dep_companion".to_owned(),
         participant_id: superseded_proposal.participant_id.clone(),
-        participant_kind: ParticipantKindV1::Device,
+        participant_kind: ParticipantKind::Device,
         participant_artifact_digest: superseded_proposal.participant_artifact_digest.clone(),
         accepted_needs_digest: superseded_proposal.participant_needs_digest.clone(),
         desired_grant_set: superseded_proposal.proposed_grant_set.clone(),
@@ -489,7 +489,7 @@ pub(super) async fn exercise_authority_flows(
         "properties": { "added": { "type": "string" } }
     });
     compatible_participant["uses"]["required"]["requiredApi"]["apiDigest"] =
-        json!(parse_api_v1(&api_values["required.api@v1"])?.digest()?);
+        json!(parse_api(&api_values["required.api@v1"])?.digest()?);
     let mut compatible_api_artifacts = api_values.values().cloned().collect::<Vec<_>>();
     compatible_api_artifacts.push(compatible_api_artifacts[0].clone());
     let compatible_input = PresentDeploymentAuthorityInput {
@@ -530,7 +530,7 @@ pub(super) async fn exercise_authority_flows(
         "required": ["changed"],
         "properties": { "changed": { "type": "string" } }
     });
-    let incompatible_api = parse_api_v1(&incompatible_apis["required.api@v1"])?;
+    let incompatible_api = parse_api(&incompatible_apis["required.api@v1"])?;
     compatible_participant["uses"]["required"]["requiredApi"]["apiDigest"] =
         json!(incompatible_api.digest()?);
     let migration = match service

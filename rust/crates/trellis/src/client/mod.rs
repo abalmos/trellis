@@ -25,12 +25,11 @@ pub use authorization::AuthorizationRegistryBinding;
 pub use authorization::IntegrationTestAuthorizationIoCounters;
 pub use authorization::{
     AuthorizationClientState, AuthorizationClientTrustState, AuthorizationContextBundle,
-    AuthorizationContextCache, AuthorizationContextStore, AuthorizationEventVerificationInput,
-    AuthorizationRequestVerificationInput, AuthorizationRoutingMaterial,
+    AuthorizationContextCache, AuthorizationContextStore, AuthorizationRoutingMaterial,
     AuthorizationSessionBinding, AuthorizationTrustBundle, AuthorizationTrustPolicy,
-    AuthorizationVerificationCore, AuthorizationVerificationError, FileAuthorizationContextStore,
-    MemoryAuthorizationContextStore, VerifiedAuthorizationEvent, VerifiedAuthorizationRequest,
-    VerifiedCaller,
+    AuthorizationVerificationCore, AuthorizationVerificationError, EventVerificationInput,
+    FileAuthorizationContextStore, MemoryAuthorizationContextStore, RequestVerificationInput,
+    VerifiedAuthorizationEvent, VerifiedAuthorizationRequest, VerifiedCaller,
 };
 #[cfg(feature = "runtime-internals")]
 pub use authorization::{RuntimeAuthorizationIoCounters, RuntimeAuthorizationTrust};

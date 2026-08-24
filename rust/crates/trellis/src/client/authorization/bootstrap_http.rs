@@ -1,5 +1,5 @@
 use serde_json::Value;
-use trellis_protocol::{parse_authorization_context_v1, SignedAuthorizationContextV1};
+use trellis_protocol::{parse_authorization_context, SignedAuthorizationContext};
 
 use super::super::TrellisClientError;
 
@@ -58,7 +58,7 @@ impl BootstrapHttp {
 /// Parse the signed context from an installed bundle.
 pub(crate) fn persisted_signed_context(
     bundle: &super::types::AuthorizationContextBundle,
-) -> Result<SignedAuthorizationContextV1, TrellisClientError> {
-    parse_authorization_context_v1(&bundle.context)
+) -> Result<SignedAuthorizationContext, TrellisClientError> {
+    parse_authorization_context(&bundle.context)
         .map_err(|error| TrellisClientError::Bootstrap(error.to_string()))
 }

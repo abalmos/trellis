@@ -357,7 +357,7 @@ fn native_builder_keeps_protocol_subjects_derived() {
         "implements": {
             "self": {
                 "api": "example.api@v1",
-                "apiDigest": trellis_protocol::parse_api_v1(&api)
+                "apiDigest": trellis_protocol::parse_api(&api)
                     .unwrap()
                     .digest()
                     .unwrap()

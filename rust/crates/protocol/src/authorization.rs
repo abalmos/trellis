@@ -1,6 +1,6 @@
 //! Pure signed authorization-context and request-proof protocol.
 //!
-//! Trellis pins an [`AuthorizationTrustRootV1`]. That root signs a
+//! Trellis pins an [`AuthorizationTrustRoot`]. That root signs a
 //! generation-numbered issuer manifest containing the authorized issuer keys.
 //! An issuer signs short-lived authorization contexts, and the session key bound
 //! into a verified context signs each exact request. Verification requires no network,
@@ -24,19 +24,19 @@
 //! use ed25519_dalek::SigningKey;
 //! use serde_json::Map;
 //! use trellis_protocol::{
-//!     sign_authorization_context_v1, sign_authorization_event, sign_authorization_request,
-//!     sign_issuer_manifest_v1,
-//!     verify_authorization_context_v1, verify_authorization_event,
+//!     sign_authorization_context, sign_authorization_event, sign_authorization_request,
+//!     sign_issuer_manifest,
+//!     verify_authorization_context, verify_authorization_event,
 //!     verify_authorization_request,
-//!     verify_issuer_manifest_v1, ApiSurfaceKindV1, AuthorizationAuthorityKindV1,
-//!     AuthorizationAuthorityRefV1, AuthorizationIssuerManifestEntryV1,
-//!     AuthorizationParticipantV1,
-//!     AuthorizationPrincipalKindV1, AuthorizationPrincipalV1,
-//!     AuthorizationEventVerificationInputV1, AuthorizationRequestVerificationInputV1,
-//!     AuthorizationTrustRootV1, AuthorizationVerificationPolicyV1, GrantSetV1,
-//!     ParticipantKindV1, PermissionActionV1, PermissionAtomV1,
-//!     PermissionTargetV1, UnsignedAuthorizationContextV1,
-//!     UnsignedAuthorizationIssuerManifestV1, AUTHORIZATION_CONTEXT_FORMAT_V1,
+//!     verify_issuer_manifest, ApiSurfaceKind, AuthorizationAuthorityKind,
+//!     AuthorizationAuthorityRef, AuthorizationIssuerManifestEntry,
+//!     AuthorizationParticipant,
+//!     AuthorizationPrincipalKind, AuthorizationPrincipal,
+//!     AuthorizationEventVerificationInput, AuthorizationRequestVerificationInput,
+//!     AuthorizationTrustRoot, AuthorizationVerificationPolicy, GrantSet,
+//!     ParticipantKind, PermissionAction, PermissionAtom,
+//!     PermissionTarget, UnsignedAuthorizationContext,
+//!     UnsignedAuthorizationIssuerManifest, AUTHORIZATION_CONTEXT_FORMAT_V1,
 //!     AUTHORIZATION_ISSUER_MANIFEST_FORMAT_V1,
 //! };
 //! use sha2::{Digest as _, Sha256};
@@ -48,9 +48,9 @@
 //! let key_id = |key: &SigningKey| {
 //!     URL_SAFE_NO_PAD.encode(Sha256::digest(key.verifying_key().as_bytes()))
 //! };
-//! let root = AuthorizationTrustRootV1::new("trellis-test", encode_key(&root_key))?;
-//! let manifest = sign_issuer_manifest_v1(
-//!     UnsignedAuthorizationIssuerManifestV1 {
+//! let root = AuthorizationTrustRoot::new("trellis-test", encode_key(&root_key))?;
+//! let manifest = sign_issuer_manifest(
+//!     UnsignedAuthorizationIssuerManifest {
 //!         format: AUTHORIZATION_ISSUER_MANIFEST_FORMAT_V1.into(),
 //!         authority: root.authority().into(),
 //!         root_key_id: root.key_id().into(),
@@ -58,7 +58,7 @@
 //!         issued_at: 1_000,
 //!         not_before: 1_000,
 //!         expires_at: 1_500,
-//!         issuers: vec![AuthorizationIssuerManifestEntryV1 {
+//!         issuers: vec![AuthorizationIssuerManifestEntry {
 //!             key_id: key_id(&issuer_key),
 //!             public_key: encode_key(&issuer_key),
 //!         }],
@@ -67,36 +67,36 @@
 //!     },
 //!     &root_key,
 //! )?;
-//! let policy = AuthorizationVerificationPolicyV1::new(1_100, 30, 300, 16_384, 16, 16, 7)?;
-//! let manifest = verify_issuer_manifest_v1(&root, &manifest, &policy)?;
-//! let permission = PermissionAtomV1::new(
-//!     PermissionTargetV1::api_surface(
+//! let policy = AuthorizationVerificationPolicy::new(1_100, 30, 300, 16_384, 16, 16, 7)?;
+//! let manifest = verify_issuer_manifest(&root, &manifest, &policy)?;
+//! let permission = PermissionAtom::new(
+//!     PermissionTarget::api_surface(
 //!         "documents@v1",
-//!         ApiSurfaceKindV1::Rpc,
+//!         ApiSurfaceKind::Rpc,
 //!         "Documents.Get",
 //!     )?,
-//!     PermissionActionV1::Call,
+//!     PermissionAction::Call,
 //! )?;
-//! let context = sign_authorization_context_v1(
-//!     UnsignedAuthorizationContextV1 {
+//! let context = sign_authorization_context(
+//!     UnsignedAuthorizationContext {
 //!         format: AUTHORIZATION_CONTEXT_FORMAT_V1.into(),
 //!         authority: root.authority().into(),
 //!         issuer_key_id: key_id(&issuer_key),
 //!         issuer_manifest_generation: 7,
 //!         session_id: "ses_example".into(),
 //!         session_key: encode_key(&session_key),
-//!         principal: AuthorizationPrincipalV1 {
-//!             kind: AuthorizationPrincipalKindV1::User,
+//!         principal: AuthorizationPrincipal {
+//!             kind: AuthorizationPrincipalKind::User,
 //!             id: "usr_example".into(),
 //!         },
-//!         participant: AuthorizationParticipantV1 {
-//!             kind: ParticipantKindV1::App,
+//!         participant: AuthorizationParticipant {
+//!             kind: ParticipantKind::App,
 //!             id: "documents-web".into(),
 //!             artifact_digest: URL_SAFE_NO_PAD.encode([4; 32]),
 //!             needs_digest: URL_SAFE_NO_PAD.encode([5; 32]),
 //!         },
-//!         authority_ref: AuthorizationAuthorityRefV1 {
-//!             kind: AuthorizationAuthorityKindV1::Identity,
+//!         authority_ref: AuthorizationAuthorityRef {
+//!             kind: AuthorizationAuthorityKind::Identity,
 //!             id: "usr_example".into(),
 //!             version: 1,
 //!         },
@@ -106,14 +106,14 @@
 //!         issued_at: 1_100,
 //!         not_before: 1_100,
 //!         expires_at: 1_300,
-//!         grant_set: GrantSetV1::new(vec![permission.clone()]),
+//!         grant_set: GrantSet::new(vec![permission.clone()]),
 //!         capabilities: vec![],
 //!         extensions: Map::new(),
 //!         critical: vec![],
 //!     },
 //!     &issuer_key,
 //! )?;
-//! let context = verify_authorization_context_v1(&root, &manifest, &context, &policy)?;
+//! let context = verify_authorization_context(&root, &manifest, &context, &policy)?;
 //! assert!(context.allows(&permission));
 //! let proof = sign_authorization_request(
 //!     context.context_digest(),
@@ -125,7 +125,7 @@
 //!     &session_key,
 //! )?;
 //! let request_permissions = [permission.clone()];
-//! let request = verify_authorization_request(AuthorizationRequestVerificationInputV1 {
+//! let request = verify_authorization_request(AuthorizationRequestVerificationInput {
 //!     context: &context,
 //!     subject: "rpc.v1.Documents.Get",
 //!     reply_subject: Some("_INBOX.example.reply"),
@@ -147,7 +147,7 @@
 //!     &session_key,
 //! )?;
 //! let event_permissions = [permission];
-//! let event = verify_authorization_event(AuthorizationEventVerificationInputV1 {
+//! let event = verify_authorization_event(AuthorizationEventVerificationInput {
 //!     context: &context,
 //!     subject: "events.v1.Documents.Changed.doc-1",
 //!     raw_payload: br#"{"id":"doc-1"}"#,
@@ -171,7 +171,7 @@ use serde_json::{Map, Value};
 use sha2::{Digest as _, Sha256};
 
 use crate::{
-    canonicalize_json, AuthorizationErrorCodeV1, GrantSetV1, ParticipantKindV1, PermissionAtomV1,
+    canonicalize_json, AuthorizationErrorCode, GrantSet, ParticipantKind, PermissionAtom,
     ProtocolError,
 };
 
@@ -192,7 +192,7 @@ const MAXIMUM_EVENT_ID_BYTES: usize = 256;
 const MAXIMUM_SAFE_JSON_INTEGER: i64 = 9_007_199_254_740_991;
 
 fn authorization_error<'a>(
-    code: AuthorizationErrorCodeV1,
+    code: AuthorizationErrorCode,
     tokens: impl IntoIterator<Item = &'a str>,
     message: impl Into<String>,
 ) -> ProtocolError {
@@ -214,18 +214,18 @@ fn encode_base64url(bytes: &[u8]) -> String {
 fn decode_base64url<const N: usize>(
     encoded: &str,
     path: &[&str],
-    code: AuthorizationErrorCodeV1,
+    code: AuthorizationErrorCode,
 ) -> Result<[u8; N], ProtocolError> {
     if encoded.contains('=') {
         return Err(authorization_error(
-            AuthorizationErrorCodeV1::InvalidEncoding,
+            AuthorizationErrorCode::InvalidEncoding,
             path.iter().copied(),
             "padded base64url is not accepted",
         ));
     }
     let decoded = URL_SAFE_NO_PAD.decode(encoded).map_err(|_| {
         authorization_error(
-            AuthorizationErrorCodeV1::InvalidEncoding,
+            AuthorizationErrorCode::InvalidEncoding,
             path.iter().copied(),
             "value is not unpadded base64url",
         )
@@ -249,7 +249,7 @@ fn decode_base64url<const N: usize>(
 fn decode_verifying_key(
     encoded: &str,
     path: &[&str],
-    code: AuthorizationErrorCodeV1,
+    code: AuthorizationErrorCode,
 ) -> Result<VerifyingKey, ProtocolError> {
     VerifyingKey::from_bytes(&decode_base64url::<32>(encoded, path, code)?).map_err(|_| {
         authorization_error(
@@ -265,12 +265,12 @@ fn derived_key_id(key: &VerifyingKey) -> String {
 }
 
 fn check_key_id(declared: &str, key: &VerifyingKey, path: &[&str]) -> Result<(), ProtocolError> {
-    decode_base64url::<32>(declared, path, AuthorizationErrorCodeV1::InvalidKeyId)?;
+    decode_base64url::<32>(declared, path, AuthorizationErrorCode::InvalidKeyId)?;
     if declared == derived_key_id(key) {
         Ok(())
     } else {
         Err(authorization_error(
-            AuthorizationErrorCodeV1::InvalidKeyId,
+            AuthorizationErrorCode::InvalidKeyId,
             path.iter().copied(),
             "declared key id does not match the public key",
         ))
@@ -282,7 +282,7 @@ fn validate_safe_i64(value: i64, path: &[&str]) -> Result<(), ProtocolError> {
         Ok(())
     } else {
         Err(authorization_error(
-            AuthorizationErrorCodeV1::UnsafeJsonInteger,
+            AuthorizationErrorCode::UnsafeJsonInteger,
             path.iter().copied(),
             "integer must be within the interoperable JSON safe-integer range",
         ))
@@ -294,7 +294,7 @@ fn validate_safe_u64(value: u64, path: &[&str]) -> Result<(), ProtocolError> {
         Ok(())
     } else {
         Err(authorization_error(
-            AuthorizationErrorCodeV1::UnsafeJsonInteger,
+            AuthorizationErrorCode::UnsafeJsonInteger,
             path.iter().copied(),
             "integer must be within the interoperable JSON safe-integer range",
         ))
@@ -318,7 +318,7 @@ fn validate_safe_extension_integers(
             };
             if unsafe_integer {
                 return Err(ProtocolError::Authorization {
-                    code: AuthorizationErrorCodeV1::UnsafeJsonInteger,
+                    code: AuthorizationErrorCode::UnsafeJsonInteger,
                     path: Box::new(PointerBuf::from_tokens(path.iter().map(String::as_str))),
                     message: "integer must be within the interoperable JSON safe-integer range"
                         .to_owned(),
@@ -347,7 +347,7 @@ fn validate_safe_extension_integers(
 fn push_length_prefixed(output: &mut Vec<u8>, bytes: &[u8]) -> Result<(), ProtocolError> {
     let length = u32::try_from(bytes.len()).map_err(|_| {
         authorization_error(
-            AuthorizationErrorCodeV1::InvalidFormat,
+            AuthorizationErrorCode::InvalidFormat,
             std::iter::empty::<&str>(),
             "signature input component exceeds u32 length",
         )
@@ -376,7 +376,7 @@ fn validate_text(value: &str, path: &[&str]) -> Result<(), ProtocolError> {
         || value.chars().any(|character| character.is_ascii_control())
     {
         return Err(authorization_error(
-            AuthorizationErrorCodeV1::InvalidFormat,
+            AuthorizationErrorCode::InvalidFormat,
             path.iter().copied(),
             "value must be nonempty protocol-safe text",
         ));
@@ -394,7 +394,7 @@ fn validate_inbox_prefix(value: &str) -> Result<(), ProtocolError> {
         || value.chars().any(char::is_whitespace)
     {
         return Err(authorization_error(
-            AuthorizationErrorCodeV1::InvalidFormat,
+            AuthorizationErrorCode::InvalidFormat,
             ["inboxPrefix"],
             "inbox prefix must contain only safe literal NATS tokens",
         ));
@@ -417,7 +417,7 @@ fn validate_extensions(
     }
     if !is_utf16_strictly_sorted(critical) {
         return Err(authorization_error(
-            AuthorizationErrorCodeV1::NonCanonicalSet,
+            AuthorizationErrorCode::NonCanonicalSet,
             ["critical"],
             "critical extension names must be UTF-16 sorted and unique",
         ));
@@ -428,14 +428,14 @@ fn validate_extensions(
         .find(|(_, name)| !extensions.contains_key(name.as_str()))
     {
         return Err(authorization_error(
-            AuthorizationErrorCodeV1::InvalidFormat,
+            AuthorizationErrorCode::InvalidFormat,
             ["critical", &index.to_string()],
             "critical extension is absent from extensions",
         ));
     }
     if let Some(name) = critical.first() {
         return Err(authorization_error(
-            AuthorizationErrorCodeV1::UnknownCriticalExtension,
+            AuthorizationErrorCode::UnknownCriticalExtension,
             ["extensions", name],
             "critical extension is not understood by this protocol version",
         ));
@@ -481,7 +481,7 @@ fn validate_window(
         Ok(())
     } else {
         Err(authorization_error(
-            AuthorizationErrorCodeV1::InvalidValidityWindow,
+            AuthorizationErrorCode::InvalidValidityWindow,
             prefix.iter().copied().chain(["expiresAt"]),
             "validity must satisfy notBefore <= issuedAt <= expiresAt and be nonempty",
         ))
@@ -492,7 +492,7 @@ fn verify_signature(
     key: &VerifyingKey,
     digest: &[u8; 32],
     encoded: &str,
-    code: AuthorizationErrorCodeV1,
+    code: AuthorizationErrorCode,
 ) -> Result<(), ProtocolError> {
     let bytes = decode_base64url::<64>(encoded, &["signature"], code)?;
     key.verify_strict(digest, &Signature::from_bytes(&bytes))
@@ -501,7 +501,7 @@ fn verify_signature(
 
 /// Explicit security policy supplied to pure authorization verification.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct AuthorizationVerificationPolicyV1 {
+pub struct AuthorizationVerificationPolicy {
     /// Verification time supplied by the caller.
     pub now_unix_seconds: i64,
     /// Allowed symmetric time skew.
@@ -518,7 +518,7 @@ pub struct AuthorizationVerificationPolicyV1 {
     pub minimum_manifest_generation: u64,
 }
 
-impl AuthorizationVerificationPolicyV1 {
+impl AuthorizationVerificationPolicy {
     /// Construct an explicit verification policy.
     ///
     /// # Errors
@@ -547,7 +547,7 @@ impl AuthorizationVerificationPolicyV1 {
     }
 }
 
-fn validate_policy(policy: &AuthorizationVerificationPolicyV1) -> Result<(), ProtocolError> {
+fn validate_policy(policy: &AuthorizationVerificationPolicy) -> Result<(), ProtocolError> {
     validate_safe_i64(policy.now_unix_seconds, &["nowUnixSeconds"])?;
     validate_safe_u64(
         policy.minimum_manifest_generation,
@@ -559,7 +559,7 @@ fn validate_policy(policy: &AuthorizationVerificationPolicyV1) -> Result<(), Pro
         || policy.maximum_capabilities == 0
     {
         return Err(authorization_error(
-            AuthorizationErrorCodeV1::InvalidFormat,
+            AuthorizationErrorCode::InvalidFormat,
             std::iter::empty::<&str>(),
             "verification limits must be nonzero",
         ));
@@ -570,14 +570,14 @@ fn validate_policy(policy: &AuthorizationVerificationPolicyV1) -> Result<(), Pro
 /// A pinned Ed25519 authorization trust root.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
-pub struct AuthorizationTrustRootV1 {
+pub struct AuthorizationTrustRoot {
     format: String,
     authority: String,
     key_id: String,
     public_key: String,
 }
 
-impl AuthorizationTrustRootV1 {
+impl AuthorizationTrustRoot {
     /// Construct a trust root and derive its key id from the public key.
     ///
     /// # Errors
@@ -593,7 +593,7 @@ impl AuthorizationTrustRootV1 {
         let key = decode_verifying_key(
             &public_key,
             &["publicKey"],
-            AuthorizationErrorCodeV1::InvalidPublicKey,
+            AuthorizationErrorCode::InvalidPublicKey,
         )?;
         Ok(Self {
             format: AUTHORIZATION_TRUST_ROOT_FORMAT_V1.to_owned(),
@@ -612,16 +612,16 @@ impl AuthorizationTrustRootV1 {
     pub fn parse(value: &Value) -> Result<Self, ProtocolError> {
         #[derive(Deserialize)]
         #[serde(deny_unknown_fields, rename_all = "camelCase")]
-        struct WireTrustRootV1 {
+        struct WireTrustRoot {
             format: String,
             authority: String,
             key_id: String,
             public_key: String,
         }
 
-        let wire: WireTrustRootV1 = serde_json::from_value(value.clone()).map_err(|_| {
+        let wire: WireTrustRoot = serde_json::from_value(value.clone()).map_err(|_| {
             authorization_error(
-                AuthorizationErrorCodeV1::InvalidFormat,
+                AuthorizationErrorCode::InvalidFormat,
                 std::iter::empty::<&str>(),
                 "trust root has an invalid strict object shape",
             )
@@ -634,7 +634,7 @@ impl AuthorizationTrustRootV1 {
         };
         if root.format != AUTHORIZATION_TRUST_ROOT_FORMAT_V1 {
             return Err(authorization_error(
-                AuthorizationErrorCodeV1::InvalidFormat,
+                AuthorizationErrorCode::InvalidFormat,
                 ["format"],
                 "unsupported trust-root format",
             ));
@@ -691,7 +691,7 @@ impl AuthorizationTrustRootV1 {
         decode_verifying_key(
             &self.public_key,
             &["publicKey"],
-            AuthorizationErrorCodeV1::InvalidPublicKey,
+            AuthorizationErrorCode::InvalidPublicKey,
         )
     }
 }
@@ -699,7 +699,7 @@ impl AuthorizationTrustRootV1 {
 /// One directly root-authorized issuer key selected by a manifest.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
-pub struct AuthorizationIssuerManifestEntryV1 {
+pub struct AuthorizationIssuerManifestEntry {
     /// Content-derived issuer key id.
     pub key_id: String,
     /// Unpadded base64url Ed25519 issuer public key.
@@ -709,7 +709,7 @@ pub struct AuthorizationIssuerManifestEntryV1 {
 /// Unsigned root-authorized issuer registry fields.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
-pub struct UnsignedAuthorizationIssuerManifestV1 {
+pub struct UnsignedAuthorizationIssuerManifest {
     /// Wire format.
     pub format: String,
     /// Authority namespace.
@@ -725,7 +725,7 @@ pub struct UnsignedAuthorizationIssuerManifestV1 {
     /// Inclusive upper validity bound.
     pub expires_at: i64,
     /// Canonically ordered issuer entries.
-    pub issuers: Vec<AuthorizationIssuerManifestEntryV1>,
+    pub issuers: Vec<AuthorizationIssuerManifestEntry>,
     /// Signed extension values.
     pub extensions: Map<String, Value>,
     /// Canonical critical extension names.
@@ -735,15 +735,15 @@ pub struct UnsignedAuthorizationIssuerManifestV1 {
 /// Root-signed issuer manifest.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
-pub struct SignedAuthorizationIssuerManifestV1 {
+pub struct SignedAuthorizationIssuerManifest {
     /// Unsigned manifest fields.
     #[serde(flatten)]
-    pub unsigned: UnsignedAuthorizationIssuerManifestV1,
+    pub unsigned: UnsignedAuthorizationIssuerManifest,
     /// Root signature.
     pub signature: String,
 }
 
-impl SignedAuthorizationIssuerManifestV1 {
+impl SignedAuthorizationIssuerManifest {
     /// Return the digest of the complete signed canonical manifest.
     ///
     /// # Errors
@@ -756,15 +756,15 @@ impl SignedAuthorizationIssuerManifestV1 {
 
 /// A manifest whose root signature, generation, and current validity succeeded.
 #[derive(Clone, Debug)]
-pub struct VerifiedAuthorizationIssuerManifestV1 {
-    manifest: SignedAuthorizationIssuerManifestV1,
+pub struct VerifiedAuthorizationIssuerManifest {
+    manifest: SignedAuthorizationIssuerManifest,
     authority: String,
     root_key_id: String,
 }
 
-impl VerifiedAuthorizationIssuerManifestV1 {
+impl VerifiedAuthorizationIssuerManifest {
     /// Return the signed manifest.
-    pub fn manifest(&self) -> &SignedAuthorizationIssuerManifestV1 {
+    pub fn manifest(&self) -> &SignedAuthorizationIssuerManifest {
         &self.manifest
     }
 
@@ -798,8 +798,8 @@ impl VerifiedAuthorizationIssuerManifestV1 {
 /// # Errors
 ///
 /// Returns a JSON canonicalization error if serialization fails.
-pub fn issuer_manifest_signing_digest_v1(
-    manifest: &UnsignedAuthorizationIssuerManifestV1,
+pub fn issuer_manifest_signing_digest(
+    manifest: &UnsignedAuthorizationIssuerManifest,
 ) -> Result<[u8; 32], ProtocolError> {
     validate_manifest_fields(manifest)?;
     signed_json_digest(
@@ -814,18 +814,18 @@ pub fn issuer_manifest_signing_digest_v1(
 ///
 /// Returns [`ProtocolError::Authorization`] for invalid manifest structure, or
 /// a JSON canonicalization error.
-pub fn sign_issuer_manifest_v1(
-    manifest: UnsignedAuthorizationIssuerManifestV1,
+pub fn sign_issuer_manifest(
+    manifest: UnsignedAuthorizationIssuerManifest,
     root_key: &SigningKey,
-) -> Result<SignedAuthorizationIssuerManifestV1, ProtocolError> {
+) -> Result<SignedAuthorizationIssuerManifest, ProtocolError> {
     validate_manifest_fields(&manifest)?;
     check_key_id(
         &manifest.root_key_id,
         &root_key.verifying_key(),
         &["rootKeyId"],
     )?;
-    let digest = issuer_manifest_signing_digest_v1(&manifest)?;
-    Ok(SignedAuthorizationIssuerManifestV1 {
+    let digest = issuer_manifest_signing_digest(&manifest)?;
+    Ok(SignedAuthorizationIssuerManifest {
         unsigned: manifest,
         signature: encode_base64url(&root_key.sign(&digest).to_bytes()),
     })
@@ -837,13 +837,13 @@ pub fn sign_issuer_manifest_v1(
 ///
 /// Returns [`ProtocolError::Authorization`] for an invalid strict object shape,
 /// signature encoding, or intrinsic manifest invariant.
-pub fn parse_issuer_manifest_v1(
+pub fn parse_issuer_manifest(
     value: &Value,
-) -> Result<SignedAuthorizationIssuerManifestV1, ProtocolError> {
-    let manifest: SignedAuthorizationIssuerManifestV1 = serde_json::from_value(value.clone())
+) -> Result<SignedAuthorizationIssuerManifest, ProtocolError> {
+    let manifest: SignedAuthorizationIssuerManifest = serde_json::from_value(value.clone())
         .map_err(|_| {
             authorization_error(
-                AuthorizationErrorCodeV1::InvalidFormat,
+                AuthorizationErrorCode::InvalidFormat,
                 std::iter::empty::<&str>(),
                 "issuer manifest has an invalid strict object shape",
             )
@@ -852,17 +852,17 @@ pub fn parse_issuer_manifest_v1(
     decode_base64url::<64>(
         &manifest.signature,
         &["signature"],
-        AuthorizationErrorCodeV1::InvalidSignature,
+        AuthorizationErrorCode::InvalidSignature,
     )?;
     Ok(manifest)
 }
 
 fn validate_manifest_fields(
-    manifest: &UnsignedAuthorizationIssuerManifestV1,
+    manifest: &UnsignedAuthorizationIssuerManifest,
 ) -> Result<(), ProtocolError> {
     if manifest.format != AUTHORIZATION_ISSUER_MANIFEST_FORMAT_V1 || manifest.generation == 0 {
         return Err(authorization_error(
-            AuthorizationErrorCodeV1::InvalidFormat,
+            AuthorizationErrorCode::InvalidFormat,
             [if manifest.generation == 0 {
                 "generation"
             } else {
@@ -875,7 +875,7 @@ fn validate_manifest_fields(
     decode_base64url::<32>(
         &manifest.root_key_id,
         &["rootKeyId"],
-        AuthorizationErrorCodeV1::InvalidKeyId,
+        AuthorizationErrorCode::InvalidKeyId,
     )?;
     validate_safe_u64(manifest.generation, &["generation"])?;
     validate_window(
@@ -889,7 +889,7 @@ fn validate_manifest_fields(
         let key = decode_verifying_key(
             &entry.public_key,
             &["issuers", &path, "publicKey"],
-            AuthorizationErrorCodeV1::InvalidPublicKey,
+            AuthorizationErrorCode::InvalidPublicKey,
         )?;
         check_key_id(&entry.key_id, &key, &["issuers", &path, "keyId"])?;
     }
@@ -901,7 +901,7 @@ fn validate_manifest_fields(
             .is_lt()
     }) {
         return Err(authorization_error(
-            AuthorizationErrorCodeV1::NonCanonicalSet,
+            AuthorizationErrorCode::NonCanonicalSet,
             ["issuers"],
             "issuer entries must be UTF-16 sorted by unique key id",
         ));
@@ -915,24 +915,24 @@ fn validate_manifest_fields(
 ///
 /// Returns [`ProtocolError::Authorization`] for invalid structure, authority,
 /// rollback, validity, extensions, or root signature.
-pub fn verify_issuer_manifest_v1(
-    root: &AuthorizationTrustRootV1,
-    manifest: &SignedAuthorizationIssuerManifestV1,
-    policy: &AuthorizationVerificationPolicyV1,
-) -> Result<VerifiedAuthorizationIssuerManifestV1, ProtocolError> {
+pub fn verify_issuer_manifest(
+    root: &AuthorizationTrustRoot,
+    manifest: &SignedAuthorizationIssuerManifest,
+    policy: &AuthorizationVerificationPolicy,
+) -> Result<VerifiedAuthorizationIssuerManifest, ProtocolError> {
     validate_policy(policy)?;
     validate_manifest_fields(&manifest.unsigned)?;
     if manifest.unsigned.authority != root.authority || manifest.unsigned.root_key_id != root.key_id
     {
         return Err(authorization_error(
-            AuthorizationErrorCodeV1::WrongAuthority,
+            AuthorizationErrorCode::WrongAuthority,
             ["authority"],
             "manifest authority or root key id does not match the pinned root",
         ));
     }
     if manifest.unsigned.generation < policy.minimum_manifest_generation {
         return Err(authorization_error(
-            AuthorizationErrorCodeV1::ManifestRollback,
+            AuthorizationErrorCode::ManifestRollback,
             ["generation"],
             "manifest generation is below the accepted minimum",
         ));
@@ -941,25 +941,25 @@ pub fn verify_issuer_manifest_v1(
     let skew = i128::from(policy.allowed_clock_skew_seconds);
     if now + skew < i128::from(manifest.unsigned.not_before) {
         return Err(authorization_error(
-            AuthorizationErrorCodeV1::ManifestNotYetValid,
+            AuthorizationErrorCode::ManifestNotYetValid,
             ["notBefore"],
             "issuer manifest is not yet valid",
         ));
     }
     if now - skew > i128::from(manifest.unsigned.expires_at) {
         return Err(authorization_error(
-            AuthorizationErrorCodeV1::ManifestExpired,
+            AuthorizationErrorCode::ManifestExpired,
             ["expiresAt"],
             "issuer manifest has expired",
         ));
     }
     verify_signature(
         &root.verifying_key()?,
-        &issuer_manifest_signing_digest_v1(&manifest.unsigned)?,
+        &issuer_manifest_signing_digest(&manifest.unsigned)?,
         &manifest.signature,
-        AuthorizationErrorCodeV1::InvalidSignature,
+        AuthorizationErrorCode::InvalidSignature,
     )?;
-    Ok(VerifiedAuthorizationIssuerManifestV1 {
+    Ok(VerifiedAuthorizationIssuerManifest {
         authority: manifest.unsigned.authority.clone(),
         root_key_id: manifest.unsigned.root_key_id.clone(),
         manifest: manifest.clone(),
@@ -969,7 +969,7 @@ pub fn verify_issuer_manifest_v1(
 /// Stable principal classes represented by an authorization context.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub enum AuthorizationPrincipalKindV1 {
+pub enum AuthorizationPrincipalKind {
     /// A Trellis user account.
     User,
     /// A hosted service runtime.
@@ -981,9 +981,9 @@ pub enum AuthorizationPrincipalKindV1 {
 /// Principal identity bound into an authorization context.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
-pub struct AuthorizationPrincipalV1 {
+pub struct AuthorizationPrincipal {
     /// Principal class.
-    pub kind: AuthorizationPrincipalKindV1,
+    pub kind: AuthorizationPrincipalKind,
     /// Stable authorization subject id.
     pub id: String,
 }
@@ -991,9 +991,9 @@ pub struct AuthorizationPrincipalV1 {
 /// Exact participant artifact and accepted-needs evidence.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
-pub struct AuthorizationParticipantV1 {
+pub struct AuthorizationParticipant {
     /// Participant class.
-    pub kind: ParticipantKindV1,
+    pub kind: ParticipantKind,
     /// Stable participant id.
     pub id: String,
     /// Digest of the exact participant artifact.
@@ -1005,7 +1005,7 @@ pub struct AuthorizationParticipantV1 {
 /// Durable authority record classes.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub enum AuthorizationAuthorityKindV1 {
+pub enum AuthorizationAuthorityKind {
     /// Delegated identity authority.
     Identity,
     /// Deployment-owned authority.
@@ -1015,9 +1015,9 @@ pub enum AuthorizationAuthorityKindV1 {
 /// Durable authority record and version used to materialize a context.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
-pub struct AuthorizationAuthorityRefV1 {
+pub struct AuthorizationAuthorityRef {
     /// Authority class.
-    pub kind: AuthorizationAuthorityKindV1,
+    pub kind: AuthorizationAuthorityKind,
     /// Durable authority record id.
     pub id: String,
     /// Positive desired-authority version.
@@ -1027,7 +1027,7 @@ pub struct AuthorizationAuthorityRefV1 {
 /// Complete unsigned authorization-context fields.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
-pub struct UnsignedAuthorizationContextV1 {
+pub struct UnsignedAuthorizationContext {
     /// Wire format.
     pub format: String,
     /// Authority namespace.
@@ -1041,11 +1041,11 @@ pub struct UnsignedAuthorizationContextV1 {
     /// Session Ed25519 public key.
     pub session_key: String,
     /// Stable caller principal.
-    pub principal: AuthorizationPrincipalV1,
+    pub principal: AuthorizationPrincipal,
     /// Exact participant evidence.
-    pub participant: AuthorizationParticipantV1,
+    pub participant: AuthorizationParticipant,
     /// Durable source authority and version.
-    pub authority_ref: AuthorizationAuthorityRefV1,
+    pub authority_ref: AuthorizationAuthorityRef,
     /// Deployment id for service and applicable device contexts.
     pub deployment_id: Option<String>,
     /// Runtime instance id for service and applicable device contexts.
@@ -1059,7 +1059,7 @@ pub struct UnsignedAuthorizationContextV1 {
     /// Inclusive upper validity bound.
     pub expires_at: i64,
     /// Exact machine permission authority.
-    pub grant_set: GrantSetV1,
+    pub grant_set: GrantSet,
     /// Canonical platform capability keys.
     pub capabilities: Vec<String>,
     /// Signed extension values.
@@ -1071,15 +1071,15 @@ pub struct UnsignedAuthorizationContextV1 {
 /// Issuer-signed authorization context.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
-pub struct SignedAuthorizationContextV1 {
+pub struct SignedAuthorizationContext {
     /// Unsigned context fields.
     #[serde(flatten)]
-    pub unsigned: UnsignedAuthorizationContextV1,
+    pub unsigned: UnsignedAuthorizationContext,
     /// Issuer signature.
     pub signature: String,
 }
 
-impl SignedAuthorizationContextV1 {
+impl SignedAuthorizationContext {
     /// Return the digest of complete signed canonical context JSON.
     ///
     /// # Errors
@@ -1095,8 +1095,8 @@ impl SignedAuthorizationContextV1 {
 /// # Errors
 ///
 /// Returns a JSON canonicalization error if serialization fails.
-pub fn authorization_context_signing_digest_v1(
-    context: &UnsignedAuthorizationContextV1,
+pub fn authorization_context_signing_digest(
+    context: &UnsignedAuthorizationContext,
 ) -> Result<[u8; 32], ProtocolError> {
     validate_context_fields(context, None)?;
     signed_json_digest(
@@ -1111,23 +1111,23 @@ pub fn authorization_context_signing_digest_v1(
 ///
 /// Returns [`ProtocolError::Authorization`] for invalid context structure, or a
 /// JSON canonicalization error.
-pub fn sign_authorization_context_v1(
-    context: UnsignedAuthorizationContextV1,
+pub fn sign_authorization_context(
+    context: UnsignedAuthorizationContext,
     issuer_key: &SigningKey,
-) -> Result<SignedAuthorizationContextV1, ProtocolError> {
+) -> Result<SignedAuthorizationContext, ProtocolError> {
     validate_context_fields(&context, None)?;
     decode_verifying_key(
         &context.session_key,
         &["sessionKey"],
-        AuthorizationErrorCodeV1::InvalidSessionKey,
+        AuthorizationErrorCode::InvalidSessionKey,
     )?;
     check_key_id(
         &context.issuer_key_id,
         &issuer_key.verifying_key(),
         &["issuerKeyId"],
     )?;
-    let digest = authorization_context_signing_digest_v1(&context)?;
-    Ok(SignedAuthorizationContextV1 {
+    let digest = authorization_context_signing_digest(&context)?;
+    Ok(SignedAuthorizationContext {
         unsigned: context,
         signature: encode_base64url(&issuer_key.sign(&digest).to_bytes()),
     })
@@ -1139,26 +1139,26 @@ pub fn sign_authorization_context_v1(
 ///
 /// Returns [`ProtocolError::Authorization`] for unknown top-level fields,
 /// malformed keys/signatures, or noncanonical set-like arrays.
-pub fn parse_authorization_context_v1(
+pub fn parse_authorization_context(
     value: &Value,
-) -> Result<SignedAuthorizationContextV1, ProtocolError> {
+) -> Result<SignedAuthorizationContext, ProtocolError> {
     #[derive(Deserialize)]
     #[serde(deny_unknown_fields, rename_all = "camelCase")]
-    struct WireSignedAuthorizationContextV1 {
+    struct WireSignedAuthorizationContext {
         #[serde(flatten)]
-        unsigned: UnsignedAuthorizationContextV1,
+        unsigned: UnsignedAuthorizationContext,
         signature: String,
     }
 
-    let wire: WireSignedAuthorizationContextV1 =
+    let wire: WireSignedAuthorizationContext =
         serde_json::from_value(value.clone()).map_err(|_| {
             authorization_error(
-                AuthorizationErrorCodeV1::InvalidFormat,
+                AuthorizationErrorCode::InvalidFormat,
                 std::iter::empty::<&str>(),
                 "authorization context has an invalid strict object shape",
             )
         })?;
-    let context = SignedAuthorizationContextV1 {
+    let context = SignedAuthorizationContext {
         unsigned: wire.unsigned,
         signature: wire.signature,
     };
@@ -1166,23 +1166,23 @@ pub fn parse_authorization_context_v1(
     decode_verifying_key(
         &context.unsigned.session_key,
         &["sessionKey"],
-        AuthorizationErrorCodeV1::InvalidSessionKey,
+        AuthorizationErrorCode::InvalidSessionKey,
     )?;
     decode_base64url::<64>(
         &context.signature,
         &["signature"],
-        AuthorizationErrorCodeV1::InvalidSignature,
+        AuthorizationErrorCode::InvalidSignature,
     )?;
     Ok(context)
 }
 
 fn validate_context_fields(
-    context: &UnsignedAuthorizationContextV1,
+    context: &UnsignedAuthorizationContext,
     authored: Option<&Value>,
 ) -> Result<(), ProtocolError> {
     if context.format != AUTHORIZATION_CONTEXT_FORMAT_V1 {
         return Err(authorization_error(
-            AuthorizationErrorCodeV1::InvalidFormat,
+            AuthorizationErrorCode::InvalidFormat,
             ["format"],
             "unsupported authorization-context format",
         ));
@@ -1195,7 +1195,7 @@ fn validate_context_fields(
     decode_base64url::<32>(
         &context.issuer_key_id,
         &["issuerKeyId"],
-        AuthorizationErrorCodeV1::InvalidKeyId,
+        AuthorizationErrorCode::InvalidKeyId,
     )?;
     validate_safe_u64(
         context.issuer_manifest_generation,
@@ -1203,7 +1203,7 @@ fn validate_context_fields(
     )?;
     if context.issuer_manifest_generation == 0 {
         return Err(authorization_error(
-            AuthorizationErrorCodeV1::InvalidFormat,
+            AuthorizationErrorCode::InvalidFormat,
             ["issuerManifestGeneration"],
             "issuer manifest generation must be positive",
         ));
@@ -1211,47 +1211,47 @@ fn validate_context_fields(
     validate_safe_u64(context.authority_ref.version, &["authorityRef", "version"])?;
     if context.authority_ref.version == 0 {
         return Err(authorization_error(
-            AuthorizationErrorCodeV1::InvalidFormat,
+            AuthorizationErrorCode::InvalidFormat,
             ["authorityRef", "version"],
             "authority version must be positive",
         ));
     }
     match context.principal.kind {
-        AuthorizationPrincipalKindV1::User => {
+        AuthorizationPrincipalKind::User => {
             if !matches!(
                 context.participant.kind,
-                ParticipantKindV1::App | ParticipantKindV1::Agent
-            ) || context.authority_ref.kind != AuthorizationAuthorityKindV1::Identity
+                ParticipantKind::App | ParticipantKind::Agent
+            ) || context.authority_ref.kind != AuthorizationAuthorityKind::Identity
                 || context.deployment_id.is_some()
                 || context.instance_id.is_some()
             {
                 return Err(authorization_error(
-                    AuthorizationErrorCodeV1::InvalidFormat,
+                    AuthorizationErrorCode::InvalidFormat,
                     ["authorityRef", "kind"],
                     "user contexts require identity authority, an app or agent, and no deployment instance",
                 ));
             }
         }
-        AuthorizationPrincipalKindV1::Service => {
-            if context.participant.kind != ParticipantKindV1::Service
-                || context.authority_ref.kind != AuthorizationAuthorityKindV1::Deployment
+        AuthorizationPrincipalKind::Service => {
+            if context.participant.kind != ParticipantKind::Service
+                || context.authority_ref.kind != AuthorizationAuthorityKind::Deployment
                 || context.deployment_id.is_none()
                 || context.instance_id.is_none()
             {
                 return Err(authorization_error(
-                    AuthorizationErrorCodeV1::InvalidFormat,
+                    AuthorizationErrorCode::InvalidFormat,
                     ["participant"],
                     "service contexts require service participant, deploymentId, and instanceId",
                 ));
             }
         }
-        AuthorizationPrincipalKindV1::Device => {
-            if context.participant.kind != ParticipantKindV1::Device
-                || context.authority_ref.kind != AuthorizationAuthorityKindV1::Deployment
+        AuthorizationPrincipalKind::Device => {
+            if context.participant.kind != ParticipantKind::Device
+                || context.authority_ref.kind != AuthorizationAuthorityKind::Deployment
                 || context.deployment_id.is_some() != context.instance_id.is_some()
             {
                 return Err(authorization_error(
-                    AuthorizationErrorCodeV1::InvalidFormat,
+                    AuthorizationErrorCode::InvalidFormat,
                     ["authorityRef", "kind"],
                     "device contexts require deployment authority and paired deployment/instance ids",
                 ));
@@ -1271,7 +1271,7 @@ fn validate_context_fields(
         decode_base64url::<32>(
             digest,
             &["participant", field],
-            AuthorizationErrorCodeV1::InvalidEncoding,
+            AuthorizationErrorCode::InvalidEncoding,
         )?;
     }
     validate_inbox_prefix(&context.inbox_prefix)?;
@@ -1286,7 +1286,7 @@ fn validate_context_fields(
     }
     if !is_utf16_strictly_sorted(&context.capabilities) {
         return Err(authorization_error(
-            AuthorizationErrorCodeV1::NonCanonicalSet,
+            AuthorizationErrorCode::NonCanonicalSet,
             ["capabilities"],
             "capabilities must be UTF-16 sorted and unique",
         ));
@@ -1294,7 +1294,7 @@ fn validate_context_fields(
     if let Some(authored_grant) = authored.and_then(|value| value.get("grantSet")) {
         if serde_json::to_value(&context.grant_set)? != *authored_grant {
             return Err(authorization_error(
-                AuthorizationErrorCodeV1::NonCanonicalSet,
+                AuthorizationErrorCode::NonCanonicalSet,
                 ["grantSet", "permissions"],
                 "permission atoms must already be in canonical order without duplicates",
             ));
@@ -1314,7 +1314,7 @@ fn validate_context_fields(
 /// Returns [`ProtocolError::Authorization`] if the digest is malformed, the
 /// signed time window is invalid, or the policy cannot schedule a refresh no
 /// earlier than issuance and strictly before expiry.
-pub fn authorization_context_refresh_at_v1(
+pub fn authorization_context_refresh_at(
     context_digest: &str,
     issued_at: i64,
     not_before: i64,
@@ -1327,7 +1327,7 @@ pub fn authorization_context_refresh_at_v1(
     validate_safe_i64(expires_at, &["expiresAt"])?;
     if not_before > issued_at || issued_at >= expires_at || refresh_lead_seconds == 0 {
         return Err(authorization_error(
-            AuthorizationErrorCodeV1::InvalidFormat,
+            AuthorizationErrorCode::InvalidFormat,
             ["refreshAt"],
             "authorization context cannot be refreshed within its signed window",
         ));
@@ -1335,13 +1335,13 @@ pub fn authorization_context_refresh_at_v1(
     let digest = decode_base64url::<32>(
         context_digest,
         &["contextDigest"],
-        AuthorizationErrorCodeV1::InvalidEncoding,
+        AuthorizationErrorCode::InvalidEncoding,
     )?;
     let jitter_range = u64::from(refresh_jitter_seconds) + 1;
     let jitter = i64::try_from(
         u64::from_be_bytes(digest[..8].try_into().map_err(|_| {
             authorization_error(
-                AuthorizationErrorCodeV1::InvalidEncoding,
+                AuthorizationErrorCode::InvalidEncoding,
                 ["contextDigest"],
                 "authorization context digest is invalid",
             )
@@ -1349,7 +1349,7 @@ pub fn authorization_context_refresh_at_v1(
     )
     .map_err(|_| {
         authorization_error(
-            AuthorizationErrorCodeV1::InvalidFormat,
+            AuthorizationErrorCode::InvalidFormat,
             ["refreshAt"],
             "authorization refresh jitter overflows",
         )
@@ -1359,14 +1359,14 @@ pub fn authorization_context_refresh_at_v1(
         .and_then(|value| value.checked_sub(jitter))
         .ok_or_else(|| {
             authorization_error(
-                AuthorizationErrorCodeV1::InvalidFormat,
+                AuthorizationErrorCode::InvalidFormat,
                 ["refreshAt"],
                 "authorization refresh schedule overflows",
             )
         })?;
     if refresh_at < issued_at || refresh_at >= expires_at {
         return Err(authorization_error(
-            AuthorizationErrorCodeV1::InvalidFormat,
+            AuthorizationErrorCode::InvalidFormat,
             ["refreshAt"],
             "authorization refresh policy has no usable window",
         ));
@@ -1376,30 +1376,30 @@ pub fn authorization_context_refresh_at_v1(
 
 /// Authorization context whose complete trust chain and lease have verified.
 #[derive(Clone, Debug)]
-pub struct VerifiedAuthorizationContextV1 {
-    context: SignedAuthorizationContextV1,
+pub struct VerifiedAuthorizationContext {
+    context: SignedAuthorizationContext,
     session_key: VerifyingKey,
     context_digest: String,
 }
 
-impl VerifiedAuthorizationContextV1 {
+impl VerifiedAuthorizationContext {
     /// Return the signed authority namespace.
     pub fn authority(&self) -> &str {
         &self.context.unsigned.authority
     }
 
     /// Return the stable caller principal.
-    pub fn principal(&self) -> &AuthorizationPrincipalV1 {
+    pub fn principal(&self) -> &AuthorizationPrincipal {
         &self.context.unsigned.principal
     }
 
     /// Return the exact participant evidence.
-    pub fn participant(&self) -> &AuthorizationParticipantV1 {
+    pub fn participant(&self) -> &AuthorizationParticipant {
         &self.context.unsigned.participant
     }
 
     /// Return the durable authority record and version that produced this context.
-    pub fn authority_ref(&self) -> &AuthorizationAuthorityRefV1 {
+    pub fn authority_ref(&self) -> &AuthorizationAuthorityRef {
         &self.context.unsigned.authority_ref
     }
 
@@ -1429,7 +1429,7 @@ impl VerifiedAuthorizationContextV1 {
     }
 
     /// Return exact machine grants.
-    pub fn grant_set(&self) -> &GrantSetV1 {
+    pub fn grant_set(&self) -> &GrantSet {
         &self.context.unsigned.grant_set
     }
 
@@ -1459,12 +1459,12 @@ impl VerifiedAuthorizationContextV1 {
     }
 
     /// Return the complete immutable signed context.
-    pub fn signed_context(&self) -> &SignedAuthorizationContextV1 {
+    pub fn signed_context(&self) -> &SignedAuthorizationContext {
         &self.context
     }
 
     /// Test exact permission membership.
-    pub fn allows(&self, permission: &PermissionAtomV1) -> bool {
+    pub fn allows(&self, permission: &PermissionAtom) -> bool {
         self.context
             .unsigned
             .grant_set
@@ -1473,7 +1473,7 @@ impl VerifiedAuthorizationContextV1 {
     }
 
     /// Test whether every exact permission is present.
-    pub fn allows_all(&self, permissions: &[PermissionAtomV1]) -> bool {
+    pub fn allows_all(&self, permissions: &[PermissionAtom]) -> bool {
         permissions.iter().all(|permission| self.allows(permission))
     }
 
@@ -1499,32 +1499,32 @@ impl VerifiedAuthorizationContextV1 {
 /// Returns [`ProtocolError::Authorization`] if the issuer is missing, the
 /// manifest generation differs, a validity bound is exceeded, collection limits
 /// fail, or the issuer signature is invalid.
-pub fn verify_authorization_context_v1(
-    root: &AuthorizationTrustRootV1,
-    verified_manifest: &VerifiedAuthorizationIssuerManifestV1,
-    context: &SignedAuthorizationContextV1,
-    policy: &AuthorizationVerificationPolicyV1,
-) -> Result<VerifiedAuthorizationContextV1, ProtocolError> {
+pub fn verify_authorization_context(
+    root: &AuthorizationTrustRoot,
+    verified_manifest: &VerifiedAuthorizationIssuerManifest,
+    context: &SignedAuthorizationContext,
+    policy: &AuthorizationVerificationPolicy,
+) -> Result<VerifiedAuthorizationContext, ProtocolError> {
     validate_policy(policy)?;
     validate_context_fields(&context.unsigned, None)?;
     let context_size = canonicalize_json(&serde_json::to_value(context)?)?.len();
     if context_size > policy.maximum_context_bytes {
         return Err(authorization_error(
-            AuthorizationErrorCodeV1::ContextTooLarge,
+            AuthorizationErrorCode::ContextTooLarge,
             std::iter::empty::<&str>(),
             "canonical signed context exceeds policy size",
         ));
     }
     if context.unsigned.grant_set.permissions().len() > policy.maximum_permissions {
         return Err(authorization_error(
-            AuthorizationErrorCodeV1::InvalidFormat,
+            AuthorizationErrorCode::InvalidFormat,
             ["grantSet", "permissions"],
             "context exceeds the permission limit",
         ));
     }
     if context.unsigned.capabilities.len() > policy.maximum_capabilities {
         return Err(authorization_error(
-            AuthorizationErrorCodeV1::InvalidFormat,
+            AuthorizationErrorCode::InvalidFormat,
             ["capabilities"],
             "context exceeds the capability limit",
         ));
@@ -1532,7 +1532,7 @@ pub fn verify_authorization_context_v1(
     if verified_manifest.authority != root.authority || verified_manifest.root_key_id != root.key_id
     {
         return Err(authorization_error(
-            AuthorizationErrorCodeV1::WrongAuthority,
+            AuthorizationErrorCode::WrongAuthority,
             ["authority"],
             "verified manifest is not bound to the supplied pinned root",
         ));
@@ -1540,21 +1540,21 @@ pub fn verify_authorization_context_v1(
     let manifest = &verified_manifest.manifest.unsigned;
     if context.unsigned.issuer_manifest_generation != manifest.generation {
         return Err(authorization_error(
-            AuthorizationErrorCodeV1::ManifestGenerationMismatch,
+            AuthorizationErrorCode::ManifestGenerationMismatch,
             ["issuerManifestGeneration"],
             "context issuer manifest generation does not match the verified manifest",
         ));
     }
     if verified_manifest.generation() < policy.minimum_manifest_generation {
         return Err(authorization_error(
-            AuthorizationErrorCodeV1::ManifestRollback,
+            AuthorizationErrorCode::ManifestRollback,
             ["generation"],
             "verified manifest generation is below the current accepted minimum",
         ));
     }
     if context.unsigned.authority != root.authority {
         return Err(authorization_error(
-            AuthorizationErrorCodeV1::WrongAuthority,
+            AuthorizationErrorCode::WrongAuthority,
             ["authority"],
             "context authority does not match the pinned root",
         ));
@@ -1566,7 +1566,7 @@ pub fn verify_authorization_context_v1(
         .find(|(_, entry)| entry.key_id == context.unsigned.issuer_key_id)
         .ok_or_else(|| {
             authorization_error(
-                AuthorizationErrorCodeV1::IssuerNotListed,
+                AuthorizationErrorCode::IssuerNotListed,
                 ["issuerKeyId"],
                 "context issuer is absent from the current manifest",
             )
@@ -1574,7 +1574,7 @@ pub fn verify_authorization_context_v1(
     let issuer_key = decode_verifying_key(
         &entry.public_key,
         &["issuers", &issuer_index.to_string(), "publicKey"],
-        AuthorizationErrorCodeV1::InvalidPublicKey,
+        AuthorizationErrorCode::InvalidPublicKey,
     )?;
     check_key_id(
         &entry.key_id,
@@ -1585,7 +1585,7 @@ pub fn verify_authorization_context_v1(
         i128::from(context.unsigned.expires_at) - i128::from(context.unsigned.not_before);
     if lifetime > i128::from(policy.maximum_context_lifetime_seconds) {
         return Err(authorization_error(
-            AuthorizationErrorCodeV1::ContextLifetimeExceeded,
+            AuthorizationErrorCode::ContextLifetimeExceeded,
             ["expiresAt"],
             "context lifetime exceeds policy",
         ));
@@ -1594,7 +1594,7 @@ pub fn verify_authorization_context_v1(
         || context.unsigned.expires_at > manifest.expires_at
     {
         return Err(authorization_error(
-            AuthorizationErrorCodeV1::ContextOutlivesManifest,
+            AuthorizationErrorCode::ContextOutlivesManifest,
             ["expiresAt"],
             "context validity is not contained by the current manifest",
         ));
@@ -1603,29 +1603,29 @@ pub fn verify_authorization_context_v1(
     let skew = i128::from(policy.allowed_clock_skew_seconds);
     if now + skew < i128::from(context.unsigned.not_before) {
         return Err(authorization_error(
-            AuthorizationErrorCodeV1::ContextNotYetValid,
+            AuthorizationErrorCode::ContextNotYetValid,
             ["notBefore"],
             "authorization context is not yet valid",
         ));
     }
     if now - skew > i128::from(context.unsigned.expires_at) {
         return Err(authorization_error(
-            AuthorizationErrorCodeV1::ContextExpired,
+            AuthorizationErrorCode::ContextExpired,
             ["expiresAt"],
             "authorization context has expired",
         ));
     }
     verify_signature(
         &issuer_key,
-        &authorization_context_signing_digest_v1(&context.unsigned)?,
+        &authorization_context_signing_digest(&context.unsigned)?,
         &context.signature,
-        AuthorizationErrorCodeV1::InvalidSignature,
+        AuthorizationErrorCode::InvalidSignature,
     )?;
-    Ok(VerifiedAuthorizationContextV1 {
+    Ok(VerifiedAuthorizationContext {
         session_key: decode_verifying_key(
             &context.unsigned.session_key,
             &["sessionKey"],
-            AuthorizationErrorCodeV1::InvalidSessionKey,
+            AuthorizationErrorCode::InvalidSessionKey,
         )?,
         context_digest: context.digest()?,
         context: context.clone(),
@@ -1667,7 +1667,7 @@ impl AuthorizationRequestProof {
         decode_base64url::<64>(
             &encoded,
             &["proof"],
-            AuthorizationErrorCodeV1::InvalidRequestProof,
+            AuthorizationErrorCode::InvalidRequestProof,
         )?;
         Ok(Self(encoded))
     }
@@ -1733,7 +1733,7 @@ pub fn sign_authorization_request(
     validate_text(subject, &["subject"])?;
     if request_id.len() > MAXIMUM_REQUEST_ID_BYTES {
         return Err(authorization_error(
-            AuthorizationErrorCodeV1::InvalidFormat,
+            AuthorizationErrorCode::InvalidFormat,
             ["request-id"],
             "request id exceeds the protocol limit",
         ));
@@ -1741,7 +1741,7 @@ pub fn sign_authorization_request(
     let context_digest = decode_base64url::<32>(
         context_digest,
         &["authorization-context"],
-        AuthorizationErrorCodeV1::InvalidEncoding,
+        AuthorizationErrorCode::InvalidEncoding,
     )?;
     let input = build_authorization_request_proof_input(
         &context_digest,
@@ -1759,7 +1759,7 @@ pub fn sign_authorization_request(
 /// Verified local caller metadata.
 #[derive(Clone, Debug)]
 pub struct VerifiedAuthorizationRequestProof {
-    context: VerifiedAuthorizationContextV1,
+    context: VerifiedAuthorizationContext,
 }
 
 /// Borrowed inputs for verifying one context-bound request proof.
@@ -1768,9 +1768,9 @@ pub struct VerifiedAuthorizationRequestProof {
 /// and digest signed by a session key, this type groups the complete local
 /// verification decision, including context, policy, and required authority.
 #[derive(Clone, Copy, Debug)]
-pub struct AuthorizationRequestVerificationInputV1<'a> {
+pub struct AuthorizationRequestVerificationInput<'a> {
     /// Verified authorization context that binds the session key and authority.
-    pub context: &'a VerifiedAuthorizationContextV1,
+    pub context: &'a VerifiedAuthorizationContext,
     /// Exact routed NATS subject covered by the proof.
     pub subject: &'a str,
     /// Actual NATS reply subject covered by the proof, when present.
@@ -1784,16 +1784,16 @@ pub struct AuthorizationRequestVerificationInputV1<'a> {
     /// Session-key signature to verify.
     pub proof: &'a AuthorizationRequestProof,
     /// Verification time and protocol limits.
-    pub policy: &'a AuthorizationVerificationPolicyV1,
+    pub policy: &'a AuthorizationVerificationPolicy,
     /// Exact permissions required by the routed operation.
-    pub required_permissions: &'a [PermissionAtomV1],
+    pub required_permissions: &'a [PermissionAtom],
     /// Platform capabilities required by the routed operation.
     pub required_capabilities: &'a [String],
 }
 
 impl VerifiedAuthorizationRequestProof {
     /// Return verified caller context metadata.
-    pub fn context(&self) -> &VerifiedAuthorizationContextV1 {
+    pub fn context(&self) -> &VerifiedAuthorizationContext {
         &self.context
     }
 }
@@ -1806,9 +1806,9 @@ impl VerifiedAuthorizationRequestProof {
 /// Returns [`ProtocolError::Authorization`] for an invalid request id, reply
 /// subject, issue time, permission/capability subset, or session-key signature.
 pub fn verify_authorization_request(
-    input: AuthorizationRequestVerificationInputV1<'_>,
+    input: AuthorizationRequestVerificationInput<'_>,
 ) -> Result<VerifiedAuthorizationRequestProof, ProtocolError> {
-    let AuthorizationRequestVerificationInputV1 {
+    let AuthorizationRequestVerificationInput {
         context,
         subject,
         reply_subject,
@@ -1826,7 +1826,7 @@ pub fn verify_authorization_request(
     validate_text(subject, &["subject"])?;
     if request_id.len() > MAXIMUM_REQUEST_ID_BYTES {
         return Err(authorization_error(
-            AuthorizationErrorCodeV1::InvalidFormat,
+            AuthorizationErrorCode::InvalidFormat,
             ["request-id"],
             "request id exceeds the protocol limit",
         ));
@@ -1836,7 +1836,7 @@ pub fn verify_authorization_request(
         required_prefix.push('.');
         if !reply.starts_with(&required_prefix) {
             return Err(authorization_error(
-                AuthorizationErrorCodeV1::ReplySubjectMismatch,
+                AuthorizationErrorCode::ReplySubjectMismatch,
                 ["reply"],
                 "reply subject is outside the verified caller inbox prefix",
             ));
@@ -1845,7 +1845,7 @@ pub fn verify_authorization_request(
     let difference = i128::from(policy.now_unix_seconds) - i128::from(iat);
     if difference.abs() > i128::from(policy.allowed_clock_skew_seconds) {
         return Err(authorization_error(
-            AuthorizationErrorCodeV1::ProofIatOutOfRange,
+            AuthorizationErrorCode::ProofIatOutOfRange,
             ["iat"],
             "request proof issue time is outside policy skew",
         ));
@@ -1854,28 +1854,28 @@ pub fn verify_authorization_request(
     let skew = i128::from(policy.allowed_clock_skew_seconds);
     if now + skew < i128::from(context.context.unsigned.not_before) {
         return Err(authorization_error(
-            AuthorizationErrorCodeV1::ContextNotYetValid,
+            AuthorizationErrorCode::ContextNotYetValid,
             ["authorization-context", "notBefore"],
             "authorization context is not yet valid for this request",
         ));
     }
     if now - skew > i128::from(context.context.unsigned.expires_at) {
         return Err(authorization_error(
-            AuthorizationErrorCodeV1::ContextExpired,
+            AuthorizationErrorCode::ContextExpired,
             ["authorization-context", "expiresAt"],
             "authorization context has expired for this request",
         ));
     }
     if !context.allows_all(required_permissions) {
         return Err(authorization_error(
-            AuthorizationErrorCodeV1::PermissionDenied,
+            AuthorizationErrorCode::PermissionDenied,
             ["grantSet", "permissions"],
             "verified context does not contain every required exact permission",
         ));
     }
     if !context.has_all_capabilities(required_capabilities) {
         return Err(authorization_error(
-            AuthorizationErrorCodeV1::CapabilityDenied,
+            AuthorizationErrorCode::CapabilityDenied,
             ["capabilities"],
             "verified context does not contain every required platform capability",
         ));
@@ -1883,7 +1883,7 @@ pub fn verify_authorization_request(
     let context_digest = decode_base64url::<32>(
         context.context_digest(),
         &["authorization-context"],
-        AuthorizationErrorCodeV1::InvalidEncoding,
+        AuthorizationErrorCode::InvalidEncoding,
     )?;
     let input = build_authorization_request_proof_input(
         &context_digest,
@@ -1896,14 +1896,14 @@ pub fn verify_authorization_request(
     let proof_bytes = decode_base64url::<64>(
         proof.as_str(),
         &["proof"],
-        AuthorizationErrorCodeV1::InvalidRequestProof,
+        AuthorizationErrorCode::InvalidRequestProof,
     )?;
     context
         .session_key
         .verify_strict(input.digest(), &Signature::from_bytes(&proof_bytes))
         .map_err(|_| {
             authorization_error(
-                AuthorizationErrorCodeV1::InvalidRequestProof,
+                AuthorizationErrorCode::InvalidRequestProof,
                 ["proof"],
                 "context-bound request signature verification failed",
             )
@@ -1926,9 +1926,9 @@ pub struct AuthorizationEventProofInput {
 /// and digest signed by a session key, this type groups the complete historical
 /// verification decision, including context, policy, authority, and revocation.
 #[derive(Clone, Copy, Debug)]
-pub struct AuthorizationEventVerificationInputV1<'a> {
+pub struct AuthorizationEventVerificationInput<'a> {
     /// Verified authorization context that binds the session key and authority.
-    pub context: &'a VerifiedAuthorizationContextV1,
+    pub context: &'a VerifiedAuthorizationContext,
     /// Exact published NATS subject covered by the proof.
     pub subject: &'a str,
     /// Exact received payload bytes covered by the proof.
@@ -1940,9 +1940,9 @@ pub struct AuthorizationEventVerificationInputV1<'a> {
     /// Session-key signature to verify.
     pub proof: &'a AuthorizationEventProof,
     /// Verification policy and protocol limits.
-    pub policy: &'a AuthorizationVerificationPolicyV1,
+    pub policy: &'a AuthorizationVerificationPolicy,
     /// Exact permissions required for the event.
-    pub required_permissions: &'a [PermissionAtomV1],
+    pub required_permissions: &'a [PermissionAtom],
     /// Platform capabilities required for the event.
     pub required_capabilities: &'a [String],
     /// Context revocation time when revocation evidence exists.
@@ -1977,7 +1977,7 @@ impl AuthorizationEventProof {
         decode_base64url::<64>(
             &encoded,
             &["proof"],
-            AuthorizationErrorCodeV1::InvalidEventProof,
+            AuthorizationErrorCode::InvalidEventProof,
         )?;
         Ok(Self(encoded))
     }
@@ -2008,13 +2008,13 @@ pub struct AuthorizationEventPublisher {
 /// Verified event metadata and publisher projection.
 #[derive(Clone, Debug)]
 pub struct VerifiedAuthorizationEventProof {
-    context: VerifiedAuthorizationContextV1,
+    context: VerifiedAuthorizationContext,
     publisher: AuthorizationEventPublisher,
 }
 
 impl VerifiedAuthorizationEventProof {
     /// Return verified publisher context metadata.
-    pub fn context(&self) -> &VerifiedAuthorizationContextV1 {
+    pub fn context(&self) -> &VerifiedAuthorizationContext {
         &self.context
     }
 
@@ -2031,7 +2031,7 @@ impl VerifiedAuthorizationEventProof {
 fn canonical_event_time_seconds(event_time: &str, path: &[&str]) -> Result<i64, ProtocolError> {
     if !event_time.contains('T') || !event_time.ends_with('Z') {
         return Err(authorization_error(
-            AuthorizationErrorCodeV1::InvalidEventTime,
+            AuthorizationErrorCode::InvalidEventTime,
             path.iter().copied(),
             "event time is not canonical RFC 3339 UTC",
         ));
@@ -2040,14 +2040,14 @@ fn canonical_event_time_seconds(event_time: &str, path: &[&str]) -> Result<i64, 
         time::OffsetDateTime::parse(event_time, &time::format_description::well_known::Rfc3339)
             .map_err(|_| {
                 authorization_error(
-                    AuthorizationErrorCodeV1::InvalidEventTime,
+                    AuthorizationErrorCode::InvalidEventTime,
                     path.iter().copied(),
                     "event time is not canonical RFC 3339 UTC",
                 )
             })?;
     if parsed.offset() != time::UtcOffset::UTC {
         return Err(authorization_error(
-            AuthorizationErrorCodeV1::InvalidEventTime,
+            AuthorizationErrorCode::InvalidEventTime,
             path.iter().copied(),
             "event time must be expressed in UTC",
         ));
@@ -2105,7 +2105,7 @@ pub fn sign_authorization_event(
     validate_text(subject, &["subject"])?;
     if event_id.len() > MAXIMUM_EVENT_ID_BYTES {
         return Err(authorization_error(
-            AuthorizationErrorCodeV1::InvalidFormat,
+            AuthorizationErrorCode::InvalidFormat,
             ["event-id"],
             "event id exceeds the protocol limit",
         ));
@@ -2114,7 +2114,7 @@ pub fn sign_authorization_event(
     let context_digest = decode_base64url::<32>(
         context_digest,
         &["authorization-context"],
-        AuthorizationErrorCodeV1::InvalidEncoding,
+        AuthorizationErrorCode::InvalidEncoding,
     )?;
     let input = build_authorization_event_proof_input(
         &context_digest,
@@ -2141,9 +2141,9 @@ pub fn sign_authorization_event(
 /// an event outside the context window, a revoked event, missing
 /// permission/capability evidence, or an invalid session-key signature.
 pub fn verify_authorization_event(
-    input: AuthorizationEventVerificationInputV1<'_>,
+    input: AuthorizationEventVerificationInput<'_>,
 ) -> Result<VerifiedAuthorizationEventProof, ProtocolError> {
-    let AuthorizationEventVerificationInputV1 {
+    let AuthorizationEventVerificationInput {
         context,
         subject,
         raw_payload,
@@ -2160,7 +2160,7 @@ pub fn verify_authorization_event(
     validate_text(subject, &["subject"])?;
     if event_id.len() > MAXIMUM_EVENT_ID_BYTES {
         return Err(authorization_error(
-            AuthorizationErrorCodeV1::InvalidFormat,
+            AuthorizationErrorCode::InvalidFormat,
             ["event-id"],
             "event id exceeds the protocol limit",
         ));
@@ -2174,35 +2174,35 @@ pub fn verify_authorization_event(
     // is applied to notBefore/expiresAt and `expiresAt` itself is exclusive.
     if event_time_unix < i128::from(context.context.unsigned.not_before) {
         return Err(authorization_error(
-            AuthorizationErrorCodeV1::ContextNotYetValid,
+            AuthorizationErrorCode::ContextNotYetValid,
             ["event-time"],
             "event is before the signed context notBefore window",
         ));
     }
     if event_time_unix >= i128::from(context.context.unsigned.expires_at) {
         return Err(authorization_error(
-            AuthorizationErrorCodeV1::ContextExpired,
+            AuthorizationErrorCode::ContextExpired,
             ["event-time"],
             "event is at or after the signed context expiresAt window",
         ));
     }
     if revoked_at.is_some() {
         return Err(authorization_error(
-            AuthorizationErrorCodeV1::EventRevoked,
+            AuthorizationErrorCode::EventRevoked,
             ["event-time"],
             "event authorization context is revoked",
         ));
     }
     if !context.allows_all(required_permissions) {
         return Err(authorization_error(
-            AuthorizationErrorCodeV1::PermissionDenied,
+            AuthorizationErrorCode::PermissionDenied,
             ["grantSet", "permissions"],
             "verified context does not contain every required exact permission",
         ));
     }
     if !context.has_all_capabilities(required_capabilities) {
         return Err(authorization_error(
-            AuthorizationErrorCodeV1::CapabilityDenied,
+            AuthorizationErrorCode::CapabilityDenied,
             ["capabilities"],
             "verified context does not contain every required platform capability",
         ));
@@ -2210,7 +2210,7 @@ pub fn verify_authorization_event(
     let context_digest = decode_base64url::<32>(
         context.context_digest(),
         &["authorization-context"],
-        AuthorizationErrorCodeV1::InvalidEncoding,
+        AuthorizationErrorCode::InvalidEncoding,
     )?;
     let input = build_authorization_event_proof_input(
         &context_digest,
@@ -2222,23 +2222,23 @@ pub fn verify_authorization_event(
     let proof_bytes = decode_base64url::<64>(
         proof.as_str(),
         &["proof"],
-        AuthorizationErrorCodeV1::InvalidEventProof,
+        AuthorizationErrorCode::InvalidEventProof,
     )?;
     context
         .session_key
         .verify_strict(input.digest(), &Signature::from_bytes(&proof_bytes))
         .map_err(|_| {
             authorization_error(
-                AuthorizationErrorCodeV1::InvalidEventProof,
+                AuthorizationErrorCode::InvalidEventProof,
                 ["proof"],
                 "context-bound event signature verification failed",
             )
         })?;
     let publisher = AuthorizationEventPublisher {
         kind: match context.principal().kind {
-            AuthorizationPrincipalKindV1::User => "user",
-            AuthorizationPrincipalKindV1::Service => "service",
-            AuthorizationPrincipalKindV1::Device => "device",
+            AuthorizationPrincipalKind::User => "user",
+            AuthorizationPrincipalKind::Service => "service",
+            AuthorizationPrincipalKind::Device => "device",
         }
         .to_owned(),
         deployment_id: context.deployment_id().map(str::to_owned),
@@ -2256,7 +2256,7 @@ pub fn verify_authorization_event(
 #[cfg(test)]
 mod phase_a_tests {
     use super::*;
-    use crate::{ApiSurfaceKindV1, PermissionActionV1, PermissionTargetV1};
+    use crate::{ApiSurfaceKind, PermissionAction, PermissionTarget};
     use serde_json::json;
 
     const ROOT_SEED: [u8; 32] = [1; 32];
@@ -2271,31 +2271,31 @@ mod phase_a_tests {
         encode_base64url(key.verifying_key().as_bytes())
     }
 
-    fn permission() -> PermissionAtomV1 {
-        PermissionAtomV1::new(
-            PermissionTargetV1::api_surface("documents@v1", ApiSurfaceKindV1::Rpc, "Documents.Get")
+    fn permission() -> PermissionAtom {
+        PermissionAtom::new(
+            PermissionTarget::api_surface("documents@v1", ApiSurfaceKind::Rpc, "Documents.Get")
                 .unwrap(),
-            PermissionActionV1::Call,
+            PermissionAction::Call,
         )
         .unwrap()
     }
 
-    fn policy(now: i64) -> AuthorizationVerificationPolicyV1 {
-        AuthorizationVerificationPolicyV1::new(now, 30, 300, 16_384, 16, 16, 7).unwrap()
+    fn policy(now: i64) -> AuthorizationVerificationPolicy {
+        AuthorizationVerificationPolicy::new(now, 30, 300, 16_384, 16, 16, 7).unwrap()
     }
 
     fn chain() -> (
-        AuthorizationTrustRootV1,
-        VerifiedAuthorizationIssuerManifestV1,
-        SignedAuthorizationContextV1,
+        AuthorizationTrustRoot,
+        VerifiedAuthorizationIssuerManifest,
+        SignedAuthorizationContext,
         SigningKey,
     ) {
         let root_key = key(ROOT_SEED);
         let issuer_key = key(ISSUER_SEED);
         let session_key = key(SESSION_SEED);
-        let root = AuthorizationTrustRootV1::new("trellis-test", encoded_key(&root_key)).unwrap();
-        let manifest = sign_issuer_manifest_v1(
-            UnsignedAuthorizationIssuerManifestV1 {
+        let root = AuthorizationTrustRoot::new("trellis-test", encoded_key(&root_key)).unwrap();
+        let manifest = sign_issuer_manifest(
+            UnsignedAuthorizationIssuerManifest {
                 format: AUTHORIZATION_ISSUER_MANIFEST_FORMAT_V1.to_owned(),
                 authority: root.authority().to_owned(),
                 root_key_id: root.key_id().to_owned(),
@@ -2303,7 +2303,7 @@ mod phase_a_tests {
                 issued_at: 1_000,
                 not_before: 1_000,
                 expires_at: 1_500,
-                issuers: vec![AuthorizationIssuerManifestEntryV1 {
+                issuers: vec![AuthorizationIssuerManifestEntry {
                     key_id: derived_key_id(&issuer_key.verifying_key()),
                     public_key: encoded_key(&issuer_key),
                 }],
@@ -2313,27 +2313,27 @@ mod phase_a_tests {
             &root_key,
         )
         .unwrap();
-        let manifest = verify_issuer_manifest_v1(&root, &manifest, &policy(1_100)).unwrap();
-        let context = sign_authorization_context_v1(
-            UnsignedAuthorizationContextV1 {
+        let manifest = verify_issuer_manifest(&root, &manifest, &policy(1_100)).unwrap();
+        let context = sign_authorization_context(
+            UnsignedAuthorizationContext {
                 format: AUTHORIZATION_CONTEXT_FORMAT_V1.to_owned(),
                 authority: root.authority().to_owned(),
                 issuer_key_id: derived_key_id(&issuer_key.verifying_key()),
                 issuer_manifest_generation: 7,
                 session_id: "ses_test".to_owned(),
                 session_key: encoded_key(&session_key),
-                principal: AuthorizationPrincipalV1 {
-                    kind: AuthorizationPrincipalKindV1::User,
+                principal: AuthorizationPrincipal {
+                    kind: AuthorizationPrincipalKind::User,
                     id: "usr_test".to_owned(),
                 },
-                participant: AuthorizationParticipantV1 {
-                    kind: ParticipantKindV1::App,
+                participant: AuthorizationParticipant {
+                    kind: ParticipantKind::App,
                     id: "documents-web".to_owned(),
                     artifact_digest: encode_base64url(&[4; 32]),
                     needs_digest: encode_base64url(&[5; 32]),
                 },
-                authority_ref: AuthorizationAuthorityRefV1 {
-                    kind: AuthorizationAuthorityKindV1::Identity,
+                authority_ref: AuthorizationAuthorityRef {
+                    kind: AuthorizationAuthorityKind::Identity,
                     id: "usr_test".to_owned(),
                     version: 12,
                 },
@@ -2343,7 +2343,7 @@ mod phase_a_tests {
                 issued_at: 1_100,
                 not_before: 1_100,
                 expires_at: 1_300,
-                grant_set: GrantSetV1::new(vec![permission()]),
+                grant_set: GrantSet::new(vec![permission()]),
                 capabilities: vec!["platform.read".to_owned()],
                 extensions: Map::new(),
                 critical: vec![],
@@ -2358,8 +2358,7 @@ mod phase_a_tests {
     fn direct_key_manifest_verifies_context_and_request_event_proofs() {
         let (root, manifest, context, session_key) = chain();
         let policy = policy(1_100);
-        let verified =
-            verify_authorization_context_v1(&root, &manifest, &context, &policy).unwrap();
+        let verified = verify_authorization_context(&root, &manifest, &context, &policy).unwrap();
         let request_proof = sign_authorization_request(
             verified.context_digest(),
             "rpc.v1.Documents.Get",
@@ -2383,7 +2382,7 @@ mod phase_a_tests {
 
         let request_permissions = [permission()];
         let request_capabilities = ["platform.read".to_owned()];
-        verify_authorization_request(AuthorizationRequestVerificationInputV1 {
+        verify_authorization_request(AuthorizationRequestVerificationInput {
             context: &verified,
             subject: "rpc.v1.Documents.Get",
             reply_subject: Some("_INBOX.test.reply"),
@@ -2398,9 +2397,9 @@ mod phase_a_tests {
         .unwrap();
 
         let historical_policy =
-            AuthorizationVerificationPolicyV1::new(1_400, 30, 300, 16_384, 16, 16, 7).unwrap();
+            AuthorizationVerificationPolicy::new(1_400, 30, 300, 16_384, 16, 16, 7).unwrap();
         let event_permissions = [permission()];
-        verify_authorization_event(AuthorizationEventVerificationInputV1 {
+        verify_authorization_event(AuthorizationEventVerificationInput {
             context: &verified,
             subject: "events.v1.Documents.Changed.doc-1",
             raw_payload: br#"{"id":"doc-1"}"#,
@@ -2421,9 +2420,9 @@ mod phase_a_tests {
         let mut wrong_generation = context.clone();
         wrong_generation.unsigned.issuer_manifest_generation = 8;
         assert!(matches!(
-            verify_authorization_context_v1(&root, &manifest, &wrong_generation, &policy(1_100)),
+            verify_authorization_context(&root, &manifest, &wrong_generation, &policy(1_100)),
             Err(ProtocolError::Authorization {
-                code: AuthorizationErrorCodeV1::ManifestGenerationMismatch,
+                code: AuthorizationErrorCode::ManifestGenerationMismatch,
                 ..
             })
         ));
@@ -2431,9 +2430,9 @@ mod phase_a_tests {
         let mut wrong_key = context.clone();
         wrong_key.unsigned.issuer_key_id = root.key_id().to_owned();
         assert!(matches!(
-            verify_authorization_context_v1(&root, &manifest, &wrong_key, &policy(1_100)),
+            verify_authorization_context(&root, &manifest, &wrong_key, &policy(1_100)),
             Err(ProtocolError::Authorization {
-                code: AuthorizationErrorCodeV1::IssuerNotListed,
+                code: AuthorizationErrorCode::IssuerNotListed,
                 ..
             })
         ));
@@ -2441,9 +2440,9 @@ mod phase_a_tests {
         let mut manifest_value = serde_json::to_value(manifest.manifest()).unwrap();
         manifest_value["issuers"][0]["keyId"] = json!(root.key_id());
         assert!(matches!(
-            parse_issuer_manifest_v1(&manifest_value),
+            parse_issuer_manifest(&manifest_value),
             Err(ProtocolError::Authorization {
-                code: AuthorizationErrorCodeV1::InvalidKeyId,
+                code: AuthorizationErrorCode::InvalidKeyId,
                 ..
             })
         ));

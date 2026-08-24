@@ -10,13 +10,13 @@ use crate::{
 /// Subjects derived for every communication surface in one API artifact.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct DerivedApiSubjectsV1 {
+pub struct DerivedApiSubjects {
     /// RPC subjects keyed by logical name.
     pub rpc: BTreeMap<String, String>,
     /// Operation subjects keyed by logical name.
     pub operations: BTreeMap<String, String>,
     /// Event base and wildcard subjects keyed by logical name.
-    pub events: BTreeMap<String, DerivedEventSubjectsV1>,
+    pub events: BTreeMap<String, DerivedEventSubjects>,
     /// Feed subjects keyed by logical name.
     pub feeds: BTreeMap<String, String>,
 }
@@ -24,7 +24,7 @@ pub struct DerivedApiSubjectsV1 {
 /// Base and wildcard subscription subjects for one event.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct DerivedEventSubjectsV1 {
+pub struct DerivedEventSubjects {
     /// Event subject before parameter tokens are appended.
     pub base: String,
     /// Subscription subject with one wildcard per event parameter.

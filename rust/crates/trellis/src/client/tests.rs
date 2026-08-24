@@ -128,7 +128,7 @@ fn vector_defaults() -> AuthorizationVectorDefaults {
 }
 
 #[test]
-fn request_proof_v1_matches_language_neutral_conformance_vector() {
+fn request_proof_matches_language_neutral_conformance_vector() {
     let chain = chain_fixture();
     let defaults = vector_defaults();
     let auth = SessionAuth::from_seed_base64url(&chain.session_seed).unwrap();
@@ -201,7 +201,7 @@ fn verify_request_proof(
 }
 
 #[test]
-fn event_proof_v1_matches_language_neutral_conformance_vector() {
+fn event_proof_matches_language_neutral_conformance_vector() {
     let chain = chain_fixture();
     let defaults = vector_defaults();
     let auth = SessionAuth::from_seed_base64url(&chain.session_seed).unwrap();

@@ -420,7 +420,7 @@ mod tests {
     }
 
     #[test]
-    fn event_proof_v1_verifies_with_context_digest() {
+    fn event_proof_verifies_with_context_digest() {
         let auth = test_auth();
         let subject = "events.v1.Documents.Changed.doc-1";
         let payload = br#"{"id":"doc-1"}"#;

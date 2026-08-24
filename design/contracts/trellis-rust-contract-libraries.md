@@ -9,10 +9,10 @@ validation, parsing, normalization, digesting, resolution, and grants.
 ## Builders
 
 `ApiBuilder` constructs a native API authoring source. Finalization calls
-`lint_api_v1_authoring` and `parse_api_v1`. `ContractBuilder` constructs or
-accepts a native participant, validates it with `lint_participant_v1_authoring`
-and `parse_participant_v1`, and resolves it with `resolve_participant_v1`
-against exact referenced APIs.
+`lint_api_authoring` and `parse_api`. `ContractBuilder` constructs or accepts a
+native participant, validates it with `lint_participant_authoring` and
+`parse_participant`, and resolves it with `resolve_participant` against exact
+referenced APIs.
 
 `ContractArtifacts` is intentionally non-serializable. It returns native API and
 participant objects, API and participant digests, participant-needs digest, and

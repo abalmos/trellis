@@ -1,5 +1,5 @@
 use trellis_protocol::{
-    AuthorizationAuthorityRefV1, AuthorizationParticipantV1, AuthorizationPrincipalV1,
+    AuthorizationAuthorityRef, AuthorizationParticipant, AuthorizationPrincipal,
 };
 
 use super::authority::{AuthorityReconciliationOutcome, IssuanceSnapshot};
@@ -199,7 +199,7 @@ pub(super) fn resolve_snapshot(
     }
 
     Ok(IssuableAuthorizationState {
-        principal: AuthorizationPrincipalV1 {
+        principal: AuthorizationPrincipal {
             kind: protocol_principal_kind(principal.kind),
             id: principal.principal_id,
         },
@@ -207,13 +207,13 @@ pub(super) fn resolve_snapshot(
         session_public_key: session.session_public_key,
         session_key_id: session.session_key_id,
         inbox_prefix: session.inbox_prefix,
-        participant: AuthorizationParticipantV1 {
+        participant: AuthorizationParticipant {
             kind: session.participant_kind,
             id: session.participant_id,
             artifact_digest: session.participant_artifact_digest,
             needs_digest: session.participant_needs_digest,
         },
-        authority_ref: AuthorizationAuthorityRefV1 {
+        authority_ref: AuthorizationAuthorityRef {
             kind: protocol_authority_kind(expected_target.kind),
             id: expected_target.authority_id,
             version: header.authority_version,

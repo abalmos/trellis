@@ -5,8 +5,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 /// Client authorization state wire format.
-pub(crate) const AUTHORIZATION_CLIENT_STATE_FORMAT_V1: &str =
-    "trellis.authorization-client-state.v1";
+pub(crate) const AUTHORIZATION_CLIENT_STATE_FORMAT_: &str = "trellis.authorization-client-state.v1";
 
 /// Client-side verification limits distributed with the pinned trust root.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]

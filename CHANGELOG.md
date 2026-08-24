@@ -110,8 +110,7 @@ and this project adheres to
 
 - Replaced contract-manifest authority at runtime with canonical
   `trellis.api.v1` and `trellis.participant.v1` artifacts, exact participant
-  bindings, protocol-derived subjects, and materialized `GrantSetV1`
-  permissions.
+  bindings, protocol-derived subjects, and materialized `GrantSet` permissions.
 - Moved browser auth, service and device bootstrap, session lifecycle,
   authorization reconciliation, NATS Auth Callout, Auth RPC, and connection
   revocation into the Rust platform runtime. Removed the TypeScript auth owner,

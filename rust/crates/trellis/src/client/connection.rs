@@ -18,8 +18,8 @@ use time::OffsetDateTime;
 use tokio::task::JoinHandle;
 use tokio::time::timeout;
 use trellis_protocol::{
-    parse_participant_v1, resolve_participant_v1, session_proof_request_digest_v1,
-    DeviceBootstrapSessionProofInputV1, ServiceBootstrapSessionProofInputV1, SessionProofInputV1,
+    parse_participant, resolve_participant, session_proof_request_digest,
+    DeviceBootstrapSessionProofInput, ServiceBootstrapSessionProofInput, SessionProofInput,
 };
 
 use super::events::{EVENT_ID_HEADER, EVENT_TIME_HEADER};
@@ -617,22 +617,21 @@ async fn fetch_service_bootstrap_inner(
             "format": "trellis.session-proof.v1",
             "signature": ""
         });
-        let request_digest = session_proof_request_digest_v1(&serde_json::to_value(&request)?)
+        let request_digest = session_proof_request_digest(&serde_json::to_value(&request)?)
             .map_err(|error| TrellisClientError::Bootstrap(error.to_string()))?;
-        let proof_input =
-            SessionProofInputV1::service_bootstrap(ServiceBootstrapSessionProofInputV1 {
-                request_id: request.request_id.clone(),
-                issued_at: request.issued_at,
-                deployment_id: request.deployment_id.clone(),
-                instance_id: request.instance_id.clone(),
-                provisioned_identity_key_id: request.provisioned_identity_key_id.clone(),
-                new_session_public_key: request.new_session_public_key.clone(),
-                new_session_nkey: session_nkey.to_owned(),
-                participant_id: request.participant_id.clone(),
-                participant_digest: request.participant_artifact_digest.clone(),
-                request_digest,
-            })
-            .map_err(|error| TrellisClientError::Bootstrap(error.to_string()))?;
+        let proof_input = SessionProofInput::service_bootstrap(ServiceBootstrapSessionProofInput {
+            request_id: request.request_id.clone(),
+            issued_at: request.issued_at,
+            deployment_id: request.deployment_id.clone(),
+            instance_id: request.instance_id.clone(),
+            provisioned_identity_key_id: request.provisioned_identity_key_id.clone(),
+            new_session_public_key: request.new_session_public_key.clone(),
+            new_session_nkey: session_nkey.to_owned(),
+            participant_id: request.participant_id.clone(),
+            participant_digest: request.participant_artifact_digest.clone(),
+            request_digest,
+        })
+        .map_err(|error| TrellisClientError::Bootstrap(error.to_string()))?;
         request.proof = serde_json::to_value(identity_auth.sign_session_proof(&proof_input)?)?;
         let request_started_at = now_context_millis()?;
         let response = client
@@ -730,7 +729,7 @@ async fn fetch_device_bootstrap<C>(
     };
     let session_nkey = session_auth.nkey_pair()?.public_key();
     let participant_artifact: Value = serde_json::from_str(opts.contract.participant_json)?;
-    let parsed_participant = trellis_protocol::parse_participant_v1(&participant_artifact)
+    let parsed_participant = trellis_protocol::parse_participant(&participant_artifact)
         .map_err(|error| TrellisClientError::Bootstrap(error.to_string()))?;
     if parsed_participant.id() != opts.contract.participant_id
         || parsed_participant
@@ -743,7 +742,7 @@ async fn fetch_device_bootstrap<C>(
         ));
     }
     let api_artifact: Value = serde_json::from_str(opts.contract.api_json)?;
-    let parsed_api = trellis_protocol::parse_api_v1(&api_artifact)
+    let parsed_api = trellis_protocol::parse_api(&api_artifact)
         .map_err(|error| TrellisClientError::Bootstrap(error.to_string()))?;
     if parsed_api
         .digest()
@@ -762,7 +761,7 @@ async fn fetch_device_bootstrap<C>(
         .iter()
         .map(|(json, digest)| {
             let artifact = serde_json::from_str(json)?;
-            let parsed = trellis_protocol::parse_api_v1(&artifact)
+            let parsed = trellis_protocol::parse_api(&artifact)
                 .map_err(|error| TrellisClientError::Bootstrap(error.to_string()))?;
             if parsed
                 .digest()
@@ -777,7 +776,7 @@ async fn fetch_device_bootstrap<C>(
             Ok(artifact)
         })
         .collect::<Result<Vec<_>, TrellisClientError>>()?;
-    let resolved = trellis_protocol::resolve_participant_v1(&parsed_participant, &participant_apis)
+    let resolved = trellis_protocol::resolve_participant(&parsed_participant, &participant_apis)
         .map_err(|error| TrellisClientError::Bootstrap(error.to_string()))?;
     if resolved
         .needs()
@@ -819,9 +818,9 @@ async fn fetch_device_bootstrap<C>(
             "signature": "",
         }),
     })?;
-    let request_digest = trellis_protocol::session_proof_request_digest_v1(&request)
+    let request_digest = trellis_protocol::session_proof_request_digest(&request)
         .map_err(|error| TrellisClientError::Bootstrap(error.to_string()))?;
-    let input = SessionProofInputV1::device_bootstrap(DeviceBootstrapSessionProofInputV1 {
+    let input = SessionProofInput::device_bootstrap(DeviceBootstrapSessionProofInput {
         request_id,
         issued_at,
         deployment_id: opts.deployment_id.to_owned(),
@@ -1485,7 +1484,7 @@ impl TrellisClient {
     ) -> Result<Self, TrellisClientError> {
         let auth = SessionAuth::from_seed_base64url(opts.session_key_seed_base64url)?;
         let participant = serde_json::from_str(opts.participant_json)?;
-        let parsed_participant = parse_participant_v1(&participant)
+        let parsed_participant = parse_participant(&participant)
             .map_err(|error| TrellisClientError::Bootstrap(error.to_string()))?;
         if parsed_participant.id() != opts.participant_id
             || parsed_participant
@@ -1504,7 +1503,7 @@ impl TrellisClient {
             .iter()
             .map(|(json, digest)| {
                 let artifact = serde_json::from_str(json)?;
-                let parsed = trellis_protocol::parse_api_v1(&artifact)
+                let parsed = trellis_protocol::parse_api(&artifact)
                     .map_err(|error| TrellisClientError::Bootstrap(error.to_string()))?;
                 let actual_digest = parsed
                     .digest()
@@ -1518,7 +1517,7 @@ impl TrellisClient {
                 Ok(artifact)
             })
             .collect::<Result<Vec<_>, TrellisClientError>>()?;
-        let parsed_api = trellis_protocol::parse_api_v1(&api)
+        let parsed_api = trellis_protocol::parse_api(&api)
             .map_err(|error| TrellisClientError::Bootstrap(error.to_string()))?;
         if parsed_api
             .digest()
@@ -1530,7 +1529,7 @@ impl TrellisClient {
             ));
         }
         participant_apis.insert(parsed_api.id().to_owned(), parsed_api);
-        let resolved = resolve_participant_v1(&parsed_participant, &participant_apis)
+        let resolved = resolve_participant(&parsed_participant, &participant_apis)
             .map_err(|error| TrellisClientError::Bootstrap(error.to_string()))?;
         if resolved
             .needs()

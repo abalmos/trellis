@@ -1,5 +1,5 @@
 use serde_json::json;
-use trellis_protocol::ParticipantKindV1;
+use trellis_protocol::ParticipantKind;
 use ulid::Ulid;
 
 use super::super::*;
@@ -14,7 +14,7 @@ pub struct CreateSessionInput {
     /// Exact participant ID.
     pub participant_id: String,
     /// Exact participant class.
-    pub participant_kind: ParticipantKindV1,
+    pub participant_kind: ParticipantKind,
     /// Exact participant artifact digest.
     pub participant_artifact_digest: String,
     /// Exact participant needs digest.

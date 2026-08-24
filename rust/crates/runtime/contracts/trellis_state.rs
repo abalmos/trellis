@@ -2,7 +2,7 @@
 
 use serde_json::{json, Value};
 use trellis_contracts::{
-    ApiArtifactV1, ApiBuilder, ContractArtifacts, ContractBuilder, ContractKind, ContractsError,
+    ApiArtifact, ApiBuilder, ContractArtifacts, ContractBuilder, ContractKind, ContractsError,
 };
 
 const AUTH_ERROR: &str = "AuthError";
@@ -10,7 +10,7 @@ const UNEXPECTED_ERROR: &str = "UnexpectedError";
 const VALIDATION_ERROR: &str = "ValidationError";
 
 /// Build the canonical State service API artifact.
-pub fn api_artifact() -> Result<ApiArtifactV1, ContractsError> {
+pub fn api_artifact() -> Result<ApiArtifact, ContractsError> {
     ApiBuilder::authoring(
         "trellis.state@v1",
         "Trellis State",

@@ -54,7 +54,7 @@ where
         tracing::warn!(%error, "invalid auth request proof envelope");
         HttpError::bad_request("invalid_auth_request")
     })?;
-    let input = SessionProofInputV1::user_auth_request(UserAuthRequestSessionProofInputV1 {
+    let input = SessionProofInput::user_auth_request(UserAuthRequestSessionProofInput {
         request_id: request.request_id.clone(),
         issued_at: request.issued_at,
         session_public_key: request.session_public_key.clone(),
@@ -65,7 +65,7 @@ where
         request_digest: request_digest.clone(),
     })
     .map_err(|_| HttpError::unauthorized("invalid_proof"))?;
-    let proof = parse_session_proof_v1(&request.proof)
+    let proof = parse_session_proof(&request.proof)
         .map_err(|_| HttpError::unauthorized("invalid_proof"))?;
     let now = now_ms()?;
     let (portal, _) = select_login_portal(
@@ -74,7 +74,7 @@ where
         &request.redirect_target,
     )
     .await?;
-    verify_session_proof_v1(
+    verify_session_proof(
         &input,
         &proof,
         &request.session_public_key,
@@ -83,13 +83,13 @@ where
     )
     .map_err(|_| HttpError::unauthorized("invalid_proof"))?;
     if let Some(participant_value) = &request.participant_artifact {
-        let participant = parse_participant_v1(participant_value)
+        let participant = parse_participant(participant_value)
             .map_err(|_| HttpError::bad_request("invalid_participant_artifact"))?;
         let mut apis = BTreeMap::new();
         let mut api_values = BTreeMap::new();
         for value in &request.referenced_api_artifacts {
             let api =
-                parse_api_v1(value).map_err(|_| HttpError::bad_request("invalid_api_artifact"))?;
+                parse_api(value).map_err(|_| HttpError::bad_request("invalid_api_artifact"))?;
             api_values.insert(
                 api.id().to_owned(),
                 api.normalized_value()
@@ -97,7 +97,7 @@ where
             );
             apis.insert(api.id().to_owned(), api);
         }
-        let resolved = resolve_participant_v1(&participant, &apis)
+        let resolved = resolve_participant(&participant, &apis)
             .map_err(|_| HttpError::bad_request("participant_resolution_failed"))?;
         let needs_digest = resolved
             .needs()

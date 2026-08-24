@@ -8,9 +8,9 @@ use ed25519_dalek::SigningKey;
 use sha2::{Digest as _, Sha256};
 use thiserror::Error;
 use trellis_protocol::{
-    canonicalize_json, parse_issuer_manifest_v1, verify_issuer_manifest_v1,
-    AuthorizationTrustRootV1, AuthorizationVerificationPolicyV1,
-    SignedAuthorizationIssuerManifestV1, VerifiedAuthorizationIssuerManifestV1,
+    canonicalize_json, parse_issuer_manifest, verify_issuer_manifest, AuthorizationTrustRoot,
+    AuthorizationVerificationPolicy, SignedAuthorizationIssuerManifest,
+    VerifiedAuthorizationIssuerManifest,
 };
 
 use crate::config::AuthorizationConfig;
@@ -19,19 +19,19 @@ const MAX_TRUST_FILE_BYTES: u64 = 1_048_576;
 
 /// Fully verified authorization trust material and active online issuer.
 pub(crate) struct VerifiedTrustMaterial {
-    pub(crate) root: AuthorizationTrustRootV1,
-    pub(crate) manifest: SignedAuthorizationIssuerManifestV1,
-    pub(crate) verified_manifest: VerifiedAuthorizationIssuerManifestV1,
+    pub(crate) root: AuthorizationTrustRoot,
+    pub(crate) manifest: SignedAuthorizationIssuerManifest,
+    pub(crate) verified_manifest: VerifiedAuthorizationIssuerManifest,
     pub(crate) issuer_signing_key: SigningKey,
-    pub(crate) policy: AuthorizationVerificationPolicyV1,
+    pub(crate) policy: AuthorizationVerificationPolicy,
 }
 
 /// Public trust material sufficient for local request and event verification.
 pub(crate) struct VerifiedValidatorTrustMaterial {
-    pub(crate) root: AuthorizationTrustRootV1,
-    pub(crate) manifest: SignedAuthorizationIssuerManifestV1,
-    pub(crate) verified_manifest: VerifiedAuthorizationIssuerManifestV1,
-    pub(crate) policy: AuthorizationVerificationPolicyV1,
+    pub(crate) root: AuthorizationTrustRoot,
+    pub(crate) manifest: SignedAuthorizationIssuerManifest,
+    pub(crate) verified_manifest: VerifiedAuthorizationIssuerManifest,
+    pub(crate) policy: AuthorizationVerificationPolicy,
 }
 
 impl std::fmt::Debug for VerifiedTrustMaterial {
@@ -106,7 +106,7 @@ impl VerifiedValidatorTrustMaterial {
         now_unix_seconds: i64,
     ) -> Result<Self, TrustMaterialError> {
         let policy_at = |now| {
-            AuthorizationVerificationPolicyV1::new(
+            AuthorizationVerificationPolicy::new(
                 now,
                 u32::try_from(config.allowed_clock_skew_seconds)
                     .map_err(|_| TrustMaterialError::InvalidPolicy)?,
@@ -122,12 +122,12 @@ impl VerifiedValidatorTrustMaterial {
         let policy = policy_at(now_unix_seconds)?;
 
         let root_value = read_canonical_json(&config.trust_root_file, "trust root")?;
-        let root = AuthorizationTrustRootV1::parse(&root_value)
+        let root = AuthorizationTrustRoot::parse(&root_value)
             .map_err(|_| TrustMaterialError::InvalidTrustRoot)?;
         let manifest_value = read_canonical_json(&config.issuer_manifest_file, "issuer manifest")?;
-        let manifest = parse_issuer_manifest_v1(&manifest_value)
+        let manifest = parse_issuer_manifest(&manifest_value)
             .map_err(|_| TrustMaterialError::InvalidManifest)?;
-        let verified_manifest = verify_issuer_manifest_v1(&root, &manifest, &policy)
+        let verified_manifest = verify_issuer_manifest(&root, &manifest, &policy)
             .map_err(|_| TrustMaterialError::InvalidManifest)?;
         if manifest.unsigned.not_before > now_unix_seconds {
             return Err(TrustMaterialError::InvalidManifest);

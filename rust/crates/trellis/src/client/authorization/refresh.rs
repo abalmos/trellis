@@ -3,8 +3,7 @@ use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use trellis_protocol::{
-    session_proof_request_digest_v1, AuthorizationContextRefreshSessionProofInputV1,
-    SessionProofInputV1,
+    session_proof_request_digest, AuthorizationContextRefreshSessionProofInput, SessionProofInput,
 };
 
 use super::super::{proof::new_request_id, SessionAuth, TrellisClientError};
@@ -88,10 +87,10 @@ pub(crate) async fn refresh(
         }),
     };
     let request_value = serde_json::to_value(&request)?;
-    let request_digest = session_proof_request_digest_v1(&request_value)
+    let request_digest = session_proof_request_digest(&request_value)
         .map_err(|error| TrellisClientError::Bootstrap(error.to_string()))?;
-    let input = SessionProofInputV1::authorization_context_refresh(
-        AuthorizationContextRefreshSessionProofInputV1 {
+    let input = SessionProofInput::authorization_context_refresh(
+        AuthorizationContextRefreshSessionProofInput {
             request_id: request.request_id.clone(),
             issued_at: request.issued_at,
             session_id: request.session_id.clone(),

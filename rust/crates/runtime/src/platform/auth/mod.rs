@@ -9,7 +9,7 @@
 //! separate fail-closed projection of that decision against authority-scoped
 //! participant, dependency, resource, and deployment evidence. Session,
 //! instance, and activation eligibility is checked only during issuance. Exact
-//! permissions remain [`trellis_protocol::GrantSetV1`] values; platform
+//! permissions remain [`trellis_protocol::GrantSet`] values; platform
 //! capabilities never expand those permissions.
 //!
 //! Context signing, public auth/bootstrap routes, and transport admission are

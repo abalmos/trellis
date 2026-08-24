@@ -102,18 +102,17 @@ fn state_contract(
             preferences.state_version = Some("preferences.v2".to_owned());
             preferences.accepted_versions.insert(
                 "v1".to_owned(),
-                trellis_rs::contracts::schema_ref("PreferencesV1"),
+                trellis_rs::contracts::schema_ref("Preferences"),
             );
             let mut drafts = state(ContractStateKind::Map, "Draft");
             drafts.state_version = Some("drafts.v2".to_owned());
-            drafts.accepted_versions.insert(
-                "v1".to_owned(),
-                trellis_rs::contracts::schema_ref("DraftV1"),
-            );
+            drafts
+                .accepted_versions
+                .insert("v1".to_owned(), trellis_rs::contracts::schema_ref("Draft"));
             builder = builder
-                .schema("PreferencesV1", preferences_schema(false))
+                .schema("Preferences", preferences_schema(false))
                 .schema("Preferences", serde_json::json!({"type": "object", "required": ["theme", "compact"], "properties": {"theme": {"type": "string"}, "compact": {"type": "boolean"}}}))
-                .schema("DraftV1", draft_schema(false))
+                .schema("Draft", draft_schema(false))
                 .schema("Draft", serde_json::json!({"type": "object", "required": ["title", "pinned"], "properties": {"title": {"type": "string"}, "pinned": {"type": "boolean"}}}))
                 .state("preferences", preferences)
                 .state("drafts", drafts);
@@ -1001,22 +1000,22 @@ async fn state_service_normal_access_is_denied() {
 
 #[tokio::test]
 async fn state_migration_required_is_returned_live() {
-    let (runtime, caller_v1) = client().await;
-    let v1 = ValueStateStore::<_, serde_json::Value>::new(&caller_v1, "preferences");
-    let map_v1 = MapStateStore::<_, serde_json::Value>::new(&caller_v1, "drafts");
+    let (runtime, caller) = client().await;
+    let v1 = ValueStateStore::<_, serde_json::Value>::new(&caller, "preferences");
+    let map = MapStateStore::<_, serde_json::Value>::new(&caller, "drafts");
     let written = v1
         .put(&serde_json::json!({"theme": "dark"}))
         .await
         .expect("write v1 State value");
     let old_value_revision = put_revision(&written);
-    let map_written = map_v1
+    let map_written = map
         .put("old", &serde_json::json!({"title": "old"}))
         .await
         .expect("write v1 map State value");
     let old_map_revision = put_revision(&map_written);
     let v1_contract = state_contract(StateFixture::Client).expect("v1 contract");
     let old_writer_digest = v1_contract.digest().to_owned();
-    let context = caller_v1
+    let context = caller
         .authorization_context()
         .expect("read v1 caller context")
         .expect("v1 caller context");

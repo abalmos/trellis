@@ -12,7 +12,7 @@ use crate::{
         validate_nonempty_text, validate_protocol_identifier,
     },
     schema_profile::{
-        lint_participant_authoring, validate_embedded_schema,
+        lint_participant_authoring as lint_participant_schema, validate_embedded_schema,
         validate_participant_runtime_structure, validate_wire_schema_additive,
     },
     ProtocolError,
@@ -34,9 +34,9 @@ pub const PARTICIPANT_AUTHORING_SCHEMA_V1_JSON: &str =
 ///
 /// Returns [`ProtocolError::ParticipantValidation`] when the closed authoring
 /// schema or the participant's intrinsic invariants are violated.
-pub fn lint_participant_v1_authoring(value: &Value) -> Result<(), ProtocolError> {
-    lint_participant_authoring(value)?;
-    parse_participant_v1(value).map(|_| ())
+pub fn lint_participant_authoring(value: &Value) -> Result<(), ProtocolError> {
+    lint_participant_schema(value)?;
+    parse_participant(value).map(|_| ())
 }
 
 /// A user-authored participant kind.
@@ -46,7 +46,7 @@ pub fn lint_participant_v1_authoring(value: &Value) -> Result<(), ProtocolError>
 /// automated behavior.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub enum ParticipantKindV1 {
+pub enum ParticipantKind {
     /// A service participant.
     Service,
     /// An application participant.
@@ -66,34 +66,34 @@ pub enum ParticipantKindV1 {
 /// resolved by this type.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct ParticipantArtifactV1 {
+pub struct ParticipantArtifact {
     format: String,
     id: String,
     display_name: String,
     description: String,
     #[serde(skip_serializing_if = "Option::is_none")]
-    docs: Option<DocumentationV1>,
-    kind: ParticipantKindV1,
+    docs: Option<Documentation>,
+    kind: ParticipantKind,
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
     schemas: BTreeMap<String, Value>,
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
-    implements: BTreeMap<String, ImplementedApiV1>,
-    #[serde(skip_serializing_if = "UsesV1::is_empty")]
-    uses: UsesV1,
+    implements: BTreeMap<String, ImplementedApi>,
+    #[serde(skip_serializing_if = "Uses::is_empty")]
+    uses: Uses,
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
-    state: BTreeMap<String, ParticipantStateV1>,
+    state: BTreeMap<String, ParticipantState>,
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
-    job_queues: BTreeMap<String, JobQueueV1>,
+    job_queues: BTreeMap<String, JobQueue>,
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
-    event_consumers: BTreeMap<String, EventConsumerV1>,
-    #[serde(skip_serializing_if = "ResourcesV1::is_empty")]
-    resources: ResourcesV1,
+    event_consumers: BTreeMap<String, EventConsumer>,
+    #[serde(skip_serializing_if = "Resources::is_empty")]
+    resources: Resources,
 }
 
 /// Validate and parse one raw `trellis.participant.v1` JSON value.
 ///
 /// Unknown object members are ignored and do not affect normalization or the
-/// semantic digest. Use [`lint_participant_v1_authoring`] in strict authoring
+/// semantic digest. Use [`lint_participant_authoring`] in strict authoring
 /// tools.
 ///
 /// # Errors
@@ -101,21 +101,21 @@ pub struct ParticipantArtifactV1 {
 /// Returns [`ProtocolError::ParticipantValidation`] with an RFC 6901 path for an
 /// invalid artifact, local reference, resource, or selection, or
 /// [`ProtocolError::Json`] when decoding fails.
-pub fn parse_participant_v1(value: &Value) -> Result<ParticipantArtifactV1, ProtocolError> {
+pub fn parse_participant(value: &Value) -> Result<ParticipantArtifact, ProtocolError> {
     validate_participant_runtime_structure(value)?;
-    let wire: WireParticipantArtifactV1 = serde_json::from_value(value.clone())
+    let wire: WireParticipantArtifact = serde_json::from_value(value.clone())
         .map_err(|error| participant_error("", error.to_string()))?;
-    ParticipantArtifactV1::from_wire(wire)
+    ParticipantArtifact::from_wire(wire)
 }
 
-impl ParticipantArtifactV1 {
+impl ParticipantArtifact {
     /// Return the stable software-definition identifier.
     pub fn id(&self) -> &str {
         &self.id
     }
 
     /// Return the participant kind.
-    pub fn kind(&self) -> ParticipantKindV1 {
+    pub fn kind(&self) -> ParticipantKind {
         self.kind
     }
 
@@ -194,7 +194,7 @@ impl ParticipantArtifactV1 {
         digest_json(&self.digest_projection()?)
     }
 
-    fn from_wire(mut wire: WireParticipantArtifactV1) -> Result<Self, ProtocolError> {
+    fn from_wire(mut wire: WireParticipantArtifact) -> Result<Self, ProtocolError> {
         if wire.format != PARTICIPANT_FORMAT_V1 {
             return Err(participant_error(
                 "/format",
@@ -439,66 +439,66 @@ impl ParticipantArtifactV1 {
     }
 }
 
-impl<'de> Deserialize<'de> for ParticipantArtifactV1 {
+impl<'de> Deserialize<'de> for ParticipantArtifact {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: Deserializer<'de>,
     {
         let value = Value::deserialize(deserializer)?;
-        parse_participant_v1(&value).map_err(D::Error::custom)
+        parse_participant(&value).map_err(D::Error::custom)
     }
 }
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct WireParticipantArtifactV1 {
+struct WireParticipantArtifact {
     format: String,
     id: String,
     display_name: String,
     description: String,
     #[serde(default)]
-    docs: Option<DocumentationV1>,
-    kind: ParticipantKindV1,
+    docs: Option<Documentation>,
+    kind: ParticipantKind,
     #[serde(default)]
     schemas: BTreeMap<String, Value>,
     #[serde(default)]
-    implements: BTreeMap<String, ImplementedApiV1>,
+    implements: BTreeMap<String, ImplementedApi>,
     #[serde(default)]
-    uses: UsesV1,
+    uses: Uses,
     #[serde(default)]
-    state: BTreeMap<String, ParticipantStateV1>,
+    state: BTreeMap<String, ParticipantState>,
     #[serde(default)]
-    job_queues: BTreeMap<String, JobQueueV1>,
+    job_queues: BTreeMap<String, JobQueue>,
     #[serde(default)]
-    event_consumers: BTreeMap<String, EventConsumerV1>,
+    event_consumers: BTreeMap<String, EventConsumer>,
     #[serde(default)]
-    resources: ResourcesV1,
+    resources: Resources,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-struct DocumentationV1 {
+struct Documentation {
     #[serde(skip_serializing_if = "Option::is_none")]
     summary: Option<String>,
     markdown: String,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-struct SchemaReferenceV1 {
+struct SchemaReference {
     schema: String,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct ImplementedApiV1 {
+struct ImplementedApi {
     api: String,
     api_digest: String,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    operation_transfers: BTreeMap<String, OperationTransferV1>,
+    operation_transfers: BTreeMap<String, OperationTransfer>,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct OperationTransferV1 {
+struct OperationTransfer {
     store: String,
     key: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -512,14 +512,14 @@ struct OperationTransferV1 {
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
-struct UsesV1 {
+struct Uses {
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    required: BTreeMap<String, UsedApiV1>,
+    required: BTreeMap<String, UsedApi>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    optional: BTreeMap<String, UsedApiV1>,
+    optional: BTreeMap<String, UsedApi>,
 }
 
-impl UsesV1 {
+impl Uses {
     fn is_empty(&self) -> bool {
         self.required.is_empty() && self.optional.is_empty()
     }
@@ -527,35 +527,35 @@ impl UsesV1 {
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct UsedApiV1 {
+struct UsedApi {
     api: String,
     api_digest: String,
-    #[serde(default, skip_serializing_if = "RpcUsesV1::is_empty")]
-    rpc: RpcUsesV1,
-    #[serde(default, skip_serializing_if = "OperationUsesV1::is_empty")]
-    operations: OperationUsesV1,
-    #[serde(default, skip_serializing_if = "EventUsesV1::is_empty")]
-    events: EventUsesV1,
-    #[serde(default, skip_serializing_if = "FeedUsesV1::is_empty")]
-    feeds: FeedUsesV1,
-    #[serde(default, skip_serializing_if = "StateUsesV1::is_empty")]
-    state: StateUsesV1,
+    #[serde(default, skip_serializing_if = "RpcUses::is_empty")]
+    rpc: RpcUses,
+    #[serde(default, skip_serializing_if = "OperationUses::is_empty")]
+    operations: OperationUses,
+    #[serde(default, skip_serializing_if = "EventUses::is_empty")]
+    events: EventUses,
+    #[serde(default, skip_serializing_if = "FeedUses::is_empty")]
+    feeds: FeedUses,
+    #[serde(default, skip_serializing_if = "StateUses::is_empty")]
+    state: StateUses,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
-struct RpcUsesV1 {
+struct RpcUses {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     call: Vec<String>,
 }
 
-impl RpcUsesV1 {
+impl RpcUses {
     fn is_empty(&self) -> bool {
         self.call.is_empty()
     }
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
-struct OperationUsesV1 {
+struct OperationUses {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     invoke: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -566,7 +566,7 @@ struct OperationUsesV1 {
     control: BTreeMap<String, Vec<String>>,
 }
 
-impl OperationUsesV1 {
+impl OperationUses {
     fn is_empty(&self) -> bool {
         self.invoke.is_empty()
             && self.observe.is_empty()
@@ -576,40 +576,40 @@ impl OperationUsesV1 {
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
-struct EventUsesV1 {
+struct EventUses {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     publish: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     subscribe: Vec<String>,
 }
 
-impl EventUsesV1 {
+impl EventUses {
     fn is_empty(&self) -> bool {
         self.publish.is_empty() && self.subscribe.is_empty()
     }
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
-struct FeedUsesV1 {
+struct FeedUses {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     subscribe: Vec<String>,
 }
 
-impl FeedUsesV1 {
+impl FeedUses {
     fn is_empty(&self) -> bool {
         self.subscribe.is_empty()
     }
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
-struct StateUsesV1 {
+struct StateUses {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     read: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     write: Vec<String>,
 }
 
-impl StateUsesV1 {
+impl StateUses {
     fn is_empty(&self) -> bool {
         self.read.is_empty() && self.write.is_empty()
     }
@@ -617,32 +617,32 @@ impl StateUsesV1 {
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
-enum StateKindV1 {
+enum StateKind {
     Value,
     Map,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct ParticipantStateV1 {
-    kind: StateKindV1,
-    schema: SchemaReferenceV1,
+struct ParticipantState {
+    kind: StateKind,
+    schema: SchemaReference,
     #[serde(skip_serializing_if = "Option::is_none")]
     state_version: Option<String>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    accepted_versions: BTreeMap<String, SchemaReferenceV1>,
+    accepted_versions: BTreeMap<String, SchemaReference>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    docs: Option<DocumentationV1>,
+    docs: Option<Documentation>,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct JobQueueV1 {
-    payload: SchemaReferenceV1,
+struct JobQueue {
+    payload: SchemaReference,
     #[serde(skip_serializing_if = "Option::is_none")]
-    update: Option<SchemaReferenceV1>,
+    update: Option<SchemaReference>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    result: Option<SchemaReferenceV1>,
+    result: Option<SchemaReference>,
     #[serde(skip_serializing_if = "Option::is_none")]
     max_deliver: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -658,16 +658,16 @@ struct JobQueueV1 {
     #[serde(default, skip_serializing_if = "is_false")]
     dlq: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
-    key_concurrency: Option<KeyConcurrencyV1>,
+    key_concurrency: Option<KeyConcurrency>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    queue: Option<QueuePolicyV1>,
+    queue: Option<QueuePolicy>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    docs: Option<DocumentationV1>,
+    docs: Option<Documentation>,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct KeyConcurrencyV1 {
+struct KeyConcurrency {
     key: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     max_active: Option<u64>,
@@ -676,28 +676,28 @@ struct KeyConcurrencyV1 {
     #[serde(skip_serializing_if = "Option::is_none")]
     heartbeat_ttl_ms: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    stale_policy: Option<StalePolicyV1>,
+    stale_policy: Option<StalePolicy>,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "kebab-case")]
-enum StalePolicyV1 {
+enum StalePolicy {
     FailStale,
     Block,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct QueuePolicyV1 {
+struct QueuePolicy {
     #[serde(skip_serializing_if = "Option::is_none")]
     max_queued_per_key: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    when_full: Option<WhenFullV1>,
+    when_full: Option<WhenFull>,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "kebab-case")]
-enum WhenFullV1 {
+enum WhenFull {
     Reject,
     Coalesce,
     ReplaceOldest,
@@ -705,12 +705,12 @@ enum WhenFullV1 {
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct EventConsumerV1 {
+struct EventConsumer {
     events: BTreeMap<String, Vec<String>>,
     #[serde(default, skip_serializing_if = "is_replay_new")]
-    replay: ReplayV1,
+    replay: Replay,
     #[serde(default, skip_serializing_if = "is_ordering_strict")]
-    ordering: OrderingV1,
+    ordering: Ordering,
     #[serde(skip_serializing_if = "Option::is_none")]
     ack_wait_ms: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -718,12 +718,12 @@ struct EventConsumerV1 {
     #[serde(skip_serializing_if = "Option::is_none")]
     backoff_ms: Option<Vec<u64>>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    docs: Option<DocumentationV1>,
+    docs: Option<Documentation>,
 }
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
-enum ReplayV1 {
+enum Replay {
     #[default]
     New,
     All,
@@ -731,21 +731,21 @@ enum ReplayV1 {
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
-enum OrderingV1 {
+enum Ordering {
     #[default]
     Strict,
     Parallel,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
-struct ResourcesV1 {
+struct Resources {
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    kv: BTreeMap<String, KvResourceV1>,
+    kv: BTreeMap<String, KvResource>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    store: BTreeMap<String, StoreResourceV1>,
+    store: BTreeMap<String, StoreResource>,
 }
 
-impl ResourcesV1 {
+impl Resources {
     fn is_empty(&self) -> bool {
         self.kv.is_empty() && self.store.is_empty()
     }
@@ -753,9 +753,9 @@ impl ResourcesV1 {
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct KvResourceV1 {
+struct KvResource {
     purpose: String,
-    schema: SchemaReferenceV1,
+    schema: SchemaReference,
     #[serde(default = "default_true", skip_serializing_if = "is_true")]
     required: bool,
     #[serde(default = "default_one", skip_serializing_if = "is_one")]
@@ -765,12 +765,12 @@ struct KvResourceV1 {
     #[serde(skip_serializing_if = "Option::is_none")]
     max_value_bytes: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    docs: Option<DocumentationV1>,
+    docs: Option<Documentation>,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct StoreResourceV1 {
+struct StoreResource {
     purpose: String,
     #[serde(default = "default_true", skip_serializing_if = "is_true")]
     required: bool,
@@ -781,7 +781,7 @@ struct StoreResourceV1 {
     #[serde(skip_serializing_if = "Option::is_none")]
     max_total_bytes: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    docs: Option<DocumentationV1>,
+    docs: Option<Documentation>,
 }
 
 fn validate_api_reference<'a>(
@@ -829,7 +829,7 @@ fn validate_api_digest(path: &str, value: &str) -> Result<(), ProtocolError> {
 fn normalize_used_api(
     requirement: &str,
     alias: &str,
-    used: &mut UsedApiV1,
+    used: &mut UsedApi,
 ) -> Result<(), ProtocolError> {
     let path = pointer(["uses", requirement, alias]);
     for (group, values) in [
@@ -898,7 +898,7 @@ fn normalize_used_api(
 fn validate_job_queue(
     schemas: &BTreeMap<String, Value>,
     name: &str,
-    queue: &JobQueueV1,
+    queue: &JobQueue,
 ) -> Result<(), ProtocolError> {
     let path = member_path("jobQueues", name);
     validate_protocol_identifier(&path, name, participant_error)?;
@@ -970,7 +970,7 @@ fn validate_job_queue(
     Ok(())
 }
 
-fn validate_docs(path: &str, docs: &DocumentationV1) -> Result<(), ProtocolError> {
+fn validate_docs(path: &str, docs: &Documentation) -> Result<(), ProtocolError> {
     validate_nonempty_text(
         &format!("{path}/markdown"),
         &docs.markdown,
@@ -984,7 +984,7 @@ fn validate_docs(path: &str, docs: &DocumentationV1) -> Result<(), ProtocolError
 
 fn require_schema(
     schemas: &BTreeMap<String, Value>,
-    reference: &SchemaReferenceV1,
+    reference: &SchemaReference,
     path: &str,
 ) -> Result<(), ProtocolError> {
     validate_protocol_identifier(path, &reference.schema, participant_error)?;
@@ -1085,12 +1085,12 @@ fn is_one(value: &u64) -> bool {
     *value == 1
 }
 
-fn is_replay_new(value: &ReplayV1) -> bool {
-    *value == ReplayV1::New
+fn is_replay_new(value: &Replay) -> bool {
+    *value == Replay::New
 }
 
-fn is_ordering_strict(value: &OrderingV1) -> bool {
-    *value == OrderingV1::Strict
+fn is_ordering_strict(value: &Ordering) -> bool {
+    *value == Ordering::Strict
 }
 
 #[cfg(test)]
@@ -1144,7 +1144,7 @@ mod tests {
                 "authoring lint result for {}",
                 vector.name
             );
-            let parsed = parse_participant_v1(&vector.input);
+            let parsed = parse_participant(&vector.input);
             if let (Err(error), Some(schema), Some(path)) =
                 (&parsed, &vector.error_schema, &vector.error_path)
             {
@@ -1169,7 +1169,7 @@ mod tests {
                 vector.name
             );
             assert_eq!(
-                serde_json::from_value::<ParticipantArtifactV1>(vector.input.clone()).is_ok(),
+                serde_json::from_value::<ParticipantArtifact>(vector.input.clone()).is_ok(),
                 vector.valid,
                 "direct deserialization result for {}",
                 vector.name
@@ -1305,14 +1305,14 @@ mod tests {
             "description": "Example participant.",
             "kind": "service",
             "schemas": {
-                "State": true, "StateV1": true, "Payload": true,
+                "State": true, "State": true, "Payload": true,
                 "Update": true, "Result": true, "KvValue": true,
                 "UnusedPrivate": { "type": "object", "additionalProperties": false }
             },
             "state": {
                 "settings": {
                     "kind": "value", "schema": { "schema": "State" },
-                    "acceptedVersions": { "v1": { "schema": "StateV1" } }
+                    "acceptedVersions": { "v1": { "schema": "State" } }
                 }
             },
             "jobQueues": {
@@ -1327,7 +1327,7 @@ mod tests {
                 }
             }
         });
-        assert!(parse_participant_v1(&base).is_ok());
+        assert!(parse_participant(&base).is_ok());
 
         for (schema, expected_path) in [
             (
@@ -1360,10 +1360,10 @@ mod tests {
                 "/properties/nested/additionalProperties",
             ),
         ] {
-            for name in ["State", "StateV1", "Payload", "Update", "Result", "KvValue"] {
+            for name in ["State", "State", "Payload", "Update", "Result", "KvValue"] {
                 let mut value = base.clone();
                 value["schemas"][name] = schema.clone();
-                let error = parse_participant_v1(&value).expect_err("closed wire schema must fail");
+                let error = parse_participant(&value).expect_err("closed wire schema must fail");
                 assert_schema_profile(error, name, expected_path);
             }
         }
@@ -1444,7 +1444,7 @@ mod tests {
             }
         });
         assert_eq!(
-            parse_participant_v1(&value)
+            parse_participant(&value)
                 .unwrap()
                 .normalized_value()
                 .unwrap()["uses"]["required"]["example"]["operations"]["control"]["Example.Run"],
@@ -1474,9 +1474,9 @@ mod tests {
         extended["extension"] = json!(true);
         extended["uses"]["required"]["example"]["extension"] = json!(true);
 
-        assert!(lint_participant_v1_authoring(&extended).is_err());
-        let base = parse_participant_v1(&base).unwrap();
-        let extended = parse_participant_v1(&extended).unwrap();
+        assert!(lint_participant_authoring(&extended).is_err());
+        let base = parse_participant(&base).unwrap();
+        let extended = parse_participant(&extended).unwrap();
         assert_eq!(
             extended.normalized_value().unwrap(),
             base.normalized_value().unwrap()
@@ -1485,7 +1485,7 @@ mod tests {
     }
 
     fn assert_participant_error(value: Value, expected_path: &str) {
-        match parse_participant_v1(&value).unwrap_err() {
+        match parse_participant(&value).unwrap_err() {
             ProtocolError::ParticipantValidation { path, .. } => {
                 assert_eq!(path, expected_path);
             }

@@ -29,7 +29,7 @@ import {
 } from "../../auth/authorization_context.ts";
 import type { InferSchemaType } from "../../contracts.ts";
 import type {
-  PermissionAtomV1,
+  PermissionAtom,
   RuntimeApi,
 } from "../../contract_support/runtime.ts";
 import type { NativeProtocolContract } from "../../contract_support/protocol_artifacts.ts";
@@ -3404,7 +3404,7 @@ export class TrellisServiceSession<
     store: string;
     key: string;
     sessionKey: string;
-    permission: PermissionAtomV1;
+    permission: PermissionAtom;
     requiredCapabilities?: readonly string[];
     inboxPrefix: string;
     expiresInMs?: number;

@@ -26,7 +26,7 @@ fn write_rust_contract(path: &Path, manifest_name: &str, kind: &str) {
     fs::write(
         path,
         format!(
-            r#"pub fn api_artifact() -> Result<trellis_contracts::ApiArtifactV1, trellis_contracts::ContractsError> {{
+            r#"pub fn api_artifact() -> Result<trellis_contracts::ApiArtifact, trellis_contracts::ContractsError> {{
     let mut source: serde_json::Value = serde_json::from_str(include_str!("{manifest_name}"))?;
     if let Some(source) = source.as_object_mut() {{
         source.remove("kind");

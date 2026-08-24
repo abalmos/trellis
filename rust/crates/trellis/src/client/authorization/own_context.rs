@@ -5,8 +5,8 @@ use std::sync::{
 
 use serde_json::Value;
 use trellis_protocol::{
-    parse_issuer_manifest_v1, verify_authorization_context_v1, verify_issuer_manifest_v1,
-    AuthorizationTrustRootV1, AuthorizationVerificationPolicyV1,
+    parse_issuer_manifest, verify_authorization_context, verify_issuer_manifest,
+    AuthorizationTrustRoot, AuthorizationVerificationPolicy,
 };
 
 use super::super::TrellisClientError;
@@ -14,7 +14,7 @@ use super::bootstrap_http::{persisted_signed_context, BootstrapHttp};
 use super::types::{
     AuthorizationClientState, AuthorizationClientTrustState, AuthorizationContextBundle,
     AuthorizationContextStore, AuthorizationRoutingMaterial, AuthorizationSessionBinding,
-    CachedAuthorizationState, CurrentContext, AUTHORIZATION_CLIENT_STATE_FORMAT_V1,
+    CachedAuthorizationState, CurrentContext, AUTHORIZATION_CLIENT_STATE_FORMAT_,
 };
 
 /// Verified process-local own authorization context used by reconnect callbacks.
@@ -162,7 +162,7 @@ impl AuthorizationContextCache {
                 "authorization context storage belongs to another identity".into(),
             ));
         }
-        let manifest = parse_issuer_manifest_v1(&bundle.trust.manifest)
+        let manifest = parse_issuer_manifest(&bundle.trust.manifest)
             .map_err(|error| TrellisClientError::Bootstrap(error.to_string()))?;
         let manifest_generation = manifest.unsigned.generation;
         let minimum_generation = durable.as_ref().map_or(manifest_generation, |state| {
@@ -171,7 +171,7 @@ impl AuthorizationContextCache {
                 .minimum_manifest_generation
                 .max(manifest_generation)
         });
-        let root = AuthorizationTrustRootV1::parse(&bundle.trust.root)
+        let root = AuthorizationTrustRoot::parse(&bundle.trust.root)
             .map_err(|error| TrellisClientError::Bootstrap(error.to_string()))?;
         let root_digest = root
             .digest()
@@ -185,7 +185,7 @@ impl AuthorizationContextCache {
                 "authorization trust root changed".into(),
             ));
         }
-        let policy = AuthorizationVerificationPolicyV1::new(
+        let policy = AuthorizationVerificationPolicy::new(
             now_unix_seconds,
             bundle.trust.policy.allowed_clock_skew_seconds,
             bundle.trust.policy.maximum_context_lifetime_seconds,
@@ -195,15 +195,14 @@ impl AuthorizationContextCache {
             minimum_generation,
         )
         .map_err(|error| TrellisClientError::Bootstrap(error.to_string()))?;
-        let verified_manifest = verify_issuer_manifest_v1(&root, &manifest, &policy)
+        let verified_manifest = verify_issuer_manifest(&root, &manifest, &policy)
             .map_err(|error| TrellisClientError::Bootstrap(error.to_string()))?;
         let manifest_digest = verified_manifest
             .digest()
             .map_err(|error| TrellisClientError::Bootstrap(error.to_string()))?;
         let context = persisted_signed_context(&bundle)?;
-        let verified =
-            verify_authorization_context_v1(&root, &verified_manifest, &context, &policy)
-                .map_err(|error| TrellisClientError::Bootstrap(error.to_string()))?;
+        let verified = verify_authorization_context(&root, &verified_manifest, &context, &policy)
+            .map_err(|error| TrellisClientError::Bootstrap(error.to_string()))?;
         let context_digest = verified.context_digest().to_owned();
         let context = &verified.signed_context().unsigned;
         if routing.bootstrap_jwt.trim().is_empty() || routing.bootstrap_jwt_expires_at <= 0 {
@@ -216,7 +215,7 @@ impl AuthorizationContextCache {
         let participant_needs_digest = context.participant.needs_digest.clone();
         let not_before = context.not_before;
         let expires_at = context.expires_at;
-        let refresh_at = trellis_protocol::authorization_context_refresh_at_v1(
+        let refresh_at = trellis_protocol::authorization_context_refresh_at(
             &context_digest,
             context.issued_at,
             not_before,
@@ -239,7 +238,7 @@ impl AuthorizationContextCache {
             needs_digest: context.participant.needs_digest.clone(),
         };
         let next = AuthorizationClientState {
-            format: AUTHORIZATION_CLIENT_STATE_FORMAT_V1.into(),
+            format: AUTHORIZATION_CLIENT_STATE_FORMAT_.into(),
             binding: self.binding.clone(),
             trust,
             session: session.clone(),
@@ -503,7 +502,7 @@ impl AuthorizationContextCache {
     pub(crate) fn provider_trust_input(&self) -> Result<ProviderTrustInput, TrellisClientError> {
         let durable = self.durable_state()?;
         let bundle = self.bundle()?;
-        let manifest = parse_issuer_manifest_v1(&bundle.trust.manifest)
+        let manifest = parse_issuer_manifest(&bundle.trust.manifest)
             .map_err(|error| TrellisClientError::Bootstrap(error.to_string()))?;
         let minimum_generation = durable
             .as_ref()
@@ -526,12 +525,12 @@ impl AuthorizationContextCache {
 pub(crate) fn inject_verified_for_test(
     cache: &AuthorizationContextCache,
     bundle: AuthorizationContextBundle,
-    verified: trellis_protocol::VerifiedAuthorizationContextV1,
-    _policy: AuthorizationVerificationPolicyV1,
+    verified: trellis_protocol::VerifiedAuthorizationContext,
+    _policy: AuthorizationVerificationPolicy,
 ) -> Result<(), TrellisClientError> {
     let context = &verified.signed_context().unsigned;
     let context_digest = verified.context_digest().to_owned();
-    let refresh_at = trellis_protocol::authorization_context_refresh_at_v1(
+    let refresh_at = trellis_protocol::authorization_context_refresh_at(
         &context_digest,
         context.issued_at,
         context.not_before,

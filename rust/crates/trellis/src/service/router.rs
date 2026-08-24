@@ -12,7 +12,7 @@ use tokio::sync::oneshot;
 
 use serde_json::Value;
 use trellis_protocol::{
-    ApiSurfaceKindV1, PermissionActionV1, PermissionAtomV1, PermissionTargetV1, ProtocolError,
+    ApiSurfaceKind, PermissionAction, PermissionAtom, PermissionTarget, ProtocolError,
 };
 
 use super::error::ValidationIssue;
@@ -60,20 +60,20 @@ pub struct RoutePermission {
     /// Versioned generated API identity that owns the surface.
     pub api: String,
     #[doc = concat!("The `", stringify!(surface), "` value.")]
-    pub surface: ApiSurfaceKindV1,
+    pub surface: ApiSurfaceKind,
     #[doc = concat!("The `", stringify!(name), "` value.")]
     pub name: String,
     #[doc = concat!("The `", stringify!(action), "` value.")]
-    pub action: PermissionActionV1,
+    pub action: PermissionAction,
     /// Operation signal name for a `Control` permission.
     pub signal: Option<String>,
 }
 
 impl RoutePermission {
     /// Convert generated route metadata into its exact permission atom.
-    pub fn permission_atom(&self) -> Result<PermissionAtomV1, ProtocolError> {
-        let target = if self.action == PermissionActionV1::Control {
-            PermissionTargetV1::operation_signal(
+    pub fn permission_atom(&self) -> Result<PermissionAtom, ProtocolError> {
+        let target = if self.action == PermissionAction::Control {
+            PermissionTarget::operation_signal(
                 self.api.clone(),
                 self.name.clone(),
                 self.signal
@@ -84,9 +84,9 @@ impl RoutePermission {
                     })?,
             )?
         } else {
-            PermissionTargetV1::api_surface(self.api.clone(), self.surface, self.name.clone())?
+            PermissionTarget::api_surface(self.api.clone(), self.surface, self.name.clone())?
         };
-        PermissionAtomV1::new(target, self.action)
+        PermissionAtom::new(target, self.action)
     }
 }
 
@@ -106,7 +106,7 @@ struct Route {
 #[derive(Debug, Clone)]
 enum RoutePermissionSpec {
     /// One fixed surface for every request on the route.
-    Static(ApiSurfaceKindV1, String, PermissionActionV1),
+    Static(ApiSurfaceKind, String, PermissionAction),
     /// Operation control routes resolve the action from the payload.
     OperationControl(String),
 }
@@ -125,17 +125,17 @@ impl RoutePermissionSpec {
             Self::OperationControl(name) => {
                 let request = serde_json::from_slice::<OperationControlRequest>(payload).ok()?;
                 let action = match request.action.as_str() {
-                    "get" | "wait" | "watch" => PermissionActionV1::Observe,
-                    "cancel" => PermissionActionV1::Cancel,
-                    "signal" => PermissionActionV1::Control,
+                    "get" | "wait" | "watch" => PermissionAction::Observe,
+                    "cancel" => PermissionAction::Cancel,
+                    "signal" => PermissionAction::Control,
                     _ => return None,
                 };
                 Some(RoutePermission {
                     api,
-                    surface: ApiSurfaceKindV1::Operation,
+                    surface: ApiSurfaceKind::Operation,
                     name: name.clone(),
                     action,
-                    signal: if action == PermissionActionV1::Control {
+                    signal: if action == PermissionAction::Control {
                         Some(request.signal?)
                     } else {
                         None
@@ -260,9 +260,9 @@ impl Router {
             Route {
                 capabilities: RouteCapabilities::Static(capabilities),
                 permission: RoutePermissionSpec::Static(
-                    ApiSurfaceKindV1::Rpc,
+                    ApiSurfaceKind::Rpc,
                     self.descriptor_name(D::KEY),
-                    PermissionActionV1::Call,
+                    PermissionAction::Call,
                 ),
                 handler: Box::new(
                 move |ctx, payload| -> BoxFuture<'static, Result<HandlerResponse, ServerError>> {
@@ -296,9 +296,9 @@ impl Router {
             Route {
                 capabilities: RouteCapabilities::Static(capabilities),
                 permission: RoutePermissionSpec::Static(
-                    ApiSurfaceKindV1::Rpc,
+                    ApiSurfaceKind::Rpc,
                     self.descriptor_name(D::KEY),
-                    PermissionActionV1::Call,
+                    PermissionAction::Call,
                 ),
                 handler: Box::new(|_, _| {
                     Box::pin(async {
@@ -336,9 +336,9 @@ impl Router {
                     self.descriptor_capabilities(D::CALLER_CAPABILITIES),
                 ),
                 permission: RoutePermissionSpec::Static(
-                    ApiSurfaceKindV1::Operation,
+                    ApiSurfaceKind::Operation,
                     name.clone(),
-                    PermissionActionV1::Invoke,
+                    PermissionAction::Invoke,
                 ),
                 handler: metadata_handler(),
             },
@@ -374,9 +374,9 @@ impl Router {
             Route {
                 capabilities: RouteCapabilities::Static(capabilities),
                 permission: RoutePermissionSpec::Static(
-                    ApiSurfaceKindV1::Feed,
+                    ApiSurfaceKind::Feed,
                     self.descriptor_name(D::KEY),
-                    PermissionActionV1::Subscribe,
+                    PermissionAction::Subscribe,
                 ),
                 handler: Box::new(
                 move |ctx, payload| -> BoxFuture<'static, Result<HandlerResponse, ServerError>> {
@@ -450,9 +450,9 @@ impl Router {
             Route {
                 capabilities: RouteCapabilities::Static(caller_capabilities),
                 permission: RoutePermissionSpec::Static(
-                    ApiSurfaceKindV1::Operation,
+                    ApiSurfaceKind::Operation,
                     self.descriptor_name(D::KEY),
-                    PermissionActionV1::Invoke,
+                    PermissionAction::Invoke,
                 ),
                 handler: Box::new(
                 move |ctx, payload| -> BoxFuture<'static, Result<HandlerResponse, ServerError>> {

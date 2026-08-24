@@ -7,8 +7,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use subtle::ConstantTimeEq;
 use trellis_protocol::{
-    parse_session_proof_v1, session_proof_request_digest_v1, verify_session_proof_v1,
-    AuthorizationContextRefreshSessionProofInputV1, SessionProofInputV1,
+    parse_session_proof, session_proof_request_digest, verify_session_proof,
+    AuthorizationContextRefreshSessionProofInput, SessionProofInput,
 };
 
 use super::super::ephemeral::AuthEphemeralRepository;
@@ -93,10 +93,10 @@ where
     }
     let digest_value = serde_json::to_value(&request)
         .map_err(|_| HttpError::bad_request("invalid_context_refresh"))?;
-    let request_digest = session_proof_request_digest_v1(&digest_value)
+    let request_digest = session_proof_request_digest(&digest_value)
         .map_err(|_| HttpError::bad_request("invalid_context_refresh"))?;
-    let input = SessionProofInputV1::authorization_context_refresh(
-        AuthorizationContextRefreshSessionProofInputV1 {
+    let input = SessionProofInput::authorization_context_refresh(
+        AuthorizationContextRefreshSessionProofInput {
             request_id: request.request_id.clone(),
             issued_at: request.issued_at,
             session_id: request.session_id.clone(),
@@ -110,9 +110,9 @@ where
         },
     )
     .map_err(|_| HttpError::unauthorized("invalid_proof"))?;
-    verify_session_proof_v1(
+    verify_session_proof(
         &input,
-        &parse_session_proof_v1(&request.proof)
+        &parse_session_proof(&request.proof)
             .map_err(|_| HttpError::unauthorized("invalid_proof"))?,
         &session.session_public_key,
         now,
@@ -150,7 +150,7 @@ where
         .await
         .map_err(map_issuance_error)?;
     let signed_context =
-        trellis_protocol::parse_authorization_context_v1(&authorization_context.context)
+        trellis_protocol::parse_authorization_context(&authorization_context.context)
             .map_err(|_| HttpError::internal("authorization context is invalid"))?;
     let authorization_context_digest = signed_context
         .digest()

@@ -1,7 +1,7 @@
 //! Contextual participant resolution and deterministic authority evidence.
 //!
-//! Intrinsic parsing proves that each [`ParticipantArtifactV1`] is internally
-//! coherent. Resolution additionally requires validated [`ApiArtifactV1`] values
+//! Intrinsic parsing proves that each [`ParticipantArtifact`] is internally
+//! coherent. Resolution additionally requires validated [`ApiArtifact`] values
 //! keyed by exact canonical API ID and pinned to the digests in the participant.
 //! It verifies selected surfaces, operation cancellation and signals, event
 //! consumers, provider transfer mappings, and schema extraction pointers.
@@ -28,10 +28,9 @@ use serde_json::{Map, Value};
 
 use crate::{
     canonicalize_json, digest_json, identifiers::compare_protocol_strings,
-    schema_profile::resolve_local_schema, ApiArtifactV1, ApiSurfaceKindV1, ConsentMetadataV1,
-    DerivedEventSubjectsV1, GrantSetV1, ParticipantArtifactV1, ParticipantKindV1,
-    ParticipantResourceKindV1, PermissionActionV1, PermissionAtomV1, PermissionTargetV1,
-    ProtocolError, ResolutionErrorCodeV1,
+    schema_profile::resolve_local_schema, ApiArtifact, ApiSurfaceKind, ConsentMetadata,
+    DerivedEventSubjects, GrantSet, ParticipantArtifact, ParticipantKind, ParticipantResourceKind,
+    PermissionAction, PermissionAtom, PermissionTarget, ProtocolError, ResolutionErrorCode,
 };
 
 /// The first canonical participant-needs format.
@@ -43,12 +42,12 @@ pub const AUTHORITY_PROPOSAL_FORMAT_V1: &str = "trellis.authority-proposal.v1";
 /// An exact API identity participating in needs.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct ProvidedApiNeedV1 {
+pub struct ProvidedApiNeed {
     api: String,
     api_digest: String,
 }
 
-impl ProvidedApiNeedV1 {
+impl ProvidedApiNeed {
     /// Return the canonical API identifier.
     pub fn api(&self) -> &str {
         &self.api
@@ -66,7 +65,7 @@ impl ProvidedApiNeedV1 {
 /// aliases used to wire dependencies.
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct ParticipantResourceNeedsV1 {
+pub struct ParticipantResourceNeeds {
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
     state: BTreeMap<String, Value>,
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
@@ -81,7 +80,7 @@ pub struct ParticipantResourceNeedsV1 {
     operation_transfers: BTreeMap<String, Value>,
 }
 
-impl ParticipantResourceNeedsV1 {
+impl ParticipantResourceNeeds {
     /// Return whether this section has no resource needs.
     pub fn is_empty(&self) -> bool {
         self.state.is_empty()
@@ -129,39 +128,39 @@ impl ParticipantResourceNeedsV1 {
 /// distinguish mandatory authority from optional integrations.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct ParticipantNeedsSectionV1 {
-    apis: Vec<ProvidedApiNeedV1>,
-    grant_set: GrantSetV1,
-    resources: ParticipantResourceNeedsV1,
+pub struct ParticipantNeedsSection {
+    apis: Vec<ProvidedApiNeed>,
+    grant_set: GrantSet,
+    resources: ParticipantResourceNeeds,
 }
 
-impl ParticipantNeedsSectionV1 {
+impl ParticipantNeedsSection {
     /// Return exact referenced API identities in canonical order.
-    pub fn apis(&self) -> &[ProvidedApiNeedV1] {
+    pub fn apis(&self) -> &[ProvidedApiNeed] {
         &self.apis
     }
 
     /// Return the exact normalized grant set.
-    pub fn grant_set(&self) -> &GrantSetV1 {
+    pub fn grant_set(&self) -> &GrantSet {
         &self.grant_set
     }
 
     /// Return private resource needs for this requirement level.
-    pub fn resources(&self) -> &ParticipantResourceNeedsV1 {
+    pub fn resources(&self) -> &ParticipantResourceNeeds {
         &self.resources
     }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct NeedsParticipantV1 {
+struct NeedsParticipant {
     id: String,
-    kind: ParticipantKindV1,
+    kind: ParticipantKind,
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize)]
-struct ProvidedNeedsV1 {
-    apis: Vec<ProvidedApiNeedV1>,
+struct ProvidedNeeds {
+    apis: Vec<ProvidedApiNeed>,
 }
 
 /// Canonical alias-independent machine needs for one participant.
@@ -173,15 +172,15 @@ struct ProvidedNeedsV1 {
 /// participant artifact digest, local API aliases, and human presentation text.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct ParticipantNeedsV1 {
+pub struct ParticipantNeeds {
     format: String,
-    participant: NeedsParticipantV1,
-    provides: ProvidedNeedsV1,
-    required: ParticipantNeedsSectionV1,
-    optional: ParticipantNeedsSectionV1,
+    participant: NeedsParticipant,
+    provides: ProvidedNeeds,
+    required: ParticipantNeedsSection,
+    optional: ParticipantNeedsSection,
 }
 
-impl ParticipantNeedsV1 {
+impl ParticipantNeeds {
     /// Serialize the canonical semantic needs value.
     ///
     /// # Errors
@@ -210,17 +209,17 @@ impl ParticipantNeedsV1 {
     }
 
     /// Return required machine needs.
-    pub fn required(&self) -> &ParticipantNeedsSectionV1 {
+    pub fn required(&self) -> &ParticipantNeedsSection {
         &self.required
     }
 
     /// Return optional machine needs.
-    pub fn optional(&self) -> &ParticipantNeedsSectionV1 {
+    pub fn optional(&self) -> &ParticipantNeedsSection {
         &self.optional
     }
 
     /// Return exact APIs provided by the participant.
-    pub fn provided_apis(&self) -> &[ProvidedApiNeedV1] {
+    pub fn provided_apis(&self) -> &[ProvidedApiNeed] {
         &self.provides.apis
     }
 }
@@ -228,24 +227,24 @@ impl ParticipantNeedsV1 {
 /// Complete alias-independent provider-side evidence derived from one pinned API.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct ResolvedProvidedApiV1 {
+pub struct ResolvedProvidedApi {
     api: String,
     api_digest: String,
     rpc: BTreeMap<String, String>,
-    operations: BTreeMap<String, ResolvedProvidedOperationV1>,
-    events: BTreeMap<String, DerivedEventSubjectsV1>,
+    operations: BTreeMap<String, ResolvedProvidedOperation>,
+    events: BTreeMap<String, DerivedEventSubjects>,
     feeds: BTreeMap<String, String>,
     state: Vec<String>,
 }
 
 /// Canonical provider evidence for one operation and its named signals.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
-pub struct ResolvedProvidedOperationV1 {
+pub struct ResolvedProvidedOperation {
     subject: String,
     signals: Vec<String>,
 }
 
-impl ResolvedProvidedOperationV1 {
+impl ResolvedProvidedOperation {
     /// Return the canonical operation subject.
     pub fn subject(&self) -> &str {
         &self.subject
@@ -257,7 +256,7 @@ impl ResolvedProvidedOperationV1 {
     }
 }
 
-impl ResolvedProvidedApiV1 {
+impl ResolvedProvidedApi {
     /// Return the canonical API identifier.
     pub fn api(&self) -> &str {
         &self.api
@@ -274,12 +273,12 @@ impl ResolvedProvidedApiV1 {
     }
 
     /// Return logical operations with canonical subjects and signal names.
-    pub fn operations(&self) -> &BTreeMap<String, ResolvedProvidedOperationV1> {
+    pub fn operations(&self) -> &BTreeMap<String, ResolvedProvidedOperation> {
         &self.operations
     }
 
     /// Return logical event names and canonical subject patterns.
-    pub fn events(&self) -> &BTreeMap<String, DerivedEventSubjectsV1> {
+    pub fn events(&self) -> &BTreeMap<String, DerivedEventSubjects> {
         &self.events
     }
 
@@ -300,19 +299,19 @@ impl ResolvedProvidedApiV1 {
 /// alias-independent authority identity.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct ResolvedImplementedApiV1 {
+pub struct ResolvedImplementedApi {
     alias: String,
-    provided: ResolvedProvidedApiV1,
+    provided: ResolvedProvidedApi,
 }
 
-impl ResolvedImplementedApiV1 {
+impl ResolvedImplementedApi {
     /// Return the participant-local API alias.
     pub fn alias(&self) -> &str {
         &self.alias
     }
 
     /// Return complete alias-independent provider evidence.
-    pub fn provided(&self) -> &ResolvedProvidedApiV1 {
+    pub fn provided(&self) -> &ResolvedProvidedApi {
         &self.provided
     }
 }
@@ -320,14 +319,14 @@ impl ResolvedImplementedApiV1 {
 /// A resolved used API retaining its local wiring alias and exact grants.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct ResolvedUsedApiV1 {
+pub struct ResolvedUsedApi {
     alias: String,
     api: String,
     api_digest: String,
-    grant_set: GrantSetV1,
+    grant_set: GrantSet,
 }
 
-impl ResolvedUsedApiV1 {
+impl ResolvedUsedApi {
     /// Return the participant-local API alias.
     pub fn alias(&self) -> &str {
         &self.alias
@@ -339,7 +338,7 @@ impl ResolvedUsedApiV1 {
     }
 
     /// Return exact grants selected through this API reference.
-    pub fn grant_set(&self) -> &GrantSetV1 {
+    pub fn grant_set(&self) -> &GrantSet {
         &self.grant_set
     }
 
@@ -356,16 +355,16 @@ impl ResolvedUsedApiV1 {
 /// expansion. Consent remains non-authoritative presentation text.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct AuthorityCapabilityEvidenceV1 {
+pub struct AuthorityCapabilityEvidence {
     api: String,
     api_digest: String,
     name: String,
-    allows: Vec<PermissionAtomV1>,
+    allows: Vec<PermissionAtom>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    consent: Option<ConsentMetadataV1>,
+    consent: Option<ConsentMetadata>,
 }
 
-impl AuthorityCapabilityEvidenceV1 {
+impl AuthorityCapabilityEvidence {
     /// Return the API that owns the capability.
     pub fn api(&self) -> &str {
         &self.api
@@ -382,12 +381,12 @@ impl AuthorityCapabilityEvidenceV1 {
     }
 
     /// Return exact permissions explained by this capability.
-    pub fn allows(&self) -> &[PermissionAtomV1] {
+    pub fn allows(&self) -> &[PermissionAtom] {
         &self.allows
     }
 
     /// Return matching human consent evidence, when declared.
-    pub fn consent(&self) -> Option<&ConsentMetadataV1> {
+    pub fn consent(&self) -> Option<&ConsentMetadata> {
         self.consent.as_ref()
     }
 }
@@ -398,31 +397,31 @@ impl AuthorityCapabilityEvidenceV1 {
 /// explicitly in [`Self::uncovered_permissions`].
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct AuthorityProposalSectionV1 {
-    grant_set: GrantSetV1,
-    capabilities: Vec<AuthorityCapabilityEvidenceV1>,
-    uncovered_permissions: Vec<PermissionAtomV1>,
-    resources: ParticipantResourceNeedsV1,
+pub struct AuthorityProposalSection {
+    grant_set: GrantSet,
+    capabilities: Vec<AuthorityCapabilityEvidence>,
+    uncovered_permissions: Vec<PermissionAtom>,
+    resources: ParticipantResourceNeeds,
 }
 
-impl AuthorityProposalSectionV1 {
+impl AuthorityProposalSection {
     /// Return the exact grant set; capability evidence never expands it.
-    pub fn grant_set(&self) -> &GrantSetV1 {
+    pub fn grant_set(&self) -> &GrantSet {
         &self.grant_set
     }
 
     /// Return fully requested capability evidence.
-    pub fn capabilities(&self) -> &[AuthorityCapabilityEvidenceV1] {
+    pub fn capabilities(&self) -> &[AuthorityCapabilityEvidence] {
         &self.capabilities
     }
 
     /// Return exact permissions not explained by a fully requested capability.
-    pub fn uncovered_permissions(&self) -> &[PermissionAtomV1] {
+    pub fn uncovered_permissions(&self) -> &[PermissionAtom] {
         &self.uncovered_permissions
     }
 
     /// Return private resource needs reviewed in this section.
-    pub fn resources(&self) -> &ParticipantResourceNeedsV1 {
+    pub fn resources(&self) -> &ParticipantResourceNeeds {
         &self.resources
     }
 }
@@ -436,18 +435,18 @@ impl AuthorityProposalSectionV1 {
 /// presentation and local aliases.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct AuthorityProposalV1 {
+pub struct AuthorityProposal {
     format: String,
     participant_id: String,
-    participant_kind: ParticipantKindV1,
+    participant_kind: ParticipantKind,
     participant_digest: String,
     needs_digest: String,
-    provides: Vec<ResolvedProvidedApiV1>,
-    required: AuthorityProposalSectionV1,
-    optional: AuthorityProposalSectionV1,
+    provides: Vec<ResolvedProvidedApi>,
+    required: AuthorityProposalSection,
+    optional: AuthorityProposalSection,
 }
 
-impl AuthorityProposalV1 {
+impl AuthorityProposal {
     /// Return the digest of canonical machine needs.
     pub fn needs_digest(&self) -> &str {
         &self.needs_digest
@@ -486,12 +485,12 @@ impl AuthorityProposalV1 {
     }
 
     /// Return required authority review evidence.
-    pub fn required(&self) -> &AuthorityProposalSectionV1 {
+    pub fn required(&self) -> &AuthorityProposalSection {
         &self.required
     }
 
     /// Return optional authority review evidence.
-    pub fn optional(&self) -> &AuthorityProposalSectionV1 {
+    pub fn optional(&self) -> &AuthorityProposalSection {
         &self.optional
     }
 
@@ -501,7 +500,7 @@ impl AuthorityProposalV1 {
     }
 
     /// Return alias-independent provider evidence.
-    pub fn provides(&self) -> &[ResolvedProvidedApiV1] {
+    pub fn provides(&self) -> &[ResolvedProvidedApi] {
         &self.provides
     }
 }
@@ -513,18 +512,18 @@ impl AuthorityProposalV1 {
 /// exposing alias-independent needs and proposal evidence.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct ResolvedParticipantV1 {
+pub struct ResolvedParticipant {
     participant_id: String,
     participant_digest: String,
-    participant_kind: ParticipantKindV1,
-    implemented_apis: Vec<ResolvedImplementedApiV1>,
-    required_apis: Vec<ResolvedUsedApiV1>,
-    optional_apis: Vec<ResolvedUsedApiV1>,
-    needs: ParticipantNeedsV1,
-    proposal: AuthorityProposalV1,
+    participant_kind: ParticipantKind,
+    implemented_apis: Vec<ResolvedImplementedApi>,
+    required_apis: Vec<ResolvedUsedApi>,
+    optional_apis: Vec<ResolvedUsedApi>,
+    needs: ParticipantNeeds,
+    proposal: AuthorityProposal,
 }
 
-impl ResolvedParticipantV1 {
+impl ResolvedParticipant {
     /// Return the participant identifier.
     pub fn participant_id(&self) -> &str {
         &self.participant_id
@@ -536,32 +535,32 @@ impl ResolvedParticipantV1 {
     }
 
     /// Return the participant kind.
-    pub fn participant_kind(&self) -> ParticipantKindV1 {
+    pub fn participant_kind(&self) -> ParticipantKind {
         self.participant_kind
     }
 
     /// Return alias-independent canonical machine needs.
-    pub fn needs(&self) -> &ParticipantNeedsV1 {
+    pub fn needs(&self) -> &ParticipantNeeds {
         &self.needs
     }
 
     /// Return deterministic owner-reviewable proposal evidence.
-    pub fn proposal(&self) -> &AuthorityProposalV1 {
+    pub fn proposal(&self) -> &AuthorityProposal {
         &self.proposal
     }
 
     /// Return resolved implemented APIs with local aliases retained for wiring.
-    pub fn implemented_apis(&self) -> &[ResolvedImplementedApiV1] {
+    pub fn implemented_apis(&self) -> &[ResolvedImplementedApi] {
         &self.implemented_apis
     }
 
     /// Return resolved required API uses.
-    pub fn required_apis(&self) -> &[ResolvedUsedApiV1] {
+    pub fn required_apis(&self) -> &[ResolvedUsedApi] {
         &self.required_apis
     }
 
     /// Return resolved optional API uses.
-    pub fn optional_apis(&self) -> &[ResolvedUsedApiV1] {
+    pub fn optional_apis(&self) -> &[ResolvedUsedApi] {
         &self.optional_apis
     }
 }
@@ -570,7 +569,7 @@ impl ResolvedParticipantV1 {
 ///
 /// The API map must contain every implemented, required, and optional API under
 /// its canonical ID, and each artifact digest must equal the participant pin.
-/// Diagnostics use typed [`ResolutionErrorCodeV1`] values and RFC 6901 paths into
+/// Diagnostics use typed [`ResolutionErrorCode`] values and RFC 6901 paths into
 /// participant-authored members.
 ///
 /// # Errors
@@ -580,15 +579,15 @@ impl ResolvedParticipantV1 {
 /// mappings, and extraction pointers that are not guaranteed for every
 /// schema-valid payload. Serialization, digest, subject, and schema errors are
 /// propagated.
-pub fn resolve_participant_v1(
-    participant: &ParticipantArtifactV1,
-    apis: &BTreeMap<String, ApiArtifactV1>,
-) -> Result<ResolvedParticipantV1, ProtocolError> {
+pub fn resolve_participant(
+    participant: &ParticipantArtifact,
+    apis: &BTreeMap<String, ApiArtifact>,
+) -> Result<ResolvedParticipant, ProtocolError> {
     let participant_value = participant.normalized_value()?;
     let participant_id = participant.id().to_owned();
     let participant_digest = participant.digest()?;
     let schemas = object_at(&participant_value, "schemas");
-    let mut resolved_by_alias: BTreeMap<String, (&ApiArtifactV1, String)> = BTreeMap::new();
+    let mut resolved_by_alias: BTreeMap<String, (&ApiArtifact, String)> = BTreeMap::new();
 
     for (section, references) in [
         ("implements", object_at(&participant_value, "implements")),
@@ -607,7 +606,7 @@ pub fn resolve_participant_v1(
             let path = pointer(section.split('/').chain(std::iter::once(alias.as_str())));
             let api = apis.get(api_id).ok_or_else(|| {
                 resolution_error(
-                    ResolutionErrorCodeV1::MissingApi,
+                    ResolutionErrorCode::MissingApi,
                     &participant_id,
                     Some(alias),
                     Some(api_id),
@@ -617,7 +616,7 @@ pub fn resolve_participant_v1(
             })?;
             if api.id() != api_id {
                 return Err(resolution_error(
-                    ResolutionErrorCodeV1::MissingApi,
+                    ResolutionErrorCode::MissingApi,
                     &participant_id,
                     Some(alias),
                     Some(api_id),
@@ -631,7 +630,7 @@ pub fn resolve_participant_v1(
             let actual_digest = api.digest()?;
             if actual_digest != pinned_digest {
                 return Err(resolution_error(
-                    ResolutionErrorCodeV1::ApiDigestMismatch,
+                    ResolutionErrorCode::ApiDigestMismatch,
                     &participant_id,
                     Some(alias),
                     Some(api_id),
@@ -668,12 +667,12 @@ pub fn resolve_participant_v1(
             &mut required_resources.operation_transfers,
         )?;
         let provided = derive_provided_api(api, digest)?;
-        provided_needs.push(ProvidedApiNeedV1 {
+        provided_needs.push(ProvidedApiNeed {
             api: api.id().to_owned(),
             api_digest: digest.to_owned(),
         });
         provided_authority.push(provided.clone());
-        implemented_apis.push(ResolvedImplementedApiV1 {
+        implemented_apis.push(ResolvedImplementedApi {
             alias: alias.to_owned(),
             provided,
         });
@@ -703,42 +702,42 @@ pub fn resolve_participant_v1(
         .collect::<Vec<_>>();
     for provided in &provided_authority {
         for event in provided.events().keys() {
-            required_permissions.push(PermissionAtomV1::new(
-                PermissionTargetV1::api_surface(provided.api(), ApiSurfaceKindV1::Event, event)?,
-                PermissionActionV1::Publish,
+            required_permissions.push(PermissionAtom::new(
+                PermissionTarget::api_surface(provided.api(), ApiSurfaceKind::Event, event)?,
+                PermissionAction::Publish,
             )?);
         }
     }
     required_permissions.extend(resource_permissions(&participant_id, &required_resources)?);
-    let required_grants = GrantSetV1::new(required_permissions);
+    let required_grants = GrantSet::new(required_permissions);
     let mut optional_permissions = optional_apis
         .iter()
         .flat_map(|used| used.grant_set.permissions().iter().cloned())
         .collect::<Vec<_>>();
     optional_permissions.extend(resource_permissions(&participant_id, &optional_resources)?);
-    let optional_grants = GrantSetV1::new(optional_permissions);
-    let needs = ParticipantNeedsV1 {
+    let optional_grants = GrantSet::new(optional_permissions);
+    let needs = ParticipantNeeds {
         format: PARTICIPANT_NEEDS_FORMAT_V1.to_owned(),
-        participant: NeedsParticipantV1 {
+        participant: NeedsParticipant {
             id: participant_id.clone(),
             kind: participant.kind(),
         },
-        provides: ProvidedNeedsV1 {
+        provides: ProvidedNeeds {
             apis: provided_needs,
         },
-        required: ParticipantNeedsSectionV1 {
+        required: ParticipantNeedsSection {
             apis: api_needs(&required_apis),
             grant_set: required_grants.clone(),
             resources: required_resources.clone(),
         },
-        optional: ParticipantNeedsSectionV1 {
+        optional: ParticipantNeedsSection {
             apis: api_needs(&optional_apis),
             grant_set: optional_grants.clone(),
             resources: optional_resources.clone(),
         },
     };
     let needs_digest = needs.digest()?;
-    let proposal = AuthorityProposalV1 {
+    let proposal = AuthorityProposal {
         format: AUTHORITY_PROPOSAL_FORMAT_V1.to_owned(),
         participant_id: participant_id.clone(),
         participant_kind: participant.kind(),
@@ -761,7 +760,7 @@ pub fn resolve_participant_v1(
         )?,
     };
 
-    Ok(ResolvedParticipantV1 {
+    Ok(ResolvedParticipant {
         participant_id,
         participant_digest,
         participant_kind: participant.kind(),
@@ -777,19 +776,19 @@ fn resolve_used_group(
     participant_id: &str,
     requirement: &str,
     references: &Map<String, Value>,
-    resolved: &BTreeMap<String, (&ApiArtifactV1, String)>,
-) -> Result<Vec<ResolvedUsedApiV1>, ProtocolError> {
+    resolved: &BTreeMap<String, (&ApiArtifact, String)>,
+) -> Result<Vec<ResolvedUsedApi>, ProtocolError> {
     let mut used = references
         .iter()
         .map(|(alias, selection)| {
             let (api, digest) = &resolved[alias];
             let path = pointer(["uses", requirement, alias]);
             let permissions = derive_permissions(participant_id, alias, &path, selection, api)?;
-            Ok(ResolvedUsedApiV1 {
+            Ok(ResolvedUsedApi {
                 alias: alias.clone(),
                 api: api.id().to_owned(),
                 api_digest: digest.clone(),
-                grant_set: GrantSetV1::new(permissions),
+                grant_set: GrantSet::new(permissions),
             })
         })
         .collect::<Result<Vec<_>, ProtocolError>>()?;
@@ -805,64 +804,64 @@ fn derive_permissions(
     alias: &str,
     path: &PointerBuf,
     selection: &Value,
-    api: &ApiArtifactV1,
-) -> Result<Vec<PermissionAtomV1>, ProtocolError> {
+    api: &ApiArtifact,
+) -> Result<Vec<PermissionAtom>, ProtocolError> {
     let api_value = api.normalized_value()?;
     let mut permissions = Vec::new();
     for (selection_path, api_section, surface, action) in [
         (
             &["rpc", "call"][..],
             "rpc",
-            ApiSurfaceKindV1::Rpc,
-            PermissionActionV1::Call,
+            ApiSurfaceKind::Rpc,
+            PermissionAction::Call,
         ),
         (
             &["operations", "invoke"][..],
             "operations",
-            ApiSurfaceKindV1::Operation,
-            PermissionActionV1::Invoke,
+            ApiSurfaceKind::Operation,
+            PermissionAction::Invoke,
         ),
         (
             &["operations", "observe"][..],
             "operations",
-            ApiSurfaceKindV1::Operation,
-            PermissionActionV1::Observe,
+            ApiSurfaceKind::Operation,
+            PermissionAction::Observe,
         ),
         (
             &["operations", "cancel"][..],
             "operations",
-            ApiSurfaceKindV1::Operation,
-            PermissionActionV1::Cancel,
+            ApiSurfaceKind::Operation,
+            PermissionAction::Cancel,
         ),
         (
             &["events", "publish"][..],
             "events",
-            ApiSurfaceKindV1::Event,
-            PermissionActionV1::Publish,
+            ApiSurfaceKind::Event,
+            PermissionAction::Publish,
         ),
         (
             &["events", "subscribe"][..],
             "events",
-            ApiSurfaceKindV1::Event,
-            PermissionActionV1::Subscribe,
+            ApiSurfaceKind::Event,
+            PermissionAction::Subscribe,
         ),
         (
             &["feeds", "subscribe"][..],
             "feeds",
-            ApiSurfaceKindV1::Feed,
-            PermissionActionV1::Subscribe,
+            ApiSurfaceKind::Feed,
+            PermissionAction::Subscribe,
         ),
         (
             &["state", "read"][..],
             "state",
-            ApiSurfaceKindV1::State,
-            PermissionActionV1::Read,
+            ApiSurfaceKind::State,
+            PermissionAction::Read,
         ),
         (
             &["state", "write"][..],
             "state",
-            ApiSurfaceKindV1::State,
-            PermissionActionV1::Write,
+            ApiSurfaceKind::State,
+            PermissionAction::Write,
         ),
     ] {
         for (index, name) in nested_array_strings(selection, selection_path).enumerate() {
@@ -872,7 +871,7 @@ fn derive_permissions(
                 .get(name)
                 .ok_or_else(|| {
                     resolution_error(
-                        ResolutionErrorCodeV1::MissingSurface,
+                        ResolutionErrorCode::MissingSurface,
                         participant_id,
                         Some(alias),
                         Some(api.id()),
@@ -880,11 +879,11 @@ fn derive_permissions(
                         format!("selected {api_section} surface '{name}' does not exist"),
                     )
                 })?;
-            if action == PermissionActionV1::Cancel
+            if action == PermissionAction::Cancel
                 && definition.get("cancel").and_then(Value::as_bool) != Some(true)
             {
                 return Err(resolution_error(
-                    ResolutionErrorCodeV1::InvalidCancelSelection,
+                    ResolutionErrorCode::InvalidCancelSelection,
                     participant_id,
                     Some(alias),
                     Some(api.id()),
@@ -892,8 +891,8 @@ fn derive_permissions(
                     format!("operation '{name}' is not cancelable"),
                 ));
             }
-            permissions.push(PermissionAtomV1::new(
-                PermissionTargetV1::api_surface(api.id(), surface, name)?,
+            permissions.push(PermissionAtom::new(
+                PermissionTarget::api_surface(api.id(), surface, name)?,
                 action,
             )?);
         }
@@ -904,7 +903,7 @@ fn derive_permissions(
             .get(operation)
             .ok_or_else(|| {
                 resolution_error(
-                    ResolutionErrorCodeV1::MissingSurface,
+                    ResolutionErrorCode::MissingSurface,
                     participant_id,
                     Some(alias),
                     Some(api.id()),
@@ -916,7 +915,7 @@ fn derive_permissions(
         for (index, signal) in array_strings(signals).enumerate() {
             if !available_signals.contains_key(signal) {
                 return Err(resolution_error(
-                    ResolutionErrorCodeV1::MissingOperationSignal,
+                    ResolutionErrorCode::MissingOperationSignal,
                     participant_id,
                     Some(alias),
                     Some(api.id()),
@@ -925,9 +924,9 @@ fn derive_permissions(
                     format!("signal '{signal}' does not exist on operation '{operation}'"),
                 ));
             }
-            permissions.push(PermissionAtomV1::new(
-                PermissionTargetV1::operation_signal(api.id(), operation, signal)?,
-                PermissionActionV1::Control,
+            permissions.push(PermissionAtom::new(
+                PermissionTarget::operation_signal(api.id(), operation, signal)?,
+                PermissionAction::Control,
             )?);
         }
     }
@@ -935,9 +934,9 @@ fn derive_permissions(
 }
 
 fn derive_provided_api(
-    api: &ApiArtifactV1,
+    api: &ApiArtifact,
     digest: &str,
-) -> Result<ResolvedProvidedApiV1, ProtocolError> {
+) -> Result<ResolvedProvidedApi, ProtocolError> {
     let value = api.normalized_value()?;
     let subjects = api.derived_subjects()?;
     let operations = object_at(&value, "operations")
@@ -950,7 +949,7 @@ fn derive_provided_api(
             signals.sort_by(|left, right| compare_protocol_strings(left, right));
             Ok((
                 name.clone(),
-                ResolvedProvidedOperationV1 {
+                ResolvedProvidedOperation {
                     subject: subjects.operations[name].clone(),
                     signals,
                 },
@@ -962,7 +961,7 @@ fn derive_provided_api(
         .cloned()
         .collect::<Vec<_>>();
     state.sort_by(|left, right| compare_protocol_strings(left, right));
-    Ok(ResolvedProvidedApiV1 {
+    Ok(ResolvedProvidedApi {
         api: api.id().to_owned(),
         api_digest: digest.to_owned(),
         rpc: subjects.rpc,
@@ -977,8 +976,8 @@ fn derive_required_resources(
     participant_id: &str,
     participant: &Value,
     schemas: &Map<String, Value>,
-    resolved: &BTreeMap<String, (&ApiArtifactV1, String)>,
-) -> Result<ParticipantResourceNeedsV1, ProtocolError> {
+    resolved: &BTreeMap<String, (&ApiArtifact, String)>,
+) -> Result<ParticipantResourceNeeds, ProtocolError> {
     let state = resolve_schema_fields(object_at(participant, "state"), schemas, &["schema"]);
     let job_queues = resolve_schema_fields(
         object_at(participant, "jobQueues"),
@@ -994,7 +993,7 @@ fn derive_required_resources(
                 let (api, digest) = &resolved[alias];
                 if nested_object_at(participant, &["uses", "optional"]).contains_key(alias) {
                     return Err(resolution_error(
-                        ResolutionErrorCodeV1::RequiredConsumerUsesOptionalApi,
+                        ResolutionErrorCode::RequiredConsumerUsesOptionalApi,
                         participant_id,
                         Some(alias),
                         Some(api.id()),
@@ -1011,7 +1010,7 @@ fn derive_required_resources(
                 for (index, event) in normalized_names.iter().enumerate() {
                     if !available_events.contains_key(event) {
                         return Err(resolution_error(
-                            ResolutionErrorCodeV1::MissingSurface,
+                            ResolutionErrorCode::MissingSurface,
                             participant_id,
                             Some(alias),
                             Some(api.id()),
@@ -1048,7 +1047,7 @@ fn derive_required_resources(
         schemas,
         false,
     );
-    Ok(ParticipantResourceNeedsV1 {
+    Ok(ParticipantResourceNeeds {
         state,
         job_queues,
         event_consumers,
@@ -1060,52 +1059,52 @@ fn derive_required_resources(
 
 fn resource_permissions(
     participant_id: &str,
-    resources: &ParticipantResourceNeedsV1,
-) -> Result<Vec<PermissionAtomV1>, ProtocolError> {
+    resources: &ParticipantResourceNeeds,
+) -> Result<Vec<PermissionAtom>, ProtocolError> {
     let mut permissions = Vec::new();
     for (kind, names, actions) in [
         (
-            ParticipantResourceKindV1::State,
+            ParticipantResourceKind::State,
             resources.state.keys(),
             &[
-                PermissionActionV1::Read,
-                PermissionActionV1::Write,
-                PermissionActionV1::Delete,
+                PermissionAction::Read,
+                PermissionAction::Write,
+                PermissionAction::Delete,
             ][..],
         ),
         (
-            ParticipantResourceKindV1::Kv,
+            ParticipantResourceKind::Kv,
             resources.kv.keys(),
             &[
-                PermissionActionV1::Read,
-                PermissionActionV1::Write,
-                PermissionActionV1::Delete,
+                PermissionAction::Read,
+                PermissionAction::Write,
+                PermissionAction::Delete,
             ][..],
         ),
         (
-            ParticipantResourceKindV1::Store,
+            ParticipantResourceKind::Store,
             resources.stores.keys(),
             &[
-                PermissionActionV1::Read,
-                PermissionActionV1::Write,
-                PermissionActionV1::Delete,
+                PermissionAction::Read,
+                PermissionAction::Write,
+                PermissionAction::Delete,
             ][..],
         ),
         (
-            ParticipantResourceKindV1::JobQueue,
+            ParticipantResourceKind::JobQueue,
             resources.job_queues.keys(),
-            &[PermissionActionV1::Process][..],
+            &[PermissionAction::Process][..],
         ),
         (
-            ParticipantResourceKindV1::EventConsumer,
+            ParticipantResourceKind::EventConsumer,
             resources.event_consumers.keys(),
-            &[PermissionActionV1::Consume][..],
+            &[PermissionAction::Consume][..],
         ),
     ] {
         for name in names {
-            let target = PermissionTargetV1::participant_resource(participant_id, kind, name)?;
+            let target = PermissionTarget::participant_resource(participant_id, kind, name)?;
             for action in actions {
-                permissions.push(PermissionAtomV1::new(target.clone(), *action)?);
+                permissions.push(PermissionAtom::new(target.clone(), *action)?);
             }
         }
     }
@@ -1115,7 +1114,7 @@ fn resource_permissions(
 fn derive_optional_resources(
     participant: &Value,
     schemas: &Map<String, Value>,
-) -> Result<ParticipantResourceNeedsV1, ProtocolError> {
+) -> Result<ParticipantResourceNeeds, ProtocolError> {
     let (_, kv) = split_resources(
         object_at(nested_value(participant, &["resources"]), "kv"),
         schemas,
@@ -1126,10 +1125,10 @@ fn derive_optional_resources(
         schemas,
         false,
     );
-    Ok(ParticipantResourceNeedsV1 {
+    Ok(ParticipantResourceNeeds {
         kv,
         stores,
-        ..ParticipantResourceNeedsV1::default()
+        ..ParticipantResourceNeeds::default()
     })
 }
 
@@ -1195,7 +1194,7 @@ fn validate_transfers(
     participant_id: &str,
     alias: &str,
     implementation: &Value,
-    api: &ApiArtifactV1,
+    api: &ApiArtifact,
     participant: &Value,
     needs: &mut BTreeMap<String, Value>,
 ) -> Result<(), ProtocolError> {
@@ -1211,7 +1210,7 @@ fn validate_transfers(
             == Some("send");
         if sends && !mappings.contains_key(operation) {
             return Err(resolution_error(
-                ResolutionErrorCodeV1::MissingRequiredTransfer,
+                ResolutionErrorCode::MissingRequiredTransfer,
                 participant_id,
                 Some(alias),
                 Some(api.id()),
@@ -1224,7 +1223,7 @@ fn validate_transfers(
         let path = base.with_trailing_token(operation.as_str());
         let Some(definition) = operations.get(operation) else {
             return Err(resolution_error(
-                ResolutionErrorCodeV1::InvalidImplementedTransfer,
+                ResolutionErrorCode::InvalidImplementedTransfer,
                 participant_id,
                 Some(alias),
                 Some(api.id()),
@@ -1239,7 +1238,7 @@ fn validate_transfers(
             != Some("send")
         {
             return Err(resolution_error(
-                ResolutionErrorCodeV1::InvalidImplementedTransfer,
+                ResolutionErrorCode::InvalidImplementedTransfer,
                 participant_id,
                 Some(alias),
                 Some(api.id()),
@@ -1251,7 +1250,7 @@ fn validate_transfers(
         let stores = object_at(nested_value(participant, &["resources"]), "store");
         let Some(store_definition) = stores.get(store) else {
             return Err(resolution_error(
-                ResolutionErrorCodeV1::InvalidImplementedTransfer,
+                ResolutionErrorCode::InvalidImplementedTransfer,
                 participant_id,
                 Some(alias),
                 Some(api.id()),
@@ -1261,7 +1260,7 @@ fn validate_transfers(
         };
         if store_definition.get("required").and_then(Value::as_bool) == Some(false) {
             return Err(resolution_error(
-                ResolutionErrorCodeV1::OptionalStoreForRequiredTransfer,
+                ResolutionErrorCode::OptionalStoreForRequiredTransfer,
                 participant_id,
                 Some(alias),
                 Some(api.id()),
@@ -1317,7 +1316,7 @@ fn validate_transfers(
 fn validate_api_schema_pointers(
     participant_id: &str,
     alias: &str,
-    api: &ApiArtifactV1,
+    api: &ApiArtifact,
 ) -> Result<(), ProtocolError> {
     let value = api.normalized_value()?;
     let schemas = object_at(&value, "schemas");
@@ -1413,7 +1412,7 @@ fn validate_typed_pointer(
     )
     .ok_or_else(|| {
         resolution_error(
-            ResolutionErrorCodeV1::UnresolvableSchemaPointer,
+            ResolutionErrorCode::UnresolvableSchemaPointer,
             context.participant_id,
             (!context.alias.is_empty()).then_some(context.alias),
             (!context.api.is_empty()).then_some(context.api),
@@ -1428,7 +1427,7 @@ fn validate_typed_pointer(
         Ok(())
     } else {
         Err(resolution_error(
-            ResolutionErrorCodeV1::SchemaPointerTypeMismatch,
+            ResolutionErrorCode::SchemaPointerTypeMismatch,
             context.participant_id,
             (!context.alias.is_empty()).then_some(context.alias),
             (!context.api.is_empty()).then_some(context.api),
@@ -1578,12 +1577,12 @@ fn schema_proves_type(
 }
 
 fn derive_proposal_section(
-    grant_set: &GrantSetV1,
-    resources: ParticipantResourceNeedsV1,
-    used: &[ResolvedUsedApiV1],
-    provided: &[ResolvedImplementedApiV1],
-    resolved: &BTreeMap<String, (&ApiArtifactV1, String)>,
-) -> Result<AuthorityProposalSectionV1, ProtocolError> {
+    grant_set: &GrantSet,
+    resources: ParticipantResourceNeeds,
+    used: &[ResolvedUsedApi],
+    provided: &[ResolvedImplementedApi],
+    resolved: &BTreeMap<String, (&ApiArtifact, String)>,
+) -> Result<AuthorityProposalSection, ProtocolError> {
     let requested = grant_set.permissions().to_vec();
     let requested_set = requested.clone();
     let mut capabilities = Vec::new();
@@ -1596,7 +1595,7 @@ fn derive_proposal_section(
         let (api, api_digest) = &resolved[alias];
         let value = api.normalized_value()?;
         for (name, capability) in object_at(&value, "capabilities") {
-            let allows = serde_json::from_value::<Vec<PermissionAtomV1>>(
+            let allows = serde_json::from_value::<Vec<PermissionAtom>>(
                 capability
                     .get("allows")
                     .cloned()
@@ -1609,7 +1608,7 @@ fn derive_proposal_section(
                     .cloned()
                     .map(serde_json::from_value)
                     .transpose()?;
-                capabilities.push(AuthorityCapabilityEvidenceV1 {
+                capabilities.push(AuthorityCapabilityEvidence {
                     api: api.id().to_owned(),
                     api_digest: api_digest.clone(),
                     name: name.clone(),
@@ -1627,7 +1626,7 @@ fn derive_proposal_section(
         compare_protocol_strings(&left.api, &right.api)
             .then_with(|| compare_protocol_strings(&left.name, &right.name))
     });
-    Ok(AuthorityProposalSectionV1 {
+    Ok(AuthorityProposalSection {
         grant_set: grant_set.clone(),
         capabilities,
         uncovered_permissions,
@@ -1645,10 +1644,10 @@ fn literal_proves_type(value: &Value, expected: ExpectedSchemaType) -> bool {
     }
 }
 
-fn api_needs(used: &[ResolvedUsedApiV1]) -> Vec<ProvidedApiNeedV1> {
+fn api_needs(used: &[ResolvedUsedApi]) -> Vec<ProvidedApiNeed> {
     let mut needs = used
         .iter()
-        .map(|used| ProvidedApiNeedV1 {
+        .map(|used| ProvidedApiNeed {
             api: used.api.clone(),
             api_digest: used.api_digest.clone(),
         })
@@ -1666,7 +1665,7 @@ fn without_human_fields(mut value: Value) -> Value {
 }
 
 fn resolution_error(
-    code: ResolutionErrorCodeV1,
+    code: ResolutionErrorCode,
     participant: &str,
     alias: Option<&str>,
     api: Option<&str>,
@@ -1748,7 +1747,7 @@ mod tests {
     use serde::Deserialize;
 
     use super::*;
-    use crate::{parse_api_v1, parse_participant_v1};
+    use crate::{parse_api, parse_participant};
 
     #[derive(Deserialize)]
     #[serde(deny_unknown_fields, rename_all = "camelCase")]
@@ -1820,7 +1819,7 @@ mod tests {
             .apis
             .iter()
             .map(|value| {
-                let api = parse_api_v1(value).unwrap();
+                let api = parse_api(value).unwrap();
                 (api.id().to_owned(), api)
             })
             .collect::<BTreeMap<_, _>>();
@@ -1876,7 +1875,7 @@ mod tests {
             covered.extend(vector.covers.iter().copied());
             let mut participant = vector.participant.clone();
             hydrate_digests(&mut participant, &digests);
-            let participant = parse_participant_v1(&participant);
+            let participant = parse_participant(&participant);
             if let Some(expected_path) = &vector.participant_error_path {
                 let ProtocolError::ParticipantValidation { path, .. } = participant.unwrap_err()
                 else {
@@ -1895,7 +1894,7 @@ mod tests {
                         .collect()
                 },
             );
-            let result = resolve_participant_v1(&participant, &supplied);
+            let result = resolve_participant(&participant, &supplied);
             assert_eq!(result.is_ok(), vector.valid, "{}: {result:?}", vector.name);
             let Ok(resolved) = result else {
                 let ProtocolError::ParticipantResolution { code, path, .. } = result.unwrap_err()
@@ -2063,20 +2062,20 @@ mod tests {
     #[test]
     fn consent_wording_changes_evidence_but_not_needs_or_fingerprint() {
         let mut api_value = fixture_api("consumer@v1");
-        let base_api = parse_api_v1(&api_value).unwrap();
+        let base_api = parse_api(&api_value).unwrap();
         api_value["consent"]["rpcOnly"]["description"] =
             Value::String("Changed review wording.".to_owned());
-        let changed_api = parse_api_v1(&api_value).unwrap();
+        let changed_api = parse_api(&api_value).unwrap();
         assert_eq!(base_api.digest().unwrap(), changed_api.digest().unwrap());
         let expected_api_digest = base_api.digest().unwrap();
 
         let participant = participant_using("consent-app", &base_api);
-        let base = resolve_participant_v1(
+        let base = resolve_participant(
             &participant,
             &BTreeMap::from([(base_api.id().to_owned(), base_api)]),
         )
         .unwrap();
-        let changed = resolve_participant_v1(
+        let changed = resolve_participant(
             &participant,
             &BTreeMap::from([(changed_api.id().to_owned(), changed_api)]),
         )
@@ -2103,24 +2102,24 @@ mod tests {
     #[test]
     fn exact_api_digest_changes_needs_identity() {
         let mut changed_value = fixture_api("consumer@v1");
-        let base_api = parse_api_v1(&changed_value).unwrap();
+        let base_api = parse_api(&changed_value).unwrap();
         changed_value["state"]["Consumer.Extra"] = serde_json::json!({
             "kind": "value",
             "schema": { "schema": "Any" }
         });
-        let changed_api = parse_api_v1(&changed_value).unwrap();
+        let changed_api = parse_api(&changed_value).unwrap();
         assert_ne!(base_api.digest().unwrap(), changed_api.digest().unwrap());
         let base_api_digest = base_api.digest().unwrap();
         let changed_api_digest = changed_api.digest().unwrap();
 
         let base_participant = participant_using("digest-app", &base_api);
         let changed_participant = participant_using("digest-app", &changed_api);
-        let base = resolve_participant_v1(
+        let base = resolve_participant(
             &base_participant,
             &BTreeMap::from([(base_api.id().to_owned(), base_api)]),
         )
         .unwrap();
-        let changed = resolve_participant_v1(
+        let changed = resolve_participant(
             &changed_participant,
             &BTreeMap::from([(changed_api.id().to_owned(), changed_api)]),
         )
@@ -2165,8 +2164,8 @@ mod tests {
             .unwrap()
     }
 
-    fn participant_using(id: &str, api: &ApiArtifactV1) -> ParticipantArtifactV1 {
-        parse_participant_v1(&serde_json::json!({
+    fn participant_using(id: &str, api: &ApiArtifact) -> ParticipantArtifact {
+        parse_participant(&serde_json::json!({
             "format": "trellis.participant.v1",
             "id": id,
             "displayName": "Digest participant",
@@ -2185,7 +2184,7 @@ mod tests {
         .unwrap()
     }
 
-    fn action_names(grant_set: &GrantSetV1) -> Vec<String> {
+    fn action_names(grant_set: &GrantSet) -> Vec<String> {
         grant_set
             .permissions()
             .iter()
@@ -2193,9 +2192,7 @@ mod tests {
             .collect()
     }
 
-    fn capability_evidence(
-        section: &AuthorityProposalSectionV1,
-    ) -> Vec<ExpectedCapabilityEvidence> {
+    fn capability_evidence(section: &AuthorityProposalSection) -> Vec<ExpectedCapabilityEvidence> {
         section
             .capabilities()
             .iter()
@@ -2207,23 +2204,23 @@ mod tests {
             .collect()
     }
 
-    fn resolution_code_name(code: ResolutionErrorCodeV1) -> &'static str {
+    fn resolution_code_name(code: ResolutionErrorCode) -> &'static str {
         match code {
-            ResolutionErrorCodeV1::MissingApi => "missingApi",
-            ResolutionErrorCodeV1::ApiDigestMismatch => "apiDigestMismatch",
-            ResolutionErrorCodeV1::MissingSurface => "missingSurface",
-            ResolutionErrorCodeV1::InvalidCancelSelection => "invalidCancelSelection",
-            ResolutionErrorCodeV1::MissingOperationSignal => "missingOperationSignal",
-            ResolutionErrorCodeV1::InvalidImplementedTransfer => "invalidImplementedTransfer",
-            ResolutionErrorCodeV1::MissingRequiredTransfer => "missingRequiredTransfer",
-            ResolutionErrorCodeV1::OptionalStoreForRequiredTransfer => {
+            ResolutionErrorCode::MissingApi => "missingApi",
+            ResolutionErrorCode::ApiDigestMismatch => "apiDigestMismatch",
+            ResolutionErrorCode::MissingSurface => "missingSurface",
+            ResolutionErrorCode::InvalidCancelSelection => "invalidCancelSelection",
+            ResolutionErrorCode::MissingOperationSignal => "missingOperationSignal",
+            ResolutionErrorCode::InvalidImplementedTransfer => "invalidImplementedTransfer",
+            ResolutionErrorCode::MissingRequiredTransfer => "missingRequiredTransfer",
+            ResolutionErrorCode::OptionalStoreForRequiredTransfer => {
                 "optionalStoreForRequiredTransfer"
             }
-            ResolutionErrorCodeV1::RequiredConsumerUsesOptionalApi => {
+            ResolutionErrorCode::RequiredConsumerUsesOptionalApi => {
                 "requiredConsumerUsesOptionalApi"
             }
-            ResolutionErrorCodeV1::UnresolvableSchemaPointer => "unresolvableSchemaPointer",
-            ResolutionErrorCodeV1::SchemaPointerTypeMismatch => "schemaPointerTypeMismatch",
+            ResolutionErrorCode::UnresolvableSchemaPointer => "unresolvableSchemaPointer",
+            ResolutionErrorCode::SchemaPointerTypeMismatch => "schemaPointerTypeMismatch",
         }
     }
 }

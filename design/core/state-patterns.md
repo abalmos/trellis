@@ -43,7 +43,7 @@ Example:
 const contract = defineAppContract(
   {
     schemas: {
-      PreferencesV1: Type.Object({ theme: Type.String() }),
+      Preferences: Type.Object({ theme: Type.String() }),
       Preferences: Type.Object({
         theme: Type.String(),
         compact: Type.Boolean(),
@@ -61,7 +61,7 @@ const contract = defineAppContract(
         schema: ref.schema("Preferences"),
         stateVersion: "preferences.v2",
         acceptedVersions: {
-          "preferences.v1": ref.schema("PreferencesV1"),
+          "preferences.v1": ref.schema("Preferences"),
         },
       },
       drafts: { kind: "map", schema: ref.schema("Draft") },

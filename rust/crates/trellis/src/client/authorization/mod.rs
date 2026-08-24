@@ -11,9 +11,9 @@ mod registry;
 mod types;
 
 pub use core::{
-    AuthorizationEventVerificationInput, AuthorizationRequestVerificationInput,
-    AuthorizationVerificationCore, AuthorizationVerificationError, VerifiedAuthorizationEvent,
-    VerifiedAuthorizationRequest, VerifiedCaller,
+    AuthorizationVerificationCore, AuthorizationVerificationError, EventVerificationInput,
+    RequestVerificationInput, VerifiedAuthorizationEvent, VerifiedAuthorizationRequest,
+    VerifiedCaller,
 };
 pub use own_context::AuthorizationContextCache;
 pub use provider_cache::AuthorizationProviderCache;

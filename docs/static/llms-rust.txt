@@ -85,7 +85,7 @@ https://raw.githubusercontent.com/qlever-llc/trellis/main/docs/static/llms-full.
   request/publish/subscribe methods.
 - If a facade lacks a declared capability, fix the contract or generator. Do not
   add a transport shim in the service repository.
-- Protocol tooling can call `trellis_protocol::resolve_participant_v1(...)` with
+- Protocol tooling can call `trellis_protocol::resolve_participant(...)` with
   one validated participant artifact and its exact digest-pinned API artifacts.
   The pure result separates required and optional grant sets, provided APIs,
   private resource needs, capability/consent evidence, uncovered permissions,
@@ -94,7 +94,7 @@ https://raw.githubusercontent.com/qlever-llc/trellis/main/docs/static/llms-full.
   complete selected permission bundle, identifies the exact defining API digest,
   and never expands the derived grant set.
 - Resource bindings are physical evidence only; transport and request validation
-  require exact `GrantSetV1` atoms. Missing optional evidence removes only the
+  require exact `GrantSet` atoms. Missing optional evidence removes only the
   optional atoms it supports.
 - Bootstrap replay resolves current issuance and signs a fresh credential.
   Externally serialized errors use stable redacted codes; internal causes belong

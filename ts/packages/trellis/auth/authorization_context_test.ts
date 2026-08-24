@@ -23,11 +23,11 @@ import {
 } from "./authorization_context.ts";
 import { FileAuthorizationContextStore } from "./file_authorization_context_store.ts";
 import { buildEventProofInput } from "./proof.ts";
-import type { PermissionAtomV1 } from "./protocol_wasm.ts";
+import type { PermissionAtom } from "./protocol_wasm.ts";
 import { createAuth } from "./session_auth.ts";
 import { base64urlEncode, sha256, utf8 } from "./utils.ts";
 import { type VerifiedCaller, verifyLocalAuthorization } from "../session.ts";
-import type { PermissionAtomV1 as DescriptorPermissionAtomV1 } from "../contract_support/runtime.ts";
+import type { PermissionAtom as DescriptorPermissionAtom } from "../contract_support/runtime.ts";
 
 function contextBundle(): AuthorizationContextBundle {
   const chain = vectors.completeChain;
@@ -419,7 +419,7 @@ async function readyProvider(
   return provider;
 }
 
-function providerPermission(): PermissionAtomV1 {
+function providerPermission(): PermissionAtom {
   return {
     action: "call",
     target: {
@@ -1190,7 +1190,7 @@ Deno.test("same request and event proofs are accepted", async () => {
 
 function descriptorPermission(
   surfaceName = "Documents.Get",
-): DescriptorPermissionAtomV1 {
+): DescriptorPermissionAtom {
   return {
     apiId: "documents@v1",
     apiVersion: "v1",
@@ -1244,7 +1244,7 @@ async function localProviderCache(
   return await readyProvider(await providerContextCache(), calls);
 }
 
-function eventDescriptorPermission(): DescriptorPermissionAtomV1 {
+function eventDescriptorPermission(): DescriptorPermissionAtom {
   return descriptorPermission();
 }
 

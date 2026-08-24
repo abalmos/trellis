@@ -90,16 +90,16 @@ export {
   verifyProof,
 } from "./proof.ts";
 export {
-  buildSessionProofTranscriptV1,
-  parseSessionProofV1,
+  buildSessionProofTranscript,
+  parseSessionProof,
   SESSION_PROOF_FORMAT_V1,
-  type SessionProofInputV1,
-  type SessionProofPolicyV1,
-  type SessionProofPurposeV1,
-  sessionProofRequestDigestV1,
-  type SessionProofV1,
-  signSessionProofV1,
-  verifySessionProofV1,
+  type SessionProof,
+  type SessionProofInput,
+  type SessionProofPolicy,
+  type SessionProofPurpose,
+  sessionProofRequestDigest,
+  signSessionProof,
+  verifySessionProof,
 } from "./session_proof.ts";
 export {
   createAuth,

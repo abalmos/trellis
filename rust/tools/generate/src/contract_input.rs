@@ -507,13 +507,13 @@ trait IntoArtifactValue {{
     fn into_artifact_value(self) -> Result<serde_json::Value, Box<dyn std::error::Error>>;
 }}
 
-impl IntoArtifactValue for trellis_contracts::ApiArtifactV1 {{
+impl IntoArtifactValue for trellis_contracts::ApiArtifact {{
     fn into_artifact_value(self) -> Result<serde_json::Value, Box<dyn std::error::Error>> {{
         Ok(self.normalized_value()?)
     }}
 }}
 
-impl IntoArtifactValue for Result<trellis_contracts::ApiArtifactV1, trellis_contracts::ContractsError> {{
+impl IntoArtifactValue for Result<trellis_contracts::ApiArtifact, trellis_contracts::ContractsError> {{
     fn into_artifact_value(self) -> Result<serde_json::Value, Box<dyn std::error::Error>> {{
         Ok(self?.normalized_value()?)
     }}

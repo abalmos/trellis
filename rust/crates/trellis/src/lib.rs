@@ -58,7 +58,7 @@ pub mod service;
 pub mod contracts {
     pub use trellis_contracts::{
         canonicalize_json, digest_json, event, schema_ref, sha256_base64url, state, use_contract,
-        ApiArtifactV1, ApiBuilder, ContractArtifacts, ContractBuilder, ContractCapabilityMetadata,
+        ApiArtifact, ApiBuilder, ContractArtifacts, ContractBuilder, ContractCapabilityMetadata,
         ContractEventConsumerGroup, ContractEventConsumerOrdering, ContractEventConsumerReplay,
         ContractKind, ContractStateKind, ContractsError, PageRequest, PageResponse,
     };

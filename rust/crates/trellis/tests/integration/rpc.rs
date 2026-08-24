@@ -499,7 +499,7 @@ async fn authorization_registry_provider_cache_is_nats_local_and_revocation_live
         .refresh_authorization_context()
         .await
         .expect("refresh live caller context");
-    let context = trellis_protocol::parse_authorization_context_v1(&context.context)
+    let context = trellis_protocol::parse_authorization_context(&context.context)
         .expect("parse refreshed caller context");
     let context_digest = context.digest().expect("digest refreshed caller context");
 

@@ -24,10 +24,10 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sha2::{Digest as _, Sha256};
 use trellis_protocol::{
-    canonicalize_json, parse_api_v1, parse_participant_v1, parse_session_proof_v1,
-    resolve_participant_v1, session_proof_request_digest_v1, verify_session_proof_v1,
-    DeviceBootstrapSessionProofInputV1, GrantSetV1, ServiceBootstrapSessionProofInputV1,
-    SessionProofInputV1, SessionProofPolicyV1, UserAuthRequestSessionProofInputV1,
+    canonicalize_json, parse_api, parse_participant, parse_session_proof, resolve_participant,
+    session_proof_request_digest, verify_session_proof, DeviceBootstrapSessionProofInput, GrantSet,
+    ServiceBootstrapSessionProofInput, SessionProofInput, SessionProofPolicy,
+    UserAuthRequestSessionProofInput,
 };
 use trellis_rs::service::{
     EventConsumerOrdering, EventConsumerReplay, EventConsumerResourceBinding,
@@ -214,7 +214,7 @@ pub(super) struct AuthHttpState<R, E> {
     native_nats_servers: Vec<String>,
     websocket_nats_servers: Vec<String>,
     oidc_providers: BTreeMap<String, OidcProvider>,
-    proof_policy: SessionProofPolicyV1,
+    proof_policy: SessionProofPolicy,
     portal_override_dir: Option<PathBuf>,
 }
 
@@ -399,7 +399,7 @@ fn browser_consent(
 fn select_browser_authority(
     consent: &BrowserConsentProposal,
     selected_optional_bundles: &[String],
-) -> Result<(GrantSetV1, Vec<String>, BTreeSet<String>), HttpError> {
+) -> Result<(GrantSet, Vec<String>, BTreeSet<String>), HttpError> {
     let selected = selected_optional_bundles
         .iter()
         .cloned()
@@ -415,7 +415,7 @@ fn select_browser_authority(
             .ok_or_else(|| HttpError::bad_request("unknown_optional_bundle"))?;
         permissions.extend_from_slice(bundle.permissions());
     }
-    let grant_set = GrantSetV1::new(permissions);
+    let grant_set = GrantSet::new(permissions);
     let mut capabilities = consent.required_capabilities.clone();
     for (qualified_name, definition) in &consent.optional_capability_definitions {
         if definition
@@ -522,7 +522,7 @@ fn session_revocation_actions(
 }
 
 fn proof_request_digest(raw: &Value) -> Result<String, trellis_protocol::ProtocolError> {
-    session_proof_request_digest_v1(raw)
+    session_proof_request_digest(raw)
 }
 
 fn first_admin_token_hash(token: &str) -> Result<String, HttpError> {

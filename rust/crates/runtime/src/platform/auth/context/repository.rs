@@ -5,8 +5,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sha2::{Digest as _, Sha256};
 use trellis_protocol::{
-    canonicalize_json, parse_authorization_context_v1, AuthorizationAuthorityKindV1,
-    SignedAuthorizationContextV1,
+    canonicalize_json, parse_authorization_context, AuthorizationAuthorityKind,
+    SignedAuthorizationContext,
 };
 
 use super::super::{
@@ -113,10 +113,10 @@ pub struct AuthorizationContextRecord {
 impl AuthorizationContextRecord {
     pub(crate) fn signed_context(
         &self,
-    ) -> Result<SignedAuthorizationContextV1, AuthorizationStateError> {
+    ) -> Result<SignedAuthorizationContext, AuthorizationStateError> {
         let value = serde_json::from_str(&self.signed_context_json)
             .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
-        parse_authorization_context_v1(&value)
+        parse_authorization_context(&value)
             .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))
     }
 }
@@ -890,7 +890,7 @@ fn validate_context_record(
     let value: Value = serde_json::from_str(&record.signed_context_json).map_err(|error| {
         AuthorizationStateError::InvalidRecord(format!("invalid signed context: {error}"))
     })?;
-    let signed = parse_authorization_context_v1(&value)
+    let signed = parse_authorization_context(&value)
         .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
     let canonical = canonicalize_json(&value)
         .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
@@ -944,7 +944,7 @@ fn context_action(
         .map_err(|error| AuthorizationStateError::Storage(error.to_string()))?;
     let signed_context = serde_json::from_str::<Value>(&context.signed_context_json)
         .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
-    let issued_at = parse_authorization_context_v1(&signed_context)
+    let issued_at = parse_authorization_context(&signed_context)
         .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?
         .unsigned
         .issued_at;
@@ -968,10 +968,10 @@ fn context_action(
     })
 }
 
-fn authority_kind(kind: AuthorizationAuthorityKindV1) -> AuthorityKind {
+fn authority_kind(kind: AuthorizationAuthorityKind) -> AuthorityKind {
     match kind {
-        AuthorizationAuthorityKindV1::Identity => AuthorityKind::Identity,
-        AuthorizationAuthorityKindV1::Deployment => AuthorityKind::Deployment,
+        AuthorizationAuthorityKind::Identity => AuthorityKind::Identity,
+        AuthorizationAuthorityKind::Deployment => AuthorityKind::Deployment,
     }
 }
 
@@ -1017,10 +1017,10 @@ mod tests {
 
     use ed25519_dalek::SigningKey;
     use trellis_protocol::{
-        parse_authorization_context_v1, parse_participant_v1, resolve_participant_v1,
-        sign_authorization_context_v1, AuthorizationAuthorityRefV1, AuthorizationParticipantV1,
-        AuthorizationPrincipalKindV1, AuthorizationPrincipalV1, GrantSetV1, ParticipantKindV1,
-        UnsignedAuthorizationContextV1, AUTHORIZATION_CONTEXT_FORMAT_V1,
+        parse_authorization_context, parse_participant, resolve_participant,
+        sign_authorization_context, AuthorizationAuthorityRef, AuthorizationParticipant,
+        AuthorizationPrincipal, AuthorizationPrincipalKind, GrantSet, ParticipantKind,
+        UnsignedAuthorizationContext, AUTHORIZATION_CONTEXT_FORMAT_V1,
     };
 
     use super::*;
@@ -1222,9 +1222,9 @@ mod tests {
             "eventConsumers": {},
             "resources": {},
         });
-        let participant = parse_participant_v1(&participant_value)
+        let participant = parse_participant(&participant_value)
             .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
-        let resolved = resolve_participant_v1(&participant, &BTreeMap::new())
+        let resolved = resolve_participant(&participant, &BTreeMap::new())
             .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
         let participant_digest = resolved.participant_digest().to_owned();
         let needs_digest = resolved
@@ -1234,7 +1234,7 @@ mod tests {
         repository
             .put_participant_binding(ParticipantBindingRecord {
                 participant_id: resolved.participant_id().to_owned(),
-                participant_kind: ParticipantKindV1::App,
+                participant_kind: ParticipantKind::App,
                 artifact_digest: participant_digest.clone(),
                 needs_digest: needs_digest.clone(),
                 participant_json: canonicalize_json(&participant_value)
@@ -1307,7 +1307,7 @@ mod tests {
             participant_id: "context-test-app".to_owned(),
             participant_artifact_digest: participant_digest.clone(),
             accepted_needs_digest: needs_digest.clone(),
-            desired_grant_set: GrantSetV1::new(Vec::new()),
+            desired_grant_set: GrantSet::new(Vec::new()),
             desired_capabilities: Vec::new(),
             state: AuthorityState::Accepted,
             version: 1,
@@ -1327,7 +1327,7 @@ mod tests {
                     principal_id: "usr_context".to_owned(),
                     principal_kind: PrincipalKind::User,
                     participant_id: "context-test-app".to_owned(),
-                    participant_kind: ParticipantKindV1::App,
+                    participant_kind: ParticipantKind::App,
                     participant_artifact_digest: participant_digest.clone(),
                     participant_needs_digest: needs_digest.clone(),
                     session_public_key: session_public_key.clone(),
@@ -1370,26 +1370,26 @@ mod tests {
         let issuer_key = SigningKey::from_bytes(&[23; 32]);
         let issuer_key_id =
             URL_SAFE_NO_PAD.encode(Sha256::digest(issuer_key.verifying_key().as_bytes()));
-        let signed = sign_authorization_context_v1(
-            UnsignedAuthorizationContextV1 {
+        let signed = sign_authorization_context(
+            UnsignedAuthorizationContext {
                 format: AUTHORIZATION_CONTEXT_FORMAT_V1.to_owned(),
                 authority: "example.test".to_owned(),
                 issuer_key_id: issuer_key_id.clone(),
                 issuer_manifest_generation: 2,
                 session_id: "ses_context".to_owned(),
                 session_key: session_public_key,
-                principal: AuthorizationPrincipalV1 {
-                    kind: AuthorizationPrincipalKindV1::User,
+                principal: AuthorizationPrincipal {
+                    kind: AuthorizationPrincipalKind::User,
                     id: "usr_context".to_owned(),
                 },
-                participant: AuthorizationParticipantV1 {
-                    kind: ParticipantKindV1::App,
+                participant: AuthorizationParticipant {
+                    kind: ParticipantKind::App,
                     id: "context-test-app".to_owned(),
                     artifact_digest: participant_digest.clone(),
                     needs_digest: needs_digest.clone(),
                 },
-                authority_ref: AuthorizationAuthorityRefV1 {
-                    kind: AuthorizationAuthorityKindV1::Identity,
+                authority_ref: AuthorizationAuthorityRef {
+                    kind: AuthorizationAuthorityKind::Identity,
                     id: "iau_context".to_owned(),
                     version: 1,
                 },
@@ -1399,7 +1399,7 @@ mod tests {
                 issued_at: NOW_SECONDS,
                 not_before: NOW_SECONDS - 30,
                 expires_at: NOW_SECONDS + 300,
-                grant_set: GrantSetV1::new(Vec::new()),
+                grant_set: GrantSet::new(Vec::new()),
                 capabilities: Vec::new(),
                 extensions: serde_json::Map::new(),
                 critical: Vec::new(),
@@ -1540,13 +1540,13 @@ mod tests {
     ) -> Result<AuthorizationContextRecord, AuthorizationStateError> {
         let value: Value = serde_json::from_str(&base.signed_context_json)
             .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
-        let mut unsigned = parse_authorization_context_v1(&value)
+        let mut unsigned = parse_authorization_context(&value)
             .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?
             .unsigned;
         let issuer_key = SigningKey::from_bytes(&[issuer_seed; 32]);
         unsigned.issuer_key_id =
             URL_SAFE_NO_PAD.encode(Sha256::digest(issuer_key.verifying_key().as_bytes()));
-        let signed = sign_authorization_context_v1(unsigned, &issuer_key)
+        let signed = sign_authorization_context(unsigned, &issuer_key)
             .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
         let mut context = base.clone();
         context.issuer_key_id = signed.unsigned.issuer_key_id.clone();
@@ -2659,7 +2659,7 @@ mod tests {
             .put_deployment_evidence(crate::platform::auth::DeploymentRecord {
                 deployment_id: "dep_instance_context".to_owned(),
                 participant_id: "instance-context-service".to_owned(),
-                participant_kind: ParticipantKindV1::Service,
+                participant_kind: ParticipantKind::Service,
                 active: true,
                 expires_at: None,
             })

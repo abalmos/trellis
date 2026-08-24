@@ -54,9 +54,9 @@ pub(super) async fn dispatch(
     let validated = ValidatedRequest {
         principal_id: verified.caller.principal.id.clone(),
         principal_kind: match verified.caller.principal.kind {
-            AuthorizationPrincipalKindV1::User => PrincipalKind::User,
-            AuthorizationPrincipalKindV1::Service => PrincipalKind::Service,
-            AuthorizationPrincipalKindV1::Device => PrincipalKind::Device,
+            AuthorizationPrincipalKind::User => PrincipalKind::User,
+            AuthorizationPrincipalKind::Service => PrincipalKind::Service,
+            AuthorizationPrincipalKind::Device => PrincipalKind::Device,
         },
         session_id: verified.caller.session_id.clone(),
         session_public_key: session_key,

@@ -61,7 +61,7 @@ import {
   type InferRuntimeRpcError,
   type InferSchemaType,
   type OperationDesc,
-  type PermissionAtomV1,
+  type PermissionAtom,
   type RPCDesc,
   type RpcErrorClass,
   type RuntimeApi,
@@ -1348,7 +1348,7 @@ type ProjectedRpcMethod<
     subject: string;
     input: ResolveSchemaFromMap<TSchemas, TMethod["input"]>;
     output: ResolveSchemaFromMap<TSchemas, TMethod["output"]>;
-    permission: PermissionAtomV1;
+    permission: PermissionAtom;
     callerCapabilities: readonly string[];
     authRequired?: boolean;
     errors?: TMethod["errors"];
@@ -1368,7 +1368,7 @@ type BuiltRpcDesc = {
   subject: string;
   input: Schema<unknown>;
   output: Schema<unknown>;
-  permission: PermissionAtomV1;
+  permission: PermissionAtom;
   callerCapabilities: readonly string[];
   transfer?: { direction: "receive" };
   authRequired?: boolean;
@@ -1471,10 +1471,10 @@ type ProjectedRpc<
   : {};
 
 type ProjectedOperationPermissions = Readonly<{
-  invoke: PermissionAtomV1;
-  observe: PermissionAtomV1;
-  cancel: PermissionAtomV1;
-  control: Readonly<Record<string, PermissionAtomV1>>;
+  invoke: PermissionAtom;
+  observe: PermissionAtom;
+  cancel: PermissionAtom;
+  control: Readonly<Record<string, PermissionAtom>>;
 }>;
 
 type ProjectedOperations<
@@ -2951,10 +2951,10 @@ function storeResource(resource: ContractStoreResource): ContractStoreResource {
 function apiPermission(
   apiId: string,
   apiVersion: `v${number}`,
-  surfaceKind: PermissionAtomV1["surfaceKind"],
+  surfaceKind: PermissionAtom["surfaceKind"],
   surfaceName: string,
-  action: PermissionAtomV1["action"],
-): PermissionAtomV1 {
+  action: PermissionAtom["action"],
+): PermissionAtom {
   return Object.freeze({ apiId, apiVersion, surfaceKind, surfaceName, action });
 }
 
@@ -2964,7 +2964,7 @@ function operationPermissions(
   operationName: string,
   signals: Record<string, ContractSourceOperationSignal> | undefined,
 ): OperationDesc["permissions"] {
-  const control: Record<string, PermissionAtomV1> = {};
+  const control: Record<string, PermissionAtom> = {};
   for (const signalName of Object.keys(signals ?? {}).sort()) {
     control[signalName] = apiPermission(
       apiId,

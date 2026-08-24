@@ -2,7 +2,7 @@ use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
-use trellis_protocol::GrantSetV1;
+use trellis_protocol::GrantSet;
 use ulid::Ulid;
 use url::Url;
 
@@ -56,7 +56,7 @@ pub struct FirstAdminRegistration {
     /// Exact accepted needs digest.
     pub participant_needs_digest: String,
     /// Exact grants required to invoke administrator surfaces.
-    pub grant_set: GrantSetV1,
+    pub grant_set: GrantSet,
     /// Required-nullable authority expiry.
     pub authority_expires_at: Option<i64>,
     /// Completion time in Unix milliseconds.
@@ -91,7 +91,7 @@ pub struct FirstAdminFederatedRegistration {
     /// Exact accepted administration participant needs digest.
     pub participant_needs_digest: String,
     /// Exact grants required to invoke administrator surfaces.
-    pub grant_set: GrantSetV1,
+    pub grant_set: GrantSet,
     /// Required-nullable authority expiry.
     pub authority_expires_at: Option<i64>,
     /// Completion time in Unix milliseconds.

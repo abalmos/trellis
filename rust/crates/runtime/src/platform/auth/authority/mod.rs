@@ -522,7 +522,7 @@ pub(super) fn validate_deployment_authority(
     )?;
     if !matches!(
         record.participant_kind,
-        trellis_protocol::ParticipantKindV1::Service | trellis_protocol::ParticipantKindV1::Device
+        trellis_protocol::ParticipantKind::Service | trellis_protocol::ParticipantKind::Device
     ) {
         return Err(AuthorizationStateError::InvalidRecord(
             "deployment authority requires a service or device participant".to_owned(),
@@ -744,7 +744,7 @@ pub(crate) fn validate_deployment_evidence(
     require_nonempty("participantId", &deployment.participant_id)?;
     if !matches!(
         deployment.participant_kind,
-        trellis_protocol::ParticipantKindV1::Service | trellis_protocol::ParticipantKindV1::Device
+        trellis_protocol::ParticipantKind::Service | trellis_protocol::ParticipantKind::Device
     ) {
         return Err(AuthorizationStateError::InvalidRecord(
             "deployment evidence requires a service or device participant".to_owned(),

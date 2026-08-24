@@ -185,7 +185,7 @@ impl ContractAuthoringBuilder {
         self
     }
 
-    pub(crate) fn build_api(mut self) -> Result<crate::ApiArtifactV1, ContractsError> {
+    pub(crate) fn build_api(mut self) -> Result<crate::ApiArtifact, ContractsError> {
         self.project_declared_capabilities()?;
         crate::ApiBuilder::new(crate::native_artifacts::build_api_value(&self.manifest)?).build()
     }

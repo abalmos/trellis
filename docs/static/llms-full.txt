@@ -109,7 +109,7 @@ https://raw.githubusercontent.com/qlever-llc/trellis/main/docs/static/llms.txt
   `trellis.participant.v1` artifacts. Normal TypeScript contract authoring is
   compiled to those protocol artifacts before runtime admission.
 - Physical resource bindings are evidence only. Exact participant-resource atoms
-  in `GrantSetV1` authorize access; missing optional evidence removes only the
+  in `GrantSet` authorize access; missing optional evidence removes only the
   corresponding optional atoms.
 - Browser approval accepts only a server-owned consent digest and selected
   server-issued optional bundle ids. OIDC callbacks require a state-specific

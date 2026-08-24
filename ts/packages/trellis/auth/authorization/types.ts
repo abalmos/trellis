@@ -1,8 +1,8 @@
 import { type Static, Type } from "typebox";
 
 import type {
-  AuthorizationContextVerificationPolicyV1,
-  PermissionAtomV1,
+  AuthorizationContextVerificationPolicy,
+  PermissionAtom,
 } from "../protocol_wasm.ts";
 
 /** Pinned root and connected NATS KV registry binding. */
@@ -102,7 +102,7 @@ export type AuthorizationContextVerificationMaterial = {
   manifest: unknown;
   context: unknown;
   contextDigest: string;
-  policy: AuthorizationContextVerificationPolicyV1;
+  policy: AuthorizationContextVerificationPolicy;
   verified: VerifiedAuthorizationContext;
 };
 
@@ -138,7 +138,7 @@ export type AuthorizationProviderRequest = {
   iat: number;
   requestId: string;
   proof: string;
-  requiredPermissions: PermissionAtomV1[];
+  requiredPermissions: PermissionAtom[];
   requiredCapabilities: string[];
 };
 
@@ -150,7 +150,7 @@ export type AuthorizationProviderEvent = {
   eventId: string;
   eventTime: string;
   proof: string;
-  requiredPermissions: PermissionAtomV1[];
+  requiredPermissions: PermissionAtom[];
   requiredCapabilities: string[];
 };
 

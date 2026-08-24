@@ -4,8 +4,8 @@ use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use serde_json::{json, Map, Value};
 use sha2::{Digest as _, Sha256};
 use trellis_protocol::{
-    authorization_context_refresh_at_v1, canonicalize_json, sign_authorization_context_v1,
-    UnsignedAuthorizationContextV1, AUTHORIZATION_CONTEXT_FORMAT_V1,
+    authorization_context_refresh_at, canonicalize_json, sign_authorization_context,
+    UnsignedAuthorizationContext, AUTHORIZATION_CONTEXT_FORMAT_V1,
 };
 use trellis_rs::client::{AuthorizationProviderCache, RuntimeAuthorizationTrust};
 
@@ -58,7 +58,7 @@ impl AuthorizationContextService {
 
     pub(crate) async fn transport_permissions(
         &self,
-        context: &trellis_protocol::VerifiedAuthorizationContextV1,
+        context: &trellis_protocol::VerifiedAuthorizationContext,
     ) -> Result<TransportPermissions, AuthorizationStateError> {
         let signed = &context.signed_context().unsigned;
         let durable = self
@@ -85,10 +85,10 @@ impl AuthorizationContextService {
                 )
             })?;
         let authority_kind = match signed.authority_ref.kind {
-            trellis_protocol::AuthorizationAuthorityKindV1::Identity => {
+            trellis_protocol::AuthorizationAuthorityKind::Identity => {
                 crate::platform::auth::AuthorityKind::Identity
             }
-            trellis_protocol::AuthorizationAuthorityKindV1::Deployment => {
+            trellis_protocol::AuthorizationAuthorityKind::Deployment => {
                 crate::platform::auth::AuthorityKind::Deployment
             }
         };
@@ -458,7 +458,7 @@ impl AuthorizationContextService {
                 "authorization context exceeds configured bounds".to_owned(),
             ));
         }
-        let unsigned = UnsignedAuthorizationContextV1 {
+        let unsigned = UnsignedAuthorizationContext {
             format: AUTHORIZATION_CONTEXT_FORMAT_V1.to_owned(),
             authority: self.trust.root.authority().to_owned(),
             issuer_key_id: issuer_key_id(&self.trust.issuer_signing_key),
@@ -485,7 +485,7 @@ impl AuthorizationContextService {
             extensions: Map::new(),
             critical: Vec::new(),
         };
-        let signed = sign_authorization_context_v1(unsigned, &self.trust.issuer_signing_key)
+        let signed = sign_authorization_context(unsigned, &self.trust.issuer_signing_key)
             .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
         let signed_context_json = canonicalize_json(
             &serde_json::to_value(&signed)
@@ -500,7 +500,7 @@ impl AuthorizationContextService {
         let context_digest = signed
             .digest()
             .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
-        let refresh_at = authorization_context_refresh_at_v1(
+        let refresh_at = authorization_context_refresh_at(
             &context_digest,
             now_seconds,
             signed.unsigned.not_before,

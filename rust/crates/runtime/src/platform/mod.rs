@@ -160,7 +160,7 @@ pub(crate) async fn start(context: &RuntimeContext) -> Result<SubsystemHandle, R
         )
         .await
         .map_err(|error| RuntimeError::Platform(error.to_string()))?;
-    let event_context = trellis_protocol::parse_authorization_context_v1(&event_context.context)
+    let event_context = trellis_protocol::parse_authorization_context(&event_context.context)
         .map_err(|error| RuntimeError::Platform(error.to_string()))?;
     let event_context_digest = event_context
         .digest()
@@ -752,12 +752,12 @@ mod tests {
             .await
             .unwrap();
         assert!(issuable.grant_set.permissions().iter().any(|permission| {
-            permission.action() == trellis_protocol::PermissionActionV1::Publish
+            permission.action() == trellis_protocol::PermissionAction::Publish
                 && matches!(
                     permission.target(),
-                    trellis_protocol::PermissionTargetV1::ApiSurface {
+                    trellis_protocol::PermissionTarget::ApiSurface {
                         api,
-                        surface: trellis_protocol::ApiSurfaceKindV1::Event,
+                        surface: trellis_protocol::ApiSurfaceKind::Event,
                         ..
                     } if api == "trellis.auth@v1"
                 )

@@ -1,5 +1,5 @@
 use serde_json::Value;
-use trellis_protocol::{lint_participant_v1_authoring, parse_api_v1, parse_participant_v1};
+use trellis_protocol::{lint_participant_authoring, parse_api, parse_participant};
 
 const AUTH_POLICY_RPCS: [&str; 9] = [
     "Auth.CapabilityGroups.Delete",
@@ -17,7 +17,7 @@ const AUTH_POLICY_RPCS: [&str; 9] = [
 fn source_auth_artifacts_are_valid_and_digest_pinned() {
     let api_value: Value =
         serde_json::from_str(trellis_rs::sdk::auth::API_JSON).expect("parse auth API JSON");
-    let api = parse_api_v1(&api_value).expect("validate auth API");
+    let api = parse_api(&api_value).expect("validate auth API");
     assert_eq!(
         api.digest().expect("digest auth API"),
         trellis_rs::sdk::auth::API_DIGEST
@@ -26,8 +26,8 @@ fn source_auth_artifacts_are_valid_and_digest_pinned() {
     let participant_value: Value =
         serde_json::from_str(include_str!("../../../trellis.participant.json"))
             .expect("parse auth participant JSON");
-    lint_participant_v1_authoring(&participant_value).expect("lint auth participant");
-    let participant = parse_participant_v1(&participant_value).expect("validate auth participant");
+    lint_participant_authoring(&participant_value).expect("lint auth participant");
+    let participant = parse_participant(&participant_value).expect("validate auth participant");
     assert_eq!(participant.id(), "trellis-auth-runtime");
 
     let mut admin_value: Value = serde_json::from_str(include_str!(
@@ -36,16 +36,16 @@ fn source_auth_artifacts_are_valid_and_digest_pinned() {
     .expect("parse admin participant JSON");
     admin_value["uses"]["required"]["auth"]["apiDigest"] =
         Value::String(trellis_rs::sdk::auth::API_DIGEST.to_owned());
-    lint_participant_v1_authoring(&admin_value).expect("lint admin participant");
-    let admin = parse_participant_v1(&admin_value).expect("validate admin participant");
+    lint_participant_authoring(&admin_value).expect("lint admin participant");
+    let admin = parse_participant(&admin_value).expect("validate admin participant");
     assert_eq!(admin.id(), "trellis-platform-administration");
-    let resolved = trellis_protocol::resolve_participant_v1(
+    let resolved = trellis_protocol::resolve_participant(
         &admin,
         &std::collections::BTreeMap::from([
             (api.id().to_owned(), api),
             (
                 trellis_rs::sdk::state::API_ID.to_owned(),
-                parse_api_v1(
+                parse_api(
                     &serde_json::from_str(trellis_rs::sdk::state::API_JSON)
                         .expect("parse state API JSON"),
                 )
@@ -288,7 +288,7 @@ fn central_trellis_participant_resolves_all_builtin_apis_with_exact_pins() {
         ("eventlog", trellis_rs::sdk::eventlog::API_JSON),
         ("state", trellis_rs::sdk::state::API_JSON),
     ] {
-        let api = parse_api_v1(&serde_json::from_str(source).expect("parse built-in API JSON"))
+        let api = parse_api(&serde_json::from_str(source).expect("parse built-in API JSON"))
             .expect("validate built-in API");
         let digest = api.digest().expect("digest built-in API");
         participant_value["implements"][alias] = serde_json::json!({
@@ -299,15 +299,14 @@ fn central_trellis_participant_resolves_all_builtin_apis_with_exact_pins() {
         apis.insert(api.id().to_owned(), api);
     }
 
-    let participant =
-        parse_participant_v1(&participant_value).expect("validate central participant");
-    let resolved = trellis_protocol::resolve_participant_v1(&participant, &apis)
+    let participant = parse_participant(&participant_value).expect("validate central participant");
+    let resolved = trellis_protocol::resolve_participant(&participant, &apis)
         .expect("resolve central participant against final built-ins");
     assert_eq!(resolved.participant_id(), "trellis-auth-runtime");
 }
 
 fn normalized_api(source: &str) -> Value {
-    parse_api_v1(&serde_json::from_str(source).expect("parse API JSON"))
+    parse_api(&serde_json::from_str(source).expect("parse API JSON"))
         .expect("validate API")
         .normalized_value()
         .expect("normalize API")

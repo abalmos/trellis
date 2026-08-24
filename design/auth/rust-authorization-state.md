@@ -92,7 +92,7 @@ and verifies both digests. An exact lookup never falls back to the latest row.
 Identity and deployment authority use separate tables and typed repositories.
 Each row stores its stable authority ID, authority subject (principal or
 deployment), exact participant identity and artifact digest, accepted-needs
-digest, normalized `GrantSetV1`, sorted unique platform capabilities, state,
+digest, normalized `GrantSet`, sorted unique platform capabilities, state,
 positive desired version, timestamps, nullable expiry, and nullable decision
 fields.
 
@@ -147,7 +147,7 @@ device instance, delegation, or instance expiry.
 
 The row stores desired authority identity and version, authority-level subject
 ID, its own positive materialization version, exact participant evidence,
-normalized effective `GrantSetV1`, canonical capabilities, state (`available`,
+normalized effective `GrantSet`, canonical capabilities, state (`available`,
 `unavailable`, or `error`), reconciliation time, nullable error category, and
 the authority/deployment expiry bound. Dependency and resource child rows are
 replaced in the same transaction.
@@ -169,7 +169,7 @@ Materialization is fail closed:
 6. require every required API and resource evidence row;
 7. remove each optional API grant set or participant-resource selection whose
    evidence is unavailable;
-8. intersect the remaining atoms with the accepted desired `GrantSetV1`;
+8. intersect the remaining atoms with the accepted desired `GrantSet`;
 9. intersect requested and accepted canonical capabilities independently;
 10. atomically replace materialized authority, supporting evidence, and its
     deterministic transition-outbox record.

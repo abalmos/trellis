@@ -70,7 +70,7 @@ Capability groups and portal grant overrides are administrative authoring tools.
 Auth expands them against the participant's declared optional capabilities
 before applying an ordinary identity authority. Contract-era identity grants and
 stored subject ACLs remain retired; only exact resolved permission atoms enter
-`GrantSetV1`.
+`GrantSet`.
 
 ## Runtime issuance
 

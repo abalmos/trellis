@@ -7,18 +7,20 @@ use std::collections::BTreeMap;
 use serde::Deserialize;
 use serde_json::{json, Value};
 use trellis_protocol::{
-    parse_api_v1, parse_authorization_context_v1, parse_issuer_manifest_v1, parse_participant_v1,
-    resolve_participant_v1 as resolve_participant_v1_protocol, session_proof_request_digest_v1,
-    session_proof_signing_digest_v1, verify_authorization_context_v1,
+    parse_api, parse_authorization_context, parse_issuer_manifest, parse_participant,
+    resolve_participant as resolve_participant_protocol,
+    session_proof_request_digest as session_proof_request_digest_protocol,
+    session_proof_signing_digest as session_proof_signing_digest_protocol,
+    verify_authorization_context as verify_authorization_context_protocol,
     verify_authorization_event as verify_authorization_event_protocol,
-    verify_authorization_request as verify_authorization_request_protocol,
-    verify_issuer_manifest_v1, verify_session_proof_v1,
-    AuthorizationContextRefreshSessionProofInputV1, AuthorizationEventProof,
-    AuthorizationEventPublisher, AuthorizationEventVerificationInputV1, AuthorizationRequestProof,
-    AuthorizationRequestVerificationInputV1, AuthorizationTrustRootV1,
-    AuthorizationVerificationPolicyV1, DeviceBootstrapSessionProofInputV1, PermissionAtomV1,
-    ProtocolError, ServiceBootstrapSessionProofInputV1, SessionProofInputV1, SessionProofPolicyV1,
-    SessionProofV1, UserAuthRequestSessionProofInputV1, VerifiedAuthorizationContextV1,
+    verify_authorization_request as verify_authorization_request_protocol, verify_issuer_manifest,
+    verify_session_proof as verify_session_proof_protocol,
+    AuthorizationContextRefreshSessionProofInput, AuthorizationEventProof,
+    AuthorizationEventPublisher, AuthorizationEventVerificationInput, AuthorizationRequestProof,
+    AuthorizationRequestVerificationInput, AuthorizationTrustRoot, AuthorizationVerificationPolicy,
+    DeviceBootstrapSessionProofInput, PermissionAtom, ProtocolError,
+    ServiceBootstrapSessionProofInput, SessionProof, SessionProofInput, SessionProofPolicy,
+    UserAuthRequestSessionProofInput, VerifiedAuthorizationContext,
 };
 use wasm_bindgen::prelude::*;
 
@@ -35,7 +37,7 @@ struct RequiredNullable<T>(Option<T>);
     rename_all = "camelCase",
     rename_all_fields = "camelCase"
 )]
-enum WireSessionProofInputV1 {
+enum WireSessionProofInput {
     UserAuthRequest {
         request_id: String,
         issued_at: i64,
@@ -85,12 +87,12 @@ enum WireSessionProofInputV1 {
     },
 }
 
-impl TryFrom<WireSessionProofInputV1> for SessionProofInputV1 {
+impl TryFrom<WireSessionProofInput> for SessionProofInput {
     type Error = ProtocolError;
 
-    fn try_from(value: WireSessionProofInputV1) -> Result<Self, Self::Error> {
+    fn try_from(value: WireSessionProofInput) -> Result<Self, Self::Error> {
         match value {
-            WireSessionProofInputV1::UserAuthRequest {
+            WireSessionProofInput::UserAuthRequest {
                 request_id,
                 issued_at,
                 session_public_key,
@@ -99,7 +101,7 @@ impl TryFrom<WireSessionProofInputV1> for SessionProofInputV1 {
                 participant_digest,
                 redirect_target,
                 request_digest,
-            } => Self::user_auth_request(UserAuthRequestSessionProofInputV1 {
+            } => Self::user_auth_request(UserAuthRequestSessionProofInput {
                 request_id,
                 issued_at,
                 session_public_key,
@@ -109,7 +111,7 @@ impl TryFrom<WireSessionProofInputV1> for SessionProofInputV1 {
                 redirect_target,
                 request_digest,
             }),
-            WireSessionProofInputV1::ServiceBootstrap {
+            WireSessionProofInput::ServiceBootstrap {
                 request_id,
                 issued_at,
                 deployment_id,
@@ -120,7 +122,7 @@ impl TryFrom<WireSessionProofInputV1> for SessionProofInputV1 {
                 participant_id,
                 participant_digest,
                 request_digest,
-            } => Self::service_bootstrap(ServiceBootstrapSessionProofInputV1 {
+            } => Self::service_bootstrap(ServiceBootstrapSessionProofInput {
                 request_id,
                 issued_at,
                 deployment_id,
@@ -132,7 +134,7 @@ impl TryFrom<WireSessionProofInputV1> for SessionProofInputV1 {
                 participant_digest,
                 request_digest,
             }),
-            WireSessionProofInputV1::DeviceBootstrap {
+            WireSessionProofInput::DeviceBootstrap {
                 request_id,
                 issued_at,
                 deployment_id,
@@ -144,7 +146,7 @@ impl TryFrom<WireSessionProofInputV1> for SessionProofInputV1 {
                 participant_digest,
                 challenge_digest,
                 request_digest,
-            } => Self::device_bootstrap(DeviceBootstrapSessionProofInputV1 {
+            } => Self::device_bootstrap(DeviceBootstrapSessionProofInput {
                 request_id,
                 issued_at,
                 deployment_id,
@@ -157,7 +159,7 @@ impl TryFrom<WireSessionProofInputV1> for SessionProofInputV1 {
                 challenge_digest: challenge_digest.0,
                 request_digest,
             }),
-            WireSessionProofInputV1::AuthorizationContextRefresh {
+            WireSessionProofInput::AuthorizationContextRefresh {
                 request_id,
                 issued_at,
                 session_id,
@@ -168,8 +170,8 @@ impl TryFrom<WireSessionProofInputV1> for SessionProofInputV1 {
                 known_root_key_id,
                 minimum_manifest_generation,
                 request_digest,
-            } => Self::authorization_context_refresh(
-                AuthorizationContextRefreshSessionProofInputV1 {
+            } => {
+                Self::authorization_context_refresh(AuthorizationContextRefreshSessionProofInput {
                     request_id,
                     issued_at,
                     session_id,
@@ -180,14 +182,14 @@ impl TryFrom<WireSessionProofInputV1> for SessionProofInputV1 {
                     known_root_key_id,
                     minimum_manifest_generation,
                     request_digest,
-                },
-            ),
+                })
+            }
         }
     }
 }
 
-fn parse_input(input_json: &str) -> Result<SessionProofInputV1, JsError> {
-    serde_json::from_str::<WireSessionProofInputV1>(input_json)
+fn parse_input(input_json: &str) -> Result<SessionProofInput, JsError> {
+    serde_json::from_str::<WireSessionProofInput>(input_json)
         .map_err(|error| JsError::new(&error.to_string()))?
         .try_into()
         .map_err(|error: ProtocolError| JsError::new(&error.to_string()))
@@ -208,13 +210,14 @@ fn safe_integer(value: f64, name: &str) -> Result<i64, JsError> {
 pub fn session_proof_request_digest(request_json: &str) -> Result<String, JsError> {
     let request: Value =
         serde_json::from_str(request_json).map_err(|error| JsError::new(&error.to_string()))?;
-    session_proof_request_digest_v1(&request).map_err(|error| JsError::new(&error.to_string()))
+    session_proof_request_digest_protocol(&request)
+        .map_err(|error| JsError::new(&error.to_string()))
 }
 
 /// Return the canonical signing digest for a JSON-encoded purpose-specific input.
 #[wasm_bindgen]
 pub fn session_proof_signing_digest(input_json: &str) -> Result<String, JsError> {
-    session_proof_signing_digest_v1(&parse_input(input_json)?)
+    session_proof_signing_digest_protocol(&parse_input(input_json)?)
         .map_err(|error| JsError::new(&error.to_string()))
 }
 
@@ -228,15 +231,15 @@ pub fn verify_session_proof(
     maximum_age_ms: f64,
     maximum_future_skew_ms: f64,
 ) -> Result<(), JsError> {
-    let proof: SessionProofV1 =
+    let proof: SessionProof =
         serde_json::from_str(proof_json).map_err(|error| JsError::new(&error.to_string()))?;
     let now_ms = safe_integer(now_ms, "nowMs")?;
-    let policy = SessionProofPolicyV1::new(
+    let policy = SessionProofPolicy::new(
         safe_integer(maximum_age_ms, "maximumAgeMs")?,
         safe_integer(maximum_future_skew_ms, "maximumFutureSkewMs")?,
     )
     .map_err(|error| JsError::new(&error.to_string()))?;
-    verify_session_proof_v1(
+    verify_session_proof_protocol(
         &parse_input(input_json)?,
         &proof,
         signer_public_key,
@@ -248,7 +251,7 @@ pub fn verify_session_proof(
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
-struct WireAuthorizationVerificationPolicyV1 {
+struct WireAuthorizationVerificationPolicy {
     now_unix_seconds: f64,
     allowed_clock_skew_seconds: u32,
     maximum_context_lifetime_seconds: u32,
@@ -260,44 +263,44 @@ struct WireAuthorizationVerificationPolicyV1 {
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
-struct WireAuthorizationRequestV1 {
+struct WireAuthorizationRequest {
     subject: String,
     reply: RequiredNullable<String>,
     iat: i64,
     request_id: String,
     proof: String,
-    required_permissions: Vec<PermissionAtomV1>,
+    required_permissions: Vec<PermissionAtom>,
     required_capabilities: Vec<String>,
-    policy: WireAuthorizationVerificationPolicyV1,
+    policy: WireAuthorizationVerificationPolicy,
 }
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
-struct WireAuthorizationEventV1 {
+struct WireAuthorizationEvent {
     subject: String,
     event_id: String,
     event_time: String,
     proof: String,
-    required_permissions: Vec<PermissionAtomV1>,
+    required_permissions: Vec<PermissionAtom>,
     required_capabilities: Vec<String>,
     #[serde(default)]
     revoked_at: Option<i64>,
-    policy: WireAuthorizationVerificationPolicyV1,
+    policy: WireAuthorizationVerificationPolicy,
 }
 
 fn authorization_verification_policy(
     policy_json: &str,
-) -> Result<AuthorizationVerificationPolicyV1, JsError> {
-    let wire: WireAuthorizationVerificationPolicyV1 =
+) -> Result<AuthorizationVerificationPolicy, JsError> {
+    let wire: WireAuthorizationVerificationPolicy =
         serde_json::from_str(policy_json).map_err(|error| JsError::new(&error.to_string()))?;
     let policy = authorization_verification_policy_from_wire(&wire)?;
     Ok(policy)
 }
 
 fn authorization_verification_policy_from_wire(
-    wire: &WireAuthorizationVerificationPolicyV1,
-) -> Result<AuthorizationVerificationPolicyV1, JsError> {
-    let policy = AuthorizationVerificationPolicyV1::new(
+    wire: &WireAuthorizationVerificationPolicy,
+) -> Result<AuthorizationVerificationPolicy, JsError> {
+    let policy = AuthorizationVerificationPolicy::new(
         safe_integer(wire.now_unix_seconds, "nowUnixSeconds")?,
         wire.allowed_clock_skew_seconds,
         wire.maximum_context_lifetime_seconds,
@@ -325,20 +328,21 @@ pub fn verify_authorization_context(
     let policy = authorization_verification_policy(policy_json)?;
     let root_value: Value =
         serde_json::from_str(root_json).map_err(|error| JsError::new(&error.to_string()))?;
-    let root = AuthorizationTrustRootV1::parse(&root_value)
+    let root = AuthorizationTrustRoot::parse(&root_value)
         .map_err(|error| JsError::new(&error.to_string()))?;
     let manifest_value: Value =
         serde_json::from_str(manifest_json).map_err(|error| JsError::new(&error.to_string()))?;
-    let manifest = parse_issuer_manifest_v1(&manifest_value)
-        .map_err(|error| JsError::new(&error.to_string()))?;
-    let verified_manifest = verify_issuer_manifest_v1(&root, &manifest, &policy)
+    let manifest =
+        parse_issuer_manifest(&manifest_value).map_err(|error| JsError::new(&error.to_string()))?;
+    let verified_manifest = verify_issuer_manifest(&root, &manifest, &policy)
         .map_err(|error| JsError::new(&error.to_string()))?;
     let context_value: Value =
         serde_json::from_str(context_json).map_err(|error| JsError::new(&error.to_string()))?;
-    let context = parse_authorization_context_v1(&context_value)
+    let context = parse_authorization_context(&context_value)
         .map_err(|error| JsError::new(&error.to_string()))?;
-    let verified = verify_authorization_context_v1(&root, &verified_manifest, &context, &policy)
-        .map_err(|error| JsError::new(&error.to_string()))?;
+    let verified =
+        verify_authorization_context_protocol(&root, &verified_manifest, &context, &policy)
+            .map_err(|error| JsError::new(&error.to_string()))?;
     let context_digest = verified.context_digest();
     let signed = verified.signed_context();
     serde_json::to_string(&json!({
@@ -363,13 +367,13 @@ pub fn verify_authorization_manifest(
     let policy = authorization_verification_policy(policy_json)?;
     let root_value: Value =
         serde_json::from_str(root_json).map_err(|error| JsError::new(&error.to_string()))?;
-    let root = AuthorizationTrustRootV1::parse(&root_value)
+    let root = AuthorizationTrustRoot::parse(&root_value)
         .map_err(|error| JsError::new(&error.to_string()))?;
     let manifest_value: Value =
         serde_json::from_str(manifest_json).map_err(|error| JsError::new(&error.to_string()))?;
-    let manifest = parse_issuer_manifest_v1(&manifest_value)
-        .map_err(|error| JsError::new(&error.to_string()))?;
-    let verified = verify_issuer_manifest_v1(&root, &manifest, &policy)
+    let manifest =
+        parse_issuer_manifest(&manifest_value).map_err(|error| JsError::new(&error.to_string()))?;
+    let verified = verify_issuer_manifest(&root, &manifest, &policy)
         .map_err(|error| JsError::new(&error.to_string()))?;
     serde_json::to_string(&json!({
         "authority": verified.authority(),
@@ -389,16 +393,16 @@ pub fn verify_authorization_manifest(
 
 /// Resolve one participant against its exact native API artifacts.
 #[wasm_bindgen]
-pub fn resolve_participant_v1(participant_json: &str, apis_json: &str) -> Result<String, JsError> {
+pub fn resolve_participant(participant_json: &str, apis_json: &str) -> Result<String, JsError> {
     let participant_value: Value =
         serde_json::from_str(participant_json).map_err(|error| JsError::new(&error.to_string()))?;
-    let participant = parse_participant_v1(&participant_value)
-        .map_err(|error| JsError::new(&error.to_string()))?;
+    let participant =
+        parse_participant(&participant_value).map_err(|error| JsError::new(&error.to_string()))?;
     let api_values: BTreeMap<String, Value> =
         serde_json::from_str(apis_json).map_err(|error| JsError::new(&error.to_string()))?;
     let mut apis = BTreeMap::new();
     for (id, value) in api_values {
-        let api = parse_api_v1(&value).map_err(|error| JsError::new(&error.to_string()))?;
+        let api = parse_api(&value).map_err(|error| JsError::new(&error.to_string()))?;
         if api.id() != id {
             return Err(JsError::new(&format!(
                 "API map key '{id}' does not match artifact id '{}'",
@@ -407,7 +411,7 @@ pub fn resolve_participant_v1(participant_json: &str, apis_json: &str) -> Result
         }
         apis.insert(id, api);
     }
-    let resolved = resolve_participant_v1_protocol(&participant, &apis)
+    let resolved = resolve_participant_protocol(&participant, &apis)
         .map_err(|error| JsError::new(&error.to_string()))?;
     let api_artifacts = apis
         .iter()
@@ -448,7 +452,7 @@ pub fn resolve_participant_v1(participant_json: &str, apis_json: &str) -> Result
 /// Opaque Rust-owned authorization context retained for repeated proof verification.
 #[wasm_bindgen]
 pub struct VerifiedAuthorizationContextHandle {
-    context: VerifiedAuthorizationContextV1,
+    context: VerifiedAuthorizationContext,
     projection: String,
 }
 
@@ -464,15 +468,15 @@ pub fn create_authorization_context_handle(
     let policy = authorization_verification_policy(policy_json)?;
     let root_value: Value =
         serde_json::from_str(root_json).map_err(|error| JsError::new(&error.to_string()))?;
-    let root = AuthorizationTrustRootV1::parse(&root_value)
+    let root = AuthorizationTrustRoot::parse(&root_value)
         .map_err(|error| JsError::new(&error.to_string()))?;
     let manifest_value: Value =
         serde_json::from_str(manifest_json).map_err(|error| JsError::new(&error.to_string()))?;
-    let manifest = parse_issuer_manifest_v1(&manifest_value)
-        .map_err(|error| JsError::new(&error.to_string()))?;
+    let manifest =
+        parse_issuer_manifest(&manifest_value).map_err(|error| JsError::new(&error.to_string()))?;
     let context_value: Value =
         serde_json::from_str(context_json).map_err(|error| JsError::new(&error.to_string()))?;
-    let signed_context = parse_authorization_context_v1(&context_value)
+    let signed_context = parse_authorization_context(&context_value)
         .map_err(|error| JsError::new(&error.to_string()))?;
     let verification_policy = if historical {
         let mut policy = policy;
@@ -481,9 +485,9 @@ pub fn create_authorization_context_handle(
     } else {
         policy
     };
-    let verified_manifest = verify_issuer_manifest_v1(&root, &manifest, &verification_policy)
+    let verified_manifest = verify_issuer_manifest(&root, &manifest, &verification_policy)
         .map_err(|error| JsError::new(&error.to_string()))?;
-    let context = verify_authorization_context_v1(
+    let context = verify_authorization_context_protocol(
         &root,
         &verified_manifest,
         &signed_context,
@@ -529,7 +533,7 @@ impl VerifiedAuthorizationContextHandle {
 }
 
 fn verified_context_projection(
-    context: &VerifiedAuthorizationContextV1,
+    context: &VerifiedAuthorizationContext,
 ) -> Result<Value, ProtocolError> {
     Ok(json!({
         "authority": context.authority(),
@@ -590,8 +594,8 @@ fn verified_result(mut projection: Value) -> String {
 }
 
 fn request_result(
-    context: &VerifiedAuthorizationContextV1,
-    input: WireAuthorizationRequestV1,
+    context: &VerifiedAuthorizationContext,
+    input: WireAuthorizationRequest,
     payload: &[u8],
 ) -> String {
     let policy = match authorization_verification_policy_from_wire(&input.policy) {
@@ -603,7 +607,7 @@ fn request_result(
         Err(error) => return protocol_error_result(&error),
     };
     let verified =
-        match verify_authorization_request_protocol(AuthorizationRequestVerificationInputV1 {
+        match verify_authorization_request_protocol(AuthorizationRequestVerificationInput {
             context,
             subject: &input.subject,
             reply_subject: input.reply.0.as_deref(),
@@ -637,8 +641,8 @@ fn event_publisher_projection(publisher: &AuthorizationEventPublisher) -> Value 
 }
 
 fn event_result(
-    context: &VerifiedAuthorizationContextV1,
-    input: WireAuthorizationEventV1,
+    context: &VerifiedAuthorizationContext,
+    input: WireAuthorizationEvent,
     payload: &[u8],
 ) -> String {
     let policy = match authorization_verification_policy_from_wire(&input.policy) {
@@ -649,22 +653,21 @@ fn event_result(
         Ok(proof) => proof,
         Err(error) => return protocol_error_result(&error),
     };
-    let verified =
-        match verify_authorization_event_protocol(AuthorizationEventVerificationInputV1 {
-            context,
-            subject: &input.subject,
-            raw_payload: payload,
-            event_id: &input.event_id,
-            event_time: &input.event_time,
-            proof: &proof,
-            policy: &policy,
-            required_permissions: &input.required_permissions,
-            required_capabilities: &input.required_capabilities,
-            revoked_at: input.revoked_at,
-        }) {
-            Ok(verified) => verified,
-            Err(error) => return protocol_error_result(&error),
-        };
+    let verified = match verify_authorization_event_protocol(AuthorizationEventVerificationInput {
+        context,
+        subject: &input.subject,
+        raw_payload: payload,
+        event_id: &input.event_id,
+        event_time: &input.event_time,
+        proof: &proof,
+        policy: &policy,
+        required_permissions: &input.required_permissions,
+        required_capabilities: &input.required_capabilities,
+        revoked_at: input.revoked_at,
+    }) {
+        Ok(verified) => verified,
+        Err(error) => return protocol_error_result(&error),
+    };
     let mut projection = match verified_context_projection(verified.context()) {
         Ok(projection) => projection,
         Err(error) => return protocol_error_result(&error),
@@ -684,7 +687,7 @@ pub fn verify_authorization_request(
     request_json: &str,
     payload: &[u8],
 ) -> String {
-    let input: WireAuthorizationRequestV1 = match serde_json::from_str(request_json) {
+    let input: WireAuthorizationRequest = match serde_json::from_str(request_json) {
         Ok(input) => input,
         Err(_) => return input_error_result(""),
     };
@@ -704,7 +707,7 @@ pub fn verify_authorization_event(
     event_json: &str,
     payload: &[u8],
 ) -> String {
-    let input: WireAuthorizationEventV1 = match serde_json::from_str(event_json) {
+    let input: WireAuthorizationEvent = match serde_json::from_str(event_json) {
         Ok(input) => input,
         Err(_) => return input_error_result(""),
     };
@@ -880,7 +883,7 @@ mod tests {
     }
 
     #[test]
-    fn local_authorization_v1_uses_conformance_chain() {
+    fn local_authorization_uses_conformance_chain() {
         let fixture = authorization_fixture();
         let chain = &fixture["completeChain"];
         let defaults = &fixture["defaults"];

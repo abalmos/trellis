@@ -4,9 +4,9 @@ use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
 use serde_json::Value;
 use trellis_protocol::{
-    parse_api_v1, parse_participant_v1, resolve_participant_v1, ApiArtifactV1, ApiSurfaceKindV1,
-    AuthorizationPrincipalKindV1, ParticipantResourceKindV1, PermissionActionV1,
-    UnsignedAuthorizationContextV1,
+    parse_api, parse_participant, resolve_participant, ApiArtifact, ApiSurfaceKind,
+    AuthorizationPrincipalKind, ParticipantResourceKind, PermissionAction,
+    UnsignedAuthorizationContext,
 };
 
 use super::{
@@ -21,7 +21,7 @@ pub(crate) struct TransportPermissions {
 }
 
 pub(crate) fn compile_transport_permissions(
-    context: &UnsignedAuthorizationContextV1,
+    context: &UnsignedAuthorizationContext,
     binding: &ParticipantBindingRecord,
     resource_bindings: &[ResourceBindingEvidence],
     registry: &AuthorizationRegistryBinding,
@@ -34,19 +34,19 @@ pub(crate) fn compile_transport_permissions(
     }
     let participant_value: Value = serde_json::from_str(&binding.participant_json)
         .map_err(|error| invalid_error(format!("participant JSON is invalid: {error}")))?;
-    let participant = parse_participant_v1(&participant_value)
-        .map_err(|error| invalid_error(error.to_string()))?;
+    let participant =
+        parse_participant(&participant_value).map_err(|error| invalid_error(error.to_string()))?;
     let api_values: BTreeMap<String, Value> = serde_json::from_str(&binding.api_artifacts_json)
         .map_err(|error| invalid_error(format!("API artifact map is invalid: {error}")))?;
     let mut apis = BTreeMap::new();
     for (api_id, value) in api_values {
-        let api = parse_api_v1(&value).map_err(|error| invalid_error(error.to_string()))?;
+        let api = parse_api(&value).map_err(|error| invalid_error(error.to_string()))?;
         if api.id() != api_id {
             return invalid("API artifact map key does not match artifact ID");
         }
         apis.insert(api_id, api);
     }
-    let resolved = resolve_participant_v1(&participant, &apis)
+    let resolved = resolve_participant(&participant, &apis)
         .map_err(|error| invalid_error(error.to_string()))?;
     if resolved.participant_digest() != context.participant.artifact_digest
         || resolved
@@ -91,10 +91,10 @@ pub(crate) fn compile_transport_permissions(
     publish.insert(format!("$JS.API.CONSUMER.INFO.{context_stream}.*"));
     if matches!(
         context.principal.kind,
-        AuthorizationPrincipalKindV1::Service | AuthorizationPrincipalKindV1::Device
+        AuthorizationPrincipalKind::Service | AuthorizationPrincipalKind::Device
     ) {
         publish.insert("$JS.API.INFO".to_owned());
-        if context.principal.kind == AuthorizationPrincipalKindV1::Service {
+        if context.principal.kind == AuthorizationPrincipalKind::Service {
             let instance_id = context
                 .instance_id
                 .as_deref()
@@ -114,9 +114,9 @@ pub(crate) fn compile_transport_permissions(
             invalid_error("deployed principal is missing instance identity".to_owned())
         })?;
         let kind = match context.principal.kind {
-            AuthorizationPrincipalKindV1::Service => "service",
-            AuthorizationPrincipalKindV1::Device => "device",
-            AuthorizationPrincipalKindV1::User => unreachable!(),
+            AuthorizationPrincipalKind::Service => "service",
+            AuthorizationPrincipalKind::Device => "device",
+            AuthorizationPrincipalKind::User => unreachable!(),
         };
         publish.insert(format!(
             "health.v1.heartbeat.{kind}.{}.{}.{}.{}.{}",
@@ -169,8 +169,8 @@ pub(crate) fn compile_transport_permissions(
                 &mut subscribe,
             )?;
         } else if let Some((api_id, operation, _signal)) = atom.target().as_operation_signal() {
-            let subject = api_subject(apis.get(api_id), ApiSurfaceKindV1::Operation, operation)?;
-            if atom.action() != PermissionActionV1::Control {
+            let subject = api_subject(apis.get(api_id), ApiSurfaceKind::Operation, operation)?;
+            if atom.action() != PermissionAction::Control {
                 return invalid("operation signal grant must use control action");
             }
             publish.insert(format!("{subject}.control"));
@@ -195,7 +195,7 @@ pub(crate) fn compile_test_transport_permissions(
     binding: &ParticipantBindingRecord,
     registry: &AuthorizationRegistryBinding,
 ) -> Result<TransportPermissions, AuthorizationStateError> {
-    let context = UnsignedAuthorizationContextV1 {
+    let context = UnsignedAuthorizationContext {
         format: trellis_protocol::AUTHORIZATION_CONTEXT_FORMAT_V1.to_owned(),
         authority: "test".to_owned(),
         issuer_key_id: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA".to_owned(),
@@ -220,10 +220,10 @@ pub(crate) fn compile_test_transport_permissions(
 }
 
 fn compile_api_surface(
-    api: &ApiArtifactV1,
-    surface: ApiSurfaceKindV1,
+    api: &ApiArtifact,
+    surface: ApiSurfaceKind,
     name: &str,
-    action: PermissionActionV1,
+    action: PermissionAction,
     publish: &mut BTreeSet<String>,
     subscribe: &mut BTreeSet<String>,
 ) -> Result<(), AuthorizationStateError> {
@@ -234,13 +234,13 @@ fn compile_api_surface(
         .normalized_value()
         .map_err(|error| invalid_error(error.to_string()))?;
     match (surface, action) {
-        (ApiSurfaceKindV1::Rpc, PermissionActionV1::Call) => {
+        (ApiSurfaceKind::Rpc, PermissionAction::Call) => {
             publish.insert(required_subject(subjects.rpc.get(name), "RPC", name)?);
             if api_value["rpc"][name]["transfer"]["direction"].as_str() == Some("receive") {
                 publish.insert("transfer.v1.download.*.*".to_owned());
             }
         }
-        (ApiSurfaceKindV1::Operation, PermissionActionV1::Invoke) => {
+        (ApiSurfaceKind::Operation, PermissionAction::Invoke) => {
             let subject = required_subject(subjects.operations.get(name), "operation", name)?;
             publish.insert(subject.clone());
             publish.insert(format!("{subject}.control"));
@@ -248,15 +248,15 @@ fn compile_api_surface(
                 publish.insert("transfer.v1.upload.*.*".to_owned());
             }
         }
-        (ApiSurfaceKindV1::Operation, PermissionActionV1::Observe) => {
+        (ApiSurfaceKind::Operation, PermissionAction::Observe) => {
             let subject = required_subject(subjects.operations.get(name), "operation", name)?;
             publish.insert(format!("{subject}.control"));
         }
-        (ApiSurfaceKindV1::Operation, PermissionActionV1::Cancel | PermissionActionV1::Control) => {
+        (ApiSurfaceKind::Operation, PermissionAction::Cancel | PermissionAction::Control) => {
             let subject = required_subject(subjects.operations.get(name), "operation", name)?;
             publish.insert(format!("{subject}.control"));
         }
-        (ApiSurfaceKindV1::Event, PermissionActionV1::Publish) => {
+        (ApiSurfaceKind::Event, PermissionAction::Publish) => {
             publish.insert(
                 subjects
                     .events
@@ -266,7 +266,7 @@ fn compile_api_surface(
                     .clone(),
             );
         }
-        (ApiSurfaceKindV1::Event, PermissionActionV1::Subscribe) => {
+        (ApiSurfaceKind::Event, PermissionAction::Subscribe) => {
             subscribe.insert(
                 subjects
                     .events
@@ -276,17 +276,17 @@ fn compile_api_surface(
                     .clone(),
             );
         }
-        (ApiSurfaceKindV1::Feed, PermissionActionV1::Subscribe) => {
+        (ApiSurfaceKind::Feed, PermissionAction::Subscribe) => {
             publish.insert(required_subject(subjects.feeds.get(name), "feed", name)?);
         }
-        (ApiSurfaceKindV1::State, PermissionActionV1::Read) => {
+        (ApiSurfaceKind::State, PermissionAction::Read) => {
             publish.insert("rpc.v1.State.Get".to_owned());
             publish.insert("rpc.v1.State.List".to_owned());
         }
-        (ApiSurfaceKindV1::State, PermissionActionV1::Write) => {
+        (ApiSurfaceKind::State, PermissionAction::Write) => {
             publish.insert("rpc.v1.State.Put".to_owned());
         }
-        (ApiSurfaceKindV1::State, PermissionActionV1::Delete) => {
+        (ApiSurfaceKind::State, PermissionAction::Delete) => {
             publish.insert("rpc.v1.State.Delete".to_owned());
         }
         _ => return invalid("grant action does not match API surface"),
@@ -295,8 +295,8 @@ fn compile_api_surface(
 }
 
 fn api_subject(
-    api: Option<&ApiArtifactV1>,
-    surface: ApiSurfaceKindV1,
+    api: Option<&ApiArtifact>,
+    surface: ApiSurfaceKind,
     name: &str,
 ) -> Result<String, AuthorizationStateError> {
     let api = api.ok_or_else(|| invalid_error("grant references unknown API"))?;
@@ -304,7 +304,7 @@ fn api_subject(
         .derived_subjects()
         .map_err(|error| invalid_error(error.to_string()))?;
     match surface {
-        ApiSurfaceKindV1::Operation => {
+        ApiSurfaceKind::Operation => {
             required_subject(subjects.operations.get(name), "operation", name)
         }
         _ => invalid("unsupported subject lookup"),
@@ -323,15 +323,15 @@ fn required_subject(
 
 fn resource_binding<'a>(
     resources: &'a [ResourceBindingEvidence],
-    kind: ParticipantResourceKindV1,
+    kind: ParticipantResourceKind,
     name: &str,
 ) -> Result<&'a ResourceBindingEvidence, AuthorizationStateError> {
     let kind = match kind {
-        ParticipantResourceKindV1::Kv => "kv",
-        ParticipantResourceKindV1::Store => "store",
-        ParticipantResourceKindV1::JobQueue => "jobQueue",
-        ParticipantResourceKindV1::EventConsumer => "eventConsumer",
-        ParticipantResourceKindV1::State => "state",
+        ParticipantResourceKind::Kv => "kv",
+        ParticipantResourceKind::Store => "store",
+        ParticipantResourceKind::JobQueue => "jobQueue",
+        ParticipantResourceKind::EventConsumer => "eventConsumer",
+        ParticipantResourceKind::State => "state",
     };
     resources
         .iter()
@@ -341,24 +341,24 @@ fn resource_binding<'a>(
 
 fn compile_resource(
     resource: &ResourceBindingEvidence,
-    action: PermissionActionV1,
+    action: PermissionAction,
     publish: &mut BTreeSet<String>,
     subscribe: &mut BTreeSet<String>,
 ) -> Result<(), AuthorizationStateError> {
     match (&resource.provider_identity, action) {
-        (ResourceProviderIdentity::Kv { bucket }, PermissionActionV1::Read) => {
+        (ResourceProviderIdentity::Kv { bucket }, PermissionAction::Read) => {
             kv_read(bucket, publish);
         }
-        (ResourceProviderIdentity::Kv { bucket }, PermissionActionV1::Write)
-        | (ResourceProviderIdentity::Kv { bucket }, PermissionActionV1::Delete) => {
+        (ResourceProviderIdentity::Kv { bucket }, PermissionAction::Write)
+        | (ResourceProviderIdentity::Kv { bucket }, PermissionAction::Delete) => {
             publish.insert(format!("$KV.{bucket}.>"));
             publish.insert(format!("$JS.API.STREAM.INFO.KV_{bucket}"));
         }
         (
             ResourceProviderIdentity::State { .. },
-            PermissionActionV1::Read | PermissionActionV1::Write | PermissionActionV1::Delete,
+            PermissionAction::Read | PermissionAction::Write | PermissionAction::Delete,
         ) => {}
-        (ResourceProviderIdentity::Store { bucket }, PermissionActionV1::Read) => {
+        (ResourceProviderIdentity::Store { bucket }, PermissionAction::Read) => {
             let stream = format!("OBJ_{bucket}");
             publish.insert("$JS.API.INFO".to_owned());
             publish.insert(format!("$JS.API.STREAM.INFO.{stream}"));
@@ -372,7 +372,7 @@ fn compile_resource(
         }
         (
             ResourceProviderIdentity::Store { bucket },
-            PermissionActionV1::Write | PermissionActionV1::Delete,
+            PermissionAction::Write | PermissionAction::Delete,
         ) => {
             publish.insert(format!("$O.{bucket}.C.>"));
             publish.insert(format!("$O.{bucket}.M.>"));
@@ -386,7 +386,7 @@ fn compile_resource(
                 updates_prefix,
                 ..
             },
-            PermissionActionV1::Submit,
+            PermissionAction::Submit,
         ) => {
             publish.insert(format!("{publish_prefix}.>"));
             publish.insert(format!("$JS.API.CONSUMER.INFO.{work_stream}.>"));
@@ -404,7 +404,7 @@ fn compile_resource(
                 updates_prefix,
                 ..
             },
-            PermissionActionV1::Process,
+            PermissionAction::Process,
         ) => {
             let keys_bucket = format!("JOBS_KEYS_{namespace}");
             subscribe.insert(work_subject.clone());
@@ -428,7 +428,7 @@ fn compile_resource(
             ResourceProviderIdentity::EventConsumer {
                 stream, consumer, ..
             },
-            PermissionActionV1::Consume,
+            PermissionAction::Consume,
         ) => {
             publish.insert(format!("$JS.API.CONSUMER.INFO.{stream}.{consumer}"));
             publish.insert(format!("$JS.API.CONSUMER.MSG.NEXT.{stream}.{consumer}"));
@@ -468,10 +468,10 @@ mod tests {
     };
     use serde_json::Value;
     use trellis_protocol::{
-        parse_api_v1, parse_participant_v1, resolve_participant_v1, ApiSurfaceKindV1,
-        AuthorizationAuthorityKindV1, AuthorizationAuthorityRefV1, AuthorizationParticipantV1,
-        AuthorizationPrincipalKindV1, AuthorizationPrincipalV1, GrantSetV1,
-        ParticipantResourceKindV1, PermissionActionV1, PermissionAtomV1, PermissionTargetV1,
+        parse_api, parse_participant, resolve_participant, ApiSurfaceKind,
+        AuthorizationAuthorityKind, AuthorizationAuthorityRef, AuthorizationParticipant,
+        AuthorizationPrincipal, AuthorizationPrincipalKind, GrantSet, ParticipantResourceKind,
+        PermissionAction, PermissionAtom, PermissionTarget,
     };
 
     fn test_registry_binding() -> super::super::context::AuthorizationRegistryBinding {
@@ -559,25 +559,25 @@ mod tests {
     #[test]
     fn compiler_is_exact_sorted_and_action_scoped() {
         let (binding, mut state) = fixture();
-        state.grant_set = GrantSetV1::new(vec![
-            PermissionAtomV1::new(
-                PermissionTargetV1::api_surface(
+        state.grant_set = GrantSet::new(vec![
+            PermissionAtom::new(
+                PermissionTarget::api_surface(
                     "trellis.auth@v1",
-                    ApiSurfaceKindV1::Rpc,
+                    ApiSurfaceKind::Rpc,
                     "Auth.Sessions.Me",
                 )
                 .unwrap(),
-                PermissionActionV1::Call,
+                PermissionAction::Call,
             )
             .unwrap(),
-            PermissionAtomV1::new(
-                PermissionTargetV1::participant_resource(
+            PermissionAtom::new(
+                PermissionTarget::participant_resource(
                     "trellis-auth-runtime",
-                    ParticipantResourceKindV1::Kv,
+                    ParticipantResourceKind::Kv,
                     "browserFlows",
                 )
                 .unwrap(),
-                PermissionActionV1::Read,
+                PermissionAction::Read,
             )
             .unwrap(),
         ]);
@@ -627,7 +627,7 @@ mod tests {
         let (binding, mut state) = fixture();
         state.resource_bindings = vec![kv_binding("trellis-auth-runtime")];
 
-        state.grant_set = GrantSetV1::new(Vec::new());
+        state.grant_set = GrantSet::new(Vec::new());
         let none =
             compile_test_transport_permissions(&state, &binding, &test_registry_binding()).unwrap();
         assert!(!none
@@ -635,7 +635,7 @@ mod tests {
             .iter()
             .any(|subject| subject.contains("AUTH_BROWSER_FLOWS")));
 
-        state.grant_set = GrantSetV1::new(vec![kv_atom(PermissionActionV1::Read)]);
+        state.grant_set = GrantSet::new(vec![kv_atom(PermissionAction::Read)]);
         let read =
             compile_test_transport_permissions(&state, &binding, &test_registry_binding()).unwrap();
         assert!(read
@@ -645,7 +645,7 @@ mod tests {
             .publish
             .contains(&"$KV.AUTH_BROWSER_FLOWS.>".to_owned()));
 
-        state.grant_set = GrantSetV1::new(vec![kv_atom(PermissionActionV1::Write)]);
+        state.grant_set = GrantSet::new(vec![kv_atom(PermissionAction::Write)]);
         let write =
             compile_test_transport_permissions(&state, &binding, &test_registry_binding()).unwrap();
         assert!(write
@@ -656,7 +656,7 @@ mod tests {
             .iter()
             .any(|subject| subject.starts_with("$JS.API.DIRECT.GET.KV_AUTH_BROWSER_FLOWS")));
 
-        state.grant_set = GrantSetV1::new(Vec::new());
+        state.grant_set = GrantSet::new(Vec::new());
         let reduced =
             compile_test_transport_permissions(&state, &binding, &test_registry_binding()).unwrap();
         assert!(!reduced
@@ -669,14 +669,14 @@ mod tests {
     fn resource_atom_for_another_participant_fails_closed() {
         let (binding, mut state) = fixture();
         state.resource_bindings = vec![kv_binding("trellis-auth-runtime")];
-        state.grant_set = GrantSetV1::new(vec![PermissionAtomV1::new(
-            PermissionTargetV1::participant_resource(
+        state.grant_set = GrantSet::new(vec![PermissionAtom::new(
+            PermissionTarget::participant_resource(
                 "other-participant",
-                ParticipantResourceKindV1::Kv,
+                ParticipantResourceKind::Kv,
                 "browserFlows",
             )
             .unwrap(),
-            PermissionActionV1::Read,
+            PermissionAction::Read,
         )
         .unwrap()]);
         assert!(
@@ -684,11 +684,11 @@ mod tests {
         );
     }
 
-    fn kv_atom(action: PermissionActionV1) -> PermissionAtomV1 {
-        PermissionAtomV1::new(
-            PermissionTargetV1::participant_resource(
+    fn kv_atom(action: PermissionAction) -> PermissionAtom {
+        PermissionAtom::new(
+            PermissionTarget::participant_resource(
                 "trellis-auth-runtime",
-                ParticipantResourceKindV1::Kv,
+                ParticipantResourceKind::Kv,
                 "browserFlows",
             )
             .unwrap(),
@@ -723,10 +723,10 @@ mod tests {
             serde_json::from_str(include_str!("../../../trellis.participant.json"))
                 .expect("auth participant JSON");
         participant_value["id"] = Value::String(participant_id.to_owned());
-        let api = parse_api_v1(&api_value).expect("auth API");
-        let participant = parse_participant_v1(&participant_value).expect("auth participant");
+        let api = parse_api(&api_value).expect("auth API");
+        let participant = parse_participant(&participant_value).expect("auth participant");
         let apis = std::collections::BTreeMap::from([(api.id().to_owned(), api.clone())]);
-        let resolved = resolve_participant_v1(&participant, &apis).expect("resolved participant");
+        let resolved = resolve_participant(&participant, &apis).expect("resolved participant");
         let binding = ParticipantBindingRecord {
             participant_id: participant.id().to_owned(),
             participant_kind: participant.kind(),
@@ -743,28 +743,28 @@ mod tests {
             error: None,
         };
         let state = IssuableAuthorizationState {
-            principal: AuthorizationPrincipalV1 {
-                kind: AuthorizationPrincipalKindV1::Service,
+            principal: AuthorizationPrincipal {
+                kind: AuthorizationPrincipalKind::Service,
                 id: "svc_auth".to_owned(),
             },
             session_id: "ses_01".to_owned(),
             session_public_key: "session-key".to_owned(),
             session_key_id: "session-key-id".to_owned(),
             inbox_prefix: "_INBOX.session".to_owned(),
-            participant: AuthorizationParticipantV1 {
+            participant: AuthorizationParticipant {
                 kind: binding.participant_kind,
                 id: binding.participant_id.clone(),
                 artifact_digest: binding.artifact_digest.clone(),
                 needs_digest: binding.needs_digest.clone(),
             },
-            authority_ref: AuthorizationAuthorityRefV1 {
-                kind: AuthorizationAuthorityKindV1::Deployment,
+            authority_ref: AuthorizationAuthorityRef {
+                kind: AuthorizationAuthorityKind::Deployment,
                 id: "dpa_auth".to_owned(),
                 version: 1,
             },
             deployment_id: Some("dep_auth".to_owned()),
             instance_id: Some("ins_auth".to_owned()),
-            grant_set: GrantSetV1::new(Vec::new()),
+            grant_set: GrantSet::new(Vec::new()),
             resource_bindings: Vec::new(),
             capabilities: vec!["service".to_owned()],
             session_expires_at: None,

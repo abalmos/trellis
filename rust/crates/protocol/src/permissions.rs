@@ -10,7 +10,7 @@ pub const GRANT_SET_FORMAT_V1: &str = "trellis.grant-set.v1";
 /// An externally visible API surface kind.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub enum ApiSurfaceKindV1 {
+pub enum ApiSurfaceKind {
     /// A request/reply RPC.
     Rpc,
     /// A caller-visible asynchronous operation.
@@ -23,7 +23,7 @@ pub enum ApiSurfaceKindV1 {
     State,
 }
 
-impl ApiSurfaceKindV1 {
+impl ApiSurfaceKind {
     fn as_str(self) -> &'static str {
         match self {
             Self::Rpc => "rpc",
@@ -38,7 +38,7 @@ impl ApiSurfaceKindV1 {
 /// A participant-private resource kind.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub enum ParticipantResourceKindV1 {
+pub enum ParticipantResourceKind {
     /// A NATS key-value resource.
     Kv,
     /// A blob store resource.
@@ -51,7 +51,7 @@ pub enum ParticipantResourceKindV1 {
     State,
 }
 
-impl ParticipantResourceKindV1 {
+impl ParticipantResourceKind {
     fn as_str(self) -> &'static str {
         match self {
             Self::Kv => "kv",
@@ -66,7 +66,7 @@ impl ParticipantResourceKindV1 {
 /// A machine-enforceable permission action.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub enum PermissionActionV1 {
+pub enum PermissionAction {
     /// Call an RPC.
     Call,
     /// Start an operation.
@@ -95,7 +95,7 @@ pub enum PermissionActionV1 {
     Consume,
 }
 
-impl PermissionActionV1 {
+impl PermissionAction {
     fn as_str(self) -> &'static str {
         match self {
             Self::Call => "call",
@@ -121,14 +121,14 @@ impl PermissionActionV1 {
 /// whitespace, and contain no ASCII control characters.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(tag = "kind")]
-pub enum PermissionTargetV1 {
+pub enum PermissionTarget {
     /// An externally visible surface owned by an API artifact.
     #[serde(rename = "apiSurface")]
     ApiSurface {
         /// The owning versioned API identifier.
         api: String,
         /// The surface family.
-        surface: ApiSurfaceKindV1,
+        surface: ApiSurfaceKind,
         /// The API-local surface name.
         name: String,
     },
@@ -138,7 +138,7 @@ pub enum PermissionTargetV1 {
         /// The owning participant identifier.
         participant: String,
         /// The resource family.
-        resource: ParticipantResourceKindV1,
+        resource: ParticipantResourceKind,
         /// The participant-local resource name.
         name: String,
     },
@@ -154,7 +154,7 @@ pub enum PermissionTargetV1 {
     },
 }
 
-impl<'de> Deserialize<'de> for PermissionTargetV1 {
+impl<'de> Deserialize<'de> for PermissionTarget {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: Deserializer<'de>,
@@ -165,13 +165,13 @@ impl<'de> Deserialize<'de> for PermissionTargetV1 {
             #[serde(rename = "apiSurface")]
             ApiSurface {
                 api: String,
-                surface: ApiSurfaceKindV1,
+                surface: ApiSurfaceKind,
                 name: String,
             },
             #[serde(rename = "participantResource")]
             ParticipantResource {
                 participant: String,
-                resource: ParticipantResourceKindV1,
+                resource: ParticipantResourceKind,
                 name: String,
             },
             #[serde(rename = "operationSignal")]
@@ -200,7 +200,7 @@ impl<'de> Deserialize<'de> for PermissionTargetV1 {
     }
 }
 
-impl PermissionTargetV1 {
+impl PermissionTarget {
     /// Construct an API-surface permission target.
     ///
     /// # Errors
@@ -209,7 +209,7 @@ impl PermissionTargetV1 {
     /// surface name violates the target string rules.
     pub fn api_surface(
         api: impl Into<String>,
-        surface: ApiSurfaceKindV1,
+        surface: ApiSurfaceKind,
         name: impl Into<String>,
     ) -> Result<Self, ProtocolError> {
         let target = Self::ApiSurface {
@@ -229,7 +229,7 @@ impl PermissionTargetV1 {
     /// identifier or resource name violates the target string rules.
     pub fn participant_resource(
         participant: impl Into<String>,
-        resource: ParticipantResourceKindV1,
+        resource: ParticipantResourceKind,
         name: impl Into<String>,
     ) -> Result<Self, ProtocolError> {
         let target = Self::ParticipantResource {
@@ -257,7 +257,7 @@ impl PermissionTargetV1 {
     }
 
     /// Return the API identifier, surface kind, and local name for an API target.
-    pub fn as_api_surface(&self) -> Option<(&str, ApiSurfaceKindV1, &str)> {
+    pub fn as_api_surface(&self) -> Option<(&str, ApiSurfaceKind, &str)> {
         match self {
             Self::ApiSurface { api, surface, name } => Some((api, *surface, name)),
             Self::ParticipantResource { .. } => None,
@@ -279,7 +279,7 @@ impl PermissionTargetV1 {
 
     /// Return the participant identifier, resource kind, and local resource name.
     #[must_use]
-    pub fn as_participant_resource(&self) -> Option<(&str, ParticipantResourceKindV1, &str)> {
+    pub fn as_participant_resource(&self) -> Option<(&str, ParticipantResourceKind, &str)> {
         match self {
             Self::ParticipantResource {
                 participant,
@@ -353,12 +353,12 @@ impl PermissionTargetV1 {
 /// events accept `publish` or `subscribe`, and private Jobs queues accept
 /// `submit` or `process`.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
-pub struct PermissionAtomV1 {
-    target: PermissionTargetV1,
-    action: PermissionActionV1,
+pub struct PermissionAtom {
+    target: PermissionTarget,
+    action: PermissionAction,
 }
 
-impl PermissionAtomV1 {
+impl PermissionAtom {
     /// Construct and validate a permission atom.
     ///
     /// # Errors
@@ -366,10 +366,7 @@ impl PermissionAtomV1 {
     /// Returns [`ProtocolError::InvalidIdentifier`] for an invalid target or
     /// [`ProtocolError::InvalidPermission`] when the action is not valid for the
     /// target family.
-    pub fn new(
-        target: PermissionTargetV1,
-        action: PermissionActionV1,
-    ) -> Result<Self, ProtocolError> {
+    pub fn new(target: PermissionTarget, action: PermissionAction) -> Result<Self, ProtocolError> {
         target.validate()?;
         let atom = Self { target, action };
         atom.validate_action()?;
@@ -377,61 +374,52 @@ impl PermissionAtomV1 {
     }
 
     /// Return the exact permission target.
-    pub fn target(&self) -> &PermissionTargetV1 {
+    pub fn target(&self) -> &PermissionTarget {
         &self.target
     }
 
     /// Return the machine action.
-    pub fn action(&self) -> PermissionActionV1 {
+    pub fn action(&self) -> PermissionAction {
         self.action
     }
 
     fn validate_action(&self) -> Result<(), ProtocolError> {
         let valid = match (&self.target, self.action) {
-            (PermissionTargetV1::ApiSurface { surface, .. }, action) => match surface {
-                ApiSurfaceKindV1::Rpc => matches!(action, PermissionActionV1::Call),
-                ApiSurfaceKindV1::Operation => matches!(
+            (PermissionTarget::ApiSurface { surface, .. }, action) => match surface {
+                ApiSurfaceKind::Rpc => matches!(action, PermissionAction::Call),
+                ApiSurfaceKind::Operation => matches!(
                     action,
-                    PermissionActionV1::Invoke
-                        | PermissionActionV1::Observe
-                        | PermissionActionV1::Cancel
+                    PermissionAction::Invoke | PermissionAction::Observe | PermissionAction::Cancel
                 ),
-                ApiSurfaceKindV1::Event => matches!(
+                ApiSurfaceKind::Event => matches!(
                     action,
-                    PermissionActionV1::Publish | PermissionActionV1::Subscribe
+                    PermissionAction::Publish | PermissionAction::Subscribe
                 ),
-                ApiSurfaceKindV1::Feed => matches!(action, PermissionActionV1::Subscribe),
-                ApiSurfaceKindV1::State => {
-                    matches!(action, PermissionActionV1::Read | PermissionActionV1::Write)
+                ApiSurfaceKind::Feed => matches!(action, PermissionAction::Subscribe),
+                ApiSurfaceKind::State => {
+                    matches!(action, PermissionAction::Read | PermissionAction::Write)
                 }
             },
-            (PermissionTargetV1::ParticipantResource { resource, .. }, action) => match resource {
-                ParticipantResourceKindV1::Kv | ParticipantResourceKindV1::Store => matches!(
+            (PermissionTarget::ParticipantResource { resource, .. }, action) => match resource {
+                ParticipantResourceKind::Kv | ParticipantResourceKind::Store => matches!(
                     action,
-                    PermissionActionV1::Read
-                        | PermissionActionV1::Write
-                        | PermissionActionV1::Delete
+                    PermissionAction::Read | PermissionAction::Write | PermissionAction::Delete
                 ),
-                ParticipantResourceKindV1::JobQueue => {
+                ParticipantResourceKind::JobQueue => {
+                    matches!(action, PermissionAction::Submit | PermissionAction::Process)
+                }
+                ParticipantResourceKind::EventConsumer => {
+                    matches!(action, PermissionAction::Consume)
+                }
+                ParticipantResourceKind::State => {
                     matches!(
                         action,
-                        PermissionActionV1::Submit | PermissionActionV1::Process
-                    )
-                }
-                ParticipantResourceKindV1::EventConsumer => {
-                    matches!(action, PermissionActionV1::Consume)
-                }
-                ParticipantResourceKindV1::State => {
-                    matches!(
-                        action,
-                        PermissionActionV1::Read
-                            | PermissionActionV1::Write
-                            | PermissionActionV1::Delete
+                        PermissionAction::Read | PermissionAction::Write | PermissionAction::Delete
                     )
                 }
             },
-            (PermissionTargetV1::OperationSignal { .. }, action) => {
-                matches!(action, PermissionActionV1::Control)
+            (PermissionTarget::OperationSignal { .. }, action) => {
+                matches!(action, PermissionAction::Control)
             }
         };
 
@@ -451,15 +439,15 @@ impl PermissionAtomV1 {
     }
 }
 
-impl<'de> Deserialize<'de> for PermissionAtomV1 {
+impl<'de> Deserialize<'de> for PermissionAtom {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: Deserializer<'de>,
     {
         #[derive(Deserialize)]
         struct WireAtom {
-            target: PermissionTargetV1,
-            action: PermissionActionV1,
+            target: PermissionTarget,
+            action: PermissionAction,
         }
 
         let wire = WireAtom::deserialize(deserializer)?;
@@ -470,34 +458,34 @@ impl<'de> Deserialize<'de> for PermissionAtomV1 {
 /// A named capability's normalized machine permissions.
 ///
 /// A capability is an authoring and explanation grouping. It does not itself
-/// confer authority; enforcement uses exact atoms in a [`GrantSetV1`].
+/// confer authority; enforcement uses exact atoms in a [`GrantSet`].
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
-pub struct CapabilityDefinitionV1 {
-    allows: Vec<PermissionAtomV1>,
+pub struct CapabilityDefinition {
+    allows: Vec<PermissionAtom>,
 }
 
-impl CapabilityDefinitionV1 {
+impl CapabilityDefinition {
     /// Construct a capability and normalize duplicate permissions.
-    pub fn new(allows: Vec<PermissionAtomV1>) -> Self {
+    pub fn new(allows: Vec<PermissionAtom>) -> Self {
         Self {
             allows: normalize_permissions(allows),
         }
     }
 
     /// Return normalized machine permissions in canonical order.
-    pub fn allows(&self) -> &[PermissionAtomV1] {
+    pub fn allows(&self) -> &[PermissionAtom] {
         &self.allows
     }
 }
 
-impl<'de> Deserialize<'de> for CapabilityDefinitionV1 {
+impl<'de> Deserialize<'de> for CapabilityDefinition {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: Deserializer<'de>,
     {
         #[derive(Deserialize)]
         struct WireCapability {
-            allows: Vec<PermissionAtomV1>,
+            allows: Vec<PermissionAtom>,
         }
 
         Ok(Self::new(WireCapability::deserialize(deserializer)?.allows))
@@ -508,7 +496,7 @@ impl<'de> Deserialize<'de> for CapabilityDefinitionV1 {
 ///
 /// These strings may be shown during owner review, but are non-authoritative.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-pub struct ConsentMetadataV1 {
+pub struct ConsentMetadata {
     /// Short consent heading.
     pub title: String,
     /// Plain-language capability description.
@@ -522,14 +510,14 @@ pub struct ConsentMetadataV1 {
 /// Construction sorts by UTF-16 code units and removes duplicate atoms. The
 /// digest therefore identifies the enforceable set rather than authored order.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
-pub struct GrantSetV1 {
+pub struct GrantSet {
     format: String,
-    permissions: Vec<PermissionAtomV1>,
+    permissions: Vec<PermissionAtom>,
 }
 
-impl GrantSetV1 {
+impl GrantSet {
     /// Construct a normalized grant set in the current format.
-    pub fn new(permissions: Vec<PermissionAtomV1>) -> Self {
+    pub fn new(permissions: Vec<PermissionAtom>) -> Self {
         Self {
             format: GRANT_SET_FORMAT_V1.to_string(),
             permissions: normalize_permissions(permissions),
@@ -542,7 +530,7 @@ impl GrantSetV1 {
     }
 
     /// Return permissions in canonical semantic order.
-    pub fn permissions(&self) -> &[PermissionAtomV1] {
+    pub fn permissions(&self) -> &[PermissionAtom] {
         &self.permissions
     }
 
@@ -567,7 +555,7 @@ impl GrantSetV1 {
     }
 }
 
-impl<'de> Deserialize<'de> for GrantSetV1 {
+impl<'de> Deserialize<'de> for GrantSet {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: Deserializer<'de>,
@@ -575,7 +563,7 @@ impl<'de> Deserialize<'de> for GrantSetV1 {
         #[derive(Deserialize)]
         struct WireGrantSet {
             format: String,
-            permissions: Vec<PermissionAtomV1>,
+            permissions: Vec<PermissionAtom>,
         }
 
         let wire = WireGrantSet::deserialize(deserializer)?;
@@ -588,16 +576,13 @@ impl<'de> Deserialize<'de> for GrantSetV1 {
     }
 }
 
-fn normalize_permissions(mut permissions: Vec<PermissionAtomV1>) -> Vec<PermissionAtomV1> {
+fn normalize_permissions(mut permissions: Vec<PermissionAtom>) -> Vec<PermissionAtom> {
     permissions.sort_by(compare_permission_atoms);
     permissions.dedup();
     permissions
 }
 
-fn compare_permission_atoms(
-    left: &PermissionAtomV1,
-    right: &PermissionAtomV1,
-) -> std::cmp::Ordering {
+fn compare_permission_atoms(left: &PermissionAtom, right: &PermissionAtom) -> std::cmp::Ordering {
     let left = left.ordering_key();
     let right = right.ordering_key();
     compare_protocol_strings(left.0, right.0)
@@ -680,7 +665,7 @@ mod tests {
         );
 
         for vector in fixture.vectors {
-            let parsed = serde_json::from_value::<GrantSetV1>(vector.input);
+            let parsed = serde_json::from_value::<GrantSet>(vector.input);
             if vector.valid {
                 let grant_set = parsed.unwrap_or_else(|error| panic!("{}: {error}", vector.name));
                 assert_eq!(
@@ -703,43 +688,36 @@ mod tests {
 
     #[test]
     fn permission_atom_round_trips_and_accepts_current_names() {
-        let atom = PermissionAtomV1::new(
-            PermissionTargetV1::api_surface(
-                "trellis.core@v1",
-                ApiSurfaceKindV1::Rpc,
-                "Documents.Get",
-            )
-            .unwrap(),
-            PermissionActionV1::Call,
+        let atom = PermissionAtom::new(
+            PermissionTarget::api_surface("trellis.core@v1", ApiSurfaceKind::Rpc, "Documents.Get")
+                .unwrap(),
+            PermissionAction::Call,
         )
         .unwrap();
         let json = serde_json::to_string(&atom).unwrap();
-        assert_eq!(
-            serde_json::from_str::<PermissionAtomV1>(&json).unwrap(),
-            atom
-        );
+        assert_eq!(serde_json::from_str::<PermissionAtom>(&json).unwrap(), atom);
 
-        PermissionTargetV1::participant_resource(
+        PermissionTarget::participant_resource(
             "billing-refunds",
-            ParticipantResourceKindV1::JobQueue,
+            ParticipantResourceKind::JobQueue,
             "reindex",
         )
         .unwrap();
 
-        assert!(PermissionAtomV1::new(
-            PermissionTargetV1::api_surface(
+        assert!(PermissionAtom::new(
+            PermissionTarget::api_surface(
                 "trellis.core@v1",
-                ApiSurfaceKindV1::Operation,
+                ApiSurfaceKind::Operation,
                 "Documents.Build",
             )
             .unwrap(),
-            PermissionActionV1::Control,
+            PermissionAction::Control,
         )
         .is_err());
-        PermissionAtomV1::new(
-            PermissionTargetV1::operation_signal("trellis.core@v1", "Documents.Build", "approve")
+        PermissionAtom::new(
+            PermissionTarget::operation_signal("trellis.core@v1", "Documents.Build", "approve")
                 .unwrap(),
-            PermissionActionV1::Control,
+            PermissionAction::Control,
         )
         .unwrap();
     }
@@ -766,7 +744,7 @@ mod tests {
                 "name": "Documents.\nGet"
             }),
         ] {
-            assert!(serde_json::from_value::<PermissionTargetV1>(invalid).is_err());
+            assert!(serde_json::from_value::<PermissionTarget>(invalid).is_err());
         }
 
         let value = serde_json::json!({
@@ -775,7 +753,7 @@ mod tests {
             "surface": "rpc",
             "name": "Documents.Get"
         });
-        let target: PermissionTargetV1 = serde_json::from_value(value.clone()).unwrap();
+        let target: PermissionTarget = serde_json::from_value(value.clone()).unwrap();
         assert_eq!(serde_json::to_value(target).unwrap(), value);
 
         let extended = serde_json::json!({
@@ -785,7 +763,7 @@ mod tests {
             "signal": "approve",
             "extra": true
         });
-        let target: PermissionTargetV1 = serde_json::from_value(extended).unwrap();
+        let target: PermissionTarget = serde_json::from_value(extended).unwrap();
         assert_eq!(
             serde_json::to_value(target).unwrap(),
             serde_json::json!({
@@ -799,9 +777,9 @@ mod tests {
 
     #[test]
     fn consent_metadata_is_not_part_of_grant_identity() {
-        let grant_set = GrantSetV1::new(Vec::new());
+        let grant_set = GrantSet::new(Vec::new());
         let before = grant_set.digest().unwrap();
-        let _: ConsentMetadataV1 = serde_json::from_value(serde_json::json!({
+        let _: ConsentMetadata = serde_json::from_value(serde_json::json!({
             "title": "View documents",
             "description": "Read documents available to your account.",
             "consequence": "This application can view your documents."
@@ -812,38 +790,38 @@ mod tests {
 
     #[test]
     fn grant_identity_is_independent_of_input_order() {
-        let first = PermissionAtomV1::new(
-            PermissionTargetV1::api_surface("documents@v1", ApiSurfaceKindV1::Rpc, "Documents.Get")
+        let first = PermissionAtom::new(
+            PermissionTarget::api_surface("documents@v1", ApiSurfaceKind::Rpc, "Documents.Get")
                 .unwrap(),
-            PermissionActionV1::Call,
+            PermissionAction::Call,
         )
         .unwrap();
-        let second = PermissionAtomV1::new(
-            PermissionTargetV1::participant_resource(
+        let second = PermissionAtom::new(
+            PermissionTarget::participant_resource(
                 "documents-worker",
-                ParticipantResourceKindV1::JobQueue,
+                ParticipantResourceKind::JobQueue,
                 "reindex",
             )
             .unwrap(),
-            PermissionActionV1::Process,
+            PermissionAction::Process,
         )
         .unwrap();
 
-        let forward = GrantSetV1::new(vec![first.clone(), second.clone()]);
-        let reverse = GrantSetV1::new(vec![second, first.clone()]);
+        let forward = GrantSet::new(vec![first.clone(), second.clone()]);
+        let reverse = GrantSet::new(vec![second, first.clone()]);
         assert_eq!(
             forward.canonical_json().unwrap(),
             reverse.canonical_json().unwrap()
         );
         assert_eq!(forward.digest().unwrap(), reverse.digest().unwrap());
 
-        let capability = CapabilityDefinitionV1::new(vec![first.clone(), first]);
+        let capability = CapabilityDefinition::new(vec![first.clone(), first]);
         assert_eq!(capability.allows().len(), 1);
     }
 
     #[test]
     fn capability_and_consent_objects_ignore_extensions() {
-        let capability: CapabilityDefinitionV1 = serde_json::from_value(serde_json::json!({
+        let capability: CapabilityDefinition = serde_json::from_value(serde_json::json!({
             "allows": [],
             "title": "not machine policy"
         }))
@@ -852,7 +830,7 @@ mod tests {
             serde_json::to_value(capability).unwrap(),
             serde_json::json!({ "allows": [] })
         );
-        let consent: ConsentMetadataV1 = serde_json::from_value(serde_json::json!({
+        let consent: ConsentMetadata = serde_json::from_value(serde_json::json!({
             "title": "View documents",
             "description": "Read documents.",
             "consequence": "Documents are visible.",
@@ -878,16 +856,16 @@ mod tests {
                 "action": "call"
             }),
         ] {
-            let atom: PermissionAtomV1 = serde_json::from_value(atom).unwrap();
+            let atom: PermissionAtom = serde_json::from_value(atom).unwrap();
             assert!(serde_json::to_value(atom).unwrap().get("extra").is_none());
         }
 
-        let grant: GrantSetV1 = serde_json::from_value(serde_json::json!({
+        let grant: GrantSet = serde_json::from_value(serde_json::json!({
             "format": GRANT_SET_FORMAT_V1,
             "permissions": [],
             "extra": true
         }))
         .unwrap();
-        assert_eq!(grant, GrantSetV1::new(Vec::new()));
+        assert_eq!(grant, GrantSet::new(Vec::new()));
     }
 }

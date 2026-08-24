@@ -18,7 +18,7 @@ import type {
   RPCDesc,
 } from "./contracts.ts";
 import type {
-  PermissionAtomV1 as DescriptorPermissionAtomV1,
+  PermissionAtom as DescriptorPermissionAtom,
   RuntimeApi,
 } from "./contract_support/runtime.ts";
 import {
@@ -43,7 +43,7 @@ import {
 import { AuthorizationProviderUnavailableError } from "./auth/authorization/provider_cache.ts";
 import type {
   AuthorizationVerificationErrorCode,
-  PermissionAtomV1 as VerifierPermissionAtomV1,
+  PermissionAtom as VerifierPermissionAtom,
   VerifiedAuthorizationContextProjection,
 } from "./auth/protocol_wasm.ts";
 import {
@@ -198,14 +198,14 @@ type LocalAuthorizationArgs =
     kind: "request";
     cache: AuthorizationProviderCache | undefined;
     message: LocalAuthorizationRequestMessage;
-    permission: DescriptorPermissionAtomV1 | undefined;
+    permission: DescriptorPermissionAtom | undefined;
     requiredCapabilities: readonly string[];
   }
   | {
     kind: "event";
     cache: AuthorizationProviderCache | undefined;
     message: LocalAuthorizationEventMessage;
-    permission: DescriptorPermissionAtomV1 | undefined;
+    permission: DescriptorPermissionAtom | undefined;
     requiredCapabilities: readonly string[];
   };
 
@@ -309,8 +309,8 @@ export async function verifyLocalAuthorization(
 }
 
 function toVerifierPermission(
-  permission: DescriptorPermissionAtomV1,
-): VerifierPermissionAtomV1 {
+  permission: DescriptorPermissionAtom,
+): VerifierPermissionAtom {
   if (
     permission.surfaceKind === "operation" && permission.action === "control"
   ) {
@@ -1744,7 +1744,7 @@ export type RpcHandlerContext = {
   sessionKey: string;
   inboxPrefix: string;
   /** Exact permission verified for this request. */
-  permission: DescriptorPermissionAtomV1;
+  permission: DescriptorPermissionAtom;
   /** Capabilities required by this request surface. */
   requiredCapabilities: readonly string[];
   requestId?: string;
@@ -3029,7 +3029,7 @@ export class Trellis<
 
   async #authenticateFeedRequest(args: {
     msg: Msg;
-    permission: DescriptorPermissionAtomV1 | undefined;
+    permission: DescriptorPermissionAtom | undefined;
     requiredCapabilities: readonly string[];
   }): Promise<Result<SessionCaller, BaseError>> {
     return await verifyLocalAuthorization({

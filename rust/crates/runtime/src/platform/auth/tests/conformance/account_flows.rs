@@ -1,5 +1,5 @@
 use serde_json::json;
-use trellis_protocol::ParticipantKindV1;
+use trellis_protocol::ParticipantKind;
 
 use super::fixtures::{digest, participant_fixture_for, profile_for, session_public_key, NOW};
 use crate::platform::auth::application::repository::{
@@ -48,7 +48,7 @@ pub(super) async fn exercise_account_flows(
         .await?
         .ok_or("companion credential missing")?;
 
-    let app_fixture = participant_fixture_for(ParticipantKindV1::App, "example.admin")?;
+    let app_fixture = participant_fixture_for(ParticipantKind::App, "example.admin")?;
     store
         .put_participant_binding(app_fixture.binding.clone())
         .await?;
@@ -419,7 +419,7 @@ pub(super) async fn exercise_account_flows(
         IdempotentOutcome::Replayed(json!({ "unlinked": true }))
     );
 
-    let user_fixture = participant_fixture_for(ParticipantKindV1::App, "example.user")?;
+    let user_fixture = participant_fixture_for(ParticipantKind::App, "example.user")?;
     store
         .put_participant_binding(user_fixture.binding.clone())
         .await?;
@@ -447,7 +447,7 @@ pub(super) async fn exercise_account_flows(
         principal_id: user.principal_id.clone(),
         principal_kind: PrincipalKind::User,
         participant_id: user_fixture.binding.participant_id.clone(),
-        participant_kind: ParticipantKindV1::App,
+        participant_kind: ParticipantKind::App,
         participant_artifact_digest: user_fixture.binding.artifact_digest.clone(),
         participant_needs_digest: user_fixture.binding.needs_digest.clone(),
         session_public_key: session_public_key(61),

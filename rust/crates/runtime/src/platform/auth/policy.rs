@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use serde::Serialize;
 use serde_json::{json, Value};
-use trellis_protocol::GrantSetV1;
+use trellis_protocol::GrantSet;
 
 use super::{
     ephemeral::BrowserConsentProposal, AuthorizationStateError, CapabilityGroupRecord,
@@ -135,7 +135,7 @@ pub(crate) fn browser_consent_proposal(
         .map(|capability| {
             (
                 capability.name().to_owned(),
-                GrantSetV1::new(capability.allows().to_vec()),
+                GrantSet::new(capability.allows().to_vec()),
             )
         })
         .collect::<BTreeMap<_, _>>();
@@ -175,7 +175,7 @@ pub(crate) struct ProviderLoginAttributes {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct PortalAuthoritySelection {
-    pub grant_set: GrantSetV1,
+    pub grant_set: GrantSet,
     pub capabilities: Vec<String>,
     pub effective_policy_digest: String,
 }
@@ -188,7 +188,7 @@ struct EffectivePortalAuthority<'a> {
     participant_id: &'a str,
     participant_artifact_digest: &'a str,
     participant_needs_digest: &'a str,
-    grant_set: &'a GrantSetV1,
+    grant_set: &'a GrantSet,
     capabilities: &'a [String],
 }
 
@@ -239,7 +239,7 @@ pub(crate) fn resolve_portal_authority_selection(
             "portal policy selects a reserved capability".to_owned(),
         ));
     }
-    let grant_set = GrantSetV1::new(permissions);
+    let grant_set = GrantSet::new(permissions);
     let digest_value = serde_json::to_value(EffectivePortalAuthority {
         format: "trellis.portal-effective-authority.v1",
         portal_id: &policy.portal_id,
@@ -284,20 +284,18 @@ fn expand_groups(
 mod tests {
     use super::*;
     use serde_json::json;
-    use trellis_protocol::{
-        ApiSurfaceKindV1, PermissionActionV1, PermissionAtomV1, PermissionTargetV1,
-    };
+    use trellis_protocol::{ApiSurfaceKind, PermissionAction, PermissionAtom, PermissionTarget};
 
-    fn atom(name: &str) -> PermissionAtomV1 {
-        PermissionAtomV1::new(
-            PermissionTargetV1::api_surface("app@v1", ApiSurfaceKindV1::Rpc, name).unwrap(),
-            PermissionActionV1::Call,
+    fn atom(name: &str) -> PermissionAtom {
+        PermissionAtom::new(
+            PermissionTarget::api_surface("app@v1", ApiSurfaceKind::Rpc, name).unwrap(),
+            PermissionAction::Call,
         )
         .unwrap()
     }
 
-    fn grant(name: &str) -> GrantSetV1 {
-        GrantSetV1::new(vec![atom(name)])
+    fn grant(name: &str) -> GrantSet {
+        GrantSet::new(vec![atom(name)])
     }
 
     fn group(key: &str, capabilities: &[&str], included: &[&str]) -> CapabilityGroupRecord {

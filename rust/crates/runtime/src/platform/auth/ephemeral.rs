@@ -5,7 +5,7 @@ use std::sync::{Arc, Mutex};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use trellis_protocol::{digest_json, GrantSetV1};
+use trellis_protocol::{digest_json, GrantSet};
 
 use super::domain::{
     require_digest, require_nonempty, require_positive, require_protocol_timestamp,
@@ -53,10 +53,10 @@ pub(crate) struct BrowserConsentProposal {
     pub consent_view: Value,
     pub consent_view_digest: String,
     pub proposal_digest: String,
-    pub required_grant_set: GrantSetV1,
-    pub optional_grant_bundles: BTreeMap<String, GrantSetV1>,
+    pub required_grant_set: GrantSet,
+    pub optional_grant_bundles: BTreeMap<String, GrantSet>,
     pub required_capabilities: Vec<String>,
-    pub optional_capability_definitions: BTreeMap<String, GrantSetV1>,
+    pub optional_capability_definitions: BTreeMap<String, GrantSet>,
 }
 
 impl BrowserConsentProposal {

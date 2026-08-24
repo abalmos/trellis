@@ -28,7 +28,7 @@ import {
 import { createAuth } from "./session_auth.ts";
 import {
   SESSION_PROOF_FORMAT_V1,
-  sessionProofRequestDigestV1,
+  sessionProofRequestDigest,
 } from "./session_proof.ts";
 import { ulid } from "ulid";
 
@@ -413,7 +413,7 @@ export async function waitForDeviceActivation(args: {
       confirmationCode,
       proof: { format: SESSION_PROOF_FORMAT_V1, signature: "" },
     };
-    const requestDigest = await sessionProofRequestDigestV1(unsigned);
+    const requestDigest = await sessionProofRequestDigest(unsigned);
     let response: Response;
     try {
       response = await fetch(

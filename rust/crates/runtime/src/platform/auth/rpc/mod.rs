@@ -17,9 +17,9 @@ use std::time::{Duration, Instant};
 
 use serde_json::{json, Value};
 use trellis_protocol::{
-    parse_session_proof_v1, session_proof_request_digest_v1, verify_session_proof_v1,
-    AuthorizationPrincipalKindV1, DeviceBootstrapSessionProofInputV1, SessionProofInputV1,
-    SessionProofPolicyV1,
+    parse_session_proof, session_proof_request_digest, verify_session_proof,
+    AuthorizationPrincipalKind, DeviceBootstrapSessionProofInput, SessionProofInput,
+    SessionProofPolicy,
 };
 #[cfg(test)]
 use trellis_rs::sdk::auth as trellis_sdk_auth;
@@ -723,33 +723,32 @@ impl AuthRpcProcessor {
                 AuthorizationStateError::InvalidRecord("request must be an object".to_owned())
             })?
             .insert("proof".to_owned(), Value::Null);
-        let request_digest = session_proof_request_digest_v1(&proof_request)
+        let request_digest = session_proof_request_digest(&proof_request)
             .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
-        let proof_input =
-            SessionProofInputV1::device_bootstrap(DeviceBootstrapSessionProofInputV1 {
-                request_id: required_string(&input, "requestId")?.to_owned(),
-                issued_at: required_i64(&input, "issuedAt")?,
-                deployment_id: deployment_id.to_owned(),
-                instance_id: instance_id.to_owned(),
-                device_identity_key_id: identity_key_id.to_owned(),
-                new_session_public_key: required_string(&input, "newSessionPublicKey")?.to_owned(),
-                new_session_nkey: required_string(&input, "newSessionNkey")?.to_owned(),
-                participant_id: participant_id.to_owned(),
-                participant_digest: participant_digest.to_owned(),
-                challenge_digest: Some(required_string(&input, "challengeDigest")?.to_owned()),
-                request_digest,
-            })
-            .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
+        let proof_input = SessionProofInput::device_bootstrap(DeviceBootstrapSessionProofInput {
+            request_id: required_string(&input, "requestId")?.to_owned(),
+            issued_at: required_i64(&input, "issuedAt")?,
+            deployment_id: deployment_id.to_owned(),
+            instance_id: instance_id.to_owned(),
+            device_identity_key_id: identity_key_id.to_owned(),
+            new_session_public_key: required_string(&input, "newSessionPublicKey")?.to_owned(),
+            new_session_nkey: required_string(&input, "newSessionNkey")?.to_owned(),
+            participant_id: participant_id.to_owned(),
+            participant_digest: participant_digest.to_owned(),
+            challenge_digest: Some(required_string(&input, "challengeDigest")?.to_owned()),
+            request_digest,
+        })
+        .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
         let now = now_millis()?;
-        verify_session_proof_v1(
+        verify_session_proof(
             &proof_input,
-            &parse_session_proof_v1(input.get("proof").ok_or_else(|| {
+            &parse_session_proof(input.get("proof").ok_or_else(|| {
                 AuthorizationStateError::InvalidRecord("proof is required".to_owned())
             })?)
             .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?,
             &identity.identity_public_key,
             now,
-            SessionProofPolicyV1::default(),
+            SessionProofPolicy::default(),
         )
         .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
         let delegation_required = self
@@ -3939,7 +3938,7 @@ fn now_millis() -> Result<i64, AuthorizationStateError> {
 mod tests {
     use super::*;
     use trellis_protocol::{
-        ApiSurfaceKindV1, GrantSetV1, PermissionActionV1, PermissionAtomV1, PermissionTargetV1,
+        ApiSurfaceKind, GrantSet, PermissionAction, PermissionAtom, PermissionTarget,
     };
 
     #[test]
@@ -3981,7 +3980,7 @@ mod tests {
             participant_id: "participant.test@v1".to_owned(),
             participant_artifact_digest: "A".repeat(43),
             participant_needs_digest: "B".repeat(43),
-            proposed_grant_set: GrantSetV1::new(Vec::new()),
+            proposed_grant_set: GrantSet::new(Vec::new()),
             proposed_capabilities: Vec::new(),
             proposal_digest: "C".repeat(43),
             payload: json!({
@@ -4049,14 +4048,10 @@ mod tests {
             "Auth.DeviceUserAuthorities.Resolved",
         ] {
             assert!(grants.permissions().contains(
-                &PermissionAtomV1::new(
-                    PermissionTargetV1::api_surface(
-                        "trellis.auth@v1",
-                        ApiSurfaceKindV1::Event,
-                        event,
-                    )
-                    .unwrap(),
-                    PermissionActionV1::Publish,
+                &PermissionAtom::new(
+                    PermissionTarget::api_surface("trellis.auth@v1", ApiSurfaceKind::Event, event,)
+                        .unwrap(),
+                    PermissionAction::Publish,
                 )
                 .unwrap()
             ));
@@ -4097,12 +4092,12 @@ mod tests {
             .unwrap()
             .expect("operation invoke route");
         let invoke = invoke.permission_atom().unwrap();
-        assert_eq!(invoke.action(), PermissionActionV1::Invoke);
+        assert_eq!(invoke.action(), PermissionAction::Invoke);
         assert_eq!(
             invoke.target(),
-            &PermissionTargetV1::api_surface(
+            &PermissionTarget::api_surface(
                 "trellis.auth@v1",
-                ApiSurfaceKindV1::Operation,
+                ApiSurfaceKind::Operation,
                 "Auth.DeviceUserAuthorities.Resolve",
             )
             .unwrap()
@@ -4115,7 +4110,7 @@ mod tests {
             .unwrap()
             .expect("operation control route");
         let control = control.permission_atom().unwrap();
-        assert_eq!(control.action(), PermissionActionV1::Observe);
+        assert_eq!(control.action(), PermissionAction::Observe);
         assert_eq!(control.target(), invoke.target());
     }
 

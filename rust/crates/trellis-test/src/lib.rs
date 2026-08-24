@@ -2365,7 +2365,7 @@ impl TrellisTestAdmin {
             .insert(api_id.clone(), compiled_api.clone());
         let participant_json = serde_json::to_string(&compiled_participant)?;
         let api_json = serde_json::to_string(&compiled_api)?;
-        let api_digest = trellis_protocol::parse_api_v1(&compiled_api)?.digest()?;
+        let api_digest = trellis_protocol::parse_api(&compiled_api)?.digest()?;
         let mut referenced_apis = selected_referenced_apis(&compiled)?;
         for api_id in contract_reference_ids(&compiled_participant) {
             if let std::collections::btree_map::Entry::Vacant(entry) =
@@ -2385,7 +2385,7 @@ impl TrellisTestAdmin {
                 let artifact = artifact.normalized_value()?;
                 Ok((
                     serde_json::to_string(&artifact)?,
-                    trellis_protocol::parse_api_v1(&artifact)?.digest()?,
+                    trellis_protocol::parse_api(&artifact)?.digest()?,
                 ))
             })
             .collect::<Result<Vec<_>, TrellisTestError>>()?;
@@ -3856,10 +3856,8 @@ fn native_participant_reference_ids(participant: &Value) -> Vec<String> {
 
 fn selected_referenced_apis(
     artifacts: &trellis_rs::contracts::ContractArtifacts,
-) -> Result<
-    std::collections::BTreeMap<String, trellis_rs::contracts::ApiArtifactV1>,
-    TrellisTestError,
-> {
+) -> Result<std::collections::BTreeMap<String, trellis_rs::contracts::ApiArtifact>, TrellisTestError>
+{
     artifacts
         .resolved()
         .required_apis()
@@ -3935,7 +3933,7 @@ fn ensure_builtin_api(
         }
     };
     let artifact: Value = serde_json::from_str(api_json)?;
-    let parsed = trellis_protocol::parse_api_v1(&artifact)?;
+    let parsed = trellis_protocol::parse_api(&artifact)?;
     if parsed.id() != api_id {
         return Err(TrellisTestError::UnexpectedResponse(format!(
             "embedded API id '{}' does not match '{api_id}'",
@@ -4233,8 +4231,8 @@ async fn start_auth_request(
         "participantArtifact": participant,
         "referencedApiArtifacts": referenced_api_artifacts,
         "redirectTarget": redirect_to,
-        "proof": auth.sign_session_proof(&trellis_protocol::SessionProofInputV1::user_auth_request(
-            trellis_protocol::UserAuthRequestSessionProofInputV1 {
+        "proof": auth.sign_session_proof(&trellis_protocol::SessionProofInput::user_auth_request(
+            trellis_protocol::UserAuthRequestSessionProofInput {
                 request_id: request_id.clone(),
                 issued_at,
                 session_public_key: auth.session_key.clone(),
@@ -4246,9 +4244,9 @@ async fn start_auth_request(
             },
         )?)?,
     });
-    let request_digest = trellis_protocol::session_proof_request_digest_v1(&raw)?;
-    let input = trellis_protocol::SessionProofInputV1::user_auth_request(
-        trellis_protocol::UserAuthRequestSessionProofInputV1 {
+    let request_digest = trellis_protocol::session_proof_request_digest(&raw)?;
+    let input = trellis_protocol::SessionProofInput::user_auth_request(
+        trellis_protocol::UserAuthRequestSessionProofInput {
             request_id,
             issued_at,
             session_public_key: auth.session_key.clone(),

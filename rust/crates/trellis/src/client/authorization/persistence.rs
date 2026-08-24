@@ -5,7 +5,7 @@ use std::sync::{Arc, Mutex};
 
 use super::super::TrellisClientError;
 use super::types::{
-    AuthorizationClientState, AuthorizationContextStore, AUTHORIZATION_CLIENT_STATE_FORMAT_V1,
+    AuthorizationClientState, AuthorizationContextStore, AUTHORIZATION_CLIENT_STATE_FORMAT_,
 };
 
 #[cfg(test)]
@@ -184,7 +184,7 @@ pub(crate) fn validate_client_state_transition(
     current: Option<&AuthorizationClientState>,
     next: &AuthorizationClientState,
 ) -> Result<(), TrellisClientError> {
-    if next.format != AUTHORIZATION_CLIENT_STATE_FORMAT_V1
+    if next.format != AUTHORIZATION_CLIENT_STATE_FORMAT_
         || next.trust.format != "trellis.authorization-client-trust.v1"
         || next.binding.trim().is_empty()
         || next.session.session_id.trim().is_empty()
@@ -227,7 +227,7 @@ pub(crate) fn validate_client_state_transition(
 #[cfg(test)]
 pub(crate) fn test_state(generation: u64, manifest_digest: &str) -> AuthorizationClientState {
     AuthorizationClientState {
-        format: AUTHORIZATION_CLIENT_STATE_FORMAT_V1.into(),
+        format: AUTHORIZATION_CLIENT_STATE_FORMAT_.into(),
         binding: "service:dep:instance".into(),
         trust: AuthorizationClientTrustState {
             format: "trellis.authorization-client-trust.v1".into(),

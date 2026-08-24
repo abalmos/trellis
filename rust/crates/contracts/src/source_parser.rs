@@ -16,8 +16,8 @@ pub fn load_participant_source(
 ) -> Result<LoadedParticipant, ContractsError> {
     let path = path.as_ref();
     let raw_value = load_json_value(path)?;
-    trellis_protocol::lint_participant_v1_authoring(&raw_value)?;
-    let participant = trellis_protocol::parse_participant_v1(&raw_value)?;
+    trellis_protocol::lint_participant_authoring(&raw_value)?;
+    let participant = trellis_protocol::parse_participant(&raw_value)?;
     let value = participant.normalized_value()?;
     let canonical = participant.canonical_json()?;
     let digest = participant.digest()?;
@@ -36,8 +36,8 @@ pub fn load_participant_source(
 pub fn load_sdk_source(path: impl AsRef<Path>) -> Result<LoadedApi, ContractsError> {
     let path = path.as_ref();
     let raw_value = load_json_value(path)?;
-    trellis_protocol::lint_api_v1_authoring(&raw_value)?;
-    let api = trellis_protocol::parse_api_v1(&raw_value)?;
+    trellis_protocol::lint_api_authoring(&raw_value)?;
+    let api = trellis_protocol::parse_api(&raw_value)?;
     let value = api.normalized_value()?;
     let canonical = api.canonical_json()?;
     let digest = api.digest()?;

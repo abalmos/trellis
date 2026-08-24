@@ -1,4 +1,4 @@
-use trellis_protocol::ParticipantKindV1;
+use trellis_protocol::ParticipantKind;
 
 use super::fixtures::{
     evidence_scope, participant_fixture_with_resources, session_public_key, test_session_creation,
@@ -16,7 +16,7 @@ use crate::platform::auth::{
 pub(super) async fn exercise_resources(
     store: SqliteAuthorizationStore,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let fixture = participant_fixture_with_resources(ParticipantKindV1::App, "resource.app", true)?;
+    let fixture = participant_fixture_with_resources(ParticipantKind::App, "resource.app", true)?;
     store
         .put_participant_binding(fixture.binding.clone())
         .await?;
@@ -56,7 +56,7 @@ pub(super) async fn exercise_resources(
         principal_id: "usr_resources".to_owned(),
         principal_kind: PrincipalKind::User,
         participant_id: fixture.binding.participant_id.clone(),
-        participant_kind: ParticipantKindV1::App,
+        participant_kind: ParticipantKind::App,
         participant_artifact_digest: fixture.binding.artifact_digest.clone(),
         participant_needs_digest: fixture.binding.needs_digest.clone(),
         session_public_key: session_public_key(11),

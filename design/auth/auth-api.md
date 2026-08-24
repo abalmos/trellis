@@ -207,7 +207,7 @@ exact-role mappings. Both surfaces select only proposal-defined authority;
 neither creates a second runtime authorization object.
 
 Physical resource bindings never imply access. Exact participant-resource atoms
-must be present in `GrantSetV1`; optional evidence contributes only currently
+must be present in `GrantSet`; optional evidence contributes only currently
 available optional atoms. Bootstrap replay stores only stable admission identity
 and reruns current issuance before generating a new JWT.
 

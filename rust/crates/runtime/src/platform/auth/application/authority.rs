@@ -5,8 +5,8 @@ use base64::Engine as _;
 use serde_json::{json, Value};
 use sha2::{Digest as _, Sha256};
 use trellis_protocol::{
-    canonicalize_json, compare_api_replacement_v1, parse_api_v1, parse_participant_v1,
-    resolve_participant_v1, ApiArtifactV1, GrantSetV1,
+    canonicalize_json, compare_api_replacement, parse_api, parse_participant, resolve_participant,
+    ApiArtifact, GrantSet,
 };
 use ulid::Ulid;
 
@@ -30,7 +30,7 @@ pub struct CreateAuthorityProposalInput {
     /// Exact participant needs digest.
     pub participant_needs_digest: String,
     /// Proposed exact grants.
-    pub grant_set: GrantSetV1,
+    pub grant_set: GrantSet,
     /// Proposed canonical platform capabilities.
     pub capabilities: Vec<String>,
     /// Authority version against which this semantic proposal was derived.
@@ -138,7 +138,7 @@ pub(crate) struct ApplyIdentityAuthoritySelectionInput {
     pub participant_id: String,
     pub participant_artifact_digest: String,
     pub participant_needs_digest: String,
-    pub grant_set: GrantSetV1,
+    pub grant_set: GrantSet,
     pub capabilities: Vec<String>,
     pub state: AuthorityState,
     pub decided_by: String,
@@ -179,13 +179,13 @@ fn proposal_semantic_digest(
 
 fn binding_apis(
     binding: &ParticipantBindingRecord,
-) -> Result<BTreeMap<String, ApiArtifactV1>, AuthorizationStateError> {
+) -> Result<BTreeMap<String, ApiArtifact>, AuthorizationStateError> {
     let values: BTreeMap<String, Value> = serde_json::from_str(&binding.api_artifacts_json)
         .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
     values
         .into_iter()
         .map(|(id, value)| {
-            let api = parse_api_v1(&value)
+            let api = parse_api(&value)
                 .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
             if api.id() != id {
                 return Err(AuthorizationStateError::InvalidRecord(format!(
@@ -214,7 +214,7 @@ fn participant_api_update_is_compatible(
             != candidate
                 .digest()
                 .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?
-            && !compare_api_replacement_v1(previous, &candidate)
+            && !compare_api_replacement(previous, &candidate)
                 .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?
                 .compatible
         {
@@ -511,12 +511,12 @@ where
     ) -> Result<IdempotentOutcome<AuthorityProposalRecord>, AuthorizationStateError> {
         super::validation::validate_idempotency_and_actions(&input.idempotency, &input.actions)?;
         super::super::domain::require_protocol_timestamp("createdAt", input.created_at)?;
-        let participant = parse_participant_v1(&input.participant_artifact)
+        let participant = parse_participant(&input.participant_artifact)
             .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
-        let mut apis = BTreeMap::<String, ApiArtifactV1>::new();
+        let mut apis = BTreeMap::<String, ApiArtifact>::new();
         let mut canonical_apis = BTreeMap::new();
         for value in input.referenced_api_artifacts {
-            let api = parse_api_v1(&value)
+            let api = parse_api(&value)
                 .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
             let id = api.id().to_owned();
             if let Some(existing) = apis.get(&id) {
@@ -540,7 +540,7 @@ where
             );
             apis.insert(id, api);
         }
-        let resolved = resolve_participant_v1(&participant, &apis)
+        let resolved = resolve_participant(&participant, &apis)
             .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
         let participant_digest = resolved.participant_digest().to_owned();
         let needs_digest = resolved
@@ -592,7 +592,7 @@ where
         self.repository.put_participant_binding(binding).await?;
 
         let proposal = resolved.proposal();
-        let grant_set = GrantSetV1::new(
+        let grant_set = GrantSet::new(
             proposal
                 .required()
                 .grant_set()
@@ -857,7 +857,7 @@ mod tests {
             participant_id: "participant.test@v1".to_owned(),
             participant_artifact_digest: "artifact".to_owned(),
             participant_needs_digest: "needs".to_owned(),
-            grant_set: GrantSetV1::new(Vec::new()),
+            grant_set: GrantSet::new(Vec::new()),
             capabilities: vec!["read".to_owned()],
             base_authority_version,
             payload: serde_json::json!({ "presentation": "ignored" }),

@@ -8,9 +8,9 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 use trellis_protocol::{
-    parse_api_v1, parse_participant_v1, resolve_participant_v1, ApiArtifactV1,
-    AuthorizationAuthorityRefV1, AuthorizationParticipantV1, AuthorizationPrincipalV1, GrantSetV1,
-    ParticipantKindV1, ResolvedParticipantV1,
+    parse_api, parse_participant, resolve_participant, ApiArtifact, AuthorizationAuthorityRef,
+    AuthorizationParticipant, AuthorizationPrincipal, GrantSet, ParticipantKind,
+    ResolvedParticipant,
 };
 
 /// Largest integer exactly representable by interoperable JSON security objects.
@@ -102,7 +102,7 @@ pub struct NewSession {
     /// Stable participant ID.
     pub participant_id: String,
     /// Participant class.
-    pub participant_kind: ParticipantKindV1,
+    pub participant_kind: ParticipantKind,
     /// Exact participant artifact digest.
     pub participant_artifact_digest: String,
     /// Exact accepted-needs digest.
@@ -130,7 +130,7 @@ pub struct SessionRecord {
     /// Stable participant ID.
     pub participant_id: String,
     /// Participant class.
-    pub participant_kind: ParticipantKindV1,
+    pub participant_kind: ParticipantKind,
     /// Exact participant artifact digest.
     pub participant_artifact_digest: String,
     /// Exact accepted-needs digest.
@@ -243,7 +243,7 @@ pub struct ParticipantBindingRecord {
     /// Stable participant ID.
     pub participant_id: String,
     /// Participant class.
-    pub participant_kind: ParticipantKindV1,
+    pub participant_kind: ParticipantKind,
     /// Exact participant artifact digest.
     pub artifact_digest: String,
     /// Exact resolved-needs digest.
@@ -268,7 +268,7 @@ impl ParticipantBindingRecord {
     /// Returns a typed digest mismatch when the canonical artifact or needs
     /// digest differs from the stored identity, or [`AuthorizationStateError::InvalidRecord`]
     /// when the retained JSON cannot be parsed and contextually resolved.
-    pub fn resolve(&self) -> Result<ResolvedParticipantV1, AuthorizationStateError> {
+    pub fn resolve(&self) -> Result<ResolvedParticipant, AuthorizationStateError> {
         if self.state != ParticipantBindingState::Resolved {
             return Err(AuthorizationStateError::ParticipantMissing);
         }
@@ -277,7 +277,7 @@ impl ParticipantBindingRecord {
                 "participant artifact JSON is invalid: {error}"
             ))
         })?;
-        let participant = parse_participant_v1(&participant_value).map_err(|error| {
+        let participant = parse_participant(&participant_value).map_err(|error| {
             AuthorizationStateError::InvalidRecord(format!(
                 "participant artifact is invalid: {error}"
             ))
@@ -301,7 +301,7 @@ impl ParticipantBindingRecord {
         let apis = api_values
             .into_iter()
             .map(|(id, value)| {
-                let api = parse_api_v1(&value).map_err(|error| {
+                let api = parse_api(&value).map_err(|error| {
                     AuthorizationStateError::InvalidRecord(format!(
                         "API artifact {id} is invalid: {error}"
                     ))
@@ -314,8 +314,8 @@ impl ParticipantBindingRecord {
                 }
                 Ok((id, api))
             })
-            .collect::<Result<BTreeMap<String, ApiArtifactV1>, AuthorizationStateError>>()?;
-        let resolved = resolve_participant_v1(&participant, &apis).map_err(|error| {
+            .collect::<Result<BTreeMap<String, ApiArtifact>, AuthorizationStateError>>()?;
+        let resolved = resolve_participant(&participant, &apis).map_err(|error| {
             AuthorizationStateError::InvalidRecord(format!(
                 "participant resolution failed: {error}"
             ))
@@ -421,7 +421,7 @@ pub struct IdentityAuthorityRecord {
     /// Exact accepted-needs digest.
     pub accepted_needs_digest: String,
     /// Exact accepted machine permissions.
-    pub desired_grant_set: GrantSetV1,
+    pub desired_grant_set: GrantSet,
     /// Canonical platform capability keys.
     pub desired_capabilities: Vec<String>,
     /// Desired-authority lifecycle state.
@@ -449,13 +449,13 @@ pub struct DeploymentAuthorityRecord {
     /// Service or device participant ID.
     pub participant_id: String,
     /// Participant class.
-    pub participant_kind: ParticipantKindV1,
+    pub participant_kind: ParticipantKind,
     /// Exact participant artifact digest.
     pub participant_artifact_digest: String,
     /// Exact accepted-needs digest.
     pub accepted_needs_digest: String,
     /// Exact accepted machine permissions.
-    pub desired_grant_set: GrantSetV1,
+    pub desired_grant_set: GrantSet,
     /// Canonical platform capability keys.
     pub desired_capabilities: Vec<String>,
     /// Desired-authority lifecycle state.
@@ -542,7 +542,7 @@ impl DesiredAuthorityRecord {
 
     /// Return exact accepted grants.
     #[must_use]
-    pub fn grant_set(&self) -> &GrantSetV1 {
+    pub fn grant_set(&self) -> &GrantSet {
         match self {
             Self::Identity(value) => &value.desired_grant_set,
             Self::Deployment(value) => &value.desired_grant_set,
@@ -609,7 +609,7 @@ pub struct DeploymentRecord {
     /// Stable deployed participant ID.
     pub participant_id: String,
     /// Service or device participant class.
-    pub participant_kind: ParticipantKindV1,
+    pub participant_kind: ParticipantKind,
     /// Whether the deployment can currently authorize sessions.
     pub active: bool,
     /// Optional deployment-level expiry in Unix milliseconds.
@@ -920,13 +920,13 @@ pub struct MaterializedAuthorityRecord {
     /// Stable participant ID.
     pub participant_id: String,
     /// Participant class.
-    pub participant_kind: ParticipantKindV1,
+    pub participant_kind: ParticipantKind,
     /// Exact participant artifact digest.
     pub participant_artifact_digest: String,
     /// Exact accepted-needs digest.
     pub participant_needs_digest: String,
     /// Current exact effective permissions.
-    pub effective_grant_set: GrantSetV1,
+    pub effective_grant_set: GrantSet,
     /// Current canonical platform capabilities.
     pub effective_capabilities: Vec<String>,
     /// Effective-state lifecycle.
@@ -991,7 +991,7 @@ pub enum AuthorizationTransitionKind {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct IssuableAuthorizationState {
     /// Stable principal projected into the protocol context shape.
-    pub principal: AuthorizationPrincipalV1,
+    pub principal: AuthorizationPrincipal,
     /// Stable session ID.
     pub session_id: String,
     /// Canonical session public key.
@@ -1001,15 +1001,15 @@ pub struct IssuableAuthorizationState {
     /// Authoritative reply inbox prefix.
     pub inbox_prefix: String,
     /// Exact participant and needs evidence.
-    pub participant: AuthorizationParticipantV1,
+    pub participant: AuthorizationParticipant,
     /// Desired authority record and version.
-    pub authority_ref: AuthorizationAuthorityRefV1,
+    pub authority_ref: AuthorizationAuthorityRef,
     /// Deployment ID for service/device principals.
     pub deployment_id: Option<String>,
     /// Runtime instance ID when required.
     pub instance_id: Option<String>,
     /// Exact effective permissions.
-    pub grant_set: GrantSetV1,
+    pub grant_set: GrantSet,
     /// Exact available physical resource bindings supporting the grant set.
     pub resource_bindings: Vec<ResourceBindingEvidence>,
     /// Canonical platform capabilities.
@@ -1188,15 +1188,15 @@ pub(crate) fn require_digest(field: &str, value: &str) -> Result<(), Authorizati
 
 pub(crate) fn validate_principal_participant(
     principal: PrincipalKind,
-    participant: ParticipantKindV1,
+    participant: ParticipantKind,
 ) -> Result<(), AuthorizationStateError> {
     let valid = matches!(
         (principal, participant),
         (
             PrincipalKind::User,
-            ParticipantKindV1::App | ParticipantKindV1::Agent
-        ) | (PrincipalKind::Service, ParticipantKindV1::Service)
-            | (PrincipalKind::Device, ParticipantKindV1::Device)
+            ParticipantKind::App | ParticipantKind::Agent
+        ) | (PrincipalKind::Service, ParticipantKind::Service)
+            | (PrincipalKind::Device, ParticipantKind::Device)
     );
     if valid {
         Ok(())

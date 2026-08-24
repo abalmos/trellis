@@ -1,7 +1,7 @@
 import type { Msg, NatsConnection } from "@nats-io/nats-core";
 import { Pointer } from "typebox/value";
 import type {
-  PermissionAtomV1,
+  PermissionAtom,
   RuntimeApi,
 } from "../../contract_support/runtime.ts";
 import {
@@ -112,7 +112,7 @@ type RuntimeOperationTransferSession = {
 type RuntimeOperationTransferSupport = {
   openOperationTransfer(args: {
     sessionKey: string;
-    permission: PermissionAtomV1 | undefined;
+    permission: PermissionAtom | undefined;
     requiredCapabilities: readonly string[];
     store: string;
     key: string;
@@ -726,7 +726,7 @@ export class TrellisServiceRuntime extends Trellis<RuntimeApi, TrellisMode> {
     ctx: RegisteredRuntimeOperationDesc,
     control: RuntimeOperationControlRequest,
   ): {
-    permission: PermissionAtomV1 | undefined;
+    permission: PermissionAtom | undefined;
     capabilities: readonly string[];
   } {
     switch (control.action) {
@@ -907,7 +907,7 @@ export class TrellisServiceRuntime extends Trellis<RuntimeApi, TrellisMode> {
     msg: Msg,
     ctx: RegisteredRuntimeOperationDesc,
     parseInput: boolean,
-    permission: PermissionAtomV1 | undefined = ctx.permissions?.invoke,
+    permission: PermissionAtom | undefined = ctx.permissions?.invoke,
     requiredCapabilities: readonly string[] = ctx.callerCapabilities ?? [],
   ): Promise<
     Result<{

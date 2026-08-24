@@ -844,7 +844,7 @@ pub struct LoadedParticipant {
     /// Source path.
     pub path: PathBuf,
     /// Parsed protocol-owned participant artifact.
-    pub participant: trellis_protocol::ParticipantArtifactV1,
+    pub participant: trellis_protocol::ParticipantArtifact,
     /// Participant-only rendering fields.
     pub render_model: ParticipantRenderModel,
     /// Normalized participant JSON.
@@ -920,11 +920,11 @@ pub struct LoadedApi {
     #[doc = concat!("The `", stringify!(value), "` contract value.")]
     pub value: Value,
     /// Parsed protocol-owned native API artifact.
-    pub api: trellis_protocol::ApiArtifactV1,
+    pub api: trellis_protocol::ApiArtifact,
     /// Exact deserialization of the API-only rendering fields.
     pub render_model: ApiRenderModel,
     /// Derived subjects keyed by API surface.
-    pub subjects: trellis_protocol::DerivedApiSubjectsV1,
+    pub subjects: trellis_protocol::DerivedApiSubjects,
     #[doc = concat!("The `", stringify!(canonical), "` contract value.")]
     pub canonical: String,
     #[doc = concat!("The `", stringify!(digest), "` contract value.")]

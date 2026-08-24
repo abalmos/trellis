@@ -2,7 +2,7 @@ use jsonptr::PointerBuf;
 
 /// A contextual participant-resolution failure category.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum ResolutionErrorCodeV1 {
+pub enum ResolutionErrorCode {
     /// A referenced API was not supplied.
     MissingApi,
     /// A supplied API did not match the pinned digest.
@@ -29,7 +29,7 @@ pub enum ResolutionErrorCodeV1 {
 
 /// Stable failure categories for signed authorization protocol values.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum AuthorizationErrorCodeV1 {
+pub enum AuthorizationErrorCode {
     /// A value has the wrong protocol format or strict object shape.
     InvalidFormat,
     /// An integer cannot be represented exactly by interoperable JSON implementations.
@@ -92,7 +92,7 @@ pub enum AuthorizationErrorCodeV1 {
 
 /// Stable failure categories for bootstrap and authorization-context refresh proofs.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum SessionProofErrorCodeV1 {
+pub enum SessionProofErrorCode {
     /// A value has the wrong protocol format or strict object shape.
     InvalidFormat,
     /// An integer cannot be represented exactly by interoperable JSON implementations.
@@ -177,7 +177,7 @@ pub enum ProtocolError {
     #[error("participant '{participant}' resolution failed at '{path}' ({code:?}): {message}")]
     ParticipantResolution {
         /// Stable failure category.
-        code: ResolutionErrorCodeV1,
+        code: ResolutionErrorCode,
         /// Participant being resolved.
         participant: String,
         /// Participant-local API alias, when applicable.
@@ -194,7 +194,7 @@ pub enum ProtocolError {
     #[error("authorization validation failed at '{path}' ({code:?}): {message}")]
     Authorization {
         /// Stable failure category.
-        code: AuthorizationErrorCodeV1,
+        code: AuthorizationErrorCode,
         /// Exact authored RFC 6901 path.
         path: Box<PointerBuf>,
         /// Safe diagnostic that omits secrets and signed payloads.
@@ -205,7 +205,7 @@ pub enum ProtocolError {
     #[error("session proof validation failed at '{path}' ({code:?}): {message}")]
     SessionProof {
         /// Stable failure category.
-        code: SessionProofErrorCodeV1,
+        code: SessionProofErrorCode,
         /// Exact authored RFC 6901 path.
         path: Box<PointerBuf>,
         /// Safe diagnostic that omits secrets and signed payloads.

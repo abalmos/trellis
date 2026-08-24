@@ -58,7 +58,7 @@ export function unwrapSchema(raw: SchemaLike): unknown {
 }
 
 /** Exact permission metadata for one contract API surface action. */
-export type PermissionAtomV1 = Readonly<{
+export type PermissionAtom = Readonly<{
   /** Source API artifact identity. */
   apiId: string;
   /** Version of the source API surface. */
@@ -96,7 +96,7 @@ export type RPCDesc<
   input: I;
   output: O;
   /** Exact permission required to call this RPC. */
-  permission: PermissionAtomV1;
+  permission: PermissionAtom;
   callerCapabilities: readonly string[];
   transfer?: { direction: "receive" };
   authRequired?: boolean;
@@ -110,9 +110,9 @@ export type EventDesc<S extends SchemaLike = SchemaLike> = {
   params?: readonly SubjectParam[];
   event: S;
   /** Exact permission required to publish this event. */
-  publishPermission: PermissionAtomV1;
+  publishPermission: PermissionAtom;
   /** Exact permission required to subscribe to this event. */
-  subscribePermission: PermissionAtomV1;
+  subscribePermission: PermissionAtom;
   publishCapabilities: readonly string[];
   subscribeCapabilities: readonly string[];
 };
@@ -125,7 +125,7 @@ export type FeedDesc<
   input: I;
   event: E;
   /** Exact permission required to subscribe to this feed. */
-  permission: PermissionAtomV1;
+  permission: PermissionAtom;
   subscribeCapabilities: readonly string[];
 };
 
@@ -146,10 +146,10 @@ export type OperationDesc<
   output?: O;
   /** Exact permissions required by each operation action. */
   permissions: Readonly<{
-    invoke: PermissionAtomV1;
-    observe: PermissionAtomV1;
-    cancel: PermissionAtomV1;
-    control: Readonly<Record<string, PermissionAtomV1>>;
+    invoke: PermissionAtom;
+    observe: PermissionAtom;
+    cancel: PermissionAtom;
+    control: Readonly<Record<string, PermissionAtom>>;
   }>;
   errors?: E;
   runtimeErrors?: TRuntimeErrors;

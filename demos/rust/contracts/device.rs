@@ -1,6 +1,6 @@
 use serde_json::{json, Value};
 use trellis_contracts::{
-    state, ApiArtifactV1, ApiBuilder, ContractArtifacts, ContractBuilder, ContractKind,
+    state, ApiArtifact, ApiBuilder, ContractArtifacts, ContractBuilder, ContractKind,
     ContractStateKind, ContractsError,
 };
 
@@ -8,7 +8,7 @@ use trellis_contracts::{
 mod service;
 
 /// Build the Rust-authored Field Device demo native API.
-pub fn api_artifact() -> Result<ApiArtifactV1, ContractsError> {
+pub fn api_artifact() -> Result<ApiArtifact, ContractsError> {
     ApiBuilder::authoring(
         "trellis.demo-device@v1",
         "Field Device Demo",

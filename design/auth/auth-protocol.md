@@ -110,7 +110,7 @@ When NATS calls `$SYS.REQ.USER.AUTH`:
 3. Load the active signed context by `contextDigest`, verify it against the
    accepted current manifest, and bind `user_nkey` to `context.sessionKey`.
 4. Load the participant and current physical resource bindings needed to compile
-   transport permissions from the context's exact `GrantSetV1`. A subject or
+   transport permissions from the context's exact `GrantSet`. A subject or
    binding never creates an atom.
 5. Sign the target-account JWT for the server-generated `user_nkey`, bounded by
    current session, authority, and delegation expiry, then record connection
@@ -153,7 +153,7 @@ auth-callout payloads are not supported.
 The auth callout derives permissions from:
 
 - verified active signed authorization context
-- the exact `GrantSetV1` accepted for the bound participant
+- the exact `GrantSet` accepted for the bound participant
 - exact `trellis.api.v1` descriptors
 - typed materialized resource bindings
 - the session reply inbox and narrow built-in subjects
@@ -551,7 +551,7 @@ User/app, CLI, native, and device-user authority uses the same immutable
 proposal and terminal-decision workflow as deployment authority. Acceptance
 updates the current desired-authority projection and inserts its outbox record
 in one transaction. The accepted record binds the stable principal, exact
-participant artifact, needs digest, `GrantSetV1`, and expiry.
+participant artifact, needs digest, `GrantSet`, and expiry.
 
 Deployment grant overrides, stored NATS subject ACLs, and contract-era
 identity-grant objects are not part of the protocol. Capability groups are

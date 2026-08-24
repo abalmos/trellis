@@ -3,7 +3,7 @@ import type { KvEntry, KvWatchEntry } from "@nats-io/kv";
 
 import type {
   AuthorizationContextHandle,
-  AuthorizationContextVerificationPolicyV1,
+  AuthorizationContextVerificationPolicy,
   AuthorizationVerificationErrorCode,
   VerifiedAuthorizationContextTokenProjection,
   VerifyAuthorizationEventArgs,
@@ -796,7 +796,7 @@ export class AuthorizationProviderCache {
     entry: ProviderContextEntry,
     nowUnixSeconds: number,
     historical = false,
-  ): AuthorizationContextVerificationPolicyV1 {
+  ): AuthorizationContextVerificationPolicy {
     if (
       !historical &&
       entry.manifestGeneration < this.#minimumManifestGeneration

@@ -19,7 +19,7 @@ fn connection_kick_response_rejects_system_errors() {
 
 fn browser_flow() -> AuthBrowserFlow {
     let consent_view = serde_json::json!({ "title": "Authorize app" });
-    let required_grant_set = GrantSetV1::new(Vec::new());
+    let required_grant_set = GrantSet::new(Vec::new());
     let optional_grant_bundles = BTreeMap::new();
     let required_capabilities = Vec::<String>::new();
     let optional_capability_definitions = BTreeMap::new();
@@ -137,7 +137,7 @@ async fn repository_conformance(repository: impl AuthEphemeralRepository + Clone
             let mut consent = authenticated.consent.clone();
             consent
                 .optional_capability_definitions
-                .insert("extra".to_owned(), GrantSetV1::new(Vec::new()));
+                .insert("extra".to_owned(), GrantSet::new(Vec::new()));
             consent
         },
     ] {

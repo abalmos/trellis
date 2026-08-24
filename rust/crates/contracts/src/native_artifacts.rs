@@ -2,9 +2,8 @@ use std::collections::BTreeMap;
 
 use serde_json::{json, Map, Value};
 use trellis_protocol::{
-    lint_api_v1_authoring, lint_participant_v1_authoring, parse_api_v1, parse_participant_v1,
-    resolve_participant_v1, ApiArtifactV1, GrantSetV1, ParticipantArtifactV1,
-    ResolvedParticipantV1,
+    lint_api_authoring, lint_participant_authoring, parse_api, parse_participant,
+    resolve_participant, ApiArtifact, GrantSet, ParticipantArtifact, ResolvedParticipant,
 };
 
 use crate::{
@@ -120,19 +119,19 @@ impl ApiBuilder {
 
     /// Run the strict authoring lint without parsing the value.
     pub fn lint(&self) -> Result<(), ContractsError> {
-        lint_api_v1_authoring(&self.authoring_value()?)?;
+        lint_api_authoring(&self.authoring_value()?)?;
         Ok(())
     }
 
     /// Parse and normalize the native API artifact.
-    pub fn build(&self) -> Result<ApiArtifactV1, ContractsError> {
+    pub fn build(&self) -> Result<ApiArtifact, ContractsError> {
         self.finalize()
     }
 
     /// Lint and parse the native API artifact at the authoring boundary.
-    pub fn finalize(&self) -> Result<ApiArtifactV1, ContractsError> {
+    pub fn finalize(&self) -> Result<ApiArtifact, ContractsError> {
         self.lint()?;
-        Ok(parse_api_v1(&self.authoring_value()?)?)
+        Ok(parse_api(&self.authoring_value()?)?)
     }
 
     /// Return the normalized native API value.
@@ -160,20 +159,20 @@ impl ApiBuilder {
 /// Native, non-serializable artifacts produced by [`ContractBuilder`].
 #[derive(Debug)]
 pub struct ContractArtifacts {
-    api: ApiArtifactV1,
-    participant: ParticipantArtifactV1,
-    referenced_apis: BTreeMap<String, ApiArtifactV1>,
-    resolved: ResolvedParticipantV1,
+    api: ApiArtifact,
+    participant: ParticipantArtifact,
+    referenced_apis: BTreeMap<String, ApiArtifact>,
+    resolved: ResolvedParticipant,
     api_digest: String,
     participant_digest: String,
     participant_needs_digest: String,
-    required_grants: GrantSetV1,
-    optional_grants: GrantSetV1,
+    required_grants: GrantSet,
+    optional_grants: GrantSet,
 }
 
 impl ContractArtifacts {
     /// Return the validated owned API artifact.
-    pub fn api(&self) -> &ApiArtifactV1 {
+    pub fn api(&self) -> &ApiArtifact {
         &self.api
     }
 
@@ -183,7 +182,7 @@ impl ContractArtifacts {
     }
 
     /// Return the validated participant artifact.
-    pub fn participant(&self) -> &ParticipantArtifactV1 {
+    pub fn participant(&self) -> &ParticipantArtifact {
         &self.participant
     }
 
@@ -193,12 +192,12 @@ impl ContractArtifacts {
     }
 
     /// Return the contextual participant resolution.
-    pub fn resolved(&self) -> &ResolvedParticipantV1 {
+    pub fn resolved(&self) -> &ResolvedParticipant {
         &self.resolved
     }
 
     /// Return the exact native API artifacts used to resolve the participant.
-    pub fn referenced_apis(&self) -> &BTreeMap<String, ApiArtifactV1> {
+    pub fn referenced_apis(&self) -> &BTreeMap<String, ApiArtifact> {
         &self.referenced_apis
     }
 
@@ -218,12 +217,12 @@ impl ContractArtifacts {
     }
 
     /// Return exact required permission grants.
-    pub fn required_grants(&self) -> &GrantSetV1 {
+    pub fn required_grants(&self) -> &GrantSet {
         &self.required_grants
     }
 
     /// Return exact optional permission grants.
-    pub fn optional_grants(&self) -> &GrantSetV1 {
+    pub fn optional_grants(&self) -> &GrantSet {
         &self.optional_grants
     }
 }
@@ -425,16 +424,16 @@ impl ContractBuilder {
         }
         let api_value = self.api;
         let participant_value = self.participant;
-        lint_api_v1_authoring(&api_value)?;
-        lint_participant_v1_authoring(&participant_value)?;
-        let api = parse_api_v1(&api_value)?;
-        let participant = parse_participant_v1(&participant_value)?;
+        lint_api_authoring(&api_value)?;
+        lint_participant_authoring(&participant_value)?;
+        let api = parse_api(&api_value)?;
+        let participant = parse_participant(&participant_value)?;
         let api_digest = api.digest()?;
         let participant_digest = participant.digest()?;
         let mut apis = BTreeMap::new();
         let mut referenced_apis = BTreeMap::new();
         for (id, value) in &self.referenced_apis {
-            let api = parse_api_v1(value)?;
+            let api = parse_api(value)?;
             if api.id() != id {
                 return Err(invalid(format!(
                     "referenced API map key '{id}' does not match artifact id '{}'",
@@ -445,7 +444,7 @@ impl ContractBuilder {
             referenced_apis.insert(id.clone(), api);
         }
         apis.insert(api.id().to_owned(), api.clone());
-        let resolved = resolve_participant_v1(&participant, &apis)?;
+        let resolved = resolve_participant(&participant, &apis)?;
         let participant_needs_digest = resolved.needs().digest()?;
         let required_grants = resolved.proposal().required().grant_set().clone();
         let optional_grants = resolved.proposal().optional().grant_set().clone();
@@ -704,8 +703,8 @@ fn compile_capabilities(contract: &Map<String, Value>) -> Map<String, Value> {
 
 pub(crate) fn build_participant_value(
     source: &AuthoringState,
-    own_api: &ApiArtifactV1,
-    apis: &BTreeMap<String, ApiArtifactV1>,
+    own_api: &ApiArtifact,
+    apis: &BTreeMap<String, ApiArtifact>,
 ) -> Result<Value, ContractsError> {
     let contract = participant_projection(source)?;
     build_participant_from_projection(&contract, own_api, apis)
@@ -713,8 +712,8 @@ pub(crate) fn build_participant_value(
 
 fn build_participant_from_projection(
     contract: &Map<String, Value>,
-    own_api: &ApiArtifactV1,
-    apis: &BTreeMap<String, ApiArtifactV1>,
+    own_api: &ApiArtifact,
+    apis: &BTreeMap<String, ApiArtifact>,
 ) -> Result<Value, ContractsError> {
     let mut participant = Map::new();
     participant.insert(

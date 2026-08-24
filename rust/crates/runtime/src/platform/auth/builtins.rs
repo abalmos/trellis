@@ -7,7 +7,7 @@ use super::{AuthorizationStateError, ParticipantBindingRecord, ParticipantBindin
 fn state_api_value() -> Result<Value, AuthorizationStateError> {
     let api: Value = serde_json::from_str(trellis_rs::sdk::state::API_JSON)
         .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
-    trellis_protocol::lint_api_v1_authoring(&api)
+    trellis_protocol::lint_api_authoring(&api)
         .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
     Ok(api)
 }
@@ -17,10 +17,10 @@ pub(crate) fn administration_participant_binding(
 ) -> Result<ParticipantBindingRecord, AuthorizationStateError> {
     let api_value: Value = serde_json::from_str(trellis_rs::sdk::auth::API_JSON)
         .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
-    let api = trellis_protocol::parse_api_v1(&api_value)
+    let api = trellis_protocol::parse_api(&api_value)
         .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
     let state_api_value = state_api_value()?;
-    let state_api = trellis_protocol::parse_api_v1(&state_api_value)
+    let state_api = trellis_protocol::parse_api(&state_api_value)
         .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
     let mut participant_value: Value = serde_json::from_str(include_str!(
         "../../../../trellis/artifacts/trellis.admin.participant.json"
@@ -51,9 +51,9 @@ pub(crate) fn auth_runtime_participant_binding(
 ) -> Result<ParticipantBindingRecord, AuthorizationStateError> {
     let api_value: Value = serde_json::from_str(trellis_rs::sdk::auth::API_JSON)
         .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
-    trellis_protocol::lint_api_v1_authoring(&api_value)
+    trellis_protocol::lint_api_authoring(&api_value)
         .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
-    let api = trellis_protocol::parse_api_v1(&api_value)
+    let api = trellis_protocol::parse_api(&api_value)
         .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
     let mut participant_value: Value =
         serde_json::from_str(include_str!("../../../trellis.participant.json"))
@@ -72,9 +72,9 @@ pub(crate) fn auth_runtime_participant_binding(
     ] {
         let value: Value = serde_json::from_str(api_json)
             .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
-        trellis_protocol::lint_api_v1_authoring(&value)
+        trellis_protocol::lint_api_authoring(&value)
             .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
-        let parsed = trellis_protocol::parse_api_v1(&value)
+        let parsed = trellis_protocol::parse_api(&value)
             .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
         participant_value["implements"][alias] = serde_json::json!({
             "api": parsed.id(),
@@ -95,22 +95,22 @@ fn builtin_participant_binding(
     api_values: BTreeMap<String, Value>,
     resolved_at: i64,
 ) -> Result<ParticipantBindingRecord, AuthorizationStateError> {
-    trellis_protocol::lint_participant_v1_authoring(
+    trellis_protocol::lint_participant_authoring(
         &serde_json::from_str(participant_json)
             .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?,
     )
     .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
     let participant_value: Value = serde_json::from_str(participant_json)
         .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
-    let participant = trellis_protocol::parse_participant_v1(&participant_value)
+    let participant = trellis_protocol::parse_participant(&participant_value)
         .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
     let mut apis = BTreeMap::new();
     for value in api_values.values() {
-        let api = trellis_protocol::parse_api_v1(value)
+        let api = trellis_protocol::parse_api(value)
             .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
         apis.insert(api.id().to_owned(), api);
     }
-    let resolved = trellis_protocol::resolve_participant_v1(&participant, &apis)
+    let resolved = trellis_protocol::resolve_participant(&participant, &apis)
         .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
     Ok(ParticipantBindingRecord {
         participant_id: resolved.participant_id().to_owned(),

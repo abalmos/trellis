@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
 use serde_json::{json, Value};
-use trellis_protocol::ParticipantKindV1;
+use trellis_protocol::ParticipantKind;
 
 use super::companion::exercise_companion_repositories;
 use super::evidence::exercise_resources;
@@ -84,7 +84,7 @@ async fn sqlite_initial_deployment_proposal_reuses_after_reopen(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let temp_dir = tempfile::tempdir()?;
     let path = temp_dir.path().join("authority-lineage.sqlite");
-    let fixture = participant_fixture_for(ParticipantKindV1::Service, "restart.service")?;
+    let fixture = participant_fixture_for(ParticipantKind::Service, "restart.service")?;
     let participant_artifact = serde_json::from_str(&fixture.binding.participant_json)?;
     let referenced_api_artifacts =
         serde_json::from_str::<BTreeMap<String, Value>>(&fixture.binding.api_artifacts_json)?
@@ -175,7 +175,7 @@ fn session_rejects_malformed_public_keys_and_kind_mismatches() {
         principal_id: "usr_invalid".to_owned(),
         principal_kind: PrincipalKind::User,
         participant_id: "example.app".to_owned(),
-        participant_kind: ParticipantKindV1::App,
+        participant_kind: ParticipantKind::App,
         participant_artifact_digest: digest(1),
         participant_needs_digest: digest(2),
         session_public_key: "not-a-key".to_owned(),
@@ -197,7 +197,7 @@ fn session_rejects_malformed_public_keys_and_kind_mismatches() {
     assert!(matches!(
         SessionRecord::from_new(NewSession {
             session_public_key: session_public_key(1),
-            participant_kind: ParticipantKindV1::Service,
+            participant_kind: ParticipantKind::Service,
             ..base
         }),
         Err(AuthorizationStateError::InvalidRecord(_))
@@ -213,7 +213,7 @@ async fn sqlite_schema_is_idempotent_and_enforces_foreign_keys(
         principal_id: "usr_missing".to_owned(),
         principal_kind: PrincipalKind::User,
         participant_id: "example.app".to_owned(),
-        participant_kind: ParticipantKindV1::App,
+        participant_kind: ParticipantKind::App,
         participant_artifact_digest: digest(1),
         participant_needs_digest: digest(2),
         session_public_key: session_public_key(8),
@@ -258,7 +258,7 @@ pub(super) async fn exercise_store(
         principal_id: principal.principal_id.clone(),
         principal_kind: PrincipalKind::User,
         participant_id: fixture.binding.participant_id.clone(),
-        participant_kind: ParticipantKindV1::App,
+        participant_kind: ParticipantKind::App,
         participant_artifact_digest: fixture.binding.artifact_digest.clone(),
         participant_needs_digest: fixture.binding.needs_digest.clone(),
         session_public_key: session_public_key(7),
@@ -308,7 +308,7 @@ pub(super) async fn exercise_store(
         principal_id: principal.principal_id.clone(),
         principal_kind: PrincipalKind::User,
         participant_id: fixture.binding.participant_id.clone(),
-        participant_kind: ParticipantKindV1::App,
+        participant_kind: ParticipantKind::App,
         participant_artifact_digest: fixture.binding.artifact_digest.clone(),
         participant_needs_digest: fixture.binding.needs_digest.clone(),
         session_public_key: session_public_key(8),
@@ -360,7 +360,7 @@ pub(super) async fn exercise_store(
         principal_id: principal.principal_id.clone(),
         principal_kind: PrincipalKind::User,
         participant_id: fixture.binding.participant_id.clone(),
-        participant_kind: ParticipantKindV1::App,
+        participant_kind: ParticipantKind::App,
         participant_artifact_digest: fixture.binding.artifact_digest.clone(),
         participant_needs_digest: fixture.binding.needs_digest.clone(),
         session_public_key: session_public_key(12),

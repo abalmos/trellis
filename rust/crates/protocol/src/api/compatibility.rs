@@ -5,7 +5,7 @@ use serde::Serialize;
 
 use super::{
     schema_compatibility::{prove_schema_equivalent, prove_schema_subset, SchemaRelation},
-    ApiArtifactV1, ErrorDefinitionV1, OperationDefinitionV1, SchemaReferenceV1,
+    ApiArtifact, ErrorDefinition, OperationDefinition, SchemaReference,
 };
 use crate::{
     canonicalize_json,
@@ -24,19 +24,19 @@ use crate::{
 /// about replacement safety, not authoring-validation errors.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct ApiCompatibilityReportV1 {
+pub struct ApiCompatibilityReport {
     /// Whether the candidate can safely replace the previous artifact.
     pub compatible: bool,
     /// Deterministically ordered incompatibilities.
-    pub issues: Vec<ApiCompatibilityIssueV1>,
+    pub issues: Vec<ApiCompatibilityIssue>,
 }
 
 /// One API replacement incompatibility.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct ApiCompatibilityIssueV1 {
+pub struct ApiCompatibilityIssue {
     /// Stable machine-readable issue category.
-    pub code: ApiCompatibilityIssueCodeV1,
+    pub code: ApiCompatibilityIssueCode,
     /// RFC 6901 pointer to the affected API member.
     pub path: String,
     /// Human-readable diagnostic.
@@ -46,7 +46,7 @@ pub struct ApiCompatibilityIssueV1 {
 /// Stable categories emitted by API replacement comparison.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "kebab-case")]
-pub enum ApiCompatibilityIssueCodeV1 {
+pub enum ApiCompatibilityIssueCode {
     /// The artifacts are from different API lineages.
     ApiIdMismatch,
     /// A previously available surface is absent.
@@ -86,12 +86,12 @@ pub enum ApiCompatibilityIssueCodeV1 {
 ///
 /// Returns a [`ProtocolError`] if either validated artifact cannot be projected,
 /// digested, or converted to its derived transport subjects.
-pub fn compare_api_replacement_v1(
-    previous: &ApiArtifactV1,
-    candidate: &ApiArtifactV1,
-) -> Result<ApiCompatibilityReportV1, ProtocolError> {
+pub fn compare_api_replacement(
+    previous: &ApiArtifact,
+    candidate: &ApiArtifact,
+) -> Result<ApiCompatibilityReport, ProtocolError> {
     if previous.digest()? == candidate.digest()? {
-        return Ok(ApiCompatibilityReportV1 {
+        return Ok(ApiCompatibilityReport {
             compatible: true,
             issues: Vec::new(),
         });
@@ -99,7 +99,7 @@ pub fn compare_api_replacement_v1(
 
     if previous.id != candidate.id {
         return Ok(report(vec![issue(
-            ApiCompatibilityIssueCodeV1::ApiIdMismatch,
+            ApiCompatibilityIssueCode::ApiIdMismatch,
             pointer(["id"]),
             format!(
                 "candidate API id '{}' does not match previous id '{}'",
@@ -121,10 +121,10 @@ pub fn compare_api_replacement_v1(
 }
 
 fn compare_rpc(
-    previous: &ApiArtifactV1,
-    candidate: &ApiArtifactV1,
+    previous: &ApiArtifact,
+    candidate: &ApiArtifact,
     checked_errors: &mut BTreeSet<String>,
-    issues: &mut Vec<ApiCompatibilityIssueV1>,
+    issues: &mut Vec<ApiCompatibilityIssue>,
 ) -> Result<(), ProtocolError> {
     for (name, old) in sorted_entries(&previous.rpc) {
         let Some(new) = candidate.rpc.get(name) else {
@@ -174,10 +174,10 @@ fn compare_rpc(
 }
 
 fn compare_operations(
-    previous: &ApiArtifactV1,
-    candidate: &ApiArtifactV1,
+    previous: &ApiArtifact,
+    candidate: &ApiArtifact,
     checked_errors: &mut BTreeSet<String>,
-    issues: &mut Vec<ApiCompatibilityIssueV1>,
+    issues: &mut Vec<ApiCompatibilityIssue>,
 ) -> Result<(), ProtocolError> {
     for (name, old) in sorted_entries(&previous.operations) {
         let Some(new) = candidate.operations.get(name) else {
@@ -230,7 +230,7 @@ fn compare_operations(
         for (signal, old_signal) in sorted_entries(&old.signals) {
             let Some(new_signal) = new.signals.get(signal) else {
                 issues.push(issue(
-                    ApiCompatibilityIssueCodeV1::SurfaceRemoved,
+                    ApiCompatibilityIssueCode::SurfaceRemoved,
                     pointer(["operations", name, "signals", signal]),
                     format!("operation signal '{signal}' was removed"),
                 ));
@@ -251,13 +251,13 @@ fn compare_operations(
 }
 
 fn compare_optional_output(
-    previous: &ApiArtifactV1,
-    old: &OperationDefinitionV1,
-    candidate: &ApiArtifactV1,
-    new: &OperationDefinitionV1,
+    previous: &ApiArtifact,
+    old: &OperationDefinition,
+    candidate: &ApiArtifact,
+    new: &OperationDefinition,
     name: &str,
     field: &str,
-    issues: &mut Vec<ApiCompatibilityIssueV1>,
+    issues: &mut Vec<ApiCompatibilityIssue>,
 ) -> Result<(), ProtocolError> {
     let (old, new) = match field {
         "progress" => (old.progress.as_ref(), new.progress.as_ref()),
@@ -283,9 +283,9 @@ fn compare_optional_output(
 }
 
 fn compare_events(
-    previous: &ApiArtifactV1,
-    candidate: &ApiArtifactV1,
-    issues: &mut Vec<ApiCompatibilityIssueV1>,
+    previous: &ApiArtifact,
+    candidate: &ApiArtifact,
+    issues: &mut Vec<ApiCompatibilityIssue>,
 ) -> Result<(), ProtocolError> {
     for (name, old) in sorted_entries(&previous.events) {
         let Some(new) = candidate.events.get(name) else {
@@ -322,9 +322,9 @@ fn compare_events(
 }
 
 fn compare_feeds(
-    previous: &ApiArtifactV1,
-    candidate: &ApiArtifactV1,
-    issues: &mut Vec<ApiCompatibilityIssueV1>,
+    previous: &ApiArtifact,
+    candidate: &ApiArtifact,
+    issues: &mut Vec<ApiCompatibilityIssue>,
 ) -> Result<(), ProtocolError> {
     for (name, old) in sorted_entries(&previous.feeds) {
         let Some(new) = candidate.feeds.get(name) else {
@@ -356,9 +356,9 @@ fn compare_feeds(
 }
 
 fn compare_state(
-    previous: &ApiArtifactV1,
-    candidate: &ApiArtifactV1,
-    issues: &mut Vec<ApiCompatibilityIssueV1>,
+    previous: &ApiArtifact,
+    candidate: &ApiArtifact,
+    issues: &mut Vec<ApiCompatibilityIssue>,
 ) -> Result<(), ProtocolError> {
     for (name, old) in sorted_entries(&previous.state) {
         let Some(new) = candidate.state.get(name) else {
@@ -386,7 +386,7 @@ fn compare_state(
             let path = pointer(["state", name, "acceptedVersions", version]);
             let Some(new_schema) = new.accepted_versions.get(version) else {
                 issues.push(issue(
-                    ApiCompatibilityIssueCodeV1::DescriptorChanged,
+                    ApiCompatibilityIssueCode::DescriptorChanged,
                     path,
                     format!("accepted state version '{version}' was removed"),
                 ));
@@ -401,15 +401,15 @@ fn compare_state(
 }
 
 fn compare_exports(
-    previous: &ApiArtifactV1,
-    candidate: &ApiArtifactV1,
-    issues: &mut Vec<ApiCompatibilityIssueV1>,
+    previous: &ApiArtifact,
+    candidate: &ApiArtifact,
+    issues: &mut Vec<ApiCompatibilityIssue>,
 ) -> Result<(), ProtocolError> {
     for name in &previous.exports.schemas {
         let path = pointer(["exports", "schemas", name]);
         if !candidate.exports.schemas.contains(name) {
             issues.push(issue(
-                ApiCompatibilityIssueCodeV1::ExportRemoved,
+                ApiCompatibilityIssueCode::ExportRemoved,
                 path,
                 format!("exported schema '{name}' was removed"),
             ));
@@ -419,7 +419,7 @@ fn compare_exports(
             != canonicalize_json(&candidate.schemas[name])?
         {
             issues.push(issue(
-                ApiCompatibilityIssueCodeV1::DescriptorChanged,
+                ApiCompatibilityIssueCode::DescriptorChanged,
                 path,
                 format!("exported schema '{name}' changed"),
             ));
@@ -429,20 +429,20 @@ fn compare_exports(
 }
 
 fn compare_capabilities(
-    previous: &ApiArtifactV1,
-    candidate: &ApiArtifactV1,
-    issues: &mut Vec<ApiCompatibilityIssueV1>,
+    previous: &ApiArtifact,
+    candidate: &ApiArtifact,
+    issues: &mut Vec<ApiCompatibilityIssue>,
 ) {
     for (name, old) in sorted_entries(&previous.capabilities) {
         let path = pointer(["capabilities", name]);
         match candidate.capabilities.get(name) {
             None => issues.push(issue(
-                ApiCompatibilityIssueCodeV1::CapabilityRemoved,
+                ApiCompatibilityIssueCode::CapabilityRemoved,
                 path,
                 format!("capability '{name}' was removed"),
             )),
             Some(new) if old != new => issues.push(issue(
-                ApiCompatibilityIssueCodeV1::CapabilityChanged,
+                ApiCompatibilityIssueCode::CapabilityChanged,
                 path,
                 format!("capability '{name}' permissions changed"),
             )),
@@ -452,11 +452,11 @@ fn compare_capabilities(
 }
 
 fn compare_referenced_errors(
-    previous: &ApiArtifactV1,
-    candidate: &ApiArtifactV1,
+    previous: &ApiArtifact,
+    candidate: &ApiArtifact,
     names: &[String],
     checked: &mut BTreeSet<String>,
-    issues: &mut Vec<ApiCompatibilityIssueV1>,
+    issues: &mut Vec<ApiCompatibilityIssue>,
 ) -> Result<(), ProtocolError> {
     for name in names {
         if !checked.insert(name.clone()) {
@@ -465,7 +465,7 @@ fn compare_referenced_errors(
         let old = &previous.errors[name];
         let Some(new) = candidate.errors.get(name) else {
             issues.push(issue(
-                ApiCompatibilityIssueCodeV1::SchemaIncompatible,
+                ApiCompatibilityIssueCode::SchemaIncompatible,
                 pointer(["errors", name]),
                 format!("referenced error '{name}' was removed"),
             ));
@@ -477,19 +477,19 @@ fn compare_referenced_errors(
 }
 
 fn compare_error_schema(
-    previous: &ApiArtifactV1,
-    old: &ErrorDefinitionV1,
-    candidate: &ApiArtifactV1,
-    new: &ErrorDefinitionV1,
+    previous: &ApiArtifact,
+    old: &ErrorDefinition,
+    candidate: &ApiArtifact,
+    new: &ErrorDefinition,
     name: &str,
-    issues: &mut Vec<ApiCompatibilityIssueV1>,
+    issues: &mut Vec<ApiCompatibilityIssue>,
 ) -> Result<(), ProtocolError> {
     let path = pointer(["errors", name, "schema"]);
     match (&old.schema, &new.schema) {
         (None, None) | (None, Some(_)) => Ok(()),
         (Some(_), None) => {
             issues.push(issue(
-                ApiCompatibilityIssueCodeV1::SchemaIncompatible,
+                ApiCompatibilityIssueCode::SchemaIncompatible,
                 path,
                 format!("referenced error '{name}' no longer has a constrained schema"),
             ));
@@ -500,12 +500,12 @@ fn compare_error_schema(
 }
 
 fn compare_schema_ref(
-    sub_artifact: &ApiArtifactV1,
-    sub: &SchemaReferenceV1,
-    super_artifact: &ApiArtifactV1,
-    super_: &SchemaReferenceV1,
+    sub_artifact: &ApiArtifact,
+    sub: &SchemaReference,
+    super_artifact: &ApiArtifact,
+    super_: &SchemaReference,
     path: String,
-    issues: &mut Vec<ApiCompatibilityIssueV1>,
+    issues: &mut Vec<ApiCompatibilityIssue>,
 ) -> Result<(), ProtocolError> {
     push_schema_relation(
         prove_schema_subset(
@@ -519,12 +519,12 @@ fn compare_schema_ref(
 }
 
 fn compare_equivalent_schema_ref(
-    left_artifact: &ApiArtifactV1,
-    left: &SchemaReferenceV1,
-    right_artifact: &ApiArtifactV1,
-    right: &SchemaReferenceV1,
+    left_artifact: &ApiArtifact,
+    left: &SchemaReference,
+    right_artifact: &ApiArtifact,
+    right: &SchemaReference,
     path: String,
-    issues: &mut Vec<ApiCompatibilityIssueV1>,
+    issues: &mut Vec<ApiCompatibilityIssue>,
 ) -> Result<(), ProtocolError> {
     push_schema_relation(
         prove_schema_equivalent(
@@ -540,16 +540,16 @@ fn compare_equivalent_schema_ref(
 fn push_schema_relation(
     relation: SchemaRelation,
     path: String,
-    issues: &mut Vec<ApiCompatibilityIssueV1>,
+    issues: &mut Vec<ApiCompatibilityIssue>,
 ) {
     let (code, message) = match relation {
         SchemaRelation::Subset => return,
         SchemaRelation::Incompatible => (
-            ApiCompatibilityIssueCodeV1::SchemaIncompatible,
+            ApiCompatibilityIssueCode::SchemaIncompatible,
             "schema is not directionally compatible",
         ),
         SchemaRelation::Unknown => (
-            ApiCompatibilityIssueCodeV1::SchemaRelationUnknown,
+            ApiCompatibilityIssueCode::SchemaRelationUnknown,
             "schema relation is outside the supported conservative subset",
         ),
     };
@@ -562,7 +562,7 @@ fn compare_field<T: PartialEq>(
     field: &str,
     old: &T,
     new: &T,
-    issues: &mut Vec<ApiCompatibilityIssueV1>,
+    issues: &mut Vec<ApiCompatibilityIssue>,
 ) {
     if old != new {
         issues.push(descriptor_changed(section, name, field));
@@ -578,43 +578,43 @@ fn sorted_entries<T>(map: &BTreeMap<String, T>) -> Vec<(&str, &T)> {
     entries
 }
 
-fn report(issues: Vec<ApiCompatibilityIssueV1>) -> ApiCompatibilityReportV1 {
-    ApiCompatibilityReportV1 {
+fn report(issues: Vec<ApiCompatibilityIssue>) -> ApiCompatibilityReport {
+    ApiCompatibilityReport {
         compatible: issues.is_empty(),
         issues,
     }
 }
 
-fn removed(section: &str, name: &str) -> ApiCompatibilityIssueV1 {
+fn removed(section: &str, name: &str) -> ApiCompatibilityIssue {
     issue(
-        ApiCompatibilityIssueCodeV1::SurfaceRemoved,
+        ApiCompatibilityIssueCode::SurfaceRemoved,
         pointer([section, name]),
         format!("{section} surface '{name}' was removed"),
     )
 }
 
-fn changed_subject(section: &str, name: &str) -> ApiCompatibilityIssueV1 {
+fn changed_subject(section: &str, name: &str) -> ApiCompatibilityIssue {
     issue(
-        ApiCompatibilityIssueCodeV1::SubjectChanged,
+        ApiCompatibilityIssueCode::SubjectChanged,
         pointer([section, name, "subject"]),
         format!("derived subject for {section} surface '{name}' changed"),
     )
 }
 
-fn descriptor_changed(section: &str, name: &str, field: &str) -> ApiCompatibilityIssueV1 {
+fn descriptor_changed(section: &str, name: &str, field: &str) -> ApiCompatibilityIssue {
     issue(
-        ApiCompatibilityIssueCodeV1::DescriptorChanged,
+        ApiCompatibilityIssueCode::DescriptorChanged,
         pointer([section, name, field]),
         format!("{section} surface '{name}' changed '{field}'"),
     )
 }
 
 fn issue(
-    code: ApiCompatibilityIssueCodeV1,
+    code: ApiCompatibilityIssueCode,
     path: String,
     message: impl Into<String>,
-) -> ApiCompatibilityIssueV1 {
-    ApiCompatibilityIssueV1 {
+) -> ApiCompatibilityIssue {
+    ApiCompatibilityIssue {
         code,
         path,
         message: message.into(),
@@ -633,7 +633,7 @@ mod tests {
     use serde_json::{json, Map, Value};
 
     use super::*;
-    use crate::parse_api_v1;
+    use crate::parse_api;
 
     #[derive(Deserialize)]
     #[serde(rename_all = "camelCase")]
@@ -661,11 +661,11 @@ mod tests {
         let fixture = fixture();
         assert!(fixture.vectors.len() >= 32);
         for vector in fixture.vectors {
-            let previous = parse_api_v1(&vector.previous)
+            let previous = parse_api(&vector.previous)
                 .unwrap_or_else(|error| panic!("{} previous: {error}", vector.name));
-            let candidate = parse_api_v1(&vector.candidate)
+            let candidate = parse_api(&vector.candidate)
                 .unwrap_or_else(|error| panic!("{} candidate: {error}", vector.name));
-            let report = compare_api_replacement_v1(&previous, &candidate)
+            let report = compare_api_replacement(&previous, &candidate)
                 .unwrap_or_else(|error| panic!("{} comparison: {error}", vector.name));
             assert_eq!(report.compatible, vector.compatible, "{}", vector.name);
             let actual = report
@@ -702,21 +702,21 @@ mod tests {
             .into_iter()
             .find(|vector| vector.name == "deterministic-section-and-utf16-order")
             .unwrap();
-        let previous = parse_api_v1(&vector.previous).unwrap();
-        let reordered = parse_api_v1(&reverse_object(vector.previous)).unwrap();
-        let candidate = parse_api_v1(&vector.candidate).unwrap();
+        let previous = parse_api(&vector.previous).unwrap();
+        let reordered = parse_api(&reverse_object(vector.previous)).unwrap();
+        let candidate = parse_api(&vector.candidate).unwrap();
         assert_eq!(
-            compare_api_replacement_v1(&previous, &candidate).unwrap(),
-            compare_api_replacement_v1(&reordered, &candidate).unwrap()
+            compare_api_replacement(&previous, &candidate).unwrap(),
+            compare_api_replacement(&reordered, &candidate).unwrap()
         );
     }
 
     #[test]
     fn report_serialization_is_stable() {
-        let report = ApiCompatibilityReportV1 {
+        let report = ApiCompatibilityReport {
             compatible: false,
             issues: vec![issue(
-                ApiCompatibilityIssueCodeV1::SurfaceRemoved,
+                ApiCompatibilityIssueCode::SurfaceRemoved,
                 "/rpc/Example.Get".to_owned(),
                 "rpc surface 'Example.Get' was removed",
             )],
