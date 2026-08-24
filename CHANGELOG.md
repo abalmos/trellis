@@ -71,6 +71,9 @@ and this project adheres to
   generated freshness and the shared live matrix. Release now verifies only
   metadata, packages, archives, images, and publication inputs from a green `rs`
   base.
+- The final self-hosted `Check` baseline is approximately 26 minutes. The
+  prebuilt live bundle takes 3m57s and Auth is the remaining critical live slice
+  at 19m31s; every other semantic live slice completes in under 8 minutes.
 - Replaced positional Rust user-session, proof, event, generator, listener, and
   test-fixture APIs with cohesive inputs; Jobs event constructors now live under
   `jobs::events`.
