@@ -258,7 +258,7 @@ jobs:
 
   live:
     name: Live Trellis
-    needs: [prepare, wasm, portal]
+    needs: [prepare, wasm, portal, rust]
     runs-on: [self-hosted, Linux, X64]
     steps:
       - name: Check out repository
