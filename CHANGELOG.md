@@ -65,15 +65,18 @@ and this project adheres to
 - Require Platform, Jobs, Health, and Event Log to use separate SQLite files;
   runtime config rejects shared subsystem paths and local bootstrap provisions
   one file per subsystem.
-- Rebuilt the release gate around compiled/executed matrix inventory, one shared
-  live host, explicit process isolation, curated pure tests, stable Rust, named
-  local/CI lanes, and machine-readable process and phase timing.
+- Made the normal `Check` workflow the sole correctness gate, including
+  generated freshness and the shared live matrix. Release now verifies only
+  metadata, packages, archives, images, and publication inputs from a green `rs`
+  base.
 - Live integration test harnesses no longer require Podman or Docker; they spawn
   the pinned nats-server binary directly. Trellis OCI images bake the pinned
   nats-server during image build instead of downloading it at container runtime.
 
 ### Fixed
 
+- Included prepared protocol-WASM output in the JSR package and preserved the
+  `trellis-generate` executable in npm package metadata.
 - Made trust startup monotonic across configured files, SQLite, immutable NATS
   KV history, and the CAS-protected current pointer, including atomic
   removed-issuer context revocation and read-only `trellis check` reporting for
