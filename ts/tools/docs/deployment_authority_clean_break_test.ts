@@ -47,7 +47,7 @@ const requiredAuthorityTerms = [
   "identity authority",
   "participant artifact",
   "resource evidence",
-  "grantsetv1",
+  "grantset",
 ];
 
 Deno.test("deployment authority docs define the clean-break vocabulary", async () => {
