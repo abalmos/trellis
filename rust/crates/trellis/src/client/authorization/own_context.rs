@@ -29,7 +29,7 @@ pub struct AuthorizationContextCache {
     store: Arc<dyn AuthorizationContextStore>,
     state: Arc<RwLock<CachedAuthorizationState>>,
     clock_offset_ms: Arc<AtomicI64>,
-    update: Arc<tokio::sync::Mutex<()>>,
+    update: Arc<Mutex<()>>,
     refresh: Arc<tokio::sync::Mutex<()>>,
     refresh_requested: Arc<tokio::sync::Notify>,
     refresh_requested_digest: Arc<Mutex<Option<Option<String>>>>,
@@ -54,7 +54,7 @@ impl AuthorizationContextCache {
             store,
             state: Arc::new(RwLock::new(CachedAuthorizationState::default())),
             clock_offset_ms: Arc::new(AtomicI64::new(0)),
-            update: Arc::new(tokio::sync::Mutex::new(())),
+            update: Arc::new(Mutex::new(())),
             refresh: Arc::new(tokio::sync::Mutex::new(())),
             refresh_requested: Arc::new(tokio::sync::Notify::new()),
             refresh_requested_digest: Arc::new(Mutex::new(None)),
@@ -75,6 +75,7 @@ impl AuthorizationContextCache {
 
     /// Restore and verify the atomically persisted current context, if present.
     pub async fn restore(&self, now_unix_seconds: i64) -> Result<bool, TrellisClientError> {
+        let _update = self.lock_update()?;
         let Some(state) = self.store.load()? else {
             return Ok(false);
         };
@@ -114,11 +115,20 @@ impl AuthorizationContextCache {
                 ));
             }
         };
-        self.install_recoverable(bundle, routing, now_unix_seconds)
-            .await
+        self.install_recoverable_locked(bundle, routing, now_unix_seconds)
     }
 
     pub(crate) async fn install_recoverable(
+        &self,
+        bundle: AuthorizationContextBundle,
+        routing: AuthorizationRoutingMaterial,
+        now_unix_seconds: i64,
+    ) -> Result<bool, TrellisClientError> {
+        let _update = self.lock_update()?;
+        self.install_recoverable_locked(bundle, routing, now_unix_seconds)
+    }
+
+    fn install_recoverable_locked(
         &self,
         bundle: AuthorizationContextBundle,
         routing: AuthorizationRoutingMaterial,
@@ -134,12 +144,11 @@ impl AuthorizationContextCache {
         } else {
             now_unix_seconds
         };
-        self.install(bundle, routing.clone(), verification_now)
-            .await?;
+        self.install_locked(bundle, routing.clone(), verification_now)?;
         if signed.unsigned.expires_at <= now_unix_seconds
             || routing.bootstrap_jwt_expires_at <= now_unix_seconds
         {
-            self.clear()?;
+            self.clear_locked()?;
             return Ok(false);
         }
         Ok(true)
@@ -152,7 +161,16 @@ impl AuthorizationContextCache {
         routing: AuthorizationRoutingMaterial,
         now_unix_seconds: i64,
     ) -> Result<(), TrellisClientError> {
-        let _update = self.update.lock().await;
+        let _update = self.lock_update()?;
+        self.install_locked(bundle, routing, now_unix_seconds)
+    }
+
+    fn install_locked(
+        &self,
+        bundle: AuthorizationContextBundle,
+        routing: AuthorizationRoutingMaterial,
+        now_unix_seconds: i64,
+    ) -> Result<(), TrellisClientError> {
         let durable = self.store.load()?;
         if durable
             .as_ref()
@@ -276,6 +294,11 @@ impl AuthorizationContextCache {
 
     /// Clear the active session context while retaining the durable trust floor.
     pub fn clear(&self) -> Result<(), TrellisClientError> {
+        let _update = self.lock_update()?;
+        self.clear_locked()
+    }
+
+    fn clear_locked(&self) -> Result<(), TrellisClientError> {
         self.store.clear_context()?;
         let mut state = self
             .state
@@ -288,6 +311,7 @@ impl AuthorizationContextCache {
 
     /// Explicitly clear both active context and installation trust.
     pub fn reset_trust(&self) -> Result<(), TrellisClientError> {
+        let _update = self.lock_update()?;
         self.store.reset_trust()?;
         *self
             .state
@@ -344,7 +368,7 @@ impl AuthorizationContextCache {
         generation: u64,
         digest: &str,
     ) -> Result<bool, TrellisClientError> {
-        let _update = self.update.lock().await;
+        let _update = self.lock_update()?;
         let mut state = self.store.load()?.ok_or_else(|| {
             TrellisClientError::Bootstrap("authorization trust floor unavailable".into())
         })?;
@@ -477,6 +501,12 @@ impl AuthorizationContextCache {
             .read()
             .map(|state| state.clone())
             .map_err(|_| TrellisClientError::Bootstrap("context cache lock poisoned".into()))
+    }
+
+    fn lock_update(&self) -> Result<std::sync::MutexGuard<'_, ()>, TrellisClientError> {
+        self.update.lock().map_err(|_| {
+            TrellisClientError::Bootstrap("authorization context update lock poisoned".into())
+        })
     }
 
     pub(crate) fn durable_state(

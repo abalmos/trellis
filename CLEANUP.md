@@ -160,6 +160,12 @@ Validation:
   generation/portal baseline, format/check/Clippy/library and integration
   compilation passed, and the focused real invalid-proof `TERM` live case
   remained green.
+- The final ownership audit confirmed one task per lease, all-or-nothing
+  acquisition, fatal renewal loss, deterministic durable-listener teardown, and
+  coherent provider state with per-digest singleflight kept separate. It also
+  closed one remaining split mutation gate: own-context restore, recoverable
+  install cleanup, clear, trust reset, and floor advance now serialize durable
+  and in-memory changes with normal installs.
 
 ## 5. Runtime composition
 

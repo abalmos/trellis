@@ -47,6 +47,8 @@ and this project adheres to
   runtime configuration never references the root seed.
 - Ordinary request and event validation now resolves signed contexts locally by
   digest and uses generated receiver-owned permission metadata.
+- Authorization-context restore, install, clear, trust reset, and floor advance
+  now mutate durable and process-local state through one coherent update gate.
 - Clarified that the deny-all bootstrap JWT is route-selection material bounded
   by session/authority/delegation/context state and a configurable lifetime cap;
   proof-bound context refresh renews and atomically installs it.
