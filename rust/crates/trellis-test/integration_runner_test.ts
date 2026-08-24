@@ -5,7 +5,6 @@ import {
   assertThrows,
 } from "@std/assert";
 import { isAbsolute, join, relative } from "@std/path";
-import { defaultLiveJobs } from "../../../ts/packages/trellis-test/src/integration/concurrency.ts";
 import {
   assertRegisteredTestsCompiled,
   assertRustExecutionInventory,
@@ -20,25 +19,11 @@ import {
   writeIntegrationLiveArtifacts,
 } from "./integration_runner.ts";
 
-Deno.test("Rust integration runner uses the shared live worker default", () => {
-  assertEquals(parseIntegrationRunnerArgs([]).jobs, defaultLiveJobs());
-});
-
-Deno.test("Rust integration runner requires one shared worker", () => {
-  assertEquals(
-    parseIntegrationRunnerArgs(["--jobs", "1", "--", "--nocapture"]),
-    { jobs: 1, testArgs: ["--nocapture"] },
-  );
-  assertThrows(
-    () => parseIntegrationRunnerArgs(["--jobs", "3"]),
-    Error,
-    "must be 1",
-  );
-  assertThrows(
-    () => parseIntegrationRunnerArgs(["--jobs=0"]),
-    Error,
-    "positive integer",
-  );
+Deno.test("Rust integration runner forwards test arguments", () => {
+  assertEquals(parseIntegrationRunnerArgs(["--", "rpc::", "--nocapture"]), [
+    "rpc::",
+    "--nocapture",
+  ]);
 });
 
 Deno.test("Rust integration inventory requires registered cases but allows helpers", () => {

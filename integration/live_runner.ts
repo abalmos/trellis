@@ -1,5 +1,4 @@
 import { fromFileUrl } from "@std/path";
-import { defaultLiveJobs } from "../ts/packages/trellis-test/src/integration/concurrency.ts";
 import { startTrellisIntegrationSharedRuntimeHost } from "../ts/packages/trellis-test/src/integration/shared_runtime_host.ts";
 import {
   summarizeTrellisTestDurations,
@@ -16,8 +15,6 @@ import {
   verifyCompiledRustInventory,
 } from "../rust/crates/trellis-test/integration_runner.ts";
 import clientMatrix from "./client-test-matrix.json" with { type: "json" };
-
-export { defaultLiveJobs };
 
 const repoRoot = fromFileUrl(new URL("../", import.meta.url));
 const PREBUILT_ONLY_ENV = "TRELLIS_TEST_PREBUILT_ONLY";
@@ -46,15 +43,10 @@ async function main(args: readonly string[]): Promise<number> {
   const keepWorkdir = args.includes("--keep-workdir") ||
     Deno.env.get("TRELLIS_TEST_KEEP_WORKDIR") === "1";
   const typescriptOnly = args.includes("--typescript-only");
+  const rustOnly = args.includes("--rust-only");
+  validateLanguageSelectors(typescriptOnly, rustOnly);
   const inventoryOnly = args.includes("--inventory-only");
-  const jobs = positiveInteger(
-    optionValue(args, "--jobs") ?? String(defaultLiveJobs()),
-    "--jobs",
-  );
-  if (jobs !== 1) {
-    throw new Error("--jobs must be 1 for fixed shared protocol subjects");
-  }
-  const typescriptCases = selectTypeScriptCases(
+  const typescriptCases = rustOnly ? [] : selectTypeScriptCases(
     clientMatrix.cases,
     typescriptCase,
     typescriptPrefix,
@@ -132,82 +124,68 @@ async function main(args: readonly string[]): Promise<number> {
     ...(prebuiltOnly ? { [PREBUILT_ONLY_ENV]: "1" } : {}),
   };
 
-  const lanes: WorkerLane[] = [];
-  if (typescriptCases.length > 0) {
-    lanes.push({
-      name: "typescript",
-      run: async (workers) => {
-        const status = await new Deno.Command(Deno.execPath(), {
-          args: [
-            "run",
-            "-A",
-            "-c",
-            "ts/integration/deno.json",
-            "ts/integration/runner.ts",
-            "--parallel",
-            "--jobs",
-            String(workers),
-            ...typescriptCaseIds.flatMap((id) => ["--case", id]),
-          ],
-          cwd: repoRoot,
-          env,
-          stdin: "inherit",
-          stdout: "inherit",
-          stderr: "inherit",
-        }).spawn().status;
-        return status.code;
-      },
-    });
-  }
-  if (rustTests.length > 0) {
-    lanes.push({
-      name: "rust",
-      run: async (workers) => {
-        const status = await new Deno.Command(Deno.execPath(), {
-          args: [
-            "run",
-            "-A",
-            "-c",
-            "ts/deno.json",
-            "rust/crates/trellis-test/integration_runner.ts",
-            "--jobs",
-            String(workers),
-            ...(rustFilter === undefined ? [] : ["--", rustFilter]),
-          ],
-          cwd: repoRoot,
-          env,
-          stdin: "inherit",
-          stdout: "inherit",
-          stderr: "inherit",
-        }).spawn().status;
-        return status.code;
-      },
-    });
-  }
-
-  return await orchestrateWorkerLanes(lanes, jobs, async (code) => {
-    try {
-      if (code !== 0) {
-        console.error(
-          `shared Trellis output:\n${host.output?.() ?? "<unavailable>"}`,
-        );
-      }
-      const metrics = host.metrics === undefined ? [] : await host.metrics();
-      console.log(JSON.stringify({
-        event: "integration-process-summary",
-        starts: summarizeTrellisTestProcessStarts(metrics),
-        slowest: summarizeTrellisTestDurations(metrics),
-      }));
-    } finally {
-      await host.stop();
+  try {
+    let code = 0;
+    if (typescriptCases.length > 0) {
+      code = (await new Deno.Command(Deno.execPath(), {
+        args: [
+          "run",
+          "-A",
+          "-c",
+          "ts/integration/deno.json",
+          "ts/integration/runner.ts",
+          ...typescriptCaseIds.flatMap((id) => ["--case", id]),
+        ],
+        cwd: repoRoot,
+        env,
+        stdin: "inherit",
+        stdout: "inherit",
+        stderr: "inherit",
+      }).spawn().status).code;
     }
-  });
+    if (rustTests.length > 0) {
+      const rustCode = (await new Deno.Command(Deno.execPath(), {
+        args: [
+          "run",
+          "-A",
+          "-c",
+          "ts/deno.json",
+          "rust/crates/trellis-test/integration_runner.ts",
+          ...(rustFilter === undefined ? [] : ["--", rustFilter]),
+        ],
+        cwd: repoRoot,
+        env,
+        stdin: "inherit",
+        stdout: "inherit",
+        stderr: "inherit",
+      }).spawn().status).code;
+      if (code === 0) code = rustCode;
+    }
+    if (code !== 0) {
+      console.error(
+        `shared Trellis output:\n${host.output?.() ?? "<unavailable>"}`,
+      );
+    }
+    const metrics = host.metrics === undefined ? [] : await host.metrics();
+    console.log(JSON.stringify({
+      event: "integration-process-summary",
+      starts: summarizeTrellisTestProcessStarts(metrics),
+      slowest: summarizeTrellisTestDurations(metrics),
+    }));
+    return code;
+  } finally {
+    await host.stop();
+  }
 }
 
-export type WorkerLane = {
-  readonly name: string;
-  readonly run: (jobs: number) => Promise<number>;
-};
+export function validateLanguageSelectors(
+  typescriptOnly: boolean,
+  rustOnly: boolean,
+): void {
+  if (typescriptOnly && rustOnly) {
+    throw new Error("--rust-only and --typescript-only are mutually exclusive");
+  }
+}
 
 export function selectTypeScriptCases<
   T extends {
@@ -236,46 +214,6 @@ export function selectTypeScriptCases<
     );
   }
   return selected;
-}
-
-export function allocateWorkers(
-  totalJobs: number,
-  laneCount: number,
-): number[] {
-  if (!Number.isInteger(totalJobs) || totalJobs <= 0 || laneCount <= 0) {
-    throw new Error("worker allocation requires positive integers");
-  }
-  const base = Math.floor(totalJobs / laneCount);
-  const remainder = totalJobs % laneCount;
-  return Array.from(
-    { length: laneCount },
-    (_, index) => base + (index >= laneCount - remainder ? 1 : 0),
-  );
-}
-
-export async function orchestrateWorkerLanes(
-  lanes: readonly WorkerLane[],
-  totalJobs: number,
-  afterSettled: (code: number) => Promise<void> = () => Promise.resolve(),
-): Promise<number> {
-  positiveInteger(String(totalJobs), "--jobs");
-  let code = 0;
-  try {
-    for (let offset = 0; offset < lanes.length; offset += totalJobs) {
-      const batch = lanes.slice(offset, offset + totalJobs);
-      const allocations = allocateWorkers(totalJobs, batch.length);
-      const results = await Promise.allSettled(
-        batch.map((lane, index) => lane.run(allocations[index])),
-      );
-      for (const result of results) {
-        const laneCode = result.status === "fulfilled" ? result.value : 1;
-        if (code === 0 && laneCode !== 0) code = laneCode;
-      }
-    }
-    return code;
-  } finally {
-    await afterSettled(code);
-  }
 }
 
 async function verifyTypeScriptInventory(
@@ -314,12 +252,4 @@ function optionValue(
     throw new Error(`${name} requires a value`);
   }
   return value;
-}
-
-function positiveInteger(value: string, flag: string): number {
-  const parsed = Number(value);
-  if (!Number.isInteger(parsed) || parsed <= 0) {
-    throw new Error(`${flag} requires a positive integer`);
-  }
-  return parsed;
 }

@@ -71,6 +71,12 @@ restore parallelism by rewriting semantic identities or by adding test-only
 protocol behavior; parallel shared-host execution requires a production
 transport-level tenant namespace first.
 
+The normal Check runs semantic subsystem slices in parallel as independent
+GitHub Actions jobs. Each job owns its own NATS server, Trellis process, and
+SQLite files, while cases within that environment remain serial. Live
+executables are built once and distributed to those jobs; live execution does
+not compile Rust.
+
 `isolated-process` is reserved for process- or deployment-global behavior such
 as restart, ownership loss, startup migration, destructive trust rotation, or
 malformed global configuration. Every isolated row records its reason and runs

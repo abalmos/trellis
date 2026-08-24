@@ -5,7 +5,6 @@ import clientMatrix from "../../../integration/client-test-matrix.json" with {
 import runtimeMatrix from "../../../integration/rust-runtime-test-matrix.json" with {
   type: "json",
 };
-import { defaultLiveJobs } from "../../../ts/packages/trellis-test/src/integration/concurrency.ts";
 import {
   summarizeTrellisTestDurations,
   summarizeTrellisTestProcessStarts,
@@ -53,7 +52,7 @@ if (import.meta.main) {
 }
 
 async function main(args: readonly string[]): Promise<number> {
-  const { jobs, testArgs } = parseIntegrationRunnerArgs(args);
+  const testArgs = parseIntegrationRunnerArgs(args);
   const tempDir = fromFileUrl(
     new URL("../../target/trellis-test-tmp/", import.meta.url),
   );
@@ -109,7 +108,7 @@ async function main(args: readonly string[]): Promise<number> {
           ...testArgs,
           ...unregisteredTests.flatMap((name) => ["--skip", name]),
           ...isolatedTests.flatMap((name) => ["--skip", name]),
-          `--test-threads=${jobs}`,
+          "--test-threads=1",
           "--format=pretty",
         ], env),
       );
@@ -186,30 +185,10 @@ async function runTests(
   return { success: status.success, code: status.code, stdout };
 }
 
-export function parseIntegrationRunnerArgs(args: readonly string[]): {
-  readonly jobs: number;
-  readonly testArgs: readonly string[];
-} {
-  let jobs = defaultLiveJobs();
-  const testArgs: string[] = [];
-  for (let index = 0; index < args.length; index += 1) {
-    const arg = args[index];
-    if (arg === "--jobs") {
-      jobs = positiveInteger(args[index + 1], arg);
-      index += 1;
-    } else if (arg.startsWith("--jobs=")) {
-      jobs = positiveInteger(arg.slice("--jobs=".length), "--jobs");
-    } else if (arg === "--") {
-      testArgs.push(...args.slice(index + 1));
-      break;
-    } else {
-      testArgs.push(arg);
-    }
-  }
-  if (jobs !== 1) {
-    throw new Error("--jobs must be 1 for fixed shared protocol subjects");
-  }
-  return { jobs, testArgs };
+export function parseIntegrationRunnerArgs(
+  args: readonly string[],
+): readonly string[] {
+  return args[0] === "--" ? args.slice(1) : args;
 }
 
 export function partitionRustTests(
@@ -223,14 +202,6 @@ export function partitionRustTests(
     sharedTests: testIds.filter((id) => !isolatedTests.includes(id)),
     isolatedTests,
   };
-}
-
-function positiveInteger(value: string | undefined, flag: string): number {
-  const parsed = Number(value);
-  if (!Number.isInteger(parsed) || parsed <= 0) {
-    throw new Error(`${flag} requires a positive integer`);
-  }
-  return parsed;
 }
 
 export async function buildIntegrationTest(): Promise<string> {

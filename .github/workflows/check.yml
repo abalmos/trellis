@@ -12,7 +12,7 @@ permissions:
 
 concurrency:
   group: check-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 env:
   DENO_VERSION: 2.9.4
@@ -256,9 +256,156 @@ jobs:
       - name: Test TypeScript package builds
         run: deno task -c ts/deno.json test:prepared:packaging
 
+  live-build:
+    name: Build live executables
+    needs: [prepare, portal]
+    runs-on: [self-hosted, Linux, X64]
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Download generated artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: check-generated
+          path: generated
+
+      - name: Download embedded portal
+        uses: actions/download-artifact@v4
+        with:
+          name: check-portal
+          path: rust/crates/runtime/generated/portal
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Set up Deno
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: ${{ env.DENO_VERSION }}
+
+      - name: Check live runners
+        run: >-
+          deno check -c ts/deno.json
+          integration/live_runner.ts
+          rust/crates/trellis-test/integration_runner.ts
+
+      - name: Test live runners
+        run: >-
+          deno test -A -c ts/deno.json
+          integration/live_runner_test.ts
+          rust/crates/trellis-test/integration_runner_test.ts
+
+      - name: Build live executables
+        env:
+          CARGO_TARGET_DIR: ${{ runner.temp }}/trellis-live-target
+        run: deno run -A -c ts/deno.json integration/live_runner.ts --build-only
+
+      - name: Upload live executables
+        uses: actions/upload-artifact@v4
+        with:
+          name: check-live-executables
+          path: dist/integration-runtime
+          retention-days: 1
+
   live:
-    name: Live Trellis
-    needs: [prepare, wasm, portal, rust]
+    name: Live ${{ matrix.name }}
+    needs: [prepare, wasm, live-build]
+    runs-on: [self-hosted, Linux, X64]
+    strategy:
+      fail-fast: false
+      max-parallel: 8
+      matrix:
+        include:
+          - name: auth
+            rust: "auth::"
+            typescript: "authorization-registry."
+          - name: operations
+            rust: "operations::"
+            typescript: "operations."
+          - name: state
+            rust: "state::"
+            typescript: "state."
+          - name: event-consumers
+            rust: "event_consumers::"
+            typescript: ""
+          - name: jobs
+            rust: "jobs::"
+            typescript: ""
+          - name: rpc
+            rust: "rpc::"
+            typescript: "rpc."
+          - name: resources
+            rust: "resources::"
+            typescript: "resources."
+          - name: transfer
+            rust: "transfer::"
+            typescript: "transfer."
+          - name: events
+            rust: "events::"
+            typescript: "events."
+          - name: feeds
+            rust: "feeds::"
+            typescript: "feeds."
+          - name: prepared-events
+            rust: "prepared_events::"
+            typescript: "outbox."
+          - name: authority-plan
+            rust: "authority_plan::"
+            typescript: ""
+          - name: health
+            rust: "health::"
+            typescript: ""
+          - name: runtime-ownership
+            rust: "runtime_ownership::"
+            typescript: ""
+          - name: cli
+            rust: "cli::"
+            typescript: ""
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Download generated artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: check-generated
+          path: generated
+
+      - name: Download protocol WASM
+        uses: actions/download-artifact@v4
+        with:
+          name: check-protocol-wasm
+          path: ts/packages/trellis/auth/protocol_wasm
+
+      - name: Download live executables
+        uses: actions/download-artifact@v4
+        with:
+          name: check-live-executables
+          path: dist/integration-runtime
+
+      - name: Set up Deno
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: ${{ env.DENO_VERSION }}
+
+      - name: Run live integration suite
+        env:
+          RUST_FILTER: ${{ matrix.rust }}
+          TYPESCRIPT_PREFIX: ${{ matrix.typescript }}
+        shell: bash
+        run: |
+          args=(--prebuilt-only --rust-filter "$RUST_FILTER")
+          if [[ -n "$TYPESCRIPT_PREFIX" ]]; then
+            args+=(--typescript-prefix "$TYPESCRIPT_PREFIX")
+          else
+            args+=(--rust-only)
+          fi
+          deno run -A -c ts/deno.json integration/live_runner.ts "${args[@]}"
+
+  external-smoke:
+    name: External repository smoke
+    needs: [prepare, wasm, live-build]
     runs-on: [self-hosted, Linux, X64]
     steps:
       - name: Check out repository
@@ -276,47 +423,22 @@ jobs:
           name: check-protocol-wasm
           path: ts/packages/trellis/auth/protocol_wasm
 
-      - name: Download embedded portal
+      - name: Download live executables
         uses: actions/download-artifact@v4
         with:
-          name: check-portal
-          path: rust/crates/runtime/generated/portal
-
-      - name: Set up Rust
-        uses: dtolnay/rust-toolchain@stable
+          name: check-live-executables
+          path: dist/integration-runtime
 
       - name: Set up Deno
         uses: denoland/setup-deno@v2
         with:
           deno-version: ${{ env.DENO_VERSION }}
 
-      - name: Cache Rust build artifacts
-        uses: swatinem/rust-cache@v2
-        with:
-          workspaces: rust -> target
-
-      - name: Check live runners
-        run: >-
-          deno check -c ts/deno.json
-          integration/live_runner.ts
-          rust/crates/trellis-test/integration_runner.ts
-
-      - name: Test live runners
-        run: >-
-          deno test -A -c ts/deno.json
-          integration/live_runner_test.ts
-          rust/crates/trellis-test/integration_runner_test.ts
-
-      - name: Build live Trellis server
-        run: cargo build --locked --manifest-path rust/Cargo.toml -p trellis-runtime --bin trellis-server
-
-      - name: Run live integration suite
-        run: deno run -A -c ts/deno.json integration/live_runner.ts
-
       - name: Run external repository smoke
         env:
-          TRELLIS_TEST_SERVER_BIN: ${{ github.workspace }}/rust/target/debug/trellis-server
+          TRELLIS_TEST_SERVER_BIN: ${{ github.workspace }}/dist/integration-runtime/trellis-server
         run: >-
+          chmod +x dist/integration-runtime/trellis-server &&
           deno run -A -c ts/deno.json
           ts/packages/trellis-test/src/integration/runner.ts
           --config

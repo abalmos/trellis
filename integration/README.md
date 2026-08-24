@@ -40,7 +40,7 @@ deno task -c ts/deno.json test:integration -- --case rpc.client-calls-service-su
 Rust uses exact `libtest` filters through the shared-host runner:
 
 ```sh
-deno run -A -c ts/deno.json integration/live_runner.ts --typescript-prefix __none --rust-filter rpc::
+deno run -A -c ts/deno.json integration/live_runner.ts --rust-only --rust-filter rpc::
 ```
 
 The complete local live schedule is:

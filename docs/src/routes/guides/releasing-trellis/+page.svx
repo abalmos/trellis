@@ -33,15 +33,16 @@ runtime, fake auth, or fake generated-client workflows to prove Trellis behavior
 If live coverage needs a missing failure or inspection surface, add the smallest
 named `trellis-test` helper and prove the behavior through a live control plane.
 
-Before committing or ending an implementation cycle, run the focused checks that match the files touched. The complete live lane starts one host, runs TypeScript with up to eight case slots, then runs Rust with up to eight case slots against the retained host:
+Before committing or ending an implementation cycle, run the focused checks that match the files touched. A local live run starts one host and executes selected TypeScript and Rust cases serially against it:
 
 ```sh
 deno run -A -c ts/deno.json integration/live_runner.ts
 ```
 
-Focused language-only runs may use all eight slots. Process-isolated cases run
-through Rust's separate serial queue after the shared Rust schedule;
-feature-area skip lists are forbidden.
+Process-isolated cases run through Rust's separate serial queue after the shared
+Rust schedule; feature-area skip lists are forbidden. The normal Check obtains
+parallelism from independent semantic subsystem jobs, each with its own live
+environment and the same prebuilt executable bundle.
 
 If the full integration suites cannot be run, record the reason and the last focused checks that did run.
 
@@ -58,30 +59,16 @@ deno task -c ts/deno.json test:integration -- --coverage cross-runtime-rpc
 deno task -c ts/deno.json test:integration -- --fixture events --fixture feeds
 ```
 
-The Rust integration runner prebuilds the test and runtime binaries before starting the shared host, then forwards Cargo's normal integration-test filter. Use the fixture module name or a concrete test function name as the single positional filter before `--`; hyphenated matrix fixture IDs use underscore module names in Rust filters:
+The top-level live runner accepts TypeScript case or prefix selectors and a Rust `libtest` substring filter. It builds missing executables for local runs; `--prebuilt-only` forbids that fallback:
 
 ```sh
-deno run -A -c ts/deno.json rust/crates/trellis-test/integration_runner.ts --jobs 1 rpc -- --nocapture
-deno run -A -c ts/deno.json rust/crates/trellis-test/integration_runner.ts --jobs 1 rpc_client_calls_service_success -- --nocapture
-deno run -A -c ts/deno.json rust/crates/trellis-test/integration_runner.ts --jobs 1 service_approval -- --nocapture
-deno run -A -c ts/deno.json rust/crates/trellis-test/integration_runner.ts --jobs 1 app_identity_approval -- --nocapture
-deno run -A -c ts/deno.json rust/crates/trellis-test/integration_runner.ts --jobs 1 rust_integration_manifest_conforms_to_shared_matrix -- --nocapture
+deno run -A -c ts/deno.json integration/live_runner.ts --typescript-only --typescript-case rpc.client-calls-service-success
+deno run -A -c ts/deno.json integration/live_runner.ts --typescript-only --typescript-prefix operations.
+deno run -A -c ts/deno.json integration/live_runner.ts --rust-only --rust-filter jobs::
+deno run -A -c ts/deno.json integration/live_runner.ts
 ```
 
 For coverage-focused Rust diagnostics, map the coverage ID back to matrix cases and run the corresponding fixture or test filters. Cargo accepts one test-filter substring per invocation; run multiple commands for multi-fixture slices.
-
-When experimenting with CI sharding, keep the TypeScript and Rust suites as peer jobs against the same matrix. Start with a few conservative TypeScript filter groups and matching Rust filter groups, then prove equivalence against the full unfiltered peer commands before treating shards as release-equivalent:
-
-```sh
-deno task -c ts/deno.json test:integration -- --fixture rpc --fixture operations --fixture events --fixture feeds
-deno task -c ts/deno.json test:integration -- --fixture state --fixture transfer --fixture resources --fixture jobs
-deno task -c ts/deno.json test:integration -- --fixture health --fixture service-approval --fixture app-identity-approval --fixture device-activation
-deno run -A -c ts/deno.json rust/crates/trellis-test/integration_runner.ts --jobs 1 rpc -- --nocapture
-deno run -A -c ts/deno.json rust/crates/trellis-test/integration_runner.ts --jobs 1 operations -- --nocapture
-deno run -A -c ts/deno.json rust/crates/trellis-test/integration_runner.ts --jobs 1 events -- --nocapture
-```
-
-Shards are a speed aid only; release verification still requires the full unsharded TypeScript and Rust integration suites until shard equivalence is proven against the shared matrix.
 
 ## Formatting policy
 

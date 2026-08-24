@@ -21,9 +21,12 @@ Repository: `abalmos/trellis` Branch: `rs` Status updated: 2026-08-20
 
 ## 1. Fast feedback / test, check, release
 
-- [x] Make live-test concurrency machine-adaptive instead of using a fixed
-      worker count.
-- [x] Share the live worker default between TS and Rust runners.
+- [x] Keep shared fixed-subject cases serial within one live environment and
+      delete the fake machine-adaptive worker setting.
+- [x] Build the live executables once and run semantic subsystem slices as
+      native parallel Actions jobs using only the prebuilt bundle.
+- [x] Run external repository smoke independently from the subsystem matrix.
+- [x] Cancel superseded everyday `Check` runs.
 - [x] Delete stale nextest/test-governance artifacts and the stale release
       timing baseline.
 - [x] Make the Rust live matrix track behavior instead of every compiled
@@ -258,9 +261,10 @@ Validation:
 - `65dae41f` — shrink typed runtime error payloads so Rust 1.98 no longer needs
   repeated `result_large_err` / `large_enum_variant` suppressions for those
   envelopes.
-- CI/release simplification also includes adaptive concurrency, stale-governance
-  deletion, release-DAG deletion, generated-artifact fixes, and one-generation
-  `Check` preparation; use `git log rs` for the exact intermediate commit chain.
+- CI/release simplification also includes native semantic live-job parallelism,
+  stale-governance deletion, release-DAG deletion, generated-artifact fixes, and
+  one-generation `Check` preparation; use `git log rs` for the exact
+  intermediate commit chain.
 
 ## Immediate next work
 

@@ -55,7 +55,7 @@ and this project adheres to
   authored source artifacts, and intentional internal persistence boundaries.
 - Increased local-bootstrap NATS authorization timeout to 30 seconds and apply
   Trellis connection timeouts to initial client dials so the full fail-closed
-  admission pipeline remains reliable under the restored eight-worker gate.
+  admission pipeline remains reliable under concurrent live validation.
 - Derived runtime convergence and read-only `trellis check` requirements from
   the selected runtime mode. Removed obsolete public infrastructure apply/check
   commands; `trellis infra` now contains only offline trust artifact tooling.
@@ -98,8 +98,8 @@ and this project adheres to
   failure, resolve exact immutable trust/context records lazily, expose cache
   health, and record admitted context digest in connection presence.
 - Defined context size limits uniformly as canonical complete signed-context
-  JSON UTF-8 bytes and restored eight-worker TypeScript and Rust integration
-  gates.
+  JSON UTF-8 bytes and restored semantic subsystem-parallel TypeScript and Rust
+  integration gates.
 - Made authorization-context revocation observation monotonic and reconnect
   recovery adopt refreshed dynamic NATS credentials without browser
   reauthentication.
