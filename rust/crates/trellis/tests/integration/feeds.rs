@@ -342,9 +342,6 @@ async fn feeds_abort_stops_client_subscription() {
     assert_eq!(first.sequence, 1);
 
     drop(stream);
-
-    tokio::time::sleep(Duration::from_millis(200)).await;
-
     service_task.abort_and_wait().await;
 }
 

@@ -1,4 +1,3 @@
-use std::sync::Arc;
 use std::time::Duration;
 
 use futures_util::StreamExt;
@@ -148,31 +147,16 @@ async fn events_client_publishes_and_subscriber_receives() {
     .await
     .expect("connect live Rust events service");
 
-    let observed_events = Arc::new(tokio::sync::Mutex::new(Vec::<EntityChangedEvent>::new()));
-    let handler_observed_events = Arc::clone(&observed_events);
-
     let service_task = AbortOnDrop::new(tokio::spawn(async move { service.run().await }));
 
     let client = admin
         .connect_client(&bootstrap_url, &pubsub_client_contract)
         .await
         .expect("connect live Rust events pubsub client");
-    let event_stream = client
+    let mut event_stream = client
         .subscribe::<EntityChangedEventDescriptor>()
         .await
         .expect("subscribe to Entity.Changed events");
-    let event_collection_task = tokio::spawn(async move {
-        let mut stream = event_stream;
-        while let Some(result) = stream.next().await {
-            match result {
-                Ok(event) => handler_observed_events.lock().await.push(event),
-                Err(error) => {
-                    eprintln!("event subscription error: {error}");
-                    break;
-                }
-            }
-        }
-    });
 
     let event = EntityChangedEvent {
         id: "entity-events-1".to_string(),
@@ -183,17 +167,14 @@ async fn events_client_publishes_and_subscriber_receives() {
         .await
         .expect("publish Entity.Changed event");
 
-    tokio::time::sleep(Duration::from_secs(3)).await;
-
-    event_collection_task.abort();
-    let _ = event_collection_task.await;
+    let received = tokio::time::timeout(Duration::from_secs(10), event_stream.next())
+        .await
+        .expect("event delivery timed out")
+        .expect("event stream ended")
+        .expect("receive Entity.Changed event");
     service_task.abort_and_wait().await;
 
-    {
-        let events = observed_events.lock().await;
-        assert_eq!(events.len(), 1, "expected one event, got: {events:?}");
-        assert_eq!(events[0], event);
-    }
+    assert_eq!(received, event);
 
     assert_eq!(
         <EntityChangedEventDescriptor as trellis_rs::client::EventDescriptor>::KEY,

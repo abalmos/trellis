@@ -1919,7 +1919,6 @@ async fn device_activation_required_review_needs_privileged_decision() {
         })
         .await
         .expect("start rejected activation operation");
-    tokio::time::sleep(Duration::from_millis(200)).await;
     let rejected_reviews = auth
         .device_user_authorities_reviews_list(
             &auth_sdk::AuthDeviceUserAuthoritiesReviewsListRequest {
