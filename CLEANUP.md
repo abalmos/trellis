@@ -68,10 +68,10 @@ Repository: `abalmos/trellis` Branch: `rs` Status updated: 2026-08-20
 - [x] Reduce the event-authorization failure live case to real behavior: publish
       a legitimate signed event, corrupt the proof, require JetStream `TERM`,
       and verify the handler is not invoked for the corrupt copy.
-- [ ] Audit the remaining `integration-test-hooks`; delete synthetic
+- [x] Audit the remaining `integration-test-hooks`; delete synthetic
       errors/faults and retain only genuine deterministic scheduling barriers
       where needed.
-- [ ] Replace avoidable fixed sleeps with observable readiness/state boundaries
+- [x] Replace avoidable fixed sleeps with observable readiness/state boundaries
       where practical.
 
 Validation:
@@ -85,6 +85,12 @@ Validation:
   tests and integration compilation passed, and the focused real JetStream
   invalid-proof case emitted `TERM` without invoking the handler for the corrupt
   event.
+- The final audit retained only three `integration-test-hooks` methods: exact
+  SQLite-backed portal snapshot/reconciliation barriers and reconciliation-pass
+  observation used by real race tests. It removed the hidden mutable Rust test
+  tenant and unused `fail_once_hooks`; shared assignments now use the immutable
+  `libtest` thread name. Remaining sleeps are bounded polling backoffs or the
+  wall-clock/non-delivery interval under test, not readiness guesses.
 
 ## 3. First public protocol version
 

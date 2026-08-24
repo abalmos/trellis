@@ -9,11 +9,6 @@ use async_nats::ConnectOptions;
 use bytes::Bytes;
 use futures_util::StreamExt;
 
-const TEST_NAME: &str = "runtime_ownership::runtime_singleton_ownership_lifecycle";
-const INCOMPATIBLE_BUCKET_TEST_NAME: &str =
-    "runtime_ownership::runtime_incompatible_lease_bucket_fails_before_storage_open";
-const MODE_SCOPED_CHECK_TEST_NAME: &str =
-    "runtime_ownership::runtime_check_is_mode_scoped_and_read_only";
 const LEASE_BUCKET: &str = "trellis_runtime_leases";
 
 struct RuntimeProcess {
@@ -129,7 +124,6 @@ impl Drop for RuntimeProcess {
 
 #[tokio::test]
 async fn runtime_singleton_ownership_lifecycle() {
-    trellis_test::set_current_test_tenant(TEST_NAME);
     let mut runtime =
         trellis_test::TrellisTestRuntime::start(trellis_test::TrellisTestRuntimeOptions::default())
             .await
@@ -319,7 +313,6 @@ async fn runtime_singleton_ownership_lifecycle() {
 
 #[tokio::test]
 async fn runtime_incompatible_lease_bucket_fails_before_storage_open() {
-    trellis_test::set_current_test_tenant(INCOMPATIBLE_BUCKET_TEST_NAME);
     let mut runtime =
         trellis_test::TrellisTestRuntime::start(trellis_test::TrellisTestRuntimeOptions::default())
             .await
@@ -365,7 +358,6 @@ async fn runtime_incompatible_lease_bucket_fails_before_storage_open() {
 
 #[tokio::test]
 async fn runtime_check_is_mode_scoped_and_read_only() {
-    trellis_test::set_current_test_tenant(MODE_SCOPED_CHECK_TEST_NAME);
     let mut runtime =
         trellis_test::TrellisTestRuntime::start(trellis_test::TrellisTestRuntimeOptions::default())
             .await

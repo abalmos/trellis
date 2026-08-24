@@ -30,10 +30,6 @@ pub(crate) fn assert_case_registered(case_id: &str, fixture: &str, module: &str)
 
     assert_eq!(matrix_case.fixture, fixture);
     assert_eq!(local_case.module, module);
-    trellis_test::set_current_test_tenant(format!(
-        "{}::{}",
-        local_case.module, local_case.function
-    ));
 }
 
 pub(crate) fn assert_runtime_case_registered(case_id: &str, fixture: &str, module: &str) {
@@ -46,8 +42,4 @@ pub(crate) fn assert_runtime_case_registered(case_id: &str, fixture: &str, modul
 
     assert_eq!(matrix_case.fixture, fixture);
     assert_eq!(local_case.module, module);
-    trellis_test::set_current_test_tenant(format!(
-        "{}::{}",
-        local_case.module, local_case.function
-    ));
 }

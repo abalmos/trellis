@@ -6,7 +6,6 @@
 //! probing, and deterministic cleanup. Admin/client/service automation will be
 //! layered on this foundation as Rust live integration cases migrate.
 
-use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap};
 use std::ffi::OsString;
 use std::fmt;
@@ -68,9 +67,6 @@ pub fn record_test_process_start(process: &str, detail: impl fmt::Display) -> io
 }
 const SHARED_RUNTIME_ENV: &str = "TRELLIS_TEST_SHARED_RUNTIME";
 const ADMIN_USERNAME: &str = "admin";
-thread_local! {
-    static CURRENT_TEST_TENANT: RefCell<Option<String>> = const { RefCell::new(None) };
-}
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -149,11 +145,6 @@ struct SharedSecretPaths {
     auth_issuer_signing: String,
     auth_target_signing: String,
     auth_callout_x_key: String,
-}
-
-/// Select the shared-NATS tenant used by the current Rust integration test.
-pub fn set_current_test_tenant(tenant: impl Into<String>) {
-    CURRENT_TEST_TENANT.with(|current| *current.borrow_mut() = Some(tenant.into()));
 }
 
 /// Error returned by Rust Trellis integration-test runtime helpers.
@@ -543,8 +534,6 @@ pub struct TrellisTestRuntimeOptions {
     pub nats_user_jwt_ttl_ms: Option<u64>,
     /// Whether an isolated process should use the shared standards-based test OIDC provider.
     pub use_shared_test_oidc_provider: bool,
-    /// Named fail-once hooks injected into the isolated test control-plane config.
-    pub fail_once_hooks: Vec<String>,
 }
 
 impl TrellisTestRuntimeOptions {
@@ -564,7 +553,6 @@ impl TrellisTestRuntimeOptions {
             oauth_providers: Map::new(),
             nats_user_jwt_ttl_ms: None,
             use_shared_test_oidc_provider: false,
-            fail_once_hooks: Vec::new(),
         }
     }
 
@@ -1078,12 +1066,12 @@ fn shared_runtime_assignment() -> Result<
     let Some(path) = std::env::var_os(SHARED_RUNTIME_ENV) else {
         return Ok(None);
     };
-    let tenant_id = CURRENT_TEST_TENANT
-        .with(|current| current.borrow().clone())
-        .or_else(|| std::thread::current().name().map(str::to_string))
+    let tenant_id = std::thread::current()
+        .name()
+        .map(str::to_string)
         .ok_or_else(|| {
             TrellisTestError::UnexpectedResponse(
-                "shared Rust integration runtime requires a registered test tenant".to_string(),
+                "shared Rust integration runtime requires a named test thread".to_string(),
             )
         })?;
     let manifest: SharedRuntimeManifest = serde_json::from_slice(&fs::read(path)?)?;
