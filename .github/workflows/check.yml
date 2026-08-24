@@ -255,7 +255,7 @@ jobs:
 
   live-build:
     name: Build live executables
-    needs: [prepare, portal]
+    needs: [prepare, wasm, portal]
     runs-on: [self-hosted, Linux, X64]
     steps:
       - name: Check out repository
@@ -272,6 +272,12 @@ jobs:
         with:
           name: check-portal
           path: rust/crates/runtime/generated/portal
+
+      - name: Download protocol WASM
+        uses: actions/download-artifact@v4
+        with:
+          name: check-protocol-wasm
+          path: ts/packages/trellis/auth/protocol_wasm
 
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
