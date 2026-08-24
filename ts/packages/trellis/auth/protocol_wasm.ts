@@ -1,6 +1,7 @@
 import init, {
   initSync,
   type SyncInitInput,
+  type VerifiedAuthorizationContextHandle as WasmAuthorizationContextHandle,
 } from "./protocol_wasm/trellis_protocol_wasm.js";
 import * as protocolWasmModule from "./protocol_wasm/trellis_protocol_wasm.js";
 import { PROTOCOL_WASM_BASE64 } from "./protocol_wasm/trellis_protocol_wasm_bytes.ts";
@@ -8,13 +9,7 @@ import { base64urlDecode, type JsonValue } from "./utils.ts";
 
 type JsonObject = { [key: string]: JsonValue };
 
-type ProtocolWasmModule = typeof protocolWasmModule & {
-  resolve_participant_v1(participantJson: string, apisJson: string): string;
-  verify_authorization_event_v1(inputJson: string): string;
-  verify_authorization_request_v1(inputJson: string): string;
-};
-
-const protocolWasm = protocolWasmModule as ProtocolWasmModule;
+const protocolWasm = protocolWasmModule;
 
 /** Verification policy accepted by the Rust authorization protocol. */
 export type AuthorizationVerificationPolicyV1 = {
@@ -215,34 +210,32 @@ export type VerifyAuthorizationEventResult =
   | { ok: false; error: AuthorizationVerificationError };
 
 /** Arguments for local context-bound request authorization. */
-export type VerifyAuthorizationRequestArgs =
-  & AuthorizationContextVerificationInput
-  & {
-    subject: string;
-    reply: string | null;
-    payload: Uint8Array;
-    iat: number;
-    requestId: string;
-    proof: string;
-    requiredPermissions: PermissionAtomV1[];
-    requiredCapabilities: string[];
-    policy: AuthorizationVerificationPolicyV1;
-  };
+export type VerifyAuthorizationRequestArgs = {
+  contextHandle: AuthorizationContextHandle;
+  subject: string;
+  reply: string | null;
+  payload: Uint8Array;
+  iat: number;
+  requestId: string;
+  proof: string;
+  requiredPermissions: PermissionAtomV1[];
+  requiredCapabilities: string[];
+  policy: AuthorizationVerificationPolicyV1;
+};
 
 /** Arguments for local context-bound event authorization. */
-export type VerifyAuthorizationEventArgs =
-  & AuthorizationContextVerificationInput
-  & {
-    subject: string;
-    payload: Uint8Array;
-    eventId: string;
-    eventTime: string;
-    proof: string;
-    requiredPermissions: PermissionAtomV1[];
-    requiredCapabilities: string[];
-    policy: AuthorizationVerificationPolicyV1;
-    revokedAt?: number | null;
-  };
+export type VerifyAuthorizationEventArgs = {
+  contextHandle: AuthorizationContextHandle;
+  subject: string;
+  payload: Uint8Array;
+  eventId: string;
+  eventTime: string;
+  proof: string;
+  requiredPermissions: PermissionAtomV1[];
+  requiredCapabilities: string[];
+  policy: AuthorizationVerificationPolicyV1;
+  revokedAt?: number | null;
+};
 
 /** Projection returned after verifying a complete context trust chain. */
 export type VerifiedAuthorizationContextTokenProjection = {
@@ -259,6 +252,9 @@ export type VerifiedAuthorizationContextTokenProjection = {
     expiresAt: number;
   };
 };
+
+/** Opaque Rust/WASM verification state for one authorization context. */
+export type AuthorizationContextHandle = WasmAuthorizationContextHandle;
 
 let initialized: Promise<void> | undefined;
 let initializedSync = false;
@@ -362,24 +358,58 @@ export async function verifyAuthorizationContextWasm(args: {
   context: unknown;
   policy: AuthorizationContextVerificationPolicyV1;
 }): Promise<VerifiedAuthorizationContextTokenProjection> {
+  const { handle, verified } = await createAuthorizationContextHandleWasm(args);
+  handle.free();
+  return verified;
+}
+
+/** Verify and retain one authorization context for repeated proof checks. */
+export async function createAuthorizationContextHandleWasm(args: {
+  root: unknown;
+  manifest: unknown;
+  context: unknown;
+  policy: AuthorizationContextVerificationPolicyV1;
+  historical?: boolean;
+}): Promise<{
+  handle: AuthorizationContextHandle;
+  verified: VerifiedAuthorizationContextTokenProjection;
+}> {
   await initialize();
-  const result = JSON.parse(
-    protocolWasm.verify_authorization_context(
-      JSON.stringify(args.root),
-      JSON.stringify(args.manifest),
-      JSON.stringify(args.context),
-      JSON.stringify(wasmVerificationPolicy(args.policy)),
-    ),
-  ) as VerifiedAuthorizationContextTokenProjection;
-  const jitter = contextJitter(
-    result.contextDigest,
-    args.policy.refreshJitterSeconds,
+  const handle = protocolWasm.create_authorization_context_handle(
+    JSON.stringify(args.root),
+    JSON.stringify(args.manifest),
+    JSON.stringify(args.context),
+    JSON.stringify(wasmVerificationPolicy(args.policy)),
+    args.historical ?? false,
   );
-  return {
-    ...result,
-    refreshAt: result.context.expiresAt - args.policy.refreshLeadSeconds -
-      jitter,
-  };
+  try {
+    const result = JSON.parse(
+      handle.projection(),
+    ) as VerifiedAuthorizationContextTokenProjection;
+    const jitter = contextJitter(
+      result.contextDigest,
+      args.policy.refreshJitterSeconds,
+    );
+    return {
+      handle,
+      verified: {
+        ...result,
+        refreshAt: result.context.expiresAt - args.policy.refreshLeadSeconds -
+          jitter,
+      },
+    };
+  } catch (error) {
+    handle.free();
+    throw error;
+  }
+}
+
+/** Require an opaque verified context to be currently eligible. */
+export function assertAuthorizationContextHandleCurrentWasm(
+  handle: AuthorizationContextHandle,
+  policy: AuthorizationContextVerificationPolicyV1,
+): void {
+  handle.assert_current(JSON.stringify(wasmVerificationPolicy(policy)));
 }
 
 /** Verify a root-signed issuer manifest through Rust/WASM. */
@@ -409,15 +439,15 @@ export async function verifyAuthorizationRequestWasm(
   args: VerifyAuthorizationRequestArgs,
 ): Promise<VerifyAuthorizationRequestResult> {
   await initialize();
-  const { context, ...input } = args;
+  const { contextHandle, payload, ...input } = args;
   return JSON.parse(
-    protocolWasm.verify_authorization_request_v1(
+    protocolWasm.verify_authorization_request(
+      contextHandle,
       JSON.stringify({
         ...input,
         policy: wasmVerificationPolicy(args.policy),
-        context,
-        payload: Array.from(args.payload),
       }),
+      payload,
     ),
   ) as VerifyAuthorizationRequestResult;
 }
@@ -427,15 +457,15 @@ export async function verifyAuthorizationEventWasm(
   args: VerifyAuthorizationEventArgs,
 ): Promise<VerifyAuthorizationEventResult> {
   await initialize();
-  const { context, ...input } = args;
+  const { contextHandle, payload, ...input } = args;
   return JSON.parse(
-    protocolWasm.verify_authorization_event_v1(
+    protocolWasm.verify_authorization_event(
+      contextHandle,
       JSON.stringify({
         ...input,
         policy: wasmVerificationPolicy(args.policy),
-        context,
-        payload: Array.from(args.payload),
       }),
+      payload,
     ),
   ) as VerifyAuthorizationEventResult;
 }

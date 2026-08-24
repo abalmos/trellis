@@ -241,8 +241,21 @@ jobs:
       - name: Set up Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Verify publishable Rust package
-        run: cargo package --manifest-path rust/Cargo.toml --package trellis-protocol --allow-dirty
+      - name: Verify publishable Rust packages
+        run: |
+          cargo package --manifest-path rust/Cargo.toml --workspace --allow-dirty \
+            --exclude trellis-local-bootstrap \
+            --exclude trellis-bootstrap \
+            --exclude trellis-local-nats \
+            --exclude trellis-jobs-runtime \
+            --exclude trellis-eventlog-runtime \
+            --exclude trellis-test \
+            --exclude trellis-protocol-wasm \
+            --exclude trellis-codegen-ts \
+            --exclude trellis-codegen-rust \
+            --exclude trellis-generate-runner \
+            --exclude trellis-cli \
+            --exclude trellis-runtime
 
   package-js:
     name: Verify JavaScript packages
@@ -842,10 +855,6 @@ jobs:
             if crate_exists "$crate" "$workspace_version"; then
               record_skip "$crate"
               return 0
-            fi
-
-            if [ "$crate" = "trellis-rs" ]; then
-              perl -0pi -e 's/\n\[dev-dependencies\]\ntrellis-test = \{ path = "\.\.\/trellis-test", version = "[^"]+" \}\n?/\n/' crates/trellis/Cargo.toml
             fi
 
             run_publish "$crate" -p "$crate"

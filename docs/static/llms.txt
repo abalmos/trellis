@@ -40,7 +40,9 @@ commands.
   Connected providers use a private digest-keyed cache over the internal NATS KV
   authorization registry, not HTTP. They watch manifest generation and
   revocations, become ready after current manifest verification and revocation
-  initial state, and fail closed only on actual connection/watch failure.
+  state, and retain each verified context as an opaque Rust/WASM handle for
+  repeated request/event proofs. Manifest changes discard those handles, and
+  providers fail closed only on actual connection/watch failure.
   Registry handles are not service-author APIs.
   Ordinary request and event proof v1 verification is local,
   exact-permission/capability checked, and performs no Auth RPC,

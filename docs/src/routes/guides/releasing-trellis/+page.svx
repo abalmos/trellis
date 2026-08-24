@@ -269,7 +269,13 @@ and run the same package-specific checks used by the Release workflow:
 ```sh
 cargo run --manifest-path xtask/Cargo.toml -- prepare
 cargo run --manifest-path rust/xtask/Cargo.toml -- protocol-wasm
-cargo package --manifest-path rust/Cargo.toml --package trellis-protocol --allow-dirty
+cargo package --manifest-path rust/Cargo.toml --workspace --allow-dirty \
+  --exclude trellis-local-bootstrap --exclude trellis-bootstrap \
+  --exclude trellis-local-nats --exclude trellis-jobs-runtime \
+  --exclude trellis-eventlog-runtime --exclude trellis-test \
+  --exclude trellis-protocol-wasm --exclude trellis-codegen-ts \
+  --exclude trellis-codegen-rust --exclude trellis-generate-runner \
+  --exclude trellis-cli --exclude trellis-runtime
 deno task -c ts/deno.json packages:build:npm:prepared
 deno task -c ts/deno.json test:prepared:packaging:built
 bash scripts/release-ts-dry-run.sh

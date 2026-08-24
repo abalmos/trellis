@@ -2,6 +2,7 @@ import type { NatsConnection } from "@nats-io/nats-core";
 import type { KvEntry, KvWatchEntry } from "@nats-io/kv";
 
 import type {
+  AuthorizationContextHandle,
   AuthorizationContextVerificationPolicyV1,
   AuthorizationVerificationErrorCode,
   VerifiedAuthorizationContextTokenProjection,
@@ -30,6 +31,7 @@ import type {
 } from "./types.ts";
 
 const REVOCATION_PREFIX = "revocation.";
+const MAX_CACHED_CONTEXTS = 256;
 
 /** Observable provider registry health. */
 export type AuthorizationProviderCacheHealth = {
@@ -44,6 +46,7 @@ export type AuthorizationProviderIoCounters =
   & AuthorizationRegistryIoCounters
   & {
     contextResolves: number;
+    contextVerifications: number;
   };
 
 /** Internal marker for retryable provider registry or readiness failure. */
@@ -64,14 +67,21 @@ type ManifestRecord = {
   value: Record<string, unknown>;
 };
 
+type VerifiedContextState = {
+  handle: AuthorizationContextHandle;
+  verified: VerifiedAuthorizationContextTokenProjection;
+};
+
 type ProviderContextEntry = {
   epoch: number;
   contextDigest: string;
   context: Record<string, unknown>;
   manifestGeneration: number;
-  retainedUntil: number;
   root: unknown;
+  // Let wasm-bindgen finalize dropped handles; explicit free can race in-flight callers.
+  handle?: AuthorizationContextHandle;
   verified?: VerifiedAuthorizationContextTokenProjection;
+  verifying?: Promise<VerifiedContextState>;
 };
 
 type WatchOutcome = "restart" | "stopped";
@@ -124,6 +134,7 @@ export class AuthorizationProviderCache {
     healthy: false,
   };
   #contextResolves = 0;
+  #contextVerifications = 0;
   #stopped = false;
   #connected = true;
   #restartWatch?: () => void;
@@ -170,7 +181,6 @@ export class AuthorizationProviderCache {
         contextDigest: material.contextDigest,
         context,
         manifestGeneration: material.verified.manifestGeneration,
-        retainedUntil: context.expiresAt,
         root: structuredClone(material.root),
         verified: structuredClone(material.verified),
       });
@@ -219,6 +229,7 @@ export class AuthorizationProviderCache {
   stop(): void {
     this.#stopped = true;
     this.#health.healthy = false;
+    this.#contexts.clear();
     for (const waiter of this.#readyWaiters) {
       waiter.reject(
         new Error("authorization provider stopped before readiness"),
@@ -275,6 +286,7 @@ export class AuthorizationProviderCache {
     return {
       ...this.#registry.ioCounters(),
       contextResolves: this.#contextResolves,
+      contextVerifications: this.#contextVerifications,
     };
   }
 
@@ -300,9 +312,15 @@ export class AuthorizationProviderCache {
   ): Promise<VerifiedAuthorizationContextTokenProjection> {
     this.#requireHealthy();
     const entry = await this.#resolveEntry(contextDigest);
-    return structuredClone(
-      await this.#ensureVerified(entry, false, this.#now()),
+    const state = await this.#ensureVerified(entry, false, this.#now());
+    const { assertAuthorizationContextHandleCurrentWasm } = await import(
+      "../protocol_wasm.ts"
     );
+    assertAuthorizationContextHandleCurrentWasm(
+      state.handle,
+      this.#policyFor(entry, this.#now()),
+    );
+    return structuredClone(state.verified);
   }
 
   /** Verify a presented request proof with exact route permissions. */
@@ -315,9 +333,11 @@ export class AuthorizationProviderCache {
       const { verifyAuthorizationRequestWasm } = await import(
         "../protocol_wasm.ts"
       );
-      const result = await verifyAuthorizationRequestWasm(
-        await this.#requestInput(entry, request),
-      );
+      const { handle } = await this.#ensureVerified(entry, false, this.#now());
+      const result = await verifyAuthorizationRequestWasm({
+        contextHandle: handle,
+        ...this.#requestInput(entry, request),
+      });
       if (!result.ok) return structuredClone(result);
       if (this.#revocationEvidence(entry.contextDigest) !== undefined) {
         return providerRequestFailure(
@@ -343,13 +363,11 @@ export class AuthorizationProviderCache {
       const { verifyAuthorizationEventWasm } = await import(
         "../protocol_wasm.ts"
       );
-      const result = await verifyAuthorizationEventWasm(
-        await this.#eventInput(
-          entry,
-          event,
-          revokedAt ?? null,
-        ),
-      );
+      const { handle } = await this.#ensureVerified(entry, true, this.#now());
+      const result = await verifyAuthorizationEventWasm({
+        contextHandle: handle,
+        ...this.#eventInput(entry, event, revokedAt ?? null),
+      });
       if (!result.ok) return structuredClone(result);
       return structuredClone(result);
     } catch (error) {
@@ -559,18 +577,14 @@ export class AuthorizationProviderCache {
     }
   }
 
-  #evictExpiredContexts(): void {
-    const now = this.#now();
-    for (const [digest, entry] of this.#contexts) {
-      if (entry.retainedUntil <= now) this.#contexts.delete(digest);
-    }
-  }
-
   async #resolveEntry(contextDigest: string): Promise<ProviderContextEntry> {
     assertDigest(contextDigest);
-    this.#evictExpiredContexts();
     const known = this.#contexts.get(contextDigest);
-    if (known) return known;
+    if (known) {
+      this.#contexts.delete(contextDigest);
+      this.#contexts.set(contextDigest, known);
+      return known;
+    }
     const pending = this.#inFlight.get(contextDigest);
     if (pending) return await pending;
     const epoch = this.#manifestEpoch;
@@ -609,13 +623,12 @@ export class AuthorizationProviderCache {
       context.issuerManifestGeneration,
       "issuerManifestGeneration",
     );
-    const expiresAt = providerPositiveInteger(context.expiresAt, "expiresAt");
+    providerPositiveInteger(context.expiresAt, "expiresAt");
     const entry: ProviderContextEntry = {
       epoch,
       contextDigest,
       context,
       manifestGeneration,
-      retainedUntil: expiresAt,
       root: structuredClone(this.#root),
     };
     if (epoch !== this.#manifestEpoch) {
@@ -623,9 +636,11 @@ export class AuthorizationProviderCache {
         "authorization manifest advanced during context resolution",
       );
     }
-    if (manifestGeneration === this.#currentManifest?.pointer.generation) {
-      this.#contexts.set(contextDigest, entry);
+    if (this.#contexts.size >= MAX_CACHED_CONTEXTS) {
+      // ponytail: bounded LRU; raise the cap only if registry reads prove costly.
+      this.#contexts.delete(this.#contexts.keys().next().value!);
     }
+    this.#contexts.set(contextDigest, entry);
     return entry;
   }
 
@@ -633,7 +648,7 @@ export class AuthorizationProviderCache {
     entry: ProviderContextEntry,
     historical: boolean,
     verificationTime: number,
-  ): Promise<VerifiedAuthorizationContextTokenProjection> {
+  ): Promise<VerifiedContextState> {
     if (!historical && entry.epoch !== this.#manifestEpoch) {
       throw new AuthorizationProviderUnavailableError(
         "authorization manifest advanced during context verification",
@@ -645,37 +660,54 @@ export class AuthorizationProviderCache {
     ) {
       throw new Error("authorization context manifest is not current");
     }
-    const current = entry.manifestGeneration ===
-        this.#currentManifest?.pointer.generation &&
-      entry.epoch === this.#manifestEpoch;
-    const existing = current ? entry.verified : undefined;
-    if (existing) return existing;
-    const chain = await this.#resolveChain(entry);
-    const policy = this.#policyFor(entry, verificationTime, historical);
-    const { verifyAuthorizationContextWasm } = await import(
-      "../protocol_wasm.ts"
-    );
-    const verified = await verifyAuthorizationContextWasm({
-      root: entry.root,
-      manifest: chain.value,
-      context: entry.context,
-      policy,
-    });
-    if ((!historical && entry.epoch !== this.#manifestEpoch) || this.#stopped) {
-      throw new AuthorizationProviderUnavailableError(
-        "authorization registry changed during verification",
+    const cacheable = entry.epoch === this.#manifestEpoch;
+    if (cacheable && entry.handle && entry.verified) {
+      return { handle: entry.handle, verified: entry.verified };
+    }
+    if (entry.verifying) return await entry.verifying;
+    const verifying = (async (): Promise<VerifiedContextState> => {
+      const chain = await this.#resolveChain(entry);
+      const policy = this.#policyFor(entry, verificationTime, historical);
+      const { createAuthorizationContextHandleWasm } = await import(
+        "../protocol_wasm.ts"
       );
+      this.#contextVerifications += 1;
+      const result = await createAuthorizationContextHandleWasm({
+        root: entry.root,
+        manifest: chain.value,
+        context: entry.context,
+        policy,
+        historical: true,
+      });
+      if (
+        (!historical && entry.epoch !== this.#manifestEpoch) || this.#stopped
+      ) {
+        result.handle.free();
+        throw new AuthorizationProviderUnavailableError(
+          "authorization registry changed during verification",
+        );
+      }
+      if (
+        result.verified.contextDigest !== entry.contextDigest ||
+        (chain.pointer.digest !== "" &&
+          result.verified.manifestDigest !== chain.pointer.digest) ||
+        result.verified.manifestGeneration !== chain.pointer.generation
+      ) {
+        result.handle.free();
+        throw new Error("authorization registry trust identity mismatch");
+      }
+      if (cacheable) {
+        entry.handle = result.handle;
+        entry.verified = result.verified;
+      }
+      return result;
+    })();
+    entry.verifying = verifying;
+    try {
+      return await verifying;
+    } finally {
+      if (entry.verifying === verifying) entry.verifying = undefined;
     }
-    if (
-      verified.contextDigest !== entry.contextDigest ||
-      (chain.pointer.digest !== "" &&
-        verified.manifestDigest !== chain.pointer.digest) ||
-      verified.manifestGeneration !== chain.pointer.generation
-    ) {
-      throw new Error("authorization registry trust identity mismatch");
-    }
-    if (current) entry.verified = verified;
-    return verified;
   }
 
   async #resolveChain(
@@ -725,15 +757,11 @@ export class AuthorizationProviderCache {
     return record;
   }
 
-  async #requestInput(
+  #requestInput(
     entry: ProviderContextEntry,
     request: AuthorizationProviderRequest,
-  ): Promise<VerifyAuthorizationRequestArgs> {
-    const chain = await this.#resolveChain(entry);
+  ): Omit<VerifyAuthorizationRequestArgs, "contextHandle"> {
     return {
-      root: entry.root,
-      manifest: chain.value,
-      context: entry.context,
       subject: request.subject,
       reply: request.reply,
       payload: new Uint8Array(request.payload),
@@ -746,16 +774,12 @@ export class AuthorizationProviderCache {
     };
   }
 
-  async #eventInput(
+  #eventInput(
     entry: ProviderContextEntry,
     event: AuthorizationProviderEvent,
     revokedAt: number | null,
-  ): Promise<VerifyAuthorizationEventArgs> {
-    const chain = await this.#resolveChain(entry);
+  ): Omit<VerifyAuthorizationEventArgs, "contextHandle"> {
     return {
-      root: entry.root,
-      manifest: chain.value,
-      context: entry.context,
       subject: event.subject,
       payload: new Uint8Array(event.payload),
       eventId: event.eventId,
@@ -811,6 +835,7 @@ export class AuthorizationProviderCache {
     if (minimumManifestGeneration > this.#minimumManifestGeneration) {
       this.#minimumManifestGeneration = minimumManifestGeneration;
       for (const entry of this.#contexts.values()) {
+        entry.handle = undefined;
         entry.verified = undefined;
       }
     }

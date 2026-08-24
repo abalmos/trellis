@@ -261,12 +261,8 @@ struct WireAuthorizationVerificationPolicyV1 {
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 struct WireAuthorizationRequestV1 {
-    root: Value,
-    manifest: Value,
-    context: Value,
     subject: String,
     reply: RequiredNullable<String>,
-    payload: Vec<u8>,
     iat: i64,
     request_id: String,
     proof: String,
@@ -278,11 +274,7 @@ struct WireAuthorizationRequestV1 {
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 struct WireAuthorizationEventV1 {
-    root: Value,
-    manifest: Value,
-    context: Value,
     subject: String,
-    payload: Vec<u8>,
     event_id: String,
     event_time: String,
     proof: String,
@@ -453,25 +445,87 @@ pub fn resolve_participant_v1(participant_json: &str, apis_json: &str) -> Result
     .map_err(|error| JsError::new(&error.to_string()))
 }
 
-fn verify_context_bundle(
-    root_value: &Value,
-    manifest_value: &Value,
-    context_value: &Value,
-    policy: &AuthorizationVerificationPolicyV1,
+/// Opaque Rust-owned authorization context retained for repeated proof verification.
+#[wasm_bindgen]
+pub struct VerifiedAuthorizationContextHandle {
+    context: VerifiedAuthorizationContextV1,
+    projection: String,
+}
+
+/// Verify a trust chain once and retain its verified context inside WASM.
+#[wasm_bindgen]
+pub fn create_authorization_context_handle(
+    root_json: &str,
+    manifest_json: &str,
+    context_json: &str,
+    policy_json: &str,
     historical: bool,
-) -> Result<VerifiedAuthorizationContextV1, ProtocolError> {
-    let root = AuthorizationTrustRootV1::parse(root_value)?;
-    let manifest = parse_issuer_manifest_v1(manifest_value)?;
-    let context = parse_authorization_context_v1(context_value)?;
+) -> Result<VerifiedAuthorizationContextHandle, JsError> {
+    let policy = authorization_verification_policy(policy_json)?;
+    let root_value: Value =
+        serde_json::from_str(root_json).map_err(|error| JsError::new(&error.to_string()))?;
+    let root = AuthorizationTrustRootV1::parse(&root_value)
+        .map_err(|error| JsError::new(&error.to_string()))?;
+    let manifest_value: Value =
+        serde_json::from_str(manifest_json).map_err(|error| JsError::new(&error.to_string()))?;
+    let manifest = parse_issuer_manifest_v1(&manifest_value)
+        .map_err(|error| JsError::new(&error.to_string()))?;
+    let context_value: Value =
+        serde_json::from_str(context_json).map_err(|error| JsError::new(&error.to_string()))?;
+    let signed_context = parse_authorization_context_v1(&context_value)
+        .map_err(|error| JsError::new(&error.to_string()))?;
     let verification_policy = if historical {
-        let mut policy = policy.clone();
-        policy.now_unix_seconds = context.unsigned.expires_at;
+        let mut policy = policy;
+        policy.now_unix_seconds = signed_context.unsigned.expires_at;
         policy
     } else {
-        policy.clone()
+        policy
     };
-    let verified_manifest = verify_issuer_manifest_v1(&root, &manifest, &verification_policy)?;
-    verify_authorization_context_v1(&root, &verified_manifest, &context, &verification_policy)
+    let verified_manifest = verify_issuer_manifest_v1(&root, &manifest, &verification_policy)
+        .map_err(|error| JsError::new(&error.to_string()))?;
+    let context = verify_authorization_context_v1(
+        &root,
+        &verified_manifest,
+        &signed_context,
+        &verification_policy,
+    )
+    .map_err(|error| JsError::new(&error.to_string()))?;
+    let projection = serde_json::to_string(&json!({
+        "authority": root.authority(),
+        "rootKeyId": root.key_id(),
+        "rootDigest": root.digest().map_err(|error| JsError::new(&error.to_string()))?,
+        "manifestDigest": verified_manifest.digest().map_err(|error| JsError::new(&error.to_string()))?,
+        "contextDigest": context.context_digest(),
+        "context": context.signed_context(),
+        "manifestGeneration": verified_manifest.generation(),
+    }))
+    .map_err(|error| JsError::new(&error.to_string()))?;
+    Ok(VerifiedAuthorizationContextHandle {
+        context,
+        projection,
+    })
+}
+
+#[wasm_bindgen]
+impl VerifiedAuthorizationContextHandle {
+    /// Return the verified context projection used by the TypeScript cache.
+    pub fn projection(&self) -> Result<String, JsError> {
+        Ok(self.projection.clone())
+    }
+
+    /// Require the retained context to be eligible at the supplied current time.
+    pub fn assert_current(&self, policy_json: &str) -> Result<(), JsError> {
+        let policy = authorization_verification_policy(policy_json)?;
+        let now = i128::from(policy.now_unix_seconds);
+        let skew = i128::from(policy.allowed_clock_skew_seconds);
+        if now + skew < i128::from(self.context.not_before()) {
+            return Err(JsError::new("authorization context is not yet valid"));
+        }
+        if now - skew > i128::from(self.context.expires_at()) {
+            return Err(JsError::new("authorization context has expired"));
+        }
+        Ok(())
+    }
 }
 
 fn verified_context_projection(
@@ -535,26 +589,25 @@ fn verified_result(mut projection: Value) -> String {
     json_result(projection)
 }
 
-fn request_result(input: WireAuthorizationRequestV1) -> String {
+fn request_result(
+    context: &VerifiedAuthorizationContextV1,
+    input: WireAuthorizationRequestV1,
+    payload: &[u8],
+) -> String {
     let policy = match authorization_verification_policy_from_wire(&input.policy) {
         Ok(policy) => policy,
         Err(_) => return input_error_result("/policy"),
     };
-    let context =
-        match verify_context_bundle(&input.root, &input.manifest, &input.context, &policy, false) {
-            Ok(context) => context,
-            Err(error) => return protocol_error_result(&error),
-        };
     let proof = match AuthorizationRequestProof::parse(input.proof) {
         Ok(proof) => proof,
         Err(error) => return protocol_error_result(&error),
     };
     let verified =
         match verify_authorization_request_protocol(AuthorizationRequestVerificationInputV1 {
-            context: &context,
+            context,
             subject: &input.subject,
             reply_subject: input.reply.0.as_deref(),
-            raw_payload: &input.payload,
+            raw_payload: payload,
             iat: input.iat,
             request_id: &input.request_id,
             proof: &proof,
@@ -583,25 +636,24 @@ fn event_publisher_projection(publisher: &AuthorizationEventPublisher) -> Value 
     })
 }
 
-fn event_result(input: WireAuthorizationEventV1) -> String {
+fn event_result(
+    context: &VerifiedAuthorizationContextV1,
+    input: WireAuthorizationEventV1,
+    payload: &[u8],
+) -> String {
     let policy = match authorization_verification_policy_from_wire(&input.policy) {
         Ok(policy) => policy,
         Err(_) => return input_error_result("/policy"),
     };
-    let context =
-        match verify_context_bundle(&input.root, &input.manifest, &input.context, &policy, true) {
-            Ok(context) => context,
-            Err(error) => return protocol_error_result(&error),
-        };
     let proof = match AuthorizationEventProof::parse(input.proof) {
         Ok(proof) => proof,
         Err(error) => return protocol_error_result(&error),
     };
     let verified =
         match verify_authorization_event_protocol(AuthorizationEventVerificationInputV1 {
-            context: &context,
+            context,
             subject: &input.subject,
-            raw_payload: &input.payload,
+            raw_payload: payload,
             event_id: &input.event_id,
             event_time: &input.event_time,
             proof: &proof,
@@ -627,12 +679,16 @@ fn event_result(input: WireAuthorizationEventV1) -> String {
 /// contain verified caller/context metadata; rejected inputs have `ok: false`
 /// and a stable authorization error code and path.
 #[wasm_bindgen]
-pub fn verify_authorization_request_v1(request_json: &str) -> String {
+pub fn verify_authorization_request(
+    context: &VerifiedAuthorizationContextHandle,
+    request_json: &str,
+    payload: &[u8],
+) -> String {
     let input: WireAuthorizationRequestV1 = match serde_json::from_str(request_json) {
         Ok(input) => input,
         Err(_) => return input_error_result(""),
     };
-    request_result(input)
+    request_result(&context.context, input, payload)
 }
 
 /// Verify one context-bound authorization event proof from a JSON argument.
@@ -643,15 +699,19 @@ pub fn verify_authorization_request_v1(request_json: &str) -> String {
 /// checked at their signed historical boundary before the strict event-time
 /// window is evaluated.
 #[wasm_bindgen]
-pub fn verify_authorization_event_v1(event_json: &str) -> String {
+pub fn verify_authorization_event(
+    context: &VerifiedAuthorizationContextHandle,
+    event_json: &str,
+    payload: &[u8],
+) -> String {
     let input: WireAuthorizationEventV1 = match serde_json::from_str(event_json) {
         Ok(input) => input,
         Err(_) => return input_error_result(""),
     };
-    event_result(input)
+    event_result(&context.context, input, payload)
 }
 
-#[cfg(any())]
+#[cfg(test)]
 mod tests {
     use super::*;
 
@@ -785,6 +845,40 @@ mod tests {
         )
     }
 
+    fn verify_request_input(input_json: &str) -> String {
+        let mut input: Value = serde_json::from_str(input_json).unwrap();
+        let payload = serde_json::from_value::<Vec<u8>>(input["payload"].take()).unwrap();
+        let handle = create_authorization_context_handle(
+            &serde_json::to_string(&input["root"]).unwrap(),
+            &serde_json::to_string(&input["manifest"]).unwrap(),
+            &serde_json::to_string(&input["context"]).unwrap(),
+            &serde_json::to_string(&input["policy"]).unwrap(),
+            false,
+        )
+        .unwrap();
+        for field in ["root", "manifest", "context", "payload"] {
+            input.as_object_mut().unwrap().remove(field);
+        }
+        verify_authorization_request(&handle, &serde_json::to_string(&input).unwrap(), &payload)
+    }
+
+    fn verify_event_input(input_json: &str) -> String {
+        let mut input: Value = serde_json::from_str(input_json).unwrap();
+        let payload = serde_json::from_value::<Vec<u8>>(input["payload"].take()).unwrap();
+        let handle = create_authorization_context_handle(
+            &serde_json::to_string(&input["root"]).unwrap(),
+            &serde_json::to_string(&input["manifest"]).unwrap(),
+            &serde_json::to_string(&input["context"]).unwrap(),
+            &serde_json::to_string(&input["policy"]).unwrap(),
+            true,
+        )
+        .unwrap();
+        for field in ["root", "manifest", "context", "payload"] {
+            input.as_object_mut().unwrap().remove(field);
+        }
+        verify_authorization_event(&handle, &serde_json::to_string(&input).unwrap(), &payload)
+    }
+
     #[test]
     fn local_authorization_v1_uses_conformance_chain() {
         let fixture = authorization_fixture();
@@ -792,6 +886,8 @@ mod tests {
         let defaults = &fixture["defaults"];
         let policy = defaults["policy"].clone();
         let permission = defaults["permission"].clone();
+        let mut denied_permission = permission.clone();
+        denied_permission["target"]["name"] = Value::from("Documents.Other");
         let required_capabilities = json!(["platform.read"]);
 
         let request = |subject: &str, reply: Option<&str>, body: &str, permission| {
@@ -807,7 +903,7 @@ mod tests {
             input
         };
 
-        let valid = verify_authorization_request_v1(
+        let valid = verify_request_input(
             &serde_json::to_string(&request(
                 defaults["request"]["subject"].as_str().unwrap(),
                 defaults["request"]["reply"].as_str(),
@@ -817,7 +913,7 @@ mod tests {
             .unwrap(),
         );
         let valid: Value = serde_json::from_str(&valid).unwrap();
-        assert_eq!(valid["ok"], true);
+        assert_eq!(valid["ok"], true, "{valid}");
         assert_eq!(valid["contextDigest"], chain["contextDigest"]);
 
         for (subject, reply, body) in [
@@ -833,7 +929,7 @@ mod tests {
             ),
             ("rpc.v1.Documents.Get", Some("_INBOX.test.reply"), "changed"),
         ] {
-            let result = verify_authorization_request_v1(
+            let result = verify_request_input(
                 &serde_json::to_string(&request(subject, reply, body, permission.clone())).unwrap(),
             );
             assert_eq!(
@@ -842,7 +938,7 @@ mod tests {
             );
         }
 
-        let outside_reply = verify_authorization_request_v1(
+        let outside_reply = verify_request_input(
             &serde_json::to_string(&request(
                 "rpc.v1.Documents.Get",
                 Some("OTHER.reply"),
@@ -856,12 +952,12 @@ mod tests {
             ("ReplySubjectMismatch".to_owned(), "/reply".to_owned())
         );
 
-        let missing_permission = verify_authorization_request_v1(
+        let missing_permission = verify_request_input(
             &serde_json::to_string(&request(
                 defaults["request"]["subject"].as_str().unwrap(),
                 defaults["request"]["reply"].as_str(),
                 defaults["request"]["payload"].as_str().unwrap(),
-                defaults["missingPermission"].clone(),
+                denied_permission,
             ))
             .unwrap(),
         );
@@ -884,14 +980,14 @@ mod tests {
         event["requiredPermissions"] = json!([permission]);
         event["requiredCapabilities"] = json!([]);
 
-        let valid_event = verify_authorization_event_v1(&serde_json::to_string(&event).unwrap());
+        let valid_event = verify_event_input(&serde_json::to_string(&event).unwrap());
         let valid_event: Value = serde_json::from_str(&valid_event).unwrap();
         assert_eq!(valid_event["ok"], true);
         assert_eq!(valid_event["publisher"]["sessionId"], "ses_test");
 
         let mut revoked = event.clone();
         revoked["revokedAt"] = Value::from(1_150);
-        let revoked = verify_authorization_event_v1(&serde_json::to_string(&revoked).unwrap());
+        let revoked = verify_event_input(&serde_json::to_string(&revoked).unwrap());
         assert_eq!(
             error_code_and_path(&revoked),
             ("EventRevoked".to_owned(), "/event-time".to_owned())
@@ -900,7 +996,7 @@ mod tests {
         let mut historical_window = event;
         historical_window["eventTime"] = Value::from("1970-01-01T00:16:40Z");
         let historical_window =
-            verify_authorization_event_v1(&serde_json::to_string(&historical_window).unwrap());
+            verify_event_input(&serde_json::to_string(&historical_window).unwrap());
         assert_eq!(
             error_code_and_path(&historical_window),
             ("ContextNotYetValid".to_owned(), "/event-time".to_owned())

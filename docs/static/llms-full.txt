@@ -144,7 +144,9 @@ https://raw.githubusercontent.com/qlever-llc/trellis/main/docs/static/llms.txt
   chain. Provider runtimes keep a
   separate private cache over the internal NATS KV authorization registry for
   presented caller contexts and revocation state; registry handles are never
-  service-author APIs. Providers watch manifest generation and revocations,
+  service-author APIs. Verified contexts remain opaque Rust/WASM handles reused
+  across request and event proofs and discarded on manifest-epoch changes.
+  Providers watch manifest generation and revocations,
   become ready after current manifest verification and revocation initial state,
   and fail closed on actual connection/watch failure. Quiet watches are healthy.
   Native file context-store paths are single-writer and private to one active

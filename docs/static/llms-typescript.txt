@@ -130,7 +130,9 @@ Rules:
   Provider authorization state uses
   the internal NATS KV registry with readiness, manifest/revocation watches, and
   reconnect reconstruction; registry handles are not service-author APIs and
-  ordinary cache hits perform no external I/O. Quiet watches remain healthy.
+  ordinary cache hits perform no external I/O. Each verified context remains an
+  opaque Rust/WASM handle reused for request and event proofs, then is discarded
+  on manifest-epoch change. Quiet watches remain healthy.
   Native Deno/Node services can use `FileAuthorizationContextStore` from the
   explicit `@qlever-llc/trellis/auth/file` subpath; it is intentionally absent
   from the browser-safe auth graph. Each file path is single-writer and must be

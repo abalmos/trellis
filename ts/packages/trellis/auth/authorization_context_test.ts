@@ -404,7 +404,7 @@ function providerNats(
 async function readyProvider(
   cache: AuthorizationContextCache,
   calls: string[] = [],
-  now = 1_100,
+  now: number | (() => number) = 1_100,
   revocations: unknown[] = [],
   missingContext = false,
 ): Promise<AuthorizationProviderCache> {
@@ -412,7 +412,7 @@ async function readyProvider(
     providerNats(calls, revocations, missingContext),
     cache.bundle().trust.authorizationRegistry,
     cache,
-    { now: () => now },
+    { now: typeof now === "function" ? now : () => now },
   );
   provider.start();
   await provider.waitReady({ timeoutMs: 1_000 });
@@ -946,6 +946,24 @@ Deno.test("provider cache reuses its installed context without registry I/O", as
   }
 });
 
+Deno.test("provider context resolution enforces the current validity window", async () => {
+  let now = 1_100;
+  const cache = await readyProvider(
+    await providerContextCache(),
+    [],
+    () => now,
+  );
+  try {
+    await cache.resolveContext(vectors.completeChain.contextDigest);
+    now = 1_400;
+    await assertRejects(() =>
+      cache.resolveContext(vectors.completeChain.contextDigest)
+    );
+  } finally {
+    cache.stop();
+  }
+});
+
 Deno.test("provider cache wakes refresh for own revocation and disconnect", async () => {
   const revokedCache = await providerContextCache();
   let revocationWakes = 0;
@@ -999,11 +1017,16 @@ Deno.test("provider cache reuses an installed client trust chain without registr
   );
   try {
     const before = provider.ioCounters();
-    const verified = await provider.resolveContext(
-      vectors.completeChain.contextDigest,
-    );
+    const [verified] = await Promise.all([
+      provider.resolveContext(vectors.completeChain.contextDigest),
+      provider.resolveContext(vectors.completeChain.contextDigest),
+      provider.resolveContext(vectors.completeChain.contextDigest),
+    ]);
     assertEquals(verified.contextDigest, vectors.completeChain.contextDigest);
-    assertEquals(provider.ioCounters(), before);
+    assertEquals(provider.ioCounters(), {
+      ...before,
+      contextVerifications: before.contextVerifications + 1,
+    });
   } finally {
     provider.stop();
   }
@@ -1159,6 +1182,7 @@ Deno.test("same request and event proofs are accepted", async () => {
       providerEvent(vectors.completeChain.eventProof),
     );
     assert(eventDuplicate.ok);
+    assertEquals(cache.ioCounters().contextVerifications, 1);
   } finally {
     cache.stop();
   }

@@ -354,3 +354,6 @@ to authoritative SQLite transactions. Ordinary requests and events consume the
 same exact principals, participant bindings, grant sets, authority versions,
 session identity, and inbox prefix through local provider caches and generated
 receiver metadata; there is no parallel or centralized request-authority model.
+TypeScript providers retain each verified context as an opaque Rust/WASM handle,
+reuse it for request and event proofs, and discard it when the manifest trust
+epoch advances. Trust-chain parsing and verification do not run per message.

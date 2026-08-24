@@ -93,6 +93,11 @@ Deno.test("release workflows use generated package-manager targets", async () =>
     "deno task -c ts/deno.json test:prepared:packaging:built",
   );
   assertStringIncludes(releaseWorkflow, "bash scripts/release-ts-dry-run.sh");
+  assertStringIncludes(releaseWorkflow, "--exclude trellis-runtime");
+  assertStringIncludes(
+    dryRunScript,
+    "test -s ts/packages/trellis/auth/protocol_wasm/trellis_protocol_wasm_bg.wasm",
+  );
   assertEquals(releaseWorkflow.includes("release lane"), false);
   assertEquals(releaseWorkflow.includes("integration/live_runner.ts"), false);
   assertStringIncludes(
@@ -268,8 +273,14 @@ Deno.test("release workflow publishes only public Rust crates", async () => {
   for (const crate of ["trellis-contracts", "trellis-rs"]) {
     assertStringIncludes(source, `publish_workspace_crate ${crate}`);
   }
-  assertStringIncludes(source, '[ "$crate" = "trellis-rs" ]');
   assertStringIncludes(source, "trellis-test");
+  const trellisManifest = await Deno.readTextFile(
+    new URL("../../../../rust/crates/trellis/Cargo.toml", import.meta.url),
+  );
+  assertStringIncludes(
+    trellisManifest,
+    'trellis-local-nats = { path = "../local-nats" }',
+  );
   for (
     const crate of [
       "trellis-auth",

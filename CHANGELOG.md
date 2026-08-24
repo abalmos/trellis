@@ -69,6 +69,14 @@ and this project adheres to
   generated freshness and the shared live matrix. Release now verifies only
   metadata, packages, archives, images, and publication inputs from a green `rs`
   base.
+- Replaced positional Rust user-session, proof, event, generator, listener, and
+  test-fixture APIs with cohesive inputs; Jobs event constructors now live under
+  `jobs::events`.
+- Removed the obsolete generic `cargo xtask release lane` and `release verify`
+  commands in favor of direct package-specific release checks.
+- TypeScript provider caches now retain bounded opaque Rust/WASM
+  verified-context handles, avoiding repeated trust-chain JSON parsing and
+  verification on request and event hot paths.
 - Live integration test harnesses no longer require Podman or Docker; they spawn
   the pinned nats-server binary directly. Trellis OCI images bake the pinned
   nats-server during image build instead of downloading it at container runtime.
