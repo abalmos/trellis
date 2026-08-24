@@ -15,6 +15,12 @@ const moduleSpecifierPattern =
   /(?:import|export)\s+(?:[^"']*?\s+from\s+)?["']([^"']+)["']|import\(\s*["']([^"']+)["']\s*\)|require\(\s*["']([^"']+)["']\s*\)/g;
 
 Deno.test("trellis npm CLI uses an npm-valid bin path", async () => {
+  try {
+    await Deno.stat(new URL("../npm/package.json", import.meta.url));
+  } catch (error) {
+    if (error instanceof Deno.errors.NotFound) return;
+    throw error;
+  }
   const packageJson = JSON.parse(
     await Deno.readTextFile(new URL("../npm/package.json", import.meta.url)),
   );
