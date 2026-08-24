@@ -102,17 +102,18 @@ fn state_contract(
             preferences.state_version = Some("preferences.v2".to_owned());
             preferences.accepted_versions.insert(
                 "v1".to_owned(),
-                trellis_rs::contracts::schema_ref("Preferences"),
+                trellis_rs::contracts::schema_ref("PreferencesV1"),
             );
             let mut drafts = state(ContractStateKind::Map, "Draft");
             drafts.state_version = Some("drafts.v2".to_owned());
-            drafts
-                .accepted_versions
-                .insert("v1".to_owned(), trellis_rs::contracts::schema_ref("Draft"));
+            drafts.accepted_versions.insert(
+                "v1".to_owned(),
+                trellis_rs::contracts::schema_ref("DraftV1"),
+            );
             builder = builder
-                .schema("Preferences", preferences_schema(false))
+                .schema("PreferencesV1", preferences_schema(false))
                 .schema("Preferences", serde_json::json!({"type": "object", "required": ["theme", "compact"], "properties": {"theme": {"type": "string"}, "compact": {"type": "boolean"}}}))
-                .schema("Draft", draft_schema(false))
+                .schema("DraftV1", draft_schema(false))
                 .schema("Draft", serde_json::json!({"type": "object", "required": ["title", "pinned"], "properties": {"title": {"type": "string"}, "pinned": {"type": "boolean"}}}))
                 .state("preferences", preferences)
                 .state("drafts", drafts);
