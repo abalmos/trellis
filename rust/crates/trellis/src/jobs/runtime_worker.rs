@@ -740,7 +740,7 @@ async fn acquire_key_slot_for_work(
             stale_slots,
         } => Ok(Some(ActiveKeyLease {
             policy,
-            slot,
+            slot: *slot,
             heartbeat_interval: Duration::from_millis(key_concurrency.heartbeat_interval_ms),
             heartbeat_ttl_ms: key_concurrency.heartbeat_ttl_ms,
             stale_slots,

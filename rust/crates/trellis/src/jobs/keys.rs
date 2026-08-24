@@ -296,14 +296,10 @@ pub struct AcquireSlotInput {
 /// Outcome of attempting to acquire an active keyed slot.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[doc = concat!("Public Trellis value set `", stringify!(AcquireSlotOutcome), "`.")]
-#[expect(
-    clippy::large_enum_variant,
-    reason = "key acquisition returns the complete persisted state without extra allocation"
-)]
 pub enum AcquireSlotOutcome {
     Acquired {
         state: JobKeyState,
-        slot: JobKeyActiveSlot,
+        slot: Box<JobKeyActiveSlot>,
         stale_slots: Vec<JobKeyActiveSlot>,
     },
     Blocked {
@@ -433,7 +429,7 @@ pub fn acquire_active_slot(
     {
         return AcquireSlotOutcome::Acquired {
             state,
-            slot: existing,
+            slot: Box::new(existing),
             stale_slots: Vec::new(),
         };
     }
@@ -478,7 +474,7 @@ pub fn acquire_active_slot(
     state.updated_at = input.started_at;
     AcquireSlotOutcome::Acquired {
         state,
-        slot,
+        slot: Box::new(slot),
         stale_slots,
     }
 }

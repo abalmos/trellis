@@ -555,11 +555,9 @@ pub fn discover_summary_lines(plan: &[AutoPlanEntry]) -> Vec<String> {
 }
 
 pub fn action_for_kind(kind: &ContractKind) -> AutoAction {
-    #[allow(unreachable_patterns)]
     match kind {
         ContractKind::Service | ContractKind::App => AutoAction::Generate,
         ContractKind::Device | ContractKind::Agent => AutoAction::Verify,
-        _ => unreachable!("portal contract kind has been removed"),
     }
 }
 
@@ -794,13 +792,11 @@ fn built_in_rust_alias_mapping(
 }
 
 pub fn contract_kind_label(kind: &ContractKind) -> &'static str {
-    #[allow(unreachable_patterns)]
     match kind {
         ContractKind::Service => "service",
         ContractKind::App => "app",
         ContractKind::Device => "device",
         ContractKind::Agent => "agent",
-        _ => unreachable!("portal contract kind has been removed"),
     }
 }
 
@@ -844,8 +840,7 @@ fn auto_plan_rank(entry: &AutoPlanEntry) -> u8 {
         (AutoAction::Generate, ContractKind::Service) => 0,
         (AutoAction::Generate, ContractKind::App) => 1,
         (AutoAction::Verify, _) => 2,
-        #[allow(unreachable_patterns)]
-        _ => 3,
+        (AutoAction::Generate, ContractKind::Device | ContractKind::Agent) => 3,
     }
 }
 

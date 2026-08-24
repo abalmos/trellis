@@ -9,6 +9,8 @@
 //! are caller-visible workflows with progress, updates, cancellation, and named
 //! signals.
 
+#[doc(hidden)]
+mod authenticated_router;
 mod bindings;
 #[doc(hidden)]
 mod bootstrap_ports;
@@ -31,16 +33,12 @@ mod runtime;
 mod runtime_facade;
 #[doc(hidden)]
 mod schema_validation;
-#[doc(hidden)]
-#[expect(
-    clippy::module_inception,
-    reason = "the service module preserves its established public layout"
-)]
-mod service;
 mod service_host;
 mod transfer;
 
 pub use crate::jobs::{ActiveJob, JobDescriptor, JobRef, JobUpdateDescriptor, JobsError};
+#[doc(hidden)]
+pub use authenticated_router::{AuthenticatedRouter, RequestValidation, RequestValidator};
 pub use bindings::{
     validate_bootstrap_contract_state, BootstrapBinding, BootstrapContractRef,
     EventConsumerOrdering, EventConsumerReplay, EventConsumerResourceBinding,
@@ -86,8 +84,6 @@ pub use runtime_facade::{
 };
 #[doc(hidden)]
 pub use schema_validation::validate_input_schema;
-#[doc(hidden)]
-pub use service::{AuthenticatedRouter, RequestValidation, RequestValidator};
 pub(crate) use service_host::bootstrap_service_host;
 #[cfg(test)]
 pub(crate) use service_host::ServiceHost;

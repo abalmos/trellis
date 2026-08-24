@@ -221,12 +221,21 @@ Validation:
       `OperationTransferStartError` by boxing genuinely large cold-path
       payloads; remove the corresponding `result_large_err` /
       `large_enum_variant` suppressions (`65dae41f`).
-- [ ] Fix remaining `too_many_arguments` causes through cohesive
+- [x] Fix remaining `too_many_arguments` causes through cohesive
       inputs/ownership instead of adding suppressions.
-- [ ] Fix remaining `result_large_err`, `large_enum_variant`, and test-only
+- [x] Fix remaining `result_large_err`, `large_enum_variant`, and test-only
       `dead_code` causes where the design can be made simpler.
-- [ ] Shorten long names by using module context and splitting oversized
+- [x] Shorten long names by using module context and splitting oversized
       modules, not by inventing abbreviations.
+
+Validation:
+
+- Strict workspace Clippy found no remaining `too_many_arguments`,
+  `result_large_err`, or test-only `dead_code` causes. The final three
+  `large_enum_variant` causes now box only the oversized generator command,
+  operation snapshot, and keyed-job slot. `service::service` is now the private
+  `authenticated_router` module, and the stale generated Jobs module-inception
+  suppression injector was deleted.
 
 ## 9. Final gate
 

@@ -18,14 +18,10 @@ pub struct Cli {
 }
 
 #[derive(Debug, Subcommand)]
-#[expect(
-    clippy::large_enum_variant,
-    reason = "clap owns this short-lived top-level command value"
-)]
 pub enum TopLevelCommand {
     Prepare(PrepareArgs),
     Discover(DiscoverArgs),
-    Generate(GenerateCommand),
+    Generate(Box<GenerateCommand>),
     /// Check for or install generator updates.
     #[command(name = "self")]
     Self_(SelfCommand),

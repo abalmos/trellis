@@ -426,12 +426,8 @@ struct StoredOperation {
 }
 
 #[derive(Debug, Clone)]
-#[expect(
-    clippy::large_enum_variant,
-    reason = "the hot transition/broadcast path keeps snapshots inline to avoid a per-event allocation"
-)]
 enum StoredOperationEvent {
-    Snapshot(OperationSnapshot<Value, Value>),
+    Snapshot(Box<OperationSnapshot<Value, Value>>),
     Update(crate::client::OperationUpdateEvent<Value>),
 }
 
@@ -827,7 +823,7 @@ where
                 Ok(StoredOperationEvent::Snapshot(snapshot)) => {
                     let done = snapshot.state.is_terminal();
                     Some((
-                        typed_snapshot(snapshot).map(OperationLiveEvent::Snapshot),
+                        typed_snapshot(*snapshot).map(OperationLiveEvent::Snapshot),
                         (receiver, done),
                     ))
                 }
@@ -1210,7 +1206,7 @@ where
         let _ = stored.updates.send(snapshot.clone());
         let _ = stored
             .live_events
-            .send(StoredOperationEvent::Snapshot(snapshot.clone()));
+            .send(StoredOperationEvent::Snapshot(Box::new(snapshot.clone())));
         typed_snapshot(snapshot)
     }
 }
