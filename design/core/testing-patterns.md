@@ -114,13 +114,14 @@ Verification has three explicit tiers:
 - **Tier 2, phase gate:** run preparation when generated artifacts may change,
   workspace formatting, lint and documentation checks, affected package suites,
   and the matching TypeScript and Rust live cases plus matrix conformance.
-- **Tier 3, release gate:** run `cargo xtask release verify`. The named static,
-  Rust, JavaScript, live-build, and live lanes are shared by local verification
-  and GitHub Actions. The gate compiles all workspace test targets, executes
-  only the curated pure Rust targets, runs doctests exactly once, and runs the
-  complete unfiltered live matrices with no hidden skips. Trellis supports
-  current stable Rust only; no older compiler compatibility is promised.
+- **Tier 3, integrated gate:** the normal `Check` workflow owns formatting,
+  lint/type checks, generated freshness, package tests, and the complete
+  unfiltered live matrices with no hidden skips. The release workflow does not
+  repeat those checks; it verifies release metadata and the exact packages,
+  archives, images, and publication inputs assembled from a green `rs` base.
+  Trellis supports current stable Rust only; no older compiler compatibility is
+  promised.
 
 Tier 1 and Tier 2 results are scoped evidence, not a full verification claim. Do
 not rerun Tier 3 after every implementation track; run it once from the final
-integrated source state before release.
+integrated source state before preparing a release.

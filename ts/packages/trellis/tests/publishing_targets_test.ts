@@ -57,6 +57,13 @@ Deno.test("workspace npm build task only builds the supported published packages
   );
 });
 
+Deno.test("trellis JSR package includes prepared protocol WASM", async () => {
+  const config = JSON.parse(
+    await Deno.readTextFile(new URL("../deno.json", import.meta.url)),
+  );
+  assertEquals(config.publish.exclude.includes("!auth/protocol_wasm/**"), true);
+});
+
 Deno.test("release workflows use generated package-manager targets", async () => {
   let releaseWorkflow = "";
   const dryRunScript = await Deno.readTextFile(
@@ -79,18 +86,21 @@ Deno.test("release workflows use generated package-manager targets", async () =>
 
   assertStringIncludes(
     releaseWorkflow,
-    "cargo run --manifest-path rust/xtask/Cargo.toml -- release lane typescript",
+    "deno task -c ts/deno.json packages:build:npm:prepared",
   );
   assertStringIncludes(
     releaseWorkflow,
-    "cargo run --manifest-path rust/xtask/Cargo.toml -- release lane live",
+    "deno task -c ts/deno.json test:prepared:packaging:built",
   );
+  assertStringIncludes(releaseWorkflow, "bash scripts/release-ts-dry-run.sh");
+  assertEquals(releaseWorkflow.includes("release lane"), false);
+  assertEquals(releaseWorkflow.includes("integration/live_runner.ts"), false);
   assertStringIncludes(
     releaseWorkflow,
-    "cargo run --manifest-path rust/tools/generate/Cargo.toml -- -f prepare --no-npm .",
+    "cargo run --manifest-path rust/tools/generate/Cargo.toml -- prepare --no-npm .",
   );
   const prepareRelease = releaseWorkflow.split("\n  prepare-release:")[1].split(
-    "\n  verify-static:",
+    "\n  package-rust:",
   )[0];
   const generateReleaseSdk = prepareRelease.indexOf(
     "- name: Generate release SDK artifacts",
@@ -183,12 +193,12 @@ Deno.test("release workflows use generated package-manager targets", async () =>
     "deno publish --allow-slow-types --allow-dirty",
   );
   assertEquals(releaseWorkflow.includes("\n  verify-format:"), false);
-  assertStringIncludes(releaseWorkflow, "\n  verify-static:");
-  assertStringIncludes(releaseWorkflow, "\n  verify-rust:");
-  assertStringIncludes(releaseWorkflow, "\n  verify-js:");
-  assertStringIncludes(releaseWorkflow, "\n  verify-live:");
-  assertEquals(releaseWorkflow.includes("verify-js-integration"), false);
-  assertEquals(releaseWorkflow.includes("verify-rust-integration"), false);
+  assertEquals(releaseWorkflow.includes("\n  verify-static:"), false);
+  assertEquals(releaseWorkflow.includes("\n  verify-rust:"), false);
+  assertEquals(releaseWorkflow.includes("\n  verify-js:"), false);
+  assertEquals(releaseWorkflow.includes("\n  verify-live:"), false);
+  assertStringIncludes(releaseWorkflow, "\n  package-rust:");
+  assertStringIncludes(releaseWorkflow, "\n  package-js:");
   assertStringIncludes(
     releaseWorkflow,
     "outputs: type=oci,dest=/tmp/$" + "{{ matrix.image }}.tar",
@@ -197,31 +207,17 @@ Deno.test("release workflows use generated package-manager targets", async () =>
     releaseWorkflow,
     "verified-image-$" + "{{ matrix.image }}",
   );
-  assertStringIncludes(releaseWorkflow, "release lane live-build");
-  assertStringIncludes(
-    releaseWorkflow,
-    "integration/live_runner.ts --prebuilt-only --artifacts-manifest dist/integration-runtime/manifest.json",
-  );
-  assertStringIncludes(releaseWorkflow, "name: integration-live-artifacts");
-  assertStringIncludes(releaseWorkflow, "path: dist/integration-runtime");
-  assertEquals(releaseWorkflow.includes("\n  verify-live-inventory:"), false);
-  assertEquals(releaseWorkflow.includes("--inventory-only"), false);
-  const verifyLive = releaseWorkflow.split("\n  verify-live:")[1].split(
-    "\n  release-gate:",
+  assertEquals(releaseWorkflow.includes("integration-live-artifacts"), false);
+  const releaseGate = releaseWorkflow.split("\n  release-gate:")[1].split(
+    "\n  create-release-tag:",
   )[0];
-  assertStringIncludes(verifyLive, "- prepare-release");
-  assertStringIncludes(verifyLive, "- verify-live-build");
-  assertEquals(verifyLive.includes("- verify-live-inventory"), false);
-  assertEquals(verifyLive.includes("- verify-static"), false);
-  assertEquals(verifyLive.includes("- verify-rust"), false);
-  assertEquals(verifyLive.includes("- verify-js"), false);
+  assertStringIncludes(releaseGate, "- package-rust");
+  assertStringIncludes(releaseGate, "- package-js");
+  assertStringIncludes(releaseGate, "needs.package-rust.result == 'success'");
+  assertStringIncludes(releaseGate, "needs.package-js.result == 'success'");
   assertStringIncludes(releaseWorkflow, "skopeo copy --all");
   assertEquals(releaseWorkflow.includes("Build and push image"), false);
   assertEquals(releaseWorkflow.includes("rust-msrv"), false);
-  assertStringIncludes(
-    releaseWorkflow,
-    "needs.verify-static.result == 'success'",
-  );
   assertEquals(releaseWorkflow.includes("deno eval --allow-read"), false);
 });
 

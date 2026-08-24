@@ -5,8 +5,7 @@ use std::time::Duration;
 
 use miette::{miette, IntoDiagnostic, Result, WrapErr};
 
-use super::plan::CommandSpec;
-use super::runner::{command_text, run_checked_command, run_output_command};
+use super::runner::{command_text, run_checked_command, run_output_command, CommandSpec};
 use super::versioning::parse_release_tag;
 
 pub(super) fn run_pretag_check(repo_root: &Path, tag: &str, git_ref: &str) -> Result<()> {

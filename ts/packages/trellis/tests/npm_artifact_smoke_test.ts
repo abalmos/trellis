@@ -14,6 +14,13 @@ const forbiddenBrowserArtifactPattern =
 const moduleSpecifierPattern =
   /(?:import|export)\s+(?:[^"']*?\s+from\s+)?["']([^"']+)["']|import\(\s*["']([^"']+)["']\s*\)|require\(\s*["']([^"']+)["']\s*\)/g;
 
+Deno.test("trellis npm CLI uses an npm-valid bin path", async () => {
+  const packageJson = JSON.parse(
+    await Deno.readTextFile(new URL("../npm/package.json", import.meta.url)),
+  );
+  assertEquals(packageJson.bin["trellis-generate"], "bin/trellis-generate.js");
+});
+
 async function* walkFiles(dir: string): AsyncGenerator<string> {
   for await (const entry of Deno.readDir(dir)) {
     const path = join(dir, entry.name);

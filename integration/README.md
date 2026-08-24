@@ -43,8 +43,11 @@ Rust uses exact `libtest` filters through the shared-host runner:
 deno run -A -c ts/deno.json integration/live_runner.ts --typescript-prefix __none --rust-filter rpc::
 ```
 
-The complete release-owned live schedule is:
+The complete local live schedule is:
 
 ```sh
-cargo xtask release lane live
+deno run -A -c ts/deno.json integration/live_runner.ts
 ```
+
+The normal `Check` workflow is the authoritative full-suite gate. Release
+packaging does not rerun live correctness tests.

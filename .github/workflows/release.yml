@@ -193,13 +193,6 @@ jobs:
       - name: Build embedded login portal
         run: deno task -c ts/portals/login/deno.json build:embedded
 
-      - name: Verify formatting
-        run: |
-          time deno fmt -c ts/deno.json --check
-          time cargo fmt --manifest-path rust/Cargo.toml --all --check
-          time cargo fmt --manifest-path rust/tools/generate/Cargo.toml --check
-          time cargo fmt --manifest-path rust/xtask/Cargo.toml --check
-
       - name: Write release notes
         if: env.RELEASE_TAG != ''
         run: time cargo run --manifest-path xtask/Cargo.toml -- release write-notes --tag "${RELEASE_TAG}" --output "${{ github.workspace }}/dist/release-notes.md"
@@ -230,8 +223,8 @@ jobs:
           name: release-notes
           path: dist/release-notes.md
 
-  verify-static:
-    name: Verify static lane
+  package-rust:
+    name: Verify Rust package
     needs: prepare-release
     runs-on: [self-hosted, Linux, X64]
 
@@ -248,23 +241,13 @@ jobs:
       - name: Set up Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Set up Deno
-        uses: denoland/setup-deno@v2
-        with:
-          deno-version: ${{ env.DENO_VERSION }}
+      - name: Verify publishable Rust package
+        run: cargo package --manifest-path rust/Cargo.toml --package trellis-protocol --allow-dirty
 
-      - name: Set up actionlint
-        run: go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.7
-
-      - name: Run static release lane
-        run: cargo run --manifest-path rust/xtask/Cargo.toml -- release lane static
-
-  verify-rust:
-    name: Verify Rust
+  package-js:
+    name: Verify JavaScript packages
     needs: prepare-release
     runs-on: [self-hosted, Linux, X64]
-    env:
-      RELEASE_TAG: ${{ needs.prepare-release.outputs.release-tag }}
 
     steps:
       - name: Check out repository
@@ -275,48 +258,6 @@ jobs:
         with:
           name: prepared-release
           path: .
-
-      - name: Set up Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: wasm32-unknown-unknown
-
-      - name: Set up Deno
-        uses: denoland/setup-deno@v2
-        with:
-          deno-version: ${{ env.DENO_VERSION }}
-
-      - name: Cache Rust build artifacts
-        uses: swatinem/rust-cache@v2
-        with:
-          workspaces: |
-            xtask -> target
-            rust -> target
-            rust/xtask -> target
-            rust/tools/generate -> target
-
-      - name: Run Rust release lane
-        run: cargo run --manifest-path rust/xtask/Cargo.toml -- release lane rust
-
-  verify-js:
-    name: Verify JavaScript
-    needs: prepare-release
-    runs-on: [self-hosted, Linux, X64]
-    env:
-      RELEASE_TAG: ${{ needs.prepare-release.outputs.release-tag }}
-
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
-
-      - name: Download prepared release workspace
-        uses: actions/download-artifact@v4
-        with:
-          name: prepared-release
-          path: .
-
-      - name: Set up Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
 
       - name: Set up Deno
         uses: denoland/setup-deno@v2
@@ -338,8 +279,14 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
 
-      - name: Run TypeScript release lane
-        run: cargo run --manifest-path rust/xtask/Cargo.toml -- release lane typescript
+      - name: Build npm packages from prepared sources
+        run: deno task -c ts/deno.json packages:build:npm:prepared
+
+      - name: Verify built package surfaces
+        run: deno task -c ts/deno.json test:prepared:packaging:built
+
+      - name: Verify TypeScript publication
+        run: bash scripts/release-ts-dry-run.sh
 
       - name: Upload npm package artifact
         uses: actions/upload-artifact@v4
@@ -659,94 +606,18 @@ jobs:
           path: /tmp/${{ matrix.image }}.tar
           compression-level: 0
 
-  verify-live-build:
-    name: Build shared live artifacts
-    needs: prepare-release
-    runs-on: [self-hosted, Linux, X64]
-
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
-
-      - name: Download prepared release workspace
-        uses: actions/download-artifact@v4
-        with:
-          name: prepared-release
-          path: .
-
-      - name: Set up Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Set up Deno
-        uses: denoland/setup-deno@v2
-        with:
-          deno-version: ${{ env.DENO_VERSION }}
-
-      - name: Cache Rust build artifacts
-        uses: swatinem/rust-cache@v2
-        with:
-          workspaces: |
-            xtask -> target
-            rust -> target
-            rust/xtask -> target
-            rust/tools/generate -> target
-
-      - name: Build live artifacts
-        run: cargo run --manifest-path rust/xtask/Cargo.toml -- release lane live-build
-
-      - name: Upload shared live artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: integration-live-artifacts
-          path: dist/integration-runtime
-
-  verify-live:
-    name: Verify shared live lane
-    needs:
-      - prepare-release
-      - verify-live-build
-    runs-on: [self-hosted, Linux, X64]
-
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
-
-      - name: Download prepared release workspace
-        uses: actions/download-artifact@v4
-        with:
-          name: prepared-release
-          path: .
-
-      - name: Download shared live artifacts
-        uses: actions/download-artifact@v4
-        with:
-          name: integration-live-artifacts
-          path: dist/integration-runtime
-
-      - name: Set up Deno
-        uses: denoland/setup-deno@v2
-        with:
-          deno-version: ${{ env.DENO_VERSION }}
-
-      - name: Run shared live lane
-        run: deno run -A -c ts/deno.json integration/live_runner.ts --prebuilt-only --artifacts-manifest dist/integration-runtime/manifest.json
-
   release-gate:
     name: Release gate
     needs:
       - prepare-release
-      - verify-static
-      - verify-rust
-      - verify-live
-      - verify-js
+      - package-rust
+      - package-js
       - build-cli
       - verify-images
     if: >-
       always()
-      && needs.verify-static.result == 'success'
-      && needs.verify-rust.result == 'success'
-      && needs.verify-live.result == 'success'
-      && needs.verify-js.result == 'success'
+      && needs.package-rust.result == 'success'
+      && needs.package-js.result == 'success'
       && (
         needs.prepare-release.outputs.release-tag == ''
         || (needs.build-cli.result == 'success' && needs.verify-images.result == 'success')
@@ -997,11 +868,11 @@ jobs:
 
   publish-npm:
     name: Publish npm packages
-    if: always() && needs.prepare-release.outputs.should-publish == 'true' && needs.github-release.result == 'success' && needs.verify-js.result == 'success'
+    if: always() && needs.prepare-release.outputs.should-publish == 'true' && needs.github-release.result == 'success' && needs.package-js.result == 'success'
     needs:
       - prepare-release
       - github-release
-      - verify-js
+      - package-js
     runs-on: [self-hosted, Linux, X64]
     permissions:
       contents: read
@@ -1107,11 +978,11 @@ jobs:
 
   publish-jsr:
     name: Publish JSR packages
-    if: always() && needs.prepare-release.outputs.should-publish == 'true' && needs.github-release.result == 'success' && needs.verify-js.result == 'success'
+    if: always() && needs.prepare-release.outputs.should-publish == 'true' && needs.github-release.result == 'success' && needs.package-js.result == 'success'
     needs:
       - prepare-release
       - github-release
-      - verify-js
+      - package-js
     runs-on: [self-hosted, Linux, X64]
     permissions:
       contents: read

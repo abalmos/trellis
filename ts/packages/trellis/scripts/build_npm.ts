@@ -523,7 +523,7 @@ async function normalizePackageJsonExports() {
 
   packageJson.exports = Object.fromEntries(normalizedEntries);
   packageJson.bin = {
-    "trellis-generate": "./bin/trellis-generate.js",
+    "trellis-generate": "bin/trellis-generate.js",
   };
   delete packageJson.dependencies?.["drizzle-orm"];
   packageJson.peerDependenciesMeta = {

@@ -83,9 +83,10 @@
   Implemented Rust rows must match the compiled executable and executed result
   stream exactly. Hidden skips are forbidden, and process-isolated cases require
   a recorded process-global reason.
-- Local and GitHub release verification use the named Rust xtask release lanes.
-  Rust supports the current stable toolchain; no older compiler compatibility is
-  promised.
+- The normal `Check` workflow owns correctness verification, including the full
+  live suite. Release verification is limited to metadata, packages, archives,
+  images, and publication inputs. Rust supports the current stable toolchain; no
+  older compiler compatibility is promised.
 - Release work must keep release-managed Trellis versions consistent through the
   Rust xtask release commands, verify `CHANGELOG.md` against changes since the
   previous release, and run the release verification checklist before the

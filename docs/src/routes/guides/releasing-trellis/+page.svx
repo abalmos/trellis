@@ -252,40 +252,31 @@ cargo run --manifest-path xtask/Cargo.toml -- release write-notes --tag "$RELEAS
 less "$tmpdir/release-notes.md"
 ```
 
-## 5. Optionally run release verification locally
+## 5. Confirm correctness and package locally
 
-The GitHub release gate is the authoritative release verification pass. If you want local confidence before pushing the release marker, run the same full release verification set locally:
+Release preparation starts from a successful normal `Check` run for the final
+`rs` base. `Check` is the authoritative formatting, lint/type, generated
+freshness, package-test, and full live-integration gate. The Release workflow
+does not rerun those correctness suites.
+
+Keep the release commit limited to the release preparation listed below. If it
+changes product behavior, return that change to `rs`, obtain a new successful
+`Check`, and rebuild the release commit from that base.
+
+For focused package confidence before pushing the release marker, prepare once
+and run the same package-specific checks used by the Release workflow:
 
 ```sh
-cargo run --manifest-path xtask/Cargo.toml -- release verify --version "$RELEASE_VERSION" --since "$PREVIOUS_TAG" --keep-workdir
+cargo run --manifest-path xtask/Cargo.toml -- prepare
+cargo run --manifest-path rust/xtask/Cargo.toml -- protocol-wasm
+cargo package --manifest-path rust/Cargo.toml --package trellis-protocol --allow-dirty
+deno task -c ts/deno.json packages:build:npm:prepared
+deno task -c ts/deno.json test:prepared:packaging:built
+bash scripts/release-ts-dry-run.sh
 ```
 
-For emergency focused local verification only, `--skip-integration` skips both language-owned integration suites and prints that release verification is incomplete. A release is not ready until both full integration suites pass in the GitHub release gate.
-
-The command prepares once, verifies that preparation did not change the existing
-working-tree diff, builds live artifacts early, then runs the independent named
-lanes. GitHub Actions invokes these same lane definitions rather than maintaining
-a second command graph. Rust uses the current stable toolchain only.
-
-```sh
-cargo run --manifest-path rust/xtask/Cargo.toml -- release lane static
-cargo run --manifest-path rust/xtask/Cargo.toml -- release lane rust
-cargo run --manifest-path rust/xtask/Cargo.toml -- release lane typescript
-cargo run --manifest-path rust/xtask/Cargo.toml -- release lane live-build
-cargo run --manifest-path rust/xtask/Cargo.toml -- release lane live
-```
-
-Release verification also checks that each Rust workspace member either inherits
-the workspace lint policy or appears in this exception registry:
-
-| Crates | Reason | Owner | Removal condition |
-| --- | --- | --- | --- |
-| `trellis-auth-adapters`, `trellis-core-bootstrap`, `trellis-local-bootstrap`, `trellis-jobs`, `trellis-jobs-runtime`, `trellis-eventlog-runtime` | Private runtime implementation crates expose cross-crate items that are not supported public APIs. Enforcing `missing_docs` would document internals as user-facing contracts. | Rust runtime maintainers | Remove each exception when the crate becomes a supported public API. |
-| `trellis-test` | Test harness internals are intentionally available only to repository live tests. | Integration-test maintainers | Remove when a supported external test API replaces the private harness. |
-| `trellis-codegen-ts`, `trellis-codegen-rust`, `trellis-generate-runner`, `trellis-cli` | Private generator and CLI implementation boundaries are tooling internals, not library APIs. | Tooling maintainers | Remove when a crate becomes publishable or exposes a supported library surface. |
-
-The registry is checked by both xtask suites. New workspace members must inherit
-`[lints] workspace = true` unless reviewers add a similarly explicit exception.
+Rust uses the current stable toolchain only. New workspace members must inherit
+`[lints] workspace = true`; the normal `Check` workflow enforces that policy.
 
 For focused local Deno loops after a single prepare, use the prepared partitions instead of rerunning generation before every slice:
 
@@ -376,8 +367,8 @@ The unified `Release` workflow publishes in gated stages:
 
 - `resolve-release` derives the final release tag from the `release/v*` branch and rejects already-used tags
 - `prepare-release` rewrites publishable versions, verifies release metadata, generates SDK artifacts, writes release notes, and uploads the prepared workspace
-- `verify-static`, `verify-rust`, `verify-js`, and `verify-live-build` run as peer release lanes; `verify-live` then runs both language schedules against one retained host
-- `build-cli` and `verify-images` validate release artifacts; pull request runs skip those release-only matrix jobs while keeping all five verification lanes. `verify-images` builds both architectures into OCI archives and, for the `trellis` image, runs a managed-mode smoke on a native linux/amd64 build: it checks the baked nats-server version against `conformance/nats-binaries.json`, starts the image as its non-root user with a read-only bundle and writable state volume (`--entrypoint trellis` with `--nats-binary` and `--nats-state-dir`), waits for runtime readiness, stops it gracefully, and asserts no startup or write errors
+- `package-rust` verifies the publishable protocol crate, while `package-js` builds npm output from the prepared sources, checks the built package surfaces, runs npm and JSR publication dry-runs, and uploads the npm package artifact
+- `build-cli` and `verify-images` validate release artifacts; pull request runs skip those tag-dependent matrix jobs while retaining package verification. `verify-images` builds both architectures into OCI archives and, for the `trellis` image, runs a managed-mode smoke on a native linux/amd64 build: it checks the baked nats-server version against `conformance/nats-binaries.json`, starts the image as its non-root user with a read-only bundle and writable state volume (`--entrypoint trellis` with `--nats-binary` and `--nats-state-dir`), waits for runtime readiness, stops it gracefully, and asserts no startup or write errors
 - `create-release-tag` creates the release tag after the release gate passes
 - `github-release` publishes CLI archives and checksums first
 - `publish-crates`, `publish-npm`, and `publish-images` publish downstream artifacts after the GitHub release exists

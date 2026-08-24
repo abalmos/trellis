@@ -44,7 +44,7 @@
       "**/*_test.ts",
       "**/*.test.ts",
       "**/*.api_check.ts",
-      "!auth/protocol_wasm/*.d.ts"
+      "!auth/protocol_wasm/**"
     ]
   },
   "imports": {
