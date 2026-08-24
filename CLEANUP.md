@@ -42,9 +42,9 @@ Repository: `abalmos/trellis` Branch: `rs` Status updated: 2026-08-20
       artifact.
 - [x] Keep hidden `agent/*` validation branches from triggering the full
       everyday `Check` suite.
-- [ ] Finish reducing `release.yml` to release-only packaging/docs/platform
+- [x] Finish reducing `release.yml` to release-only packaging/docs/platform
       work; normal correctness belongs in `Check`.
-- [ ] Confirm the final `test` / `check` / `release` command split is simple and
+- [x] Confirm the final `test` / `check` / `release` command split is simple and
       non-overlapping.
 - [ ] Record a fresh cold/warm timing baseline after the final test architecture
       settles.
@@ -245,16 +245,16 @@ Validation:
 
 ## 9. Final gate
 
-- [ ] One understandable production-semantics live suite using real
+- [x] One understandable production-semantics live suite using real
       Trellis/NATS/SQLite behavior.
-- [ ] Small pure/unit/real-adapter checks only where they are the right level.
-- [ ] Normal `check`: format + lint/type + tests + generated-files-up-to-date.
-- [ ] Release-only package/docs/container/platform validation and publication
+- [x] Small pure/unit/real-adapter checks only where they are the right level.
+- [x] Normal `check`: format + lint/type + tests + generated-files-up-to-date.
+- [x] Release-only package/docs/container/platform validation and publication
       metadata.
 - [ ] Full final format/Clippy/type/live run on the finished tree.
 - [ ] Record the new timing baseline and compare it with the deleted historical
       baseline only as historical context.
-- [ ] Update user/developer docs for the final public API/protocol shape.
+- [x] Update user/developer docs for the final public API/protocol shape.
 - [ ] Delete this tracker.
 
 ## Landed cleanup commits worth preserving

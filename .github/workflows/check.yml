@@ -253,9 +253,6 @@ jobs:
       - name: Test TypeScript packages
         run: deno task -c ts/deno.json test:prepared
 
-      - name: Test TypeScript package builds
-        run: deno task -c ts/deno.json test:prepared:packaging
-
   live-build:
     name: Build live executables
     needs: [prepare, portal]
