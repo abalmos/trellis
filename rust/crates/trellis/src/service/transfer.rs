@@ -1,8 +1,3 @@
-#![expect(
-    dead_code,
-    reason = "low-level transfer endpoints are internal behind generated operation helpers"
-)]
-
 use std::collections::BTreeMap;
 use std::time::Duration;
 
@@ -445,29 +440,6 @@ pub fn decode_upload_transfer_chunk(
     Ok(UploadTransferChunk { seq, payload, eof })
 }
 
-/// Run a NATS upload transfer endpoint for a single planned grant until its subscriber closes.
-pub async fn run_upload_transfer_endpoint<C, V>(
-    client: async_nats::Client,
-    subscriber: impl futures_util::Stream<Item = async_nats::Message>,
-    session: UploadTransferSession,
-    store: C,
-    validator: V,
-) -> Result<(), ServerError>
-where
-    C: StoreResourceClient,
-    V: RequestValidator + 'static,
-{
-    run_upload_transfer_endpoint_with_progress(
-        client,
-        subscriber,
-        session,
-        store,
-        validator,
-        |_| {},
-    )
-    .await
-}
-
 /// Run a NATS upload transfer endpoint and report operation progress for accepted body chunks.
 pub async fn run_upload_transfer_endpoint_with_progress<C, V, F>(
     client: async_nats::Client,
@@ -709,20 +681,6 @@ where
     }
 
     Ok(())
-}
-
-/// Subscribe and run one planned upload transfer endpoint in the background.
-pub async fn spawn_upload_transfer_endpoint<C, V>(
-    client: async_nats::Client,
-    session: UploadTransferSession,
-    store: C,
-    validator: V,
-) -> Result<(), ServerError>
-where
-    C: StoreResourceClient,
-    V: RequestValidator + 'static,
-{
-    spawn_upload_transfer_endpoint_with_progress(client, session, store, validator, |_| {}).await
 }
 
 /// Subscribe and run an upload transfer endpoint that reports operation progress.

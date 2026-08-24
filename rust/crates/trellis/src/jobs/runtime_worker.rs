@@ -1,8 +1,3 @@
-#![expect(
-    dead_code,
-    reason = "low-level NATS worker helpers are internal behind start_worker_host_from_client"
-)]
-
 use std::collections::BTreeMap;
 use std::future::Future;
 use std::sync::{
@@ -34,7 +29,7 @@ use crate::jobs::manager::{
     JobManager, JobMetaSource, JobProcessError, JobProcessOutcome, TerminalPublishDecision,
 };
 use crate::jobs::projection::job_from_work_event;
-use crate::jobs::publisher::{JobEventHeaders, JobEventPublisher};
+use crate::jobs::publisher::JobEventPublisher;
 use crate::jobs::registry::{
     start_worker_heartbeat_loop, ActiveJobCancellationRegistry, ServiceRegistryError,
     WorkerHeartbeatHandle, WorkerHeartbeatOptions,
@@ -120,47 +115,6 @@ impl JobCancellationToken {
             if self.is_cancelled() {
                 return;
             }
-        }
-    }
-}
-
-/// [`JobEventPublisher`] backed by a NATS client.
-#[derive(Clone)]
-pub(crate) struct NatsJobEventPublisher {
-    nats: async_nats::Client,
-}
-
-impl NatsJobEventPublisher {
-    /// Create a publisher that writes encoded job events to NATS.
-    pub(crate) fn new(nats: async_nats::Client) -> Self {
-        Self { nats }
-    }
-}
-
-impl JobEventPublisher for NatsJobEventPublisher {
-    type Error = String;
-
-    fn publish(
-        &self,
-        subject: String,
-        headers: JobEventHeaders,
-        payload: Vec<u8>,
-    ) -> impl Future<Output = Result<(), Self::Error>> + Send {
-        let nats = self.nats.clone();
-        async move {
-            let mut nats_headers = async_nats::HeaderMap::new();
-            nats_headers.insert("request-id", headers.request_id.as_str());
-            nats_headers.insert("traceparent", headers.traceparent.as_str());
-            if let Some(tracestate) = headers.tracestate.as_deref() {
-                nats_headers.insert("tracestate", tracestate);
-            }
-            async_nats::jetstream::new(nats)
-                .publish_with_headers(subject, nats_headers, payload.into())
-                .await
-                .map_err(|error| error.to_string())?
-                .await
-                .map(|_| ())
-                .map_err(|error| error.to_string())
         }
     }
 }
@@ -465,83 +419,6 @@ where
     cancellation: JobCancellationToken,
     cancellation_registry: ActiveJobCancellationRegistry,
     key_coordinator: Option<NatsKeyCoordinator>,
-}
-
-/// Run one queue worker with explicit shutdown and active-job cancellation context.
-pub async fn run_single_queue_worker<P, M, H, Fut, E>(
-    nats: async_nats::Client,
-    work_stream: &str,
-    queue_type: &str,
-    manager: JobManager<P, M>,
-    cancellation: JobCancellationToken,
-    cancellation_registry: ActiveJobCancellationRegistry,
-    handler: H,
-) -> Result<(), RuntimeWorkerError>
-where
-    P: JobEventPublisher + Send + Sync + 'static,
-    P::Error: std::fmt::Display,
-    M: JobMetaSource + Send + Sync + 'static,
-    H: Fn(ActiveJob<P, M>) -> Fut + Clone + Send + Sync + 'static,
-    Fut: Future<Output = Result<Value, JobProcessError<E>>> + Send,
-    E: ToString + Send,
-{
-    let queue = manager
-        .bindings()
-        .queues
-        .get(queue_type)
-        .ok_or_else(|| RuntimeWorkerError::MissingQueueBinding {
-            queue_type: queue_type.to_string(),
-        })?
-        .clone();
-    let cancellation_subject = format!("{}.*.cancelled", queue.publish_prefix);
-    let mut cancellation_subscriber =
-        nats.subscribe(cancellation_subject.clone())
-            .await
-            .map_err(|error| RuntimeWorkerError::CancellationSubscription {
-                subject: cancellation_subject.clone(),
-                details: error.to_string(),
-            })?;
-    let cancellation_task = {
-        let cancellation_registry = cancellation_registry.clone();
-        tokio::spawn(async move {
-            while let Some(message) = cancellation_subscriber.next().await {
-                let Ok(event) = serde_json::from_slice::<JobEvent>(&message.payload) else {
-                    continue;
-                };
-                if event.event_type != JobEventType::Cancelled {
-                    continue;
-                }
-                let key = job_key(&event.service, &event.job_type, &event.job_id);
-                cancellation_registry.cancel(&key);
-            }
-        })
-    };
-
-    let result = async {
-        let key_coordinator =
-            key_coordinator_for_queue(nats.clone(), manager.bindings().namespace.as_str(), &queue)
-                .await?;
-        let jetstream = jetstream::new(nats);
-        let lifecycle_stream = lifecycle_stream(&jetstream).await?;
-        let consumer = ensure_worker_consumer(&jetstream, work_stream, &queue).await?;
-        run_prepared_queue_worker_loop(
-            WorkerLoopResources {
-                consumer,
-                lifecycle_stream,
-                queue,
-                manager,
-                cancellation,
-                cancellation_registry,
-                key_coordinator,
-            },
-            handler,
-        )
-        .await
-    }
-    .await;
-    cancellation_task.abort();
-    let _ = cancellation_task.await;
-    result
 }
 
 async fn run_prepared_queue_worker_loop<P, M, H, Fut, E>(
