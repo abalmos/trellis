@@ -200,16 +200,6 @@ impl RuntimeAuthVerifier {
         }
     }
 
-    /// Registry I/O counters observed by the backing context source.
-    #[cfg(test)]
-    #[expect(
-        dead_code,
-        reason = "retained for verifier tests that inspect aggregate source I/O"
-    )]
-    pub(crate) fn io_counters(&self) -> AuthorizationValidatorIoCounters {
-        self.source.io_counters()
-    }
-
     /// Require one additional exact permission from an already-cached current context.
     pub(crate) fn require_cached_permission(
         &self,

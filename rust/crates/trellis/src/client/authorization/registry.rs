@@ -169,15 +169,6 @@ impl AuthorizationRegistryReader {
     }
 
     #[cfg(feature = "test-support")]
-    #[expect(
-        dead_code,
-        reason = "retained for test-support authorization registry inspection"
-    )]
-    pub(crate) fn binding(&self) -> &AuthorizationRegistryBinding {
-        &self.binding
-    }
-
-    #[cfg(feature = "test-support")]
     pub(crate) fn io_counters(&self) -> AuthorizationRegistryIoCounters {
         AuthorizationRegistryIoCounters {
             context_gets: self.context_gets.load(Ordering::Relaxed),
