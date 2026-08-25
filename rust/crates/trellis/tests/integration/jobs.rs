@@ -1796,10 +1796,29 @@ async fn wait_for_admin_job(
         if let Some(job) = page.entries.into_iter().find(|entry| entry.id == job_id) {
             return job;
         }
-        assert!(
-            tokio::time::Instant::now() < deadline,
-            "Jobs.Query did not return {state:?} job {job_id} before timeout"
-        );
+        if tokio::time::Instant::now() >= deadline {
+            let current = jobs_admin
+                .rpc()
+                .jobs()
+                .query(&JobsQueryRequest {
+                    group_by: None,
+                    queue_key: None,
+                    runtime_band: None,
+                    search: None,
+                    service: None,
+                    sort: None,
+                    state: None,
+                    trigger: None,
+                    r#type: None,
+                    offset: None,
+                    limit: 20,
+                    window: None,
+                })
+                .await;
+            panic!(
+                "Jobs.Query did not return {state:?} job {job_id} before timeout; current={current:?}"
+            );
+        }
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
 }
