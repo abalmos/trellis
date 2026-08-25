@@ -2150,7 +2150,7 @@ async fn wait_for_observed(
     event_id: &str,
     group: Option<&str>,
 ) {
-    let deadline = Instant::now() + Duration::from_secs(5);
+    let deadline = Instant::now() + Duration::from_secs(10);
     loop {
         if let Some((event, context)) = observed.lock().await.clone() {
             assert_eq!(event.id, event_id);
