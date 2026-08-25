@@ -117,42 +117,48 @@ async function main(args: readonly string[]): Promise<number> {
   };
 
   try {
-    let code = 0;
+    const lanes: Promise<number>[] = [];
     if (typescriptCases.length > 0) {
-      code = (await new Deno.Command(Deno.execPath(), {
-        args: [
-          "run",
-          "-A",
-          "-c",
-          "ts/integration/deno.json",
-          "ts/integration/runner.ts",
-          ...typescriptCaseIds.flatMap((id) => ["--case", id]),
-        ],
-        cwd: repoRoot,
-        env,
-        stdin: "inherit",
-        stdout: "inherit",
-        stderr: "inherit",
-      }).spawn().status).code;
+      lanes.push(
+        new Deno.Command(Deno.execPath(), {
+          args: [
+            "run",
+            "-A",
+            "-c",
+            "ts/integration/deno.json",
+            "ts/integration/runner.ts",
+            "--parallel",
+            ...typescriptCaseIds.flatMap((id) => ["--case", id]),
+          ],
+          cwd: repoRoot,
+          env,
+          stdin: "inherit",
+          stdout: "inherit",
+          stderr: "inherit",
+        }).spawn().status.then((status) => status.code),
+      );
     }
     if (rustTests.length > 0) {
-      const rustCode = (await new Deno.Command(Deno.execPath(), {
-        args: [
-          "run",
-          "-A",
-          "-c",
-          "ts/deno.json",
-          "rust/crates/trellis-test/integration_runner.ts",
-          ...(rustFilter === undefined ? [] : ["--", rustFilter]),
-        ],
-        cwd: repoRoot,
-        env,
-        stdin: "inherit",
-        stdout: "inherit",
-        stderr: "inherit",
-      }).spawn().status).code;
-      if (code === 0) code = rustCode;
+      lanes.push(
+        new Deno.Command(Deno.execPath(), {
+          args: [
+            "run",
+            "-A",
+            "-c",
+            "ts/deno.json",
+            "rust/crates/trellis-test/integration_runner.ts",
+            ...(rustFilter === undefined ? [] : ["--", rustFilter]),
+          ],
+          cwd: repoRoot,
+          env,
+          stdin: "inherit",
+          stdout: "inherit",
+          stderr: "inherit",
+        }).spawn().status.then((status) => status.code),
+      );
     }
+    const codes = await Promise.all(lanes);
+    const code = codes.find((laneCode) => laneCode !== 0) ?? 0;
     if (code !== 0) {
       console.error(
         `shared Trellis output:\n${host.output?.() ?? "<unavailable>"}`,

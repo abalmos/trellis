@@ -23,6 +23,9 @@ jobs:
   prepare:
     name: Prepare generated artifacts
     runs-on: [self-hosted, Linux, X64]
+    env:
+      CARGO_HOME: ${{ runner.temp }}/trellis-prepare-cargo-home
+      CARGO_TARGET_DIR: ${{ runner.temp }}/trellis-prepare-target
     outputs:
       current: ${{ steps.current.outputs.current }}
     steps:
@@ -82,8 +85,10 @@ jobs:
 
   wasm:
     name: Protocol WASM
-    needs: prepare
     runs-on: [self-hosted, Linux, X64]
+    env:
+      CARGO_HOME: ${{ runner.temp }}/trellis-wasm-cargo-home
+      CARGO_TARGET_DIR: ${{ runner.temp }}/trellis-wasm-target
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -246,6 +251,18 @@ jobs:
       - name: Test TypeScript packages
         run: deno task -c ts/deno.json test:prepared
 
+      - name: Check live runners
+        run: >-
+          deno check -c ts/deno.json
+          integration/live_runner.ts
+          rust/crates/trellis-test/integration_runner.ts
+
+      - name: Test live runners
+        run: >-
+          deno test -A -c ts/deno.json
+          integration/live_runner_test.ts
+          rust/crates/trellis-test/integration_runner_test.ts
+
   live-build:
     name: Build live executables
     needs: [prepare, wasm, portal]
@@ -280,18 +297,6 @@ jobs:
         with:
           deno-version: ${{ env.DENO_VERSION }}
 
-      - name: Check live runners
-        run: >-
-          deno check -c ts/deno.json
-          integration/live_runner.ts
-          rust/crates/trellis-test/integration_runner.ts
-
-      - name: Test live runners
-        run: >-
-          deno test -A -c ts/deno.json
-          integration/live_runner_test.ts
-          rust/crates/trellis-test/integration_runner_test.ts
-
       - name: Build live executables
         env:
           CARGO_TARGET_DIR: ${{ runner.temp }}/trellis-live-target
@@ -308,11 +313,9 @@ jobs:
     name: Live ${{ matrix.name }}
     needs: [prepare, wasm, live-build]
     runs-on: [self-hosted, Linux, X64]
-    env:
-      TRELLIS_TEST_JOBS: "2"
     strategy:
       fail-fast: false
-      max-parallel: 4
+      max-parallel: 8
       matrix:
         include:
           - name: auth

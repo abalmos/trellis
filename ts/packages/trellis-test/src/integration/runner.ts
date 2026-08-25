@@ -220,11 +220,15 @@ export async function runTrellisIntegrationTests(
     childDenoTestArgs.push(`--coverage=${coverage.rawDir}`);
   }
   if (args.parallel) {
+    const jobs = integrationJobs(
+      selected.caseIds.length,
+      args.jobs,
+    );
     const inheritedManifest = Deno.env.get(TRELLIS_TEST_SHARED_RUNTIME_ENV);
     if (inheritedManifest !== undefined) {
       const env: Record<string, string> = {
         [TRELLIS_TEST_SHARED_RUNTIME_ENV]: inheritedManifest,
-        DENO_JOBS: "1",
+        DENO_JOBS: String(jobs),
       };
       const run = await runDenoTestsWithEvents(commandRunner, {
         executable: Deno.execPath(),
@@ -262,7 +266,7 @@ export async function runTrellisIntegrationTests(
         };
       }),
     });
-    const env = { ...host.env, DENO_JOBS: "1" };
+    const env = { ...host.env, DENO_JOBS: String(jobs) };
 
     try {
       const run = await runDenoTestsWithEvents(commandRunner, {
@@ -609,9 +613,6 @@ function parseRunnerArgs(args: readonly string[]): ParsedRunnerArgs {
     }
   }
 
-  if (jobs !== undefined && jobs !== 1) {
-    throw new Error("--jobs must be 1 for fixed shared protocol subjects");
-  }
   return {
     configPath,
     fixtureFilters,
@@ -625,6 +626,18 @@ function parseRunnerArgs(args: readonly string[]): ParsedRunnerArgs {
     denoTestArgs,
     help,
   };
+}
+
+/** Returns the bounded worker count for parallel TypeScript integration cases. */
+export function integrationJobs(
+  caseCount: number,
+  configuredJobs: number | undefined,
+  hardwareConcurrency = navigator.hardwareConcurrency,
+): number {
+  return Math.min(
+    caseCount,
+    configuredJobs ?? Math.max(1, Math.ceil(hardwareConcurrency / 2)),
+  );
 }
 
 function coveragePaths(
@@ -1033,7 +1046,7 @@ Options:
   --coverage-dir <dir>  Collect Deno coverage under <dir>/raw and write <dir>/lcov.info.
   --inventory-only      Evaluate selected modules and validate registrations without running tests.
   --parallel            Run selected tests with one shared Trellis runtime.
-  --jobs <n>            Shared mode requires 1 for fixed protocol subjects.
+  --jobs <n>            Override the machine-relative parallel worker count.
   --deno-test-arg <arg> Pass one argument through to child deno test. May be repeated.
   --                    Pass all remaining arguments through to child deno test.
   --skip-conformance    Skip the optional config conformance hook.

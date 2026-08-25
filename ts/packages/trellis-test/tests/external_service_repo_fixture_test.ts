@@ -138,7 +138,7 @@ Deno.test("external service repo fixture runs through generic runner shared mode
       fixtureConfigPath,
       "--parallel",
       "--jobs",
-      "1",
+      "2",
       "--fixture",
       "external-service-repo",
     ],

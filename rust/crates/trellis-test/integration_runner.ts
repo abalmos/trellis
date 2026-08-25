@@ -193,7 +193,7 @@ export function rustIntegrationJobs(
     testCount,
     Number.isSafeInteger(configured) && configured > 0
       ? configured
-      : Math.min(4, Math.ceil(Math.sqrt(hardwareConcurrency))),
+      : Math.max(1, Math.ceil(hardwareConcurrency / 2)),
   );
 }
 

@@ -6,6 +6,7 @@ import {
 } from "@std/assert";
 import { join } from "@std/path";
 import {
+  integrationJobs,
   parseTypeScriptIntegrationEvents,
   reconcileTypeScriptIntegrationEvents,
   reconcileTypeScriptIntegrationInventory,
@@ -399,7 +400,7 @@ Deno.test("runner constructs parallel commands with case host env and DENO_JOBS"
   let stopCalls = 0;
 
   const code = await runTrellisIntegrationTests({
-    args: ["--parallel", "--jobs", "1", "--case", "orders.created"],
+    args: ["--parallel", "--jobs", "3", "--case", "orders.created"],
     config,
     commandRunner: (command) =>
       mockRun(
@@ -444,6 +445,12 @@ Deno.test("runner constructs parallel commands with case host env and DENO_JOBS"
     [TRELLIS_TEST_SHARED_RUNTIME_ENV]: "/tmp/manifest.json",
     DENO_JOBS: "1",
   });
+});
+
+Deno.test("runner parallelism is machine-relative, bounded, and overridable", () => {
+  assertEquals(integrationJobs(20, undefined, 32), 16);
+  assertEquals(integrationJobs(3, undefined, 32), 3);
+  assertEquals(integrationJobs(20, 7, 32), 7);
 });
 
 Deno.test("runner skips optional conformance hook when requested", async () => {

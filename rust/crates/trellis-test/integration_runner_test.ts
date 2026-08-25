@@ -40,7 +40,7 @@ Deno.test("Rust integration inventory requires registered cases but allows helpe
 
 Deno.test("Rust integration concurrency is machine-relative and overridable", () => {
   assertEquals(rustIntegrationJobs(10, undefined, 4), 2);
-  assertEquals(rustIntegrationJobs(10, undefined, 32), 4);
+  assertEquals(rustIntegrationJobs(20, undefined, 32), 16);
   assertEquals(rustIntegrationJobs(3, undefined, 4), 2);
   assertEquals(rustIntegrationJobs(10, "2", 4), 2);
   assertEquals(rustIntegrationJobs(10, "invalid", 4), 2);
