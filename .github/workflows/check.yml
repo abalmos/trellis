@@ -307,8 +307,11 @@ jobs:
     name: Live ${{ matrix.name }}
     needs: [prepare, wasm, live-build]
     runs-on: [self-hosted, Linux, X64]
+    env:
+      TRELLIS_TEST_JOBS: "2"
     strategy:
       fail-fast: false
+      max-parallel: 4
       matrix:
         include:
           - name: auth

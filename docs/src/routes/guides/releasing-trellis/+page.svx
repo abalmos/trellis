@@ -40,11 +40,12 @@ deno run -A -c ts/deno.json integration/live_runner.ts
 ```
 
 Rust runs exact-test processes through a bounded machine-relative worker pool;
-`TRELLIS_TEST_JOBS` is a local debugging override. Process-isolated cases use
-the same case-owned schedule and retain a matrix reason; feature-area skip lists
-are forbidden. The normal Check also overlaps independent semantic subsystem
-jobs, each using the same prebuilt normal release executable bundle. Live jobs
-do not invoke Cargo.
+`TRELLIS_TEST_JOBS` overrides that bound for local diagnosis or aggregate CI
+host load. Process-isolated cases use the same case-owned schedule and retain a
+matrix reason; feature-area skip lists are forbidden. The normal Check overlaps
+up to four independent semantic subsystem jobs with two case workers each; each
+uses the same prebuilt normal release executable bundle. Live jobs do not invoke
+Cargo.
 
 If the full integration suites cannot be run, record the reason and the last focused checks that did run.
 

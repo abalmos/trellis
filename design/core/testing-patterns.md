@@ -68,14 +68,15 @@ names, and domain records.
 
 Rust executes each case as an exact-test process through a bounded,
 machine-relative worker pool. `TRELLIS_TEST_JOBS` may override the bound for
-local diagnosis. Do not restore parallelism by rewriting semantic identities or
-by adding test-only protocol behavior.
+local diagnosis or to coordinate aggregate CI host load. Do not restore
+parallelism by rewriting semantic identities or by adding test-only protocol
+behavior.
 
 The normal Check runs semantic subsystem slices as independent GitHub Actions
 jobs. Live executables are built once as normal locked release binaries and
-distributed to those jobs; live execution does not compile Rust. Independent
-jobs and case workers overlap according to available runner capacity without
-assuming a particular GitHub runner topology.
+distributed to those jobs; live execution does not compile Rust. Check runs up
+to four subsystem jobs with two case workers each, preserving the prior proven
+aggregate bound of eight processes on the current self-hosted runner.
 
 `isolated-process` remains matrix documentation for genuinely process- or
 deployment-global behavior such as restart, ownership loss, startup migration,
