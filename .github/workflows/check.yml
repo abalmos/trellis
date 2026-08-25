@@ -46,6 +46,9 @@ jobs:
         with:
           deno-version: ${{ env.DENO_VERSION }}
 
+      - name: Reset isolated preparation state
+        run: rm -rf "${{ runner.temp }}/trellis-prepare-cargo-home" "${{ runner.temp }}/trellis-prepare-target"
+
       - name: Cache preparation build
         uses: swatinem/rust-cache@v2
         env:
@@ -105,6 +108,9 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: wasm32-unknown-unknown
+
+      - name: Reset isolated WASM state
+        run: rm -rf "${{ runner.temp }}/trellis-wasm-cargo-home" "${{ runner.temp }}/trellis-wasm-target"
 
       - name: Cache protocol WASM build
         uses: swatinem/rust-cache@v2
@@ -251,6 +257,9 @@ jobs:
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Reset isolated tooling state
+        run: rm -rf "${{ runner.temp }}/trellis-tooling-cargo-home"
+
       - name: Cache Rust tooling
         uses: swatinem/rust-cache@v2
         env:
@@ -347,6 +356,9 @@ jobs:
 
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
+
+      - name: Reset isolated live build state
+        run: rm -rf "${{ runner.temp }}/trellis-live-cargo-home" "${{ runner.temp }}/trellis-live-target"
 
       - name: Cache live release build
         uses: swatinem/rust-cache@v2
