@@ -1280,32 +1280,6 @@ impl TrellisTestRuntime {
         TrellisControlPlaneSqlite::new(self.control_plane_path.clone())
     }
 
-    /// Publish one synthetic immutable authorization revocation for live watcher tests.
-    pub async fn publish_authorization_revocation(
-        &self,
-        context_digest: &str,
-        value: &serde_json::Value,
-    ) -> Result<(), TrellisTestError> {
-        let client = ConnectOptions::new()
-            .credentials_file(trellis_creds_path(self.workdir.path()))
-            .await?
-            .connect(&self.nats_url)
-            .await
-            .map_err(|error| io::Error::new(io::ErrorKind::ConnectionRefused, error))?;
-        let store = jetstream::new(client)
-            .get_key_value("trellis_authorization_contexts")
-            .await
-            .map_err(io::Error::other)?;
-        store
-            .put(
-                format!("revocation.{context_digest}"),
-                serde_json::to_vec(value)?.into(),
-            )
-            .await
-            .map_err(io::Error::other)?;
-        Ok(())
-    }
-
     /// List JetStream consumers on the shared Trellis event stream.
     pub async fn list_trellis_jetstream_consumers(
         &self,

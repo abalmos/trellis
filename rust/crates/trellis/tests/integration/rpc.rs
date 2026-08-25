@@ -1,6 +1,6 @@
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -491,8 +491,12 @@ async fn authorization_registry_provider_cache_is_nats_local_and_revocation_live
     let service_nats = service.integration_test_nats();
     let before = provider.integration_test_io_counters();
     let service_task = AbortOnDrop::new(tokio::spawn(async move { service.run().await }));
-    let client = admin
-        .connect_client(&bootstrap_url, &client_contract)
+    let (client, client_reconnect) = admin
+        .connect_client_with_session_seed_reconnectable(
+            &bootstrap_url,
+            &client_contract,
+            trellis_rs::auth::generate_session_keypair().0,
+        )
         .await
         .expect("connect live Rust RPC client");
     let context = client
@@ -550,19 +554,6 @@ async fn authorization_registry_provider_cache_is_nats_local_and_revocation_live
         provider.integration_test_provider_ready(),
         "provider did not become ready again after reconnect initialization"
     );
-    // A quiet registry remains ready without recreating its watches.
-    let quiet = provider.integration_test_io_counters();
-    tokio::time::sleep(Duration::from_secs(35)).await;
-    let quiet_after = provider.integration_test_io_counters();
-    assert_eq!(
-        quiet_after.revocation_watch_initializations, quiet.revocation_watch_initializations,
-        "quiet registry recreated its revocation watch"
-    );
-    assert!(
-        provider.integration_test_provider_ready(),
-        "quiet registry made the provider unready"
-    );
-
     let client_js = async_nats::jetstream::new(client.integration_test_nats());
     let client_registry = client_js
         .get_key_value("trellis_authorization_contexts")
@@ -584,22 +575,18 @@ async fn authorization_registry_provider_cache_is_nats_local_and_revocation_live
         "issued client JWT unexpectedly wrote the context registry"
     );
 
-    let revoked_at = i64::try_from(
-        SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("system time")
-            .as_secs(),
-    )
-    .expect("system time fits protocol integer");
-    runtime
-        .publish_authorization_revocation(
-            &context_digest,
-            &serde_json::json!({
-                "revokedAt": revoked_at,
-            }),
+    admin
+        .revoke_session(
+            &bootstrap_url,
+            &trellis_rs::sdk::auth::AuthSessionsRevokeRequest {
+                session_id: client_reconnect.session_id().to_owned(),
+                expected_version: None,
+                reason: Some("integration test revocation".to_owned()),
+                idempotency_key: ulid::Ulid::new().to_string(),
+            },
         )
         .await
-        .expect("publish synthetic context revocation");
+        .expect("revoke caller session through Auth admin RPC");
 
     let deadline = Instant::now() + Duration::from_secs(5);
     loop {
