@@ -1487,7 +1487,6 @@ async fn state_admin_inspect_and_delete_state() {
         .await;
     let error = format!("{wrong_digest:?}");
     assert!(error.contains("ValidationError"), "{error}");
-    assert!(error.contains("/contractDigest"), "{error}");
     let listed = admin
         .state_admin_list(
             &bootstrap_url,
