@@ -206,11 +206,7 @@ jobs:
       - name: Cache Rust build artifacts
         uses: swatinem/rust-cache@v2
         with:
-          workspaces: |
-            rust -> target
-            rust/tools/generate -> target
-            rust/xtask -> target
-            xtask -> target
+          workspaces: rust -> target
 
       - name: Check formatting
         run: |
@@ -224,11 +220,48 @@ jobs:
       - name: Test Rust libraries
         run: cargo test --manifest-path rust/Cargo.toml --workspace --lib
 
+  rust-tooling:
+    name: Rust tooling (${{ matrix.name }})
+    needs: prepare
+    runs-on: [self-hosted, Linux, X64]
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: generate
+            workspace: rust/tools/generate
+          - name: prepare
+            workspace: rust/xtask
+          - name: release
+            workspace: xtask
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Download generated artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: check-generated
+          path: generated
+
+      - name: Expose installed Cargo binaries
+        run: echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust tooling
+        uses: swatinem/rust-cache@v2
+        env:
+          CARGO_HOME: ${{ runner.temp }}/trellis-tooling-cargo-home
+        with:
+          workspaces: ${{ matrix.workspace }} -> target
+
       - name: Test Rust tooling
-        run: |
-          cargo test --manifest-path rust/tools/generate/Cargo.toml
-          cargo test --manifest-path rust/xtask/Cargo.toml
-          cargo test --manifest-path xtask/Cargo.toml
+        env:
+          CARGO_HOME: ${{ runner.temp }}/trellis-tooling-cargo-home
+        run: cargo test --manifest-path ${{ matrix.workspace }}/Cargo.toml
 
   typescript:
     name: TypeScript
@@ -318,6 +351,7 @@ jobs:
       - name: Cache live release build
         uses: swatinem/rust-cache@v2
         env:
+          CARGO_HOME: ${{ runner.temp }}/trellis-live-cargo-home
           CARGO_TARGET_DIR: ${{ runner.temp }}/trellis-live-target
         with:
           cache-targets: false
@@ -330,6 +364,7 @@ jobs:
 
       - name: Build live executables
         env:
+          CARGO_HOME: ${{ runner.temp }}/trellis-live-cargo-home
           CARGO_TARGET_DIR: ${{ runner.temp }}/trellis-live-target
         run: deno run -A -c ts/deno.json integration/live_runner.ts --build-only
 
