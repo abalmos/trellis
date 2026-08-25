@@ -1,5 +1,4 @@
 use std::fs::File;
-use std::net::TcpListener;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, ExitStatus, Stdio};
 use std::time::Duration;
@@ -15,6 +14,7 @@ struct RuntimeProcess {
     child: Child,
     url: String,
     stderr_path: PathBuf,
+    _port_reservation: trellis_test::TrellisTestPortReservation,
 }
 
 impl RuntimeProcess {
@@ -24,12 +24,15 @@ impl RuntimeProcess {
         config_path: &Path,
         label: &str,
     ) -> Self {
-        let port = reserve_port();
+        let mut port_reservation =
+            trellis_test::reserve_local_port().expect("reserve runtime port");
+        let port = port_reservation.port().expect("read reserved runtime port");
         write_runtime_config(runtime, mode, config_path, label, port);
         let stdout = File::create(runtime.workdir().join(format!("{label}.stdout.log")))
             .expect("create runtime stdout log");
         let stderr_path = runtime.workdir().join(format!("{label}.stderr.log"));
         let stderr = File::create(&stderr_path).expect("create runtime stderr log");
+        port_reservation.release_listener();
         let child = runtime_command(mode, config_path)
             .stdout(Stdio::from(stdout))
             .stderr(Stdio::from(stderr))
@@ -39,6 +42,7 @@ impl RuntimeProcess {
             child,
             url: format!("http://127.0.0.1:{port}"),
             stderr_path,
+            _port_reservation: port_reservation,
         }
     }
 
@@ -682,14 +686,6 @@ fn runtime_command(mode: &str, config_path: &Path) -> Command {
         .current_dir(rust_dir)
         .stdin(Stdio::null());
     command
-}
-
-fn reserve_port() -> u16 {
-    TcpListener::bind("127.0.0.1:0")
-        .expect("reserve runtime port")
-        .local_addr()
-        .expect("read reserved runtime port")
-        .port()
 }
 
 fn toml_path(path: &Path) -> String {
