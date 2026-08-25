@@ -57,6 +57,8 @@ jobs:
         with:
           cache-targets: false
           cache-directories: ${{ runner.temp }}/trellis-prepare-target
+          env-vars: CC CFLAGS CXX CMAKE RUST
+          key: prepare-locked
 
       - name: Prepare generated artifacts
         env:
@@ -120,6 +122,8 @@ jobs:
         with:
           cache-targets: false
           cache-directories: ${{ runner.temp }}/trellis-wasm-target
+          env-vars: CC CFLAGS CXX CMAKE RUST
+          key: wasm32-release
 
       - name: Build protocol WASM
         env:
@@ -266,6 +270,8 @@ jobs:
           CARGO_HOME: ${{ runner.temp }}/trellis-tooling-cargo-home
         with:
           workspaces: ${{ matrix.workspace }} -> target
+          env-vars: CC CFLAGS CXX CMAKE RUST
+          key: ${{ matrix.name }}
 
       - name: Test Rust tooling
         env:
@@ -368,6 +374,8 @@ jobs:
         with:
           cache-targets: false
           cache-directories: ${{ runner.temp }}/trellis-live-target
+          env-vars: CC CFLAGS CXX CMAKE RUST
+          key: x86_64-release-test-support-runtime-internals
 
       - name: Set up Deno
         uses: denoland/setup-deno@v2
