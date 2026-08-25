@@ -4,7 +4,7 @@ export type TestOidcClaims = Record<string, unknown>;
 /** A minimal live OIDC provider backed by WebCrypto signatures. */
 export type TestOidcProvider = {
   readonly issuer: string;
-  setClaims(claims: TestOidcClaims): void;
+  setClaims(claims: TestOidcClaims, redirectOrigin?: string): void;
   shutdown(): Promise<void>;
 };
 
@@ -24,7 +24,8 @@ export async function startTestOidcProvider(
   );
   const publicJwk = await crypto.subtle.exportKey("jwk", keyPair.publicKey);
   let claims = initialClaims;
-  const codes = new Map<string, string>();
+  const scopedClaims = new Map<string, TestOidcClaims>();
+  const codes = new Map<string, { nonce: string; claims: TestOidcClaims }>();
   let issuer = "";
   const server = Deno.serve(
     { hostname: "127.0.0.1", port: 0, onListen() {} },
@@ -57,7 +58,10 @@ export async function startTestOidcProvider(
           return new Response(null, { status: 400 });
         }
         const code = crypto.randomUUID();
-        codes.set(code, nonce);
+        codes.set(code, {
+          nonce,
+          claims: scopedClaims.get(new URL(redirectUri).origin) ?? claims,
+        });
         const redirect = new URL(redirectUri);
         redirect.searchParams.set("code", code);
         redirect.searchParams.set("state", state);
@@ -66,8 +70,10 @@ export async function startTestOidcProvider(
       if (url.pathname === "/token" && request.method === "POST") {
         const form = await request.formData();
         const code = form.get("code");
-        const nonce = typeof code === "string" ? codes.get(code) : undefined;
-        if (!nonce || typeof code !== "string") {
+        const authorization = typeof code === "string"
+          ? codes.get(code)
+          : undefined;
+        if (!authorization || typeof code !== "string") {
           return new Response(null, { status: 400 });
         }
         codes.delete(code);
@@ -81,8 +87,8 @@ export async function startTestOidcProvider(
             aud: "trellis-test-client",
             iat: now,
             exp: now + 300,
-            nonce,
-            ...claims,
+            nonce: authorization.nonce,
+            ...authorization.claims,
           },
         );
         return Response.json({
@@ -98,8 +104,9 @@ export async function startTestOidcProvider(
   issuer = `http://127.0.0.1:${server.addr.port}`;
   return {
     issuer,
-    setClaims(value) {
-      claims = value;
+    setClaims(value, redirectOrigin) {
+      if (redirectOrigin === undefined) claims = value;
+      else scopedClaims.set(redirectOrigin, value);
     },
     shutdown: () => server.shutdown(),
   };

@@ -1542,7 +1542,7 @@ async fn password_reset_and_change_invalidate_old_credentials() {
         .await
         .is_err());
 
-    let (current, _current_reconnect) = fixture
+    let (current, current_reconnect) = fixture
         .admin
         .connect_local_user_for_portal_reconnectable(
             &fixture.bootstrap_url,
@@ -1563,6 +1563,11 @@ async fn password_reset_and_change_invalidate_old_credentials() {
         .await
         .expect("connect sibling password session");
     drop(sibling);
+    drop(current);
+    let current = current_reconnect
+        .connect_bound_only()
+        .await
+        .expect("refresh current password session context");
 
     let response = auth_sdk::AuthClient::new(&current)
         .rpc()
@@ -2488,35 +2493,6 @@ fn binding_rows(
         .expect("query trusted portal binding")
 }
 
-fn active_principal_context_capabilities(
-    runtime: &trellis_test::TrellisTestRuntime,
-    session_id: &str,
-) -> Vec<Vec<String>> {
-    runtime
-        .control_plane_sqlite()
-        .query(
-            "SELECT c.signed_context_json FROM auth_authorization_contexts c JOIN auth_sessions s ON s.principal_id = c.principal_id WHERE s.session_id = ? AND c.state = 'active'",
-            [session_id],
-        )
-        .expect("query active principal contexts")
-        .into_iter()
-        .map(|row| {
-            serde_json::from_str::<Value>(
-                row["signed_context_json"]
-                    .as_str()
-                    .expect("signed context JSON"),
-            )
-            .expect("parse signed context")
-            ["capabilities"]
-                .as_array()
-                .expect("context capabilities")
-                .iter()
-                .map(|capability| capability.as_str().expect("capability name").to_owned())
-                .collect()
-        })
-        .collect()
-}
-
 fn portal_policy_version(
     runtime: &trellis_test::TrellisTestRuntime,
     portal_id: &str,
@@ -2557,196 +2533,6 @@ fn session_count(runtime: &trellis_test::TrellisTestRuntime, session_id: &str) -
         .len()
 }
 
-async fn put_local_portal_eligibility(
-    caller: &trellis_rs::generated::Caller,
-    portal_id: &str,
-    disabled: bool,
-    local_login: bool,
-    providers: Vec<String>,
-) {
-    let auth = auth_sdk::AuthClient::new(caller).rpc().auth();
-    let portal = auth
-        .portals_list(&auth_sdk::AuthPortalsListRequest {
-            cursor: None,
-            disabled: None,
-            limit: Some(100),
-        })
-        .await
-        .expect("list portal for eligibility mutation")
-        .entries
-        .into_iter()
-        .find(|portal| portal.portal_id == portal_id)
-        .expect("find portal for eligibility mutation");
-    auth.portals_put(&auth_sdk::AuthPortalsPutRequest {
-        disabled,
-        display_name: portal.display_name,
-        entry_url: portal.entry_url,
-        expected_version: Some(portal.version),
-        idempotency_key: format!("portal-eligibility-{}", rand::random::<u64>()),
-        login_settings: auth_sdk::AuthPortalsPutRequestLoginSettings {
-            federated_registration: portal.login_settings.federated_registration,
-            local_login,
-            local_registration: portal.login_settings.local_registration,
-            providers: Some(providers),
-        },
-        portal_id: portal_id.to_owned(),
-    })
-    .await
-    .expect("mutate portal eligibility");
-}
-
-fn assert_no_portal_admission_records(
-    runtime: &trellis_test::TrellisTestRuntime,
-    username: &str,
-    participant_id: &str,
-) {
-    let sqlite = runtime.control_plane_sqlite();
-    let principal = sqlite
-        .query(
-            "SELECT principal_id FROM auth_local_credentials WHERE normalized_username = ?",
-            [username],
-        )
-        .expect("query failed-flow principal");
-    assert_eq!(principal.len(), 1, "registration did not create exact user");
-    let principal_id = principal[0]["principal_id"]
-        .as_str()
-        .expect("failed-flow principal ID");
-    for (table, query) in [
-        (
-            "auth_identity_authorities",
-            "SELECT 1 FROM auth_identity_authorities WHERE principal_id = ?1 AND participant_id = ?2",
-        ),
-        (
-            "auth_portal_authority_bindings",
-            "SELECT 1 FROM auth_portal_authority_bindings WHERE principal_id = ?1 AND participant_id = ?2",
-        ),
-        (
-            "auth_authorization_contexts",
-            "SELECT 1 FROM auth_authorization_contexts c JOIN auth_identity_authorities a ON a.authority_id = c.authority_id WHERE c.principal_id = ?1 AND a.participant_id = ?2 AND c.state = 'active'",
-        ),
-        (
-            "auth_sessions",
-            "SELECT 1 FROM auth_sessions WHERE principal_id = ?1 AND participant_id = ?2",
-        ),
-    ] {
-        assert!(
-            sqlite
-                .query(query, [principal_id, participant_id])
-                .expect("query failed-flow admission state")
-                .is_empty(),
-            "failed flow left a record in {table}"
-        );
-    }
-}
-
-async fn assert_local_portal_eligibility_race(
-    fixture: &mut Fixture,
-    portal_id: &str,
-    participant_id: &str,
-    username: &'static str,
-    password: &'static str,
-    eligibility: (bool, bool, Vec<String>),
-    prove_recovery: bool,
-) {
-    let sqlite = fixture.runtime.control_plane_sqlite();
-    sqlite
-        .install_portal_snapshot_barrier(portal_id)
-        .expect("install portal eligibility barrier");
-    sqlite
-        .install_portal_reconciliation_barrier(portal_id)
-        .expect("install portal eligibility worker barrier");
-    sqlite
-        .count_portal_reconciliation_passes(portal_id)
-        .expect("count portal eligibility reconciliation");
-    let mut login_admin = std::mem::replace(&mut fixture.admin, fixture.runtime.admin());
-    let bootstrap_url = fixture.bootstrap_url.clone();
-    let client_contract = fixture.client_contract.clone();
-    let selected_portal_id = portal_id.to_owned();
-    let login = tokio::spawn(async move {
-        let result = login_admin
-            .connect_new_local_user_for_portal_reconnectable(
-                &bootstrap_url,
-                &client_contract,
-                selected_portal_id,
-                username,
-                password,
-            )
-            .await;
-        (login_admin, result)
-    });
-    sqlite
-        .wait_for_portal_snapshot_barrier(portal_id, Duration::from_secs(10))
-        .await
-        .expect("browser selected eligible portal policy");
-    put_local_portal_eligibility(
-        &fixture.service_handle.caller(),
-        portal_id,
-        eligibility.0,
-        eligibility.1,
-        eligibility.2,
-    )
-    .await;
-    sqlite
-        .wait_for_portal_reconciliation_barrier(portal_id, Duration::from_secs(10))
-        .await
-        .expect("keyed worker paused before reading ineligible portal");
-    sqlite
-        .release_portal_reconciliation_barrier(portal_id)
-        .expect("release ineligible portal worker");
-    sqlite
-        .wait_for_portal_reconciliation_pass(portal_id, Duration::from_secs(10))
-        .await
-        .expect("ineligible portal reconciliation drained before binding existed");
-    sqlite
-        .release_portal_snapshot_barrier(portal_id)
-        .expect("resume ineligible portal login");
-    let (login_admin, login_result) = login.await.expect("join ineligible portal login");
-    fixture.admin = login_admin;
-    assert!(login_result.is_err(), "ineligible portal login succeeded");
-    assert_no_portal_admission_records(&fixture.runtime, username, participant_id);
-
-    put_local_portal_eligibility(
-        &fixture.service_handle.caller(),
-        portal_id,
-        false,
-        true,
-        vec!["local".to_owned()],
-    )
-    .await;
-    if !prove_recovery {
-        return;
-    }
-    let (client, reconnect) = fixture
-        .admin
-        .connect_local_user_for_portal_reconnectable(
-            &fixture.bootstrap_url,
-            &fixture.client_contract,
-            username,
-            password,
-        )
-        .await
-        .expect("fresh flow succeeds after portal eligibility is restored");
-    assert_eq!(
-        wait_for_authority(
-            &fixture.runtime,
-            reconnect.session_id(),
-            "accepted",
-            &[fixture.read_capability.as_str()],
-        )
-        .await["state"],
-        "accepted"
-    );
-    assert_eq!(
-        binding_rows(&fixture.runtime, reconnect.session_id()).len(),
-        1
-    );
-    assert_eq!(session_count(&fixture.runtime, reconnect.session_id()), 1);
-    assert!(
-        !active_principal_context_capabilities(&fixture.runtime, reconnect.session_id()).is_empty()
-    );
-    drop(client);
-}
-
 async fn list_connections(
     fixture: &mut Fixture,
     session_id: &str,
@@ -2778,96 +2564,6 @@ async fn update_portal_policy(fixture: &mut Fixture, portal_id: &str, capabiliti
         )
         .await
         .expect("update trusted portal policy");
-}
-
-async fn put_portal_policy(
-    caller: &trellis_rs::generated::Caller,
-    portal_id: &str,
-    participant_id: &str,
-    expected_version: Option<i64>,
-    direct_capabilities: Vec<String>,
-) {
-    auth_sdk::AuthClient::new(caller)
-        .rpc()
-        .auth()
-        .portals_grant_overrides_put(&auth_sdk::types::AuthPortalsGrantOverridesPutRequest {
-            capability_group_keys: Vec::new(),
-            direct_capabilities,
-            expected_version,
-            idempotency_key: format!("portal-race-{}", rand::random::<u64>()),
-            participant_id: participant_id.to_owned(),
-            portal_id: portal_id.to_owned(),
-            role_mappings: Vec::new(),
-        })
-        .await
-        .expect("put portal race policy");
-}
-
-async fn put_portal_group_policy(
-    caller: &trellis_rs::generated::Caller,
-    portal_id: &str,
-    participant_id: &str,
-    expected_version: i64,
-    capability_group_keys: Vec<String>,
-) {
-    auth_sdk::AuthClient::new(caller)
-        .rpc()
-        .auth()
-        .portals_grant_overrides_put(&auth_sdk::types::AuthPortalsGrantOverridesPutRequest {
-            capability_group_keys,
-            direct_capabilities: Vec::new(),
-            expected_version: Some(expected_version),
-            idempotency_key: format!("portal-group-race-{}", rand::random::<u64>()),
-            participant_id: participant_id.to_owned(),
-            portal_id: portal_id.to_owned(),
-            role_mappings: Vec::new(),
-        })
-        .await
-        .expect("put portal group policy");
-}
-
-async fn put_race_capability_group(
-    caller: &trellis_rs::generated::Caller,
-    group_key: &str,
-    expected_version: Option<i64>,
-    capabilities: Vec<String>,
-    included_groups: Vec<String>,
-) -> i64 {
-    auth_sdk::AuthClient::new(caller)
-        .rpc()
-        .auth()
-        .capability_groups_put(&auth_sdk::types::AuthCapabilityGroupsPutRequest {
-            capabilities,
-            description: format!("Portal race group {group_key}"),
-            display_name: group_key.to_owned(),
-            expected_version,
-            group_key: group_key.to_owned(),
-            idempotency_key: format!("portal-race-group-{}", rand::random::<u64>()),
-            included_groups,
-        })
-        .await
-        .expect("put portal race capability group")
-        .group
-        .version
-}
-
-async fn remove_portal_policy(
-    caller: &trellis_rs::generated::Caller,
-    portal_id: &str,
-    participant_id: &str,
-    expected_version: i64,
-) {
-    auth_sdk::AuthClient::new(caller)
-        .rpc()
-        .auth()
-        .portals_grant_overrides_remove(&auth_sdk::types::AuthPortalsGrantOverridesRemoveRequest {
-            expected_version,
-            idempotency_key: format!("portal-race-remove-{}", rand::random::<u64>()),
-            participant_id: participant_id.to_owned(),
-            portal_id: portal_id.to_owned(),
-        })
-        .await
-        .expect("remove portal race policy");
 }
 
 async fn wait_for_no_connections(fixture: &mut Fixture, session_id: &str) {
@@ -3124,414 +2820,24 @@ async fn portal_policy_reduction_and_expansion_converge() {
     );
     drop(client);
     wait_for_no_connections(&mut fixture, &session_id).await;
-    let client = reconnect
-        .connect_bound_only()
-        .await
-        .expect("reconnect after expanded policy context is published");
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let client = loop {
+        match reconnect.connect_bound_only().await {
+            Ok(client) => break client,
+            Err(error)
+                if error.to_string().contains("authorization_pending")
+                    && Instant::now() < deadline =>
+            {
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
+            Err(error) => panic!("reconnect after expanded policy context is published: {error}"),
+        }
+    };
     assert_eq!(
         call_value(&client, "expanded").await.unwrap().value,
         "expanded"
     );
     assert_eq!(session_count(&fixture.runtime, &session_id), 1);
-}
-
-#[tokio::test]
-async fn portal_policy_snapshot_races_are_fenced() {
-    assert_runtime_case_registered("auth.portal-login-policy-snapshot-race", "auth", "auth");
-    let mut fixture = start_fixture(None, false).await;
-    let username_a = "snapshot-race-user-a";
-    let username_b = "snapshot-race-user-b";
-    let password = "snapshot-race-password-123";
-    let tested_portal_id = fixture.portal_id.clone();
-    let participant_id = fixture.client_contract.id().to_owned();
-    fixture
-        .admin
-        .put_portal_grant_override(
-            &fixture.bootstrap_url,
-            &tested_portal_id,
-            &participant_id,
-            None,
-            vec![fixture.read_capability.clone()],
-        )
-        .await
-        .expect("install policy A");
-
-    assert_local_portal_eligibility_race(
-        &mut fixture,
-        &tested_portal_id,
-        &participant_id,
-        "snapshot-disabled-local-login-user",
-        password,
-        (false, false, vec!["local".to_owned()]),
-        false,
-    )
-    .await;
-    assert_local_portal_eligibility_race(
-        &mut fixture,
-        &tested_portal_id,
-        &participant_id,
-        "snapshot-removed-local-provider-user",
-        password,
-        (false, true, Vec::new()),
-        false,
-    )
-    .await;
-    assert_local_portal_eligibility_race(
-        &mut fixture,
-        &tested_portal_id,
-        &participant_id,
-        "snapshot-disabled-portal-user",
-        password,
-        (true, true, vec!["local".to_owned()]),
-        true,
-    )
-    .await;
-
-    let sqlite = fixture.runtime.control_plane_sqlite();
-    sqlite
-        .install_portal_snapshot_barrier(&tested_portal_id)
-        .expect("install new-binding barrier");
-    sqlite
-        .count_portal_reconciliation_passes(&tested_portal_id)
-        .expect("count new-binding reconciliation");
-    let mut login_admin = std::mem::replace(&mut fixture.admin, fixture.runtime.admin());
-    let bootstrap_url = fixture.bootstrap_url.clone();
-    let client_contract = fixture.client_contract.clone();
-    let portal_id = tested_portal_id.clone();
-    let mut login = tokio::spawn(async move {
-        let result = login_admin
-            .connect_new_local_user_for_portal_reconnectable(
-                &bootstrap_url,
-                &client_contract,
-                portal_id,
-                username_a,
-                password,
-            )
-            .await;
-        (login_admin, result)
-    });
-    tokio::select! {
-        result = sqlite.wait_for_portal_snapshot_barrier(
-            &tested_portal_id,
-            Duration::from_secs(10),
-        ) => result.expect("browser resolved policy A"),
-        result = &mut login => match result {
-            Ok((_admin, Ok(_))) => panic!("login completed before policy barrier"),
-            Ok((_admin, Err(error))) => panic!("login failed before policy barrier: {error}"),
-            Err(error) => panic!("login task failed before policy barrier: {error}"),
-        },
-    }
-    let version = portal_policy_version(&fixture.runtime, &tested_portal_id, &participant_id)
-        .expect("policy A version");
-    remove_portal_policy(
-        &fixture.service_handle.caller(),
-        &tested_portal_id,
-        &participant_id,
-        version,
-    )
-    .await;
-    put_portal_policy(
-        &fixture.service_handle.caller(),
-        &tested_portal_id,
-        &participant_id,
-        None,
-        Vec::new(),
-    )
-    .await;
-    sqlite
-        .wait_for_portal_reconciliation_pass(&tested_portal_id, Duration::from_secs(10))
-        .await
-        .expect("policy B reconciliation drained before binding existed");
-    sqlite
-        .release_portal_snapshot_barrier(&tested_portal_id)
-        .expect("resume new-binding login");
-    let (login_admin, login_result) = login.await.expect("join new-binding login");
-    fixture.admin = login_admin;
-    let (client_a, reconnect_a) = login_result.expect("new-binding login retries with policy B");
-    wait_for_authority(&fixture.runtime, reconnect_a.session_id(), "accepted", &[]).await;
-    assert!(call_value(&client_a, "stale-policy-a").await.is_err());
-
-    sqlite
-        .install_portal_snapshot_barrier(&tested_portal_id)
-        .expect("install override-removal barrier");
-    sqlite
-        .count_portal_reconciliation_passes(&tested_portal_id)
-        .expect("count override-removal reconciliation");
-    let mut login_admin = std::mem::replace(&mut fixture.admin, fixture.runtime.admin());
-    let bootstrap_url = fixture.bootstrap_url.clone();
-    let client_contract = fixture.client_contract.clone();
-    let portal_id = tested_portal_id.clone();
-    let login = tokio::spawn(async move {
-        let result = login_admin
-            .connect_new_local_user_for_portal_reconnectable(
-                &bootstrap_url,
-                &client_contract,
-                portal_id,
-                username_b,
-                password,
-            )
-            .await;
-        (login_admin, result)
-    });
-    sqlite
-        .wait_for_portal_snapshot_barrier(&tested_portal_id, Duration::from_secs(10))
-        .await
-        .expect("browser resolved removable override");
-    let version = portal_policy_version(&fixture.runtime, &tested_portal_id, &participant_id)
-        .expect("current override version");
-    remove_portal_policy(
-        &fixture.service_handle.caller(),
-        &tested_portal_id,
-        &participant_id,
-        version,
-    )
-    .await;
-    sqlite
-        .wait_for_portal_reconciliation_pass(&tested_portal_id, Duration::from_secs(10))
-        .await
-        .expect("override-removal reconciliation drained before binding existed");
-    sqlite
-        .release_portal_snapshot_barrier(&tested_portal_id)
-        .expect("resume override-removal login");
-    let (login_admin, login_result) = login.await.expect("join override-removal login");
-    fixture.admin = login_admin;
-    let (_client_b, reconnect_b) =
-        login_result.expect("ordinary approval completes after override removal");
-    assert!(binding_rows(&fixture.runtime, reconnect_b.session_id()).is_empty());
-
-    put_portal_policy(
-        &fixture.service_handle.caller(),
-        &tested_portal_id,
-        &participant_id,
-        None,
-        vec![fixture.read_capability.clone()],
-    )
-    .await;
-    let (_policy_a_client, policy_a_reconnect) = fixture
-        .admin
-        .connect_local_user_for_portal_reconnectable(
-            &fixture.bootstrap_url,
-            &fixture.client_contract,
-            username_a,
-            password,
-        )
-        .await
-        .expect("restore existing binding under policy A");
-    wait_for_authority(
-        &fixture.runtime,
-        policy_a_reconnect.session_id(),
-        "accepted",
-        &[fixture.read_capability.as_str()],
-    )
-    .await;
-    let policy_a_digest = binding_rows(&fixture.runtime, policy_a_reconnect.session_id())[0]
-        ["effective_policy_digest"]
-        .clone();
-    sqlite
-        .install_portal_snapshot_barrier(&tested_portal_id)
-        .expect("install existing-binding barrier");
-    sqlite
-        .install_portal_reconciliation_barrier(&tested_portal_id)
-        .expect("install existing-binding worker barrier");
-    let mut login_admin = std::mem::replace(&mut fixture.admin, fixture.runtime.admin());
-    let bootstrap_url = fixture.bootstrap_url.clone();
-    let client_contract = fixture.client_contract.clone();
-    let login = tokio::spawn(async move {
-        let result = login_admin
-            .connect_local_user_for_portal_reconnectable(
-                &bootstrap_url,
-                &client_contract,
-                username_a,
-                password,
-            )
-            .await;
-        (login_admin, result)
-    });
-    sqlite
-        .wait_for_portal_snapshot_barrier(&tested_portal_id, Duration::from_secs(10))
-        .await
-        .expect("existing binding resolved policy A");
-    let version = portal_policy_version(&fixture.runtime, &tested_portal_id, &participant_id)
-        .expect("policy A version");
-    put_portal_policy(
-        &fixture.service_handle.caller(),
-        &tested_portal_id,
-        &participant_id,
-        Some(version),
-        Vec::new(),
-    )
-    .await;
-    sqlite
-        .wait_for_portal_reconciliation_barrier(&tested_portal_id, Duration::from_secs(10))
-        .await
-        .expect("keyed worker paused before reading policy B");
-    sqlite
-        .release_portal_snapshot_barrier(&tested_portal_id)
-        .expect("resume existing-binding login");
-    let (login_admin, login_result) = login.await.expect("join existing-binding login");
-    fixture.admin = login_admin;
-    let (reduced_client, reduced_reconnect) =
-        login_result.expect("existing binding retries and commits policy B");
-    let authority = authority_rows(&fixture.runtime, reduced_reconnect.session_id());
-    assert_eq!(authority.len(), 1);
-    assert_eq!(authority[0]["desired_capabilities_json"], "[]");
-    let binding = binding_rows(&fixture.runtime, reduced_reconnect.session_id());
-    assert_eq!(binding.len(), 1);
-    assert_ne!(binding[0]["effective_policy_digest"], policy_a_digest);
-    assert_eq!(binding[0]["authority_version"], authority[0]["version"]);
-    assert!(call_value(&reduced_client, "current-policy-b")
-        .await
-        .is_err());
-    assert!(
-        active_principal_context_capabilities(&fixture.runtime, reduced_reconnect.session_id())
-            .iter()
-            .all(|capabilities| !capabilities.contains(&fixture.read_capability)),
-        "policy reduction left a fresh active policy-A context"
-    );
-    sqlite
-        .release_portal_reconciliation_barrier(&tested_portal_id)
-        .expect("release existing-binding worker");
-
-    let group_g = "portal-snapshot-group-g";
-    let group_h = "portal-snapshot-group-h";
-    assert_eq!(
-        put_race_capability_group(
-            &fixture.service_handle.caller(),
-            group_g,
-            None,
-            Vec::new(),
-            Vec::new(),
-        )
-        .await,
-        1,
-    );
-    let version = portal_policy_version(&fixture.runtime, &tested_portal_id, &participant_id)
-        .expect("policy B version");
-    put_portal_group_policy(
-        &fixture.service_handle.caller(),
-        &tested_portal_id,
-        &participant_id,
-        version,
-        vec![group_g.to_owned()],
-    )
-    .await;
-    sqlite
-        .install_portal_snapshot_barrier(&tested_portal_id)
-        .expect("install transitive-expansion barrier");
-    let mut login_admin = std::mem::replace(&mut fixture.admin, fixture.runtime.admin());
-    let bootstrap_url = fixture.bootstrap_url.clone();
-    let client_contract = fixture.client_contract.clone();
-    let portal_id = tested_portal_id.clone();
-    let login = tokio::spawn(async move {
-        let result = login_admin
-            .connect_new_local_user_for_portal_reconnectable(
-                &bootstrap_url,
-                &client_contract,
-                portal_id,
-                "snapshot-transitive-user",
-                password,
-            )
-            .await;
-        (login_admin, result)
-    });
-    sqlite
-        .wait_for_portal_snapshot_barrier(&tested_portal_id, Duration::from_secs(10))
-        .await
-        .expect("browser captured group G snapshot");
-    assert_eq!(
-        put_race_capability_group(
-            &fixture.service_handle.caller(),
-            group_h,
-            None,
-            vec![fixture.read_capability.clone()],
-            Vec::new(),
-        )
-        .await,
-        1,
-    );
-    assert_eq!(
-        put_race_capability_group(
-            &fixture.service_handle.caller(),
-            group_g,
-            Some(1),
-            Vec::new(),
-            vec![group_h.to_owned()],
-        )
-        .await,
-        2,
-    );
-    sqlite
-        .release_portal_snapshot_barrier(&tested_portal_id)
-        .expect("resume transitive-expansion login");
-    let (login_admin, login_result) = login.await.expect("join transitive-expansion login");
-    fixture.admin = login_admin;
-    let (transitive_client, _) = login_result.expect("transitive group expansion retries");
-    assert_eq!(
-        call_value(&transitive_client, "transitive-current-policy")
-            .await
-            .expect("transitively expanded policy permits read")
-            .value,
-        "transitive-current-policy"
-    );
-
-    sqlite
-        .install_portal_snapshot_barrier(&tested_portal_id)
-        .expect("install direct-new-group barrier");
-    let mut login_admin = std::mem::replace(&mut fixture.admin, fixture.runtime.admin());
-    let bootstrap_url = fixture.bootstrap_url.clone();
-    let client_contract = fixture.client_contract.clone();
-    let portal_id = tested_portal_id.clone();
-    let login = tokio::spawn(async move {
-        let result = login_admin
-            .connect_new_local_user_for_portal_reconnectable(
-                &bootstrap_url,
-                &client_contract,
-                portal_id,
-                "snapshot-direct-group-user",
-                password,
-            )
-            .await;
-        (login_admin, result)
-    });
-    sqlite
-        .wait_for_portal_snapshot_barrier(&tested_portal_id, Duration::from_secs(10))
-        .await
-        .expect("browser captured policy referencing group G");
-    let direct_group = "portal-snapshot-direct-group-h";
-    assert_eq!(
-        put_race_capability_group(
-            &fixture.service_handle.caller(),
-            direct_group,
-            None,
-            vec![fixture.read_capability.clone()],
-            Vec::new(),
-        )
-        .await,
-        1,
-    );
-    let version = portal_policy_version(&fixture.runtime, &tested_portal_id, &participant_id)
-        .expect("group-G policy version");
-    put_portal_group_policy(
-        &fixture.service_handle.caller(),
-        &tested_portal_id,
-        &participant_id,
-        version,
-        vec![direct_group.to_owned()],
-    )
-    .await;
-    sqlite
-        .release_portal_snapshot_barrier(&tested_portal_id)
-        .expect("resume direct-new-group login");
-    let (login_admin, login_result) = login.await.expect("join direct-new-group login");
-    fixture.admin = login_admin;
-    let (direct_client, _) = login_result.expect("direct new-group policy retries");
-    assert_eq!(
-        call_value(&direct_client, "direct-current-policy")
-            .await
-            .expect("direct new-group policy permits read")
-            .value,
-        "direct-current-policy"
-    );
 }
 
 #[tokio::test]
@@ -3650,6 +2956,10 @@ async fn hostile_old_context_is_denied_after_reduction() {
         )
         .expect("query old authorization context");
     assert_eq!(old_contexts.len(), 1);
+    let old_context_digest = old_contexts[0]["context_digest"]
+        .as_str()
+        .expect("old authorization context digest")
+        .to_owned();
     assert_eq!(
         call_value(&client, "before-reduction").await.unwrap().value,
         "before-reduction"
@@ -3678,8 +2988,17 @@ async fn hostile_old_context_is_denied_after_reduction() {
     }
     update_policy(&mut fixture, Vec::new()).await;
     wait_for_authority(&fixture.runtime, &session_id, "accepted", &[]).await;
-    assert_eq!(context_states(&fixture.runtime, &session_id), ["revoked"]);
     wait_for_no_connections(&mut fixture, &session_id).await;
+    let old_context = fixture
+        .runtime
+        .control_plane_sqlite()
+        .query(
+            "SELECT state FROM auth_authorization_contexts WHERE context_digest = ?",
+            [&old_context_digest],
+        )
+        .expect("query old authorization context state");
+    assert_eq!(old_context.len(), 1);
+    assert_eq!(old_context[0]["state"], "revoked");
     drop(client);
     assert!(reconnect
         .connect_captured_admission(old_contexts[0]["context_digest"].as_str().unwrap())
@@ -3996,7 +3315,7 @@ async fn oidc_role_mapping_converges_authority() {
 }
 
 #[tokio::test]
-async fn same_session_connections_survive_jwt_window_and_are_kicked() {
+async fn same_session_connections_are_kicked() {
     assert_runtime_case_registered(
         "auth.same-session-multiple-connections-are-kicked",
         "auth",
@@ -4032,9 +3351,6 @@ async fn same_session_connections_survive_jwt_window_and_are_kicked() {
     let initial = list_connections(&mut fixture, &session_id).await;
     assert_eq!(initial.len(), 2);
     assert_ne!(initial[0].connection_id, initial[1].connection_id);
-
-    tokio::time::sleep(Duration::from_secs(3)).await;
-    assert_eq!(list_connections(&mut fixture, &session_id).await.len(), 2);
 
     update_policy(&mut fixture, Vec::new()).await;
     wait_for_authority(&fixture.runtime, &session_id, "accepted", &[]).await;

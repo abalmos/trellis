@@ -16,6 +16,7 @@ const repoRoot = fromFileUrl(new URL("../../../", import.meta.url));
 const INTEGRATION_BINARY_ENV = "TRELLIS_TEST_INTEGRATION_BIN";
 const PREBUILT_ONLY_ENV = "TRELLIS_TEST_PREBUILT_ONLY";
 const ALLOW_DIRTY_PREBUILT_ENV = "TRELLIS_TEST_ALLOW_DIRTY_PREBUILT";
+const TEST_JOBS_ENV = "TRELLIS_TEST_JOBS";
 export const INTEGRATION_LIVE_ARTIFACTS_MANIFEST =
   "dist/integration-runtime/manifest.json";
 const INTEGRATION_LIVE_ARTIFACTS_FORMAT =
@@ -69,12 +70,6 @@ async function main(args: readonly string[]): Promise<number> {
   if (tenantIds.length === 0) {
     throw new Error("Rust integration selection contains no registered cases");
   }
-  const unregisteredTests = compiled.filter((id) => !registered.has(id));
-  const classifications = rustTestClassifications();
-  const { sharedTests, isolatedTests } = partitionRustTests(
-    tenantIds,
-    classifications,
-  );
   const inheritedManifest = Deno.env.get(TRELLIS_TEST_SHARED_RUNTIME_ENV);
   const host = inheritedManifest === undefined
     ? await startTrellisIntegrationSharedRuntimeHost({
@@ -89,7 +84,6 @@ async function main(args: readonly string[]): Promise<number> {
       assignments: tenantIds.map((id) => ({
         id,
         namespacePrefix: "rs",
-        classification: classifications.get(id) ?? "shared",
       })),
     })
     : {
@@ -102,27 +96,25 @@ async function main(args: readonly string[]): Promise<number> {
   try {
     const env = { ...host.env, ...runtimeBinaries, TMPDIR: tempDir };
     const runs: TestRun[] = [];
-    if (sharedTests.length > 0) {
-      runs.push(
-        await runTests(executable, [
-          ...testArgs,
-          ...unregisteredTests.flatMap((name) => ["--skip", name]),
-          ...isolatedTests.flatMap((name) => ["--skip", name]),
-          "--test-threads=1",
-          "--format=pretty",
-        ], env),
-      );
-    }
-    for (const name of isolatedTests) {
-      runs.push(
-        await runTests(executable, [
+    const jobs = rustIntegrationJobs(
+      tenantIds.length,
+      Deno.env.get(TEST_JOBS_ENV),
+    );
+    let next = 0;
+    let failed = false;
+    await Promise.all(Array.from({ length: jobs }, async () => {
+      while (!failed) {
+        const name = tenantIds[next++];
+        if (name === undefined) return;
+        const run = await runTests(executable, [
           name,
           "--exact",
-          "--test-threads=1",
           "--format=pretty",
-        ], env),
-      );
-    }
+        ], env);
+        runs.push(run);
+        failed ||= !run.success;
+      }
+    }));
     const results = runs.flatMap((run) => rustTestResults(run.stdout));
     const success = runs.every((run) => run.success);
     if (success) assertRustExecutionInventory(tenantIds, results);
@@ -191,17 +183,18 @@ export function parseIntegrationRunnerArgs(
   return args[0] === "--" ? args.slice(1) : args;
 }
 
-export function partitionRustTests(
-  testIds: readonly string[],
-  classifications: ReadonlyMap<string, string>,
-): { readonly sharedTests: string[]; readonly isolatedTests: string[] } {
-  const isolatedTests = testIds.filter((id) =>
-    classifications.get(id) === "isolated-process"
+export function rustIntegrationJobs(
+  testCount: number,
+  configuredJobs: string | undefined,
+  hardwareConcurrency = navigator.hardwareConcurrency,
+): number {
+  const configured = Number.parseInt(configuredJobs ?? "", 10);
+  return Math.min(
+    testCount,
+    Number.isSafeInteger(configured) && configured > 0
+      ? configured
+      : Math.min(4, Math.ceil(Math.sqrt(hardwareConcurrency))),
   );
-  return {
-    sharedTests: testIds.filter((id) => !isolatedTests.includes(id)),
-    isolatedTests,
-  };
 }
 
 export async function buildIntegrationTest(): Promise<string> {
@@ -209,6 +202,8 @@ export async function buildIntegrationTest(): Promise<string> {
   const output = await new Deno.Command("cargo", {
     args: [
       "test",
+      "--locked",
+      "--release",
       "--manifest-path",
       "rust/Cargo.toml",
       "-p",
@@ -262,6 +257,8 @@ export async function buildRuntimeBinaries(): Promise<Record<string, string>> {
   const output = await new Deno.Command("cargo", {
     args: [
       "build",
+      "--locked",
+      "--release",
       "--manifest-path",
       "rust/Cargo.toml",
       "-p",
@@ -269,8 +266,6 @@ export async function buildRuntimeBinaries(): Promise<Record<string, string>> {
       "-p",
       "trellis-cli",
       "--bins",
-      "--features",
-      "trellis-runtime/integration-test-hooks",
       "--message-format=json",
     ],
     cwd: repoRoot,
@@ -331,6 +326,11 @@ export async function writeIntegrationLiveArtifacts(
   executables: Readonly<Record<keyof typeof LIVE_EXECUTABLES, string>>,
 ): Promise<IntegrationLiveArtifacts> {
   const artifactDir = dirname(manifestPath);
+  try {
+    await Deno.remove(artifactDir, { recursive: true });
+  } catch (error) {
+    if (!(error instanceof Deno.errors.NotFound)) throw error;
+  }
   await Deno.mkdir(artifactDir, { recursive: true });
   const manifestExecutables =
     {} as IntegrationLiveArtifactsManifest["executables"];
@@ -540,37 +540,6 @@ export function expectedRustTests(): string[] {
       return `${implementation.module}::${implementation.function}`;
     })
     .toSorted();
-}
-
-export function rustTestClassifications(): ReadonlyMap<
-  string,
-  "shared" | "isolated-process"
-> {
-  return new Map(
-    [...clientMatrix.cases, ...runtimeMatrix.cases]
-      .filter((entry) => entry.completion.rust === "implemented")
-      .map((entry) => {
-        const implementation = entry.implementations?.rust;
-        if (implementation === undefined) {
-          throw new Error(
-            `implemented Rust matrix case ${entry.id} has no mapping`,
-          );
-        }
-        const classification = entry.classification ?? "shared";
-        if (
-          classification !== "shared" &&
-          classification !== "isolated-process"
-        ) {
-          throw new Error(
-            `Rust matrix case ${entry.id} has invalid classification ${classification}`,
-          );
-        }
-        return [
-          `${implementation.module}::${implementation.function}`,
-          classification,
-        ] as const;
-      }),
-  );
 }
 
 export async function verifyCompiledRustInventory(

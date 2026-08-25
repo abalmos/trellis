@@ -652,166 +652,6 @@ impl TrellisControlPlaneSqlite {
         &self.path
     }
 
-    /// Install the exact browser post-policy-resolution barrier for one flow.
-    pub fn install_portal_snapshot_barrier(&self, flow_id: &str) -> Result<(), TrellisTestError> {
-        let connection = self.connection()?;
-        connection.execute_batch(
-            "CREATE TABLE IF NOT EXISTS __trellis_test_portal_snapshot_barriers (
-                    flow_id TEXT PRIMARY KEY,
-                    reached INTEGER NOT NULL DEFAULT 0,
-                    released INTEGER NOT NULL DEFAULT 0
-                );",
-        )?;
-        connection.execute(
-            "INSERT OR REPLACE INTO __trellis_test_portal_snapshot_barriers
-                 (flow_id, reached, released) VALUES (?1, 0, 0)",
-            [flow_id],
-        )?;
-        Ok(())
-    }
-
-    /// Wait until browser admission has resolved the fenced policy snapshot.
-    pub async fn wait_for_portal_snapshot_barrier(
-        &self,
-        flow_id: &str,
-        timeout: Duration,
-    ) -> Result<(), TrellisTestError> {
-        let deadline = tokio::time::Instant::now() + timeout;
-        loop {
-            let reached = self.connection()?.query_row(
-                "SELECT reached FROM __trellis_test_portal_snapshot_barriers
-                     WHERE flow_id = ?1",
-                [flow_id],
-                |row| row.get::<_, bool>(0),
-            )?;
-            if reached {
-                return Ok(());
-            }
-            if tokio::time::Instant::now() >= deadline {
-                return Err(TrellisTestError::IntegrationControl(
-                    "portal snapshot barrier was not reached".to_owned(),
-                ));
-            }
-            tokio::time::sleep(Duration::from_millis(10)).await;
-        }
-    }
-
-    /// Release one installed browser policy-snapshot barrier.
-    pub fn release_portal_snapshot_barrier(&self, flow_id: &str) -> Result<(), TrellisTestError> {
-        self.connection()?.execute(
-            "UPDATE __trellis_test_portal_snapshot_barriers
-                 SET released = 1 WHERE flow_id = ?1",
-            [flow_id],
-        )?;
-        Ok(())
-    }
-
-    /// Install a barrier before one exact keyed portal reconciliation pass.
-    pub fn install_portal_reconciliation_barrier(
-        &self,
-        portal_id: &str,
-    ) -> Result<(), TrellisTestError> {
-        let connection = self.connection()?;
-        connection.execute_batch(
-            "CREATE TABLE IF NOT EXISTS __trellis_test_portal_reconciliation_barriers (
-                portal_id TEXT PRIMARY KEY,
-                reached INTEGER NOT NULL DEFAULT 0,
-                released INTEGER NOT NULL DEFAULT 0
-            );",
-        )?;
-        connection.execute(
-            "INSERT OR REPLACE INTO __trellis_test_portal_reconciliation_barriers
-             (portal_id, reached, released) VALUES (?1, 0, 0)",
-            [portal_id],
-        )?;
-        Ok(())
-    }
-
-    /// Wait until the keyed worker reaches one portal reconciliation barrier.
-    pub async fn wait_for_portal_reconciliation_barrier(
-        &self,
-        portal_id: &str,
-        timeout: Duration,
-    ) -> Result<(), TrellisTestError> {
-        let deadline = tokio::time::Instant::now() + timeout;
-        loop {
-            let reached = self.connection()?.query_row(
-                "SELECT reached FROM __trellis_test_portal_reconciliation_barriers
-                 WHERE portal_id = ?1",
-                [portal_id],
-                |row| row.get::<_, bool>(0),
-            )?;
-            if reached {
-                return Ok(());
-            }
-            if tokio::time::Instant::now() >= deadline {
-                return Err(TrellisTestError::IntegrationControl(
-                    "portal reconciliation barrier was not reached".to_owned(),
-                ));
-            }
-            tokio::time::sleep(Duration::from_millis(10)).await;
-        }
-    }
-
-    /// Release one installed keyed portal reconciliation barrier.
-    pub fn release_portal_reconciliation_barrier(
-        &self,
-        portal_id: &str,
-    ) -> Result<(), TrellisTestError> {
-        self.connection()?.execute(
-            "UPDATE __trellis_test_portal_reconciliation_barriers
-             SET released = 1 WHERE portal_id = ?1",
-            [portal_id],
-        )?;
-        Ok(())
-    }
-
-    /// Begin counting completed scoped reconciliation passes for one portal.
-    pub fn count_portal_reconciliation_passes(
-        &self,
-        portal_id: &str,
-    ) -> Result<(), TrellisTestError> {
-        let connection = self.connection()?;
-        connection.execute_batch(
-            "CREATE TABLE IF NOT EXISTS __trellis_test_portal_reconciliation_passes (
-                portal_id TEXT PRIMARY KEY,
-                pass_count INTEGER NOT NULL DEFAULT 0
-            );",
-        )?;
-        connection.execute(
-            "INSERT OR REPLACE INTO __trellis_test_portal_reconciliation_passes
-             (portal_id, pass_count) VALUES (?1, 0)",
-            [portal_id],
-        )?;
-        Ok(())
-    }
-
-    /// Wait for one additional scoped reconciliation pass for a portal.
-    pub async fn wait_for_portal_reconciliation_pass(
-        &self,
-        portal_id: &str,
-        timeout: Duration,
-    ) -> Result<(), TrellisTestError> {
-        let deadline = tokio::time::Instant::now() + timeout;
-        loop {
-            let count = self.connection()?.query_row(
-                "SELECT pass_count FROM __trellis_test_portal_reconciliation_passes
-                 WHERE portal_id = ?1",
-                [portal_id],
-                |row| row.get::<_, u64>(0),
-            )?;
-            if count > 0 {
-                return Ok(());
-            }
-            if tokio::time::Instant::now() >= deadline {
-                return Err(TrellisTestError::IntegrationControl(
-                    "portal reconciliation pass did not complete".to_owned(),
-                ));
-            }
-            tokio::time::sleep(Duration::from_millis(10)).await;
-        }
-    }
-
     /// Runs a SQL query against the live control-plane database.
     pub fn query<P>(
         &self,
@@ -1963,8 +1803,14 @@ impl TrellisTestAdmin {
         if self.bootstrap_complete {
             return Ok(());
         }
-        complete_first_admin_bootstrap(&self.trellis_url, bootstrap_url, &self.admin_password)
-            .await?;
+        match complete_first_admin_bootstrap(&self.trellis_url, bootstrap_url, &self.admin_password)
+            .await
+        {
+            Err(TrellisTestError::HttpStatus {
+                status: 409, body, ..
+            }) if body.contains("account_flow_consumed") => {}
+            result => result?,
+        }
         self.bootstrap_complete = true;
         Ok(())
     }
@@ -3219,7 +3065,15 @@ impl TrellisTestAdmin {
                 "test OIDC claims require the shared runtime provider".to_owned(),
             )
         })?;
-        let _: Value = proxy.call("testOidcSetClaims", &claims).await?;
+        let _: Value = proxy
+            .call(
+                "testOidcSetClaims",
+                &serde_json::json!({
+                    "origin": self.trellis_url,
+                    "claims": claims,
+                }),
+            )
+            .await?;
         Ok(())
     }
 
@@ -4172,11 +4026,6 @@ async fn complete_first_admin_bootstrap(
     .await
     {
         Ok(response) => response,
-        Err(TrellisTestError::HttpStatus {
-            status: 409, body, ..
-        }) if body.contains("flow_already_consumed") => {
-            return Ok(());
-        }
         Err(error) => return Err(error),
     };
     if response.status == "created" {

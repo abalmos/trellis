@@ -75,10 +75,9 @@ export type TrellisIntegrationRunnerOptions = {
   readonly sharedRuntimeHostStarter?: (args: {
     /** Runtime options from the loaded runner config. */
     readonly runtime: TrellisIntegrationRuntimeOptions;
-    /** Selected executable cases and their process classification. */
+    /** Selected executable cases. */
     readonly assignments: readonly {
       id: string;
-      classification?: "shared" | "isolated-process";
     }[];
   }) => Promise<TrellisIntegrationSharedRuntimeHost>;
   /** Output hook used for help text. Defaults to `console`. */
@@ -260,7 +259,6 @@ export async function runTrellisIntegrationTests(
         return {
           id,
           namespacePrefix: "ts",
-          classification: integrationCase.classification,
         };
       }),
     });

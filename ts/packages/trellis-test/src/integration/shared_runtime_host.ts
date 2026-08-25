@@ -40,7 +40,6 @@ export async function startTrellisIntegrationSharedRuntimeHost(args: {
   readonly runtime: TrellisIntegrationRuntimeOptions;
   readonly assignments: readonly {
     id: string;
-    classification?: "shared" | "isolated-process";
     namespacePrefix?: string;
   }[];
 }): Promise<TrellisIntegrationSharedRuntimeHost> {
@@ -62,11 +61,10 @@ export async function startTrellisIntegrationSharedRuntimeHost(args: {
   const assignments: Record<string, TrellisIntegrationRuntimeAssignment> = {};
   const tenantIds = [SHARED_TENANT];
   for (const [index, assignment] of args.assignments.entries()) {
-    const isolated = assignment.classification === "isolated-process";
-    const tenantId = isolated ? `isolated-${index}` : SHARED_TENANT;
-    if (isolated) tenantIds.push(tenantId);
+    const tenantId = `case-${index}`;
+    tenantIds.push(tenantId);
     assignments[assignment.id] = {
-      mode: isolated ? "isolated-process" : "shared",
+      mode: "isolated-process",
       namespace: `it-${runId}-${assignment.namespacePrefix ?? "case"}-${
         integrationSlug(assignment.id)
       }`,
@@ -179,12 +177,22 @@ export async function startTrellisIntegrationSharedRuntimeHost(args: {
           await runtime?.resetAcceptedIntegrationAuthorities();
           output = {};
         } else if (body.method === "testOidcSetClaims") {
-          if (typeof body.input !== "object" || body.input === null) {
+          if (
+            typeof body.input !== "object" || body.input === null ||
+            !("origin" in body.input) ||
+            typeof body.input.origin !== "string" ||
+            !("claims" in body.input) ||
+            typeof body.input.claims !== "object" ||
+            body.input.claims === null
+          ) {
             return Response.json({ ok: false, error: "invalid OIDC claims" }, {
               status: 400,
             });
           }
-          oidc.setClaims(Object.fromEntries(Object.entries(body.input)));
+          oidc.setClaims(
+            Object.fromEntries(Object.entries(body.input.claims)),
+            new URL(body.input.origin).origin,
+          );
           output = {};
         } else {
           for (let attempt = 1;; attempt += 1) {

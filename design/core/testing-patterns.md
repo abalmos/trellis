@@ -55,36 +55,36 @@ Rules:
 - keep pending rows explicit with a reason and owner
 - do not use source-text annotations as proof that a test compiled or ran
 
-### Shared Runtime
+### Case-Owned Runtime
 
-Normal live cases share one NATS server, one `trellis-server` process, and one
-SQLite set. Built-in Jobs and Event Log run as subsystems of that process. Cases
+A live subsystem run owns one managed NATS server. Every selected case receives
+its own NATS account and starts its own `trellis-server` process and SQLite set.
+Built-in Jobs and Event Log run as subsystems of that case-owned process. Cases
 keep authored contract ids, participant ids, action names, versions, and
-protocol subjects fixed. Run and case slugs isolate only physical deployment
-ids, resource keys, state keys, durable names, and domain records. Before an
-attached case authenticates, the harness revokes accepted non-administration
-authority left by the prior case or run through public Auth APIs.
+protocol subjects fixed; account isolation prevents those fixed protocol
+subjects and participant identities from colliding across cases. Run and case
+slugs still isolate physical deployment ids, resource keys, state keys, durable
+names, and domain records.
 
-Fixed protocol subjects share one NATS account, so shared-host cases execute
-with one worker. TypeScript and Rust lanes also execute sequentially. Do not
-restore parallelism by rewriting semantic identities or by adding test-only
-protocol behavior; parallel shared-host execution requires a production
-transport-level tenant namespace first.
+Rust executes each case as an exact-test process through a bounded,
+machine-relative worker pool. `TRELLIS_TEST_JOBS` may override the bound for
+local diagnosis. Do not restore parallelism by rewriting semantic identities or
+by adding test-only protocol behavior.
 
-The normal Check runs semantic subsystem slices in parallel as independent
-GitHub Actions jobs. Each job owns its own NATS server, Trellis process, and
-SQLite files, while cases within that environment remain serial. Live
-executables are built once and distributed to those jobs; live execution does
-not compile Rust.
+The normal Check runs semantic subsystem slices as independent GitHub Actions
+jobs. Live executables are built once as normal locked release binaries and
+distributed to those jobs; live execution does not compile Rust. Independent
+jobs and case workers overlap according to available runner capacity without
+assuming a particular GitHub runner topology.
 
-`isolated-process` is reserved for process- or deployment-global behavior such
-as restart, ownership loss, startup migration, destructive trust rotation, or
-malformed global configuration. Every isolated row records its reason and runs
-through the separately bounded isolation queue. Feature area alone is never an
-isolation reason.
+`isolated-process` remains matrix documentation for genuinely process- or
+deployment-global behavior such as restart, ownership loss, startup migration,
+destructive trust rotation, or malformed global configuration. Every such row
+records its reason, but it uses the same case-owned process pool as other cases;
+feature area alone is never an isolation reason.
 
 Each live run emits machine-readable inventory, result, process-start, and
-duration records. Shared-host duration summaries aggregate count, average, and
+duration records. Case-owned duration summaries aggregate count, average, and
 maximum time by operation and phase so gate-performance claims use retained
 measurements rather than terminal-log estimates.
 

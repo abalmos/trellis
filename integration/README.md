@@ -15,8 +15,8 @@ including explicit pending requirements.
   and the executed result stream exactly.
 - Pending Rust runtime rows record their current owner or blocker. They are not
   hidden skips.
-- Process isolation requires a recorded process-global reason. All other cases
-  attach to the shared NATS and Trellis host.
+- Process isolation requires a recorded process-global reason. Every case owns a
+  NATS account, Trellis process, and SQLite files regardless of classification.
 
 ## Adding A Case
 
@@ -37,7 +37,7 @@ deno task -c ts/deno.json test:integration -- --fixture rpc
 deno task -c ts/deno.json test:integration -- --case rpc.client-calls-service-success
 ```
 
-Rust uses exact `libtest` filters through the shared-host runner:
+Rust uses exact `libtest` filters through the case-owned runtime runner:
 
 ```sh
 deno run -A -c ts/deno.json integration/live_runner.ts --rust-only --rust-filter rpc::

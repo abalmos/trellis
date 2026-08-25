@@ -124,13 +124,6 @@ where
             if portal_ids.is_empty() {
                 return Ok(());
             }
-            #[cfg(feature = "integration-test-hooks")]
-            for portal_id in &portal_ids {
-                self.service
-                    .repository()
-                    .wait_for_portal_reconciliation_test_barrier(portal_id)
-                    .await?;
-            }
             let bindings = self
                 .service
                 .repository()
@@ -141,11 +134,6 @@ where
                 .collect();
             let groups = self.capability_groups().await?;
             self.reconcile_bindings(bindings, false, groups).await?;
-            #[cfg(feature = "integration-test-hooks")]
-            self.service
-                .repository()
-                .record_portal_reconciliation_test_pass(&portal_ids.into_iter().collect::<Vec<_>>())
-                .await?;
         }
     }
 

@@ -1530,8 +1530,7 @@
       "completion": {
         "rust": "implemented"
       },
-      "classification": "isolated-process",
-      "isolationReason": "requires test-only mutation of a user principal in the runtime-owned SQLite database",
+      "classification": "shared",
       "implementations": {
         "rust": {
           "module": "auth",
@@ -1681,8 +1680,7 @@
       "completion": {
         "rust": "implemented"
       },
-      "classification": "isolated-process",
-      "isolationReason": "mutates process-global state or process lifecycle",
+      "classification": "shared",
       "implementations": {
         "rust": {
           "module": "auth",
@@ -1812,8 +1810,7 @@
       "completion": {
         "rust": "implemented"
       },
-      "classification": "isolated-process",
-      "isolationReason": "mutates process-global state or process lifecycle",
+      "classification": "shared",
       "implementations": {
         "rust": {
           "module": "auth",
@@ -2278,8 +2275,7 @@
           "function": "state_exact_resource_permission_is_required"
         }
       },
-      "classification": "isolated-process",
-      "isolationReason": "requires test-only mutation of one authority/materialized grant set in the runtime-owned SQLite database"
+      "classification": "shared"
     },
     {
       "id": "state.malformed-envelope-and-unknown-version-are-unexpected",
@@ -2399,8 +2395,7 @@
       "completion": {
         "rust": "implemented"
       },
-      "classification": "isolated-process",
-      "isolationReason": "requires test-only expiry of an authority proposal in the runtime-owned SQLite database",
+      "classification": "shared",
       "implementations": {
         "rust": {
           "module": "authority_plan",
@@ -2484,8 +2479,7 @@
       "completion": {
         "rust": "implemented"
       },
-      "classification": "isolated-process",
-      "isolationReason": "mutates process-global state or process lifecycle",
+      "classification": "shared",
       "implementations": {
         "rust": {
           "module": "auth",
@@ -2530,8 +2524,7 @@
       "completion": {
         "rust": "implemented"
       },
-      "classification": "isolated-process",
-      "isolationReason": "mutates process-global state or process lifecycle",
+      "classification": "shared",
       "implementations": {
         "rust": {
           "module": "auth",
@@ -2622,8 +2615,7 @@
       "completion": {
         "rust": "implemented"
       },
-      "classification": "isolated-process",
-      "isolationReason": "mutates process-global state or process lifecycle",
+      "classification": "shared",
       "implementations": {
         "rust": {
           "module": "auth",
@@ -3704,8 +3696,7 @@
           "function": "oidc_role_mapping_converges_authority"
         }
       },
-      "classification": "isolated-process",
-      "isolationReason": "mutates the shared test OIDC provider's process-global claims"
+      "classification": "shared"
     },
     {
       "id": "auth.portal-policy-reduction-and-expansion-converge",
@@ -3739,40 +3730,6 @@
         }
       },
       "classification": "shared"
-    },
-    {
-      "id": "auth.portal-login-policy-snapshot-race",
-      "fixture": "auth",
-      "title": "Trusted portal login commits only a current policy snapshot",
-      "coverage": [
-        "auth",
-        "authorization-context",
-        "trusted-portals"
-      ],
-      "description": "Browser trusted-portal admission fails closed when the authenticated provider becomes ineligible and retries typed snapshot conflicts across policy reduction, override removal, and direct or transitive capability-group changes without relying on keyed reconciliation.",
-      "scenario": {
-        "participants": [],
-        "given": [
-          "browser admission has resolved one immutable portal policy snapshot"
-        ],
-        "when": [
-          "the portal or authenticated provider becomes ineligible, or the policy changes, disappears, or expands through a new capability group after resolution while reconciliation is either drained or independently paused"
-        ],
-        "then": [
-          "an ineligible paused trusted flow creates no authority, binding, context, or session, while eligible stale authority transactions retry with current policy and never expose a missing-group InvalidRecord"
-        ]
-      },
-      "completion": {
-        "rust": "implemented"
-      },
-      "implementations": {
-        "rust": {
-          "module": "auth",
-          "function": "portal_policy_snapshot_races_are_fenced"
-        }
-      },
-      "classification": "isolated-process",
-      "isolationReason": "installs exact integration-only SQLite barriers in the runtime-owned Auth database"
     },
     {
       "id": "auth.hostile-old-context-and-proofs-are-denied",
@@ -3836,11 +3793,10 @@
       "implementations": {
         "rust": {
           "module": "auth",
-          "function": "same_session_connections_survive_jwt_window_and_are_kicked"
+          "function": "same_session_connections_are_kicked"
         }
       },
-      "classification": "isolated-process",
-      "isolationReason": "requires a 10-second process-level NATS user-JWT lifetime to verify the live connection-presence bucket configuration"
+      "classification": "shared"
     },
     {
       "id": "auth.portal-reconciliation-a-b-a-converges",
@@ -3941,7 +3897,7 @@
         "rust": "implemented"
       },
       "classification": "isolated-process",
-      "isolationReason": "CLI managed-NATS case starts its own isolated NATS instance; all other cases share the host NATS. Startup allows a 600s ceiling because the first managed run downloads the pinned nats-server binary into an empty cache.",
+      "isolationReason": "starts an additional managed NATS process; startup allows a 600s ceiling because the first managed run downloads the pinned nats-server binary into an empty cache.",
       "implementations": {
         "rust": {
           "module": "cli",

@@ -11,7 +11,6 @@ import {
   expectedRustTests,
   INTEGRATION_LIVE_ARTIFACTS_MANIFEST,
   loadIntegrationLiveArtifacts,
-  rustTestClassifications,
   verifyCompiledRustInventory,
 } from "../rust/crates/trellis-test/integration_runner.ts";
 import clientMatrix from "./client-test-matrix.json" with { type: "json" };
@@ -73,7 +72,6 @@ async function main(args: readonly string[]): Promise<number> {
     ]);
     return 0;
   }
-  const rustClassifications = rustTestClassifications();
   const typescriptCaseIds = typescriptCases.map((testCase) => {
     const implementation = testCase.implementations.typescript;
     if (implementation === undefined) {
@@ -90,19 +88,13 @@ async function main(args: readonly string[]): Promise<number> {
     );
   const assignments = [
     ...typescriptCases
-      .map((testCase, index) => ({
+      .map((_, index) => ({
         id: typescriptCaseIds[index],
         namespacePrefix: "ts",
-        classification: testCase.classification === "isolated-process"
-          ? "isolated-process" as const
-          : "shared" as const,
       })),
     ...rustTests.map((id) => ({
       id,
       namespacePrefix: "rs",
-      classification: rustClassifications.get(id) === "isolated-process"
-        ? "isolated-process" as const
-        : "shared" as const,
     })),
   ];
   const host = await startTrellisIntegrationSharedRuntimeHost({

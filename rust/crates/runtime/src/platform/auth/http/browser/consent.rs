@@ -287,12 +287,6 @@ where
                 Some(&policy),
                 &groups,
             )?;
-            #[cfg(feature = "integration-test-hooks")]
-            state
-                .service
-                .repository()
-                .wait_for_portal_snapshot_test_barrier(&flow.flow_id, &portal.portal_id)
-                .await?;
             let selection =
                 resolve_portal_authority_selection(&policy, &groups, &consent, &attributes)?;
             if selection.capabilities.iter().any(|capability| {

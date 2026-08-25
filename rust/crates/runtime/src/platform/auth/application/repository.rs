@@ -585,28 +585,6 @@ pub(crate) trait AccountRepository: Send + Sync {
 /// Persistence contract for login portals, settings, and deterministic routes.
 #[async_trait]
 pub(crate) trait PortalRepository: Send + Sync {
-    /// Block at the exact post-policy-resolution integration-test barrier.
-    #[cfg(feature = "integration-test-hooks")]
-    async fn wait_for_portal_snapshot_test_barrier(
-        &self,
-        flow_id: &str,
-        portal_id: &str,
-    ) -> Result<(), AuthorizationStateError>;
-
-    /// Block one exact keyed portal reconciliation pass in integration tests.
-    #[cfg(feature = "integration-test-hooks")]
-    async fn wait_for_portal_reconciliation_test_barrier(
-        &self,
-        portal_id: &str,
-    ) -> Result<(), AuthorizationStateError>;
-
-    /// Record completion of one exact portal-scoped integration-test pass.
-    #[cfg(feature = "integration-test-hooks")]
-    async fn record_portal_reconciliation_test_pass(
-        &self,
-        portal_ids: &[String],
-    ) -> Result<(), AuthorizationStateError>;
-
     /// List login portals in stable ID order.
     async fn list_login_portals(&self) -> Result<Vec<LoginPortalRecord>, AuthorizationStateError>;
 

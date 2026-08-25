@@ -42,13 +42,6 @@ jobs:
         with:
           deno-version: ${{ env.DENO_VERSION }}
 
-      - name: Check protocol WASM clean bootstrap
-        shell: bash
-        run: |
-          rm -rf generated
-          cargo check --locked --manifest-path rust/Cargo.toml -p trellis-protocol-wasm
-          git restore generated
-
       - name: Cache preparation build
         uses: swatinem/rust-cache@v2
         with:
@@ -89,9 +82,6 @@ jobs:
 
   wasm:
     name: Protocol WASM
-    # Both jobs share Cargo registry state on the self-hosted runner. Serialize
-    # their rust-cache lifecycle so one job cannot prune sources under the other.
-    needs: prepare
     runs-on: [self-hosted, Linux, X64]
     steps:
       - name: Check out repository
@@ -110,7 +100,9 @@ jobs:
             rust/xtask -> target
 
       - name: Build protocol WASM
-        run: cargo run --manifest-path rust/xtask/Cargo.toml -- protocol-wasm
+        run: |
+          rm -rf generated
+          cargo run --manifest-path rust/xtask/Cargo.toml -- protocol-wasm
 
       - name: Upload protocol WASM
         uses: actions/upload-artifact@v4
@@ -317,7 +309,6 @@ jobs:
     runs-on: [self-hosted, Linux, X64]
     strategy:
       fail-fast: false
-      max-parallel: 8
       matrix:
         include:
           - name: auth

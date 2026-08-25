@@ -12,8 +12,8 @@ import {
   buildRuntimeBinaries,
   loadIntegrationLiveArtifacts,
   parseIntegrationRunnerArgs,
-  partitionRustTests,
   prebuiltDirtyTreeError,
+  rustIntegrationJobs,
   rustTestResults,
   testNamesFromList,
   writeIntegrationLiveArtifacts,
@@ -38,17 +38,12 @@ Deno.test("Rust integration inventory requires registered cases but allows helpe
   );
 });
 
-Deno.test("Rust integration runner separates isolated process cases", () => {
-  assertEquals(
-    partitionRustTests(
-      ["rpc::shared", "runtime::isolated", "support"],
-      new Map([["runtime::isolated", "isolated-process"]]),
-    ),
-    {
-      sharedTests: ["rpc::shared", "support"],
-      isolatedTests: ["runtime::isolated"],
-    },
-  );
+Deno.test("Rust integration concurrency is machine-relative and overridable", () => {
+  assertEquals(rustIntegrationJobs(10, undefined, 4), 2);
+  assertEquals(rustIntegrationJobs(10, undefined, 32), 4);
+  assertEquals(rustIntegrationJobs(3, undefined, 4), 2);
+  assertEquals(rustIntegrationJobs(10, "2", 4), 2);
+  assertEquals(rustIntegrationJobs(10, "invalid", 4), 2);
 });
 
 Deno.test("Rust integration runner extracts test tenant names", () => {
@@ -220,8 +215,13 @@ Deno.test("integration live artifacts are deterministic and validated", async ()
       '"format": "trellis.integration-live-artifacts.v1"',
     );
     assertStringIncludes(firstManifest, `"sourceSha": "${sourceSha}"`);
+    await Deno.writeTextFile(`${tempDir}/dist/stale`, "unused artifact");
     await writeIntegrationLiveArtifacts(manifestPath, sourceSha, executables);
     assertEquals(await Deno.readTextFile(manifestPath), firstManifest);
+    await assertRejects(
+      () => Deno.stat(`${tempDir}/dist/stale`),
+      Deno.errors.NotFound,
+    );
 
     await Deno.chmod(`${tempDir}/dist/trellis-integration-test`, 0o644);
     const artifacts = await loadIntegrationLiveArtifacts(

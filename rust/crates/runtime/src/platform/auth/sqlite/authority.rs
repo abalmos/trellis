@@ -1197,3 +1197,176 @@ pub(in crate::platform::auth) fn decode_decision(
         _ => Err(decode_failure("paired authority decision columns disagree")),
     }
 }
+
+#[cfg(test)]
+mod portal_policy_snapshot_tests {
+    use std::collections::BTreeMap;
+
+    use serde_json::{json, Value};
+
+    use super::verify_portal_policy_snapshot;
+    use crate::platform::auth::application::repository::{LoginPortalMutation, PortalRepository};
+    use crate::platform::auth::policy::portal_policy_snapshot;
+    use crate::platform::auth::{
+        AuthorizationStateError, CapabilityGroupRecord, IdempotencyResultRecord, LoginPortalRecord,
+        LoginSettingsRecord, PortalGrantOverrideRecord, SqliteAuthorizationStore,
+    };
+
+    fn idempotency(request_id: &str) -> IdempotencyResultRecord {
+        IdempotencyResultRecord {
+            scope_key: trellis_protocol::digest_json(&json!(["portal-snapshot", request_id]))
+                .unwrap(),
+            purpose: "test.portal-snapshot".to_owned(),
+            signer_id: "test".to_owned(),
+            request_id: request_id.to_owned(),
+            request_digest: trellis_protocol::digest_json(&Value::String(request_id.to_owned()))
+                .unwrap(),
+            result: Value::Null,
+            created_at: 1,
+            expires_at: 100,
+        }
+    }
+
+    async fn verify_snapshot(
+        store: &SqliteAuthorizationStore,
+        snapshot: crate::platform::auth::PortalPolicySnapshot,
+    ) -> Result<(), AuthorizationStateError> {
+        store
+            .run(move |connection| verify_portal_policy_snapshot(connection, &snapshot))
+            .await
+    }
+
+    #[tokio::test]
+    async fn stale_portal_policy_snapshots_fail_at_the_sqlite_transaction_boundary() {
+        let store = SqliteAuthorizationStore::open_in_memory().unwrap();
+        let portal = LoginPortalRecord {
+            portal_id: "portal".to_owned(),
+            display_name: "Portal".to_owned(),
+            entry_url: None,
+            builtin: false,
+            disabled: false,
+            removed: false,
+            local_registration_enabled: true,
+            provider_ids: vec!["local".to_owned()],
+            created_at: 1,
+            updated_at: 1,
+            version: 1,
+        };
+        let settings = LoginSettingsRecord {
+            portal_id: portal.portal_id.clone(),
+            default_provider_id: Some("local".to_owned()),
+            local_login_enabled: true,
+            federated_registration_enabled: false,
+            provider_selection_enabled: false,
+            updated_at: 1,
+            version: 1,
+        };
+        store
+            .put_login_portal(LoginPortalMutation {
+                portal: portal.clone(),
+                settings: settings.clone(),
+                expected_version: None,
+                idempotency: idempotency("portal-1"),
+                actions: Vec::new(),
+            })
+            .await
+            .unwrap();
+        let group = CapabilityGroupRecord {
+            group_key: "readers".to_owned(),
+            display_name: "Readers".to_owned(),
+            description: "Read access".to_owned(),
+            capabilities: vec!["app::read".to_owned()],
+            included_groups: Vec::new(),
+            created_at: 1,
+            updated_at: 1,
+            version: 1,
+        };
+        store
+            .put_capability_group(group.clone(), None, idempotency("group-1"))
+            .await
+            .unwrap();
+        let policy = PortalGrantOverrideRecord {
+            portal_id: portal.portal_id.clone(),
+            participant_id: "app".to_owned(),
+            direct_capabilities: Vec::new(),
+            capability_group_keys: vec![group.group_key.clone()],
+            role_mappings: Vec::new(),
+            created_at: 1,
+            updated_at: 1,
+            version: 1,
+        };
+        store
+            .put_portal_grant_override(policy.clone(), None, idempotency("policy-1"))
+            .await
+            .unwrap();
+        let groups = BTreeMap::from([(group.group_key.clone(), group.clone())]);
+        let snapshot =
+            portal_policy_snapshot(&portal, &settings, "app", Some(&policy), &groups).unwrap();
+        verify_snapshot(&store, snapshot.clone()).await.unwrap();
+
+        let mut changed_portal = portal.clone();
+        changed_portal.display_name = "Changed".to_owned();
+        changed_portal.updated_at = 2;
+        changed_portal.version = 2;
+        let mut changed_settings = settings.clone();
+        changed_settings.updated_at = 2;
+        changed_settings.version = 2;
+        store
+            .put_login_portal(LoginPortalMutation {
+                portal: changed_portal.clone(),
+                settings: changed_settings.clone(),
+                expected_version: Some(1),
+                idempotency: idempotency("portal-2"),
+                actions: Vec::new(),
+            })
+            .await
+            .unwrap();
+        assert_eq!(
+            verify_snapshot(&store, snapshot).await,
+            Err(AuthorizationStateError::PortalPolicyChanged)
+        );
+
+        let snapshot = portal_policy_snapshot(
+            &changed_portal,
+            &changed_settings,
+            "app",
+            Some(&policy),
+            &groups,
+        )
+        .unwrap();
+        let mut changed_group = group.clone();
+        changed_group.capabilities = Vec::new();
+        changed_group.updated_at = 2;
+        changed_group.version = 2;
+        store
+            .put_capability_group(changed_group.clone(), Some(1), idempotency("group-2"))
+            .await
+            .unwrap();
+        assert_eq!(
+            verify_snapshot(&store, snapshot).await,
+            Err(AuthorizationStateError::PortalPolicyChanged)
+        );
+
+        let changed_groups = BTreeMap::from([(changed_group.group_key.clone(), changed_group)]);
+        let snapshot = portal_policy_snapshot(
+            &changed_portal,
+            &changed_settings,
+            "app",
+            Some(&policy),
+            &changed_groups,
+        )
+        .unwrap();
+        let mut changed_policy = policy;
+        changed_policy.capability_group_keys.clear();
+        changed_policy.updated_at = 2;
+        changed_policy.version = 2;
+        store
+            .put_portal_grant_override(changed_policy, Some(1), idempotency("policy-2"))
+            .await
+            .unwrap();
+        assert_eq!(
+            verify_snapshot(&store, snapshot).await,
+            Err(AuthorizationStateError::PortalPolicyChanged)
+        );
+    }
+}

@@ -408,6 +408,8 @@ async fn invalid_authority_acceptance_preserves_desired_and_proposal_state() {
         .accept_authority_update(&bootstrap_url, &proposal.0, Some(proposal.2 + 1))
         .await
         .is_err());
+    connect.abort();
+    let _ = connect.await;
     runtime
         .control_plane_sqlite()
         .execute(
@@ -440,7 +442,6 @@ async fn invalid_authority_acceptance_preserves_desired_and_proposal_state() {
             .expect("read proposal after invalid acceptance")[0]["state"],
         "pending"
     );
-    connect.abort();
 }
 
 #[tokio::test]

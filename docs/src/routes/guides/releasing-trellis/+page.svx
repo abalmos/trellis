@@ -33,16 +33,18 @@ runtime, fake auth, or fake generated-client workflows to prove Trellis behavior
 If live coverage needs a missing failure or inspection surface, add the smallest
 named `trellis-test` helper and prove the behavior through a live control plane.
 
-Before committing or ending an implementation cycle, run the focused checks that match the files touched. A local live run starts one host and executes selected TypeScript and Rust cases serially against it:
+Before committing or ending an implementation cycle, run the focused checks that match the files touched. A local live run starts one managed NATS server and gives every selected case its own NATS account, Trellis process, and SQLite files:
 
 ```sh
 deno run -A -c ts/deno.json integration/live_runner.ts
 ```
 
-Process-isolated cases run through Rust's separate serial queue after the shared
-Rust schedule; feature-area skip lists are forbidden. The normal Check obtains
-parallelism from independent semantic subsystem jobs, each with its own live
-environment and the same prebuilt executable bundle.
+Rust runs exact-test processes through a bounded machine-relative worker pool;
+`TRELLIS_TEST_JOBS` is a local debugging override. Process-isolated cases use
+the same case-owned schedule and retain a matrix reason; feature-area skip lists
+are forbidden. The normal Check also overlaps independent semantic subsystem
+jobs, each using the same prebuilt normal release executable bundle. Live jobs
+do not invoke Cargo.
 
 If the full integration suites cannot be run, record the reason and the last focused checks that did run.
 
