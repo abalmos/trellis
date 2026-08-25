@@ -53,6 +53,7 @@ jobs:
           CARGO_TARGET_DIR: ${{ runner.temp }}/trellis-prepare-target
         with:
           workspaces: ${{ runner.temp }} -> trellis-prepare-target
+          cache-workspace-crates: true
 
       - name: Prepare generated artifacts
         env:
@@ -112,6 +113,7 @@ jobs:
           CARGO_TARGET_DIR: ${{ runner.temp }}/trellis-wasm-target
         with:
           workspaces: ${{ runner.temp }} -> trellis-wasm-target
+          cache-workspace-crates: true
 
       - name: Build protocol WASM
         env:
