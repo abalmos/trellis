@@ -143,7 +143,17 @@ fn generate_protocol_wasm() -> Result<()> {
     if !status.success() {
         return Err(miette::miette!("protocol WASM build failed with {status}"));
     }
-    let input = rust.join("target/wasm32-unknown-unknown/release/trellis_protocol_wasm.wasm");
+    let target = env::var_os("CARGO_TARGET_DIR")
+        .map(PathBuf::from)
+        .map(|path| {
+            if path.is_absolute() {
+                path
+            } else {
+                rust.join(path)
+            }
+        })
+        .unwrap_or_else(|| rust.join("target"));
+    let input = target.join("wasm32-unknown-unknown/release/trellis_protocol_wasm.wasm");
     let output = root.join("ts/packages/trellis/auth/protocol_wasm");
     std::fs::create_dir_all(&output).into_diagnostic()?;
     let mut bindgen = wasm_bindgen_cli_support::Bindgen::new();
