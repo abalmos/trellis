@@ -23,9 +23,6 @@ jobs:
   prepare:
     name: Prepare generated artifacts
     runs-on: [self-hosted, Linux, X64]
-    env:
-      CARGO_HOME: ${{ runner.temp }}/trellis-prepare-cargo-home
-      CARGO_TARGET_DIR: ${{ runner.temp }}/trellis-prepare-target
     outputs:
       current: ${{ steps.current.outputs.current }}
     steps:
@@ -47,12 +44,18 @@ jobs:
 
       - name: Cache preparation build
         uses: swatinem/rust-cache@v2
+        env:
+          CARGO_HOME: ${{ runner.temp }}/trellis-prepare-cargo-home
+          CARGO_TARGET_DIR: ${{ runner.temp }}/trellis-prepare-target
         with:
           workspaces: |
             rust/tools/generate -> target
             rust/xtask -> target
 
       - name: Prepare generated artifacts
+        env:
+          CARGO_HOME: ${{ runner.temp }}/trellis-prepare-cargo-home
+          CARGO_TARGET_DIR: ${{ runner.temp }}/trellis-prepare-target
         run: cargo run --manifest-path rust/xtask/Cargo.toml -- prepare
 
       - name: Inspect generated artifact drift
@@ -86,9 +89,6 @@ jobs:
   wasm:
     name: Protocol WASM
     runs-on: [self-hosted, Linux, X64]
-    env:
-      CARGO_HOME: ${{ runner.temp }}/trellis-wasm-cargo-home
-      CARGO_TARGET_DIR: ${{ runner.temp }}/trellis-wasm-target
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -100,12 +100,18 @@ jobs:
 
       - name: Cache protocol WASM build
         uses: swatinem/rust-cache@v2
+        env:
+          CARGO_HOME: ${{ runner.temp }}/trellis-wasm-cargo-home
+          CARGO_TARGET_DIR: ${{ runner.temp }}/trellis-wasm-target
         with:
           workspaces: |
             rust -> target
             rust/xtask -> target
 
       - name: Build protocol WASM
+        env:
+          CARGO_HOME: ${{ runner.temp }}/trellis-wasm-cargo-home
+          CARGO_TARGET_DIR: ${{ runner.temp }}/trellis-wasm-target
         run: |
           rm -rf generated
           cargo run --manifest-path rust/xtask/Cargo.toml -- protocol-wasm
