@@ -365,7 +365,7 @@ async fn setup_jobs_fixture() -> JobsFixture {
         "jobQueues": {
             "processDocument": {"payload": {"schema": "JobPayload"}, "update": {"schema": "JobUpdate"}, "result": {"schema": "JobResult"}, "progress": true, "logs": true},
             "longProcessDocument": {"payload": {"schema": "LongJobPayload"}, "result": {"schema": "JobResult"}},
-            "failingProcessDocument": {"payload": {"schema": "FailingJobPayload"}, "result": {"schema": "JobResult"}, "maxDeliver": 2, "backoffMs": [0]},
+            "failingProcessDocument": {"payload": {"schema": "FailingJobPayload"}, "result": {"schema": "JobResult"}, "maxDeliver": 2, "backoffMs": [5000]},
             "keyedProcessDocument": {"payload": {"schema": "KeyedJobPayload"}, "result": {"schema": "KeyedJobResult"}, "keyConcurrency": {"key": ["/groupKey"], "maxActive": 1, "heartbeatIntervalMs": 1000, "heartbeatTtlMs": 10000, "stalePolicy": "fail-stale"}, "queue": {"maxQueuedPerKey": 1, "whenFull": "reject"}},
             "coalesceKeyedProcessDocument": {"payload": {"schema": "KeyedJobPayload"}, "result": {"schema": "KeyedJobResult"}, "keyConcurrency": {"key": ["/groupKey"], "maxActive": 1, "heartbeatIntervalMs": 1000, "heartbeatTtlMs": 10000, "stalePolicy": "fail-stale"}, "queue": {"maxQueuedPerKey": 1, "whenFull": "coalesce"}},
             "replaceKeyedProcessDocument": {"payload": {"schema": "KeyedJobPayload"}, "result": {"schema": "KeyedJobResult"}, "keyConcurrency": {"key": ["/groupKey"], "maxActive": 1, "heartbeatIntervalMs": 1000, "heartbeatTtlMs": 10000, "stalePolicy": "fail-stale"}, "queue": {"maxQueuedPerKey": 1, "whenFull": "replace-oldest"}},
@@ -1422,7 +1422,7 @@ async fn jobs_failed_job_retries_then_dead() {
 
     assert_eq!(terminal.state, "dead");
     assert_eq!(terminal.max_tries, 2);
-    assert!(attempts.len() > 1, "handler should be retried");
+    assert_eq!(attempts, vec![1, 2]);
 
     fixture.stop().await;
 }

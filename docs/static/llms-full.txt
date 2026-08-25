@@ -226,6 +226,9 @@ https://raw.githubusercontent.com/qlever-llc/trellis/main/docs/static/llms.txt
 - TypeScript job handlers request automatic redelivery by returning or throwing
   `RetryJobError` from `@qlever-llc/trellis/jobs`; ordinary handler errors are
   terminal job failures.
+- Rust active jobs report JetStream-derived attempt and redelivery metadata.
+  Retryable failures NAK before the final allowed delivery; the final delivery
+  remains unacknowledged so `AckWait` drives the durable MaxDeliver advisory.
 - Jobs admin mutation requests accept optional `reason`; reasons appear in
   lifecycle admin metadata and inspection timelines. Active cancellation remains
   cooperative through `Jobs.Cancel`; do not add hard stop or kill flows. The

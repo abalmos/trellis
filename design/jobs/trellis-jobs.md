@@ -1050,7 +1050,8 @@ Public runtime rules:
   normal public service-author entrypoint
 - active job handles expose typed payloads plus service-private execution
   controls such as heartbeat/in-progress acknowledgement, progress publication,
-  log publication, cooperative cancellation checks, and redelivery metadata
+  log publication, cooperative cancellation checks, and JetStream-derived
+  attempt/redelivery metadata
 - queues with a declared update schema expose typed active-job emission plus
   `JobRef` and known-job-id subscription helpers; subscriptions are live-only
   and must be cleaned up when no longer consumed
@@ -1220,6 +1221,12 @@ When a work message exceeds `MaxDeliver`, NATS emits an advisory captured in
 
 This approach is durable—if the `jobs` service is temporarily unavailable,
 advisories accumulate in the stream and are processed on recovery.
+
+Workers NAK retryable failures before the final allowed delivery. On the final
+delivery they leave the message unacknowledged so `AckWait` drives JetStream's
+MaxDeliver advisory path; immediately NAKing the final delivery can race that
+advisory. Delivery attempt and redelivery metadata come from JetStream message
+metadata, not from the original `.created` payload.
 
 **Keyed heartbeat expiry:**
 

@@ -279,7 +279,9 @@ idempotent.
   worker task exit fails the service.
 - `JobRef` provides typed get, wait, and cancel behavior backed by lifecycle
   events.
-- Per-message processing failures NAK and continue the queue loop. Keyed active
+- Retryable failures NAK before the final allowed delivery. The final retryable
+  delivery remains unacknowledged so `AckWait` drives the durable MaxDeliver
+  advisory; attempt and redelivery metadata come from JetStream. Keyed active
   slots are released best-effort before redelivery.
 - Use `job.heartbeat()` for long processing, `job.progress(...)` for durable
   lifecycle progress, and `job.is_cancelled()` for cooperative cancellation.

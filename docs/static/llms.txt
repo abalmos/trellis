@@ -186,6 +186,9 @@ commands.
 - TypeScript job handlers that need JetStream redelivery should return or throw
   `RetryJobError` from `@qlever-llc/trellis/jobs`; ordinary errors remain
   terminal job failures.
+- Rust active jobs use JetStream-derived attempt/redelivery metadata. Retryable
+  failures NAK before the final allowed delivery; the final delivery remains
+  unacknowledged so `AckWait` drives the durable MaxDeliver advisory.
 - Jobs admin mutations accept optional `reason`; active cancellation is
   cooperative through `Jobs.Cancel`. Do not invent hard stop/kill APIs. The
   SQLite jobs projection is disposable; the `JOBS` stream remains the source of

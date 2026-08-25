@@ -47,6 +47,7 @@ const CANCELLATION_JOB: u8 = 2;
 enum WorkerAckAction {
     Ack,
     Nak,
+    AwaitMaxDeliver,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -462,11 +463,28 @@ where
             consumer: queue.consumer_name.clone(),
             details: error.to_string(),
         })?;
+        let delivery_attempt = match message.info() {
+            Ok(info) => u64::try_from(info.delivered)
+                .map_err(|error| RuntimeWorkerError::Messages {
+                    consumer: queue.consumer_name.clone(),
+                    details: format!("invalid delivery attempt metadata: {error}"),
+                })?
+                .max(1),
+            Err(error) => {
+                tracing::warn!(%error, subject = %message.subject, "retrying job with unavailable delivery metadata");
+                message
+                    .ack_with(AckKind::Nak(Some(Duration::from_secs(5))))
+                    .await
+                    .map_err(map_ack_error)?;
+                continue;
+            }
+        };
         let payload = message.payload.clone();
-        let Some(parsed_job) = parse_work_payload_job(&payload) else {
+        let Some(mut parsed_job) = parse_work_payload_job(&payload) else {
             message.ack().await.map_err(map_ack_error)?;
             continue;
         };
+        parsed_job.tries = delivery_attempt.saturating_sub(1);
         let job_key = job_key(&parsed_job.service, &parsed_job.job_type, &parsed_job.id);
         if stream_work_decision(&lifecycle_stream, &queue.publish_prefix, &parsed_job).await?
             == ProjectedWorkDecision::SkipAck
@@ -499,7 +517,7 @@ where
             manager.bindings().namespace.as_str(),
             &parsed_job,
             &manager.now_iso(),
-            1,
+            delivery_attempt,
         )
         .await?;
         if queue.key_concurrency.is_some() && active_key.is_none() {
@@ -628,12 +646,13 @@ where
         forward_cancellation.abort();
         let _ = forward_cancellation.await;
         let process_result = process_result?;
-        match ack_action_for_outcome(Some(&process_result)) {
+        match ack_action_for_outcome(Some(&process_result), parsed_job.max_tries) {
             WorkerAckAction::Ack => message.ack().await.map_err(map_ack_error)?,
             WorkerAckAction::Nak => message
                 .ack_with(AckKind::Nak(None))
                 .await
                 .map_err(map_ack_error)?,
+            WorkerAckAction::AwaitMaxDeliver => {}
         }
     }
 
@@ -1254,8 +1273,12 @@ fn is_terminal_lifecycle_event(event_type: JobEventType) -> bool {
 
 fn ack_action_for_outcome<TResult>(
     outcome: Option<&JobProcessOutcome<TResult>>,
+    max_tries: u64,
 ) -> WorkerAckAction {
     match outcome {
+        Some(JobProcessOutcome::Retry { tries, .. }) if *tries >= max_tries => {
+            WorkerAckAction::AwaitMaxDeliver
+        }
         Some(JobProcessOutcome::Retry { .. }) => WorkerAckAction::Nak,
         Some(JobProcessOutcome::Interrupted { .. }) => WorkerAckAction::Nak,
         Some(JobProcessOutcome::Completed { .. })
@@ -1377,8 +1400,25 @@ mod tests {
     #[test]
     fn interrupted_outcomes_use_nak_instead_of_ack() {
         assert_eq!(
-            ack_action_for_outcome(Some(&JobProcessOutcome::<Value>::Interrupted { tries: 1 })),
+            ack_action_for_outcome(
+                Some(&JobProcessOutcome::<Value>::Interrupted { tries: 1 }),
+                2,
+            ),
             WorkerAckAction::Nak
+        );
+    }
+
+    #[test]
+    fn final_retry_waits_for_max_deliver_advisory() {
+        assert_eq!(
+            ack_action_for_outcome(
+                Some(&JobProcessOutcome::<Value>::Retry {
+                    tries: 2,
+                    error: "retry requested".to_string(),
+                }),
+                2,
+            ),
+            WorkerAckAction::AwaitMaxDeliver
         );
     }
 
