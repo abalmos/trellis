@@ -2,7 +2,7 @@ use std::sync::{
     atomic::{AtomicBool, AtomicUsize, Ordering},
     Arc,
 };
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine as _;
@@ -188,6 +188,22 @@ async fn client() -> (
     )
     .await;
     (runtime, caller)
+}
+
+async fn refresh_authorization_context(caller: &trellis_rs::generated::Caller) {
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        match caller.refresh_authorization_context().await {
+            Ok(_) => return,
+            Err(error)
+                if error.to_string().contains("authorization_pending")
+                    && Instant::now() < deadline =>
+            {
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
+            Err(error) => panic!("refresh State session context: {error}"),
+        }
+    }
 }
 
 async fn connect_clean_client(
@@ -473,14 +489,8 @@ async fn state_value_and_map_conflict_shapes_live() {
         .await
         .expect("connect second State client session");
     assert_ne!(first_session.session_id(), second_session.session_id());
-    caller
-        .refresh_authorization_context()
-        .await
-        .expect("refresh first State session context");
-    caller_two
-        .refresh_authorization_context()
-        .await
-        .expect("refresh second State session context");
+    refresh_authorization_context(&caller).await;
+    refresh_authorization_context(&caller_two).await;
     let store = MapStateStore::<_, Draft>::new(&caller, "drafts");
     assert!(matches!(
         MapStateStore::<_, Draft>::new(&caller_two, "drafts")
