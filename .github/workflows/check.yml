@@ -52,8 +52,8 @@ jobs:
           CARGO_HOME: ${{ runner.temp }}/trellis-prepare-cargo-home
           CARGO_TARGET_DIR: ${{ runner.temp }}/trellis-prepare-target
         with:
-          workspaces: ${{ runner.temp }} -> trellis-prepare-target
-          cache-workspace-crates: true
+          cache-targets: false
+          cache-directories: ${{ runner.temp }}/trellis-prepare-target
 
       - name: Prepare generated artifacts
         env:
@@ -112,8 +112,8 @@ jobs:
           CARGO_HOME: ${{ runner.temp }}/trellis-wasm-cargo-home
           CARGO_TARGET_DIR: ${{ runner.temp }}/trellis-wasm-target
         with:
-          workspaces: ${{ runner.temp }} -> trellis-wasm-target
-          cache-workspace-crates: true
+          cache-targets: false
+          cache-directories: ${{ runner.temp }}/trellis-wasm-target
 
       - name: Build protocol WASM
         env:
@@ -320,8 +320,8 @@ jobs:
         env:
           CARGO_TARGET_DIR: ${{ runner.temp }}/trellis-live-target
         with:
-          workspaces: ${{ runner.temp }} -> trellis-live-target
-          cache-workspace-crates: true
+          cache-targets: false
+          cache-directories: ${{ runner.temp }}/trellis-live-target
 
       - name: Set up Deno
         uses: denoland/setup-deno@v2
