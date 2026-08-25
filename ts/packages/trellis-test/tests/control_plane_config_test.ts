@@ -38,9 +38,12 @@ function testManifest(): LocalNatsBootstrapManifest {
 
 Deno.test("reserveLocalPort records a process-wide host lease", async () => {
   const port = reserveLocalPort();
-  const lockPath = `${
-    Deno.env.get("TMPDIR") ?? "/tmp"
-  }/trellis-test-port-${port}.lock/owner`;
+  const lockRoot = Deno.env.get("TRELLIS_TEST_PORT_LOCK_DIR") ??
+    (Deno.build.os === "windows" ? Deno.env.get("TEMP") : "/tmp");
+  if (lockRoot === undefined) {
+    throw new Error("no temporary directory is configured");
+  }
+  const lockPath = `${lockRoot}/trellis-test-port-${port}.lock/owner`;
 
   assertEquals((await Deno.readTextFile(lockPath)).trim(), String(Deno.pid));
 });

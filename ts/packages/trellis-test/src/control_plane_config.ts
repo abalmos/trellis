@@ -124,9 +124,12 @@ export function reserveLocalPort(): number {
   while (true) {
     const listener = Deno.listen({ hostname: "127.0.0.1", port: 0 });
     const port = listener.addr.port;
-    const lockPath = `${
-      Deno.env.get("TMPDIR") ?? "/tmp"
-    }/trellis-test-port-${port}.lock`;
+    const lockRoot = Deno.env.get("TRELLIS_TEST_PORT_LOCK_DIR") ??
+      (Deno.build.os === "windows" ? Deno.env.get("TEMP") : "/tmp");
+    if (lockRoot === undefined) {
+      throw new Error("no temporary directory is configured");
+    }
+    const lockPath = `${lockRoot}/trellis-test-port-${port}.lock`;
     try {
       Deno.mkdirSync(lockPath);
       Deno.writeTextFileSync(`${lockPath}/owner`, `${Deno.pid}\n`);

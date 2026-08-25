@@ -4656,7 +4656,16 @@ fn reserve_local_port() -> Result<LocalPortReservation, TrellisTestError> {
     loop {
         let listener = TcpListener::bind(("127.0.0.1", 0))?;
         let port = listener.local_addr()?.port();
-        let lock_path = std::env::temp_dir().join(format!("trellis-test-port-{port}.lock"));
+        let lock_root = std::env::var_os("TRELLIS_TEST_PORT_LOCK_DIR")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| {
+                if cfg!(windows) {
+                    std::env::temp_dir()
+                } else {
+                    PathBuf::from("/tmp")
+                }
+            });
+        let lock_path = lock_root.join(format!("trellis-test-port-{port}.lock"));
         match fs::create_dir(&lock_path) {
             Ok(()) => {
                 fs::write(lock_path.join("owner"), format!("{}\n", std::process::id()))?;
@@ -5322,7 +5331,17 @@ mod tests {
         let mut reservation = reserve_local_port().expect("reserve local port");
         let port = reservation.local_addr().expect("read local address").port();
         let lock_path = reservation.lock_path.clone();
+        let expected_root = std::env::var_os("TRELLIS_TEST_PORT_LOCK_DIR")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|| {
+                if cfg!(windows) {
+                    std::env::temp_dir()
+                } else {
+                    std::path::PathBuf::from("/tmp")
+                }
+            });
 
+        assert_eq!(lock_path.parent(), Some(expected_root.as_path()));
         assert!(std::net::TcpListener::bind(("127.0.0.1", port)).is_err());
         reservation.release_listener();
         assert!(lock_path.exists());
