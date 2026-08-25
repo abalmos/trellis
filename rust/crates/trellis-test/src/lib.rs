@@ -1109,7 +1109,8 @@ impl TrellisTestRuntime {
             url: shared.admin_rpc_url.clone(),
             token: shared.admin_rpc_token.clone(),
         });
-        let port = reserve_local_port()?;
+        let port_reservation = reserve_local_port()?;
+        let port = port_reservation.local_addr()?.port();
         let trellis_url = format!("http://127.0.0.1:{port}");
         let mut bootstrap_options = LocalTrellisBootstrapOptions::new(workdir.path());
         bootstrap_options.force = false;
@@ -1188,6 +1189,8 @@ impl TrellisTestRuntime {
             .await?;
 
             let config_path = workdir.path().join(&manifest.paths.trellis_config);
+            // Release as late as possible so concurrent cases cannot reserve the same port.
+            drop(port_reservation);
             let started_trellis = TrellisProcess::start(
                 &options.trellis_command,
                 &config_path,
@@ -4622,9 +4625,8 @@ fn keep_workdir_from_env() -> bool {
         .unwrap_or(false)
 }
 
-fn reserve_local_port() -> Result<u16, TrellisTestError> {
-    let listener = TcpListener::bind(("127.0.0.1", 0))?;
-    Ok(listener.local_addr()?.port())
+fn reserve_local_port() -> Result<TcpListener, TrellisTestError> {
+    Ok(TcpListener::bind(("127.0.0.1", 0))?)
 }
 
 fn is_podman_port_race(error: &TrellisTestError) -> bool {
@@ -5189,9 +5191,9 @@ mod tests {
         auth_deployments_create_request_shape, container_mount, first_admin_bootstrap_body,
         flow_id_from_url, materialized_authority_failure, materialized_authority_is_current,
         parse_published_port, parse_trellis_bootstrap_url, pid_from_prefixed_name,
-        remove_stale_marked_workdirs, repo_trellis_command, ContainerRuntime, MountMode,
-        ResolvedContainerRuntime, TrellisControlPlaneSqlite, TrustedLocalUserRegistration,
-        WORKDIR_OWNER_MARKER,
+        remove_stale_marked_workdirs, repo_trellis_command, reserve_local_port, ContainerRuntime,
+        MountMode, ResolvedContainerRuntime, TrellisControlPlaneSqlite,
+        TrustedLocalUserRegistration, WORKDIR_OWNER_MARKER,
     };
     use rusqlite::params;
     use serde_json::{json, Value};
@@ -5264,6 +5266,14 @@ mod tests {
         assert_eq!(parse_published_port("127.0.0.1:49152\n").unwrap(), 49152);
         assert_eq!(parse_published_port("0.0.0.0:42221\n").unwrap(), 42221);
         assert_eq!(parse_published_port("[::1]:43333\n").unwrap(), 43333);
+    }
+
+    #[test]
+    fn local_port_reservation_holds_the_port() {
+        let reservation = reserve_local_port().expect("reserve local port");
+        let port = reservation.local_addr().expect("read local address").port();
+
+        assert!(std::net::TcpListener::bind(("127.0.0.1", port)).is_err());
     }
 
     #[test]
