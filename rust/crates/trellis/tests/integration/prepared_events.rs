@@ -176,6 +176,7 @@ async fn prepared_events_prepared_publish_preserves_custom_headers_and_annotates
     let prepared = trellis_rs::client::prepare_event::<EntityChanged>(&payload)
         .expect("prepare event")
         .with_headers(headers);
+    wait_for_publisher_context(&service, &listener_service).await;
 
     service
         .event_publisher()
@@ -244,6 +245,28 @@ async fn prepared_events_prepared_publish_preserves_custom_headers_and_annotates
             );
         }
         other => panic!("expected annotated event handler error, got {other:?}"),
+    }
+}
+
+async fn wait_for_publisher_context(
+    publisher: &trellis_rs::service::ConnectedServiceRuntime<PreparedEventsContract>,
+    listener: &trellis_rs::service::ConnectedServiceRuntime<PreparedEventsListenerContract>,
+) {
+    let digest = publisher.integration_test_authorization_context_digest();
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        if listener
+            .integration_test_resolve_authorization_context(&digest)
+            .await
+            .is_ok()
+        {
+            return;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "timed out waiting for publisher authorization context"
+        );
+        tokio::time::sleep(Duration::from_millis(25)).await;
     }
 }
 

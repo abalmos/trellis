@@ -846,6 +846,31 @@ impl<C> ConnectedServiceRuntime<C> {
             .expect("connected service authorization provider is present")
     }
 
+    /// Return the active authorization context digest for live integration synchronization.
+    #[cfg(feature = "test-support")]
+    #[doc(hidden)]
+    pub fn integration_test_authorization_context_digest(&self) -> String {
+        self.client
+            .authorization_context_digest()
+            .expect("connected service authorization context is present")
+    }
+
+    /// Resolve an exact authorization context through the live verification path.
+    #[cfg(feature = "test-support")]
+    #[doc(hidden)]
+    pub async fn integration_test_resolve_authorization_context(
+        &self,
+        digest: &str,
+    ) -> Result<(), super::EventVerificationFailure> {
+        self.integration_test_authorization_provider()
+            .resolve_event_context_for_verification(
+                digest,
+                time::OffsetDateTime::now_utc().unix_timestamp(),
+            )
+            .await
+            .map(|_| ())
+    }
+
     /// Return the connected NATS client for live reconnect assertions.
     #[cfg(feature = "test-support")]
     #[doc(hidden)]
