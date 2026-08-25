@@ -183,7 +183,8 @@ async fn prepared_events_prepared_publish_preserves_custom_headers_and_annotates
         .await
         .expect("publish prepared event");
 
-    let listener_error = tokio::time::timeout(Duration::from_secs(5), listener)
+    let (observed_event, observed_context) = wait_for_observed(&observed).await;
+    let listener_error = tokio::time::timeout(Duration::from_secs(1), listener)
         .await
         .expect("listener returns handler error")
         .expect("listener task joins")
@@ -214,7 +215,6 @@ async fn prepared_events_prepared_publish_preserves_custom_headers_and_annotates
     );
     assert_eq!(raw.payload.as_ref(), prepared.payload());
 
-    let (observed_event, observed_context) = wait_for_observed(&observed).await;
     assert_eq!(observed_event, payload);
     assert_eq!(observed_context.id.as_deref(), Some(prepared.event_id()));
     assert_eq!(
@@ -250,7 +250,7 @@ async fn prepared_events_prepared_publish_preserves_custom_headers_and_annotates
 async fn wait_for_observed(
     observed: &Arc<Mutex<Option<(EntityChangedEvent, ServiceEventListenerContext)>>>,
 ) -> (EntityChangedEvent, ServiceEventListenerContext) {
-    let deadline = Instant::now() + Duration::from_secs(5);
+    let deadline = Instant::now() + Duration::from_secs(10);
     loop {
         if let Some(value) = observed.lock().await.clone() {
             return value;
