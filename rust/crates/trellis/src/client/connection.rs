@@ -1781,6 +1781,15 @@ impl TrellisClient {
         self.authorization_context_cache()
     }
 
+    /// Return the active authorization context digest for live integration synchronization.
+    #[cfg(feature = "test-support")]
+    #[doc(hidden)]
+    pub fn integration_test_authorization_context_digest(
+        &self,
+    ) -> Result<String, TrellisClientError> {
+        self.authorization_context_digest()
+    }
+
     /// Refresh and verify the current authorization context immediately.
     pub async fn refresh_authorization_context(
         &self,

@@ -921,6 +921,24 @@ async fn event_consumers_transient_missing_consumer_retries_after_reconcile() {
         .connect_client(&bootstrap_url, &publisher_contract)
         .await
         .expect("connect event publisher client");
+    let publisher_context = publisher
+        .integration_test_authorization_context_digest()
+        .expect("read publisher authorization context");
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        if consumer
+            .integration_test_resolve_authorization_context(&publisher_context)
+            .await
+            .is_ok()
+        {
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "timed out waiting for publisher authorization context"
+        );
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
     publisher
         .publish::<SourcePingedEvent>(&EventRecord {
             id: "rust-event-consumers-transient-missing".to_string(),

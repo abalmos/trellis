@@ -65,6 +65,15 @@ impl Caller {
         self.client.integration_test_nats()
     }
 
+    /// Return the active authorization context digest for live integration synchronization.
+    #[cfg(feature = "test-support")]
+    #[doc(hidden)]
+    pub fn integration_test_authorization_context_digest(
+        &self,
+    ) -> Result<String, crate::client::TrellisClientError> {
+        self.client.integration_test_authorization_context_digest()
+    }
+
     /// Connect a user-authenticated generated participant.
     #[doc(hidden)]
     pub async fn connect_user(
