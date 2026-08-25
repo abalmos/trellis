@@ -70,7 +70,7 @@ Deno.test("parseTrellisBootstrapUrl reads structured and fallback log lines", ()
   assertEquals(parseTrellisBootstrapUrl("ready"), undefined);
 });
 
-Deno.test("startTrellisProcess reports readiness timeout with output tails", async () => {
+Deno.test("startTrellisProcess reports early exit with output tails", async () => {
   const configPath = "/tmp/trellis-test-config.json";
 
   const error = await assertRejects(
@@ -83,7 +83,7 @@ Deno.test("startTrellisProcess reports readiness timeout with output tails", asy
             cmd: Deno.execPath(),
             args: [
               "eval",
-              "console.log('TRELLIS_CONFIG=' + Deno.env.get('TRELLIS_CONFIG')); console.log('TRELLIS_ADMIN_BOOTSTRAP_URL=http://127.0.0.1:9000/bootstrap'); console.error('NO_COLOR=' + Deno.env.get('NO_COLOR')); setInterval(() => {}, 1000);",
+              "console.log('TRELLIS_CONFIG=' + Deno.env.get('TRELLIS_CONFIG')); console.log('TRELLIS_ADMIN_BOOTSTRAP_URL=http://127.0.0.1:9000/bootstrap'); console.error('NO_COLOR=' + Deno.env.get('NO_COLOR')); Deno.exit(23);",
             ],
           },
         },
@@ -91,7 +91,7 @@ Deno.test("startTrellisProcess reports readiness timeout with output tails", asy
         shutdownTimeoutMs: 1_000,
       }),
     Error,
-    "Timed out after 1000ms waiting for Trellis process readiness",
+    "Trellis process exited before readiness (exit code 23)",
   );
 
   assertStringIncludes(error.message, "http://127.0.0.1:9/readyz");
