@@ -1566,6 +1566,8 @@ async fn jobs_admin_list_services_filters_stale_worker_heartbeats() {
     assert_eq!(fresh_entry.workers[0].service, fresh_service);
     assert_eq!(fresh_entry.workers[0].job_type, job_type);
 
+    wait_for_admin_services(&jobs_admin, second_fresh_service, second_fresh_instance).await;
+
     let first_page = jobs_admin
         .rpc()
         .jobs()
