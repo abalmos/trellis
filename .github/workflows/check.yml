@@ -82,6 +82,7 @@ jobs:
 
   wasm:
     name: Protocol WASM
+    needs: prepare
     runs-on: [self-hosted, Linux, X64]
     steps:
       - name: Check out repository
