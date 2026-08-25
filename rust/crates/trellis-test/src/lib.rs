@@ -575,6 +575,7 @@ impl Default for TrellisTestRuntimeOptions {
 #[derive(Debug)]
 pub struct TrellisTestRuntime {
     workdir: IntegrationWorkdir,
+    _port_reservation: Option<LocalPortReservation>,
     nats: Option<NatsContainer>,
     trellis: Option<TrellisProcess>,
     trellis_url: String,
@@ -1109,7 +1110,7 @@ impl TrellisTestRuntime {
             url: shared.admin_rpc_url.clone(),
             token: shared.admin_rpc_token.clone(),
         });
-        let port_reservation = reserve_local_port()?;
+        let mut port_reservation = reserve_local_port()?;
         let port = port_reservation.local_addr()?.port();
         let trellis_url = format!("http://127.0.0.1:{port}");
         let mut bootstrap_options = LocalTrellisBootstrapOptions::new(workdir.path());
@@ -1145,6 +1146,7 @@ impl TrellisTestRuntime {
                 }
                 return Ok(Self {
                     workdir,
+                    _port_reservation: None,
                     nats: None,
                     trellis: None,
                     trellis_url: shared.trellis_url.clone(),
@@ -1189,8 +1191,7 @@ impl TrellisTestRuntime {
             .await?;
 
             let config_path = workdir.path().join(&manifest.paths.trellis_config);
-            // Release as late as possible so concurrent cases cannot reserve the same port.
-            drop(port_reservation);
+            port_reservation.release_listener();
             let started_trellis = TrellisProcess::start(
                 &options.trellis_command,
                 &config_path,
@@ -1225,6 +1226,7 @@ impl TrellisTestRuntime {
         let control_plane_path = control_plane_sqlite_path(workdir.path());
         Ok(Self {
             workdir,
+            _port_reservation: Some(port_reservation),
             nats,
             trellis,
             trellis_url,
@@ -4625,8 +4627,55 @@ fn keep_workdir_from_env() -> bool {
         .unwrap_or(false)
 }
 
-fn reserve_local_port() -> Result<TcpListener, TrellisTestError> {
-    Ok(TcpListener::bind(("127.0.0.1", 0))?)
+#[derive(Debug)]
+struct LocalPortReservation {
+    listener: Option<TcpListener>,
+    lock_path: PathBuf,
+}
+
+impl LocalPortReservation {
+    fn local_addr(&self) -> io::Result<std::net::SocketAddr> {
+        self.listener
+            .as_ref()
+            .expect("port reservation listener is available")
+            .local_addr()
+    }
+
+    fn release_listener(&mut self) {
+        self.listener.take();
+    }
+}
+
+impl Drop for LocalPortReservation {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.lock_path);
+    }
+}
+
+fn reserve_local_port() -> Result<LocalPortReservation, TrellisTestError> {
+    loop {
+        let listener = TcpListener::bind(("127.0.0.1", 0))?;
+        let port = listener.local_addr()?.port();
+        let lock_path = std::env::temp_dir().join(format!("trellis-test-port-{port}.lock"));
+        match fs::create_dir(&lock_path) {
+            Ok(()) => {
+                fs::write(lock_path.join("owner"), format!("{}\n", std::process::id()))?;
+                return Ok(LocalPortReservation {
+                    listener: Some(listener),
+                    lock_path,
+                });
+            }
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
+                let owner = fs::read_to_string(lock_path.join("owner"))
+                    .ok()
+                    .and_then(|value| value.trim().parse::<u32>().ok());
+                if owner.is_some_and(process_is_gone) {
+                    let _ = fs::remove_dir_all(lock_path);
+                }
+            }
+            Err(error) => return Err(error.into()),
+        }
+    }
 }
 
 fn is_podman_port_race(error: &TrellisTestError) -> bool {
@@ -5270,10 +5319,15 @@ mod tests {
 
     #[test]
     fn local_port_reservation_holds_the_port() {
-        let reservation = reserve_local_port().expect("reserve local port");
+        let mut reservation = reserve_local_port().expect("reserve local port");
         let port = reservation.local_addr().expect("read local address").port();
+        let lock_path = reservation.lock_path.clone();
 
         assert!(std::net::TcpListener::bind(("127.0.0.1", port)).is_err());
+        reservation.release_listener();
+        assert!(lock_path.exists());
+        drop(reservation);
+        assert!(!lock_path.exists());
     }
 
     #[test]

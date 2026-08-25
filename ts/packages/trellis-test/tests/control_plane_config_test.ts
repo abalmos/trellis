@@ -2,6 +2,7 @@ import { assertEquals, assertStringIncludes } from "@std/assert";
 import { join } from "@std/path";
 import {
   buildControlPlaneConfig,
+  reserveLocalPort,
   writeTrellisConfig,
 } from "../src/control_plane_config.ts";
 import type { LocalNatsBootstrapManifest } from "../src/nats_bootstrap.ts";
@@ -34,6 +35,15 @@ function testManifest(): LocalNatsBootstrapManifest {
     },
   };
 }
+
+Deno.test("reserveLocalPort records a process-wide host lease", async () => {
+  const port = reserveLocalPort();
+  const lockPath = `${
+    Deno.env.get("TMPDIR") ?? "/tmp"
+  }/trellis-test-port-${port}.lock/owner`;
+
+  assertEquals((await Deno.readTextFile(lockPath)).trim(), String(Deno.pid));
+});
 
 Deno.test("writeTrellisConfig writes file-backed test control-plane config", async () => {
   const workdir = await Deno.makeTempDir({ prefix: "trellis-config-test-" });

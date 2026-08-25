@@ -108,12 +108,54 @@ export function generateSessionSeed(): string {
   return base64url(seed);
 }
 
+const reservedPortLocks = new Set<string>();
+addEventListener("unload", () => {
+  for (const path of reservedPortLocks) {
+    try {
+      Deno.removeSync(path, { recursive: true });
+    } catch (error) {
+      if (!(error instanceof Deno.errors.NotFound)) throw error;
+    }
+  }
+});
+
 /** Reserves a localhost TCP port for the spawned Trellis HTTP listener. */
 export function reserveLocalPort(): number {
-  const listener = Deno.listen({ hostname: "127.0.0.1", port: 0 });
-  const port = listener.addr.port;
-  listener.close();
-  return port;
+  while (true) {
+    const listener = Deno.listen({ hostname: "127.0.0.1", port: 0 });
+    const port = listener.addr.port;
+    const lockPath = `${
+      Deno.env.get("TMPDIR") ?? "/tmp"
+    }/trellis-test-port-${port}.lock`;
+    try {
+      Deno.mkdirSync(lockPath);
+      Deno.writeTextFileSync(`${lockPath}/owner`, `${Deno.pid}\n`);
+      reservedPortLocks.add(lockPath);
+      listener.close();
+      return port;
+    } catch (error) {
+      listener.close();
+      if (!(error instanceof Deno.errors.AlreadyExists)) throw error;
+      let owner: number;
+      try {
+        owner = Number.parseInt(Deno.readTextFileSync(`${lockPath}/owner`), 10);
+      } catch (readError) {
+        if (readError instanceof Deno.errors.NotFound) continue;
+        throw readError;
+      }
+      if (!Number.isInteger(owner)) continue;
+      try {
+        Deno.statSync(`/proc/${owner}`);
+      } catch (statError) {
+        if (!(statError instanceof Deno.errors.NotFound)) throw statError;
+        try {
+          Deno.removeSync(lockPath, { recursive: true });
+        } catch (removeError) {
+          if (!(removeError instanceof Deno.errors.NotFound)) throw removeError;
+        }
+      }
+    }
+  }
 }
 
 /** Builds the real Trellis control-plane config for an isolated test runtime. */
