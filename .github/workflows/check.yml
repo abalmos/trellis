@@ -340,55 +340,53 @@ jobs:
     runs-on: [self-hosted, Linux, X64]
     timeout-minutes: 20
     env:
-      # Eight runner services share the 192-core host; each job runs both languages.
-      TRELLIS_INTEGRATION_JOBS: "8"
+      TRELLIS_INTEGRATION_JOBS: ${{ vars.TRELLIS_INTEGRATION_JOBS }}
     strategy:
       fail-fast: false
-      max-parallel: 8
       matrix:
         include:
+          - name: transfer
+            rust: "transfer::"
+            typescript: "transfer."
+          - name: runtime-ownership
+            rust: "runtime_ownership::"
+            typescript: ""
+          - name: jobs
+            rust: "jobs::"
+            typescript: ""
+          - name: resources
+            rust: "resources::"
+            typescript: "resources."
+          - name: authority-plan
+            rust: "authority_plan::"
+            typescript: ""
+          - name: state
+            rust: "state::"
+            typescript: "state."
+          - name: health
+            rust: "health::"
+            typescript: ""
           - name: auth
             rust: "auth::"
             typescript: "authorization-registry."
           - name: operations
             rust: "operations::"
             typescript: "operations."
-          - name: state
-            rust: "state::"
-            typescript: "state."
-          - name: event-consumers
-            rust: "event_consumers::"
-            typescript: ""
-          - name: jobs
-            rust: "jobs::"
-            typescript: ""
-          - name: rpc
-            rust: "rpc::"
-            typescript: "rpc."
-          - name: resources
-            rust: "resources::"
-            typescript: "resources."
-          - name: transfer
-            rust: "transfer::"
-            typescript: "transfer."
-          - name: events
-            rust: "events::"
-            typescript: "events."
           - name: feeds
             rust: "feeds::"
             typescript: "feeds."
+          - name: rpc
+            rust: "rpc::"
+            typescript: "rpc."
+          - name: events
+            rust: "events::"
+            typescript: "events."
+          - name: event-consumers
+            rust: "event_consumers::"
+            typescript: ""
           - name: prepared-events
             rust: "prepared_events::"
             typescript: "outbox."
-          - name: authority-plan
-            rust: "authority_plan::"
-            typescript: ""
-          - name: health
-            rust: "health::"
-            typescript: ""
-          - name: runtime-ownership
-            rust: "runtime_ownership::"
-            typescript: ""
           - name: cli
             rust: "cli::"
             typescript: ""

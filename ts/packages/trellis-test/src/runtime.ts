@@ -427,7 +427,6 @@ export class TrellisTestRuntime implements AsyncDisposable {
       nats,
       admin,
     });
-    await runtime.resetAcceptedIntegrationAuthorities();
     return runtime;
   }
 

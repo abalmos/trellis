@@ -17,6 +17,8 @@ import clientMatrix from "./client-test-matrix.json" with { type: "json" };
 
 const repoRoot = fromFileUrl(new URL("../", import.meta.url));
 const PREBUILT_ONLY_ENV = "TRELLIS_TEST_PREBUILT_ONLY";
+const INTEGRATION_JOBS_ENV = "TRELLIS_INTEGRATION_JOBS";
+const RUST_JOBS_ENV = "TRELLIS_TEST_JOBS";
 
 if (import.meta.main) {
   if (
@@ -39,6 +41,7 @@ async function main(args: readonly string[]): Promise<number> {
   const typescriptCase = optionValue(args, "--typescript-case");
   const typescriptPrefix = optionValue(args, "--typescript-prefix");
   const rustFilter = optionValue(args, "--rust-filter");
+  const jobs = Deno.env.get(INTEGRATION_JOBS_ENV);
   const keepWorkdir = args.includes("--keep-workdir") ||
     Deno.env.get("TRELLIS_TEST_KEEP_WORKDIR") === "1";
   const typescriptOnly = args.includes("--typescript-only");
@@ -128,6 +131,7 @@ async function main(args: readonly string[]): Promise<number> {
             "ts/integration/deno.json",
             "ts/integration/runner.ts",
             "--parallel",
+            ...(jobs === undefined || jobs === "" ? [] : ["--jobs", jobs]),
             ...typescriptCaseIds.flatMap((id) => ["--case", id]),
           ],
           cwd: repoRoot,
@@ -150,7 +154,12 @@ async function main(args: readonly string[]): Promise<number> {
             ...(rustFilter === undefined ? [] : ["--", rustFilter]),
           ],
           cwd: repoRoot,
-          env,
+          env: {
+            ...env,
+            ...(jobs === undefined || jobs === ""
+              ? {}
+              : { [RUST_JOBS_ENV]: jobs }),
+          },
           stdin: "inherit",
           stdout: "inherit",
           stderr: "inherit",

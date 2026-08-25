@@ -255,12 +255,7 @@ export class TrellisTestAdminAutomation {
   /** Revokes accepted authority left by earlier integration runs for this administrator. */
   async resetAcceptedIntegrationAuthorities(): Promise<void> {
     if (this.#rpcProxy) {
-      await postAdminRpc(
-        this.#rpcProxy,
-        "resetAcceptedIntegrationAuthorities",
-        null,
-      );
-      return;
+      throw new Error("shared integration authority reset is startup-only");
     }
     const client = await this.#client();
     await revokeStaleIntegrationAuthorities({

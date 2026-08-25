@@ -21,7 +21,7 @@ const WORKDIR_PREFIX = "trellis-test-pool-";
 const WORKDIR_OWNER_MARKER = ".trellis-test-owner";
 const SHARED_TENANT = "shared";
 
-/** Shared NATS/Trellis host started for serialized integration cases. */
+/** Shared control-plane host that assigns isolated runtimes to concurrent cases. */
 export type TrellisIntegrationSharedRuntimeHost = {
   /** Path to the private manifest passed to worker processes. */
   readonly manifestPath: string;
@@ -173,9 +173,6 @@ export async function startTrellisIntegrationSharedRuntimeHost(args: {
             mode: body.input.mode,
           } as const;
           output = await runtime?.completeClientAuth(authInput);
-        } else if (body.method === "resetAcceptedIntegrationAuthorities") {
-          await runtime?.resetAcceptedIntegrationAuthorities();
-          output = {};
         } else if (body.method === "testOidcSetClaims") {
           if (
             typeof body.input !== "object" || body.input === null ||

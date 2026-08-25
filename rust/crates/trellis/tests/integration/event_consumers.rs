@@ -908,6 +908,13 @@ async fn event_consumers_transient_missing_consumer_retries_after_reconcile() {
         1,
     )
     .await;
+    wait_for_waiting_count(
+        &runtime,
+        SourcePingedEvent::SUBJECT,
+        bound_name(&consumer, "ingest"),
+        1,
+    )
+    .await;
 
     let publisher_contract = publisher_contract();
     let publisher = admin
@@ -2150,7 +2157,7 @@ async fn wait_for_observed(
     event_id: &str,
     group: Option<&str>,
 ) {
-    let deadline = Instant::now() + Duration::from_secs(10);
+    let deadline = Instant::now() + Duration::from_secs(5);
     loop {
         if let Some((event, context)) = observed.lock().await.clone() {
             assert_eq!(event.id, event_id);
