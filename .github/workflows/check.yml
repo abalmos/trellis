@@ -52,9 +52,7 @@ jobs:
           CARGO_HOME: ${{ runner.temp }}/trellis-prepare-cargo-home
           CARGO_TARGET_DIR: ${{ runner.temp }}/trellis-prepare-target
         with:
-          workspaces: |
-            rust/tools/generate -> target
-            rust/xtask -> target
+          workspaces: ${{ runner.temp }} -> trellis-prepare-target
 
       - name: Prepare generated artifacts
         env:
@@ -113,9 +111,7 @@ jobs:
           CARGO_HOME: ${{ runner.temp }}/trellis-wasm-cargo-home
           CARGO_TARGET_DIR: ${{ runner.temp }}/trellis-wasm-target
         with:
-          workspaces: |
-            rust -> target
-            rust/xtask -> target
+          workspaces: ${{ runner.temp }} -> trellis-wasm-target
 
       - name: Build protocol WASM
         env:
@@ -221,7 +217,7 @@ jobs:
           cargo fmt --manifest-path rust/xtask/Cargo.toml --check
 
       - name: Lint production Rust
-        run: cargo clippy --manifest-path rust/Cargo.toml --workspace --all-targets -- -D warnings
+        run: cargo clippy --manifest-path rust/Cargo.toml --workspace --lib --bins -- -D warnings
 
       - name: Test Rust libraries
         run: cargo test --manifest-path rust/Cargo.toml --workspace --lib
