@@ -1343,6 +1343,11 @@ where
             .subscribe(client.descriptor_subject(D::SUBJECT))
             .await
             .map_err(|error| TrellisClientError::NatsRequest(error.to_string()))?;
+        client
+            .nats()
+            .flush()
+            .await
+            .map_err(|error| TrellisClientError::NatsRequest(error.to_string()))?;
         let event_auth = auth.clone();
         let event_api_id = event_api_id.clone();
         let event_name = event_name.clone();
