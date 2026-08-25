@@ -341,7 +341,7 @@ jobs:
     timeout-minutes: 20
     env:
       # Eight runner services share the 192-core host; each job runs both languages.
-      TRELLIS_INTEGRATION_JOBS: "8"
+      TRELLIS_INTEGRATION_JOBS: "4"
     strategy:
       fail-fast: false
       max-parallel: 8
