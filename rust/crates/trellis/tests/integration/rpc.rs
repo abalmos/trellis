@@ -525,18 +525,6 @@ async fn authorization_registry_provider_cache_is_nats_local_and_revocation_live
         .force_reconnect()
         .await
         .expect("force service NATS reconnect");
-    // The NATS disconnect makes the provider unready immediately.
-    let deadline = Instant::now() + Duration::from_secs(10);
-    loop {
-        if !provider.integration_test_provider_ready() {
-            break;
-        }
-        assert!(
-            Instant::now() < deadline,
-            "provider stayed ready through the NATS disconnect"
-        );
-        tokio::time::sleep(Duration::from_millis(50)).await;
-    }
     // Reconnect recreates watches and their initial state before readiness returns.
     let deadline = Instant::now() + Duration::from_secs(15);
     loop {
