@@ -35,7 +35,7 @@ export type TrellisIntegrationSharedRuntimeHost = {
   stop(): Promise<void>;
 };
 
-/** Starts one NATS server and one Trellis runtime for ordinary test cases. */
+/** Starts the shared control plane that provisions isolated concurrent case runtimes. */
 export async function startTrellisIntegrationSharedRuntimeHost(args: {
   readonly runtime: TrellisIntegrationRuntimeOptions;
   readonly assignments: readonly {
@@ -93,7 +93,7 @@ export async function startTrellisIntegrationSharedRuntimeHost(args: {
       startupMs: args.runtime.timeouts?.startupMs,
       tenantIds,
     });
-    runtime = await TrellisTestRuntime.start({
+    runtime = await TrellisTestRuntime.startIntegrationHost({
       ...args.runtime,
       oauthProviders: {
         ...args.runtime.oauthProviders,
@@ -125,7 +125,6 @@ export async function startTrellisIntegrationSharedRuntimeHost(args: {
         manifest: nats.manifests[SHARED_TENANT],
       },
     });
-    await runtime.resetAcceptedIntegrationAuthorities();
     await runtime.deployments.create({ id: hostDeployment });
     const adminRpcServer = Deno.serve({
       hostname: "127.0.0.1",

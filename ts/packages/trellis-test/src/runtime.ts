@@ -382,6 +382,20 @@ export class TrellisTestRuntime implements AsyncDisposable {
     }
   }
 
+  /** @internal Starts the shared integration host after one-time authority cleanup. */
+  static async startIntegrationHost(
+    options: TrellisTestRuntimeStartOptions,
+  ): Promise<TrellisTestRuntime> {
+    const runtime = await TrellisTestRuntime.start(options);
+    try {
+      await runtime.#admin.resetAcceptedIntegrationAuthorities();
+      return runtime;
+    } catch (error) {
+      await runtime.stop();
+      throw error;
+    }
+  }
+
   /** Attaches worker-local clients and admin automation to a shared Trellis host. */
   static async attach(args: {
     trellisUrl: string;
@@ -433,11 +447,6 @@ export class TrellisTestRuntime implements AsyncDisposable {
   /** @internal Forwards one low-level Auth RPC over the host admin session. */
   callAdminRpc(method: string, input: unknown): Promise<unknown> {
     return this.#admin.callAdminRpc(method, input);
-  }
-
-  /** Revokes accepted non-administration authority left by earlier shared test runs. */
-  async resetAcceptedIntegrationAuthorities(): Promise<void> {
-    await this.#admin.resetAcceptedIntegrationAuthorities();
   }
 
   /** Registers a service contract and creates a service instance key. */
