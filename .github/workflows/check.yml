@@ -313,6 +313,14 @@ jobs:
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Cache live release build
+        uses: swatinem/rust-cache@v2
+        env:
+          CARGO_TARGET_DIR: ${{ runner.temp }}/trellis-live-target
+        with:
+          workspaces: ${{ runner.temp }} -> trellis-live-target
+          cache-workspace-crates: true
+
       - name: Set up Deno
         uses: denoland/setup-deno@v2
         with:
@@ -341,44 +349,44 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - name: transfer
-            rust: "transfer::"
-            typescript: "transfer."
-          - name: runtime-ownership
-            rust: "runtime_ownership::"
-            typescript: ""
+          - name: auth
+            rust: "auth::"
+            typescript: "authorization-registry."
+          - name: state
+            rust: "state::"
+            typescript: "state."
+          - name: operations
+            rust: "operations::"
+            typescript: "operations."
           - name: jobs
             rust: "jobs::"
+            typescript: ""
+          - name: event-consumers
+            rust: "event_consumers::"
+            typescript: ""
+          - name: rpc
+            rust: "rpc::"
+            typescript: "rpc."
+          - name: feeds
+            rust: "feeds::"
+            typescript: "feeds."
+          - name: runtime-ownership
+            rust: "runtime_ownership::"
             typescript: ""
           - name: resources
             rust: "resources::"
             typescript: "resources."
-          - name: authority-plan
-            rust: "authority_plan::"
-            typescript: ""
-          - name: state
-            rust: "state::"
-            typescript: "state."
           - name: health
             rust: "health::"
             typescript: ""
-          - name: auth
-            rust: "auth::"
-            typescript: "authorization-registry."
-          - name: operations
-            rust: "operations::"
-            typescript: "operations."
-          - name: feeds
-            rust: "feeds::"
-            typescript: "feeds."
-          - name: rpc
-            rust: "rpc::"
-            typescript: "rpc."
           - name: events
             rust: "events::"
             typescript: "events."
-          - name: event-consumers
-            rust: "event_consumers::"
+          - name: transfer
+            rust: "transfer::"
+            typescript: "transfer."
+          - name: authority-plan
+            rust: "authority_plan::"
             typescript: ""
           - name: prepared-events
             rust: "prepared_events::"
