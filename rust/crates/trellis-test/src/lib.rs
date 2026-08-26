@@ -4517,6 +4517,7 @@ impl TrellisProcess {
             .stdin(Stdio::null())
             .stdout(Stdio::from(stdout))
             .stderr(Stdio::from(stderr));
+        terminate_on_parent_exit(&mut child_command);
         let child = child_command.spawn()?;
         let mut process = Self { child, stdout_log };
         if let Err(error) =
@@ -4665,6 +4666,31 @@ impl Drop for TrellisTestHostSlot {
         }
         if self.borrowed_case_slot {
             BORROWED_CASE_SLOT.store(false, Ordering::Release);
+        }
+    }
+}
+
+/// Configures a test child to receive `SIGTERM` if its parent test process exits.
+pub fn terminate_on_parent_exit(command: &mut Command) {
+    #[cfg(target_os = "linux")]
+    {
+        use std::os::unix::process::CommandExt as _;
+
+        let parent_pid = std::process::id();
+        // SAFETY: `pre_exec` invokes only async-signal-safe libc calls before exec.
+        unsafe {
+            command.pre_exec(move || {
+                if libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGTERM) == -1 {
+                    return Err(io::Error::last_os_error());
+                }
+                if libc::getppid() != parent_pid.cast_signed() {
+                    return Err(io::Error::new(
+                        io::ErrorKind::Interrupted,
+                        "test parent exited before child startup",
+                    ));
+                }
+                Ok(())
+            });
         }
     }
 }

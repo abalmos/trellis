@@ -493,6 +493,7 @@ fn health_command(rust_dir: &Path, config_path: &Path) -> Command {
         ])
         .current_dir(rust_dir)
         .stdin(Stdio::null());
+    trellis_test::terminate_on_parent_exit(&mut command);
     command
 }
 

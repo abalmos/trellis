@@ -37,11 +37,12 @@ impl RuntimeProcess {
         let stderr_path = runtime.workdir().join(format!("{label}.stderr.log"));
         let stderr = File::create(&stderr_path).expect("create runtime stderr log");
         port_reservation.release_listener();
-        let child = runtime_command(mode, config_path)
+        let mut command = runtime_command(mode, config_path);
+        command
             .stdout(Stdio::from(stdout))
-            .stderr(Stdio::from(stderr))
-            .spawn()
-            .expect("start Rust runtime process");
+            .stderr(Stdio::from(stderr));
+        trellis_test::terminate_on_parent_exit(&mut command);
+        let child = command.spawn().expect("start Rust runtime process");
         Self {
             child,
             url: format!("http://127.0.0.1:{port}"),

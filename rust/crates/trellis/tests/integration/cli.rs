@@ -101,6 +101,7 @@ struct ChildGuard {
 
 impl ChildGuard {
     fn spawn(command: &mut Command, label: &'static str) -> Self {
+        trellis_test::terminate_on_parent_exit(command);
         let child = command
             .spawn()
             .unwrap_or_else(|error| panic!("spawn {label}: {error}"));
