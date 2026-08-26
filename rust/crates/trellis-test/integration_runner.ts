@@ -108,11 +108,14 @@ async function main(args: readonly string[]): Promise<number> {
         const name = tenantIds[next++];
         if (name === undefined) return;
         const hostSlot = await reserveHostTestSlot();
+        const caseEnv = hostSlot === undefined
+          ? env
+          : { ...env, TRELLIS_TEST_CASE_SLOT: "1" };
         const run = await runTests(executable, [
           name,
           "--exact",
           "--format=pretty",
-        ], env).finally(() => hostSlot?.release());
+        ], caseEnv).finally(() => hostSlot?.release());
         runs.push(run);
         failed ||= !run.success;
       }

@@ -36,7 +36,7 @@ struct HealthRuntimeProcess {
 
 impl HealthRuntimeProcess {
     async fn start(runtime: &trellis_test::TrellisTestRuntime) -> Self {
-        let host_slot = trellis_test::reserve_host_test_slot()
+        let host_slot = trellis_test::reserve_additional_host_test_slot()
             .await
             .expect("reserve host runtime slot");
         let config_path = runtime.workdir().join("health-runtime.toml");

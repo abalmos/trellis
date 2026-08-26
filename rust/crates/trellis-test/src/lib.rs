@@ -14,6 +14,7 @@ use std::io::{self, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Output, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -4653,17 +4654,41 @@ impl Drop for TrellisTestPortReservation {
 /// Host-wide lease for one running Trellis integration-test process.
 #[derive(Debug)]
 pub struct TrellisTestHostSlot {
-    lock_path: PathBuf,
+    lock_path: Option<PathBuf>,
+    borrowed_case_slot: bool,
 }
 
 impl Drop for TrellisTestHostSlot {
     fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.lock_path);
+        if let Some(lock_path) = &self.lock_path {
+            let _ = fs::remove_dir_all(lock_path);
+        }
+        if self.borrowed_case_slot {
+            BORROWED_CASE_SLOT.store(false, Ordering::Release);
+        }
     }
 }
 
 /// Acquires an optional host-wide Trellis process slot.
 pub async fn reserve_host_test_slot() -> Result<Option<TrellisTestHostSlot>, TrellisTestError> {
+    if std::env::var_os("TRELLIS_TEST_CASE_SLOT").is_some()
+        && BORROWED_CASE_SLOT
+            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+            .is_ok()
+    {
+        return Ok(Some(TrellisTestHostSlot {
+            lock_path: None,
+            borrowed_case_slot: true,
+        }));
+    }
+    reserve_additional_host_test_slot().await
+}
+
+static BORROWED_CASE_SLOT: AtomicBool = AtomicBool::new(false);
+
+/// Acquires an optional additional host-wide Trellis process slot.
+pub async fn reserve_additional_host_test_slot(
+) -> Result<Option<TrellisTestHostSlot>, TrellisTestError> {
     let Some(configured) = std::env::var_os("TRELLIS_TEST_HOST_JOBS") else {
         return Ok(None);
     };
@@ -4694,7 +4719,10 @@ pub async fn reserve_host_test_slot() -> Result<Option<TrellisTestHostSlot>, Tre
             match fs::create_dir(&lock_path) {
                 Ok(()) => {
                     fs::write(lock_path.join("owner"), format!("{}\n", std::process::id()))?;
-                    return Ok(Some(TrellisTestHostSlot { lock_path }));
+                    return Ok(Some(TrellisTestHostSlot {
+                        lock_path: Some(lock_path),
+                        borrowed_case_slot: false,
+                    }));
                 }
                 Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
                     let owner = fs::read_to_string(lock_path.join("owner"))
