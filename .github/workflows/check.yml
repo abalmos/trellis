@@ -49,23 +49,17 @@ jobs:
           deno-version: ${{ env.DENO_VERSION }}
 
       - name: Reset isolated preparation state
-        run: rm -rf .check-cargo/prepare rust/xtask/target rust/tools/generate/target
+        run: rm -rf rust/xtask/target rust/tools/generate/target
 
       - name: Cache preparation build
-        uses: swatinem/rust-cache@v2
-        env:
-          CARGO_HOME: ${{ github.workspace }}/.check-cargo/prepare
+        uses: actions/cache@v4
         with:
-          workspaces: |
-            rust/xtask -> target
-            rust/tools/generate -> target
-          cache-workspace-crates: true
-          add-rust-environment-hash-key: false
-          key: ${{ steps.rust.outputs.cachekey }}-${{ runner.os }}-${{ runner.arch }}-prepare-dev-locked-${{ hashFiles('rust/**/Cargo.toml', 'rust/**/Cargo.lock', '.cargo/config.toml', 'rust/.cargo/config.toml') }}
+          path: |
+            rust/xtask/target
+            rust/tools/generate/target
+          key: cargo-${{ steps.rust.outputs.cachekey }}-${{ runner.os }}-${{ runner.arch }}-prepare-dev-locked-${{ hashFiles('rust/**/Cargo.toml', 'rust/**/Cargo.lock', '.cargo/config.toml', 'rust/.cargo/config.toml') }}
 
       - name: Prepare generated artifacts
-        env:
-          CARGO_HOME: ${{ github.workspace }}/.check-cargo/prepare
         run: cargo run --manifest-path rust/xtask/Cargo.toml -- prepare
 
       - name: Inspect generated artifact drift
@@ -115,23 +109,17 @@ jobs:
           targets: wasm32-unknown-unknown
 
       - name: Reset isolated WASM state
-        run: rm -rf .check-cargo/wasm rust/target rust/xtask/target
+        run: rm -rf rust/target rust/xtask/target
 
       - name: Cache protocol WASM build
-        uses: swatinem/rust-cache@v2
-        env:
-          CARGO_HOME: ${{ github.workspace }}/.check-cargo/wasm
+        uses: actions/cache@v4
         with:
-          workspaces: |
-            rust -> target
-            rust/xtask -> target
-          cache-workspace-crates: true
-          add-rust-environment-hash-key: false
-          key: ${{ steps.rust.outputs.cachekey }}-${{ runner.os }}-${{ runner.arch }}-wasm32-unknown-unknown-release-${{ hashFiles('rust/**/Cargo.toml', 'rust/**/Cargo.lock', '.cargo/config.toml', 'rust/.cargo/config.toml') }}
+          path: |
+            rust/target
+            rust/xtask/target
+          key: cargo-${{ steps.rust.outputs.cachekey }}-${{ runner.os }}-${{ runner.arch }}-wasm32-unknown-unknown-release-${{ hashFiles('rust/**/Cargo.toml', 'rust/**/Cargo.lock', '.cargo/config.toml', 'rust/.cargo/config.toml') }}
 
       - name: Build protocol WASM
-        env:
-          CARGO_HOME: ${{ github.workspace }}/.check-cargo/wasm
         run: |
           rm -rf generated
           cargo run --manifest-path rust/xtask/Cargo.toml -- protocol-wasm
@@ -204,6 +192,7 @@ jobs:
         run: echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
 
       - name: Set up Rust
+        id: rust
         uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
@@ -217,9 +206,10 @@ jobs:
           deno-version: ${{ env.DENO_VERSION }}
 
       - name: Cache Rust build artifacts
-        uses: swatinem/rust-cache@v2
+        uses: actions/cache@v4
         with:
-          workspaces: rust -> target
+          path: rust/target
+          key: cargo-${{ steps.rust.outputs.cachekey }}-${{ runner.os }}-${{ runner.arch }}-static-production-clippy-lib-tests-${{ hashFiles('rust/**/Cargo.toml', 'rust/**/Cargo.lock', '.cargo/config.toml', 'rust/.cargo/config.toml') }}
 
       - name: Check formatting
         run: |
@@ -266,21 +256,15 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Reset isolated tooling state
-        run: rm -rf .check-cargo/tooling
+        run: rm -rf ${{ matrix.workspace }}/target
 
       - name: Cache Rust tooling
-        uses: swatinem/rust-cache@v2
-        env:
-          CARGO_HOME: ${{ github.workspace }}/.check-cargo/tooling
+        uses: actions/cache@v4
         with:
-          workspaces: ${{ matrix.workspace }} -> target
-          cache-workspace-crates: true
-          add-rust-environment-hash-key: false
-          key: ${{ steps.rust.outputs.cachekey }}-${{ runner.os }}-${{ runner.arch }}-${{ matrix.name }}-test-${{ hashFiles('rust/**/Cargo.toml', 'rust/**/Cargo.lock', '.cargo/config.toml', 'rust/.cargo/config.toml') }}
+          path: ${{ matrix.workspace }}/target
+          key: cargo-${{ steps.rust.outputs.cachekey }}-${{ runner.os }}-${{ runner.arch }}-${{ matrix.name }}-test-${{ hashFiles('rust/**/Cargo.toml', 'rust/**/Cargo.lock', '.cargo/config.toml', 'rust/.cargo/config.toml') }}
 
       - name: Test Rust tooling
-        env:
-          CARGO_HOME: ${{ github.workspace }}/.check-cargo/tooling
         run: cargo test --manifest-path ${{ matrix.workspace }}/Cargo.toml
 
   typescript:
@@ -370,18 +354,13 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Reset isolated live build state
-        run: rm -rf .check-cargo/live rust/target/check-live
+        run: rm -rf rust/target/check-live
 
       - name: Cache live release build
-        uses: swatinem/rust-cache@v2
-        env:
-          CARGO_HOME: ${{ github.workspace }}/.check-cargo/live
-          CARGO_TARGET_DIR: ${{ github.workspace }}/rust/target/check-live
+        uses: actions/cache@v4
         with:
-          workspaces: rust -> target/check-live
-          cache-workspace-crates: true
-          add-rust-environment-hash-key: false
-          key: ${{ steps.rust.outputs.cachekey }}-${{ runner.os }}-${{ runner.arch }}-release-test-support-runtime-internals-${{ hashFiles('rust/**/Cargo.toml', 'rust/**/Cargo.lock', '.cargo/config.toml', 'rust/.cargo/config.toml') }}
+          path: rust/target/check-live
+          key: cargo-${{ steps.rust.outputs.cachekey }}-${{ runner.os }}-${{ runner.arch }}-release-test-support-runtime-internals-${{ hashFiles('rust/**/Cargo.toml', 'rust/**/Cargo.lock', '.cargo/config.toml', 'rust/.cargo/config.toml') }}
 
       - name: Set up Deno
         uses: denoland/setup-deno@v2
@@ -390,7 +369,6 @@ jobs:
 
       - name: Build live executables
         env:
-          CARGO_HOME: ${{ github.workspace }}/.check-cargo/live
           CARGO_TARGET_DIR: ${{ github.workspace }}/rust/target/check-live
         run: deno run -A -c ts/deno.json integration/live_runner.ts --build-only
 
