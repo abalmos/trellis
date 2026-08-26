@@ -66,17 +66,19 @@ subjects and participant identities from colliding across cases. Run and case
 slugs still isolate physical deployment ids, resource keys, state keys, durable
 names, and domain records.
 
-Rust executes each case as an exact-test process through a bounded,
-machine-relative worker pool. `TRELLIS_TEST_JOBS` may override the bound for
-local diagnosis or to coordinate aggregate CI host load. Do not restore
-parallelism by rewriting semantic identities or by adding test-only protocol
-behavior.
+Rust executes each case as an exact-test process. The Rust and TypeScript
+runners use bounded, machine-relative worker pools; `TRELLIS_INTEGRATION_JOBS`
+may override each runner's pool for local diagnosis. Do not restore parallelism
+by rewriting semantic identities or by adding test-only protocol behavior.
 
 The normal Check runs semantic subsystem slices as independent GitHub Actions
 jobs. Live executables are built once as normal locked release binaries and
-distributed to those jobs; live execution does not compile Rust. Check runs up
-to four subsystem jobs with two case workers each, preserving the prior proven
-aggregate bound of eight processes on the current self-hosted runner.
+distributed to those jobs; live execution does not compile Rust. Subsystem jobs
+may run concurrently without a fixed matrix-topology cap. Each selected case
+acquires one host-wide slot controlled by `TRELLIS_TEST_HOST_JOBS`, which Check
+sets to the measured aggregate bound of eight on the current self-hosted runner.
+Custom fixtures borrow that slot when replacing the case runtime and acquire an
+additional slot for each concurrently running child process.
 
 `isolated-process` remains matrix documentation for genuinely process- or
 deployment-global behavior such as restart, ownership loss, startup migration,
