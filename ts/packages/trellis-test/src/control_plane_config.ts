@@ -233,11 +233,17 @@ function tryAcquireProcessLock(lockPath: string): boolean {
   } catch (error) {
     if (!(error instanceof Deno.errors.NotFound)) throw error;
   }
-  if (
-    !Number.isInteger(owner) &&
-    Date.now() - (Deno.statSync(lockPath).mtime?.getTime() ?? Date.now()) >=
-      PROCESS_LOCK_STARTUP_GRACE_MS
-  ) {
+  let lockAgeMs = 0;
+  if (!Number.isInteger(owner)) {
+    try {
+      lockAgeMs = Date.now() -
+        (Deno.statSync(lockPath).mtime?.getTime() ?? Date.now());
+    } catch (error) {
+      if (error instanceof Deno.errors.NotFound) return false;
+      throw error;
+    }
+  }
+  if (!Number.isInteger(owner) && lockAgeMs >= PROCESS_LOCK_STARTUP_GRACE_MS) {
     try {
       Deno.removeSync(lockPath, { recursive: true });
     } catch (error) {
