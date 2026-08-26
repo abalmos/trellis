@@ -103,21 +103,9 @@ jobs:
         run: echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
 
       - name: Set up Rust
-        id: rust
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: wasm32-unknown-unknown
-
-      - name: Reset isolated WASM state
-        run: rm -rf rust/target rust/xtask/target
-
-      - name: Cache protocol WASM build
-        uses: actions/cache@v4
-        with:
-          path: |
-            rust/target
-            rust/xtask/target
-          key: cargo-${{ steps.rust.outputs.cachekey }}-${{ runner.os }}-${{ runner.arch }}-wasm32-unknown-unknown-release-${{ hashFiles('rust/**/Cargo.toml', 'rust/**/Cargo.lock', '.cargo/config.toml', 'rust/.cargo/config.toml') }}
 
       - name: Build protocol WASM
         run: |
@@ -252,17 +240,7 @@ jobs:
         run: echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
 
       - name: Set up Rust
-        id: rust
         uses: dtolnay/rust-toolchain@stable
-
-      - name: Reset isolated tooling state
-        run: rm -rf ${{ matrix.workspace }}/target
-
-      - name: Cache Rust tooling
-        uses: actions/cache@v4
-        with:
-          path: ${{ matrix.workspace }}/target
-          key: cargo-${{ steps.rust.outputs.cachekey }}-${{ runner.os }}-${{ runner.arch }}-${{ matrix.name }}-test-${{ hashFiles('rust/**/Cargo.toml', 'rust/**/Cargo.lock', '.cargo/config.toml', 'rust/.cargo/config.toml') }}
 
       - name: Test Rust tooling
         run: cargo test --manifest-path ${{ matrix.workspace }}/Cargo.toml
