@@ -20,9 +20,7 @@ import {
 import {
   buildControlPlaneConfig,
   generateSessionSeed,
-  reserveHostTestSlot,
   reserveLocalPort,
-  type TrellisTestHostSlot,
   writeTrellisConfig,
 } from "./control_plane_config.ts";
 import { TrellisControlPlaneSqlite } from "./control_plane_sqlite.ts";
@@ -165,7 +163,6 @@ export class TrellisTestRuntime implements AsyncDisposable {
   #timeouts: RuntimeTimeouts;
   #clients = new Set<ConnectedClient>();
   #captures = new Set<EventCapture>();
-  #hostSlot: TrellisTestHostSlot | undefined;
   #stopped = false;
 
   private constructor(args: {
@@ -180,7 +177,6 @@ export class TrellisTestRuntime implements AsyncDisposable {
     nats: NatsTestContainer;
     controlPlane?: TrellisProcessHandle;
     admin: TrellisTestAdminAutomation;
-    hostSlot?: TrellisTestHostSlot;
     ownsWorkdir?: boolean;
   }) {
     this.trellisUrl = args.trellisUrl;
@@ -195,7 +191,6 @@ export class TrellisTestRuntime implements AsyncDisposable {
     this.#configPath = args.configPath;
     this.#trellisOptions = args.trellisOptions;
     this.#admin = args.admin;
-    this.#hostSlot = args.hostSlot;
     if (args.controlPlaneSqlitePath !== undefined) {
       this.controlPlane = {
         sqlite: new TrellisControlPlaneSqlite(args.controlPlaneSqlitePath),
@@ -265,9 +260,7 @@ export class TrellisTestRuntime implements AsyncDisposable {
     });
     let nats: NatsTestContainer | undefined;
     let controlPlane: TrellisProcessHandle | undefined;
-    let hostSlot: TrellisTestHostSlot | undefined;
     try {
-      hostSlot = await reserveHostTestSlot();
       const timeouts = {
         startupMs: options.timeouts?.startupMs ?? 30_000,
         reconciliationMs: options.timeouts?.reconciliationMs ?? 5_000,
@@ -378,11 +371,9 @@ export class TrellisTestRuntime implements AsyncDisposable {
         nats,
         controlPlane: startedControlPlane,
         admin,
-        hostSlot,
       });
     } catch (error) {
       await controlPlane?.stop().catch(() => undefined);
-      hostSlot?.release();
       await nats?.stop().catch(() => undefined);
       if (!options.keepWorkdir) {
         await Deno.remove(workdir, { recursive: true }).catch(() => undefined);
@@ -747,8 +738,6 @@ export class TrellisTestRuntime implements AsyncDisposable {
     } catch (error) {
       failures.push(error);
     }
-    this.#hostSlot?.release();
-    this.#hostSlot = undefined;
     try {
       await this.#nats.stop();
     } catch (error) {

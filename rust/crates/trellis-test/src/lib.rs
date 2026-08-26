@@ -575,7 +575,6 @@ impl Default for TrellisTestRuntimeOptions {
 #[derive(Debug)]
 pub struct TrellisTestRuntime {
     workdir: IntegrationWorkdir,
-    host_slot: Option<TrellisTestHostSlot>,
     _port_reservation: Option<TrellisTestPortReservation>,
     nats: Option<NatsContainer>,
     trellis: Option<TrellisProcess>,
@@ -1142,7 +1141,6 @@ impl TrellisTestRuntime {
             if assignment.mode == "shared" {
                 return Ok(Self {
                     workdir,
-                    host_slot: None,
                     _port_reservation: None,
                     nats: None,
                     trellis: None,
@@ -1167,8 +1165,6 @@ impl TrellisTestRuntime {
                 });
             }
         }
-
-        let host_slot = reserve_host_test_slot().await?;
 
         let mut nats = None;
         let mut trellis = None;
@@ -1225,7 +1221,6 @@ impl TrellisTestRuntime {
         let control_plane_path = control_plane_sqlite_path(workdir.path());
         Ok(Self {
             workdir,
-            host_slot,
             _port_reservation: Some(port_reservation),
             nats,
             trellis,
@@ -1618,9 +1613,7 @@ impl TrellisTestRuntime {
                 "Trellis process is not running".to_string(),
             ));
         };
-        let result = trellis.stop(self.shutdown_timeout);
-        self.host_slot = None;
-        result
+        trellis.stop(self.shutdown_timeout)
     }
 
     /// Stop Trellis, remove the NATS container, and clean up the workdir.
@@ -1632,7 +1625,6 @@ impl TrellisTestRuntime {
         if let Some(mut trellis) = self.trellis.take() {
             trellis.stop(shutdown_timeout)?;
         }
-        self.host_slot = None;
         if let Some(mut nats) = self.nats.take() {
             nats.stop()?;
         }
