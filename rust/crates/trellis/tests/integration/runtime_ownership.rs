@@ -166,7 +166,12 @@ async fn runtime_singleton_ownership_lifecycle() {
     assert!(blocked_storage.is_dir());
     assert!(first.is_ready().await, "first Jobs owner lost readiness");
 
-    assert!(first.terminate().await.success());
+    let first_status = first.terminate().await;
+    assert!(
+        first_status.success(),
+        "first Jobs owner exited with {first_status}: {}",
+        first.stderr()
+    );
     let successor_config = runtime.workdir().join("jobs-successor.toml");
     let mut successor =
         RuntimeProcess::start(&runtime, "jobs", &successor_config, "jobs-successor");

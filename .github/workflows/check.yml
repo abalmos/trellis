@@ -35,6 +35,7 @@ jobs:
         run: echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
 
       - name: Set up Rust
+        id: rust
         uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt
@@ -59,8 +60,8 @@ jobs:
             rust/xtask -> target
             rust/tools/generate -> target
           cache-workspace-crates: true
-          env-vars: CC CFLAGS CXX CMAKE RUST
-          key: prepare-locked-workspaces
+          add-rust-environment-hash-key: false
+          key: ${{ steps.rust.outputs.cachekey }}-${{ runner.os }}-${{ runner.arch }}-prepare-dev-locked-${{ hashFiles('rust/**/Cargo.toml', 'rust/**/Cargo.lock', '.cargo/config.toml', 'rust/.cargo/config.toml') }}
 
       - name: Prepare generated artifacts
         env:
@@ -108,6 +109,7 @@ jobs:
         run: echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
 
       - name: Set up Rust
+        id: rust
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: wasm32-unknown-unknown
@@ -124,8 +126,8 @@ jobs:
             rust -> target
             rust/xtask -> target
           cache-workspace-crates: true
-          env-vars: CC CFLAGS CXX CMAKE RUST
-          key: wasm32-release-workspaces
+          add-rust-environment-hash-key: false
+          key: ${{ steps.rust.outputs.cachekey }}-${{ runner.os }}-${{ runner.arch }}-wasm32-unknown-unknown-release-${{ hashFiles('rust/**/Cargo.toml', 'rust/**/Cargo.lock', '.cargo/config.toml', 'rust/.cargo/config.toml') }}
 
       - name: Build protocol WASM
         env:
@@ -260,6 +262,7 @@ jobs:
         run: echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
 
       - name: Set up Rust
+        id: rust
         uses: dtolnay/rust-toolchain@stable
 
       - name: Reset isolated tooling state
@@ -272,8 +275,8 @@ jobs:
         with:
           workspaces: ${{ matrix.workspace }} -> target
           cache-workspace-crates: true
-          env-vars: CC CFLAGS CXX CMAKE RUST
-          key: ${{ matrix.name }}-workspace
+          add-rust-environment-hash-key: false
+          key: ${{ steps.rust.outputs.cachekey }}-${{ runner.os }}-${{ runner.arch }}-${{ matrix.name }}-test-${{ hashFiles('rust/**/Cargo.toml', 'rust/**/Cargo.lock', '.cargo/config.toml', 'rust/.cargo/config.toml') }}
 
       - name: Test Rust tooling
         env:
@@ -363,6 +366,7 @@ jobs:
         run: echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
 
       - name: Set up Rust
+        id: rust
         uses: dtolnay/rust-toolchain@stable
 
       - name: Reset isolated live build state
@@ -376,8 +380,8 @@ jobs:
         with:
           workspaces: rust -> target/check-live
           cache-workspace-crates: true
-          env-vars: CC CFLAGS CXX CMAKE RUST
-          key: x86_64-release-test-support-runtime-internals-workspace
+          add-rust-environment-hash-key: false
+          key: ${{ steps.rust.outputs.cachekey }}-${{ runner.os }}-${{ runner.arch }}-release-test-support-runtime-internals-${{ hashFiles('rust/**/Cargo.toml', 'rust/**/Cargo.lock', '.cargo/config.toml', 'rust/.cargo/config.toml') }}
 
       - name: Set up Deno
         uses: denoland/setup-deno@v2
