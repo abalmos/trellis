@@ -2,6 +2,7 @@ import { assertEquals, assertStringIncludes } from "@std/assert";
 import { join } from "@std/path";
 import {
   buildControlPlaneConfig,
+  reserveHostTestSlot,
   reserveLocalPort,
   writeTrellisConfig,
 } from "../src/control_plane_config.ts";
@@ -46,6 +47,34 @@ Deno.test("reserveLocalPort records a process-wide host lease", async () => {
   const lockPath = `${lockRoot}/trellis-test-port-${port}.lock/owner`;
 
   assertEquals((await Deno.readTextFile(lockPath)).trim(), String(Deno.pid));
+});
+
+Deno.test("reserveHostTestSlot enforces the configured host bound", async () => {
+  const lockRoot = await Deno.makeTempDir({ prefix: "trellis-host-slots-" });
+  const previousJobs = Deno.env.get("TRELLIS_TEST_HOST_JOBS");
+  const previousRoot = Deno.env.get("TRELLIS_TEST_HOST_LOCK_DIR");
+  Deno.env.set("TRELLIS_TEST_HOST_JOBS", "2");
+  Deno.env.set("TRELLIS_TEST_HOST_LOCK_DIR", lockRoot);
+  try {
+    const first = await reserveHostTestSlot();
+    const second = await reserveHostTestSlot();
+    assertEquals(
+      Array.from(Deno.readDirSync(join(lockRoot, "trellis-test-host-slots")))
+        .length,
+      2,
+    );
+    first?.release();
+    second?.release();
+  } finally {
+    if (previousJobs === undefined) Deno.env.delete("TRELLIS_TEST_HOST_JOBS");
+    else Deno.env.set("TRELLIS_TEST_HOST_JOBS", previousJobs);
+    if (previousRoot === undefined) {
+      Deno.env.delete("TRELLIS_TEST_HOST_LOCK_DIR");
+    } else {
+      Deno.env.set("TRELLIS_TEST_HOST_LOCK_DIR", previousRoot);
+    }
+    await Deno.remove(lockRoot, { recursive: true });
+  }
 });
 
 Deno.test("writeTrellisConfig writes file-backed test control-plane config", async () => {

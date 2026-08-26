@@ -109,8 +109,9 @@ export function generateSessionSeed(): string {
 }
 
 const reservedPortLocks = new Set<string>();
+const reservedHostSlotLocks = new Set<string>();
 addEventListener("unload", () => {
-  for (const path of reservedPortLocks) {
+  for (const path of [...reservedPortLocks, ...reservedHostSlotLocks]) {
     try {
       Deno.removeSync(path, { recursive: true });
     } catch (error) {
@@ -118,6 +119,54 @@ addEventListener("unload", () => {
     }
   }
 });
+
+/** Lease for one host-wide live integration case slot. */
+export type TrellisTestHostSlot = {
+  /** Releases the slot for another live integration case. */
+  release(): void;
+};
+
+/** Acquires an optional host-wide live integration case slot. */
+export async function reserveHostTestSlot(): Promise<
+  TrellisTestHostSlot | undefined
+> {
+  const configured = Deno.env.get("TRELLIS_TEST_HOST_JOBS")?.trim();
+  if (configured === undefined || configured === "") return undefined;
+  const limit = Number(configured);
+  if (!Number.isInteger(limit) || limit < 1) {
+    throw new Error("TRELLIS_TEST_HOST_JOBS must be a positive integer");
+  }
+  const lockRoot = Deno.env.get("TRELLIS_TEST_HOST_LOCK_DIR") ??
+    (Deno.build.os === "windows" ? Deno.env.get("TEMP") : "/tmp");
+  if (lockRoot === undefined) {
+    throw new Error("no temporary directory is configured");
+  }
+  const slotRoot = `${lockRoot}/trellis-test-host-slots`;
+  Deno.mkdirSync(slotRoot, { recursive: true });
+
+  while (true) {
+    for (let slot = 0; slot < limit; slot++) {
+      const lockPath = `${slotRoot}/${slot}.lock`;
+      if (tryAcquireProcessLock(lockPath)) {
+        reservedHostSlotLocks.add(lockPath);
+        let released = false;
+        return {
+          release() {
+            if (released) return;
+            released = true;
+            reservedHostSlotLocks.delete(lockPath);
+            try {
+              Deno.removeSync(lockPath, { recursive: true });
+            } catch (error) {
+              if (!(error instanceof Deno.errors.NotFound)) throw error;
+            }
+          },
+        };
+      }
+    }
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+}
 
 /** Reserves a localhost TCP port for the spawned Trellis HTTP listener. */
 export function reserveLocalPort(): number {
@@ -130,35 +179,49 @@ export function reserveLocalPort(): number {
       throw new Error("no temporary directory is configured");
     }
     const lockPath = `${lockRoot}/trellis-test-port-${port}.lock`;
+    let acquired: boolean;
     try {
-      Deno.mkdirSync(lockPath);
-      Deno.writeTextFileSync(`${lockPath}/owner`, `${Deno.pid}\n`);
+      acquired = tryAcquireProcessLock(lockPath);
+    } catch (error) {
+      listener.close();
+      throw error;
+    }
+    if (acquired) {
       reservedPortLocks.add(lockPath);
       listener.close();
       return port;
-    } catch (error) {
-      listener.close();
-      if (!(error instanceof Deno.errors.AlreadyExists)) throw error;
-      let owner: number;
-      try {
-        owner = Number.parseInt(Deno.readTextFileSync(`${lockPath}/owner`), 10);
-      } catch (readError) {
-        if (readError instanceof Deno.errors.NotFound) continue;
-        throw readError;
-      }
-      if (!Number.isInteger(owner)) continue;
-      try {
-        Deno.statSync(`/proc/${owner}`);
-      } catch (statError) {
-        if (!(statError instanceof Deno.errors.NotFound)) throw statError;
-        try {
-          Deno.removeSync(lockPath, { recursive: true });
-        } catch (removeError) {
-          if (!(removeError instanceof Deno.errors.NotFound)) throw removeError;
-        }
-      }
+    }
+    listener.close();
+  }
+}
+
+function tryAcquireProcessLock(lockPath: string): boolean {
+  try {
+    Deno.mkdirSync(lockPath);
+    Deno.writeTextFileSync(`${lockPath}/owner`, `${Deno.pid}\n`);
+    return true;
+  } catch (error) {
+    if (!(error instanceof Deno.errors.AlreadyExists)) throw error;
+  }
+  let owner: number;
+  try {
+    owner = Number.parseInt(Deno.readTextFileSync(`${lockPath}/owner`), 10);
+  } catch (error) {
+    if (error instanceof Deno.errors.NotFound) return false;
+    throw error;
+  }
+  if (!Number.isInteger(owner)) return false;
+  try {
+    Deno.statSync(`/proc/${owner}`);
+  } catch (error) {
+    if (!(error instanceof Deno.errors.NotFound)) throw error;
+    try {
+      Deno.removeSync(lockPath, { recursive: true });
+    } catch (removeError) {
+      if (!(removeError instanceof Deno.errors.NotFound)) throw removeError;
     }
   }
+  return false;
 }
 
 /** Builds the real Trellis control-plane config for an isolated test runtime. */

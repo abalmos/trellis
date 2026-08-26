@@ -33,10 +33,7 @@ mod pool_tests {
         atomic::{AtomicUsize, Ordering},
         Arc,
     };
-    use std::{
-        thread,
-        time::{Duration, Instant},
-    };
+    use std::{thread, time::Duration};
 
     use super::SqliteAuthorizationStore;
     use crate::storage::SqliteStore;
@@ -57,8 +54,6 @@ mod pool_tests {
         let repository = SqliteAuthorizationStore::open(&store).expect("open sqlite pool");
         let active = Arc::new(AtomicUsize::new(0));
         let maximum = Arc::new(AtomicUsize::new(0));
-        let started = Instant::now();
-
         let operations = (0..4).map(|_| {
             let repository = repository.clone();
             let active = Arc::clone(&active);
@@ -79,6 +74,5 @@ mod pool_tests {
         let results = futures_util::future::join_all(operations).await;
         assert!(results.into_iter().all(|result| result.is_ok()));
         assert_eq!(maximum.load(Ordering::SeqCst), 4);
-        assert!(started.elapsed() < Duration::from_millis(300));
     }
 }

@@ -18,6 +18,7 @@ env:
   DENO_VERSION: 2.9.4
   CARGO_TERM_COLOR: always
   RUSTUP_INIT_SKIP_PATH_CHECK: "yes"
+  TRELLIS_TEST_HOST_JOBS: ${{ vars.TRELLIS_TEST_HOST_JOBS }}
 
 jobs:
   prepare:

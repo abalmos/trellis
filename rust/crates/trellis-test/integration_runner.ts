@@ -9,6 +9,7 @@ import {
   summarizeTrellisTestDurations,
   summarizeTrellisTestProcessStarts,
 } from "../../../ts/packages/trellis-test/src/integration/metrics.ts";
+import { reserveHostTestSlot } from "../../../ts/packages/trellis-test/src/control_plane_config.ts";
 import { startTrellisIntegrationSharedRuntimeHost } from "../../../ts/packages/trellis-test/src/integration/shared_runtime_host.ts";
 import { TRELLIS_TEST_SHARED_RUNTIME_ENV } from "../../../ts/packages/trellis-test/src/integration/shared_runtime_protocol.ts";
 
@@ -106,11 +107,12 @@ async function main(args: readonly string[]): Promise<number> {
       while (!failed) {
         const name = tenantIds[next++];
         if (name === undefined) return;
+        const hostSlot = await reserveHostTestSlot();
         const run = await runTests(executable, [
           name,
           "--exact",
           "--format=pretty",
-        ], env);
+        ], env).finally(() => hostSlot?.release());
         runs.push(run);
         failed ||= !run.success;
       }
