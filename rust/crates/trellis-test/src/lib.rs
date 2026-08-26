@@ -4711,6 +4711,8 @@ pub async fn reserve_host_test_slot() -> Result<Option<TrellisTestHostSlot>, Tre
 }
 
 static BORROWED_CASE_SLOT: AtomicBool = AtomicBool::new(false);
+const PROCESS_LOCK_STARTUP_GRACE: Duration = Duration::from_secs(1);
+const HOST_SLOT_ACQUIRE_TIMEOUT: Duration = Duration::from_secs(120);
 
 /// Acquires an optional additional host-wide Trellis process slot.
 pub async fn reserve_additional_host_test_slot(
@@ -4739,6 +4741,7 @@ pub async fn reserve_additional_host_test_slot(
         })
         .join("trellis-test-host-slots");
     fs::create_dir_all(&lock_root)?;
+    let started = std::time::Instant::now();
     loop {
         for slot in 0..limit {
             let lock_path = lock_root.join(format!("{slot}.lock"));
@@ -4751,18 +4754,46 @@ pub async fn reserve_additional_host_test_slot(
                     }));
                 }
                 Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
-                    let owner = fs::read_to_string(lock_path.join("owner"))
-                        .ok()
-                        .and_then(|value| value.trim().parse::<u32>().ok());
-                    if owner.is_some_and(process_is_gone) {
+                    if process_lock_is_reclaimable(&lock_path) {
                         let _ = fs::remove_dir_all(lock_path);
                     }
                 }
                 Err(error) => return Err(error.into()),
             }
         }
+        if started.elapsed() >= HOST_SLOT_ACQUIRE_TIMEOUT {
+            let owners = (0..limit)
+                .map(|slot| {
+                    let lock_path = lock_root.join(format!("{slot}.lock"));
+                    let owner = fs::read_to_string(lock_path.join("owner"))
+                        .map_or_else(|_| "<missing>".to_owned(), |value| value.trim().to_owned());
+                    format!("{}={owner}", lock_path.display())
+                })
+                .collect::<Vec<_>>()
+                .join(", ");
+            return Err(TrellisTestError::UnexpectedResponse(format!(
+                "timed out acquiring a host test slot after {}s: {owners}",
+                HOST_SLOT_ACQUIRE_TIMEOUT.as_secs()
+            )));
+        }
         tokio::time::sleep(Duration::from_millis(10)).await;
     }
+}
+
+fn process_lock_is_reclaimable(lock_path: &Path) -> bool {
+    let owner = fs::read_to_string(lock_path.join("owner"))
+        .ok()
+        .and_then(|value| value.trim().parse::<u32>().ok());
+    owner.map_or_else(
+        || {
+            fs::metadata(lock_path)
+                .and_then(|metadata| metadata.modified())
+                .ok()
+                .and_then(|modified| modified.elapsed().ok())
+                .is_some_and(|age| age >= PROCESS_LOCK_STARTUP_GRACE)
+        },
+        process_is_gone,
+    )
 }
 
 /// Reserves a local TCP port with a host-wide lease held until the returned guard is dropped.
@@ -4789,10 +4820,7 @@ pub fn reserve_local_port() -> Result<TrellisTestPortReservation, TrellisTestErr
                 });
             }
             Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
-                let owner = fs::read_to_string(lock_path.join("owner"))
-                    .ok()
-                    .and_then(|value| value.trim().parse::<u32>().ok());
-                if owner.is_some_and(process_is_gone) {
+                if process_lock_is_reclaimable(&lock_path) {
                     let _ = fs::remove_dir_all(lock_path);
                 }
             }
@@ -5363,13 +5391,30 @@ mod tests {
         auth_deployments_create_request_shape, container_mount, first_admin_bootstrap_body,
         flow_id_from_url, materialized_authority_failure, materialized_authority_is_current,
         parse_published_port, parse_trellis_bootstrap_url, pid_from_prefixed_name,
-        remove_stale_marked_workdirs, repo_trellis_command, reserve_local_port, ContainerRuntime,
-        MountMode, ResolvedContainerRuntime, TrellisControlPlaneSqlite,
-        TrustedLocalUserRegistration, WORKDIR_OWNER_MARKER,
+        process_lock_is_reclaimable, remove_stale_marked_workdirs, repo_trellis_command,
+        reserve_local_port, ContainerRuntime, MountMode, ResolvedContainerRuntime,
+        TrellisControlPlaneSqlite, TrustedLocalUserRegistration, WORKDIR_OWNER_MARKER,
     };
     use rusqlite::params;
     use serde_json::{json, Value};
     use std::fs;
+
+    #[test]
+    fn stale_malformed_process_lock_is_reclaimable() {
+        let dir = tempfile::tempdir().expect("create process lock tempdir");
+        let lock_path = dir.path().join("0.lock");
+        fs::create_dir(&lock_path).expect("create process lock");
+        fs::write(lock_path.join("owner"), "invalid\n").expect("write invalid owner");
+        fs::File::open(&lock_path)
+            .expect("open process lock")
+            .set_times(
+                fs::FileTimes::new()
+                    .set_modified(std::time::SystemTime::now() - std::time::Duration::from_secs(2)),
+            )
+            .expect("age process lock");
+
+        assert!(process_lock_is_reclaimable(&lock_path));
+    }
 
     #[test]
     fn container_mount_relabels_podman_volumes() {
