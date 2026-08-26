@@ -3,6 +3,7 @@ use std::time::{Duration, Instant};
 use bytes::Bytes;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use tokio::io::AsyncWriteExt;
 use tokio::task::JoinHandle;
 use trellis_rs::service::ServerError;
 
@@ -332,6 +333,61 @@ async fn resources_service_store_create_read_list_delete() {
         let read_text = String::from_utf8(read_bytes)
             .map_err(|_| ServerError::Nats("store text not utf-8".to_string()))?;
 
+        let interrupted_key = format!("{}.interrupted", input.key);
+        let (mut partial_writer, partial_reader) = tokio::io::duplex(64 * 1024);
+        let partial_task = tokio::spawn(async move {
+            partial_writer.write_all(&vec![7_u8; 64 * 1024]).await?;
+            std::future::pending::<()>().await;
+            Ok::<(), std::io::Error>(())
+        });
+        let interrupted = store
+            .write_from_with_cancel(
+                &interrupted_key,
+                partial_reader,
+                None,
+                tokio::time::sleep(Duration::from_millis(100)),
+            )
+            .await;
+        partial_task.abort();
+        if !matches!(interrupted, Err(ServerError::StoreWriteCancelled)) {
+            return Err(ServerError::Nats(format!(
+                "interrupted new object returned {interrupted:?}"
+            )));
+        }
+        if store.read(&interrupted_key).await?.is_some() {
+            return Err(ServerError::Nats(
+                "interrupted new object became visible".to_string(),
+            ));
+        }
+
+        let previous = Bytes::from_static(b"previous complete value");
+        store.write(&interrupted_key, previous.clone()).await?;
+        let (mut replacement_writer, replacement_reader) = tokio::io::duplex(64 * 1024);
+        let replacement_task = tokio::spawn(async move {
+            replacement_writer.write_all(&vec![9_u8; 64 * 1024]).await?;
+            std::future::pending::<()>().await;
+            Ok::<(), std::io::Error>(())
+        });
+        let replacement = store
+            .write_from_with_cancel(
+                &interrupted_key,
+                replacement_reader,
+                None,
+                tokio::time::sleep(Duration::from_millis(100)),
+            )
+            .await;
+        replacement_task.abort();
+        if !matches!(replacement, Err(ServerError::StoreWriteCancelled)) {
+            return Err(ServerError::Nats(format!(
+                "interrupted replacement returned {replacement:?}"
+            )));
+        }
+        if store.read(&interrupted_key).await? != Some(previous) {
+            return Err(ServerError::Nats(
+                "interrupted replacement did not retain previous value".to_string(),
+            ));
+        }
+
         let listed = store.list().await?;
         if !listed.contains(&store_key) {
             return Err(ServerError::Nats(format!(
@@ -340,6 +396,7 @@ async fn resources_service_store_create_read_list_delete() {
         }
 
         store.delete(&store_key).await?;
+        store.delete(&interrupted_key).await?;
 
         Ok(ResourceExerciseOutput {
             provider: "rust".to_string(),

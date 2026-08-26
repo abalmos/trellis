@@ -22,7 +22,7 @@ export type ReceiveTransferGrant = {
     readonly key: string;
     readonly size: number;
     readonly updatedAt: string;
-    readonly digest?: string;
+    readonly digest: string;
     readonly contentType?: string;
     readonly metadata: Record<string, string>;
   };
@@ -45,7 +45,9 @@ export function requireReceiveTransferGrant(
     typeof value.expiresAt !== "string" ||
     typeof value.chunkBytes !== "number" ||
     typeof value.info.key !== "string" || typeof value.info.size !== "number" ||
-    typeof value.info.updatedAt !== "string" || !isRecord(value.info.metadata)
+    typeof value.info.updatedAt !== "string" ||
+    !isRecord(value.info.metadata) ||
+    typeof value.info.digest !== "string"
   ) {
     throw new Error("expected receive transfer grant fields");
   }
@@ -69,9 +71,7 @@ export function requireReceiveTransferGrant(
       key: value.info.key,
       size: value.info.size,
       updatedAt: value.info.updatedAt,
-      digest: typeof value.info.digest === "string"
-        ? value.info.digest
-        : undefined,
+      digest: value.info.digest,
       contentType: typeof value.info.contentType === "string"
         ? value.info.contentType
         : undefined,
@@ -115,7 +115,7 @@ export function createTransferFixture(
         key: Type.String(),
         size: Type.Integer(),
         updatedAt: Type.String(),
-        digest: Type.Optional(Type.String()),
+        digest: Type.String(),
         contentType: Type.Optional(Type.String()),
         metadata: Type.Record(Type.String(), Type.String()),
       }),

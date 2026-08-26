@@ -1081,6 +1081,30 @@ pub fn validate_store_binding(
     Ok(())
 }
 
+fn invalid_binding(
+    service_name: &str,
+    resource_kind: &str,
+    resource_name: &str,
+    reason: &str,
+) -> ServerError {
+    ServerError::InvalidResourceBinding {
+        service_name: service_name.to_string(),
+        resource_kind: resource_kind.to_string(),
+        resource_name: resource_name.to_string(),
+        reason: reason.to_string(),
+    }
+}
+
+fn is_valid_nats_resource_name(value: &str) -> bool {
+    value
+        .bytes()
+        .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'))
+}
+
+fn nats_error(error: impl fmt::Display) -> ServerError {
+    ServerError::Nats(error.to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::{
@@ -1273,28 +1297,4 @@ mod tests {
             .expect_err("cancellation must abort upload");
         assert!(matches!(error, ServerError::StoreWriteCancelled));
     }
-}
-
-fn invalid_binding(
-    service_name: &str,
-    resource_kind: &str,
-    resource_name: &str,
-    reason: &str,
-) -> ServerError {
-    ServerError::InvalidResourceBinding {
-        service_name: service_name.to_string(),
-        resource_kind: resource_kind.to_string(),
-        resource_name: resource_name.to_string(),
-        reason: reason.to_string(),
-    }
-}
-
-fn is_valid_nats_resource_name(value: &str) -> bool {
-    value
-        .bytes()
-        .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'))
-}
-
-fn nats_error(error: impl fmt::Display) -> ServerError {
-    ServerError::Nats(error.to_string())
 }

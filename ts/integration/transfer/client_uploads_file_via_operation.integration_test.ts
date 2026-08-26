@@ -3,7 +3,10 @@ import { liveTrellisTest, runtimeScopeForCase } from "../_support/runtime.ts";
 import { createTransferFixture } from "./_fixture.ts";
 
 const CASE_ID = "transfer.client-uploads-file-via-operation" as const;
-const fixture = createTransferFixture(CASE_ID);
+const storedBodies = new Map<string, Uint8Array>();
+const fixture = createTransferFixture(CASE_ID, {
+  onStored: ({ key, body }) => storedBodies.set(key, body),
+});
 
 liveTrellisTest({
   name:
@@ -16,7 +19,7 @@ liveTrellisTest({
         contract: fixture.clientContract,
       });
 
-      const uploadBytes = new Uint8Array(3 * 65_536 + 17).map((_, i) =>
+      const uploadBytes = new Uint8Array(3 * 262_144 + 17).map((_, i) =>
         i % 251
       );
       const upload = await client.filesUpload({
@@ -34,6 +37,36 @@ liveTrellisTest({
         size: uploadBytes.length,
         contentType: "text/plain",
       });
+
+      const control = new TextEncoder().encode('{"action":"cancel"}');
+      const normal = new Uint8Array([0, 1, 2, 255]);
+      const collisionCases = [
+        [control],
+        [control, normal],
+        [normal, control, normal],
+        [normal, control],
+      ];
+      for (const [index, chunks] of collisionCases.entries()) {
+        const key = `${fixture.uploadKey}.control-data-${index}`;
+        const body = {
+          async *[Symbol.asyncIterator]() {
+            yield* chunks;
+          },
+        };
+        const collisionUpload = await client.filesUpload({ key }).transfer(body)
+          .start()
+          .orThrow();
+        await collisionUpload.wait().orThrow();
+        const expected = new Uint8Array(
+          chunks.reduce((size, chunk) => size + chunk.length, 0),
+        );
+        let offset = 0;
+        for (const chunk of chunks) {
+          expected.set(chunk, offset);
+          offset += chunk.length;
+        }
+        assertEquals(storedBodies.get(key), expected);
+      }
     });
   },
 });

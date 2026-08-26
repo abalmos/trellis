@@ -22,9 +22,12 @@ import {
   injectTraceContext,
   recordTrellisError,
 } from "./telemetry/mod.ts";
+import { transferFrameProofPayload } from "./transfer_protocol.ts";
 
 const TRANSFER_SEQUENCE_HEADER = "trellis-transfer-seq";
 const TRANSFER_EOF_HEADER = "trellis-transfer-eof";
+const TRANSFER_CONTROL_HEADER = "trellis-transfer-control";
+export const MAX_TRANSFER_CHUNK_BYTES = 1024 * 1024;
 
 export const FileInfoSchema = Type.Object({
   key: Type.String({ minLength: 1 }),
@@ -44,7 +47,7 @@ const TransferGrantBaseSchema = Type.Object({
   transferId: Type.String({ minLength: 1 }),
   subject: Type.String({ minLength: 1 }),
   expiresAt: Type.String({ minLength: 1 }),
-  chunkBytes: Type.Integer({ minimum: 1 }),
+  chunkBytes: Type.Integer({ minimum: 1, maximum: MAX_TRANSFER_CHUNK_BYTES }),
 });
 
 export const SendTransferGrantSchema = Type.Object({
@@ -60,7 +63,10 @@ export const SendTransferGrantSchema = Type.Object({
 export const ReceiveTransferGrantSchema = Type.Object({
   ...TransferGrantBaseSchema.properties,
   direction: Type.Literal("receive"),
-  info: FileInfoSchema,
+  info: Type.Object({
+    ...FileInfoSchema.properties,
+    digest: Type.String({ minLength: 1 }),
+  }),
 });
 
 export const TransferGrantSchema = Type.Union([
@@ -87,7 +93,8 @@ type TrellisTransferAuth = {
 
 type TransferAck =
   | { status: "continue" }
-  | { status: "complete"; info: FileInfo };
+  | { status: "complete"; info: FileInfo }
+  | { status: "cancelled" };
 
 async function createTransferProof(
   auth: TrellisTransferAuth,
@@ -286,7 +293,7 @@ async function requestTransfer(
 function receiveStream(
   grant: ReceiveTransferGrant,
   requestFrame: (seq: number) => Promise<Msg>,
-  cancelTransfer: (seq: number) => Promise<void>,
+  cancelTransfer: () => Promise<void>,
 ): ReadableStream<Uint8Array> {
   const hasher = incrementalSha256.create();
   let expectedSeq = 0;
@@ -309,7 +316,28 @@ function receiveStream(
         }
         expectedSeq += 1;
 
-        if (msg.data.length > 0) {
+        if (msg.data.length > grant.chunkBytes) {
+          throw new TransferError({
+            operation: "stream",
+            context: {
+              reason: "chunk_too_large",
+              maxChunkBytes: grant.chunkBytes,
+              actualChunkBytes: msg.data.length,
+            },
+          });
+        }
+        const eof = msg.headers?.get(TRANSFER_EOF_HEADER) === "true";
+        if (eof && msg.data.length !== 0) {
+          throw new TransferError({
+            operation: "stream",
+            context: {
+              reason: "nonempty_eof",
+              actualChunkBytes: msg.data.length,
+            },
+          });
+        }
+
+        if (!eof && msg.data.length > 0) {
           receivedBytes += msg.data.length;
           if (receivedBytes > grant.info.size) {
             throw new TransferError({
@@ -325,7 +353,7 @@ function receiveStream(
           controller.enqueue(msg.data);
         }
 
-        if (msg.headers?.get(TRANSFER_EOF_HEADER) === "true") {
+        if (eof) {
           if (receivedBytes !== grant.info.size) {
             throw new TransferError({
               operation: "stream",
@@ -338,7 +366,6 @@ function receiveStream(
           }
           const digest = `SHA-256=${base64urlEncode(hasher.digest())}`;
           if (
-            grant.info.digest !== undefined &&
             grant.info.digest.replace(/=+$/, "") !== digest.replace(/=+$/, "")
           ) {
             throw new TransferError({
@@ -353,6 +380,7 @@ function receiveStream(
           controller.close();
         }
       } catch (cause) {
+        await cancelTransfer().catch(() => undefined);
         const error = cause instanceof TransferError
           ? cause
           : new TransferError({ operation: "stream", cause });
@@ -360,7 +388,7 @@ function receiveStream(
       }
     },
     async cancel() {
-      await cancelTransfer(expectedSeq).catch(() => undefined);
+      await cancelTransfer().catch(() => undefined);
     },
   });
 }
@@ -464,14 +492,14 @@ class BaseTransferHandle {
     reply: string,
     payload: Uint8Array,
     seq?: number,
-    eof?: boolean,
+    control?: "complete" | "cancel",
   ): Promise<MsgHdrs> {
     const headers = natsHeaders();
     const authHeaders = await createTransferProof(
       this.#auth,
       subject,
       reply,
-      payload,
+      transferFrameProofPayload(seq ?? 0, control, payload),
     );
     headers.set("session-key", this.#auth.sessionKey);
     headers.set("authorization-context", authHeaders.contextDigest);
@@ -481,11 +509,40 @@ class BaseTransferHandle {
     if (seq !== undefined) {
       headers.set(TRANSFER_SEQUENCE_HEADER, String(seq));
     }
-    if (eof) {
-      headers.set(TRANSFER_EOF_HEADER, "true");
+    if (control !== undefined) {
+      headers.set(TRANSFER_CONTROL_HEADER, control);
     }
     injectTraceContext(createNatsHeaderCarrier(headers));
     return headers;
+  }
+
+  protected async cancelTransfer(subject: string): Promise<void> {
+    const payload = new TextEncoder().encode(
+      JSON.stringify({ action: "cancel" }),
+    );
+    const reply = createInbox(this.inboxPrefix);
+    const headers = await this.buildHeaders(
+      subject,
+      reply,
+      payload,
+      0,
+      "cancel",
+    );
+    const response = await requestTransfer(
+      this.nc,
+      subject,
+      payload,
+      headers,
+      reply,
+      this.timeoutMs,
+    );
+    const ack = parseTransferAck(response, "cancel").take();
+    if (isErr(ack) || ack.status !== "cancelled") {
+      throw isErr(ack) ? ack.error : new TransferError({
+        operation: "cancel",
+        context: { reason: "not_acknowledged" },
+      });
+    }
   }
 }
 
@@ -513,8 +570,9 @@ export class SendTransferHandle extends BaseTransferHandle {
 
         let sentBytes = 0;
         let seq = 0;
-        let completed: FileInfo | null = null;
         const hasher = incrementalSha256.create();
+        const abort = () =>
+          this.cancelTransfer(this.#grant.subject).catch(() => {});
 
         for await (const chunk of chunkBody(body, this.#grant.chunkBytes)) {
           sentBytes += chunk.length;
@@ -522,6 +580,7 @@ export class SendTransferHandle extends BaseTransferHandle {
             this.#grant.maxBytes !== undefined &&
             sentBytes > this.#grant.maxBytes
           ) {
+            await abort();
             return Result.err(
               recordTransferError(
                 new TransferError({
@@ -544,7 +603,7 @@ export class SendTransferHandle extends BaseTransferHandle {
             reply,
             chunk,
             seq,
-            false,
+            undefined,
           );
           const response = await AsyncResult.try(() =>
             requestTransfer(
@@ -557,6 +616,7 @@ export class SendTransferHandle extends BaseTransferHandle {
             )
           ).take();
           if (isErr(response)) {
+            await abort();
             return Result.err(
               recordTransferError(
                 new TransferError({ operation: "send", cause: response.error }),
@@ -568,19 +628,31 @@ export class SendTransferHandle extends BaseTransferHandle {
 
           const ack = parseTransferAck(response, "send").take();
           if (isErr(ack)) {
+            await abort();
             return Result.err(recordTransferError(ack.error, "send", "ack"));
           }
           if (ack.status === "complete") {
-            completed = ack.info;
+            await abort();
+            return Result.err(
+              recordTransferError(
+                new TransferError({
+                  operation: "send",
+                  context: { reason: "premature_completion" },
+                }),
+                "send",
+                "ack",
+              ),
+            );
           }
           hasher.update(chunk);
           seq += 1;
         }
 
+        const sentDigest = `SHA-256=${base64urlEncode(hasher.digest())}`;
         const completion = new TextEncoder().encode(JSON.stringify({
           action: "complete",
           size: sentBytes,
-          digest: `SHA-256=${base64urlEncode(hasher.digest())}`,
+          digest: sentDigest,
         }));
         const reply = createInbox(this.inboxPrefix);
         const finalHeaders = await this.buildHeaders(
@@ -588,7 +660,7 @@ export class SendTransferHandle extends BaseTransferHandle {
           reply,
           completion,
           seq,
-          true,
+          "complete",
         );
         const finalResponse = await AsyncResult.try(() =>
           requestTransfer(
@@ -629,7 +701,29 @@ export class SendTransferHandle extends BaseTransferHandle {
             ),
           );
         }
-        return Result.ok(finalAck.info ?? completed!);
+        if (
+          finalAck.info.size !== sentBytes ||
+          finalAck.info.digest?.replace(/=+$/, "") !==
+            sentDigest.replace(/=+$/, "")
+        ) {
+          return Result.err(
+            recordTransferError(
+              new TransferError({
+                operation: "send",
+                context: {
+                  reason: "result_metadata_mismatch",
+                  expectedSize: sentBytes,
+                  actualSize: finalAck.info.size,
+                  expectedDigest: sentDigest,
+                  actualDigest: finalAck.info.digest,
+                },
+              }),
+              "send",
+              "ack",
+            ),
+          );
+        }
+        return Result.ok(finalAck.info);
       })(),
     );
   }
@@ -671,7 +765,7 @@ export class ReceiveTransferHandle extends BaseTransferHandle {
               reply,
               payload,
               seq,
-              false,
+              undefined,
             );
             return await requestTransfer(
               this.nc,
@@ -682,27 +776,7 @@ export class ReceiveTransferHandle extends BaseTransferHandle {
               this.timeoutMs,
             );
           },
-          async (seq) => {
-            const cancelPayload = new TextEncoder().encode(
-              JSON.stringify({ action: "cancel" }),
-            );
-            const reply = createInbox(this.inboxPrefix);
-            const cancelHeaders = await this.buildHeaders(
-              this.#grant.subject,
-              reply,
-              cancelPayload,
-              seq,
-              false,
-            );
-            await requestTransfer(
-              this.nc,
-              this.#grant.subject,
-              cancelPayload,
-              cancelHeaders,
-              reply,
-              this.timeoutMs,
-            );
-          },
+          () => this.cancelTransfer(this.#grant.subject),
         ));
       })(),
     );

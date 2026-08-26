@@ -433,7 +433,7 @@ pub enum ServerError {
     #[doc(hidden)]
     TransferObjectMissing { store: String, key: String },
 
-    #[error("transfer chunk size must be greater than zero, got {chunk_bytes}")]
+    #[error("transfer chunk size must be between 1 and 1048576 bytes, got {chunk_bytes}")]
     #[doc(hidden)]
     InvalidTransferChunkSize { chunk_bytes: u64 },
 

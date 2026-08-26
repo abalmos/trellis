@@ -198,6 +198,7 @@ type LocalAuthorizationArgs =
     kind: "request";
     cache: AuthorizationProviderCache | undefined;
     message: LocalAuthorizationRequestMessage;
+    proofPayload?: Uint8Array;
     permission: DescriptorPermissionAtom | undefined;
     requiredCapabilities: readonly string[];
   }
@@ -259,7 +260,8 @@ export async function verifyLocalAuthorization(
         contextDigest,
         subject: args.message.subject,
         reply,
-        payload: new Uint8Array(args.message.data ?? new Uint8Array()),
+        payload: args.proofPayload ??
+          new Uint8Array(args.message.data ?? new Uint8Array()),
         iat,
         requestId,
         proof,

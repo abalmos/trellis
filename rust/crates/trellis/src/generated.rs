@@ -18,11 +18,11 @@ pub const fn assert_abi(version: u32) {
 pub use crate::client::{
     AuthErrorPayload, AuthorizationContextBundle, AuthorizationContextStore, CallError,
     DeclaredError, DeclaredErrorPayload, DeclaredOperationUpdates, DeviceConnectOptions,
-    DownloadTransferGrant, EventDescriptor, FeedDescriptor, MapStateStore, NoDeclaredError,
-    NoOperationUpdates, OperationDescriptor, OperationInvoker, OperationRef,
+    DownloadTransferGrant, EventDescriptor, FeedDescriptor, FileInfo, MapStateStore,
+    NoDeclaredError, NoOperationUpdates, OperationDescriptor, OperationInvoker, OperationRef,
     OperationTransferStartError, RemoteErrorPayload, RpcDescriptor, StartedOperationTransfer,
-    TransferOperationDescriptor, TrellisClientError, UserAuthorizationContext, UserConnectOptions,
-    UserSessionCredentials, ValueStateStore,
+    TransferCancellation, TransferOperationDescriptor, TrellisClientError,
+    UserAuthorizationContext, UserConnectOptions, UserSessionCredentials, ValueStateStore,
 };
 
 /// Opaque authenticated caller handle used by generated crates.

@@ -272,7 +272,9 @@ or shutdown.
 Store and transfer bodies accept `ReadableStream<Uint8Array>` and async iterables
 for bounded streaming. Use `bytes()` only when intentionally collecting the whole
 value in memory. Cancelling a receive stream sends an authenticated transfer
-cancel control; a caller may already have consumed a valid prefix.
+cancel control and waits for its acknowledgement; a caller may already have
+consumed a valid prefix. Grants restrict frames to 1 byte through 1 MiB and
+completed transfers require independent size and SHA-256 verification.
 
 For browser app sign-out, use the connected generated Auth API over NATS. Do not
 add an HTTP logout, context, revocation, or client-bootstrap call, and do not

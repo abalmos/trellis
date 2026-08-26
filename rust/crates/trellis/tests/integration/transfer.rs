@@ -1,5 +1,10 @@
 use std::collections::BTreeMap;
-use std::sync::Arc;
+use std::pin::Pin;
+use std::sync::{
+    atomic::{AtomicUsize, Ordering},
+    Arc,
+};
+use std::task::{Context, Poll};
 use std::time::{Duration, Instant};
 
 use bytes::Bytes;
@@ -7,13 +12,15 @@ use futures_util::stream::{self, BoxStream};
 use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use tokio::io::AsyncWrite;
 use tokio::task::JoinHandle;
 use trellis_rs::client::OperationState as ClientOpState;
 use trellis_rs::client::{OperationDescriptor, TransferOperationDescriptor};
 use trellis_rs::service::{
     AcceptedOperation, FileTransferInfo, OperationRefData, OperationSnapshot,
-    OperationState as ServiceOpState, ServerError, ServiceRuntimeError, TransferDownloadGrantArgs,
-    TransferUploadGrantArgs, UploadTransferCompletion, UploadTransferSession,
+    OperationState as ServiceOpState, ServerError, ServiceRuntimeError, StoreObjectInfo,
+    StoreResourceClient, TransferDownloadGrantArgs, TransferUploadGrantArgs,
+    UploadTransferCompletion, UploadTransferSession,
 };
 
 use crate::support::assertions::{assert_case_registered, assert_generated_service_contract};
@@ -200,6 +207,7 @@ struct SharedOpState {
         std::collections::HashMap<String, OperationSnapshot<Value, UploadOutput>>,
     >,
     stored_uploads: tokio::sync::Mutex<std::collections::HashMap<String, StoredUpload>>,
+    download_reads: Arc<AtomicUsize>,
 }
 
 type UploadFuture<T> = futures_util::future::BoxFuture<'static, Result<T, ServerError>>;
@@ -284,11 +292,70 @@ struct StoredUpload {
     size: u64,
 }
 
+struct BlockingWriter;
+
+#[derive(Debug, Clone)]
+struct CountingStore<C> {
+    inner: C,
+    reads: Arc<AtomicUsize>,
+}
+
+impl<C> StoreResourceClient for CountingStore<C>
+where
+    C: StoreResourceClient,
+{
+    async fn read_into<W>(
+        &self,
+        key: &str,
+        writer: &mut W,
+    ) -> Result<Option<StoreObjectInfo>, ServerError>
+    where
+        W: tokio::io::AsyncWrite + Unpin + Send,
+    {
+        self.reads.fetch_add(1, Ordering::SeqCst);
+        self.inner.read_into(key, writer).await
+    }
+
+    async fn write_from<R>(&self, key: &str, reader: &mut R) -> Result<StoreObjectInfo, ServerError>
+    where
+        R: tokio::io::AsyncRead + Unpin + Send,
+    {
+        self.inner.write_from(key, reader).await
+    }
+
+    async fn list(&self) -> Result<Vec<String>, ServerError> {
+        self.inner.list().await
+    }
+
+    async fn delete(&self, key: &str) -> Result<(), ServerError> {
+        self.inner.delete(key).await
+    }
+}
+
+impl AsyncWrite for BlockingWriter {
+    fn poll_write(
+        self: Pin<&mut Self>,
+        _cx: &mut Context<'_>,
+        _buffer: &[u8],
+    ) -> Poll<std::io::Result<usize>> {
+        Poll::Pending
+    }
+
+    fn poll_flush(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
+        Poll::Ready(Ok(()))
+    }
+
+    fn poll_shutdown(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
+        Poll::Ready(Ok(()))
+    }
+}
+
 impl SharedOpState {
     fn new() -> Arc<Self> {
         Arc::new(Self {
             snapshots: tokio::sync::Mutex::new(std::collections::HashMap::new()),
             stored_uploads: tokio::sync::Mutex::new(std::collections::HashMap::new()),
+            download_reads: Arc::new(AtomicUsize::new(0)),
         })
     }
 }
@@ -339,7 +406,7 @@ impl TransferFixture {
         let shared = SharedOpState::new();
 
         register_upload_handler(&mut service, Arc::clone(&shared));
-        register_download_handler(&mut service);
+        register_download_handler(&mut service, Arc::clone(&shared));
 
         let service_task = tokio::spawn(async move { service.run().await });
 
@@ -438,7 +505,7 @@ fn register_upload_handler(
                             key: &input.key,
                             transfer_id: &transfer_id,
                             expires_at: &expires_at,
-                            chunk_bytes: 64 * 1024,
+                            chunk_bytes: 256,
                             max_bytes: Some(1_048_576),
                             content_type: input.content_type.as_deref(),
                             metadata: BTreeMap::new(),
@@ -585,50 +652,84 @@ fn register_upload_handler(
 
 fn register_download_handler(
     service: &mut trellis_rs::service::ConnectedServiceRuntime<TransferServiceContract>,
+    shared: Arc<SharedOpState>,
 ) {
-    service.register_rpc::<FilesDownloadRpc, _, _>(move |context, input| async move {
-        let handle = context.handle();
-        let service_session_key = handle.session_key().to_string();
-        let service_name = handle.service_name().to_string();
-        let resources = handle.resources().clone();
-        let caller_session_key = context.request().session_key.clone().unwrap_or_default();
+    service.register_rpc::<FilesDownloadRpc, _, _>(move |context, input| {
+        let shared = Arc::clone(&shared);
+        async move {
+            let handle = context.handle();
+            let service_session_key = handle.session_key().to_string();
+            let service_name = handle.service_name().to_string();
+            let resources = handle.resources().clone();
+            let caller_session_key = context.request().session_key.clone().unwrap_or_default();
 
-        let payload = Bytes::from(format!("download:{}", input.key));
-        let store = handle.store_client("uploads").await?;
-        store.write(&input.key, payload.clone()).await?;
-
-        let transfer_id = format!("download-{}", input.key.replace(['/', '.'], "-"));
-        let expires_at = (time::OffsetDateTime::now_utc() + time::Duration::minutes(5))
-            .format(&time::format_description::well_known::Rfc3339)
-            .map_err(|e| ServerError::Nats(e.to_string()))?;
-        let updated_at = now_iso()?;
-
-        let plan = trellis_rs::service::plan_download_transfer_grant(TransferDownloadGrantArgs {
-            service_name: &service_name,
-            session_key: &caller_session_key,
-            service_session_key: &service_session_key,
-            resources: &resources,
-            store: "uploads",
-            transfer_id: &transfer_id,
-            expires_at: &expires_at,
-            chunk_bytes: 64 * 1024,
-            info: FileTransferInfo {
-                key: input.key.clone(),
-                size: payload.len() as u64,
-                updated_at,
-                digest: None,
-                content_type: Some("text/plain".to_string()),
-                metadata: BTreeMap::new(),
-            },
-        })
-        .map_err(|e| ServerError::Nats(e.to_string()))?;
-
-        handle
-            .spawn_download_transfer_endpoint(plan.clone(), store)
+            let payload = if input.key.ends_with(".multi") {
+                Bytes::from(
+                    (0..(3 * 256 + 17))
+                        .map(|index| (index % 251) as u8)
+                        .collect::<Vec<_>>(),
+                )
+            } else {
+                Bytes::from(format!("download:{}", input.key))
+            };
+            let store = handle.store_client("uploads").await?;
+            let mut payload_reader = std::io::Cursor::new(payload.clone());
+            let stored = trellis_rs::service::StoreResourceClient::write_from(
+                &store,
+                &input.key,
+                &mut payload_reader,
+            )
             .await?;
 
-        let grant_value = serde_json::to_value(&plan.grant).map_err(ServerError::Json)?;
-        Ok(grant_value)
+            let transfer_id = format!("download-{}", input.key.replace(['/', '.'], "-"));
+            let expires_in = if input.key.ends_with(".unused") {
+                time::Duration::milliseconds(200)
+            } else {
+                time::Duration::minutes(5)
+            };
+            let expires_at = (time::OffsetDateTime::now_utc() + expires_in)
+                .format(&time::format_description::well_known::Rfc3339)
+                .map_err(|e| ServerError::Nats(e.to_string()))?;
+            let updated_at = now_iso()?;
+
+            let plan =
+                trellis_rs::service::plan_download_transfer_grant(TransferDownloadGrantArgs {
+                    service_name: &service_name,
+                    session_key: &caller_session_key,
+                    service_session_key: &service_session_key,
+                    resources: &resources,
+                    store: "uploads",
+                    transfer_id: &transfer_id,
+                    expires_at: &expires_at,
+                    chunk_bytes: 256,
+                    info: FileTransferInfo {
+                        key: input.key.clone(),
+                        size: payload.len() as u64,
+                        updated_at,
+                        digest: stored.digest.ok_or_else(|| {
+                            ServerError::Nats(
+                                "download object is missing a SHA-256 digest".to_string(),
+                            )
+                        })?,
+                        content_type: Some("text/plain".to_string()),
+                        metadata: BTreeMap::new(),
+                    },
+                })
+                .map_err(|e| ServerError::Nats(e.to_string()))?;
+
+            handle
+                .spawn_download_transfer_endpoint(
+                    plan.clone(),
+                    CountingStore {
+                        inner: store,
+                        reads: Arc::clone(&shared.download_reads),
+                    },
+                )
+                .await?;
+
+            let grant_value = serde_json::to_value(&plan.grant).map_err(ServerError::Json)?;
+            Ok(grant_value)
+        }
     });
 }
 
@@ -643,7 +744,9 @@ async fn transfer_client_uploads_file_via_operation() {
     let mut fixture = TransferFixture::start().await;
     let client = fixture.connect_client().await;
 
-    let upload_bytes = Bytes::from_static(b"uploaded through transfer");
+    let upload_bytes = (0..(3 * 256 + 17))
+        .map(|index| (index % 251) as u8)
+        .collect::<Vec<_>>();
     let upload_input = UploadInput {
         key: "client/upload.txt".to_string(),
         content_type: Some("text/plain".to_string()),
@@ -666,6 +769,14 @@ async fn transfer_client_uploads_file_via_operation() {
     assert_eq!(output.key, "client/upload.txt");
     assert_eq!(output.size, upload_bytes.len() as u64);
     assert_eq!(output.content_type.as_deref(), Some("text/plain"));
+    assert_eq!(
+        fixture
+            .stored_upload(operation_ref.id())
+            .await
+            .expect("service should retain the multiframe upload")
+            .body,
+        upload_bytes
+    );
 
     fixture.shutdown().await;
 }
@@ -744,7 +855,7 @@ async fn transfer_client_downloads_file_via_receive_grant() {
     let mut fixture = TransferFixture::start().await;
     let client = fixture.connect_client().await;
 
-    let download_key = "client/download.txt";
+    let download_key = "client/download.multi";
     let download_input = DownloadInput {
         key: download_key.to_string(),
     };
@@ -765,10 +876,60 @@ async fn transfer_client_downloads_file_via_receive_grant() {
         .await
         .expect("stream download transfer bytes");
     assert_eq!(info.size, downloaded.len() as u64);
+    assert_eq!(downloaded.len(), 3 * 256 + 17);
+    assert!(downloaded
+        .iter()
+        .enumerate()
+        .all(|(index, byte)| *byte == (index % 251) as u8));
+
+    let cancellation_grant = call_download_with_retry(
+        &client,
+        &DownloadInput {
+            key: "client/download-cancel.multi".to_string(),
+        },
+    )
+    .await;
+    let cancellation_grant =
+        trellis_rs::client::download_transfer_grant_from_value(cancellation_grant)
+            .expect("parse cancellation download grant");
+    let cancellation = trellis_rs::generated::TransferCancellation::new();
+    let cancellation_task = {
+        let cancellation = cancellation.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(100)).await;
+            cancellation.cancel();
+        })
+    };
+    let cancelled = client
+        .download_transfer_into_with_cancel(&cancellation_grant, &mut BlockingWriter, &cancellation)
+        .await;
+    cancellation_task.await.expect("cancellation task");
+    assert!(matches!(
+        cancelled,
+        Err(trellis_rs::generated::TrellisClientError::TransferCancelled)
+    ));
+
+    let reads_before_unused_grant = fixture.shared.download_reads.load(Ordering::SeqCst);
+    let unused_grant = call_download_with_retry(
+        &client,
+        &DownloadInput {
+            key: "client/download.unused".to_string(),
+        },
+    )
+    .await;
+    let unused_grant = trellis_rs::client::download_transfer_grant_from_value(unused_grant)
+        .expect("parse unused download grant");
+    tokio::time::sleep(Duration::from_millis(500)).await;
     assert_eq!(
-        String::from_utf8_lossy(&downloaded),
-        format!("download:{download_key}")
+        fixture.shared.download_reads.load(Ordering::SeqCst),
+        reads_before_unused_grant,
+        "unused grant must not open the object reader"
     );
+    let expired = client.download_transfer(&unused_grant).await;
+    assert!(matches!(
+        expired,
+        Err(trellis_rs::generated::TrellisClientError::NatsRequest(_))
+    ));
 
     fixture.shutdown().await;
 }

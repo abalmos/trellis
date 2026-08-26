@@ -29,11 +29,14 @@ import type {
   ReceiveTransferGrant,
   SendTransferGrant,
 } from "../../transfer.ts";
+import { transferFrameProofPayload } from "../../transfer_protocol.ts";
+import { MAX_TRANSFER_CHUNK_BYTES } from "../../transfer.ts";
 
 const UPLOAD_SUBJECT_PREFIX = "transfer.v2.upload";
 const DOWNLOAD_SUBJECT_PREFIX = "transfer.v2.download";
 const TRANSFER_SEQUENCE_HEADER = "trellis-transfer-seq";
 const TRANSFER_EOF_HEADER = "trellis-transfer-eof";
+const TRANSFER_CONTROL_HEADER = "trellis-transfer-control";
 const DEFAULT_TRANSFER_CHUNK_BYTES = 256 * 1024;
 
 export type TransferStoreHandle = {
@@ -393,6 +396,14 @@ export class ServiceTransfer {
     this.#auth = opts.auth;
     this.#stores = opts.stores;
     this.#chunkBytes = opts.chunkBytes ?? DEFAULT_TRANSFER_CHUNK_BYTES;
+    if (
+      !Number.isSafeInteger(this.#chunkBytes) || this.#chunkBytes < 1 ||
+      this.#chunkBytes > MAX_TRANSFER_CHUNK_BYTES
+    ) {
+      throw new RangeError(
+        `transfer chunk size must be between 1 and ${MAX_TRANSFER_CHUNK_BYTES} bytes`,
+      );
+    }
   }
 
   async initiateUpload(
@@ -570,6 +581,16 @@ export class ServiceTransfer {
         }),
       );
     }
+    const info = fileInfoFromStoreInfo(entryValue.info);
+    if (info.digest === undefined) {
+      return Result.err(
+        new TransferError({
+          operation: "initiateDownload",
+          context: { reason: "missing_digest", key: args.key },
+        }),
+      );
+    }
+    const downloadInfo = { ...info, digest: info.digest };
 
     const transferId = ulid();
     const subject = `${DOWNLOAD_SUBJECT_PREFIX}.${
@@ -588,7 +609,7 @@ export class ServiceTransfer {
       expiresAtMs,
       store: storeValue,
       key: args.key,
-      info: fileInfoFromStoreInfo(entryValue.info),
+      info: downloadInfo,
       subscription,
       pendingOffset: 0,
       nextSeq: 0,
@@ -630,7 +651,7 @@ export class ServiceTransfer {
       subject,
       expiresAt: new Date(expiresAtMs).toISOString(),
       chunkBytes: this.#chunkBytes,
-      info: session.info,
+      info: downloadInfo,
     });
   }
 
@@ -695,12 +716,20 @@ export class ServiceTransfer {
       return;
     }
 
+    const seqResult = parseSeq(msg).take();
+    if (isErr(seqResult)) {
+      replyError(msg, seqResult.error);
+      this.#expireUploadSession(session.subject, seqResult.error);
+      return;
+    }
+    const control = msg.headers?.get(TRANSFER_CONTROL_HEADER) || undefined;
     const authenticated = await verifyLocalAuthorization({
       kind: "request",
       cache: this.#auth.authorizationProviderCache,
       message: msg,
       permission: session.permission,
       requiredCapabilities: session.requiredCapabilities,
+      proofPayload: transferFrameProofPayload(seqResult, control, msg.data),
     });
     const authenticatedValue = authenticated.take();
     if (
@@ -716,11 +745,27 @@ export class ServiceTransfer {
       return;
     }
 
-    try {
-      if (
-        (JSON.parse(new TextDecoder().decode(msg.data)) as { action?: string })
-          .action === "cancel"
-      ) {
+    if (msg.headers?.get(TRANSFER_EOF_HEADER) === "true") {
+      const error = new TransferError({
+        operation: "put",
+        context: { reason: "legacy_eof_header" },
+      });
+      replyError(msg, error);
+      this.#expireUploadSession(session.subject, error);
+      return;
+    }
+    if (control === "cancel") {
+      try {
+        if (
+          (JSON.parse(new TextDecoder().decode(msg.data)) as {
+            action?: string;
+          })
+            .action !== "cancel"
+        ) {
+          throw new Error(
+            "cancellation payload does not match its control header",
+          );
+        }
         msg.respond(JSON.stringify({ status: "cancelled" }));
         this.#expireUploadSession(
           session.subject,
@@ -730,17 +775,28 @@ export class ServiceTransfer {
           }),
         );
         return;
+      } catch (cause) {
+        const error = new TransferError({
+          operation: "put",
+          cause,
+          context: { reason: "invalid_control" },
+        });
+        replyError(msg, error);
+        this.#expireUploadSession(session.subject, error);
+        return;
       }
-    } catch {
-      // Data frames are arbitrary bytes, not control JSON.
     }
-
-    const seq = parseSeq(msg).take();
-    if (isErr(seq)) {
-      replyError(msg, seq.error);
-      this.#expireUploadSession(session.subject, seq.error);
+    if (control !== undefined && control !== "complete") {
+      const error = new TransferError({
+        operation: "put",
+        context: { reason: "invalid_control", control },
+      });
+      replyError(msg, error);
+      this.#expireUploadSession(session.subject, error);
       return;
     }
+
+    const seq = seqResult;
     if (seq !== session.nextSeq) {
       const error = new TransferError({
         operation: "put",
@@ -754,7 +810,7 @@ export class ServiceTransfer {
       this.#expireUploadSession(session.subject, error);
       return;
     }
-    const eof = msg.headers?.get(TRANSFER_EOF_HEADER) === "true";
+    const eof = control === "complete";
     if (!eof && msg.data.length > 0) {
       if (msg.data.length > this.#chunkBytes) {
         const error = new TransferError({
@@ -855,6 +911,24 @@ export class ServiceTransfer {
       }
 
       const info = fileInfoFromStoreInfo(storedValue.info);
+      if (
+        info.size !== session.receivedBytes || info.digest === undefined ||
+        info.digest.replace(/=+$/, "") !== digest.replace(/=+$/, "")
+      ) {
+        const error = new TransferError({
+          operation: "put",
+          context: {
+            reason: "stored_metadata_mismatch",
+            expectedSize: session.receivedBytes,
+            actualSize: info.size,
+            expectedDigest: digest,
+            actualDigest: info.digest,
+          },
+        });
+        replyError(msg, error);
+        this.#expireUploadSession(session.subject, error);
+        return;
+      }
       msg.respond(JSON.stringify({ status: "complete", info }));
       await session.onComplete?.(info);
       if (session.onStored) {
@@ -915,12 +989,19 @@ export class ServiceTransfer {
       return true;
     }
 
+    const parsedSeq = parseSeq(msg).take();
+    if (isErr(parsedSeq)) {
+      replyError(msg, parsedSeq.error);
+      return false;
+    }
+    const control = msg.headers?.get(TRANSFER_CONTROL_HEADER) || undefined;
     const authenticated = await verifyLocalAuthorization({
       kind: "request",
       cache: this.#auth.authorizationProviderCache,
       message: msg,
       permission: session.permission,
       requiredCapabilities: session.requiredCapabilities,
+      proofPayload: transferFrameProofPayload(parsedSeq, control, msg.data),
     });
     const authenticatedValue = authenticated.take();
     if (
@@ -938,11 +1019,51 @@ export class ServiceTransfer {
       return false;
     }
 
-    const parsedSeq = parseSeq(msg).take();
-    if (isErr(parsedSeq) || parsedSeq !== session.nextSeq) {
+    if (control === "cancel") {
+      try {
+        if (
+          (JSON.parse(new TextDecoder().decode(msg.data)) as {
+            action?: string;
+          })
+            .action !== "cancel"
+        ) {
+          throw new Error(
+            "cancellation payload does not match its control header",
+          );
+        }
+        await session.reader?.cancel().catch(() => undefined);
+        msg.respond(JSON.stringify({ status: "cancelled" }));
+        return true;
+      } catch (cause) {
+        replyError(
+          msg,
+          new TransferError({
+            operation: "get",
+            cause,
+            context: { reason: "invalid_control" },
+          }),
+        );
+        return false;
+      }
+    }
+    if (
+      control !== undefined ||
+      msg.headers?.get(TRANSFER_EOF_HEADER) === "true"
+    ) {
       replyError(
         msg,
-        isErr(parsedSeq) ? parsedSeq.error : new TransferError({
+        new TransferError({
+          operation: "get",
+          context: { reason: "invalid_control", control },
+        }),
+      );
+      return false;
+    }
+
+    if (parsedSeq !== session.nextSeq) {
+      replyError(
+        msg,
+        new TransferError({
           operation: "get",
           context: {
             reason: "sequence",
@@ -952,11 +1073,6 @@ export class ServiceTransfer {
         }),
       );
       return false;
-    }
-    if (new TextDecoder().decode(msg.data) === '{"action":"cancel"}') {
-      await session.reader?.cancel().catch(() => undefined);
-      msg.respond(JSON.stringify({ status: "cancelled" }));
-      return true;
     }
     if (msg.data.length !== 0) {
       replyError(

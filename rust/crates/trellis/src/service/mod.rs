@@ -35,6 +35,7 @@ mod runtime_facade;
 mod schema_validation;
 mod service_host;
 mod transfer;
+pub(crate) use transfer::transfer_frame_proof_payload;
 
 pub use crate::jobs::{ActiveJob, JobDescriptor, JobRef, JobUpdateDescriptor, JobsError};
 #[doc(hidden)]

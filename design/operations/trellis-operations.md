@@ -212,10 +212,21 @@ Caller surface:
   `operation.<group>.<leaf>.input(input).transfer(body).start()`
 - transfer payloads use ordered bounded frames; downloads are client-pulled one
   frame at a time so a slow writer cannot move unbounded buffering into NATS or
-  the client; upload completion is an authenticated JSON control carrying the
-  exact byte count and SHA-256 digest, and download EOF is published only after
-  the store reader validates EOF and integrity
-- upload and download cancellation controls are authenticated like data frames;
+  the client; `chunkBytes` MUST be between 1 byte and the protocol maximum of 1
+  MiB and is validated when a grant is created or parsed
+- data and JSON controls are distinguished by the signed
+  `trellis-transfer-control` header, never by payload bytes; upload completion
+  is an authenticated JSON control carrying the exact byte count and SHA-256
+  digest, and download EOF is published only after the store reader validates
+  EOF and integrity
+- upload and download cancellation controls are authenticated and acknowledged;
+  cancellation is independent of the next data sequence so it remains valid
+  while a data frame or caller-owned writer is in flight; a failed or missing
+  cancellation acknowledgement is not reported as successful cancellation
+- download endpoints wait for the first authenticated request before opening the
+  Object Store reader and expire even when no request arrives
+- every completed transfer requires and independently checks the backend,
+  advertised, and computed SHA-256 digests plus final size and key metadata;
   upload cancellation before validated source EOF prevents metadata completion,
   while download cancellation may leave a prefix in the caller-owned writer
 

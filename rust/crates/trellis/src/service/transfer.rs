@@ -30,6 +30,28 @@ const DOWNLOAD_SUBJECT_PREFIX: &str = "transfer.v2.download";
 pub const TRANSFER_SEQUENCE_HEADER: &str = "trellis-transfer-seq";
 /// Header marking the final transfer frame.
 pub const TRANSFER_EOF_HEADER: &str = "trellis-transfer-eof";
+/// Header distinguishing signed transfer control payloads from arbitrary data.
+pub const TRANSFER_CONTROL_HEADER: &str = "trellis-transfer-control";
+/// Largest transfer frame accepted by Trellis runtimes.
+pub const MAX_TRANSFER_CHUNK_BYTES: u64 = 1024 * 1024;
+const TRANSFER_FRAME_PROOF_DOMAIN: &[u8] = b"trellis.transfer.v2.frame\0";
+
+pub(crate) fn transfer_frame_proof_payload(
+    seq: u64,
+    control: Option<&str>,
+    payload: &[u8],
+) -> Bytes {
+    let control = control.unwrap_or_default().as_bytes();
+    let mut framed = Vec::with_capacity(
+        TRANSFER_FRAME_PROOF_DOMAIN.len() + 8 + 4 + control.len() + payload.len(),
+    );
+    framed.extend_from_slice(TRANSFER_FRAME_PROOF_DOMAIN);
+    framed.extend_from_slice(&seq.to_be_bytes());
+    framed.extend_from_slice(&(control.len() as u32).to_be_bytes());
+    framed.extend_from_slice(control);
+    framed.extend_from_slice(payload);
+    Bytes::from(framed)
+}
 
 /// File metadata carried by receive transfer grants.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -45,10 +67,9 @@ pub struct FileTransferInfo {
     /// Last update timestamp encoded as an ISO-8601 string.
     #[doc = concat!("The `", stringify!(updated_at), "` value.")]
     pub updated_at: String,
-    /// Optional object digest supplied by the store.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    /// SHA-256 object digest supplied by the store.
     #[doc = concat!("The `", stringify!(digest), "` value.")]
-    pub digest: Option<String>,
+    pub digest: String,
     /// Optional object content type.
     #[serde(skip_serializing_if = "Option::is_none")]
     #[doc = concat!("The `", stringify!(content_type), "` value.")]
@@ -159,6 +180,7 @@ pub struct UploadTransferGrant {
     #[doc = concat!("The `", stringify!(expires_at), "` value.")]
     pub expires_at: String,
     /// Maximum transfer frame size advertised to clients.
+    #[serde(deserialize_with = "deserialize_chunk_bytes")]
     #[doc = concat!("The `", stringify!(chunk_bytes), "` value.")]
     pub chunk_bytes: u64,
     /// Effective upload cap after applying the bound store limit.
@@ -220,6 +242,7 @@ pub struct DownloadTransferGrant {
     #[doc = concat!("The `", stringify!(expires_at), "` value.")]
     pub expires_at: String,
     /// Maximum transfer frame size advertised to clients.
+    #[serde(deserialize_with = "deserialize_chunk_bytes")]
     #[doc = concat!("The `", stringify!(chunk_bytes), "` value.")]
     pub chunk_bytes: u64,
     /// Object metadata for the file that will be streamed later.
@@ -258,6 +281,9 @@ pub struct UploadTransferChunk {
     /// Whether this chunk carries `trellis-transfer-eof: true`.
     #[doc = concat!("The `", stringify!(eof), "` value.")]
     pub eof: bool,
+    /// Whether this frame carries an authenticated cancellation control.
+    #[doc = concat!("The `", stringify!(cancel), "` value.")]
+    pub cancel: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -279,6 +305,8 @@ pub enum UploadTransferAck {
         /// Metadata for the stored object.
         info: FileTransferInfo,
     },
+    /// Cancellation was authenticated and the endpoint terminated.
+    Cancelled,
 }
 
 /// Awaitable provider-side notification that an upload transfer reached durable storage.
@@ -518,21 +546,26 @@ impl UploadTransferSession {
                 actual_size: stored.size,
             });
         }
-        if let Some(stored_digest) = stored.digest.as_ref() {
-            if !transfer_digests_match(stored_digest, &actual_digest) {
-                return Err(ServerError::TransferDigestMismatch {
-                    transfer_id: self.plan.grant.transfer_id.clone(),
-                    expected_digest: actual_digest,
-                    actual_digest: stored_digest.clone(),
-                });
-            }
+        let stored_digest = stored
+            .digest
+            .ok_or_else(|| ServerError::TransferDigestMismatch {
+                transfer_id: self.plan.grant.transfer_id.clone(),
+                expected_digest: actual_digest.clone(),
+                actual_digest: "missing backend digest".to_string(),
+            })?;
+        if !transfer_digests_match(&stored_digest, &actual_digest) {
+            return Err(ServerError::TransferDigestMismatch {
+                transfer_id: self.plan.grant.transfer_id.clone(),
+                expected_digest: actual_digest,
+                actual_digest: stored_digest,
+            });
         }
 
         let info = FileTransferInfo {
             key: self.plan.key.clone(),
             size: self.transferred_bytes,
             updated_at: self.updated_at.clone(),
-            digest: Some(actual_digest),
+            digest: actual_digest,
             content_type: self.plan.grant.content_type.clone(),
             metadata: self.plan.grant.metadata.clone(),
         };
@@ -568,16 +601,31 @@ pub fn decode_upload_transfer_chunk(
     headers: Option<&HeaderMap>,
     payload: Bytes,
 ) -> Result<UploadTransferChunk, ServerError> {
-    let seq = required_header(headers, TRANSFER_SEQUENCE_HEADER)?;
-    let seq = seq
-        .parse::<u64>()
-        .map_err(|_| ServerError::InvalidTransferHeader {
-            header: TRANSFER_SEQUENCE_HEADER,
-            value: seq.to_string(),
-        })?;
-    let eof = optional_header(headers, TRANSFER_EOF_HEADER).is_some_and(|value| value == "true");
+    let seq = parse_transfer_sequence(headers)?;
+    if let Some(value) = optional_header(headers, TRANSFER_EOF_HEADER) {
+        return Err(ServerError::InvalidTransferHeader {
+            header: TRANSFER_EOF_HEADER,
+            value: value.to_string(),
+        });
+    }
+    let (eof, cancel) = match optional_header(headers, TRANSFER_CONTROL_HEADER) {
+        None => (false, false),
+        Some("complete") => (true, false),
+        Some("cancel") => (false, true),
+        Some(value) => {
+            return Err(ServerError::InvalidTransferHeader {
+                header: TRANSFER_CONTROL_HEADER,
+                value: value.to_string(),
+            })
+        }
+    };
 
-    Ok(UploadTransferChunk { seq, payload, eof })
+    Ok(UploadTransferChunk {
+        seq,
+        payload,
+        eof,
+        cancel,
+    })
 }
 
 /// Run a NATS upload transfer endpoint and report operation progress for accepted body chunks.
@@ -653,13 +701,19 @@ where
                                     let _ = sender.send(Ok(info.clone()));
                                 }
                             }
-                            UploadTransferAck::Continue => {}
+                            UploadTransferAck::Continue | UploadTransferAck::Cancelled => {}
                         }
                         if let Some(reply_to) = reply_to {
                             client
                                 .publish(reply_to, Bytes::from(serde_json::to_vec(&ack)?))
                                 .await
                                 .map_err(|error| ServerError::Nats(error.to_string()))?;
+                        }
+                        if matches!(
+                            ack,
+                            UploadTransferAck::Complete { .. } | UploadTransferAck::Cancelled
+                        ) {
+                            return Ok(());
                         }
                     }
                     Err(error) => {
@@ -668,7 +722,17 @@ where
                             let _ = sender.send(Err(transfer_completion_error(&error)));
                         }
                         if let Some(reply_to) = reply_to {
-                            publish_error_reply(&client, reply_to, &error).await?;
+                            if matches!(error, ServerError::TransferCancelled { .. }) {
+                                client
+                                    .publish(
+                                        reply_to,
+                                        Bytes::from_static(b"{\"status\":\"cancelled\"}"),
+                                    )
+                                    .await
+                                    .map_err(|error| ServerError::Nats(error.to_string()))?;
+                            } else {
+                                publish_error_reply(&client, reply_to, &error).await?;
+                            }
                         }
                         return Ok(());
                     }
@@ -796,6 +860,30 @@ fn transfer_completion_error(error: &ServerError) -> ServerError {
             expected_size: *expected_size,
             actual_size: *actual_size,
         },
+        ServerError::TransferDigestMismatch {
+            transfer_id,
+            expected_digest,
+            actual_digest,
+        } => ServerError::TransferDigestMismatch {
+            transfer_id: transfer_id.clone(),
+            expected_digest: expected_digest.clone(),
+            actual_digest: actual_digest.clone(),
+        },
+        ServerError::TransferCancelled { transfer_id } => ServerError::TransferCancelled {
+            transfer_id: transfer_id.clone(),
+        },
+        ServerError::StoreCommitIndeterminate { key, message } => {
+            ServerError::StoreCommitIndeterminate {
+                key: key.clone(),
+                message: message.clone(),
+            }
+        }
+        ServerError::StoreCommittedCleanupFailed { key, message } => {
+            ServerError::StoreCommittedCleanupFailed {
+                key: key.clone(),
+                message: message.clone(),
+            }
+        }
         _ => ServerError::Nats(error.to_string()),
     }
 }
@@ -813,27 +901,69 @@ where
     V: RequestValidator + 'static,
 {
     let mut subscriber = Box::pin(subscriber);
-    let capacity = usize::try_from(plan.grant.chunk_bytes)
-        .unwrap_or(usize::MAX)
-        .max(1);
-    let (mut pipe_writer, mut pipe_reader) = tokio::io::duplex(capacity);
-    let key = plan.grant.info.key.clone();
-    let store_task = tokio::spawn(async move { store.read_into(&key, &mut pipe_writer).await });
+    let capacity = usize::try_from(plan.grant.chunk_bytes).map_err(|_| {
+        ServerError::InvalidTransferChunkSize {
+            chunk_bytes: plan.grant.chunk_bytes,
+        }
+    })?;
+    validate_chunk_bytes(plan.grant.chunk_bytes)?;
+    let mut store = Some(store);
+    let mut pipe_reader = None;
+    let mut store_task = None;
     let mut seq = 0_u64;
     let mut transferred = 0_u64;
     let mut hasher = Sha256::new();
     let mut buffer = vec![0_u8; capacity];
+    let expiry = tokio::time::sleep(transfer_expiry_delay(&plan.grant.expires_at)?);
+    tokio::pin!(expiry);
 
-    while let Some(message) = subscriber.next().await {
+    loop {
+        let message = tokio::select! {
+            _ = &mut expiry => {
+                abort_store_task(&mut store_task).await;
+                return Ok(());
+            }
+            message = subscriber.next() => {
+                let Some(message) = message else {
+                    abort_store_task(&mut store_task).await;
+                    return Ok(());
+                };
+                message
+            }
+        };
         let Some(reply_to) = message.reply.as_ref().map(ToString::to_string) else {
             continue;
         };
         if let Err(error) = validate_download_transfer_message(&plan, &validator, &message).await {
             publish_error_reply(&client, reply_to, &error).await?;
+            if matches!(error, ServerError::TransferExpired { .. }) {
+                abort_store_task(&mut store_task).await;
+                return Ok(());
+            }
             continue;
         }
         let frame =
             decode_upload_transfer_chunk(message.headers.as_ref(), message.payload.clone())?;
+        if frame.cancel {
+            if !matches!(
+                serde_json::from_slice(&message.payload),
+                Ok(UploadTransferControl::Cancel)
+            ) {
+                publish_error_reply(
+                    &client,
+                    reply_to,
+                    &ServerError::Nats("invalid download cancellation control".to_string()),
+                )
+                .await?;
+                continue;
+            }
+            abort_store_task(&mut store_task).await;
+            client
+                .publish(reply_to, Bytes::from_static(b"{\"status\":\"cancelled\"}"))
+                .await
+                .map_err(|error| ServerError::Nats(error.to_string()))?;
+            return Ok(());
+        }
         if frame.seq != seq {
             publish_error_reply(
                 &client,
@@ -847,18 +977,7 @@ where
             .await?;
             continue;
         }
-        if matches!(
-            serde_json::from_slice(&message.payload),
-            Ok(UploadTransferControl::Cancel)
-        ) {
-            store_task.abort();
-            client
-                .publish(reply_to, Bytes::from_static(b"{\"status\":\"cancelled\"}"))
-                .await
-                .map_err(|error| ServerError::Nats(error.to_string()))?;
-            return Ok(());
-        }
-        if !message.payload.is_empty() {
+        if frame.eof || !message.payload.is_empty() {
             publish_error_reply(
                 &client,
                 reply_to,
@@ -868,17 +987,78 @@ where
             continue;
         }
 
-        let count = match pipe_reader.read(&mut buffer).await {
+        if pipe_reader.is_none() {
+            let (mut pipe_writer, reader) = tokio::io::duplex(capacity);
+            let key = plan.grant.info.key.clone();
+            let store = store.take().ok_or_else(|| {
+                ServerError::Nats("download transfer store already started".to_string())
+            })?;
+            pipe_reader = Some(reader);
+            store_task = Some(tokio::spawn(async move {
+                store.read_into(&key, &mut pipe_writer).await
+            }));
+        }
+
+        let count = match loop {
+            tokio::select! {
+                _ = &mut expiry => {
+                    abort_store_task(&mut store_task).await;
+                    return Ok(());
+                }
+                result = pipe_reader.as_mut().expect("download pipe initialized").read(&mut buffer) => break result,
+                control = subscriber.next() => {
+                    let Some(control) = control else {
+                        abort_store_task(&mut store_task).await;
+                        return Ok(());
+                    };
+                    let Some(control_reply) = control.reply.as_ref().map(ToString::to_string) else {
+                        continue;
+                    };
+                    if let Err(error) = validate_download_transfer_message(&plan, &validator, &control).await {
+                        publish_error_reply(&client, control_reply, &error).await?;
+                        continue;
+                    }
+                    let frame = decode_upload_transfer_chunk(
+                        control.headers.as_ref(),
+                        control.payload.clone(),
+                    )?;
+                    if frame.cancel && matches!(
+                        serde_json::from_slice(&control.payload),
+                        Ok(UploadTransferControl::Cancel)
+                    ) {
+                        abort_store_task(&mut store_task).await;
+                        client
+                            .publish(
+                                control_reply,
+                                Bytes::from_static(b"{\"status\":\"cancelled\"}"),
+                            )
+                            .await
+                            .map_err(|error| ServerError::Nats(error.to_string()))?;
+                        return Ok(());
+                    }
+                    publish_error_reply(
+                        &client,
+                        control_reply,
+                        &ServerError::Nats("download transfer already has a pending pull".to_string()),
+                    )
+                    .await?;
+                }
+            }
+        } {
             Ok(count) => count,
             Err(error) => {
-                store_task.abort();
+                abort_store_task(&mut store_task).await;
                 publish_error_reply(&client, reply_to, &ServerError::Nats(error.to_string()))
                     .await?;
                 return Ok(());
             }
         };
         if count == 0 {
-            let store_info = match store_task.await {
+            let store_info = match store_task
+                .take()
+                .ok_or_else(|| ServerError::Nats("download transfer task missing".to_string()))?
+                .await
+            {
                 Ok(Ok(Some(info))) => info,
                 Ok(Ok(None)) => {
                     publish_error_reply(
@@ -917,29 +1097,30 @@ where
                 return Ok(());
             }
             let digest = format!("SHA-256={}", URL_SAFE_NO_PAD.encode(hasher.finalize()));
-            if plan
-                .grant
-                .info
+            if !transfer_digests_match(&plan.grant.info.digest, &digest) {
+                publish_error_reply(
+                    &client,
+                    reply_to,
+                    &ServerError::TransferDigestMismatch {
+                        transfer_id: plan.grant.transfer_id.clone(),
+                        expected_digest: plan.grant.info.digest.clone(),
+                        actual_digest: digest,
+                    },
+                )
+                .await?;
+                return Ok(());
+            }
+            if let Some(expected) = store_info
                 .digest
                 .as_ref()
-                .is_some_and(|expected| !transfer_digests_match(expected, &digest))
-                || store_info
-                    .digest
-                    .as_ref()
-                    .is_some_and(|expected| !transfer_digests_match(expected, &digest))
+                .filter(|expected| !transfer_digests_match(expected, &digest))
             {
                 publish_error_reply(
                     &client,
                     reply_to,
                     &ServerError::TransferDigestMismatch {
                         transfer_id: plan.grant.transfer_id.clone(),
-                        expected_digest: plan
-                            .grant
-                            .info
-                            .digest
-                            .clone()
-                            .or(store_info.digest)
-                            .unwrap_or_default(),
+                        expected_digest: expected.clone(),
                         actual_digest: digest,
                     },
                 )
@@ -954,7 +1135,7 @@ where
             .checked_add(count as u64)
             .ok_or_else(|| ServerError::Nats("download transfer size overflow".to_string()))?;
         if next > plan.grant.info.size || plan.max_object_bytes.is_some_and(|max| next > max) {
-            store_task.abort();
+            abort_store_task(&mut store_task).await;
             publish_error_reply(
                 &client,
                 reply_to,
@@ -983,9 +1164,13 @@ where
             .checked_add(1)
             .ok_or_else(|| ServerError::Nats("download transfer sequence overflow".to_string()))?;
     }
-    store_task.abort();
+}
 
-    Ok(())
+async fn abort_store_task<T>(task: &mut Option<JoinHandle<T>>) {
+    if let Some(task) = task.take() {
+        task.abort();
+        let _ = task.await;
+    }
 }
 
 /// Subscribe and run an upload transfer endpoint that reports operation progress.
@@ -1128,25 +1313,26 @@ where
     V: RequestValidator,
 {
     let context = transfer_request_context(message);
+    let seq = parse_transfer_sequence(message.headers.as_ref())?;
+    let control = optional_header(message.headers.as_ref(), TRANSFER_CONTROL_HEADER);
+    let proof_payload = transfer_frame_proof_payload(seq, control, &message.payload);
     validate_transfer_request(
         session.subject(),
-        &message.payload,
+        &proof_payload,
         &context,
         session.session_key(),
         validator,
     )
     .await?;
     let chunk = decode_upload_transfer_chunk(message.headers.as_ref(), message.payload.clone())?;
-    if matches!(
-        serde_json::from_slice(&message.payload),
-        Ok(UploadTransferControl::Cancel)
-    ) {
-        if chunk.seq != session.next_seq {
-            return Err(ServerError::TransferSequenceOutOfOrder {
-                transfer_id: session.plan.grant.transfer_id.clone(),
-                expected_seq: session.next_seq,
-                actual_seq: chunk.seq,
-            });
+    if chunk.cancel {
+        if !matches!(
+            serde_json::from_slice(&message.payload),
+            Ok(UploadTransferControl::Cancel)
+        ) {
+            return Err(ServerError::Nats(
+                "invalid upload cancellation control".to_string(),
+            ));
         }
         session.abort();
         return Err(ServerError::TransferCancelled {
@@ -1175,9 +1361,12 @@ where
     V: RequestValidator,
 {
     let context = transfer_request_context(message);
+    let seq = parse_transfer_sequence(message.headers.as_ref())?;
+    let control = optional_header(message.headers.as_ref(), TRANSFER_CONTROL_HEADER);
+    let proof_payload = transfer_frame_proof_payload(seq, control, &message.payload);
     validate_transfer_request(
         &plan.grant.subject,
-        &message.payload,
+        &proof_payload,
         &context,
         &plan.grant.session_key,
         validator,
@@ -1289,6 +1478,15 @@ fn required_header<'a>(
     header: &'static str,
 ) -> Result<&'a str, ServerError> {
     optional_header(headers, header).ok_or(ServerError::MissingTransferHeader { header })
+}
+
+fn parse_transfer_sequence(headers: Option<&HeaderMap>) -> Result<u64, ServerError> {
+    let seq = required_header(headers, TRANSFER_SEQUENCE_HEADER)?;
+    seq.parse::<u64>()
+        .map_err(|_| ServerError::InvalidTransferHeader {
+            header: TRANSFER_SEQUENCE_HEADER,
+            value: seq.to_string(),
+        })
 }
 
 fn optional_header<'a>(headers: Option<&'a HeaderMap>, header: &str) -> Option<&'a str> {
@@ -1442,10 +1640,23 @@ fn enforce_upload_max_bytes(plan: &UploadTransferGrantPlan, size: u64) -> Result
 }
 
 fn validate_chunk_bytes(chunk_bytes: u64) -> Result<(), ServerError> {
-    if chunk_bytes == 0 {
+    if !(1..=MAX_TRANSFER_CHUNK_BYTES).contains(&chunk_bytes) {
         return Err(ServerError::InvalidTransferChunkSize { chunk_bytes });
     }
     Ok(())
+}
+
+fn deserialize_chunk_bytes<'de, D>(deserializer: D) -> Result<u64, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let chunk_bytes = u64::deserialize(deserializer)?;
+    if !(1..=MAX_TRANSFER_CHUNK_BYTES).contains(&chunk_bytes) {
+        return Err(serde::de::Error::custom(format!(
+            "transfer chunk size must be between 1 and {MAX_TRANSFER_CHUNK_BYTES} bytes"
+        )));
+    }
+    Ok(chunk_bytes)
 }
 
 fn current_time_iso() -> Result<String, ServerError> {
@@ -1537,6 +1748,8 @@ mod tests {
     #[derive(Debug, Clone, Default)]
     struct CommitOnEofStore {
         bytes: Arc<Mutex<Option<Vec<u8>>>>,
+        reported_size: Option<u64>,
+        reported_digest: Option<String>,
     }
 
     impl StoreResourceClient for CommitOnEofStore {
@@ -1568,8 +1781,19 @@ mod tests {
             *self.bytes.lock().expect("test store lock") = Some(bytes);
             Ok(StoreObjectInfo {
                 key: key.to_string(),
-                size,
-                digest: None,
+                size: self.reported_size.unwrap_or(size),
+                digest: self.reported_digest.clone().or_else(|| {
+                    Some(format!(
+                        "SHA-256={}",
+                        URL_SAFE_NO_PAD.encode(Sha256::digest(
+                            self.bytes
+                                .lock()
+                                .expect("test store lock")
+                                .as_deref()
+                                .unwrap_or_default()
+                        ))
+                    ))
+                }),
                 modified_at: None,
             })
         }
@@ -1615,6 +1839,7 @@ mod tests {
                     seq: 0,
                     payload: Bytes::from_static(b"1234"),
                     eof: false,
+                    cancel: false,
                 },
                 "2026-08-26T00:00:00Z",
             )
@@ -1634,6 +1859,7 @@ mod tests {
                     seq: 1,
                     payload: Bytes::from(completion),
                     eof: true,
+                    cancel: false,
                 },
                 "2026-08-26T00:00:00Z",
             )
@@ -1658,6 +1884,7 @@ mod tests {
                     seq: 0,
                     payload: Bytes::from_static(b"1234"),
                     eof: false,
+                    cancel: false,
                 },
                 "2026-08-26T00:00:00Z",
             )
@@ -1666,6 +1893,107 @@ mod tests {
         session.abort();
         tokio::task::yield_now().await;
         assert!(store.bytes.lock().expect("test store lock").is_none());
+    }
+
+    #[test]
+    fn cancellation_json_is_data_without_an_explicit_control_header() {
+        let mut headers = HeaderMap::new();
+        headers.insert(TRANSFER_SEQUENCE_HEADER, "0");
+        let chunk = decode_upload_transfer_chunk(
+            Some(&headers),
+            Bytes::from_static(br#"{"action":"cancel"}"#),
+        )
+        .expect("decode arbitrary data frame");
+
+        assert!(!chunk.cancel);
+        assert!(!chunk.eof);
+        assert_eq!(chunk.payload, Bytes::from_static(br#"{"action":"cancel"}"#));
+    }
+
+    #[test]
+    fn authenticated_framing_matches_shared_transfer_v2_vectors() {
+        let vectors: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../../../conformance/transfer-v2-vectors.json"
+        ))
+        .unwrap();
+        for vector in vectors["vectors"].as_array().unwrap() {
+            let payload = URL_SAFE_NO_PAD
+                .decode(vector["payloadBase64url"].as_str().unwrap())
+                .unwrap();
+            let framed = transfer_frame_proof_payload(
+                vector["seq"].as_u64().unwrap(),
+                vector["control"].as_str(),
+                &payload,
+            );
+            assert_eq!(
+                URL_SAFE_NO_PAD.encode(framed),
+                vector["framedBase64url"].as_str().unwrap()
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn upload_rejects_backend_final_size_and_digest_mismatches() {
+        let expected_digest = format!(
+            "SHA-256={}",
+            URL_SAFE_NO_PAD.encode(Sha256::digest(b"1234"))
+        );
+        for (store, size_mismatch) in [
+            (
+                CommitOnEofStore {
+                    reported_size: Some(5),
+                    ..Default::default()
+                },
+                true,
+            ),
+            (
+                CommitOnEofStore {
+                    reported_digest: Some("SHA-256=wrong".to_string()),
+                    ..Default::default()
+                },
+                false,
+            ),
+        ] {
+            let mut session = UploadTransferSession::new(upload_plan(4), "2026-08-26T00:00:00Z");
+            session.start(store).await.unwrap();
+            session
+                .receive_at(
+                    UploadTransferChunk {
+                        seq: 0,
+                        payload: Bytes::from_static(b"1234"),
+                        eof: false,
+                        cancel: false,
+                    },
+                    "2026-08-26T00:00:00Z",
+                )
+                .await
+                .unwrap();
+            let completion = serde_json::to_vec(&UploadTransferControl::Complete {
+                size: 4,
+                digest: expected_digest.clone(),
+            })
+            .unwrap();
+            let error = session
+                .receive_at(
+                    UploadTransferChunk {
+                        seq: 1,
+                        payload: Bytes::from(completion),
+                        eof: true,
+                        cancel: false,
+                    },
+                    "2026-08-26T00:00:00Z",
+                )
+                .await
+                .unwrap_err();
+            assert_eq!(
+                matches!(&error, ServerError::TransferObjectSizeMismatch { .. }),
+                size_mismatch
+            );
+            assert_eq!(
+                matches!(&error, ServerError::TransferDigestMismatch { .. }),
+                !size_mismatch
+            );
+        }
     }
 
     impl RequestValidator for CountingValidator {

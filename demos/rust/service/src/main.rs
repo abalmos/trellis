@@ -118,6 +118,7 @@ struct Evidence {
     evidence_id: String,
     key: String,
     size: i64,
+    digest: Option<String>,
     content_type: Option<String>,
     evidence_type: String,
     file_name: Option<String>,
@@ -319,6 +320,7 @@ impl StoreResourceClient for EvidenceStore {
                     || (upload_evidence_id.is_none() && evidence.key == key)
             }) {
                 evidence.size = i64::try_from(info.size).unwrap_or(i64::MAX);
+                evidence.digest = info.digest.clone();
                 evidence.uploaded_at = now_iso();
                 if evidence.file_name.is_none() {
                     evidence.file_name = key.rsplit('/').next().map(ToString::to_string);
@@ -1182,7 +1184,9 @@ async fn evidence_download(
             key: evidence.key,
             size: evidence.size as u64,
             updated_at: evidence.uploaded_at,
-            digest: None,
+            digest: evidence.digest.ok_or_else(|| {
+                ServerError::Nats("download evidence is missing a SHA-256 digest".to_string())
+            })?,
             content_type: evidence.content_type,
             metadata: BTreeMap::new(),
         },
@@ -1609,6 +1613,7 @@ async fn evidence_upload_start(
                 evidence_id: evidence_id.clone(),
                 key: input.key.clone(),
                 size: 0,
+                digest: None,
                 content_type: input.content_type.clone(),
                 evidence_type: input.evidence_type,
                 file_name: file_name.clone(),
@@ -2080,7 +2085,7 @@ fn download_transfer_to_response(grant: DownloadTransferGrant) -> EvidenceDownlo
             key: grant.info.key,
             size: grant.info.size as i64,
             updated_at: grant.info.updated_at,
-            digest: grant.info.digest,
+            digest: Some(grant.info.digest),
             content_type: grant.info.content_type,
             metadata: grant
                 .info
@@ -2127,6 +2132,7 @@ fn sample_state() -> AppState {
             evidence_id: "ev-1001".to_string(),
             key: "site-north/transformer-a/photo.txt".to_string(),
             size: 42,
+            digest: None,
             content_type: Some("text/plain".to_string()),
             evidence_type: "photo".to_string(),
             file_name: Some("photo.txt".to_string()),

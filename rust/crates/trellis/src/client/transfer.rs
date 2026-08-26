@@ -1,8 +1,4 @@
 use std::collections::BTreeMap;
-use std::sync::{
-    atomic::{AtomicBool, Ordering},
-    Arc,
-};
 use std::time::Duration;
 
 use async_nats::header::HeaderMap;
@@ -11,37 +7,51 @@ use bytes::Bytes;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest as _, Sha256};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
-use tokio::sync::Notify;
+use tokio::sync::watch;
 
 use crate::client::connection::signed_headers;
 use crate::client::{SessionAuth, TrellisClient, TrellisClientError};
 
 const TRANSFER_SEQUENCE_HEADER: &str = "trellis-transfer-seq";
 const TRANSFER_EOF_HEADER: &str = "trellis-transfer-eof";
+const TRANSFER_CONTROL_HEADER: &str = "trellis-transfer-control";
+const MAX_TRANSFER_CHUNK_BYTES: u64 = 1024 * 1024;
 
 /// Cloneable cancellation signal for an active transfer.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct TransferCancellation {
-    cancelled: Arc<AtomicBool>,
-    notify: Arc<Notify>,
+    sender: watch::Sender<bool>,
 }
 
 impl TransferCancellation {
     /// Create a cancellation signal in the active state.
     pub fn new() -> Self {
-        Self::default()
+        let (sender, _) = watch::channel(false);
+        Self { sender }
     }
 
     /// Request transfer cancellation.
     pub fn cancel(&self) {
-        self.cancelled.store(true, Ordering::Release);
-        self.notify.notify_waiters();
+        self.sender.send_replace(true);
     }
 
     async fn cancelled(&self) {
-        while !self.cancelled.load(Ordering::Acquire) {
-            self.notify.notified().await;
+        let mut receiver = self.sender.subscribe();
+        while !*receiver.borrow_and_update() {
+            if receiver.changed().await.is_err() {
+                return;
+            }
         }
+    }
+
+    fn is_cancelled(&self) -> bool {
+        *self.sender.borrow()
+    }
+}
+
+impl Default for TransferCancellation {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -51,8 +61,7 @@ pub struct FileInfo {
     pub key: String,
     pub size: u64,
     pub updated_at: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub digest: Option<String>,
+    pub digest: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub content_type: Option<String>,
     pub metadata: BTreeMap<String, String>,
@@ -70,6 +79,7 @@ pub struct UploadTransferGrant {
     pub transfer_id: String,
     pub subject: String,
     pub expires_at: String,
+    #[serde(deserialize_with = "deserialize_chunk_bytes")]
     pub chunk_bytes: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub max_bytes: Option<u64>,
@@ -91,6 +101,7 @@ pub struct DownloadTransferGrant {
     pub transfer_id: String,
     pub subject: String,
     pub expires_at: String,
+    #[serde(deserialize_with = "deserialize_chunk_bytes")]
     pub chunk_bytes: u64,
     pub info: FileInfo,
 }
@@ -100,6 +111,7 @@ pub struct DownloadTransferGrant {
 enum UploadAck {
     Continue,
     Complete { info: FileInfo },
+    Cancelled,
 }
 
 #[derive(Serialize)]
@@ -116,18 +128,41 @@ fn upload_headers(
     reply: &str,
     payload: &[u8],
     seq: u64,
-    eof: bool,
+    control: Option<&str>,
 ) -> Result<HeaderMap, TrellisClientError> {
-    let mut headers = signed_headers(auth, context_digest, subject, reply, payload)?;
+    let proof_payload = crate::service::transfer_frame_proof_payload(seq, control, payload);
+    let mut headers = signed_headers(auth, context_digest, subject, reply, &proof_payload)?;
     headers.insert(TRANSFER_SEQUENCE_HEADER, seq.to_string().as_str());
-    if eof {
-        headers.insert(TRANSFER_EOF_HEADER, "true");
+    if let Some(control) = control {
+        headers.insert(TRANSFER_CONTROL_HEADER, control);
     }
     Ok(headers)
 }
 
-fn upload_chunk_size(chunk_bytes: u64) -> usize {
-    (chunk_bytes as usize).max(1)
+fn transfer_chunk_size(chunk_bytes: u64) -> Result<usize, TrellisClientError> {
+    if !(1..=MAX_TRANSFER_CHUNK_BYTES).contains(&chunk_bytes) {
+        return Err(TrellisClientError::TransferProtocol(format!(
+            "transfer chunk size must be between 1 and {MAX_TRANSFER_CHUNK_BYTES} bytes, got {chunk_bytes}"
+        )));
+    }
+    usize::try_from(chunk_bytes).map_err(|_| {
+        TrellisClientError::TransferProtocol(
+            "transfer chunk size does not fit in usize".to_string(),
+        )
+    })
+}
+
+fn deserialize_chunk_bytes<'de, D>(deserializer: D) -> Result<u64, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let chunk_bytes = u64::deserialize(deserializer)?;
+    if !(1..=MAX_TRANSFER_CHUNK_BYTES).contains(&chunk_bytes) {
+        return Err(serde::de::Error::custom(format!(
+            "transfer chunk size must be between 1 and {MAX_TRANSFER_CHUNK_BYTES} bytes"
+        )));
+    }
+    Ok(chunk_bytes)
 }
 
 pub(crate) async fn put_upload_grant(
@@ -173,7 +208,7 @@ where
             )));
         }
     }
-    let max_chunk = upload_chunk_size(grant.chunk_bytes);
+    let max_chunk = transfer_chunk_size(grant.chunk_bytes)?;
     let context_digest = client.authorization_context_digest()?;
     let mut seq: u64 = 0;
     let mut transferred = 0_u64;
@@ -237,22 +272,38 @@ where
             &reply,
             chunk,
             seq,
-            false,
+            None,
         )?;
         let request = async_nats::Request::new()
             .inbox(reply)
             .headers(headers)
             .payload(Bytes::copy_from_slice(chunk));
-        let response = tokio::time::timeout(
+        let response = match tokio::time::timeout(
             Duration::from_millis(client.timeout_ms()),
             client.nats().send_request(grant.subject.clone(), request),
         )
         .await
-        .map_err(|_| TrellisClientError::Timeout)?
-        .map_err(|error| TrellisClientError::NatsRequest(error.to_string()))?;
+        {
+            Ok(Ok(response)) => response,
+            Ok(Err(error)) => {
+                let _ = send_transfer_cancel(client, &grant.subject, &context_digest, seq).await;
+                return Err(TrellisClientError::NatsRequest(error.to_string()));
+            }
+            Err(_) => {
+                let _ = send_transfer_cancel(client, &grant.subject, &context_digest, seq).await;
+                return Err(TrellisClientError::Timeout);
+            }
+        };
 
-        let ack = parse_upload_ack(response)?;
-        if matches!(ack, UploadAck::Complete { .. }) {
+        let ack = match parse_upload_ack(response) {
+            Ok(ack) => ack,
+            Err(error) => {
+                let _ = send_transfer_cancel(client, &grant.subject, &context_digest, seq).await;
+                return Err(error);
+            }
+        };
+        if !matches!(ack, UploadAck::Continue) {
+            let _ = send_transfer_cancel(client, &grant.subject, &context_digest, seq).await;
             return Err(TrellisClientError::TransferProtocol(
                 "upload completed before eof frame".into(),
             ));
@@ -287,7 +338,7 @@ where
         &reply,
         &completion,
         seq,
-        true,
+        Some("complete"),
     )?;
     let request = async_nats::Request::new()
         .inbox(reply)
@@ -302,10 +353,24 @@ where
     .map_err(|error| TrellisClientError::NatsRequest(error.to_string()))?;
 
     match parse_upload_ack(response)? {
-        UploadAck::Continue => Err(TrellisClientError::TransferProtocol(
+        UploadAck::Continue | UploadAck::Cancelled => Err(TrellisClientError::TransferProtocol(
             "upload finished without completion payload".into(),
         )),
-        UploadAck::Complete { info } => Ok(info),
+        UploadAck::Complete { info } => {
+            if info.size != transferred {
+                return Err(TrellisClientError::TransferProtocol(format!(
+                    "upload result size mismatch: expected {transferred}, got {}",
+                    info.size
+                )));
+            }
+            if !transfer_digests_match(&info.digest, &digest) {
+                return Err(TrellisClientError::TransferProtocol(format!(
+                    "upload result digest mismatch: expected {digest}, got {:?}",
+                    info.digest
+                )));
+            }
+            Ok(info)
+        }
     }
 }
 
@@ -324,9 +389,9 @@ async fn send_transfer_cancel(
         &reply,
         &payload,
         seq,
-        false,
+        Some("cancel"),
     )?;
-    tokio::time::timeout(
+    let response = tokio::time::timeout(
         Duration::from_millis(client.timeout_ms()),
         client.nats().send_request(
             subject.to_string(),
@@ -339,6 +404,11 @@ async fn send_transfer_cancel(
     .await
     .map_err(|_| TrellisClientError::Timeout)?
     .map_err(|error| TrellisClientError::NatsRequest(error.to_string()))?;
+    if !matches!(parse_upload_ack(response)?, UploadAck::Cancelled) {
+        return Err(TrellisClientError::TransferProtocol(
+            "transfer cancellation was not acknowledged".to_string(),
+        ));
+    }
     Ok(())
 }
 
@@ -371,14 +441,37 @@ pub(crate) async fn get_download_grant_into_with_cancel<W>(
 where
     W: AsyncWrite + Unpin + Send + ?Sized,
 {
+    let result = get_download_grant_into_inner(client, grant, writer, cancellation).await;
+    if result.is_err()
+        && !matches!(&result, Err(TrellisClientError::TransferCancelled))
+        && grant.session_key == client.auth().session_key
+    {
+        if let Ok(context_digest) = client.authorization_context_digest() {
+            let _ = send_transfer_cancel(client, &grant.subject, &context_digest, 0).await;
+        }
+    }
+    result
+}
+
+async fn get_download_grant_into_inner<W>(
+    client: &TrellisClient,
+    grant: &DownloadTransferGrant,
+    writer: &mut W,
+    cancellation: Option<&TransferCancellation>,
+) -> Result<FileInfo, TrellisClientError>
+where
+    W: AsyncWrite + Unpin + Send + ?Sized,
+{
     validate_grant(&grant.session_key, client)?;
+    transfer_chunk_size(grant.chunk_bytes)?;
+    let expected_digest = &grant.info.digest;
     let context_digest = client.authorization_context_digest()?;
 
     let mut expected_seq = 0_u64;
     let mut transferred = 0_u64;
     let mut hasher = Sha256::new();
     loop {
-        if cancellation.is_some_and(|signal| signal.cancelled.load(Ordering::Acquire)) {
+        if cancellation.is_some_and(TransferCancellation::is_cancelled) {
             send_transfer_cancel(client, &grant.subject, &context_digest, expected_seq).await?;
             return Err(TrellisClientError::TransferCancelled);
         }
@@ -390,7 +483,7 @@ where
             &reply,
             &[],
             expected_seq,
-            false,
+            None,
         )?;
         let request = async_nats::Request::new()
             .inbox(reply)
@@ -487,19 +580,35 @@ where
                     grant.info.size
                 )));
             }
-            if let Some(expected_digest) = grant.info.digest.as_ref() {
-                let actual_digest =
-                    format!("SHA-256={}", URL_SAFE_NO_PAD.encode(hasher.finalize()));
-                if actual_digest.trim_end_matches('=') != expected_digest.trim_end_matches('=') {
-                    return Err(TrellisClientError::TransferProtocol(format!(
-                        "download digest mismatch: expected {expected_digest}, got {actual_digest}"
-                    )));
-                }
+            let actual_digest = format!("SHA-256={}", URL_SAFE_NO_PAD.encode(hasher.finalize()));
+            if !transfer_digests_match(&actual_digest, expected_digest) {
+                return Err(TrellisClientError::TransferProtocol(format!(
+                    "download digest mismatch: expected {expected_digest}, got {actual_digest}"
+                )));
             }
             return Ok(grant.info.clone());
         }
 
-        writer.write_all(&message.payload).await?;
+        let write = writer.write_all(&message.payload);
+        if let Some(cancellation) = cancellation {
+            tokio::select! {
+                biased;
+                () = cancellation.cancelled() => {
+                    send_transfer_cancel(client, &grant.subject, &context_digest, expected_seq).await?;
+                    return Err(TrellisClientError::TransferCancelled);
+                }
+                result = write => {
+                    if let Err(error) = result {
+                        let _ = send_transfer_cancel(client, &grant.subject, &context_digest, expected_seq).await;
+                        return Err(error.into());
+                    }
+                }
+            }
+        } else if let Err(error) = write.await {
+            let _ =
+                send_transfer_cancel(client, &grant.subject, &context_digest, expected_seq).await;
+            return Err(error.into());
+        }
         hasher.update(&message.payload);
         transferred = next;
         expected_seq = expected_seq.checked_add(1).ok_or_else(|| {
@@ -525,6 +634,10 @@ fn validate_grant(
         ));
     }
     Ok(())
+}
+
+fn transfer_digests_match(left: &str, right: &str) -> bool {
+    left.trim_end_matches('=') == right.trim_end_matches('=')
 }
 
 fn parse_upload_ack(message: async_nats::Message) -> Result<UploadAck, TrellisClientError> {
@@ -556,16 +669,68 @@ mod tests {
 
     const TEST_CONTEXT_DIGEST: &str = "byhVYTUxr4iVywgon-utTJesrl5WZVm1MC0PXqCU06c";
 
+    #[tokio::test]
+    async fn cancellation_cannot_lose_registration_wakeups() {
+        for _ in 0..2_000 {
+            let cancellation = TransferCancellation::new();
+            let waiter = {
+                let cancellation = cancellation.clone();
+                tokio::spawn(async move { cancellation.cancelled().await })
+            };
+            tokio::task::yield_now().await;
+            cancellation.cancel();
+            tokio::time::timeout(Duration::from_secs(1), waiter)
+                .await
+                .expect("cancellation waiter must wake")
+                .expect("cancellation waiter task");
+        }
+    }
+
     #[test]
-    fn upload_chunk_size_never_returns_zero() {
-        assert_eq!(upload_chunk_size(0), 1);
-        assert_eq!(upload_chunk_size(6), 6);
+    fn transfer_chunk_size_is_bounded() {
+        assert!(transfer_chunk_size(0).is_err());
+        assert_eq!(transfer_chunk_size(6).unwrap(), 6);
+        assert!(transfer_chunk_size(MAX_TRANSFER_CHUNK_BYTES + 1).is_err());
+    }
+
+    #[test]
+    fn download_grant_deserialization_rejects_invalid_bounds_and_missing_digest() {
+        let grant = serde_json::json!({
+            "type": "TransferGrant",
+            "direction": "receive",
+            "service": "service",
+            "sessionKey": "session",
+            "transferId": "transfer",
+            "subject": "transfer.v2.download.service.transfer",
+            "expiresAt": "2099-01-01T00:00:00Z",
+            "chunkBytes": 1,
+            "info": {
+                "key": "object",
+                "size": 0,
+                "updatedAt": "2099-01-01T00:00:00Z",
+                "digest": "SHA-256=47DEQpj8HBSa-_TImW-5JCeuQeRkm5NMpJWZG3hSuFU",
+                "metadata": {}
+            }
+        });
+        assert!(serde_json::from_value::<DownloadTransferGrant>(grant.clone()).is_ok());
+
+        for chunk_bytes in [0, MAX_TRANSFER_CHUNK_BYTES + 1] {
+            let mut invalid = grant.clone();
+            invalid["chunkBytes"] = chunk_bytes.into();
+            assert!(serde_json::from_value::<DownloadTransferGrant>(invalid).is_err());
+        }
+        let mut missing_digest = grant;
+        missing_digest["info"]
+            .as_object_mut()
+            .unwrap()
+            .remove("digest");
+        assert!(serde_json::from_value::<DownloadTransferGrant>(missing_digest).is_err());
     }
 
     #[test]
     fn upload_chunks_match_raw_transfer_sequence() {
         let body = b"hello world";
-        let chunks: Vec<&[u8]> = body.chunks(upload_chunk_size(6)).collect();
+        let chunks: Vec<&[u8]> = body.chunks(transfer_chunk_size(6).unwrap()).collect();
 
         assert_eq!(chunks, vec![b"hello ".as_slice(), b"world".as_slice()]);
         assert_eq!(chunks.len() as u64, 2);
@@ -583,11 +748,24 @@ mod tests {
             .expect("context digest")
             .try_into()
             .expect("context digest bytes");
+        let seq = headers
+            .get(TRANSFER_SEQUENCE_HEADER)
+            .expect("sequence")
+            .as_str()
+            .parse()
+            .expect("sequence integer");
+        let proof_payload = crate::service::transfer_frame_proof_payload(
+            seq,
+            headers
+                .get(TRANSFER_CONTROL_HEADER)
+                .map(async_nats::HeaderValue::as_str),
+            payload,
+        );
         let input = build_authorization_request_proof_input(
             &context_digest,
             subject,
             Some(reply),
-            payload,
+            &proof_payload,
             headers
                 .get("iat")
                 .expect("iat")
@@ -616,22 +794,15 @@ mod tests {
     }
 
     #[test]
-    fn upload_headers_include_session_proof_sequence_and_eof_marker() {
+    fn upload_headers_include_session_proof_sequence_and_control_kind() {
         let auth = test_auth();
         let subject = "transfer.v2.upload.test.tx1";
         let reply = "_INBOX.test.reply";
         let payload = b"hello ";
 
-        let chunk_headers = upload_headers(
-            &auth,
-            TEST_CONTEXT_DIGEST,
-            subject,
-            reply,
-            payload,
-            0,
-            false,
-        )
-        .expect("chunk headers");
+        let chunk_headers =
+            upload_headers(&auth, TEST_CONTEXT_DIGEST, subject, reply, payload, 0, None)
+                .expect("chunk headers");
 
         assert_eq!(
             chunk_headers
@@ -663,8 +834,16 @@ mod tests {
         );
         assert!(chunk_headers.get(TRANSFER_EOF_HEADER).is_none());
 
-        let eof_headers = upload_headers(&auth, TEST_CONTEXT_DIGEST, subject, reply, &[], 2, true)
-            .expect("eof headers");
+        let eof_headers = upload_headers(
+            &auth,
+            TEST_CONTEXT_DIGEST,
+            subject,
+            reply,
+            &[],
+            2,
+            Some("complete"),
+        )
+        .expect("control headers");
 
         assert_eq!(
             eof_headers
@@ -675,10 +854,10 @@ mod tests {
         );
         assert_eq!(
             eof_headers
-                .get(TRANSFER_EOF_HEADER)
-                .expect("eof marker")
+                .get(TRANSFER_CONTROL_HEADER)
+                .expect("control marker")
                 .as_str(),
-            "true"
+            "complete"
         );
         assert!(verify_request_proof_headers(
             &auth,

@@ -303,7 +303,10 @@ idempotent.
 - Start transfer-capable operations with the generated builder's
   `.transfer_from(reader, expected_size).start()` when the body is not already in
   memory. Download grants support `download_transfer_into(...)`; the bytes helpers
-  remain conveniences.
+  remain conveniences. Generated dependency aliases expose the same writer-based
+  download methods. Transfer grants restrict frames to 1 byte through 1 MiB;
+  cancellation is authenticated and acknowledged, and completion requires
+  independent final size and SHA-256 verification.
 - Providers receive `RequestContext`; capture
   `service.generated_handle()` at registration for resolved stores and other
   bound runtime resources.

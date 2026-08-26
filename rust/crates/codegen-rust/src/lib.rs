@@ -1181,6 +1181,20 @@ fn render_participant_cargo_toml(
     {
         dependency_lines.push("futures-util = \"0.3\"".to_string());
     }
+    if mappings.iter().any(|mapping| {
+        mapping
+            .use_ref
+            .rpc
+            .as_ref()
+            .and_then(|rpc| rpc.call.as_ref())
+            .is_some_and(|calls| {
+                calls
+                    .iter()
+                    .any(|key| mapping.manifest.render_model.rpc[key].transfer.is_some())
+            })
+    }) {
+        dependency_lines.push("tokio = { version = \"1\", features = [\"io-util\"] }".to_string());
+    }
     if let (Some(crate_name), Some(path)) = (&opts.owned_sdk_crate_name, &opts.owned_sdk_path) {
         let path = relative_path(&opts.out_dir, path);
         dependency_lines.push(format!(
@@ -2355,6 +2369,14 @@ fn render_participant_use_alias_rs(mapping: &ValidatedParticipantAlias) -> Strin
             "    /// Download bytes from a transfer grant returned by this dependency.".to_string(),
         );
         lines.push("    pub async fn download_transfer(&self, grant: &trellis_rs::generated::DownloadTransferGrant) -> Result<Vec<u8>, trellis_rs::generated::TrellisClientError> { self.transport.download_transfer(grant).await }".to_string());
+        lines.push(
+            "    /// Stream bytes from a transfer grant into a caller-owned writer.".to_string(),
+        );
+        lines.push("    pub async fn download_transfer_into<W>(&self, grant: &trellis_rs::generated::DownloadTransferGrant, writer: &mut W) -> Result<trellis_rs::generated::FileInfo, trellis_rs::generated::TrellisClientError> where W: tokio::io::AsyncWrite + Unpin + Send + ?Sized { self.transport.download_transfer_into(grant, writer).await }".to_string());
+        lines.push(
+            "    /// Stream bytes into a writer with authenticated cancellation.".to_string(),
+        );
+        lines.push("    pub async fn download_transfer_into_with_cancel<W>(&self, grant: &trellis_rs::generated::DownloadTransferGrant, writer: &mut W, cancellation: &trellis_rs::generated::TransferCancellation) -> Result<trellis_rs::generated::FileInfo, trellis_rs::generated::TrellisClientError> where W: tokio::io::AsyncWrite + Unpin + Send + ?Sized { self.transport.download_transfer_into_with_cancel(grant, writer, cancellation).await }".to_string());
     }
     if let Some(operations) = &mapping.use_ref.operations {
         for key in operations.invoke.as_deref().unwrap_or(&[]) {
@@ -5345,7 +5367,8 @@ mod tests {
                     "Core.Info": {
                         "version":"v1",
                         "input":{"schema":"CatalogInput"},
-                        "output":{"schema":"CatalogOutput"}
+                        "output":{"schema":"CatalogOutput"},
+                        "transfer":{"direction":"receive"}
                     },
                     "Core.Api.Get": {
                         "version":"v1",
@@ -5469,6 +5492,7 @@ mod tests {
         assert!(cargo_toml.contains("trellis-contracts = { path = "));
         assert!(!cargo_toml.contains("trellis-service"));
         assert!(cargo_toml.contains("futures-util = \"0.3\""));
+        assert!(cargo_toml.contains("tokio = { version = \"1\", features = [\"io-util\"] }"));
         assert!(!out_dir.join("facade/build.rs").exists());
         assert!(trellis_md.contains("# Trellis Participant Guide: audit@v1"));
         assert!(trellis_md
@@ -5522,6 +5546,31 @@ mod tests {
         assert!(!owned_rs.contains("pub fn register_audit_feed"));
         assert!(out_dir.join("facade/apis/core.json").exists());
         assert!(out_dir.join("facade/apis/auth.json").exists());
+        fs::write(
+            out_dir.join("facade/src/stream_compile.rs"),
+            r#"#[allow(dead_code)]
+async fn download_through_alias<W>(
+    client: &crate::uses::core::Client<'_>,
+    grant: &trellis_rs::generated::DownloadTransferGrant,
+    writer: &mut W,
+    cancellation: &trellis_rs::generated::TransferCancellation,
+) -> Result<trellis_rs::generated::FileInfo, trellis_rs::generated::TrellisClientError>
+where
+    W: tokio::io::AsyncWrite + Unpin + Send + ?Sized,
+{
+    client.download_transfer_into(grant, writer).await?;
+    client
+        .download_transfer_into_with_cancel(grant, writer, cancellation)
+        .await
+}
+"#,
+        )
+        .unwrap();
+        fs::write(
+            out_dir.join("facade/src/lib.rs"),
+            format!("{}\nmod stream_compile;\n", lib_rs),
+        )
+        .unwrap();
         cargo_check(&out_dir.join("facade/Cargo.toml"));
 
         fs::remove_dir_all(out_dir).unwrap();
