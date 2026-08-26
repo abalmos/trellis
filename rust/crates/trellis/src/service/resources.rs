@@ -3,6 +3,10 @@ use std::{
     future::{pending, Future},
     io::Cursor,
     pin::Pin,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
     task::{Context, Poll},
     time::Duration,
 };
@@ -286,25 +290,28 @@ enum UploadReadFailure {
     Cancelled,
 }
 
-struct GuardedUploadReader<R, F> {
+struct GuardedUploadReader<R> {
     reader: R,
-    cancel: Pin<Box<F>>,
+    validated_eof: Arc<AtomicBool>,
     expected_size: Option<u64>,
     max_size: Option<u64>,
     read: u64,
-    validated_eof: bool,
     failure: Option<UploadReadFailure>,
 }
 
-impl<R, F> GuardedUploadReader<R, F> {
-    fn new(reader: R, expected_size: Option<u64>, max_size: Option<u64>, cancel: F) -> Self {
+impl<R> GuardedUploadReader<R> {
+    fn new(
+        reader: R,
+        expected_size: Option<u64>,
+        max_size: Option<u64>,
+        validated_eof: Arc<AtomicBool>,
+    ) -> Self {
         Self {
             reader,
-            cancel: Box::pin(cancel),
+            validated_eof,
             expected_size,
             max_size,
             read: 0,
-            validated_eof: false,
             failure: None,
         }
     }
@@ -333,10 +340,9 @@ impl<R, F> GuardedUploadReader<R, F> {
     }
 }
 
-impl<R, F> AsyncRead for GuardedUploadReader<R, F>
+impl<R> AsyncRead for GuardedUploadReader<R>
 where
     R: AsyncRead + Unpin,
-    F: Future<Output = ()>,
 {
     fn poll_read(
         self: Pin<&mut Self>,
@@ -344,17 +350,12 @@ where
         buf: &mut ReadBuf<'_>,
     ) -> Poll<std::io::Result<()>> {
         let this = self.get_mut();
-        if this.validated_eof {
+        if this.validated_eof.load(Ordering::Acquire) {
             return Poll::Ready(Ok(()));
         }
         if this.failure.is_some() {
             return Poll::Ready(Err(std::io::Error::other("guarded upload terminated")));
         }
-        if this.cancel.as_mut().poll(cx).is_ready() {
-            this.failure = Some(UploadReadFailure::Cancelled);
-            return Poll::Ready(Err(std::io::Error::other("store upload cancelled")));
-        }
-
         let limit = this.limit();
         if limit.is_some_and(|limit| this.read == limit) {
             let mut extra = [0_u8; 1];
@@ -363,7 +364,7 @@ where
                 Poll::Pending => Poll::Pending,
                 Poll::Ready(Err(error)) => Poll::Ready(Err(error)),
                 Poll::Ready(Ok(())) if probe.filled().is_empty() => {
-                    this.validated_eof = true;
+                    this.validated_eof.store(true, Ordering::Release);
                     Poll::Ready(Ok(()))
                 }
                 Poll::Ready(Ok(())) => {
@@ -406,7 +407,7 @@ where
                             )));
                         }
                     }
-                    this.validated_eof = true;
+                    this.validated_eof.store(true, Ordering::Release);
                 }
                 Poll::Ready(Ok(()))
             }
@@ -509,8 +510,29 @@ where
             }
         }
 
-        let mut guarded = GuardedUploadReader::new(reader, expected_size, max_size, cancel);
-        let result = self.client.write_from(key, &mut guarded).await;
+        let validated_eof = Arc::new(AtomicBool::new(false));
+        let mut guarded =
+            GuardedUploadReader::new(reader, expected_size, max_size, Arc::clone(&validated_eof));
+        let result = {
+            let write = self.client.write_from(key, &mut guarded);
+            tokio::pin!(write);
+            tokio::pin!(cancel);
+            tokio::select! {
+                biased;
+                result = &mut write => Some(result),
+                () = &mut cancel => {
+                    if validated_eof.load(Ordering::Acquire) {
+                        Some(write.await)
+                    } else {
+                        None
+                    }
+                }
+            }
+        };
+        if result.is_none() {
+            guarded.failure = Some(UploadReadFailure::Cancelled);
+        }
+        let result = result.unwrap_or(Err(ServerError::StoreWriteCancelled));
         match guarded.failure {
             Some(UploadReadFailure::TooLarge {
                 attempted_bytes,
@@ -1108,11 +1130,14 @@ fn nats_error(error: impl fmt::Display) -> ServerError {
 #[cfg(test)]
 mod tests {
     use std::sync::{
-        atomic::{AtomicUsize, Ordering},
+        atomic::{AtomicBool, AtomicUsize, Ordering},
         Arc, Mutex,
     };
 
-    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::{
+        io::{AsyncReadExt, AsyncWriteExt},
+        sync::{oneshot, Notify},
+    };
 
     use super::*;
 
@@ -1120,6 +1145,102 @@ mod tests {
     struct RecordingStore {
         writes: Arc<AtomicUsize>,
         bytes: Arc<Mutex<Vec<u8>>>,
+    }
+
+    #[derive(Debug, Clone, Default)]
+    struct StalledStore {
+        started: Arc<Notify>,
+        dropped: Arc<AtomicBool>,
+    }
+
+    #[derive(Debug, Clone, Default)]
+    struct CommitStalledStore {
+        committing: Arc<Notify>,
+        release: Arc<Notify>,
+    }
+
+    impl StoreResourceClient for CommitStalledStore {
+        async fn read_into<W>(
+            &self,
+            _key: &str,
+            _writer: &mut W,
+        ) -> Result<Option<StoreObjectInfo>, ServerError>
+        where
+            W: AsyncWrite + Unpin + Send,
+        {
+            unreachable!()
+        }
+
+        async fn write_from<R>(
+            &self,
+            key: &str,
+            reader: &mut R,
+        ) -> Result<StoreObjectInfo, ServerError>
+        where
+            R: AsyncRead + Unpin + Send,
+        {
+            let mut bytes = Vec::new();
+            reader.read_to_end(&mut bytes).await.map_err(nats_error)?;
+            self.committing.notify_one();
+            self.release.notified().await;
+            Ok(StoreObjectInfo {
+                key: key.to_string(),
+                size: bytes.len() as u64,
+                digest: None,
+                modified_at: None,
+            })
+        }
+
+        async fn list(&self) -> Result<Vec<String>, ServerError> {
+            unreachable!()
+        }
+
+        async fn delete(&self, _key: &str) -> Result<(), ServerError> {
+            unreachable!()
+        }
+    }
+
+    impl StoreResourceClient for StalledStore {
+        async fn read_into<W>(
+            &self,
+            _key: &str,
+            _writer: &mut W,
+        ) -> Result<Option<StoreObjectInfo>, ServerError>
+        where
+            W: AsyncWrite + Unpin + Send,
+        {
+            unreachable!()
+        }
+
+        async fn write_from<R>(
+            &self,
+            _key: &str,
+            reader: &mut R,
+        ) -> Result<StoreObjectInfo, ServerError>
+        where
+            R: AsyncRead + Unpin + Send,
+        {
+            struct DropFlag(Arc<AtomicBool>);
+            impl Drop for DropFlag {
+                fn drop(&mut self) {
+                    self.0.store(true, Ordering::SeqCst);
+                }
+            }
+
+            let mut byte = [0_u8; 1];
+            reader.read_exact(&mut byte).await.map_err(nats_error)?;
+            let _drop_flag = DropFlag(Arc::clone(&self.dropped));
+            self.started.notify_one();
+            pending().await
+        }
+
+        async fn list(&self) -> Result<Vec<String>, ServerError> {
+            unreachable!()
+        }
+
+        async fn delete(&self, _key: &str) -> Result<(), ServerError> {
+            unreachable!()
+        }
     }
 
     impl StoreResourceClient for RecordingStore {
@@ -1296,5 +1417,80 @@ mod tests {
             .await
             .expect_err("cancellation must abort upload");
         assert!(matches!(error, ServerError::StoreWriteCancelled));
+    }
+
+    #[tokio::test]
+    async fn store_write_from_cancellation_drops_stalled_backend_before_eof() {
+        let store = StalledStore::default();
+        let started = Arc::clone(&store.started);
+        let dropped = Arc::clone(&store.dropped);
+        let handle = StoreResourceHandle::new(
+            "test-service",
+            "uploads",
+            StoreResourceBinding {
+                name: "test_store".to_string(),
+                ttl_ms: 0,
+                max_object_bytes: None,
+                max_total_bytes: None,
+            },
+            store,
+        );
+        let (cancel_tx, cancel_rx) = oneshot::channel();
+        let task = tokio::spawn(async move {
+            handle
+                .write_from_with_cancel("key", Cursor::new(b"payload"), None, async {
+                    let _ = cancel_rx.await;
+                })
+                .await
+        });
+
+        started.notified().await;
+        cancel_tx.send(()).expect("send cancellation");
+        let result = tokio::time::timeout(Duration::from_secs(1), task)
+            .await
+            .expect("cancellation must not wait for stalled backend")
+            .expect("upload task must join");
+
+        assert!(matches!(result, Err(ServerError::StoreWriteCancelled)));
+        assert!(dropped.load(Ordering::SeqCst));
+    }
+
+    #[tokio::test]
+    async fn store_write_from_ignores_cancellation_after_validated_eof() {
+        let store = CommitStalledStore::default();
+        let committing = Arc::clone(&store.committing);
+        let release = Arc::clone(&store.release);
+        let handle = StoreResourceHandle::new(
+            "test-service",
+            "uploads",
+            StoreResourceBinding {
+                name: "test_store".to_string(),
+                ttl_ms: 0,
+                max_object_bytes: None,
+                max_total_bytes: None,
+            },
+            store,
+        );
+        let (cancel_tx, cancel_rx) = oneshot::channel();
+        let mut task = tokio::spawn(async move {
+            handle
+                .write_from_with_cancel("key", Cursor::new(b"payload"), None, async {
+                    let _ = cancel_rx.await;
+                })
+                .await
+        });
+
+        committing.notified().await;
+        cancel_tx.send(()).expect("send cancellation");
+        tokio::select! {
+            result = &mut task => panic!("cancellation rolled back validated EOF: {result:?}"),
+            () = tokio::time::sleep(Duration::from_millis(20)) => {}
+        }
+        release.notify_one();
+        let info = task
+            .await
+            .expect("upload task must join")
+            .expect("metadata commit must complete");
+        assert_eq!(info.size, 7);
     }
 }

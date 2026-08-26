@@ -115,10 +115,37 @@ type UploadSession = {
   timeoutId: ReturnType<typeof setTimeout>;
   queue: AsyncChunkQueue;
   putPromise: AsyncResult<void, StoreError>;
+  cancellation: AbortController;
+  committing: boolean;
   nextSeq: number;
   receivedBytes: number;
   hasher: ReturnType<typeof sha256.create>;
 };
+
+function raceCancellation<T>(
+  promise: Promise<T>,
+  signal: AbortSignal,
+): Promise<T> {
+  if (signal.aborted) return Promise.reject(signal.reason);
+  return new Promise<T>((resolve, reject) => {
+    const cancel = () => {
+      finish();
+      reject(signal.reason);
+    };
+    const finish = () => signal.removeEventListener("abort", cancel);
+    signal.addEventListener("abort", cancel, { once: true });
+    promise.then(
+      (value) => {
+        finish();
+        resolve(value);
+      },
+      (error) => {
+        finish();
+        reject(error);
+      },
+    );
+  });
+}
 
 type DownloadSession = {
   kind: "download";
@@ -140,6 +167,7 @@ type DownloadSession = {
   nextSeq: number;
   sentBytes: number;
   hasher: ReturnType<typeof sha256.create>;
+  cancellation: AbortController;
 };
 
 function effectiveUploadMaxBytes(
@@ -467,6 +495,8 @@ export class ServiceTransfer {
       ),
       queue,
       putPromise,
+      cancellation: new AbortController(),
+      committing: false,
       nextSeq: 0,
       receivedBytes: 0,
       hasher: sha256.create(),
@@ -615,6 +645,7 @@ export class ServiceTransfer {
       nextSeq: 0,
       sentBytes: 0,
       hasher: sha256.create(),
+      cancellation: new AbortController(),
       timeoutId: setTimeout(
         () => this.#cleanupDownloadSession(subject),
         args.expiresInMs,
@@ -693,14 +724,41 @@ export class ServiceTransfer {
   }
 
   async #runUploadSession(session: UploadSession): Promise<void> {
+    let pending: Promise<void> | undefined;
     try {
       for await (const msg of session.subscription) {
-        await this.#handleUploadMessage(session, msg);
-        if (!this.#uploadSessions.has(session.subject)) {
+        const cancellation = msg.headers?.get(TRANSFER_CONTROL_HEADER) ===
+          "cancel";
+        if (pending && !cancellation) {
+          replyError(
+            msg,
+            new TransferError({
+              operation: "put",
+              context: { reason: "pending_frame" },
+            }),
+          );
+          continue;
+        }
+        const handling = this.#handleUploadMessage(session, msg);
+        if (pending) {
+          await handling;
+          await pending.catch(() => undefined);
           break;
         }
+        let tracked: Promise<void>;
+        tracked = handling.catch((cause) => {
+          const error = cause instanceof TransferError
+            ? cause
+            : new TransferError({ operation: "put", cause });
+          replyError(msg, error);
+          this.#expireUploadSession(session.subject, error);
+        }).finally(() => {
+          if (pending === tracked) pending = undefined;
+        });
+        pending = tracked;
       }
     } finally {
+      await pending?.catch(() => undefined);
       this.#cleanupUploadSession(session.subject);
     }
   }
@@ -766,7 +824,16 @@ export class ServiceTransfer {
             "cancellation payload does not match its control header",
           );
         }
-        msg.respond(JSON.stringify({ status: "cancelled" }));
+        if (session.committing) {
+          replyError(
+            msg,
+            new TransferError({
+              operation: "put",
+              context: { reason: "cancel_after_validated_eof" },
+            }),
+          );
+          return;
+        }
         this.#expireUploadSession(
           session.subject,
           new TransferError({
@@ -774,6 +841,7 @@ export class ServiceTransfer {
             context: { reason: "cancelled" },
           }),
         );
+        msg.respond(JSON.stringify({ status: "cancelled" }));
         return;
       } catch (cause) {
         const error = new TransferError({
@@ -841,7 +909,10 @@ export class ServiceTransfer {
         this.#expireUploadSession(session.subject, error);
         return;
       }
-      await session.queue.push(msg.data);
+      await raceCancellation(
+        session.queue.push(msg.data),
+        session.cancellation.signal,
+      );
       session.hasher.update(msg.data);
       await session.onProgress?.({
         chunkIndex: session.nextSeq,
@@ -886,6 +957,8 @@ export class ServiceTransfer {
         return;
       }
       session.queue.close();
+      session.committing = true;
+      clearTimeout(session.timeoutId);
       const putResult = await session.putPromise;
       const putValue = putResult.take();
       if (isErr(putValue)) {
@@ -912,13 +985,16 @@ export class ServiceTransfer {
 
       const info = fileInfoFromStoreInfo(storedValue.info);
       if (
-        info.size !== session.receivedBytes || info.digest === undefined ||
+        info.key !== session.key || info.size !== session.receivedBytes ||
+        info.digest === undefined ||
         info.digest.replace(/=+$/, "") !== digest.replace(/=+$/, "")
       ) {
         const error = new TransferError({
           operation: "put",
           context: {
             reason: "stored_metadata_mismatch",
+            expectedKey: session.key,
+            actualKey: info.key,
             expectedSize: session.receivedBytes,
             actualSize: info.size,
             expectedDigest: digest,
@@ -950,11 +1026,40 @@ export class ServiceTransfer {
   }
 
   async #runDownloadSession(session: DownloadSession): Promise<void> {
+    let pending: Promise<boolean> | undefined;
     try {
       for await (const msg of session.subscription) {
-        if (await this.#handleDownloadRequest(session, msg)) break;
+        const cancellation = msg.headers?.get(TRANSFER_CONTROL_HEADER) ===
+          "cancel";
+        if (pending && !cancellation) {
+          replyError(
+            msg,
+            new TransferError({
+              operation: "get",
+              context: { reason: "pending_frame" },
+            }),
+          );
+          continue;
+        }
+        const handling = this.#handleDownloadRequest(session, msg);
+        if (pending) {
+          if (await handling) break;
+          continue;
+        }
+        let tracked: Promise<boolean>;
+        tracked = handling.then((done) => {
+          if (done) this.#cleanupDownloadSession(session.subject);
+          return done;
+        }).catch(() => {
+          this.#cleanupDownloadSession(session.subject);
+          return true;
+        }).finally(() => {
+          if (pending === tracked) pending = undefined;
+        });
+        pending = tracked;
       }
     } finally {
+      await pending?.catch(() => undefined);
       this.#cleanupDownloadSession(session.subject);
     }
   }
@@ -1031,6 +1136,12 @@ export class ServiceTransfer {
             "cancellation payload does not match its control header",
           );
         }
+        session.cancellation.abort(
+          new TransferError({
+            operation: "get",
+            context: { reason: "cancelled" },
+          }),
+        );
         await session.reader?.cancel().catch(() => undefined);
         msg.respond(JSON.stringify({ status: "cancelled" }));
         return true;
@@ -1096,7 +1207,10 @@ export class ServiceTransfer {
       while (
         !session.pending || session.pendingOffset >= session.pending.length
       ) {
-        const next = await session.reader.read();
+        const next = await raceCancellation(
+          session.reader.read(),
+          session.cancellation.signal,
+        );
         if (next.done) {
           if (session.sentBytes !== session.info.size) {
             throw new TransferError({
@@ -1176,6 +1290,7 @@ export class ServiceTransfer {
     if (!session) {
       return;
     }
+    session.cancellation.abort(error);
     session.queue.fail(error);
     void Promise.resolve(session.onError?.(error));
     this.#cleanupUploadSession(subject);
@@ -1187,6 +1302,7 @@ export class ServiceTransfer {
       return;
     }
     clearTimeout(session.timeoutId);
+    session.cancellation.abort();
     session.subscription.unsubscribe();
     this.#uploadSessions.delete(subject);
   }
@@ -1197,6 +1313,7 @@ export class ServiceTransfer {
       return;
     }
     clearTimeout(session.timeoutId);
+    session.cancellation.abort();
     session.subscription.unsubscribe();
     void session.reader?.cancel().catch(() => undefined);
     this.#downloadSessions.delete(subject);

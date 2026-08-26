@@ -1,4 +1,4 @@
-import { assertEquals } from "@std/assert";
+import { assertEquals, assertRejects } from "@std/assert";
 import { liveTrellisTest, runtimeScopeForCase } from "../_support/runtime.ts";
 import {
   createTransferFixture,
@@ -42,6 +42,14 @@ liveTrellisTest({
       const reader = stream.getReader();
       assertEquals((await reader.read()).done, false);
       await reader.cancel();
+
+      const staleStream = await client.transfer(cancelledGrant).stream()
+        .orThrow();
+      await assertRejects(
+        () => staleStream.getReader().cancel(),
+        Error,
+        "Transfer cancel failed",
+      );
     });
   },
 });

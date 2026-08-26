@@ -501,13 +501,13 @@ impl UploadTransferSession {
 
         let control: UploadTransferControl = serde_json::from_slice(&chunk.payload)?;
         let UploadTransferControl::Complete { size, digest } = control else {
-            self.abort();
+            self.abort().await;
             return Err(ServerError::TransferCancelled {
                 transfer_id: self.plan.grant.transfer_id.clone(),
             });
         };
         if size != self.transferred_bytes {
-            self.abort();
+            self.abort().await;
             return Err(ServerError::TransferObjectSizeMismatch {
                 store: self.plan.store_alias.clone(),
                 key: self.plan.key.clone(),
@@ -520,7 +520,7 @@ impl UploadTransferSession {
             URL_SAFE_NO_PAD.encode(self.hasher.clone().finalize())
         );
         if digest != actual_digest {
-            self.abort();
+            self.abort().await;
             return Err(ServerError::TransferDigestMismatch {
                 transfer_id: self.plan.grant.transfer_id.clone(),
                 expected_digest: digest,
@@ -538,6 +538,12 @@ impl UploadTransferSession {
             .map_err(|error| {
                 ServerError::Nats(format!("upload transfer task failed: {error}"))
             })??;
+        if stored.key != self.plan.key {
+            return Err(ServerError::Nats(format!(
+                "upload stored key mismatch: expected {}, got {}",
+                self.plan.key, stored.key
+            )));
+        }
         if stored.size != self.transferred_bytes {
             return Err(ServerError::TransferObjectSizeMismatch {
                 store: self.plan.store_alias.clone(),
@@ -577,9 +583,10 @@ impl UploadTransferSession {
         Ok(UploadTransferAck::Complete { info })
     }
 
-    fn abort(&mut self) {
+    async fn abort(&mut self) {
         self.upload_state.store(UPLOAD_ABORT, Ordering::Release);
         self.pipe.take();
+        abort_store_task(&mut self.upload_task).await;
     }
 
     /// Fail if the session has not received an EOF completion frame.
@@ -673,9 +680,9 @@ where
     let expiry = tokio::time::sleep(transfer_expiry_delay(&session.plan.grant.expires_at)?);
     tokio::pin!(expiry);
     loop {
-        tokio::select! {
+        let message = tokio::select! {
             _ = &mut expiry => {
-                session.abort();
+                session.abort().await;
                 if let Some(sender) = completion.take() {
                     let _ = sender.send(Err(ServerError::TransferExpired {
                         transfer_id: session.plan.grant.transfer_id.clone(),
@@ -688,61 +695,158 @@ where
                 let Some(message) = maybe_message else {
                     break;
                 };
-                let reply_to = message.reply.as_ref().map(ToString::to_string);
-                let result = handle_upload_transfer_message(&mut session, &validator, &message).await;
-                match result {
-                    Ok((ack, progress)) => {
-                        match &ack {
-                            UploadTransferAck::Continue if progress.chunk_bytes > 0 => {
-                                on_progress(progress);
-                            }
-                            UploadTransferAck::Complete { info } => {
-                                if let Some(sender) = completion.take() {
-                                    let _ = sender.send(Ok(info.clone()));
+                message
+            }
+        };
+        let reply_to = message.reply.as_ref().map(ToString::to_string);
+        let subject = session.subject().to_string();
+        let session_key = session.session_key().to_string();
+        let upload_state = Arc::clone(&session.upload_state);
+        enum Outcome {
+            Handled(Result<(UploadTransferAck, OperationTransferProgress), ServerError>),
+            Cancelled(Option<String>),
+            Expired,
+            Closed,
+        }
+        let outcome = {
+            let handling = handle_upload_transfer_message(&mut session, &validator, &message);
+            tokio::pin!(handling);
+            loop {
+                tokio::select! {
+                _ = &mut expiry, if upload_state.load(Ordering::Acquire) < UPLOAD_COMMIT => {
+                    break Outcome::Expired;
+                }
+                result = &mut handling => break Outcome::Handled(result),
+                pending = subscriber.next() => {
+                    let Some(pending) = pending else {
+                        break Outcome::Closed;
+                    };
+                    let pending_reply = pending.reply.as_ref().map(ToString::to_string);
+                    match decode_authenticated_upload_transfer_message(
+                        &subject,
+                        &session_key,
+                        &validator,
+                        &pending,
+                    ).await {
+                        Ok(chunk) if chunk.cancel => {
+                            if upload_state.load(Ordering::Acquire) >= UPLOAD_COMMIT {
+                                if let Some(pending_reply) = pending_reply {
+                                    publish_error_reply(
+                                        &client,
+                                        pending_reply,
+                                        &ServerError::Nats(
+                                            "upload transfer cannot be cancelled after validated EOF"
+                                                .to_string(),
+                                        ),
+                                    ).await?;
                                 }
+                            } else {
+                                break Outcome::Cancelled(pending_reply);
                             }
-                            UploadTransferAck::Continue | UploadTransferAck::Cancelled => {}
                         }
-                        if let Some(reply_to) = reply_to {
-                            client
-                                .publish(reply_to, Bytes::from(serde_json::to_vec(&ack)?))
-                                .await
-                                .map_err(|error| ServerError::Nats(error.to_string()))?;
+                        Ok(_) => {
+                            if let Some(pending_reply) = pending_reply {
+                                publish_error_reply(
+                                    &client,
+                                    pending_reply,
+                                    &ServerError::Nats(
+                                        "upload transfer already has a pending frame".to_string(),
+                                    ),
+                                ).await?;
+                            }
                         }
-                        if matches!(
-                            ack,
-                            UploadTransferAck::Complete { .. } | UploadTransferAck::Cancelled
-                        ) {
-                            return Ok(());
+                        Err(error) => {
+                            if let Some(pending_reply) = pending_reply {
+                                publish_error_reply(&client, pending_reply, &error).await?;
+                            }
                         }
                     }
-                    Err(error) => {
-                        session.abort();
-                        if let Some(sender) = completion.take() {
-                            let _ = sender.send(Err(transfer_completion_error(&error)));
+                }
+                }
+            }
+        };
+        match outcome {
+            Outcome::Expired => {
+                session.abort().await;
+                if let Some(sender) = completion.take() {
+                    let _ = sender.send(Err(ServerError::TransferExpired {
+                        transfer_id: session.plan.grant.transfer_id.clone(),
+                        expires_at: session.plan.grant.expires_at.clone(),
+                    }));
+                }
+                return Ok(());
+            }
+            Outcome::Closed => break,
+            Outcome::Cancelled(cancel_reply) => {
+                session.abort().await;
+                if let Some(sender) = completion.take() {
+                    let _ = sender.send(Err(ServerError::TransferCancelled {
+                        transfer_id: session.plan.grant.transfer_id.clone(),
+                    }));
+                }
+                if let Some(cancel_reply) = cancel_reply {
+                    client
+                        .publish(
+                            cancel_reply,
+                            Bytes::from_static(b"{\"status\":\"cancelled\"}"),
+                        )
+                        .await
+                        .map_err(|error| ServerError::Nats(error.to_string()))?;
+                }
+                return Ok(());
+            }
+            Outcome::Handled(result) => match result {
+                Ok((ack, progress)) => {
+                    match &ack {
+                        UploadTransferAck::Continue if progress.chunk_bytes > 0 => {
+                            on_progress(progress);
                         }
-                        if let Some(reply_to) = reply_to {
-                            if matches!(error, ServerError::TransferCancelled { .. }) {
-                                client
-                                    .publish(
-                                        reply_to,
-                                        Bytes::from_static(b"{\"status\":\"cancelled\"}"),
-                                    )
-                                    .await
-                                    .map_err(|error| ServerError::Nats(error.to_string()))?;
-                            } else {
-                                publish_error_reply(&client, reply_to, &error).await?;
+                        UploadTransferAck::Complete { info } => {
+                            if let Some(sender) = completion.take() {
+                                let _ = sender.send(Ok(info.clone()));
                             }
                         }
+                        UploadTransferAck::Continue | UploadTransferAck::Cancelled => {}
+                    }
+                    if let Some(reply_to) = reply_to {
+                        client
+                            .publish(reply_to, Bytes::from(serde_json::to_vec(&ack)?))
+                            .await
+                            .map_err(|error| ServerError::Nats(error.to_string()))?;
+                    }
+                    if matches!(
+                        ack,
+                        UploadTransferAck::Complete { .. } | UploadTransferAck::Cancelled
+                    ) {
                         return Ok(());
                     }
                 }
-            }
+                Err(error) => {
+                    session.abort().await;
+                    if let Some(sender) = completion.take() {
+                        let _ = sender.send(Err(transfer_completion_error(&error)));
+                    }
+                    if let Some(reply_to) = reply_to {
+                        if matches!(error, ServerError::TransferCancelled { .. }) {
+                            client
+                                .publish(
+                                    reply_to,
+                                    Bytes::from_static(b"{\"status\":\"cancelled\"}"),
+                                )
+                                .await
+                                .map_err(|error| ServerError::Nats(error.to_string()))?;
+                        } else {
+                            publish_error_reply(&client, reply_to, &error).await?;
+                        }
+                    }
+                    return Ok(());
+                }
+            },
         }
     }
 
+    session.abort().await;
     if let Some(sender) = completion.take() {
-        session.abort();
         let _ = sender.send(Err(ServerError::TransferMissingEof {
             transfer_id: session.plan.grant.transfer_id.clone(),
         }));
@@ -1082,6 +1186,18 @@ where
                     return Ok(());
                 }
             };
+            if store_info.key != plan.grant.info.key {
+                publish_error_reply(
+                    &client,
+                    reply_to,
+                    &ServerError::Nats(format!(
+                        "download stored key mismatch: expected {}, got {}",
+                        plan.grant.info.key, store_info.key
+                    )),
+                )
+                .await?;
+                return Ok(());
+            }
             if transferred != plan.grant.info.size || store_info.size != transferred {
                 publish_error_reply(
                     &client,
@@ -1110,11 +1226,20 @@ where
                 .await?;
                 return Ok(());
             }
-            if let Some(expected) = store_info
-                .digest
-                .as_ref()
-                .filter(|expected| !transfer_digests_match(expected, &digest))
-            {
+            let Some(expected) = store_info.digest.as_ref() else {
+                publish_error_reply(
+                    &client,
+                    reply_to,
+                    &ServerError::TransferDigestMismatch {
+                        transfer_id: plan.grant.transfer_id.clone(),
+                        expected_digest: plan.grant.info.digest.clone(),
+                        actual_digest: "missing backend digest".to_string(),
+                    },
+                )
+                .await?;
+                return Ok(());
+            };
+            if !transfer_digests_match(expected, &digest) {
                 publish_error_reply(
                     &client,
                     reply_to,
@@ -1312,29 +1437,15 @@ async fn handle_upload_transfer_message<V>(
 where
     V: RequestValidator,
 {
-    let context = transfer_request_context(message);
-    let seq = parse_transfer_sequence(message.headers.as_ref())?;
-    let control = optional_header(message.headers.as_ref(), TRANSFER_CONTROL_HEADER);
-    let proof_payload = transfer_frame_proof_payload(seq, control, &message.payload);
-    validate_transfer_request(
+    let chunk = decode_authenticated_upload_transfer_message(
         session.subject(),
-        &proof_payload,
-        &context,
         session.session_key(),
         validator,
+        message,
     )
     .await?;
-    let chunk = decode_upload_transfer_chunk(message.headers.as_ref(), message.payload.clone())?;
     if chunk.cancel {
-        if !matches!(
-            serde_json::from_slice(&message.payload),
-            Ok(UploadTransferControl::Cancel)
-        ) {
-            return Err(ServerError::Nats(
-                "invalid upload cancellation control".to_string(),
-            ));
-        }
-        session.abort();
+        session.abort().await;
         return Err(ServerError::TransferCancelled {
             transfer_id: session.plan.grant.transfer_id.clone(),
         });
@@ -1350,6 +1461,35 @@ where
     let now = current_time_iso()?;
     let ack = session.receive_at(chunk, &now).await?;
     Ok((ack, progress))
+}
+
+async fn decode_authenticated_upload_transfer_message<V>(
+    subject: &str,
+    session_key: &str,
+    validator: &V,
+    message: &async_nats::Message,
+) -> Result<UploadTransferChunk, ServerError>
+where
+    V: RequestValidator,
+{
+    let context = transfer_request_context(message);
+    let seq = parse_transfer_sequence(message.headers.as_ref())?;
+    let control = optional_header(message.headers.as_ref(), TRANSFER_CONTROL_HEADER);
+    let proof_payload = transfer_frame_proof_payload(seq, control, &message.payload);
+    validate_transfer_request(subject, &proof_payload, &context, session_key, validator).await?;
+    let chunk = decode_upload_transfer_chunk(message.headers.as_ref(), message.payload.clone())?;
+    if chunk.cancel {
+        if !matches!(
+            serde_json::from_slice(&message.payload),
+            Ok(UploadTransferControl::Cancel)
+        ) {
+            return Err(ServerError::Nats(
+                "invalid upload cancellation control".to_string(),
+            ));
+        }
+        return Ok(chunk);
+    }
+    Ok(chunk)
 }
 
 async fn validate_download_transfer_message<V>(
@@ -1748,6 +1888,7 @@ mod tests {
     #[derive(Debug, Clone, Default)]
     struct CommitOnEofStore {
         bytes: Arc<Mutex<Option<Vec<u8>>>>,
+        reported_key: Option<String>,
         reported_size: Option<u64>,
         reported_digest: Option<String>,
     }
@@ -1780,7 +1921,7 @@ mod tests {
             let size = bytes.len() as u64;
             *self.bytes.lock().expect("test store lock") = Some(bytes);
             Ok(StoreObjectInfo {
-                key: key.to_string(),
+                key: self.reported_key.clone().unwrap_or_else(|| key.to_string()),
                 size: self.reported_size.unwrap_or(size),
                 digest: self.reported_digest.clone().or_else(|| {
                     Some(format!(
@@ -1890,7 +2031,7 @@ mod tests {
             )
             .await
             .unwrap();
-        session.abort();
+        session.abort().await;
         tokio::task::yield_now().await;
         assert!(store.bytes.lock().expect("test store lock").is_none());
     }
@@ -1933,25 +2074,32 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn upload_rejects_backend_final_size_and_digest_mismatches() {
+    async fn upload_rejects_backend_final_key_size_and_digest_mismatches() {
         let expected_digest = format!(
             "SHA-256={}",
             URL_SAFE_NO_PAD.encode(Sha256::digest(b"1234"))
         );
-        for (store, size_mismatch) in [
+        for (store, expected_error) in [
             (
                 CommitOnEofStore {
                     reported_size: Some(5),
                     ..Default::default()
                 },
-                true,
+                "size",
             ),
             (
                 CommitOnEofStore {
                     reported_digest: Some("SHA-256=wrong".to_string()),
                     ..Default::default()
                 },
-                false,
+                "digest",
+            ),
+            (
+                CommitOnEofStore {
+                    reported_key: Some("wrong-key".to_string()),
+                    ..Default::default()
+                },
+                "key",
             ),
         ] {
             let mut session = UploadTransferSession::new(upload_plan(4), "2026-08-26T00:00:00Z");
@@ -1985,14 +2133,13 @@ mod tests {
                 )
                 .await
                 .unwrap_err();
-            assert_eq!(
-                matches!(&error, ServerError::TransferObjectSizeMismatch { .. }),
-                size_mismatch
-            );
-            assert_eq!(
-                matches!(&error, ServerError::TransferDigestMismatch { .. }),
-                !size_mismatch
-            );
+            assert!(match expected_error {
+                "size" => matches!(&error, ServerError::TransferObjectSizeMismatch { .. }),
+                "digest" => matches!(&error, ServerError::TransferDigestMismatch { .. }),
+                "key" =>
+                    matches!(&error, ServerError::Nats(message) if message.contains("key mismatch")),
+                _ => unreachable!(),
+            });
         }
     }
 

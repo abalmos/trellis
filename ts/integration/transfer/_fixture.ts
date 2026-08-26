@@ -87,6 +87,7 @@ export function createTransferFixture(
     onStored?: (
       object: { key: string; body: Uint8Array; size: number },
     ) => Promise<void> | void;
+    onTransferError?: (error: unknown) => Promise<void> | void;
   } = {},
 ) {
   const slug = integrationSlug(caseId);
@@ -209,7 +210,13 @@ export function createTransferFixture(
     try {
       await service.handleFilesUpload(
         async ({ input, op, transfer, client }) => {
-          const transferred = await transfer.completed().orThrow();
+          let transferred;
+          try {
+            transferred = await transfer.completed().orThrow();
+          } catch (error) {
+            await options.onTransferError?.(error);
+            throw error;
+          }
           if (options.onStored) {
             const store = await client.store.uploads.open().orThrow();
             const entry = await store.get(input.key).orThrow();

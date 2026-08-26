@@ -4,8 +4,12 @@ import { createTransferFixture } from "./_fixture.ts";
 
 const CASE_ID = "transfer.client-uploads-file-via-operation" as const;
 const storedBodies = new Map<string, Uint8Array>();
+let reportTransferError: (() => void) | undefined;
 const fixture = createTransferFixture(CASE_ID, {
-  onStored: ({ key, body }) => storedBodies.set(key, body),
+  onStored: ({ key, body }) => {
+    storedBodies.set(key, body);
+  },
+  onTransferError: () => reportTransferError?.(),
 });
 
 liveTrellisTest({
@@ -67,6 +71,30 @@ liveTrellisTest({
         }
         assertEquals(storedBodies.get(key), expected);
       }
+
+      const remoteAbort = new Promise<void>((resolve) => {
+        reportTransferError = resolve;
+      });
+      const sourceError = new Error("upload source failed");
+      const failedSource = {
+        async *[Symbol.asyncIterator]() {
+          yield new Uint8Array([1, 2, 3]);
+          throw sourceError;
+        },
+      };
+      const failedUpload = await client.filesUpload({
+        key: `${fixture.uploadKey}.source-error`,
+      }).transfer(failedSource).start().orThrow();
+      assertEquals((await failedUpload.wait()).isErr(), true);
+      await Promise.race([
+        remoteAbort,
+        new Promise<never>((_, reject) =>
+          setTimeout(
+            () => reject(new Error("remote upload abort was not observed")),
+            2_000,
+          )
+        ),
+      ]);
     });
   },
 });

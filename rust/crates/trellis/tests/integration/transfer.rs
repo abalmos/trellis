@@ -1,7 +1,8 @@
 use std::collections::BTreeMap;
+use std::future::pending;
 use std::pin::Pin;
 use std::sync::{
-    atomic::{AtomicUsize, Ordering},
+    atomic::{AtomicBool, AtomicUsize, Ordering},
     Arc,
 };
 use std::task::{Context, Poll};
@@ -12,7 +13,7 @@ use futures_util::stream::{self, BoxStream};
 use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use tokio::io::AsyncWrite;
+use tokio::io::{AsyncReadExt, AsyncWrite};
 use tokio::task::JoinHandle;
 use trellis_rs::client::OperationState as ClientOpState;
 use trellis_rs::client::{OperationDescriptor, TransferOperationDescriptor};
@@ -208,6 +209,8 @@ struct SharedOpState {
     >,
     stored_uploads: tokio::sync::Mutex<std::collections::HashMap<String, StoredUpload>>,
     download_reads: Arc<AtomicUsize>,
+    stalled_upload_started: Arc<tokio::sync::Notify>,
+    stalled_upload_dropped: Arc<AtomicBool>,
 }
 
 type UploadFuture<T> = futures_util::future::BoxFuture<'static, Result<T, ServerError>>;
@@ -300,6 +303,62 @@ struct CountingStore<C> {
     reads: Arc<AtomicUsize>,
 }
 
+#[derive(Debug, Clone)]
+struct StallingUploadStore<C> {
+    inner: C,
+    started: Arc<tokio::sync::Notify>,
+    dropped: Arc<AtomicBool>,
+}
+
+impl<C> StoreResourceClient for StallingUploadStore<C>
+where
+    C: StoreResourceClient,
+{
+    async fn read_into<W>(
+        &self,
+        key: &str,
+        writer: &mut W,
+    ) -> Result<Option<StoreObjectInfo>, ServerError>
+    where
+        W: tokio::io::AsyncWrite + Unpin + Send,
+    {
+        self.inner.read_into(key, writer).await
+    }
+
+    async fn write_from<R>(&self, key: &str, reader: &mut R) -> Result<StoreObjectInfo, ServerError>
+    where
+        R: tokio::io::AsyncRead + Unpin + Send,
+    {
+        if !key.ends_with(".stall") {
+            return self.inner.write_from(key, reader).await;
+        }
+
+        struct DropFlag(Arc<AtomicBool>);
+        impl Drop for DropFlag {
+            fn drop(&mut self) {
+                self.0.store(true, Ordering::SeqCst);
+            }
+        }
+
+        let mut byte = [0_u8; 1];
+        reader
+            .read_exact(&mut byte)
+            .await
+            .map_err(|error| ServerError::Nats(error.to_string()))?;
+        let _drop_flag = DropFlag(Arc::clone(&self.dropped));
+        self.started.notify_one();
+        pending().await
+    }
+
+    async fn list(&self) -> Result<Vec<String>, ServerError> {
+        self.inner.list().await
+    }
+
+    async fn delete(&self, key: &str) -> Result<(), ServerError> {
+        self.inner.delete(key).await
+    }
+}
+
 impl<C> StoreResourceClient for CountingStore<C>
 where
     C: StoreResourceClient,
@@ -356,6 +415,8 @@ impl SharedOpState {
             snapshots: tokio::sync::Mutex::new(std::collections::HashMap::new()),
             stored_uploads: tokio::sync::Mutex::new(std::collections::HashMap::new()),
             download_reads: Arc::new(AtomicUsize::new(0)),
+            stalled_upload_started: Arc::new(tokio::sync::Notify::new()),
+            stalled_upload_dropped: Arc::new(AtomicBool::new(false)),
         })
     }
 }
@@ -513,7 +574,11 @@ fn register_upload_handler(
                         .map_err(|e| ServerError::Nats(e.to_string()))?;
 
                     let session = UploadTransferSession::new(plan.clone(), &updated_at);
-                    let store = handle.store_client("uploads").await?;
+                    let store = StallingUploadStore {
+                        inner: handle.store_client("uploads").await?,
+                        started: Arc::clone(&shared.stalled_upload_started),
+                        dropped: Arc::clone(&shared.stalled_upload_dropped),
+                    };
                     let completion: UploadTransferCompletion = handle
                         .spawn_upload_transfer_endpoint_with_completion(session, store.clone())
                         .await?;
@@ -776,6 +841,38 @@ async fn transfer_client_uploads_file_via_operation() {
             .expect("service should retain the multiframe upload")
             .body,
         upload_bytes
+    );
+
+    let stalled_input = UploadInput {
+        key: "client/upload.stall".to_string(),
+        content_type: None,
+    };
+    let stalled_body = vec![7_u8; 3 * 256];
+    let cancellation = trellis_rs::generated::TransferCancellation::new();
+    let mut reader = std::io::Cursor::new(&stalled_body);
+    let stalled_operation = client
+        .operation::<FilesUploadOp>()
+        .start(&stalled_input)
+        .await
+        .expect("start stalled upload operation");
+    let stalled_upload = stalled_operation.transfer_from_with_cancel(
+        &mut reader,
+        Some(stalled_body.len() as u64),
+        &cancellation,
+    );
+    tokio::pin!(stalled_upload);
+    tokio::select! {
+        () = fixture.shared.stalled_upload_started.notified() => {}
+        result = &mut stalled_upload => panic!("stalled upload completed before cancellation: {result:?}"),
+    }
+    cancellation.cancel();
+    let result = tokio::time::timeout(Duration::from_secs(2), stalled_upload)
+        .await
+        .expect("stalled upload cancellation must be prompt");
+    assert!(result.is_err(), "stalled upload should report cancellation");
+    assert!(
+        fixture.shared.stalled_upload_dropped.load(Ordering::SeqCst),
+        "service must abort and join the stalled store upload before acknowledging cancellation"
     );
 
     fixture.shutdown().await;

@@ -184,10 +184,12 @@ async function* chunkBody(
   chunkBytes: number,
 ): AsyncIterable<Uint8Array> {
   const reader = streamFromBody(body).getReader();
+  let completed = false;
   try {
     while (true) {
       const next = await reader.read();
       if (next.done) {
+        completed = true;
         return;
       }
 
@@ -199,6 +201,7 @@ async function* chunkBody(
       }
     }
   } finally {
+    if (!completed) void reader.cancel().catch(() => undefined);
     reader.releaseLock();
   }
 }
@@ -388,7 +391,7 @@ function receiveStream(
       }
     },
     async cancel() {
-      await cancelTransfer().catch(() => undefined);
+      await cancelTransfer();
     },
   });
 }
@@ -574,78 +577,92 @@ export class SendTransferHandle extends BaseTransferHandle {
         const abort = () =>
           this.cancelTransfer(this.#grant.subject).catch(() => {});
 
-        for await (const chunk of chunkBody(body, this.#grant.chunkBytes)) {
-          sentBytes += chunk.length;
-          if (
-            this.#grant.maxBytes !== undefined &&
-            sentBytes > this.#grant.maxBytes
-          ) {
-            await abort();
-            return Result.err(
-              recordTransferError(
-                new TransferError({
-                  operation: "send",
-                  context: {
-                    reason: "max_bytes_exceeded",
-                    maxBytes: this.#grant.maxBytes,
-                    attemptedBytes: sentBytes,
-                  },
-                }),
-                "send",
-                "validation",
-              ),
-            );
-          }
+        try {
+          for await (const chunk of chunkBody(body, this.#grant.chunkBytes)) {
+            sentBytes += chunk.length;
+            if (
+              this.#grant.maxBytes !== undefined &&
+              sentBytes > this.#grant.maxBytes
+            ) {
+              await abort();
+              return Result.err(
+                recordTransferError(
+                  new TransferError({
+                    operation: "send",
+                    context: {
+                      reason: "max_bytes_exceeded",
+                      maxBytes: this.#grant.maxBytes,
+                      attemptedBytes: sentBytes,
+                    },
+                  }),
+                  "send",
+                  "validation",
+                ),
+              );
+            }
 
-          const reply = createInbox(this.inboxPrefix);
-          const headers = await this.buildHeaders(
-            this.#grant.subject,
-            reply,
-            chunk,
-            seq,
-            undefined,
-          );
-          const response = await AsyncResult.try(() =>
-            requestTransfer(
-              this.nc,
+            const reply = createInbox(this.inboxPrefix);
+            const headers = await this.buildHeaders(
               this.#grant.subject,
-              chunk,
-              headers,
               reply,
-              this.timeoutMs,
-            )
-          ).take();
-          if (isErr(response)) {
-            await abort();
-            return Result.err(
-              recordTransferError(
-                new TransferError({ operation: "send", cause: response.error }),
-                "send",
-                "send",
-              ),
+              chunk,
+              seq,
+              undefined,
             );
-          }
+            const response = await AsyncResult.try(() =>
+              requestTransfer(
+                this.nc,
+                this.#grant.subject,
+                chunk,
+                headers,
+                reply,
+                this.timeoutMs,
+              )
+            ).take();
+            if (isErr(response)) {
+              await abort();
+              return Result.err(
+                recordTransferError(
+                  new TransferError({
+                    operation: "send",
+                    cause: response.error,
+                  }),
+                  "send",
+                  "send",
+                ),
+              );
+            }
 
-          const ack = parseTransferAck(response, "send").take();
-          if (isErr(ack)) {
-            await abort();
-            return Result.err(recordTransferError(ack.error, "send", "ack"));
+            const ack = parseTransferAck(response, "send").take();
+            if (isErr(ack)) {
+              await abort();
+              return Result.err(recordTransferError(ack.error, "send", "ack"));
+            }
+            if (ack.status === "complete") {
+              await abort();
+              return Result.err(
+                recordTransferError(
+                  new TransferError({
+                    operation: "send",
+                    context: { reason: "premature_completion" },
+                  }),
+                  "send",
+                  "ack",
+                ),
+              );
+            }
+            hasher.update(chunk);
+            seq += 1;
           }
-          if (ack.status === "complete") {
-            await abort();
-            return Result.err(
-              recordTransferError(
-                new TransferError({
-                  operation: "send",
-                  context: { reason: "premature_completion" },
-                }),
-                "send",
-                "ack",
-              ),
-            );
-          }
-          hasher.update(chunk);
-          seq += 1;
+        } catch (cause) {
+          await abort();
+          return Result.err(
+            recordTransferError(
+              new TransferError({ operation: "send", cause }),
+              "send",
+              "source",
+            ),
+          );
         }
 
         const sentDigest = `SHA-256=${base64urlEncode(hasher.digest())}`;

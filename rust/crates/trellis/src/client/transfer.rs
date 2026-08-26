@@ -278,12 +278,27 @@ where
             .inbox(reply)
             .headers(headers)
             .payload(Bytes::copy_from_slice(chunk));
-        let response = match tokio::time::timeout(
-            Duration::from_millis(client.timeout_ms()),
-            client.nats().send_request(grant.subject.clone(), request),
-        )
-        .await
-        {
+        let response = {
+            let request = tokio::time::timeout(
+                Duration::from_millis(client.timeout_ms()),
+                client.nats().send_request(grant.subject.clone(), request),
+            );
+            tokio::pin!(request);
+            if let Some(cancellation) = cancellation {
+                tokio::select! {
+                    biased;
+                    () = cancellation.cancelled() => None,
+                    response = &mut request => Some(response),
+                }
+            } else {
+                Some(request.await)
+            }
+        };
+        let Some(response) = response else {
+            send_transfer_cancel(client, &grant.subject, &context_digest, seq).await?;
+            return Err(TrellisClientError::TransferCancelled);
+        };
+        let response = match response {
             Ok(Ok(response)) => response,
             Ok(Err(error)) => {
                 let _ = send_transfer_cancel(client, &grant.subject, &context_digest, seq).await;
