@@ -14,16 +14,20 @@ struct RuntimeProcess {
     child: Child,
     url: String,
     stderr_path: PathBuf,
+    _host_slot: Option<trellis_test::TrellisTestHostSlot>,
     _port_reservation: trellis_test::TrellisTestPortReservation,
 }
 
 impl RuntimeProcess {
-    fn start(
+    async fn start(
         runtime: &trellis_test::TrellisTestRuntime,
         mode: &str,
         config_path: &Path,
         label: &str,
     ) -> Self {
+        let host_slot = trellis_test::reserve_host_test_slot()
+            .await
+            .expect("reserve host runtime slot");
         let mut port_reservation =
             trellis_test::reserve_local_port().expect("reserve runtime port");
         let port = port_reservation.port().expect("read reserved runtime port");
@@ -42,6 +46,7 @@ impl RuntimeProcess {
             child,
             url: format!("http://127.0.0.1:{port}"),
             stderr_path,
+            _host_slot: host_slot,
             _port_reservation: port_reservation,
         }
     }
@@ -74,6 +79,7 @@ impl RuntimeProcess {
         let deadline = tokio::time::Instant::now() + Duration::from_secs(15);
         loop {
             if let Some(status) = self.child.try_wait().expect("inspect runtime process") {
+                self._host_slot = None;
                 return status;
             }
             assert!(
@@ -148,7 +154,7 @@ async fn runtime_singleton_ownership_lifecycle() {
         .expect("remove default platform lease bucket");
 
     let first_config = runtime.workdir().join("jobs-first.toml");
-    let mut first = RuntimeProcess::start(&runtime, "jobs", &first_config, "jobs-first");
+    let mut first = RuntimeProcess::start(&runtime, "jobs", &first_config, "jobs-first").await;
     first.wait_ready().await;
     assert_jobs_owner_consumers(&client).await;
 
@@ -156,7 +162,7 @@ async fn runtime_singleton_ownership_lifecycle() {
     std::fs::create_dir(&blocked_storage).expect("create path that SQLite cannot open as a file");
     let duplicate_config = runtime.workdir().join("jobs-duplicate.toml");
     let mut duplicate =
-        RuntimeProcess::start(&runtime, "jobs", &duplicate_config, "jobs-duplicate");
+        RuntimeProcess::start(&runtime, "jobs", &duplicate_config, "jobs-duplicate").await;
     let duplicate_status = duplicate.wait_exit().await;
     let duplicate_error = duplicate.stderr();
     assert!(!duplicate_status.success());
@@ -174,7 +180,7 @@ async fn runtime_singleton_ownership_lifecycle() {
     );
     let successor_config = runtime.workdir().join("jobs-successor.toml");
     let mut successor =
-        RuntimeProcess::start(&runtime, "jobs", &successor_config, "jobs-successor");
+        RuntimeProcess::start(&runtime, "jobs", &successor_config, "jobs-successor").await;
     successor.wait_ready().await;
 
     let leases = jetstream::new(client.clone())
@@ -206,7 +212,7 @@ async fn runtime_singleton_ownership_lifecycle() {
         .await
         .expect("pre-hold Health owner lease");
     let all_config = runtime.workdir().join("all-partial.toml");
-    let mut all = RuntimeProcess::start(&runtime, "all", &all_config, "all-partial");
+    let mut all = RuntimeProcess::start(&runtime, "all", &all_config, "all-partial").await;
     let all_status = all.wait_exit().await;
     let all_error = all.stderr();
     assert!(!all_status.success());
@@ -221,7 +227,7 @@ async fn runtime_singleton_ownership_lifecycle() {
 
     let all_runtime_config = runtime.workdir().join("all-runtime.toml");
     let mut all_runtime =
-        RuntimeProcess::start(&runtime, "all", &all_runtime_config, "all-runtime");
+        RuntimeProcess::start(&runtime, "all", &all_runtime_config, "all-runtime").await;
     all_runtime.wait_ready().await;
     assert_jobs_owner_consumers(&client).await;
     let (same_owner_revision, same_owner_value) =
@@ -354,7 +360,7 @@ async fn runtime_incompatible_lease_bucket_fails_before_storage_open() {
     let blocked_storage = runtime.workdir().join("incompatible-jobs.sqlite");
     std::fs::create_dir(&blocked_storage).expect("create path that SQLite cannot open as a file");
     let config = runtime.workdir().join("incompatible.toml");
-    let mut process = RuntimeProcess::start(&runtime, "jobs", &config, "incompatible");
+    let mut process = RuntimeProcess::start(&runtime, "jobs", &config, "incompatible").await;
     let status = process.wait_exit().await;
     let error = process.stderr();
 
@@ -387,7 +393,7 @@ async fn runtime_check_is_mode_scoped_and_read_only() {
         .await
         .expect("remove fixture lease bucket");
     let config_path = runtime.workdir().join("mode-check.toml");
-    let mut all = RuntimeProcess::start(&runtime, "all", &config_path, "mode-check-all");
+    let mut all = RuntimeProcess::start(&runtime, "all", &config_path, "mode-check-all").await;
     all.wait_ready().await;
     assert!(all.terminate().await.success());
 
@@ -418,7 +424,7 @@ async fn runtime_check_is_mode_scoped_and_read_only() {
     assert!(jetstream.get_stream("JOBS").await.is_err());
 
     let jobs_config = runtime.workdir().join("mode-check-jobs.toml");
-    let mut jobs = RuntimeProcess::start(&runtime, "jobs", &jobs_config, "mode-check-jobs");
+    let mut jobs = RuntimeProcess::start(&runtime, "jobs", &jobs_config, "mode-check-jobs").await;
     jobs.wait_ready().await;
     assert!(jobs.terminate().await.success());
     for bucket in [
@@ -446,7 +452,8 @@ async fn runtime_check_is_mode_scoped_and_read_only() {
         "platform",
         &platform_config,
         "mode-check-platform",
-    );
+    )
+    .await;
     platform.wait_ready().await;
     assert!(platform.terminate().await.success());
     jetstream

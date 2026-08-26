@@ -1,9 +1,5 @@
 import { TrellisTestRuntime } from "../runtime.ts";
 import {
-  reserveHostTestSlot,
-  type TrellisTestHostSlot,
-} from "../control_plane_config.ts";
-import {
   hasSharedRuntimeManifest,
   readSharedRuntimeManifest,
 } from "./shared_runtime_client.ts";
@@ -85,9 +81,7 @@ export function trellisIntegrationTest(
     async fn() {
       const startedAt = performance.now();
       emitIntegrationTestEvent(caseId, name, "started");
-      let hostSlot: TrellisTestHostSlot | undefined;
       try {
-        hostSlot = await reserveHostTestSlot();
         if (useSharedRuntime) {
           const manifest = await readSharedRuntimeManifest();
           const assignment = manifest.assignments[scope.caseId];
@@ -161,8 +155,6 @@ export function trellisIntegrationTest(
           performance.now() - startedAt,
         );
         throw error;
-      } finally {
-        hostSlot?.release();
       }
     },
   });

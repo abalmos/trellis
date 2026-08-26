@@ -575,6 +575,7 @@ impl Default for TrellisTestRuntimeOptions {
 #[derive(Debug)]
 pub struct TrellisTestRuntime {
     workdir: IntegrationWorkdir,
+    host_slot: Option<TrellisTestHostSlot>,
     _port_reservation: Option<TrellisTestPortReservation>,
     nats: Option<NatsContainer>,
     trellis: Option<TrellisProcess>,
@@ -1139,13 +1140,9 @@ impl TrellisTestRuntime {
 
         if let Some((shared, _, assignment)) = &shared_runtime {
             if assignment.mode == "shared" {
-                if let Some(proxy) = &test_control_rpc {
-                    let _: Value = proxy
-                        .call("resetAcceptedIntegrationAuthorities", &json!({}))
-                        .await?;
-                }
                 return Ok(Self {
                     workdir,
+                    host_slot: None,
                     _port_reservation: None,
                     nats: None,
                     trellis: None,
@@ -1170,6 +1167,8 @@ impl TrellisTestRuntime {
                 });
             }
         }
+
+        let host_slot = reserve_host_test_slot().await?;
 
         let mut nats = None;
         let mut trellis = None;
@@ -1226,6 +1225,7 @@ impl TrellisTestRuntime {
         let control_plane_path = control_plane_sqlite_path(workdir.path());
         Ok(Self {
             workdir,
+            host_slot,
             _port_reservation: Some(port_reservation),
             nats,
             trellis,
@@ -1618,7 +1618,9 @@ impl TrellisTestRuntime {
                 "Trellis process is not running".to_string(),
             ));
         };
-        trellis.stop(self.shutdown_timeout)
+        let result = trellis.stop(self.shutdown_timeout);
+        self.host_slot = None;
+        result
     }
 
     /// Stop Trellis, remove the NATS container, and clean up the workdir.
@@ -1630,6 +1632,7 @@ impl TrellisTestRuntime {
         if let Some(mut trellis) = self.trellis.take() {
             trellis.stop(shutdown_timeout)?;
         }
+        self.host_slot = None;
         if let Some(mut nats) = self.nats.take() {
             nats.stop()?;
         }
@@ -4652,6 +4655,67 @@ impl TrellisTestPortReservation {
 impl Drop for TrellisTestPortReservation {
     fn drop(&mut self) {
         let _ = fs::remove_dir_all(&self.lock_path);
+    }
+}
+
+/// Host-wide lease for one running Trellis integration-test process.
+#[derive(Debug)]
+pub struct TrellisTestHostSlot {
+    lock_path: PathBuf,
+}
+
+impl Drop for TrellisTestHostSlot {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.lock_path);
+    }
+}
+
+/// Acquires an optional host-wide Trellis process slot.
+pub async fn reserve_host_test_slot() -> Result<Option<TrellisTestHostSlot>, TrellisTestError> {
+    let Some(configured) = std::env::var_os("TRELLIS_TEST_HOST_JOBS") else {
+        return Ok(None);
+    };
+    let limit = configured
+        .to_string_lossy()
+        .parse::<usize>()
+        .ok()
+        .filter(|limit| *limit > 0)
+        .ok_or_else(|| {
+            TrellisTestError::UnexpectedResponse(
+                "TRELLIS_TEST_HOST_JOBS must be a positive integer".to_owned(),
+            )
+        })?;
+    let lock_root = std::env::var_os("TRELLIS_TEST_HOST_LOCK_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| {
+            if cfg!(windows) {
+                std::env::temp_dir()
+            } else {
+                PathBuf::from("/tmp")
+            }
+        })
+        .join("trellis-test-host-slots");
+    fs::create_dir_all(&lock_root)?;
+    loop {
+        for slot in 0..limit {
+            let lock_path = lock_root.join(format!("{slot}.lock"));
+            match fs::create_dir(&lock_path) {
+                Ok(()) => {
+                    fs::write(lock_path.join("owner"), format!("{}\n", std::process::id()))?;
+                    return Ok(Some(TrellisTestHostSlot { lock_path }));
+                }
+                Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
+                    let owner = fs::read_to_string(lock_path.join("owner"))
+                        .ok()
+                        .and_then(|value| value.trim().parse::<u32>().ok());
+                    if owner.is_some_and(process_is_gone) {
+                        let _ = fs::remove_dir_all(lock_path);
+                    }
+                }
+                Err(error) => return Err(error.into()),
+            }
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
     }
 }
 

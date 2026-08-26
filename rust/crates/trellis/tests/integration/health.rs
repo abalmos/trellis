@@ -31,10 +31,14 @@ struct HealthFixtureContract;
 struct HealthRuntimeProcess {
     child: Child,
     config_path: PathBuf,
+    _host_slot: Option<trellis_test::TrellisTestHostSlot>,
 }
 
 impl HealthRuntimeProcess {
-    fn start(runtime: &trellis_test::TrellisTestRuntime) -> Self {
+    async fn start(runtime: &trellis_test::TrellisTestRuntime) -> Self {
+        let host_slot = trellis_test::reserve_host_test_slot()
+            .await
+            .expect("reserve host runtime slot");
         let config_path = runtime.workdir().join("health-runtime.toml");
         let health_db = runtime.workdir().join("health.sqlite");
         let session_seed = runtime
@@ -122,7 +126,11 @@ registry_replicas = 1
             .stderr(Stdio::from(stderr))
             .spawn()
             .expect("start Rust health runtime");
-        Self { child, config_path }
+        Self {
+            child,
+            config_path,
+            _host_slot: host_slot,
+        }
     }
 
     fn restart(&mut self) {
@@ -207,7 +215,7 @@ async fn health_projection_lifecycle_and_recovery() {
         .await
         .expect("connect health observer");
 
-    let mut health_runtime = HealthRuntimeProcess::start(&runtime);
+    let mut health_runtime = HealthRuntimeProcess::start(&runtime).await;
     let raw_nats = ConnectOptions::new()
         .credentials_file(runtime.workdir().join("nats/creds/trellis-auth.creds"))
         .await
