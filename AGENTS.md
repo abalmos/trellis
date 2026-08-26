@@ -70,13 +70,15 @@
   on generated artifacts, run `cd js && deno task prepare` and
   `cd rust && cargo xtask prepare` as part of verification.
 - Follow `docs/src/routes/guides/releasing-trellis/+page.svx` for testing and
-  release practice and `design/core/testing-patterns.md` for test design.
-  Trellis runtime-observable behavior belongs in live TypeScript and Rust
-  integration tests, not fake NATS, fake Hono, fake storage, fake runtime, fake
-  auth, or fake generated-client units. Unit tests should be rare and limited to
-  pure parser/codec/crypto/schema/type/export/tooling/UI helper checks. When
-  live coverage needs a hook, extend `trellis-test` with the smallest named
-  helper rather than enriching a fake.
+  release practice and `design/core/testing-patterns.md` for test design. Test
+  each invariant at the smallest real boundary that proves it. Use live
+  TypeScript and Rust integration for transport, authorization, cross-language,
+  process-lifecycle, restart, NATS, and distributed-coordination behavior. Use
+  real component or adapter integration tests for deterministic transaction,
+  repository, projection, reducer, and state-machine invariants. Do not use fake
+  NATS, fake Hono, fake storage, fake runtime, fake auth, fake generated
+  clients, or synthetic failure hooks when a real boundary can prove the
+  invariant.
 - Live integration uses one shared NATS and Trellis host by default. Client
   interoperability is tracked in `integration/client-test-matrix.json`; Rust
   runtime correctness is tracked in `integration/rust-runtime-test-matrix.json`.

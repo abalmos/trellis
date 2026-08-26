@@ -1,6 +1,6 @@
 ---
 title: Testing Patterns
-description: Trellis testing policy for live integration coverage, matrix parity, and rare retained unit tests.
+description: Trellis testing policy for smallest real boundaries, live integration coverage, and matrix parity.
 order: 90
 ---
 
@@ -19,24 +19,28 @@ Trellis behavior is distributed runtime behavior. Tests that prove Trellis
 runtime behavior must use a live Trellis control plane and real TypeScript and
 Rust client/service paths.
 
-### Live-First Rule
+### Smallest Real Boundary
 
-Use live integration tests for Trellis behavior. This includes behavior observed
-through HTTP routes, generated RPCs, operations, jobs, feeds, events, transfer,
-state, resources, auth, bootstrap, device activation, service deployment,
-catalog, permissions, NATS subjects, storage-backed runtime state, retry,
-rollback, restart, and failure handling.
+Test an invariant at the smallest real boundary that proves it. Use complete
+live Trellis integration when transport, authorization, cross-language behavior,
+process lifecycle, restart, NATS, or distributed coordination is part of the
+invariant. Use real component or adapter integration tests for deterministic
+transaction, repository, projection, reducer, and state-machine invariants that
+do not require the complete runtime. Such tests use the production
+implementation and a real backing adapter such as temporary or in-memory SQLite,
+not a fake implementation of the boundary under test.
 
 Do not prove Trellis behavior with fake NATS, fake Hono, fake storage, fake
 runtime, fake auth, fake generated clients, or fake control-plane responders.
 Those tests create a second implementation of Trellis and drift from the
 runtime.
 
-When a behavior is not reachable through current public test helpers, extend the
-test library with the smallest named live-test surface needed to produce or
-observe the behavior. Prefer case-scoped helpers in `trellis-test` over generic
-chaos frameworks. Examples include a one-shot failure hook, a control-plane
-SQLite inspection helper, or a JetStream inspection helper.
+When behavior that requires the complete runtime is not reachable through
+current public test helpers, extend the test library with the smallest named
+case-scoped surface needed to provide real input or observe real state. Examples
+include a control-plane SQLite inspection helper or a JetStream inspection
+helper. Do not add generic chaos frameworks or synthetic fault hooks when a real
+component boundary can prove the invariant deterministically.
 
 ### Test Ownership
 
@@ -91,10 +95,11 @@ duration records. Case-owned duration summaries aggregate count, average, and
 maximum time by operation and phase so gate-performance claims use retained
 measurements rather than terminal-log estimates.
 
-### Unit Test Boundary
+### Smaller Test Boundary
 
-Unit tests are the exception. Keep them only when the behavior is not Trellis
-runtime behavior:
+Real component and adapter integration tests may cover transaction, repository,
+projection, reducer, and state-machine invariants without starting the complete
+runtime. Pure unit tests remain appropriate for:
 
 - pure parser, codec, canonicalization, crypto vector, schema pointer, or error
   serialization checks
@@ -103,16 +108,15 @@ runtime behavior:
 - CLI argument parsing and release-tool planning checks
 - tiny UI copy or page-state helpers
 
-If a unit test needs fake Trellis runtime pieces to pass, it probably belongs in
-live integration. Delete it after live TS/Rust coverage proves the same
-behavior, or replace it with a smaller pure-function test if a real pure
-invariant remains.
+If a smaller test needs fake Trellis runtime pieces to pass, move it to live
+integration or replace it with a real component boundary. Delete it after live
+TS/Rust coverage proves the same behavior if no independent smaller invariant
+remains.
 
-Retained unit tests should document why they are not live integration tests. The
-comment should name the pure invariant, not say that the behavior is merely
+Retained smaller tests should make the proving boundary clear. Comments, when
+needed, should name the deterministic invariant, not say that behavior is merely
 "private" or "not public". Current Trellis behavior is the behavior to protect;
-the question is whether it is runtime-observable and therefore belongs in live
-integration.
+the question is which smallest real boundary proves it honestly.
 
 ### Verification Practice
 

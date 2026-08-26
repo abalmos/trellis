@@ -335,7 +335,6 @@ export class TrellisTestRuntime implements AsyncDisposable {
         manifest: sharedManifest ?? nats.manifest,
         port,
         oauthProviders: options.oauthProviders,
-        failOnceHooks: options.failOnceHooks,
         webOrigins: options.webOrigins,
       });
       const configPath = await writeTrellisConfig({ workdir, config });

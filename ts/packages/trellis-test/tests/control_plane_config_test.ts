@@ -56,6 +56,11 @@ Deno.test("reserveHostTestSlot enforces the configured host bound", async () => 
   Deno.env.set("TRELLIS_TEST_HOST_JOBS", "2");
   Deno.env.set("TRELLIS_TEST_HOST_LOCK_DIR", lockRoot);
   try {
+    const staleLock = join(lockRoot, "trellis-test-host-slots", "0.lock");
+    Deno.mkdirSync(staleLock, { recursive: true });
+    Deno.writeTextFileSync(join(staleLock, "owner"), "invalid\n");
+    const staleTime = new Date(Date.now() - 2_000);
+    Deno.utimeSync(staleLock, staleTime, staleTime);
     const first = await reserveHostTestSlot();
     const second = await reserveHostTestSlot();
     assertEquals(
@@ -113,7 +118,6 @@ Deno.test("writeTrellisConfig writes file-backed test control-plane config", asy
           },
         },
       },
-      failOnceHooks: ["auth.admin.serviceDeployments.refreshActiveContracts"],
     });
     const configPath = await writeTrellisConfig({ workdir, config });
     const text = await Deno.readTextFile(configPath);

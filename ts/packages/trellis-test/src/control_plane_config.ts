@@ -61,9 +61,6 @@ export type TrellisControlPlaneConfig = {
     alwaysShowProviderChooser: boolean;
     providers: Record<string, TrellisControlPlaneOAuthProvider>;
   };
-  trellisTest: {
-    failOnce: string[];
-  };
 };
 
 /** Serializable OAuth/OIDC provider config for test control planes. */
@@ -110,6 +107,8 @@ export function generateSessionSeed(): string {
 
 const reservedPortLocks = new Set<string>();
 const reservedHostSlotLocks = new Set<string>();
+const PROCESS_LOCK_STARTUP_GRACE_MS = 1_000;
+const HOST_SLOT_ACQUIRE_TIMEOUT_MS = 120_000;
 addEventListener("unload", () => {
   for (const path of [...reservedPortLocks, ...reservedHostSlotLocks]) {
     try {
@@ -143,6 +142,7 @@ export async function reserveHostTestSlot(): Promise<
   }
   const slotRoot = `${lockRoot}/trellis-test-host-slots`;
   Deno.mkdirSync(slotRoot, { recursive: true });
+  const deadline = Date.now() + HOST_SLOT_ACQUIRE_TIMEOUT_MS;
 
   while (true) {
     for (let slot = 0; slot < limit; slot++) {
@@ -163,6 +163,30 @@ export async function reserveHostTestSlot(): Promise<
           },
         };
       }
+    }
+    if (Date.now() >= deadline) {
+      const owners = Array.from(Deno.readDirSync(slotRoot))
+        .filter((entry) => entry.isDirectory && entry.name.endsWith(".lock"))
+        .sort((left, right) => left.name.localeCompare(right.name))
+        .map((entry) => {
+          try {
+            return `${entry.name}=${
+              Deno.readTextFileSync(
+                `${slotRoot}/${entry.name}/owner`,
+              ).trim()
+            }`;
+          } catch (error) {
+            if (error instanceof Deno.errors.NotFound) {
+              return `${entry.name}=<missing>`;
+            }
+            throw error;
+          }
+        });
+      throw new Error(
+        `timed out acquiring a host test slot after ${HOST_SLOT_ACQUIRE_TIMEOUT_MS}ms: ${
+          owners.join(", ")
+        }`,
+      );
     }
     await new Promise((resolve) => setTimeout(resolve, 10));
   }
@@ -203,12 +227,23 @@ function tryAcquireProcessLock(lockPath: string): boolean {
   } catch (error) {
     if (!(error instanceof Deno.errors.AlreadyExists)) throw error;
   }
-  let owner: number;
+  let owner: number | undefined;
   try {
-    owner = Number.parseInt(Deno.readTextFileSync(`${lockPath}/owner`), 10);
+    owner = Number(Deno.readTextFileSync(`${lockPath}/owner`).trim());
   } catch (error) {
-    if (error instanceof Deno.errors.NotFound) return false;
-    throw error;
+    if (!(error instanceof Deno.errors.NotFound)) throw error;
+  }
+  if (
+    !Number.isInteger(owner) &&
+    Date.now() - (Deno.statSync(lockPath).mtime?.getTime() ?? Date.now()) >=
+      PROCESS_LOCK_STARTUP_GRACE_MS
+  ) {
+    try {
+      Deno.removeSync(lockPath, { recursive: true });
+    } catch (error) {
+      if (!(error instanceof Deno.errors.NotFound)) throw error;
+    }
+    return false;
   }
   if (!Number.isInteger(owner)) return false;
   try {
@@ -233,7 +268,6 @@ export function buildControlPlaneConfig(args: {
   manifest: LocalNatsBootstrapManifest;
   port: number;
   oauthProviders?: Record<string, TrellisControlPlaneOAuthProvider>;
-  failOnceHooks?: readonly string[];
   webOrigins?: readonly string[];
 }): TrellisControlPlaneConfig {
   const natsDir = join(args.natsWorkdir ?? args.workdir, "nats");
@@ -306,7 +340,6 @@ export function buildControlPlaneConfig(args: {
       alwaysShowProviderChooser: false,
       providers: args.oauthProviders ?? {},
     },
-    trellisTest: { failOnce: [...args.failOnceHooks ?? []] },
   };
 }
 

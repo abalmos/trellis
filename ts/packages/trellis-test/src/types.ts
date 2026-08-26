@@ -92,8 +92,6 @@ export type TrellisTestRuntimeStartOptions = {
   };
   /** OAuth/OIDC providers injected into the isolated test control-plane config. */
   oauthProviders?: Record<string, TrellisControlPlaneOAuthProvider>;
-  /** Named fail-once hooks injected into the isolated test control-plane config. */
-  failOnceHooks?: readonly string[];
   /** Additional exact browser origins allowed by the test runtime. */
   webOrigins?: readonly string[];
   timeouts?: {
