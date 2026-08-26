@@ -4735,24 +4735,11 @@ pub async fn reserve_additional_host_test_slot(
     loop {
         for slot in 0..limit {
             let lock_path = lock_root.join(format!("{slot}.lock"));
-            let mut lock_file = fs::OpenOptions::new()
-                .create(true)
-                .truncate(false)
-                .read(true)
-                .write(true)
-                .open(&lock_path)?;
-            match lock_file.try_lock() {
-                Ok(()) => {
-                    lock_file.set_len(0)?;
-                    lock_file.rewind()?;
-                    writeln!(lock_file, "{}", std::process::id())?;
-                    return Ok(Some(TrellisTestHostSlot {
-                        _lock_file: Some(lock_file),
-                        borrowed_case_slot: false,
-                    }));
-                }
-                Err(fs::TryLockError::WouldBlock) => {}
-                Err(fs::TryLockError::Error(error)) => return Err(error.into()),
+            if let Some(lock_file) = try_acquire_file_lock(&lock_path)? {
+                return Ok(Some(TrellisTestHostSlot {
+                    _lock_file: Some(lock_file),
+                    borrowed_case_slot: false,
+                }));
             }
         }
         if started.elapsed() >= HOST_SLOT_ACQUIRE_TIMEOUT {
@@ -4774,6 +4761,30 @@ pub async fn reserve_additional_host_test_slot(
     }
 }
 
+fn try_acquire_file_lock(lock_path: &Path) -> io::Result<Option<File>> {
+    let mut lock_file = match fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .read(true)
+        .write(true)
+        .open(lock_path)
+    {
+        Ok(file) => file,
+        Err(error) if error.raw_os_error() == Some(libc::EISDIR) => return Ok(None),
+        Err(error) => return Err(error),
+    };
+    match lock_file.try_lock() {
+        Ok(()) => {
+            lock_file.set_len(0)?;
+            lock_file.rewind()?;
+            writeln!(lock_file, "{}", std::process::id())?;
+            Ok(Some(lock_file))
+        }
+        Err(fs::TryLockError::WouldBlock) => Ok(None),
+        Err(fs::TryLockError::Error(error)) => Err(error),
+    }
+}
+
 /// Reserves a local TCP port with a host-wide lease held until the returned guard is dropped.
 pub fn reserve_local_port() -> Result<TrellisTestPortReservation, TrellisTestError> {
     loop {
@@ -4789,24 +4800,11 @@ pub fn reserve_local_port() -> Result<TrellisTestPortReservation, TrellisTestErr
                 }
             });
         let lock_path = lock_root.join(format!("trellis-test-port-{port}.lock"));
-        let mut lock_file = fs::OpenOptions::new()
-            .create(true)
-            .truncate(false)
-            .read(true)
-            .write(true)
-            .open(&lock_path)?;
-        match lock_file.try_lock() {
-            Ok(()) => {
-                lock_file.set_len(0)?;
-                lock_file.rewind()?;
-                writeln!(lock_file, "{}", std::process::id())?;
-                return Ok(TrellisTestPortReservation {
-                    listener: Some(listener),
-                    _lock_file: lock_file,
-                });
-            }
-            Err(fs::TryLockError::WouldBlock) => {}
-            Err(fs::TryLockError::Error(error)) => return Err(error.into()),
+        if let Some(lock_file) = try_acquire_file_lock(&lock_path)? {
+            return Ok(TrellisTestPortReservation {
+                listener: Some(listener),
+                _lock_file: lock_file,
+            });
         }
     }
 }
@@ -5373,13 +5371,24 @@ mod tests {
         auth_deployments_create_request_shape, container_mount, first_admin_bootstrap_body,
         flow_id_from_url, materialized_authority_failure, materialized_authority_is_current,
         parse_published_port, parse_trellis_bootstrap_url, pid_from_prefixed_name,
-        remove_stale_marked_workdirs, repo_trellis_command, reserve_local_port, ContainerRuntime,
-        MountMode, ResolvedContainerRuntime, TrellisControlPlaneSqlite,
-        TrustedLocalUserRegistration, WORKDIR_OWNER_MARKER,
+        remove_stale_marked_workdirs, repo_trellis_command, reserve_local_port,
+        try_acquire_file_lock, ContainerRuntime, MountMode, ResolvedContainerRuntime,
+        TrellisControlPlaneSqlite, TrustedLocalUserRegistration, WORKDIR_OWNER_MARKER,
     };
     use rusqlite::params;
     use serde_json::{json, Value};
     use std::fs;
+
+    #[test]
+    fn file_locks_treat_legacy_directories_as_occupied() {
+        let dir = tempfile::tempdir().expect("create legacy lock tempdir");
+        let lock_path = dir.path().join("legacy.lock");
+        fs::create_dir(&lock_path).expect("create legacy lock directory");
+
+        assert!(try_acquire_file_lock(&lock_path)
+            .expect("inspect legacy lock")
+            .is_none());
+    }
 
     #[cfg(target_os = "linux")]
     #[test]

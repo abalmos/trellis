@@ -56,6 +56,17 @@ Deno.test("reserveHostTestSlot enforces the configured host bound", async () => 
   Deno.env.set("TRELLIS_TEST_HOST_JOBS", "2");
   Deno.env.set("TRELLIS_TEST_HOST_LOCK_DIR", lockRoot);
   try {
+    const legacyLock = join(lockRoot, "trellis-test-host-slots", "0.lock");
+    Deno.mkdirSync(legacyLock, { recursive: true });
+    const migrated = await reserveHostTestSlot();
+    assertEquals(
+      Array.from(Deno.readDirSync(join(lockRoot, "trellis-test-host-slots")))
+        .filter((entry) => entry.isFile).length,
+      1,
+    );
+    migrated?.release();
+    Deno.removeSync(legacyLock);
+
     const first = await reserveHostTestSlot();
     const second = await reserveHostTestSlot();
     assertEquals(

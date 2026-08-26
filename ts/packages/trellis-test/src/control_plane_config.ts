@@ -206,11 +206,17 @@ export function reserveLocalPort(): number {
 
 function tryAcquireProcessLock(lockPath: string): Deno.FsFile | undefined {
   if (heldProcessLocks.has(lockPath)) return undefined;
-  const file = Deno.openSync(lockPath, {
-    create: true,
-    read: true,
-    write: true,
-  });
+  let file: Deno.FsFile;
+  try {
+    file = Deno.openSync(lockPath, {
+      create: true,
+      read: true,
+      write: true,
+    });
+  } catch (error) {
+    if (error instanceof Deno.errors.IsADirectory) return undefined;
+    throw error;
+  }
   if (!file.tryLockSync()) {
     file.close();
     return undefined;
