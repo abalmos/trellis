@@ -126,6 +126,35 @@ impl Caller {
         self.client.download_transfer(grant).await
     }
 
+    /// Stream a transfer grant into a caller-owned asynchronous writer.
+    #[doc(hidden)]
+    pub async fn download_transfer_into<W>(
+        &self,
+        grant: &crate::client::DownloadTransferGrant,
+        writer: &mut W,
+    ) -> Result<crate::client::FileInfo, crate::client::TrellisClientError>
+    where
+        W: tokio::io::AsyncWrite + Unpin + Send + ?Sized,
+    {
+        self.client.download_transfer_into(grant, writer).await
+    }
+
+    /// Stream a transfer grant into a writer with authenticated cancellation.
+    #[doc(hidden)]
+    pub async fn download_transfer_into_with_cancel<W>(
+        &self,
+        grant: &crate::client::DownloadTransferGrant,
+        writer: &mut W,
+        cancellation: &crate::client::TransferCancellation,
+    ) -> Result<crate::client::FileInfo, crate::client::TrellisClientError>
+    where
+        W: tokio::io::AsyncWrite + Unpin + Send + ?Sized,
+    {
+        self.client
+            .download_transfer_into_with_cancel(grant, writer, cancellation)
+            .await
+    }
+
     /// Call one generated RPC descriptor.
     #[doc(hidden)]
     pub async fn call_typed<D, E>(
@@ -273,6 +302,48 @@ impl crate::client::OperationTransport for Caller {
     > + Send
            + 'a {
         crate::client::OperationTransport::put_upload_transfer(self.client.as_ref(), grant, body)
+    }
+
+    fn put_upload_transfer_from<'a, R>(
+        &'a self,
+        grant: crate::client::UploadTransferGrant,
+        reader: &'a mut R,
+        expected_size: Option<u64>,
+    ) -> impl std::future::Future<
+        Output = Result<crate::client::FileInfo, crate::client::TrellisClientError>,
+    > + Send
+           + 'a
+    where
+        R: tokio::io::AsyncRead + Unpin + Send + ?Sized + 'a,
+    {
+        crate::client::OperationTransport::put_upload_transfer_from(
+            self.client.as_ref(),
+            grant,
+            reader,
+            expected_size,
+        )
+    }
+
+    fn put_upload_transfer_from_with_cancel<'a, R>(
+        &'a self,
+        grant: crate::client::UploadTransferGrant,
+        reader: &'a mut R,
+        expected_size: Option<u64>,
+        cancellation: &'a crate::client::TransferCancellation,
+    ) -> impl std::future::Future<
+        Output = Result<crate::client::FileInfo, crate::client::TrellisClientError>,
+    > + Send
+           + 'a
+    where
+        R: tokio::io::AsyncRead + Unpin + Send + ?Sized + 'a,
+    {
+        crate::client::OperationTransport::put_upload_transfer_from_with_cancel(
+            self.client.as_ref(),
+            grant,
+            reader,
+            expected_size,
+            cancellation,
+        )
     }
 }
 

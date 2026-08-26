@@ -74,9 +74,9 @@ pub use operations::{
     control_subject, DeclaredOperationUpdates, HasOperationUpdates, NoOperationUpdates,
     OperationDescriptor, OperationEvent, OperationInputBuilder, OperationInvoker, OperationRef,
     OperationRefData, OperationSignalAccepted, OperationSnapshot, OperationState,
-    OperationTransferInputBuilder, OperationTransferProgress, OperationTransferStartError,
-    OperationTransport, OperationUpdateEvent, OperationUpdateEvidence, StartedOperationTransfer,
-    TransferOperationDescriptor,
+    OperationTransferInputBuilder, OperationTransferProgress, OperationTransferReaderInputBuilder,
+    OperationTransferStartError, OperationTransport, OperationUpdateEvent, OperationUpdateEvidence,
+    StartedOperationTransfer, TransferOperationDescriptor,
 };
 pub use proof::verify_event_proof;
 pub use state::{
@@ -86,7 +86,8 @@ pub use state::{
 };
 pub use subject::SubjectError;
 pub use transfer::{
-    download_transfer_grant_from_value, DownloadTransferGrant, FileInfo, UploadTransferGrant,
+    download_transfer_grant_from_value, DownloadTransferGrant, FileInfo, TransferCancellation,
+    UploadTransferGrant,
 };
 pub use trellis_contracts::{PageRequest, PageResponse};
 

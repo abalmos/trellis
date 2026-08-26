@@ -20,6 +20,9 @@ commands.
   registry, revocation, logout, or client-bootstrap API.
 - Runtime boundaries use `trellis.api.v1` and `trellis.participant.v1` artifacts.
   TypeScript contracts are compiled to those artifacts before bootstrap.
+- Large Rust store and transfer bodies use borrowed Tokio readers and writers;
+  whole-buffer helpers remain conveniences. Transfer completion and cancellation
+  are authenticated, with completion bound to exact size and SHA-256 digest.
 - Bootstrap returns a deny-all JWT plus a root-pinned, issuer-signed short-lived
   authorization context. Every NATS connect and reconnect uses the standard NATS
   nonce signature and a digest-only context-selection token; there is no shared

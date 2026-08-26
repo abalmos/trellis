@@ -759,9 +759,12 @@ async fn transfer_client_downloads_file_via_receive_grant() {
         Some("text/plain")
     );
 
-    let downloaded = trellis_test::download_transfer(&client, &download_grant)
+    let mut downloaded = Vec::new();
+    let info = client
+        .download_transfer_into(&download_grant, &mut downloaded)
         .await
-        .expect("download transfer bytes");
+        .expect("stream download transfer bytes");
+    assert_eq!(info.size, downloaded.len() as u64);
     assert_eq!(
         String::from_utf8_lossy(&downloaded),
         format!("download:{download_key}")
@@ -809,10 +812,11 @@ async fn start_upload_with_retry<'a>(
 {
     let deadline = Instant::now() + Duration::from_secs(5);
     loop {
+        let mut reader = std::io::Cursor::new(body);
         match client
             .operation::<FilesUploadOp>()
             .input(input)
-            .transfer(body)
+            .transfer_from(&mut reader, Some(body.len() as u64))
             .start()
             .await
         {
@@ -845,10 +849,11 @@ async fn start_upload_result_with_retry<'a>(
 > {
     let deadline = Instant::now() + Duration::from_secs(5);
     loop {
+        let mut reader = std::io::Cursor::new(body);
         match client
             .operation::<FilesUploadOp>()
             .input(input)
-            .transfer(body)
+            .transfer_from(&mut reader, Some(body.len() as u64))
             .start()
             .await
         {

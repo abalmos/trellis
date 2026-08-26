@@ -269,6 +269,11 @@ handles. Use generated `rpc`, `event`, `feed`, `operation`, `state`, and
 `service.jobs` for service-owned resources, and `connection` for lifecycle status
 or shutdown.
 
+Store and transfer bodies accept `ReadableStream<Uint8Array>` and async iterables
+for bounded streaming. Use `bytes()` only when intentionally collecting the whole
+value in memory. Cancelling a receive stream sends an authenticated transfer
+cancel control; a caller may already have consumed a valid prefix.
+
 For browser app sign-out, use the connected generated Auth API over NATS. Do not
 add an HTTP logout, context, revocation, or client-bootstrap call, and do not
 hard-code IdP endpoints or arbitrary return URLs.

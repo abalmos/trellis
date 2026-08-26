@@ -2172,6 +2172,37 @@ impl TrellisClient {
     ) -> Result<Vec<u8>, TrellisClientError> {
         get_download_grant(self, grant).await
     }
+
+    /// Stream the bytes exposed by a receive transfer grant into `writer`.
+    pub async fn download_transfer_into<W>(
+        &self,
+        grant: &DownloadTransferGrant,
+        writer: &mut W,
+    ) -> Result<FileInfo, TrellisClientError>
+    where
+        W: tokio::io::AsyncWrite + Unpin + Send + ?Sized,
+    {
+        crate::client::transfer::get_download_grant_into(self, grant, writer).await
+    }
+
+    /// Stream a receive transfer into `writer` with authenticated cancellation.
+    pub async fn download_transfer_into_with_cancel<W>(
+        &self,
+        grant: &DownloadTransferGrant,
+        writer: &mut W,
+        cancellation: &crate::client::TransferCancellation,
+    ) -> Result<FileInfo, TrellisClientError>
+    where
+        W: tokio::io::AsyncWrite + Unpin + Send + ?Sized,
+    {
+        crate::client::transfer::get_download_grant_into_with_cancel(
+            self,
+            grant,
+            writer,
+            Some(cancellation),
+        )
+        .await
+    }
 }
 
 impl Drop for TrellisClient {
@@ -2266,6 +2297,38 @@ impl OperationTransport for TrellisClient {
         body: Vec<u8>,
     ) -> Result<FileInfo, TrellisClientError> {
         put_upload_grant(self, &grant, body).await
+    }
+
+    async fn put_upload_transfer_from<'a, R>(
+        &'a self,
+        grant: UploadTransferGrant,
+        reader: &'a mut R,
+        expected_size: Option<u64>,
+    ) -> Result<FileInfo, TrellisClientError>
+    where
+        R: tokio::io::AsyncRead + Unpin + Send + ?Sized + 'a,
+    {
+        crate::client::transfer::put_upload_grant_from(self, &grant, reader, expected_size).await
+    }
+
+    async fn put_upload_transfer_from_with_cancel<'a, R>(
+        &'a self,
+        grant: UploadTransferGrant,
+        reader: &'a mut R,
+        expected_size: Option<u64>,
+        cancellation: &'a crate::client::TransferCancellation,
+    ) -> Result<FileInfo, TrellisClientError>
+    where
+        R: tokio::io::AsyncRead + Unpin + Send + ?Sized + 'a,
+    {
+        crate::client::transfer::put_upload_grant_from_with_cancel(
+            self,
+            &grant,
+            reader,
+            expected_size,
+            Some(cancellation),
+        )
+        .await
     }
 }
 

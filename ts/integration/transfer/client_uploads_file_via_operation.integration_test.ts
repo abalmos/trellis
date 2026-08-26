@@ -16,7 +16,9 @@ liveTrellisTest({
         contract: fixture.clientContract,
       });
 
-      const uploadBytes = new TextEncoder().encode("uploaded through transfer");
+      const uploadBytes = new Uint8Array(3 * 65_536 + 17).map((_, i) =>
+        i % 251
+      );
       const upload = await client.filesUpload({
         key: fixture.uploadKey,
         contentType: "text/plain",

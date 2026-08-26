@@ -1935,7 +1935,7 @@
         "auth-protocol-matrix",
         "observability-trace-matrix"
       ],
-      "description": "The client sends bytes through the generated transfer operation and the service observes completed upload with size, key, and contentType.",
+      "description": "The client streams a multi-frame body through the generated transfer operation and the service observes completed upload with size, key, and contentType.",
       "scenario": {
         "participants": [
           {
@@ -2120,7 +2120,8 @@
         ],
         "then": [
           "the returned receive grant is usable immediately without caller retry",
-          "the downloaded payload matches the expected content"
+          "the downloaded payload matches the expected content",
+          "cancelling after one frame sends an authenticated control and stops the session"
         ]
       },
       "completion": {

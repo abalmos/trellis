@@ -1,12 +1,22 @@
 use std::collections::BTreeMap;
+use std::pin::Pin;
+use std::sync::{
+    atomic::{AtomicU8, Ordering},
+    Arc,
+};
+use std::task::{Context, Poll};
 use std::time::Duration;
 
 use async_nats::header::HeaderMap;
-use bytes::{Bytes, BytesMut};
+use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
+use bytes::Bytes;
 use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
+use sha2::{Digest as _, Sha256};
 use time::{format_description::well_known::Rfc3339, OffsetDateTime};
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt, ReadBuf};
 use tokio::sync::oneshot;
+use tokio::task::JoinHandle;
 
 use super::request_loop::encode_error_reply;
 use super::{
@@ -14,8 +24,8 @@ use super::{
     ServiceResourceBindings, StoreResourceBinding, StoreResourceClient,
 };
 
-const UPLOAD_SUBJECT_PREFIX: &str = "transfer.v1.upload";
-const DOWNLOAD_SUBJECT_PREFIX: &str = "transfer.v1.download";
+const UPLOAD_SUBJECT_PREFIX: &str = "transfer.v2.upload";
+const DOWNLOAD_SUBJECT_PREFIX: &str = "transfer.v2.download";
 /// Header carrying the zero-based transfer chunk sequence number.
 pub const TRANSFER_SEQUENCE_HEADER: &str = "trellis-transfer-seq";
 /// Header marking the final transfer frame.
@@ -250,6 +260,13 @@ pub struct UploadTransferChunk {
     pub eof: bool,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "action", rename_all = "lowercase")]
+enum UploadTransferControl {
+    Complete { size: u64, digest: String },
+    Cancel,
+}
+
 /// Service reply payload for an upload chunk request.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "status", rename_all = "lowercase")]
@@ -282,14 +299,59 @@ impl UploadTransferCompletion {
 }
 
 /// Store-backed upload transfer executor for a single planned grant.
-#[derive(Debug, Clone)]
 #[doc = concat!("Public Trellis data type `", stringify!(UploadTransferSession), "`.")]
 pub struct UploadTransferSession {
     plan: UploadTransferGrantPlan,
-    bytes: BytesMut,
     next_seq: u64,
+    transferred_bytes: u64,
+    hasher: Sha256,
+    pipe: Option<tokio::io::DuplexStream>,
+    upload_state: Arc<AtomicU8>,
+    upload_task: Option<JoinHandle<Result<super::StoreObjectInfo, ServerError>>>,
     complete: bool,
     updated_at: String,
+}
+
+impl std::fmt::Debug for UploadTransferSession {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("UploadTransferSession")
+            .field("plan", &self.plan)
+            .field("next_seq", &self.next_seq)
+            .field("transferred_bytes", &self.transferred_bytes)
+            .field("complete", &self.complete)
+            .field("updated_at", &self.updated_at)
+            .finish_non_exhaustive()
+    }
+}
+
+const UPLOAD_OPEN: u8 = 0;
+const UPLOAD_COMMIT: u8 = 1;
+const UPLOAD_ABORT: u8 = 2;
+
+struct UploadPipeReader {
+    reader: tokio::io::DuplexStream,
+    state: Arc<AtomicU8>,
+}
+
+impl AsyncRead for UploadPipeReader {
+    fn poll_read(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &mut ReadBuf<'_>,
+    ) -> Poll<std::io::Result<()>> {
+        let this = self.get_mut();
+        let before = buf.filled().len();
+        match Pin::new(&mut this.reader).poll_read(cx, buf) {
+            Poll::Ready(Ok(()))
+                if buf.filled().len() == before
+                    && this.state.load(Ordering::Acquire) != UPLOAD_COMMIT =>
+            {
+                Poll::Ready(Err(std::io::Error::other("upload transfer aborted")))
+            }
+            result => result,
+        }
+    }
 }
 
 impl UploadTransferSession {
@@ -298,8 +360,12 @@ impl UploadTransferSession {
     pub fn new(plan: UploadTransferGrantPlan, updated_at: impl Into<String>) -> Self {
         Self {
             plan,
-            bytes: BytesMut::new(),
             next_seq: 0,
+            transferred_bytes: 0,
+            hasher: Sha256::new(),
+            pipe: None,
+            upload_state: Arc::new(AtomicU8::new(UPLOAD_OPEN)),
+            upload_task: None,
             complete: false,
             updated_at: updated_at.into(),
         }
@@ -323,33 +389,38 @@ impl UploadTransferSession {
         OperationTransferProgress {
             chunk_index: chunk.seq,
             chunk_bytes: chunk.payload.len() as u64,
-            transferred_bytes: self.bytes.len() as u64 + chunk.payload.len() as u64,
+            transferred_bytes: self
+                .transferred_bytes
+                .saturating_add(chunk.payload.len() as u64),
         }
     }
 
-    /// Accept one ordered upload chunk, writing the object to `store` on EOF.
-    pub async fn receive<C>(
-        &mut self,
-        store: &C,
-        chunk: UploadTransferChunk,
-    ) -> Result<UploadTransferAck, ServerError>
+    async fn start<C>(&mut self, store: C) -> Result<(), ServerError>
     where
         C: StoreResourceClient,
     {
-        let now = current_time_iso()?;
-        self.receive_at(store, chunk, &now).await
+        let capacity = usize::try_from(self.plan.grant.chunk_bytes)
+            .unwrap_or(usize::MAX)
+            .max(1);
+        let (writer, reader) = tokio::io::duplex(capacity);
+        let mut reader = UploadPipeReader {
+            reader,
+            state: Arc::clone(&self.upload_state),
+        };
+        let key = self.plan.key.clone();
+        self.pipe = Some(writer);
+        self.upload_task = Some(tokio::spawn(async move {
+            store.write_from(&key, &mut reader).await
+        }));
+        Ok(())
     }
 
     /// Accept one ordered upload chunk using an explicit timestamp for expiry checks.
-    pub async fn receive_at<C>(
+    async fn receive_at(
         &mut self,
-        store: &C,
         chunk: UploadTransferChunk,
         now_iso: &str,
-    ) -> Result<UploadTransferAck, ServerError>
-    where
-        C: StoreResourceClient,
-    {
+    ) -> Result<UploadTransferAck, ServerError> {
         if self.complete {
             return Err(ServerError::TransferAlreadyComplete {
                 transfer_id: self.plan.grant.transfer_id.clone(),
@@ -370,7 +441,7 @@ impl UploadTransferSession {
         }
 
         let chunk_limit = self.plan.grant.chunk_bytes;
-        if chunk.payload.len() as u64 > chunk_limit {
+        if !chunk.eof && chunk.payload.len() as u64 > chunk_limit {
             return Err(ServerError::TransferObjectTooLarge {
                 service_name: self.plan.grant.service.clone(),
                 store: self.plan.store_alias.clone(),
@@ -380,33 +451,102 @@ impl UploadTransferSession {
             });
         }
 
-        let next_size = self.bytes.len() as u64 + chunk.payload.len() as u64;
-        enforce_upload_max_bytes(&self.plan, next_size)?;
-
         if !chunk.eof {
-            self.bytes.extend_from_slice(&chunk.payload);
-            self.next_seq += 1;
+            let next_size = self
+                .transferred_bytes
+                .checked_add(chunk.payload.len() as u64)
+                .ok_or_else(|| ServerError::Nats("upload transfer size overflow".to_string()))?;
+            enforce_upload_max_bytes(&self.plan, next_size)?;
+            self.pipe
+                .as_mut()
+                .ok_or_else(|| ServerError::Nats("upload transfer pipe is not open".to_string()))?
+                .write_all(&chunk.payload)
+                .await
+                .map_err(|error| ServerError::Nats(error.to_string()))?;
+            self.hasher.update(&chunk.payload);
+            self.transferred_bytes = next_size;
+            self.next_seq = self.next_seq.checked_add(1).ok_or_else(|| {
+                ServerError::Nats("upload transfer sequence overflow".to_string())
+            })?;
             return Ok(UploadTransferAck::Continue);
         }
 
-        let mut completed_bytes = self.bytes.clone();
-        completed_bytes.extend_from_slice(&chunk.payload);
+        let control: UploadTransferControl = serde_json::from_slice(&chunk.payload)?;
+        let UploadTransferControl::Complete { size, digest } = control else {
+            self.abort();
+            return Err(ServerError::TransferCancelled {
+                transfer_id: self.plan.grant.transfer_id.clone(),
+            });
+        };
+        if size != self.transferred_bytes {
+            self.abort();
+            return Err(ServerError::TransferObjectSizeMismatch {
+                store: self.plan.store_alias.clone(),
+                key: self.plan.key.clone(),
+                expected_size: size,
+                actual_size: self.transferred_bytes,
+            });
+        }
+        let actual_digest = format!(
+            "SHA-256={}",
+            URL_SAFE_NO_PAD.encode(self.hasher.clone().finalize())
+        );
+        if digest != actual_digest {
+            self.abort();
+            return Err(ServerError::TransferDigestMismatch {
+                transfer_id: self.plan.grant.transfer_id.clone(),
+                expected_digest: digest,
+                actual_digest,
+            });
+        }
+
+        self.upload_state.store(UPLOAD_COMMIT, Ordering::Release);
+        self.pipe.take();
+        let stored = self
+            .upload_task
+            .take()
+            .ok_or_else(|| ServerError::Nats("upload transfer task is not running".to_string()))?
+            .await
+            .map_err(|error| {
+                ServerError::Nats(format!("upload transfer task failed: {error}"))
+            })??;
+        if stored.size != self.transferred_bytes {
+            return Err(ServerError::TransferObjectSizeMismatch {
+                store: self.plan.store_alias.clone(),
+                key: self.plan.key.clone(),
+                expected_size: self.transferred_bytes,
+                actual_size: stored.size,
+            });
+        }
+        if let Some(stored_digest) = stored.digest.as_ref() {
+            if !transfer_digests_match(stored_digest, &actual_digest) {
+                return Err(ServerError::TransferDigestMismatch {
+                    transfer_id: self.plan.grant.transfer_id.clone(),
+                    expected_digest: actual_digest,
+                    actual_digest: stored_digest.clone(),
+                });
+            }
+        }
 
         let info = FileTransferInfo {
             key: self.plan.key.clone(),
-            size: completed_bytes.len() as u64,
+            size: self.transferred_bytes,
             updated_at: self.updated_at.clone(),
-            digest: None,
+            digest: Some(actual_digest),
             content_type: self.plan.grant.content_type.clone(),
             metadata: self.plan.grant.metadata.clone(),
         };
-        store
-            .write(&self.plan.key, completed_bytes.clone().freeze())
-            .await?;
-        self.bytes = completed_bytes;
-        self.next_seq += 1;
+        self.next_seq = self
+            .next_seq
+            .checked_add(1)
+            .ok_or_else(|| ServerError::Nats("upload transfer sequence overflow".to_string()))?;
         self.complete = true;
         Ok(UploadTransferAck::Complete { info })
+    }
+
+    fn abort(&mut self) {
+        self.upload_state.store(UPLOAD_ABORT, Ordering::Release);
+        self.pipe.take();
     }
 
     /// Fail if the session has not received an EOF completion frame.
@@ -481,11 +621,13 @@ where
     F: Fn(OperationTransferProgress) + Send + Sync + 'static,
 {
     let mut subscriber = Box::pin(subscriber);
+    session.start(store).await?;
     let expiry = tokio::time::sleep(transfer_expiry_delay(&session.plan.grant.expires_at)?);
     tokio::pin!(expiry);
     loop {
         tokio::select! {
             _ = &mut expiry => {
+                session.abort();
                 if let Some(sender) = completion.take() {
                     let _ = sender.send(Err(ServerError::TransferExpired {
                         transfer_id: session.plan.grant.transfer_id.clone(),
@@ -499,7 +641,7 @@ where
                     break;
                 };
                 let reply_to = message.reply.as_ref().map(ToString::to_string);
-                let result = handle_upload_transfer_message(&mut session, &store, &validator, &message).await;
+                let result = handle_upload_transfer_message(&mut session, &validator, &message).await;
                 match result {
                     Ok((ack, progress)) => {
                         match &ack {
@@ -521,6 +663,7 @@ where
                         }
                     }
                     Err(error) => {
+                        session.abort();
                         if let Some(sender) = completion.take() {
                             let _ = sender.send(Err(transfer_completion_error(&error)));
                         }
@@ -535,6 +678,7 @@ where
     }
 
     if let Some(sender) = completion.take() {
+        session.abort();
         let _ = sender.send(Err(ServerError::TransferMissingEof {
             transfer_id: session.plan.grant.transfer_id.clone(),
         }));
@@ -669,16 +813,177 @@ where
     V: RequestValidator + 'static,
 {
     let mut subscriber = Box::pin(subscriber);
+    let capacity = usize::try_from(plan.grant.chunk_bytes)
+        .unwrap_or(usize::MAX)
+        .max(1);
+    let (mut pipe_writer, mut pipe_reader) = tokio::io::duplex(capacity);
+    let key = plan.grant.info.key.clone();
+    let store_task = tokio::spawn(async move { store.read_into(&key, &mut pipe_writer).await });
+    let mut seq = 0_u64;
+    let mut transferred = 0_u64;
+    let mut hasher = Sha256::new();
+    let mut buffer = vec![0_u8; capacity];
+
     while let Some(message) = subscriber.next().await {
         let Some(reply_to) = message.reply.as_ref().map(ToString::to_string) else {
             continue;
         };
-
-        match handle_download_transfer_message(&plan, &store, &validator, &message).await {
-            Ok(chunks) => publish_download_chunks(&client, reply_to, chunks).await?,
-            Err(error) => publish_error_reply(&client, reply_to, &error).await?,
+        if let Err(error) = validate_download_transfer_message(&plan, &validator, &message).await {
+            publish_error_reply(&client, reply_to, &error).await?;
+            continue;
         }
+        let frame =
+            decode_upload_transfer_chunk(message.headers.as_ref(), message.payload.clone())?;
+        if frame.seq != seq {
+            publish_error_reply(
+                &client,
+                reply_to,
+                &ServerError::TransferSequenceOutOfOrder {
+                    transfer_id: plan.grant.transfer_id.clone(),
+                    expected_seq: seq,
+                    actual_seq: frame.seq,
+                },
+            )
+            .await?;
+            continue;
+        }
+        if matches!(
+            serde_json::from_slice(&message.payload),
+            Ok(UploadTransferControl::Cancel)
+        ) {
+            store_task.abort();
+            client
+                .publish(reply_to, Bytes::from_static(b"{\"status\":\"cancelled\"}"))
+                .await
+                .map_err(|error| ServerError::Nats(error.to_string()))?;
+            return Ok(());
+        }
+        if !message.payload.is_empty() {
+            publish_error_reply(
+                &client,
+                reply_to,
+                &ServerError::Nats("invalid download transfer control".to_string()),
+            )
+            .await?;
+            continue;
+        }
+
+        let count = match pipe_reader.read(&mut buffer).await {
+            Ok(count) => count,
+            Err(error) => {
+                store_task.abort();
+                publish_error_reply(&client, reply_to, &ServerError::Nats(error.to_string()))
+                    .await?;
+                return Ok(());
+            }
+        };
+        if count == 0 {
+            let store_info = match store_task.await {
+                Ok(Ok(Some(info))) => info,
+                Ok(Ok(None)) => {
+                    publish_error_reply(
+                        &client,
+                        reply_to,
+                        &ServerError::TransferObjectMissing {
+                            store: plan.store_alias.clone(),
+                            key: plan.grant.info.key.clone(),
+                        },
+                    )
+                    .await?;
+                    return Ok(());
+                }
+                Ok(Err(error)) => {
+                    publish_error_reply(&client, reply_to, &error).await?;
+                    return Ok(());
+                }
+                Err(error) => {
+                    publish_error_reply(&client, reply_to, &ServerError::Nats(error.to_string()))
+                        .await?;
+                    return Ok(());
+                }
+            };
+            if transferred != plan.grant.info.size || store_info.size != transferred {
+                publish_error_reply(
+                    &client,
+                    reply_to,
+                    &ServerError::TransferObjectSizeMismatch {
+                        store: plan.store_alias.clone(),
+                        key: plan.grant.info.key.clone(),
+                        expected_size: plan.grant.info.size,
+                        actual_size: transferred,
+                    },
+                )
+                .await?;
+                return Ok(());
+            }
+            let digest = format!("SHA-256={}", URL_SAFE_NO_PAD.encode(hasher.finalize()));
+            if plan
+                .grant
+                .info
+                .digest
+                .as_ref()
+                .is_some_and(|expected| !transfer_digests_match(expected, &digest))
+                || store_info
+                    .digest
+                    .as_ref()
+                    .is_some_and(|expected| !transfer_digests_match(expected, &digest))
+            {
+                publish_error_reply(
+                    &client,
+                    reply_to,
+                    &ServerError::TransferDigestMismatch {
+                        transfer_id: plan.grant.transfer_id.clone(),
+                        expected_digest: plan
+                            .grant
+                            .info
+                            .digest
+                            .clone()
+                            .or(store_info.digest)
+                            .unwrap_or_default(),
+                        actual_digest: digest,
+                    },
+                )
+                .await?;
+                return Ok(());
+            }
+            publish_download_chunk(&client, &reply_to, seq, Bytes::new(), true).await?;
+            return Ok(());
+        }
+
+        let next = transferred
+            .checked_add(count as u64)
+            .ok_or_else(|| ServerError::Nats("download transfer size overflow".to_string()))?;
+        if next > plan.grant.info.size || plan.max_object_bytes.is_some_and(|max| next > max) {
+            store_task.abort();
+            publish_error_reply(
+                &client,
+                reply_to,
+                &ServerError::TransferObjectTooLarge {
+                    service_name: plan.grant.service.clone(),
+                    store: plan.store_alias.clone(),
+                    key: plan.grant.info.key.clone(),
+                    size: next,
+                    max_bytes: plan.max_object_bytes.unwrap_or(plan.grant.info.size),
+                },
+            )
+            .await?;
+            return Ok(());
+        }
+        publish_download_chunk(
+            &client,
+            &reply_to,
+            seq,
+            Bytes::copy_from_slice(&buffer[..count]),
+            false,
+        )
+        .await?;
+        hasher.update(&buffer[..count]);
+        transferred = next;
+        seq = seq
+            .checked_add(1)
+            .ok_or_else(|| ServerError::Nats("download transfer sequence overflow".to_string()))?;
     }
+    store_task.abort();
 
     Ok(())
 }
@@ -814,14 +1119,12 @@ where
     Ok(())
 }
 
-async fn handle_upload_transfer_message<C, V>(
+async fn handle_upload_transfer_message<V>(
     session: &mut UploadTransferSession,
-    store: &C,
     validator: &V,
     message: &async_nats::Message,
 ) -> Result<(UploadTransferAck, OperationTransferProgress), ServerError>
 where
-    C: StoreResourceClient,
     V: RequestValidator,
 {
     let context = transfer_request_context(message);
@@ -834,6 +1137,22 @@ where
     )
     .await?;
     let chunk = decode_upload_transfer_chunk(message.headers.as_ref(), message.payload.clone())?;
+    if matches!(
+        serde_json::from_slice(&message.payload),
+        Ok(UploadTransferControl::Cancel)
+    ) {
+        if chunk.seq != session.next_seq {
+            return Err(ServerError::TransferSequenceOutOfOrder {
+                transfer_id: session.plan.grant.transfer_id.clone(),
+                expected_seq: session.next_seq,
+                actual_seq: chunk.seq,
+            });
+        }
+        session.abort();
+        return Err(ServerError::TransferCancelled {
+            transfer_id: session.plan.grant.transfer_id.clone(),
+        });
+    }
     let progress = session.progress_for_chunk(&chunk);
     tracing::debug!(
         subject = %session.subject(),
@@ -843,18 +1162,16 @@ where
         "received upload transfer chunk"
     );
     let now = current_time_iso()?;
-    let ack = session.receive_at(store, chunk, &now).await?;
+    let ack = session.receive_at(chunk, &now).await?;
     Ok((ack, progress))
 }
 
-async fn handle_download_transfer_message<C, V>(
+async fn validate_download_transfer_message<V>(
     plan: &DownloadTransferGrantPlan,
-    store: &C,
     validator: &V,
     message: &async_nats::Message,
-) -> Result<Vec<DownloadTransferChunk>, ServerError>
+) -> Result<(), ServerError>
 where
-    C: StoreResourceClient,
     V: RequestValidator,
 {
     let context = transfer_request_context(message);
@@ -867,7 +1184,7 @@ where
     )
     .await?;
     let now = current_time_iso()?;
-    plan_download_transfer_chunks_at(plan, store, &now).await
+    enforce_transfer_not_expired(&plan.grant.transfer_id, &plan.grant.expires_at, &now)
 }
 
 fn transfer_request_context(message: &async_nats::Message) -> RequestContext {
@@ -935,23 +1252,22 @@ where
     }
 }
 
-async fn publish_download_chunks(
+async fn publish_download_chunk(
     client: &async_nats::Client,
-    reply_to: String,
-    chunks: Vec<DownloadTransferChunk>,
+    reply_to: &str,
+    seq: u64,
+    payload: Bytes,
+    eof: bool,
 ) -> Result<(), ServerError> {
-    for chunk in chunks {
-        let mut headers = HeaderMap::new();
-        headers.insert(TRANSFER_SEQUENCE_HEADER, chunk.seq.to_string().as_str());
-        if chunk.eof {
-            headers.insert(TRANSFER_EOF_HEADER, "true");
-        }
-        client
-            .publish_with_headers(reply_to.clone(), headers, chunk.payload)
-            .await
-            .map_err(|error| ServerError::Nats(error.to_string()))?;
+    let mut headers = HeaderMap::new();
+    headers.insert(TRANSFER_SEQUENCE_HEADER, seq.to_string().as_str());
+    if eof {
+        headers.insert(TRANSFER_EOF_HEADER, "true");
     }
-    Ok(())
+    client
+        .publish_with_headers(reply_to.to_string(), headers, payload)
+        .await
+        .map_err(|error| ServerError::Nats(error.to_string()))
 }
 
 async fn publish_error_reply(
@@ -979,21 +1295,6 @@ fn optional_header<'a>(headers: Option<&'a HeaderMap>, header: &str) -> Option<&
     headers
         .and_then(|headers| headers.get(header))
         .map(async_nats::header::HeaderValue::as_str)
-}
-
-/// One encoded download frame ready to publish to the transfer reply inbox.
-#[derive(Debug, Clone, PartialEq, Eq)]
-#[doc = concat!("Public Trellis data type `", stringify!(DownloadTransferChunk), "`.")]
-pub struct DownloadTransferChunk {
-    /// Zero-based chunk sequence number.
-    #[doc = concat!("The `", stringify!(seq), "` value.")]
-    pub seq: u64,
-    /// Raw chunk payload bytes.
-    #[doc = concat!("The `", stringify!(payload), "` value.")]
-    pub payload: Bytes,
-    /// Whether this chunk should carry `trellis-transfer-eof: true`.
-    #[doc = concat!("The `", stringify!(eof), "` value.")]
-    pub eof: bool,
 }
 
 /// Build upload transfer grant metadata from resolved service resource bindings.
@@ -1067,80 +1368,6 @@ pub fn plan_download_transfer_grant(
             .max_object_bytes
             .and_then(|value| u64::try_from(value).ok()),
     })
-}
-
-/// Read a planned download object from `store` and encode ordered transfer chunks.
-pub async fn plan_download_transfer_chunks<C>(
-    plan: &DownloadTransferGrantPlan,
-    store: &C,
-) -> Result<Vec<DownloadTransferChunk>, ServerError>
-where
-    C: StoreResourceClient,
-{
-    let now = current_time_iso()?;
-    plan_download_transfer_chunks_at(plan, store, &now).await
-}
-
-/// Read a planned download object and encode chunks using an explicit timestamp for expiry checks.
-pub async fn plan_download_transfer_chunks_at<C>(
-    plan: &DownloadTransferGrantPlan,
-    store: &C,
-    now_iso: &str,
-) -> Result<Vec<DownloadTransferChunk>, ServerError>
-where
-    C: StoreResourceClient,
-{
-    enforce_transfer_not_expired(&plan.grant.transfer_id, &plan.grant.expires_at, now_iso)?;
-    let key = &plan.grant.info.key;
-    let bytes = store
-        .read(key)
-        .await?
-        .ok_or_else(|| ServerError::TransferObjectMissing {
-            store: plan.store_alias.clone(),
-            key: key.clone(),
-        })?;
-    let actual_size = bytes.len() as u64;
-    if actual_size != plan.grant.info.size {
-        return Err(ServerError::TransferObjectSizeMismatch {
-            store: plan.store_alias.clone(),
-            key: key.clone(),
-            expected_size: plan.grant.info.size,
-            actual_size,
-        });
-    }
-    if let Some(max_bytes) = plan.max_object_bytes {
-        if actual_size > max_bytes {
-            return Err(ServerError::TransferObjectTooLarge {
-                service_name: plan.grant.service.clone(),
-                store: plan.store_alias.clone(),
-                key: key.clone(),
-                size: actual_size,
-                max_bytes,
-            });
-        }
-    }
-
-    let chunk_bytes = usize::try_from(plan.grant.chunk_bytes)
-        .unwrap_or(usize::MAX)
-        .max(1);
-    if bytes.is_empty() {
-        return Ok(vec![DownloadTransferChunk {
-            seq: 0,
-            payload: Bytes::new(),
-            eof: true,
-        }]);
-    }
-
-    let chunk_count = bytes.len().div_ceil(chunk_bytes);
-    Ok(bytes
-        .chunks(chunk_bytes)
-        .enumerate()
-        .map(|(index, chunk)| DownloadTransferChunk {
-            seq: index as u64,
-            payload: Bytes::copy_from_slice(chunk),
-            eof: index + 1 == chunk_count,
-        })
-        .collect())
 }
 
 fn store_binding<'a>(
@@ -1283,16 +1510,21 @@ fn validate_transfer_id(transfer_id: &str) -> Result<(), ServerError> {
     Ok(())
 }
 
+fn transfer_digests_match(left: &str, right: &str) -> bool {
+    left.trim_end_matches('=') == right.trim_end_matches('=')
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::{
         atomic::{AtomicUsize, Ordering},
-        Arc,
+        Arc, Mutex,
     };
 
     use futures_util::future::BoxFuture;
+    use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite};
 
-    use crate::service::RequestValidation;
+    use crate::service::{RequestValidation, StoreObjectInfo};
 
     use super::*;
 
@@ -1300,6 +1532,140 @@ mod tests {
     struct CountingValidator {
         calls: Arc<AtomicUsize>,
         allowed: bool,
+    }
+
+    #[derive(Debug, Clone, Default)]
+    struct CommitOnEofStore {
+        bytes: Arc<Mutex<Option<Vec<u8>>>>,
+    }
+
+    impl StoreResourceClient for CommitOnEofStore {
+        async fn read_into<W>(
+            &self,
+            _key: &str,
+            _writer: &mut W,
+        ) -> Result<Option<StoreObjectInfo>, ServerError>
+        where
+            W: AsyncWrite + Unpin + Send,
+        {
+            Ok(None)
+        }
+
+        async fn write_from<R>(
+            &self,
+            key: &str,
+            reader: &mut R,
+        ) -> Result<StoreObjectInfo, ServerError>
+        where
+            R: AsyncRead + Unpin + Send,
+        {
+            let mut bytes = Vec::new();
+            reader
+                .read_to_end(&mut bytes)
+                .await
+                .map_err(|error| ServerError::Nats(format!("test store upload failed: {error}")))?;
+            let size = bytes.len() as u64;
+            *self.bytes.lock().expect("test store lock") = Some(bytes);
+            Ok(StoreObjectInfo {
+                key: key.to_string(),
+                size,
+                digest: None,
+                modified_at: None,
+            })
+        }
+
+        async fn list(&self) -> Result<Vec<String>, ServerError> {
+            Ok(Vec::new())
+        }
+
+        async fn delete(&self, _key: &str) -> Result<(), ServerError> {
+            Ok(())
+        }
+    }
+
+    fn upload_plan(chunk_bytes: u64) -> UploadTransferGrantPlan {
+        UploadTransferGrantPlan {
+            grant: UploadTransferGrant {
+                type_name: "TransferGrant".to_string(),
+                direction: "send".to_string(),
+                service: "test-service".to_string(),
+                session_key: "session".to_string(),
+                transfer_id: "transfer-1".to_string(),
+                subject: "transfer.v2.upload.service.transfer-1".to_string(),
+                expires_at: "2099-01-01T00:00:00Z".to_string(),
+                chunk_bytes,
+                max_bytes: Some(32),
+                content_type: None,
+                metadata: BTreeMap::new(),
+            },
+            store_alias: "objects".to_string(),
+            store: "physical_store".to_string(),
+            key: "object".to_string(),
+        }
+    }
+
+    #[tokio::test]
+    async fn upload_session_streams_and_commits_only_after_authenticated_completion() {
+        let store = CommitOnEofStore::default();
+        let mut session = UploadTransferSession::new(upload_plan(4), "2026-08-26T00:00:00Z");
+        session.start(store.clone()).await.unwrap();
+        session
+            .receive_at(
+                UploadTransferChunk {
+                    seq: 0,
+                    payload: Bytes::from_static(b"1234"),
+                    eof: false,
+                },
+                "2026-08-26T00:00:00Z",
+            )
+            .await
+            .unwrap();
+        assert!(store.bytes.lock().expect("test store lock").is_none());
+
+        let digest = format!(
+            "SHA-256={}",
+            URL_SAFE_NO_PAD.encode(Sha256::digest(b"1234"))
+        );
+        let completion =
+            serde_json::to_vec(&UploadTransferControl::Complete { size: 4, digest }).unwrap();
+        let ack = session
+            .receive_at(
+                UploadTransferChunk {
+                    seq: 1,
+                    payload: Bytes::from(completion),
+                    eof: true,
+                },
+                "2026-08-26T00:00:00Z",
+            )
+            .await
+            .unwrap();
+
+        assert!(matches!(ack, UploadTransferAck::Complete { .. }));
+        assert_eq!(
+            store.bytes.lock().expect("test store lock").as_deref(),
+            Some(b"1234".as_slice())
+        );
+    }
+
+    #[tokio::test]
+    async fn upload_session_abort_never_commits_a_partial_object() {
+        let store = CommitOnEofStore::default();
+        let mut session = UploadTransferSession::new(upload_plan(4), "2026-08-26T00:00:00Z");
+        session.start(store.clone()).await.unwrap();
+        session
+            .receive_at(
+                UploadTransferChunk {
+                    seq: 0,
+                    payload: Bytes::from_static(b"1234"),
+                    eof: false,
+                },
+                "2026-08-26T00:00:00Z",
+            )
+            .await
+            .unwrap();
+        session.abort();
+        tokio::task::yield_now().await;
+        assert!(store.bytes.lock().expect("test store lock").is_none());
     }
 
     impl RequestValidator for CountingValidator {
@@ -1328,7 +1694,7 @@ mod tests {
             allowed: true,
         };
         let context = RequestContext {
-            subject: "transfer.v1.upload.session.transfer-1".to_string(),
+            subject: "transfer.v2.upload.session.transfer-1".to_string(),
             session_key: Some("wrong-session".to_string()),
             proof: Some("proof".to_string()),
             authorization_context: None,
@@ -1343,7 +1709,7 @@ mod tests {
         };
 
         let error = validate_transfer_request(
-            "transfer.v1.upload.session.transfer-1",
+            "transfer.v2.upload.session.transfer-1",
             &Bytes::new(),
             &context,
             "expected-session",
@@ -1368,7 +1734,7 @@ mod tests {
             allowed: true,
         };
         let context = RequestContext {
-            subject: "transfer.v1.upload.session.transfer-1".to_string(),
+            subject: "transfer.v2.upload.session.transfer-1".to_string(),
             session_key: Some("wrong-session".to_string()),
             proof: None,
             authorization_context: None,
@@ -1383,7 +1749,7 @@ mod tests {
         };
 
         let error = validate_transfer_request(
-            "transfer.v1.upload.session.transfer-1",
+            "transfer.v2.upload.session.transfer-1",
             &Bytes::new(),
             &context,
             "expected-session",
@@ -1404,7 +1770,7 @@ mod tests {
             allowed: false,
         };
         let context = RequestContext {
-            subject: "transfer.v1.download.session.transfer-1".to_string(),
+            subject: "transfer.v2.download.session.transfer-1".to_string(),
             session_key: Some("expected-session".to_string()),
             proof: Some("proof".to_string()),
             authorization_context: None,
@@ -1419,7 +1785,7 @@ mod tests {
         };
 
         let error = validate_transfer_request(
-            "transfer.v1.download.session.transfer-1",
+            "transfer.v2.download.session.transfer-1",
             &Bytes::new(),
             &context,
             "expected-session",

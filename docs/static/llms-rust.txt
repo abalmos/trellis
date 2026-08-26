@@ -296,8 +296,15 @@ idempotent.
   contain resolved bootstrap bindings.
 - Services use only the resolved handles returned by the connected facade; they
   do not fetch binding payloads or construct resource clients.
-- Transfer-capable operations expose transfer methods on the typed operation
-  reference. Providers receive `RequestContext`; capture
+- Stream large store values with `StoreResourceHandle::write_from(...)` and
+  `read_into(...)`; `write(...)` and `read(...)` are whole-buffer conveniences.
+  The streaming write enforces the bound per-object maximum and an optional exact
+  size while reading. Caller-owned writers are not flushed or shut down.
+- Start transfer-capable operations with the generated builder's
+  `.transfer_from(reader, expected_size).start()` when the body is not already in
+  memory. Download grants support `download_transfer_into(...)`; the bytes helpers
+  remain conveniences.
+- Providers receive `RequestContext`; capture
   `service.generated_handle()` at registration for resolved stores and other
   bound runtime resources.
 

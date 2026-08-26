@@ -5,8 +5,9 @@ use futures_util::stream::{self, BoxStream};
 use futures_util::StreamExt;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_json::{json, Value};
+use tokio::io::AsyncRead;
 
-use crate::client::transfer::{FileInfo, UploadTransferGrant};
+use crate::client::transfer::{FileInfo, TransferCancellation, UploadTransferGrant};
 use crate::client::TrellisClientError;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -217,6 +218,25 @@ pub trait OperationTransport {
         grant: UploadTransferGrant,
         body: Vec<u8>,
     ) -> impl Future<Output = Result<FileInfo, TrellisClientError>> + Send + 'a;
+
+    fn put_upload_transfer_from<'a, R>(
+        &'a self,
+        grant: UploadTransferGrant,
+        reader: &'a mut R,
+        expected_size: Option<u64>,
+    ) -> impl Future<Output = Result<FileInfo, TrellisClientError>> + Send + 'a
+    where
+        R: AsyncRead + Unpin + Send + ?Sized + 'a;
+
+    fn put_upload_transfer_from_with_cancel<'a, R>(
+        &'a self,
+        grant: UploadTransferGrant,
+        reader: &'a mut R,
+        expected_size: Option<u64>,
+        cancellation: &'a TransferCancellation,
+    ) -> impl Future<Output = Result<FileInfo, TrellisClientError>> + Send + 'a
+    where
+        R: AsyncRead + Unpin + Send + ?Sized + 'a;
 }
 
 #[derive(Debug)]
@@ -238,6 +258,15 @@ pub struct OperationTransferInputBuilder<'a, 'b, T, D: OperationDescriptor> {
     invoker: &'b OperationInvoker<'a, T, D>,
     input: &'b D::Input,
     body: Vec<u8>,
+}
+
+/// Builder for operation calls that stream upload bytes after acceptance.
+#[derive(Debug)]
+pub struct OperationTransferReaderInputBuilder<'a, 'b, T, D: OperationDescriptor, R: ?Sized> {
+    invoker: &'b OperationInvoker<'a, T, D>,
+    input: &'b D::Input,
+    reader: &'b mut R,
+    expected_size: Option<u64>,
 }
 
 /// Successful result for starting an operation and uploading its transfer body.
@@ -411,6 +440,24 @@ where
             body: body.as_ref().to_vec(),
         }
     }
+
+    /// Captures a borrowed asynchronous reader to stream after operation acceptance.
+    pub fn transfer_from<R>(
+        self,
+        reader: &'b mut R,
+        expected_size: Option<u64>,
+    ) -> OperationTransferReaderInputBuilder<'a, 'b, T, D, R>
+    where
+        D: TransferOperationDescriptor,
+        R: AsyncRead + Unpin + Send + ?Sized,
+    {
+        OperationTransferReaderInputBuilder {
+            invoker: self.invoker,
+            input: self.input,
+            reader,
+            expected_size,
+        }
+    }
 }
 
 impl<'a, 'b, T, D> OperationTransferInputBuilder<'a, 'b, T, D>
@@ -430,6 +477,42 @@ where
             .await
             .map_err(OperationTransferStartError::Start)?;
         let file_info = match operation_ref.transfer_vec(self.body).await {
+            Ok(file_info) => file_info,
+            Err(source) => {
+                return Err(OperationTransferStartError::Upload {
+                    operation_ref: Box::new(operation_ref),
+                    source,
+                })
+            }
+        };
+        Ok(StartedOperationTransfer {
+            operation_ref,
+            file_info,
+        })
+    }
+}
+
+impl<'a, 'b, T, D, R> OperationTransferReaderInputBuilder<'a, 'b, T, D, R>
+where
+    T: OperationTransport,
+    D: TransferOperationDescriptor,
+    D::Progress: Send,
+    D::Output: Send,
+    R: AsyncRead + Unpin + Send + ?Sized,
+{
+    /// Starts the operation, streams the reader, and returns the operation and file info.
+    pub async fn start(
+        self,
+    ) -> Result<StartedOperationTransfer<'a, T, D>, OperationTransferStartError<'a, T, D>> {
+        let operation_ref = self
+            .invoker
+            .start(self.input)
+            .await
+            .map_err(OperationTransferStartError::Start)?;
+        let file_info = match operation_ref
+            .transfer_from(self.reader, self.expected_size)
+            .await
+        {
             Ok(file_info) => file_info,
             Err(source) => {
                 return Err(OperationTransferStartError::Upload {
@@ -727,6 +810,45 @@ where
         self.transfer_vec(body.as_ref().to_vec()).await
     }
 
+    /// Upload a transfer from a borrowed asynchronous reader after this operation is accepted.
+    pub async fn transfer_from<R>(
+        &self,
+        reader: &mut R,
+        expected_size: Option<u64>,
+    ) -> Result<FileInfo, TrellisClientError>
+    where
+        R: AsyncRead + Unpin + Send + ?Sized,
+    {
+        let grant = self.accepted_transfer.clone().ok_or_else(|| {
+            TrellisClientError::OperationProtocol(
+                "operation does not have an accepted transfer session".into(),
+            )
+        })?;
+        self.transport
+            .put_upload_transfer_from(grant, reader, expected_size)
+            .await
+    }
+
+    /// Upload from a borrowed reader and authenticate cancellation when requested.
+    pub async fn transfer_from_with_cancel<R>(
+        &self,
+        reader: &mut R,
+        expected_size: Option<u64>,
+        cancellation: &TransferCancellation,
+    ) -> Result<FileInfo, TrellisClientError>
+    where
+        R: AsyncRead + Unpin + Send + ?Sized,
+    {
+        let grant = self.accepted_transfer.clone().ok_or_else(|| {
+            TrellisClientError::OperationProtocol(
+                "operation does not have an accepted transfer session".into(),
+            )
+        })?;
+        self.transport
+            .put_upload_transfer_from_with_cancel(grant, reader, expected_size, cancellation)
+            .await
+    }
+
     async fn transfer_vec(&self, body: Vec<u8>) -> Result<FileInfo, TrellisClientError> {
         let grant = self.accepted_transfer.clone().ok_or_else(|| {
             TrellisClientError::OperationProtocol(
@@ -972,11 +1094,12 @@ mod tests {
     use futures_util::StreamExt;
     use serde::{Deserialize, Serialize};
     use serde_json::{json, Value};
+    use tokio::io::AsyncRead;
 
     use super::{
         control_subject, FileInfo, OperationDescriptor, OperationEvent, OperationInvoker,
         OperationSignalAccepted, OperationTransferProgress, OperationTransport,
-        TransferOperationDescriptor, UploadTransferGrant,
+        TransferCancellation, TransferOperationDescriptor, UploadTransferGrant,
     };
     use crate::client::TrellisClientError;
 
@@ -1086,6 +1209,35 @@ mod tests {
         ) -> Result<FileInfo, TrellisClientError> {
             Err(TrellisClientError::TransferProtocol(
                 "not implemented in test transport".to_string(),
+            ))
+        }
+
+        async fn put_upload_transfer_from<'a, R>(
+            &'a self,
+            _grant: UploadTransferGrant,
+            _reader: &'a mut R,
+            _expected_size: Option<u64>,
+        ) -> Result<FileInfo, TrellisClientError>
+        where
+            R: AsyncRead + Unpin + Send + ?Sized + 'a,
+        {
+            Err(TrellisClientError::OperationProtocol(
+                "recording transport does not stream transfers".to_string(),
+            ))
+        }
+
+        async fn put_upload_transfer_from_with_cancel<'a, R>(
+            &'a self,
+            _grant: UploadTransferGrant,
+            _reader: &'a mut R,
+            _expected_size: Option<u64>,
+            _cancellation: &'a TransferCancellation,
+        ) -> Result<FileInfo, TrellisClientError>
+        where
+            R: AsyncRead + Unpin + Send + ?Sized + 'a,
+        {
+            Err(TrellisClientError::OperationProtocol(
+                "recording transport does not stream transfers".to_string(),
             ))
         }
     }

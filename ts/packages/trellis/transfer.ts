@@ -10,10 +10,10 @@ import {
   type Msg,
   type MsgHdrs,
   type NatsConnection,
-  type Subscription,
 } from "@nats-io/nats-core";
 import Type, { type Static } from "typebox";
 import { ulid } from "ulid";
+import { sha256 as incrementalSha256 } from "@noble/hashes/sha256";
 import { buildProofInput } from "./auth/proof.ts";
 import { base64urlEncode, sha256 } from "./auth/utils.ts";
 import { TransferError } from "./errors/TransferError.ts";
@@ -284,68 +284,83 @@ async function requestTransfer(
 }
 
 function receiveStream(
-  sub: Subscription,
-  timeoutMs: number,
+  grant: ReceiveTransferGrant,
+  requestFrame: (seq: number) => Promise<Msg>,
+  cancelTransfer: (seq: number) => Promise<void>,
 ): ReadableStream<Uint8Array> {
-  const iterator = sub[Symbol.asyncIterator]();
+  const hasher = incrementalSha256.create();
+  let expectedSeq = 0;
+  let receivedBytes = 0;
 
   return new ReadableStream<Uint8Array>({
     async pull(controller) {
       try {
-        const next = await new Promise<IteratorResult<Msg>>(
-          (resolve, reject) => {
-            const timer = setTimeout(() => {
-              reject(
-                new TransferError({
-                  operation: "stream",
-                  context: { reason: "timeout" },
-                }),
-              );
-            }, timeoutMs);
-
-            iterator.next().then(
-              (value) => {
-                clearTimeout(timer);
-                resolve(value);
-              },
-              (error) => {
-                clearTimeout(timer);
-                reject(error);
-              },
-            );
-          },
-        );
-
-        if (next.done) {
-          throw new TransferError({
-            operation: "stream",
-            context: { reason: "stream_closed" },
-          });
-        }
-
-        const msg = next.value;
+        const msg = await requestFrame(expectedSeq);
         if (msg.headers?.get("status") === "error") {
           throw deserializeTransferError(msg, "stream");
         }
 
+        const actualSeq = Number(msg.headers?.get(TRANSFER_SEQUENCE_HEADER));
+        if (!Number.isSafeInteger(actualSeq) || actualSeq !== expectedSeq) {
+          throw new TransferError({
+            operation: "stream",
+            context: { reason: "sequence", expectedSeq, actualSeq },
+          });
+        }
+        expectedSeq += 1;
+
         if (msg.data.length > 0) {
+          receivedBytes += msg.data.length;
+          if (receivedBytes > grant.info.size) {
+            throw new TransferError({
+              operation: "stream",
+              context: {
+                reason: "size_mismatch",
+                expectedBytes: grant.info.size,
+                actualBytes: receivedBytes,
+              },
+            });
+          }
+          hasher.update(msg.data);
           controller.enqueue(msg.data);
         }
 
         if (msg.headers?.get(TRANSFER_EOF_HEADER) === "true") {
+          if (receivedBytes !== grant.info.size) {
+            throw new TransferError({
+              operation: "stream",
+              context: {
+                reason: "size_mismatch",
+                expectedBytes: grant.info.size,
+                actualBytes: receivedBytes,
+              },
+            });
+          }
+          const digest = `SHA-256=${base64urlEncode(hasher.digest())}`;
+          if (
+            grant.info.digest !== undefined &&
+            grant.info.digest.replace(/=+$/, "") !== digest.replace(/=+$/, "")
+          ) {
+            throw new TransferError({
+              operation: "stream",
+              context: {
+                reason: "digest_mismatch",
+                expectedDigest: grant.info.digest,
+                actualDigest: digest,
+              },
+            });
+          }
           controller.close();
-          sub.unsubscribe();
         }
       } catch (cause) {
-        sub.unsubscribe();
         const error = cause instanceof TransferError
           ? cause
           : new TransferError({ operation: "stream", cause });
         controller.error(recordTransferError(error, "receive", "stream"));
       }
     },
-    cancel() {
-      sub.unsubscribe();
+    async cancel() {
+      await cancelTransfer(expectedSeq).catch(() => undefined);
     },
   });
 }
@@ -499,6 +514,7 @@ export class SendTransferHandle extends BaseTransferHandle {
         let sentBytes = 0;
         let seq = 0;
         let completed: FileInfo | null = null;
+        const hasher = incrementalSha256.create();
 
         for await (const chunk of chunkBody(body, this.#grant.chunkBytes)) {
           sentBytes += chunk.length;
@@ -557,14 +573,20 @@ export class SendTransferHandle extends BaseTransferHandle {
           if (ack.status === "complete") {
             completed = ack.info;
           }
+          hasher.update(chunk);
           seq += 1;
         }
 
+        const completion = new TextEncoder().encode(JSON.stringify({
+          action: "complete",
+          size: sentBytes,
+          digest: `SHA-256=${base64urlEncode(hasher.digest())}`,
+        }));
         const reply = createInbox(this.inboxPrefix);
         const finalHeaders = await this.buildHeaders(
           this.#grant.subject,
           reply,
-          new Uint8Array(),
+          completion,
           seq,
           true,
         );
@@ -572,7 +594,7 @@ export class SendTransferHandle extends BaseTransferHandle {
           requestTransfer(
             this.nc,
             this.#grant.subject,
-            new Uint8Array(),
+            completion,
             finalHeaders,
             reply,
             this.timeoutMs,
@@ -639,30 +661,49 @@ export class ReceiveTransferHandle extends BaseTransferHandle {
           );
         }
 
-        const inbox = createInbox(this.inboxPrefix);
-        const sub = this.nc.subscribe(inbox);
-        const payload = new Uint8Array();
-        const headers = await this.buildHeaders(
-          this.#grant.subject,
-          inbox,
-          payload,
-        );
-
-        try {
-          this.nc.publish(this.#grant.subject, payload, {
-            headers,
-            reply: inbox,
-          });
-        } catch (cause) {
-          sub.unsubscribe();
-          return Result.err(recordTransferError(
-            new TransferError({ operation: "stream", cause }),
-            "receive",
-            "send",
-          ));
-        }
-
-        return Result.ok(receiveStream(sub, this.timeoutMs));
+        return Result.ok(receiveStream(
+          this.#grant,
+          async (seq) => {
+            const payload = new Uint8Array();
+            const reply = createInbox(this.inboxPrefix);
+            const headers = await this.buildHeaders(
+              this.#grant.subject,
+              reply,
+              payload,
+              seq,
+              false,
+            );
+            return await requestTransfer(
+              this.nc,
+              this.#grant.subject,
+              payload,
+              headers,
+              reply,
+              this.timeoutMs,
+            );
+          },
+          async (seq) => {
+            const cancelPayload = new TextEncoder().encode(
+              JSON.stringify({ action: "cancel" }),
+            );
+            const reply = createInbox(this.inboxPrefix);
+            const cancelHeaders = await this.buildHeaders(
+              this.#grant.subject,
+              reply,
+              cancelPayload,
+              seq,
+              false,
+            );
+            await requestTransfer(
+              this.nc,
+              this.#grant.subject,
+              cancelPayload,
+              cancelHeaders,
+              reply,
+              this.timeoutMs,
+            );
+          },
+        ));
       })(),
     );
   }

@@ -317,14 +317,19 @@ async fn resources_service_store_create_read_list_delete() {
 
         let store_key = format!("{}.store", input.key);
         let store_text = format!("store:{}", input.message);
+        let mut source = std::io::Cursor::new(store_text.as_bytes());
         store
-            .write(&store_key, Bytes::from(store_text.clone()))
+            .write_from(&store_key, &mut source, Some(store_text.len() as u64))
             .await?;
-        let read_bytes = store
-            .read(&store_key)
+        let mut read_bytes = Vec::new();
+        let info = store
+            .read_into(&store_key, &mut read_bytes)
             .await?
             .ok_or_else(|| ServerError::Nats(format!("store missing {store_key}")))?;
-        let read_text = String::from_utf8(read_bytes.to_vec())
+        if info.size != read_bytes.len() as u64 {
+            return Err(ServerError::Nats("store size mismatch".to_string()));
+        }
+        let read_text = String::from_utf8(read_bytes)
             .map_err(|_| ServerError::Nats("store text not utf-8".to_string()))?;
 
         let listed = store.list().await?;

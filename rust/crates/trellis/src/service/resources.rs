@@ -1,11 +1,18 @@
-use std::{fmt, future::Future, io::Cursor, pin::Pin, task::Poll, time::Duration};
+use std::{
+    fmt,
+    future::{pending, Future},
+    io::Cursor,
+    pin::Pin,
+    task::{Context, Poll},
+    time::Duration,
+};
 
 use async_nats::jetstream::kv::Operation;
-use async_nats::jetstream::object_store::GetErrorKind;
+use async_nats::jetstream::object_store::{GetErrorKind, PutErrorKind};
 use bytes::Bytes;
 use futures_util::{pin_mut, Stream, StreamExt, TryStreamExt};
 use time::OffsetDateTime;
-use tokio::io::AsyncReadExt;
+use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 
 use super::{KvResourceBinding, ServerError, StoreResourceBinding};
 
@@ -101,17 +108,64 @@ pub struct KvResourceEntry {
     pub operation: KvResourceOperation,
 }
 
+/// Contract-safe metadata for one object-store object.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StoreObjectInfo {
+    /// Logical object key.
+    pub key: String,
+    /// Object size in bytes.
+    pub size: u64,
+    /// Backend-verified digest when available.
+    pub digest: Option<String>,
+    /// Last modification time when available.
+    pub modified_at: Option<OffsetDateTime>,
+}
+
 /// Operations required by a high-level bound object-store resource handle.
 pub trait StoreResourceClient: Clone + fmt::Debug + Send + Sync + 'static {
-    /// Read all bytes for `key`, or `None` when the object is absent.
-    fn read(&self, key: &str) -> impl Future<Output = Result<Option<Bytes>, ServerError>> + Send;
+    /// Stream `key` into `writer`, or return `None` when the object is absent.
+    ///
+    /// This method does not flush or shut down the caller-owned writer.
+    fn read_into<W>(
+        &self,
+        key: &str,
+        writer: &mut W,
+    ) -> impl Future<Output = Result<Option<StoreObjectInfo>, ServerError>> + Send
+    where
+        W: AsyncWrite + Unpin + Send;
 
-    /// Persist `value` at `key`.
+    /// Stream an object from `reader` into the store.
+    fn write_from<R>(
+        &self,
+        key: &str,
+        reader: &mut R,
+    ) -> impl Future<Output = Result<StoreObjectInfo, ServerError>> + Send
+    where
+        R: AsyncRead + Unpin + Send;
+
+    /// Read all bytes for `key`, or `None` when the object is absent.
+    fn read(&self, key: &str) -> impl Future<Output = Result<Option<Bytes>, ServerError>> + Send {
+        async move {
+            let mut writer = Cursor::new(Vec::new());
+            Ok(self
+                .read_into(key, &mut writer)
+                .await?
+                .map(|_| Bytes::from(writer.into_inner())))
+        }
+    }
+
+    /// Persist a complete in-memory object at `key`.
     fn write(
         &self,
         key: &str,
         value: Bytes,
-    ) -> impl Future<Output = Result<(), ServerError>> + Send;
+    ) -> impl Future<Output = Result<(), ServerError>> + Send {
+        async move {
+            let mut reader = Cursor::new(value);
+            self.write_from(key, &mut reader).await?;
+            Ok(())
+        }
+    }
 
     /// List active object names in this store.
     fn list(&self) -> impl Future<Output = Result<Vec<String>, ServerError>> + Send;
@@ -219,6 +273,147 @@ pub struct StoreResourceHandle<C> {
     client: C,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum UploadReadFailure {
+    TooLarge {
+        attempted_bytes: u64,
+        max_bytes: u64,
+    },
+    SizeMismatch {
+        expected_bytes: u64,
+        actual_bytes: u64,
+    },
+    Cancelled,
+}
+
+struct GuardedUploadReader<R, F> {
+    reader: R,
+    cancel: Pin<Box<F>>,
+    expected_size: Option<u64>,
+    max_size: Option<u64>,
+    read: u64,
+    validated_eof: bool,
+    failure: Option<UploadReadFailure>,
+}
+
+impl<R, F> GuardedUploadReader<R, F> {
+    fn new(reader: R, expected_size: Option<u64>, max_size: Option<u64>, cancel: F) -> Self {
+        Self {
+            reader,
+            cancel: Box::pin(cancel),
+            expected_size,
+            max_size,
+            read: 0,
+            validated_eof: false,
+            failure: None,
+        }
+    }
+
+    fn limit(&self) -> Option<u64> {
+        match (self.expected_size, self.max_size) {
+            (Some(expected), Some(max)) => Some(expected.min(max)),
+            (Some(expected), None) => Some(expected),
+            (None, max) => max,
+        }
+    }
+
+    fn crossing_failure(&self) -> UploadReadFailure {
+        if let Some(expected_bytes) = self.expected_size {
+            UploadReadFailure::SizeMismatch {
+                expected_bytes,
+                actual_bytes: expected_bytes.saturating_add(1),
+            }
+        } else {
+            let max_bytes = self.max_size.expect("a crossing requires a size limit");
+            UploadReadFailure::TooLarge {
+                attempted_bytes: max_bytes.saturating_add(1),
+                max_bytes,
+            }
+        }
+    }
+}
+
+impl<R, F> AsyncRead for GuardedUploadReader<R, F>
+where
+    R: AsyncRead + Unpin,
+    F: Future<Output = ()>,
+{
+    fn poll_read(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &mut ReadBuf<'_>,
+    ) -> Poll<std::io::Result<()>> {
+        let this = self.get_mut();
+        if this.validated_eof {
+            return Poll::Ready(Ok(()));
+        }
+        if this.failure.is_some() {
+            return Poll::Ready(Err(std::io::Error::other("guarded upload terminated")));
+        }
+        if this.cancel.as_mut().poll(cx).is_ready() {
+            this.failure = Some(UploadReadFailure::Cancelled);
+            return Poll::Ready(Err(std::io::Error::other("store upload cancelled")));
+        }
+
+        let limit = this.limit();
+        if limit.is_some_and(|limit| this.read == limit) {
+            let mut extra = [0_u8; 1];
+            let mut probe = ReadBuf::new(&mut extra);
+            return match Pin::new(&mut this.reader).poll_read(cx, &mut probe) {
+                Poll::Pending => Poll::Pending,
+                Poll::Ready(Err(error)) => Poll::Ready(Err(error)),
+                Poll::Ready(Ok(())) if probe.filled().is_empty() => {
+                    this.validated_eof = true;
+                    Poll::Ready(Ok(()))
+                }
+                Poll::Ready(Ok(())) => {
+                    this.failure = Some(this.crossing_failure());
+                    Poll::Ready(Err(std::io::Error::other(
+                        "store upload size limit exceeded",
+                    )))
+                }
+            };
+        }
+
+        let remaining = limit
+            .map(|limit| usize::try_from(limit - this.read).unwrap_or(usize::MAX))
+            .unwrap_or(buf.remaining())
+            .min(buf.remaining());
+        let unfilled = buf.initialize_unfilled_to(remaining);
+        let mut bounded = ReadBuf::new(unfilled);
+        match Pin::new(&mut this.reader).poll_read(cx, &mut bounded) {
+            Poll::Pending => Poll::Pending,
+            Poll::Ready(Err(error)) => Poll::Ready(Err(error)),
+            Poll::Ready(Ok(())) => {
+                let count = bounded.filled().len();
+                buf.advance(count);
+                let Some(actual) = this
+                    .read
+                    .checked_add(u64::try_from(count).unwrap_or(u64::MAX))
+                else {
+                    return Poll::Ready(Err(std::io::Error::other("store upload size overflow")));
+                };
+                this.read = actual;
+                if count == 0 {
+                    if let Some(expected_bytes) = this.expected_size {
+                        if actual != expected_bytes {
+                            this.failure = Some(UploadReadFailure::SizeMismatch {
+                                expected_bytes,
+                                actual_bytes: actual,
+                            });
+                            return Poll::Ready(Err(std::io::Error::other(
+                                "store upload size mismatch",
+                            )));
+                        }
+                    }
+                    this.validated_eof = true;
+                }
+                Poll::Ready(Ok(()))
+            }
+        }
+    }
+}
+
 /// Options for waiting until an object appears in a bound object store.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[doc = concat!("Public Trellis data type `", stringify!(StoreWaitOptions), "`.")]
@@ -272,10 +467,109 @@ where
         &self.binding
     }
 
+    /// Stream an object from `reader` while enforcing the bound maximum and exact expected size.
+    pub async fn write_from<R>(
+        &self,
+        key: &str,
+        reader: R,
+        expected_size: Option<u64>,
+    ) -> Result<StoreObjectInfo, ServerError>
+    where
+        R: AsyncRead + Unpin + Send,
+    {
+        self.write_from_with_cancel(key, reader, expected_size, pending())
+            .await
+    }
+
+    /// Stream an object from `reader`, aborting before validated EOF when `cancel` resolves.
+    ///
+    /// Once validated source EOF has been observed, backend metadata commit is awaited and
+    /// cancellation can no longer promise rollback.
+    pub async fn write_from_with_cancel<R, F>(
+        &self,
+        key: &str,
+        reader: R,
+        expected_size: Option<u64>,
+        cancel: F,
+    ) -> Result<StoreObjectInfo, ServerError>
+    where
+        R: AsyncRead + Unpin + Send,
+        F: Future<Output = ()> + Send,
+    {
+        let max_size = self
+            .binding
+            .max_object_bytes
+            .and_then(|value| value.try_into().ok());
+        if let (Some(expected_bytes), Some(max_bytes)) = (expected_size, max_size) {
+            if expected_bytes > max_bytes {
+                return Err(ServerError::StoreObjectTooLarge {
+                    attempted_bytes: expected_bytes,
+                    max_bytes,
+                });
+            }
+        }
+
+        let mut guarded = GuardedUploadReader::new(reader, expected_size, max_size, cancel);
+        let result = self.client.write_from(key, &mut guarded).await;
+        match guarded.failure {
+            Some(UploadReadFailure::TooLarge {
+                attempted_bytes,
+                max_bytes,
+            }) => Err(ServerError::StoreObjectTooLarge {
+                attempted_bytes,
+                max_bytes,
+            }),
+            Some(UploadReadFailure::SizeMismatch {
+                expected_bytes,
+                actual_bytes,
+            }) => Err(ServerError::StoreObjectSizeMismatch {
+                expected_bytes,
+                actual_bytes,
+            }),
+            Some(UploadReadFailure::Cancelled) => Err(ServerError::StoreWriteCancelled),
+            None => result,
+        }
+    }
+
+    /// Stream an object into `writer`; the writer is neither flushed nor shut down.
+    pub async fn read_into<W>(
+        &self,
+        key: &str,
+        writer: W,
+    ) -> Result<Option<StoreObjectInfo>, ServerError>
+    where
+        W: AsyncWrite + Unpin + Send,
+    {
+        self.read_into_with_cancel(key, writer, pending()).await
+    }
+
+    /// Stream an object into `writer`, returning cancellation after any already-written prefix.
+    pub async fn read_into_with_cancel<W, F>(
+        &self,
+        key: &str,
+        mut writer: W,
+        cancel: F,
+    ) -> Result<Option<StoreObjectInfo>, ServerError>
+    where
+        W: AsyncWrite + Unpin + Send,
+        F: Future<Output = ()> + Send,
+    {
+        tokio::pin!(cancel);
+        tokio::select! {
+            biased;
+            () = &mut cancel => Err(ServerError::StoreReadCancelled),
+            result = self.client.read_into(key, &mut writer) => result,
+        }
+    }
+
     /// Read all bytes for `key`, or `None` when the object is absent.
     #[doc = concat!("Asynchronous Trellis API operation `", stringify!(read), "`.")]
     pub async fn read(&self, key: &str) -> Result<Option<Bytes>, ServerError> {
-        self.client.read(key).await
+        let mut writer = Cursor::new(Vec::new());
+        Ok(self
+            .read_into(key, &mut writer)
+            .await?
+            .map(|_| Bytes::from(writer.into_inner())))
     }
 
     /// Wait until `key` appears in this store, then return its bytes.
@@ -385,23 +679,13 @@ where
     #[doc = concat!("Asynchronous Trellis API operation `", stringify!(write), "`.")]
     pub async fn write(&self, key: &str, value: impl Into<Bytes>) -> Result<(), ServerError> {
         let value = value.into();
-        if let Some(max_bytes) = self
-            .binding
-            .max_object_bytes
-            .and_then(|value| u64::try_from(value).ok())
-        {
-            if value.len() as u64 > max_bytes {
-                return Err(ServerError::TransferObjectTooLarge {
-                    service_name: self.service_name.clone(),
-                    store: self.resource_name.clone(),
-                    key: key.to_string(),
-                    size: value.len() as u64,
-                    max_bytes,
-                });
-            }
-        }
-
-        self.client.write(key, value).await
+        let expected_size = u64::try_from(value.len()).map_err(|_| {
+            ServerError::Nats("store object length does not fit in u64".to_string())
+        })?;
+        let mut reader = Cursor::new(value);
+        self.write_from(key, &mut reader, Some(expected_size))
+            .await?;
+        Ok(())
     }
 
     /// List active object names in this store.
@@ -421,12 +705,22 @@ impl<C> StoreResourceClient for StoreResourceHandle<C>
 where
     C: StoreResourceClient,
 {
-    async fn read(&self, key: &str) -> Result<Option<Bytes>, ServerError> {
-        self.client.read(key).await
+    async fn read_into<W>(
+        &self,
+        key: &str,
+        writer: &mut W,
+    ) -> Result<Option<StoreObjectInfo>, ServerError>
+    where
+        W: AsyncWrite + Unpin + Send,
+    {
+        StoreResourceHandle::read_into(self, key, writer).await
     }
 
-    async fn write(&self, key: &str, value: Bytes) -> Result<(), ServerError> {
-        self.client.write(key, value).await
+    async fn write_from<R>(&self, key: &str, reader: &mut R) -> Result<StoreObjectInfo, ServerError>
+    where
+        R: AsyncRead + Unpin + Send,
+    {
+        StoreResourceHandle::write_from(self, key, reader, None).await
     }
 
     async fn list(&self) -> Result<Vec<String>, ServerError> {
@@ -598,24 +892,47 @@ impl fmt::Debug for BoundStoreResourceClient {
 }
 
 impl StoreResourceClient for BoundStoreResourceClient {
-    async fn read(&self, key: &str) -> Result<Option<Bytes>, ServerError> {
+    async fn read_into<W>(
+        &self,
+        key: &str,
+        writer: &mut W,
+    ) -> Result<Option<StoreObjectInfo>, ServerError>
+    where
+        W: AsyncWrite + Unpin + Send,
+    {
         let mut object = match self.store.get(key).await {
             Ok(object) => object,
             Err(error) if error.kind() == GetErrorKind::NotFound => return Ok(None),
             Err(error) => return Err(nats_error(error)),
         };
-        let mut bytes = Vec::new();
-        object.read_to_end(&mut bytes).await.map_err(nats_error)?;
-        Ok(Some(bytes.into()))
+        let info = store_object_info(object.info())?;
+        tokio::io::copy(&mut object, writer)
+            .await
+            .map_err(nats_error)?;
+        Ok(Some(info))
     }
 
-    async fn write(&self, key: &str, value: Bytes) -> Result<(), ServerError> {
-        let mut reader = Cursor::new(value);
-        self.store
-            .put(key, &mut reader)
-            .await
-            .map(|_| ())
-            .map_err(nats_error)
+    async fn write_from<R>(&self, key: &str, reader: &mut R) -> Result<StoreObjectInfo, ServerError>
+    where
+        R: AsyncRead + Unpin + Send,
+    {
+        let mut reader = reader;
+        match self.store.put(key, &mut reader).await {
+            Ok(info) => store_object_info(&info),
+            Err(error) if error.kind() == PutErrorKind::PublishMetadata => {
+                Err(ServerError::StoreCommitIndeterminate {
+                    key: key.to_string(),
+                    message: error.to_string(),
+                })
+            }
+            Err(error) if error.kind() == PutErrorKind::PurgeOldChunks => {
+                Err(ServerError::StoreCommittedCleanupFailed {
+                    key: key.to_string(),
+                    message: error.to_string(),
+                })
+            }
+            Err(error) => Err(nats_error(error)),
+        }
     }
 
     async fn list(&self) -> Result<Vec<String>, ServerError> {
@@ -629,6 +946,18 @@ impl StoreResourceClient for BoundStoreResourceClient {
     async fn delete(&self, key: &str) -> Result<(), ServerError> {
         self.store.delete(key).await.map_err(nats_error)
     }
+}
+
+fn store_object_info(
+    info: &async_nats::jetstream::object_store::ObjectInfo,
+) -> Result<StoreObjectInfo, ServerError> {
+    Ok(StoreObjectInfo {
+        key: info.name.clone(),
+        size: u64::try_from(info.size)
+            .map_err(|_| ServerError::Nats("store object size does not fit in u64".to_string()))?,
+        digest: info.digest.clone(),
+        modified_at: info.modified,
+    })
 }
 
 impl ResourceRuntimeClient for async_nats::Client {
@@ -750,6 +1079,200 @@ pub fn validate_store_binding(
         ));
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc, Mutex,
+    };
+
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    use super::*;
+
+    #[derive(Debug, Clone, Default)]
+    struct RecordingStore {
+        writes: Arc<AtomicUsize>,
+        bytes: Arc<Mutex<Vec<u8>>>,
+    }
+
+    impl StoreResourceClient for RecordingStore {
+        async fn read_into<W>(
+            &self,
+            key: &str,
+            writer: &mut W,
+        ) -> Result<Option<StoreObjectInfo>, ServerError>
+        where
+            W: AsyncWrite + Unpin + Send,
+        {
+            let bytes = self.bytes.lock().expect("recording store lock").clone();
+            writer.write_all(&bytes).await.map_err(nats_error)?;
+            Ok(Some(StoreObjectInfo {
+                key: key.to_string(),
+                size: bytes.len() as u64,
+                digest: None,
+                modified_at: None,
+            }))
+        }
+
+        async fn write_from<R>(
+            &self,
+            key: &str,
+            reader: &mut R,
+        ) -> Result<StoreObjectInfo, ServerError>
+        where
+            R: AsyncRead + Unpin + Send,
+        {
+            self.writes.fetch_add(1, Ordering::SeqCst);
+            let mut bytes = Vec::new();
+            reader.read_to_end(&mut bytes).await.map_err(nats_error)?;
+            let size = bytes.len() as u64;
+            *self.bytes.lock().expect("recording store lock") = bytes;
+            Ok(StoreObjectInfo {
+                key: key.to_string(),
+                size,
+                digest: None,
+                modified_at: None,
+            })
+        }
+
+        async fn list(&self) -> Result<Vec<String>, ServerError> {
+            Ok(Vec::new())
+        }
+
+        async fn delete(&self, _key: &str) -> Result<(), ServerError> {
+            Ok(())
+        }
+    }
+
+    fn handle(max_object_bytes: Option<i64>) -> StoreResourceHandle<RecordingStore> {
+        StoreResourceHandle::new(
+            "test-service",
+            "objects",
+            StoreResourceBinding {
+                name: "test_store".to_string(),
+                max_object_bytes,
+                max_total_bytes: None,
+                ttl_ms: 0,
+            },
+            RecordingStore::default(),
+        )
+    }
+
+    #[tokio::test]
+    async fn store_write_from_rejects_known_oversize_before_backend_io() {
+        let handle = handle(Some(4));
+        let writes = Arc::clone(&handle.client.writes);
+        let mut reader = Cursor::new(b"12345".to_vec());
+
+        let error = handle
+            .write_from("key", &mut reader, Some(5))
+            .await
+            .expect_err("known oversize must fail");
+
+        assert!(matches!(
+            error,
+            ServerError::StoreObjectTooLarge {
+                attempted_bytes: 5,
+                max_bytes: 4
+            }
+        ));
+        assert_eq!(writes.load(Ordering::SeqCst), 0);
+        assert_eq!(reader.position(), 0);
+    }
+
+    #[tokio::test]
+    async fn store_write_from_rejects_unknown_oversize_without_clean_eof() {
+        let handle = handle(Some(4));
+        let error = handle
+            .write_from("key", Cursor::new(b"12345".to_vec()), None)
+            .await
+            .expect_err("unknown oversize must fail");
+
+        assert!(matches!(
+            error,
+            ServerError::StoreObjectTooLarge {
+                attempted_bytes: 5,
+                max_bytes: 4
+            }
+        ));
+        assert!(handle
+            .client
+            .bytes
+            .lock()
+            .expect("recording store lock")
+            .is_empty());
+    }
+
+    #[tokio::test]
+    async fn store_write_from_requires_exact_expected_size() {
+        for (bytes, actual) in [(b"123".as_slice(), 3), (b"12345".as_slice(), 5)] {
+            let handle = handle(None);
+            let error = handle
+                .write_from("key", Cursor::new(bytes.to_vec()), Some(4))
+                .await
+                .expect_err("size mismatch must fail");
+            assert!(matches!(
+                error,
+                ServerError::StoreObjectSizeMismatch {
+                    expected_bytes: 4,
+                    actual_bytes
+                } if actual_bytes == actual
+            ));
+        }
+    }
+
+    #[tokio::test]
+    async fn store_trait_forwarding_keeps_bound_maximum() {
+        let handle = handle(Some(4));
+        let mut reader = Cursor::new(b"12345".to_vec());
+        let error = StoreResourceClient::write_from(&handle, "key", &mut reader)
+            .await
+            .expect_err("trait forwarding must enforce binding");
+        assert!(matches!(error, ServerError::StoreObjectTooLarge { .. }));
+    }
+
+    #[tokio::test]
+    async fn store_streaming_and_whole_buffer_paths_round_trip() {
+        let handle = handle(Some(1024));
+        let info = handle
+            .write_from("key", Cursor::new(b"streamed".to_vec()), Some(8))
+            .await
+            .expect("stream upload");
+        assert_eq!(info.size, 8);
+
+        let mut writer = Cursor::new(Vec::new());
+        let read_info = handle
+            .read_into("key", &mut writer)
+            .await
+            .expect("stream download")
+            .expect("object exists");
+        assert_eq!(read_info.size, 8);
+        assert_eq!(writer.into_inner(), b"streamed");
+
+        handle
+            .write("key", Bytes::from_static(b"buffered"))
+            .await
+            .unwrap();
+        assert_eq!(
+            handle.read("key").await.unwrap().unwrap(),
+            b"buffered".as_slice()
+        );
+    }
+
+    #[tokio::test]
+    async fn store_write_from_cancellation_aborts_before_eof() {
+        let handle = handle(None);
+        let (mut writer, reader) = tokio::io::duplex(8);
+        writer.write_all(b"prefix").await.unwrap();
+        let error = handle
+            .write_from_with_cancel("key", reader, None, async {})
+            .await
+            .expect_err("cancellation must abort upload");
+        assert!(matches!(error, ServerError::StoreWriteCancelled));
+    }
 }
 
 fn invalid_binding(

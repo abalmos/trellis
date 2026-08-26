@@ -9,6 +9,7 @@ use clap::Parser;
 use futures_util::future::BoxFuture;
 use futures_util::stream;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use tokio::io::{AsyncRead, AsyncWrite};
 use trellis_participant_demo_service::jobs::RefreshSiteSummaryQueueClient;
 use trellis_participant_demo_service::owned::Publisher;
 use trellis_participant_demo_service::{
@@ -20,8 +21,8 @@ use trellis_rs::service::{
     AcceptedOperation, DownloadTransferGrant, FileTransferInfo, InMemoryOperationRuntime, KvHandle,
     OperationDescriptor, OperationFailure, OperationRefData, OperationSnapshot, OperationState,
     OperationTransferProgress, RequestContext, ServerError, ServiceHandle, ServiceOperation,
-    ServiceOperationProvider, StoreHandle, StoreResourceClient, TransferUploadGrantArgs,
-    UploadTransferGrant, UploadTransferSession,
+    ServiceOperationProvider, StoreHandle, StoreObjectInfo, StoreResourceClient,
+    TransferUploadGrantArgs, UploadTransferGrant, UploadTransferSession,
 };
 use trellis_sdk_demo_service::operations as sdk_operations;
 use trellis_sdk_demo_service::types::{
@@ -287,12 +288,22 @@ impl std::fmt::Debug for EvidenceStore {
 }
 
 impl StoreResourceClient for EvidenceStore {
-    async fn read(&self, key: &str) -> Result<Option<Bytes>, ServerError> {
-        self.inner.read(key).await
+    async fn read_into<W>(
+        &self,
+        key: &str,
+        writer: &mut W,
+    ) -> Result<Option<StoreObjectInfo>, ServerError>
+    where
+        W: AsyncWrite + Unpin + Send,
+    {
+        StoreResourceClient::read_into(&self.inner, key, writer).await
     }
 
-    async fn write(&self, key: &str, value: Bytes) -> Result<(), ServerError> {
-        self.inner.write(key, value.clone()).await?;
+    async fn write_from<R>(&self, key: &str, reader: &mut R) -> Result<StoreObjectInfo, ServerError>
+    where
+        R: AsyncRead + Unpin + Send,
+    {
+        let info = StoreResourceClient::write_from(&self.inner, key, reader).await?;
         let updated = {
             let mut state = self.state.lock().expect("demo state lock");
             let upload_evidence_id = self.upload_evidence_id.clone().or_else(|| {
@@ -307,7 +318,7 @@ impl StoreResourceClient for EvidenceStore {
                     .is_some_and(|evidence_id| evidence_id == &evidence.evidence_id)
                     || (upload_evidence_id.is_none() && evidence.key == key)
             }) {
-                evidence.size = value.len() as i64;
+                evidence.size = i64::try_from(info.size).unwrap_or(i64::MAX);
                 evidence.uploaded_at = now_iso();
                 if evidence.file_name.is_none() {
                     evidence.file_name = key.rsplit('/').next().map(ToString::to_string);
@@ -318,7 +329,7 @@ impl StoreResourceClient for EvidenceStore {
             };
             tracing::info!(
                 key,
-                bytes = value.len(),
+                bytes = info.size,
                 evidence_id = upload_evidence_id.as_deref().unwrap_or("<unknown>"),
                 operation_id = self.upload_operation_id.as_deref().unwrap_or("<none>"),
                 "evidence bytes stored"
@@ -333,7 +344,7 @@ impl StoreResourceClient for EvidenceStore {
         if let Some(evidence) = updated.as_ref() {
             publish_evidence_upload_events(self.publisher.as_ref(), evidence).await;
         }
-        Ok(())
+        Ok(info)
     }
 
     async fn list(&self) -> Result<Vec<String>, ServerError> {

@@ -11,6 +11,8 @@ import {
   type Subscription,
 } from "@nats-io/nats-core";
 import { ulid } from "ulid";
+import { sha256 } from "@noble/hashes/sha256";
+import { base64urlEncode } from "../../auth/utils.ts";
 
 import type { PermissionAtom } from "../../contract_support/runtime.ts";
 import {
@@ -28,8 +30,8 @@ import type {
   SendTransferGrant,
 } from "../../transfer.ts";
 
-const UPLOAD_SUBJECT_PREFIX = "transfer.v1.upload";
-const DOWNLOAD_SUBJECT_PREFIX = "transfer.v1.download";
+const UPLOAD_SUBJECT_PREFIX = "transfer.v2.upload";
+const DOWNLOAD_SUBJECT_PREFIX = "transfer.v2.download";
 const TRANSFER_SEQUENCE_HEADER = "trellis-transfer-seq";
 const TRANSFER_EOF_HEADER = "trellis-transfer-eof";
 const DEFAULT_TRANSFER_CHUNK_BYTES = 256 * 1024;
@@ -112,6 +114,7 @@ type UploadSession = {
   putPromise: AsyncResult<void, StoreError>;
   nextSeq: number;
   receivedBytes: number;
+  hasher: ReturnType<typeof sha256.create>;
 };
 
 type DownloadSession = {
@@ -128,6 +131,12 @@ type DownloadSession = {
   info: FileInfo;
   subscription: Subscription;
   timeoutId: ReturnType<typeof setTimeout>;
+  reader?: ReadableStreamDefaultReader<Uint8Array>;
+  pending?: Uint8Array;
+  pendingOffset: number;
+  nextSeq: number;
+  sentBytes: number;
+  hasher: ReturnType<typeof sha256.create>;
 };
 
 function effectiveUploadMaxBytes(
@@ -250,12 +259,12 @@ class AsyncValueBroadcaster<T> {
 }
 
 class AsyncChunkQueue implements AsyncIterable<Uint8Array> {
-  #values: Uint8Array[] = [];
+  #values: Array<{ chunk: Uint8Array; consumed: () => void }> = [];
   #resolvers: Array<(result: IteratorResult<Uint8Array>) => void> = [];
   #closed = false;
   #error: unknown;
 
-  push(chunk: Uint8Array): void {
+  async push(chunk: Uint8Array): Promise<void> {
     if (this.#closed) {
       return;
     }
@@ -266,7 +275,9 @@ class AsyncChunkQueue implements AsyncIterable<Uint8Array> {
       return;
     }
 
-    this.#values.push(chunk);
+    await new Promise<void>((consumed) => {
+      this.#values.push({ chunk, consumed });
+    });
   }
 
   close(): void {
@@ -285,6 +296,9 @@ class AsyncChunkQueue implements AsyncIterable<Uint8Array> {
     }
     this.#error = error;
     this.#closed = true;
+    for (const value of this.#values.splice(0)) {
+      value.consumed();
+    }
     while (this.#resolvers.length > 0) {
       this.#resolvers.shift()?.({ value: undefined, done: true });
     }
@@ -292,7 +306,9 @@ class AsyncChunkQueue implements AsyncIterable<Uint8Array> {
 
   async next(): Promise<IteratorResult<Uint8Array>> {
     if (this.#values.length > 0) {
-      return { value: this.#values.shift()!, done: false };
+      const value = this.#values.shift()!;
+      value.consumed();
+      return { value: value.chunk, done: false };
     }
     if (this.#error) {
       throw this.#error;
@@ -360,23 +376,6 @@ function parseSeq(msg: Msg): ResultType<number, TransferError> {
     );
   }
   return Result.ok(value);
-}
-
-async function* iterateStream(
-  stream: ReadableStream<Uint8Array>,
-): AsyncIterable<Uint8Array> {
-  const reader = stream.getReader();
-  try {
-    while (true) {
-      const next = await reader.read();
-      if (next.done) {
-        return;
-      }
-      yield next.value;
-    }
-  } finally {
-    reader.releaseLock();
-  }
 }
 
 export class ServiceTransfer {
@@ -459,6 +458,7 @@ export class ServiceTransfer {
       putPromise,
       nextSeq: 0,
       receivedBytes: 0,
+      hasher: sha256.create(),
     };
 
     this.#uploadSessions.set(subject, session);
@@ -590,6 +590,10 @@ export class ServiceTransfer {
       key: args.key,
       info: fileInfoFromStoreInfo(entryValue.info),
       subscription,
+      pendingOffset: 0,
+      nextSeq: 0,
+      sentBytes: 0,
+      hasher: sha256.create(),
       timeoutId: setTimeout(
         () => this.#cleanupDownloadSession(subject),
         args.expiresInMs,
@@ -712,6 +716,25 @@ export class ServiceTransfer {
       return;
     }
 
+    try {
+      if (
+        (JSON.parse(new TextDecoder().decode(msg.data)) as { action?: string })
+          .action === "cancel"
+      ) {
+        msg.respond(JSON.stringify({ status: "cancelled" }));
+        this.#expireUploadSession(
+          session.subject,
+          new TransferError({
+            operation: "put",
+            context: { reason: "cancelled" },
+          }),
+        );
+        return;
+      }
+    } catch {
+      // Data frames are arbitrary bytes, not control JSON.
+    }
+
     const seq = parseSeq(msg).take();
     if (isErr(seq)) {
       replyError(msg, seq.error);
@@ -731,7 +754,8 @@ export class ServiceTransfer {
       this.#expireUploadSession(session.subject, error);
       return;
     }
-    if (msg.data.length > 0) {
+    const eof = msg.headers?.get(TRANSFER_EOF_HEADER) === "true";
+    if (!eof && msg.data.length > 0) {
       if (msg.data.length > this.#chunkBytes) {
         const error = new TransferError({
           operation: "put",
@@ -761,7 +785,8 @@ export class ServiceTransfer {
         this.#expireUploadSession(session.subject, error);
         return;
       }
-      session.queue.push(msg.data);
+      await session.queue.push(msg.data);
+      session.hasher.update(msg.data);
       await session.onProgress?.({
         chunkIndex: session.nextSeq,
         chunkBytes: msg.data.length,
@@ -770,7 +795,40 @@ export class ServiceTransfer {
     }
     session.nextSeq += 1;
 
-    if (msg.headers?.get(TRANSFER_EOF_HEADER) === "true") {
+    if (eof) {
+      let completion: { action: "complete"; size: number; digest: string };
+      try {
+        completion = JSON.parse(new TextDecoder().decode(msg.data));
+      } catch (cause) {
+        const error = new TransferError({
+          operation: "put",
+          cause,
+          context: { reason: "invalid_completion" },
+        });
+        replyError(msg, error);
+        this.#expireUploadSession(session.subject, error);
+        return;
+      }
+      const digest = `SHA-256=${base64urlEncode(session.hasher.digest())}`;
+      if (
+        completion.action !== "complete" ||
+        completion.size !== session.receivedBytes ||
+        completion.digest !== digest
+      ) {
+        const error = new TransferError({
+          operation: "put",
+          context: {
+            reason: "completion_mismatch",
+            expectedSize: session.receivedBytes,
+            actualSize: completion.size,
+            expectedDigest: digest,
+            actualDigest: completion.digest,
+          },
+        });
+        replyError(msg, error);
+        this.#expireUploadSession(session.subject, error);
+        return;
+      }
       session.queue.close();
       const putResult = await session.putPromise;
       const putValue = putResult.take();
@@ -820,8 +878,7 @@ export class ServiceTransfer {
   async #runDownloadSession(session: DownloadSession): Promise<void> {
     try {
       for await (const msg of session.subscription) {
-        await this.#handleDownloadRequest(session, msg);
-        break;
+        if (await this.#handleDownloadRequest(session, msg)) break;
       }
     } finally {
       this.#cleanupDownloadSession(session.subject);
@@ -831,7 +888,7 @@ export class ServiceTransfer {
   async #handleDownloadRequest(
     session: DownloadSession,
     msg: Msg,
-  ): Promise<void> {
+  ): Promise<boolean> {
     const reply = msg.reply;
     if (
       !reply || !reply.startsWith(`${session.inboxPrefix}.`)
@@ -847,7 +904,7 @@ export class ServiceTransfer {
           },
         }),
       );
-      return;
+      return false;
     }
     if (Date.now() >= session.expiresAtMs) {
       publishError(
@@ -855,7 +912,7 @@ export class ServiceTransfer {
         reply,
         new TransferError({ operation: "get", context: { reason: "expired" } }),
       );
-      return;
+      return true;
     }
 
     const authenticated = await verifyLocalAuthorization({
@@ -878,49 +935,117 @@ export class ServiceTransfer {
           context: { reason: "invalid_proof" },
         }),
       );
-      return;
+      return false;
     }
 
-    const entry = await session.store.get(session.key);
-    const entryValue = entry.take();
-    if (isErr(entryValue)) {
-      publishError(
-        this.#nc,
-        reply,
-        new TransferError({ operation: "get", cause: entryValue.error }),
+    const parsedSeq = parseSeq(msg).take();
+    if (isErr(parsedSeq) || parsedSeq !== session.nextSeq) {
+      replyError(
+        msg,
+        isErr(parsedSeq) ? parsedSeq.error : new TransferError({
+          operation: "get",
+          context: {
+            reason: "sequence",
+            expected: session.nextSeq,
+            actual: parsedSeq,
+          },
+        }),
       );
-      return;
+      return false;
     }
-
-    const stream = await entryValue.stream();
-    const streamValue = stream.take();
-    if (isErr(streamValue)) {
-      publishError(
-        this.#nc,
-        reply,
-        new TransferError({ operation: "get", cause: streamValue.error }),
+    if (new TextDecoder().decode(msg.data) === '{"action":"cancel"}') {
+      await session.reader?.cancel().catch(() => undefined);
+      msg.respond(JSON.stringify({ status: "cancelled" }));
+      return true;
+    }
+    if (msg.data.length !== 0) {
+      replyError(
+        msg,
+        new TransferError({
+          operation: "get",
+          context: { reason: "invalid_control" },
+        }),
       );
-      return;
+      return false;
     }
 
-    let seq = 0;
     try {
-      for await (const chunk of iterateStream(streamValue)) {
-        const headers = natsHeaders();
-        headers.set(TRANSFER_SEQUENCE_HEADER, String(seq));
-        this.#nc.publish(reply, chunk, { headers });
-        seq += 1;
+      if (!session.reader) {
+        const entryValue = (await session.store.get(session.key)).take();
+        if (isErr(entryValue)) throw entryValue.error;
+        const streamValue = (await entryValue.stream()).take();
+        if (isErr(streamValue)) throw streamValue.error;
+        session.reader = streamValue.getReader();
       }
-      const finalHeaders = natsHeaders();
-      finalHeaders.set(TRANSFER_SEQUENCE_HEADER, String(seq));
-      finalHeaders.set(TRANSFER_EOF_HEADER, "true");
-      this.#nc.publish(reply, new Uint8Array(), { headers: finalHeaders });
-    } catch (cause) {
-      publishError(
-        this.#nc,
-        reply,
-        new TransferError({ operation: "get", cause }),
+      while (
+        !session.pending || session.pendingOffset >= session.pending.length
+      ) {
+        const next = await session.reader.read();
+        if (next.done) {
+          if (session.sentBytes !== session.info.size) {
+            throw new TransferError({
+              operation: "get",
+              context: {
+                reason: "size_mismatch",
+                expected: session.info.size,
+                actual: session.sentBytes,
+              },
+            });
+          }
+          const digest = `SHA-256=${base64urlEncode(session.hasher.digest())}`;
+          if (
+            session.info.digest &&
+            session.info.digest.replace(/=+$/, "") !== digest.replace(/=+$/, "")
+          ) {
+            throw new TransferError({
+              operation: "get",
+              context: {
+                reason: "digest_mismatch",
+                expected: session.info.digest,
+                actual: digest,
+              },
+            });
+          }
+          const headers = natsHeaders();
+          headers.set(TRANSFER_SEQUENCE_HEADER, String(session.nextSeq));
+          headers.set(TRANSFER_EOF_HEADER, "true");
+          msg.respond(new Uint8Array(), { headers });
+          return true;
+        }
+        session.pending = next.value;
+        session.pendingOffset = 0;
+      }
+
+      const chunk = session.pending.slice(
+        session.pendingOffset,
+        session.pendingOffset + this.#chunkBytes,
       );
+      session.pendingOffset += chunk.length;
+      session.sentBytes += chunk.length;
+      if (session.sentBytes > session.info.size) {
+        throw new TransferError({
+          operation: "get",
+          context: {
+            reason: "size_mismatch",
+            expected: session.info.size,
+            actual: session.sentBytes,
+          },
+        });
+      }
+      session.hasher.update(chunk);
+      const headers = natsHeaders();
+      headers.set(TRANSFER_SEQUENCE_HEADER, String(session.nextSeq));
+      msg.respond(chunk, { headers });
+      session.nextSeq += 1;
+      return false;
+    } catch (cause) {
+      replyError(
+        msg,
+        cause instanceof TransferError
+          ? cause
+          : new TransferError({ operation: "get", cause }),
+      );
+      return true;
     }
   }
 
@@ -957,6 +1082,7 @@ export class ServiceTransfer {
     }
     clearTimeout(session.timeoutId);
     session.subscription.unsubscribe();
+    void session.reader?.cancel().catch(() => undefined);
     this.#downloadSessions.delete(subject);
   }
 }

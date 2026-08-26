@@ -33,6 +33,15 @@ liveTrellisTest({
         new TextDecoder().decode(downloaded),
         `download:${fixture.downloadKey}`,
       );
+
+      const cancelledGrant = requireReceiveTransferGrant(
+        await client.filesDownload({ key: `${fixture.downloadKey}.cancel` })
+          .orThrow(),
+      );
+      const stream = await client.transfer(cancelledGrant).stream().orThrow();
+      const reader = stream.getReader();
+      assertEquals((await reader.read()).done, false);
+      await reader.cancel();
     });
   },
 });

@@ -352,6 +352,52 @@ pub enum ServerError {
         max_bytes: u64,
     },
 
+    /// A bound object-store upload exceeded its configured maximum.
+    #[error("store object exceeds configured maximum: attempted {attempted_bytes} bytes, max {max_bytes} bytes")]
+    StoreObjectTooLarge {
+        /// First size known to exceed the limit.
+        attempted_bytes: u64,
+        /// Configured object-size limit.
+        max_bytes: u64,
+    },
+
+    /// A bound object-store upload did not match its declared exact size.
+    #[error(
+        "store object size mismatch: expected {expected_bytes} bytes, got {actual_bytes} bytes"
+    )]
+    StoreObjectSizeMismatch {
+        /// Declared exact object size.
+        expected_bytes: u64,
+        /// Observed size, or the first size known to exceed the declaration.
+        actual_bytes: u64,
+    },
+
+    /// A bound object-store upload was cancelled before validated source EOF.
+    #[error("store object upload cancelled")]
+    StoreWriteCancelled,
+
+    /// A bound object-store download was cancelled.
+    #[error("store object download cancelled")]
+    StoreReadCancelled,
+
+    /// Object metadata publication may have committed without a definitive acknowledgement.
+    #[error("store object commit is indeterminate for key {key}: {message}")]
+    StoreCommitIndeterminate {
+        /// Logical object key.
+        key: String,
+        /// Backend failure detail.
+        message: String,
+    },
+
+    /// Replacement metadata committed but cleanup of the previous chunks failed.
+    #[error("store object replacement committed but cleanup failed for key {key}: {message}")]
+    StoreCommittedCleanupFailed {
+        /// Logical object key.
+        key: String,
+        /// Backend failure detail.
+        message: String,
+    },
+
     #[error("invalid transfer id '{value}': expected a single safe NATS subject token")]
     #[doc(hidden)]
     InvalidTransferId { value: String },
@@ -408,6 +454,26 @@ pub enum ServerError {
         key: String,
         expected_size: u64,
         actual_size: u64,
+    },
+
+    /// Transfer completion metadata did not match the independently hashed bytes.
+    #[error(
+        "transfer '{transfer_id}' digest mismatch: expected {expected_digest}, got {actual_digest}"
+    )]
+    TransferDigestMismatch {
+        /// Transfer session identifier.
+        transfer_id: String,
+        /// Digest declared by the sender or grant.
+        expected_digest: String,
+        /// Digest computed by the receiver.
+        actual_digest: String,
+    },
+
+    /// An authenticated transfer cancellation was accepted.
+    #[error("transfer '{transfer_id}' cancelled")]
+    TransferCancelled {
+        /// Transfer session identifier.
+        transfer_id: String,
     },
 }
 

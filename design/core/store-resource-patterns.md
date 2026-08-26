@@ -156,8 +156,8 @@ Rules:
   total-store limit; Trellis maps this to the backing NATS object store's
   `max_bytes` stream limit
 - bindings include `maxObjectBytes` only when the contract requested a finite
-  per-object limit that the Trellis runtime write path enforces before writing
-  each object
+  per-object limit that the Trellis runtime write path enforces while streaming
+  each object; a declared exact size above the limit is rejected before reading
 - bindings must not expose operator or platform management credentials
 
 ### Runtime API Expectations
@@ -227,6 +227,25 @@ class TypedStoreEntry {
   bytes(): AsyncResult<Uint8Array, StoreError>;
 }
 ```
+
+Rust expectations:
+
+- `StoreResourceHandle::write_from(...)` accepts a borrowed Tokio `AsyncRead`,
+  an optional exact byte count, and enforces `maxObjectBytes` while bytes flow;
+  `write_from_with_cancel(...)` additionally accepts a cancellation future
+- `StoreResourceHandle::read_into(...)` copies into a caller-owned Tokio
+  `AsyncWrite` without flushing or shutting it down;
+  `read_into_with_cancel(...)` can stop after a partial caller-visible prefix
+- `read(...)` and `write(...)` remain whole-buffer conveniences implemented over
+  those streaming primitives
+- successful writes return logical object metadata only; physical bucket names,
+  object NUIDs, and chunk subjects remain runtime internals
+- the NATS Object Store backend publishes object metadata after source EOF, so a
+  reader error or cancellation before validated EOF does not publish a completed
+  object version; replacement is not advertised as an atomic transaction
+- metadata-publication acknowledgement failures are reported as
+  commit-indeterminate, while old-chunk purge failures report that the
+  replacement committed but cleanup failed
 
 Rules:
 

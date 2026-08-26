@@ -173,6 +173,9 @@ Rules:
   declares `update`
 - transfer-capable operations initiate caller-to-service send transfer through
   `operation.<group>.<leaf>.input(input).transfer(body).start()`
+- Rust also accepts a borrowed Tokio reader through
+  `.input(input).transfer_from(reader, expected_size).start()`; operation start
+  and transfer remain one builder action even though bytes flow after acceptance
 - transfer initiation is builder-only: callers MUST NOT start an operation once
   and attach bytes later, and resumed operation references MUST only observe
   transfer-backed operations
@@ -207,6 +210,14 @@ Caller surface:
 - callers send bytes for transfer-backed operations through the generated
   operation leaf's builder path,
   `operation.<group>.<leaf>.input(input).transfer(body).start()`
+- transfer payloads use ordered bounded frames; downloads are client-pulled one
+  frame at a time so a slow writer cannot move unbounded buffering into NATS or
+  the client; upload completion is an authenticated JSON control carrying the
+  exact byte count and SHA-256 digest, and download EOF is published only after
+  the store reader validates EOF and integrity
+- upload and download cancellation controls are authenticated like data frames;
+  upload cancellation before validated source EOF prevents metadata completion,
+  while download cancellation may leave a prefix in the caller-owned writer
 
 Owning-service surface:
 

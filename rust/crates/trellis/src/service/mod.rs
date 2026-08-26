@@ -68,7 +68,7 @@ pub use operations::{
 pub use publisher::EventPublisher;
 pub use resources::{
     KvHandle, KvResourceClient, KvResourceEntry, KvResourceHandle, KvResourceOperation,
-    StoreHandle, StoreResourceClient, StoreResourceHandle, StoreWaitOptions,
+    StoreHandle, StoreObjectInfo, StoreResourceClient, StoreResourceHandle, StoreWaitOptions,
 };
 #[doc(hidden)]
 pub use router::{RequestContext, RoutePermission, Router};
@@ -88,8 +88,7 @@ pub(crate) use service_host::bootstrap_service_host;
 #[cfg(test)]
 pub(crate) use service_host::ServiceHost;
 pub use transfer::{
-    decode_upload_transfer_chunk, plan_download_transfer_chunks, plan_download_transfer_chunks_at,
-    plan_download_transfer_grant, plan_upload_transfer_grant, DownloadTransferChunk,
+    decode_upload_transfer_chunk, plan_download_transfer_grant, plan_upload_transfer_grant,
     DownloadTransferGrant, DownloadTransferGrantPlan, FileTransferInfo, TransferDownloadGrantArgs,
     TransferUploadGrantArgs, UploadTransferAck, UploadTransferChunk, UploadTransferCompletion,
     UploadTransferGrant, UploadTransferGrantPlan, UploadTransferSession, TRANSFER_EOF_HEADER,

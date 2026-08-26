@@ -374,6 +374,16 @@ Rules:
   independent of session and artifact digest. Generated facades provide revision
   CAS, TTL, bounded map listing, and author-declared migration results. Services
   use KV resources; participants never access the internal `trellis_state` bucket.
+- Rust store handles stream borrowed Tokio readers and writers through
+  `write_from(...)` and `read_into(...)`; whole-buffer `write(...)` and `read(...)`
+  remain conveniences. Streaming writes enforce exact and contract-bound sizes
+  while reading.
+- Transfer operations stream bounded ordered frames; downloads are client-pulled
+  one frame at a time. Completion and cancellation are authenticated controls,
+  completion binds the exact byte count and SHA-256 digest, and download EOF
+  follows verified store EOF. Rust operation builders
+  accept `.transfer_from(reader, expected_size).start()` and receive grants can
+  write through `download_transfer_into(...)`.
 - the local `AGENTS.md` should record the contract source path, generated artifact
   command, format command, typecheck/clippy command, test command, run command,
   and migration command
