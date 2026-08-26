@@ -44,7 +44,7 @@ Deno.test("reserveLocalPort records a process-wide host lease", async () => {
   if (lockRoot === undefined) {
     throw new Error("no temporary directory is configured");
   }
-  const lockPath = `${lockRoot}/trellis-test-port-${port}.lock/owner`;
+  const lockPath = `${lockRoot}/trellis-test-port-${port}.lock`;
 
   assertEquals((await Deno.readTextFile(lockPath)).trim(), String(Deno.pid));
 });
@@ -56,11 +56,6 @@ Deno.test("reserveHostTestSlot enforces the configured host bound", async () => 
   Deno.env.set("TRELLIS_TEST_HOST_JOBS", "2");
   Deno.env.set("TRELLIS_TEST_HOST_LOCK_DIR", lockRoot);
   try {
-    const staleLock = join(lockRoot, "trellis-test-host-slots", "0.lock");
-    Deno.mkdirSync(staleLock, { recursive: true });
-    Deno.writeTextFileSync(join(staleLock, "owner"), "invalid\n");
-    const staleTime = new Date(Date.now() - 2_000);
-    Deno.utimeSync(staleLock, staleTime, staleTime);
     const first = await reserveHostTestSlot();
     const second = await reserveHostTestSlot();
     assertEquals(

@@ -10,7 +10,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::ffi::OsString;
 use std::fmt;
 use std::fs::{self, File};
-use std::io::{self, Write};
+use std::io::{self, Seek, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Output, Stdio};
@@ -4627,7 +4627,7 @@ fn keep_workdir_from_env() -> bool {
 #[derive(Debug)]
 pub struct TrellisTestPortReservation {
     listener: Option<TcpListener>,
-    lock_path: PathBuf,
+    _lock_file: File,
 }
 
 impl TrellisTestPortReservation {
@@ -4646,24 +4646,15 @@ impl TrellisTestPortReservation {
     }
 }
 
-impl Drop for TrellisTestPortReservation {
-    fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.lock_path);
-    }
-}
-
 /// Host-wide lease for one running Trellis integration-test process.
 #[derive(Debug)]
 pub struct TrellisTestHostSlot {
-    lock_path: Option<PathBuf>,
+    _lock_file: Option<File>,
     borrowed_case_slot: bool,
 }
 
 impl Drop for TrellisTestHostSlot {
     fn drop(&mut self) {
-        if let Some(lock_path) = &self.lock_path {
-            let _ = fs::remove_dir_all(lock_path);
-        }
         if self.borrowed_case_slot {
             BORROWED_CASE_SLOT.store(false, Ordering::Release);
         }
@@ -4703,7 +4694,7 @@ pub async fn reserve_host_test_slot() -> Result<Option<TrellisTestHostSlot>, Tre
             .is_ok()
     {
         return Ok(Some(TrellisTestHostSlot {
-            lock_path: None,
+            _lock_file: None,
             borrowed_case_slot: true,
         }));
     }
@@ -4711,7 +4702,6 @@ pub async fn reserve_host_test_slot() -> Result<Option<TrellisTestHostSlot>, Tre
 }
 
 static BORROWED_CASE_SLOT: AtomicBool = AtomicBool::new(false);
-const PROCESS_LOCK_STARTUP_GRACE: Duration = Duration::from_secs(1);
 const HOST_SLOT_ACQUIRE_TIMEOUT: Duration = Duration::from_secs(120);
 
 /// Acquires an optional additional host-wide Trellis process slot.
@@ -4745,27 +4735,31 @@ pub async fn reserve_additional_host_test_slot(
     loop {
         for slot in 0..limit {
             let lock_path = lock_root.join(format!("{slot}.lock"));
-            match fs::create_dir(&lock_path) {
+            let mut lock_file = fs::OpenOptions::new()
+                .create(true)
+                .truncate(false)
+                .read(true)
+                .write(true)
+                .open(&lock_path)?;
+            match lock_file.try_lock() {
                 Ok(()) => {
-                    fs::write(lock_path.join("owner"), format!("{}\n", std::process::id()))?;
+                    lock_file.set_len(0)?;
+                    lock_file.rewind()?;
+                    writeln!(lock_file, "{}", std::process::id())?;
                     return Ok(Some(TrellisTestHostSlot {
-                        lock_path: Some(lock_path),
+                        _lock_file: Some(lock_file),
                         borrowed_case_slot: false,
                     }));
                 }
-                Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
-                    if process_lock_is_reclaimable(&lock_path) {
-                        let _ = fs::remove_dir_all(lock_path);
-                    }
-                }
-                Err(error) => return Err(error.into()),
+                Err(fs::TryLockError::WouldBlock) => {}
+                Err(fs::TryLockError::Error(error)) => return Err(error.into()),
             }
         }
         if started.elapsed() >= HOST_SLOT_ACQUIRE_TIMEOUT {
             let owners = (0..limit)
                 .map(|slot| {
                     let lock_path = lock_root.join(format!("{slot}.lock"));
-                    let owner = fs::read_to_string(lock_path.join("owner"))
+                    let owner = fs::read_to_string(&lock_path)
                         .map_or_else(|_| "<missing>".to_owned(), |value| value.trim().to_owned());
                     format!("{}={owner}", lock_path.display())
                 })
@@ -4778,22 +4772,6 @@ pub async fn reserve_additional_host_test_slot(
         }
         tokio::time::sleep(Duration::from_millis(10)).await;
     }
-}
-
-fn process_lock_is_reclaimable(lock_path: &Path) -> bool {
-    let owner = fs::read_to_string(lock_path.join("owner"))
-        .ok()
-        .and_then(|value| value.trim().parse::<u32>().ok());
-    owner.map_or_else(
-        || {
-            fs::metadata(lock_path)
-                .and_then(|metadata| metadata.modified())
-                .ok()
-                .and_then(|modified| modified.elapsed().ok())
-                .is_some_and(|age| age >= PROCESS_LOCK_STARTUP_GRACE)
-        },
-        process_is_gone,
-    )
 }
 
 /// Reserves a local TCP port with a host-wide lease held until the returned guard is dropped.
@@ -4811,20 +4789,24 @@ pub fn reserve_local_port() -> Result<TrellisTestPortReservation, TrellisTestErr
                 }
             });
         let lock_path = lock_root.join(format!("trellis-test-port-{port}.lock"));
-        match fs::create_dir(&lock_path) {
+        let mut lock_file = fs::OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .read(true)
+            .write(true)
+            .open(&lock_path)?;
+        match lock_file.try_lock() {
             Ok(()) => {
-                fs::write(lock_path.join("owner"), format!("{}\n", std::process::id()))?;
+                lock_file.set_len(0)?;
+                lock_file.rewind()?;
+                writeln!(lock_file, "{}", std::process::id())?;
                 return Ok(TrellisTestPortReservation {
                     listener: Some(listener),
-                    lock_path,
+                    _lock_file: lock_file,
                 });
             }
-            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
-                if process_lock_is_reclaimable(&lock_path) {
-                    let _ = fs::remove_dir_all(lock_path);
-                }
-            }
-            Err(error) => return Err(error.into()),
+            Err(fs::TryLockError::WouldBlock) => {}
+            Err(fs::TryLockError::Error(error)) => return Err(error.into()),
         }
     }
 }
@@ -5391,29 +5373,91 @@ mod tests {
         auth_deployments_create_request_shape, container_mount, first_admin_bootstrap_body,
         flow_id_from_url, materialized_authority_failure, materialized_authority_is_current,
         parse_published_port, parse_trellis_bootstrap_url, pid_from_prefixed_name,
-        process_lock_is_reclaimable, remove_stale_marked_workdirs, repo_trellis_command,
-        reserve_local_port, ContainerRuntime, MountMode, ResolvedContainerRuntime,
-        TrellisControlPlaneSqlite, TrustedLocalUserRegistration, WORKDIR_OWNER_MARKER,
+        remove_stale_marked_workdirs, repo_trellis_command, reserve_local_port, ContainerRuntime,
+        MountMode, ResolvedContainerRuntime, TrellisControlPlaneSqlite,
+        TrustedLocalUserRegistration, WORKDIR_OWNER_MARKER,
     };
     use rusqlite::params;
     use serde_json::{json, Value};
     use std::fs;
 
+    #[cfg(target_os = "linux")]
     #[test]
-    fn stale_malformed_process_lock_is_reclaimable() {
-        let dir = tempfile::tempdir().expect("create process lock tempdir");
-        let lock_path = dir.path().join("0.lock");
-        fs::create_dir(&lock_path).expect("create process lock");
-        fs::write(lock_path.join("owner"), "invalid\n").expect("write invalid owner");
-        fs::File::open(&lock_path)
-            .expect("open process lock")
-            .set_times(
-                fs::FileTimes::new()
-                    .set_modified(std::time::SystemTime::now() - std::time::Duration::from_secs(2)),
-            )
-            .expect("age process lock");
+    fn deno_and_rust_file_locks_interoperate() {
+        use std::io::{BufRead as _, Write as _};
+        use std::process::{Command, Stdio};
 
-        assert!(process_lock_is_reclaimable(&lock_path));
+        const TRY_LOCK: &str = r#"
+const file = Deno.openSync(Deno.args[0], { read: true, write: true });
+console.log(file.tryLockSync() ? "acquired" : "blocked");
+file.close();
+"#;
+        const HOLD_LOCK: &str = r#"
+const file = Deno.openSync(Deno.args[0], { read: true, write: true });
+if (!file.tryLockSync()) Deno.exit(2);
+console.log("locked");
+await Deno.stdin.read(new Uint8Array(1));
+file.close();
+"#;
+
+        let dir = tempfile::tempdir().expect("create lock interoperability tempdir");
+        let lock_path = dir.path().join("interop.lock");
+        fs::write(&lock_path, b"").expect("create lock file");
+        let rust_file = fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(&lock_path)
+            .expect("open Rust lock file");
+        rust_file.try_lock().expect("acquire Rust lock");
+
+        let output = Command::new("deno")
+            .args(["eval", TRY_LOCK, "--"])
+            .arg(&lock_path)
+            .output()
+            .expect("run Deno lock probe");
+        assert!(output.status.success());
+        assert_eq!(String::from_utf8_lossy(&output.stdout).trim(), "blocked");
+        rust_file.unlock().expect("release Rust lock");
+
+        let spawn_holder = || {
+            Command::new("deno")
+                .args(["eval", HOLD_LOCK, "--"])
+                .arg(&lock_path)
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .spawn()
+                .expect("spawn Deno lock holder")
+        };
+        let wait_until_locked = |child: &mut std::process::Child| {
+            let mut line = String::new();
+            std::io::BufReader::new(child.stdout.as_mut().expect("Deno holder stdout"))
+                .read_line(&mut line)
+                .expect("read Deno lock status");
+            assert_eq!(line.trim(), "locked");
+        };
+
+        let mut deno = spawn_holder();
+        wait_until_locked(&mut deno);
+        assert!(matches!(
+            rust_file.try_lock(),
+            Err(fs::TryLockError::WouldBlock)
+        ));
+        deno.stdin
+            .take()
+            .expect("Deno holder stdin")
+            .write_all(b"\n")
+            .expect("release Deno lock");
+        assert!(deno.wait().expect("wait for Deno lock release").success());
+        rust_file.try_lock().expect("acquire Deno-released lock");
+        rust_file.unlock().expect("release reacquired lock");
+
+        let mut deno = spawn_holder();
+        wait_until_locked(&mut deno);
+        deno.kill().expect("kill Deno lock holder");
+        deno.wait().expect("wait for killed Deno lock holder");
+        rust_file
+            .try_lock()
+            .expect("acquire lock after owner death");
     }
 
     #[test]
@@ -5489,7 +5533,6 @@ mod tests {
     fn local_port_reservation_holds_the_port() {
         let mut reservation = reserve_local_port().expect("reserve local port");
         let port = reservation.port().expect("read local port");
-        let lock_path = reservation.lock_path.clone();
         let expected_root = std::env::var_os("TRELLIS_TEST_PORT_LOCK_DIR")
             .map(std::path::PathBuf::from)
             .unwrap_or_else(|| {
@@ -5499,13 +5542,23 @@ mod tests {
                     std::path::PathBuf::from("/tmp")
                 }
             });
+        let lock_path = expected_root.join(format!("trellis-test-port-{port}.lock"));
 
         assert_eq!(lock_path.parent(), Some(expected_root.as_path()));
         assert!(std::net::TcpListener::bind(("127.0.0.1", port)).is_err());
+        let competitor = fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(&lock_path)
+            .expect("open competing port lock");
+        assert!(matches!(
+            competitor.try_lock(),
+            Err(fs::TryLockError::WouldBlock)
+        ));
         reservation.release_listener();
         assert!(lock_path.exists());
         drop(reservation);
-        assert!(!lock_path.exists());
+        competitor.try_lock().expect("acquire released port lock");
     }
 
     #[test]
