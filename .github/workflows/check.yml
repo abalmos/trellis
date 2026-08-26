@@ -48,23 +48,23 @@ jobs:
           deno-version: ${{ env.DENO_VERSION }}
 
       - name: Reset isolated preparation state
-        run: rm -rf "${{ runner.temp }}/trellis-prepare-cargo-home" "${{ runner.temp }}/trellis-prepare-target"
+        run: rm -rf .check-cargo/prepare target/check-prepare
 
       - name: Cache preparation build
         uses: swatinem/rust-cache@v2
         env:
-          CARGO_HOME: ${{ runner.temp }}/trellis-prepare-cargo-home
-          CARGO_TARGET_DIR: ${{ runner.temp }}/trellis-prepare-target
+          CARGO_HOME: .check-cargo/prepare
+          CARGO_TARGET_DIR: target/check-prepare
         with:
           cache-targets: false
-          cache-directories: ${{ runner.temp }}/trellis-prepare-target
+          cache-directories: target/check-prepare
           env-vars: CC CFLAGS CXX CMAKE RUST
-          key: prepare-locked
+          key: prepare-locked-portable
 
       - name: Prepare generated artifacts
         env:
-          CARGO_HOME: ${{ runner.temp }}/trellis-prepare-cargo-home
-          CARGO_TARGET_DIR: ${{ runner.temp }}/trellis-prepare-target
+          CARGO_HOME: .check-cargo/prepare
+          CARGO_TARGET_DIR: target/check-prepare
         run: cargo run --manifest-path rust/xtask/Cargo.toml -- prepare
 
       - name: Inspect generated artifact drift
@@ -113,23 +113,23 @@ jobs:
           targets: wasm32-unknown-unknown
 
       - name: Reset isolated WASM state
-        run: rm -rf "${{ runner.temp }}/trellis-wasm-cargo-home" "${{ runner.temp }}/trellis-wasm-target"
+        run: rm -rf .check-cargo/wasm target/check-wasm
 
       - name: Cache protocol WASM build
         uses: swatinem/rust-cache@v2
         env:
-          CARGO_HOME: ${{ runner.temp }}/trellis-wasm-cargo-home
-          CARGO_TARGET_DIR: ${{ runner.temp }}/trellis-wasm-target
+          CARGO_HOME: .check-cargo/wasm
+          CARGO_TARGET_DIR: target/check-wasm
         with:
           cache-targets: false
-          cache-directories: ${{ runner.temp }}/trellis-wasm-target
+          cache-directories: target/check-wasm
           env-vars: CC CFLAGS CXX CMAKE RUST
-          key: wasm32-release
+          key: wasm32-release-portable
 
       - name: Build protocol WASM
         env:
-          CARGO_HOME: ${{ runner.temp }}/trellis-wasm-cargo-home
-          CARGO_TARGET_DIR: ${{ runner.temp }}/trellis-wasm-target
+          CARGO_HOME: .check-cargo/wasm
+          CARGO_TARGET_DIR: target/check-wasm
         run: |
           rm -rf generated
           cargo run --manifest-path rust/xtask/Cargo.toml -- protocol-wasm
@@ -263,20 +263,20 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Reset isolated tooling state
-        run: rm -rf "${{ runner.temp }}/trellis-tooling-cargo-home"
+        run: rm -rf .check-cargo/tooling
 
       - name: Cache Rust tooling
         uses: swatinem/rust-cache@v2
         env:
-          CARGO_HOME: ${{ runner.temp }}/trellis-tooling-cargo-home
+          CARGO_HOME: .check-cargo/tooling
         with:
           workspaces: ${{ matrix.workspace }} -> target
           env-vars: CC CFLAGS CXX CMAKE RUST
-          key: ${{ matrix.name }}
+          key: ${{ matrix.name }}-portable
 
       - name: Test Rust tooling
         env:
-          CARGO_HOME: ${{ runner.temp }}/trellis-tooling-cargo-home
+          CARGO_HOME: .check-cargo/tooling
         run: cargo test --manifest-path ${{ matrix.workspace }}/Cargo.toml
 
   typescript:
@@ -365,18 +365,18 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Reset isolated live build state
-        run: rm -rf "${{ runner.temp }}/trellis-live-cargo-home" "${{ runner.temp }}/trellis-live-target"
+        run: rm -rf .check-cargo/live target/check-live
 
       - name: Cache live release build
         uses: swatinem/rust-cache@v2
         env:
-          CARGO_HOME: ${{ runner.temp }}/trellis-live-cargo-home
-          CARGO_TARGET_DIR: ${{ runner.temp }}/trellis-live-target
+          CARGO_HOME: .check-cargo/live
+          CARGO_TARGET_DIR: target/check-live
         with:
           cache-targets: false
-          cache-directories: ${{ runner.temp }}/trellis-live-target
+          cache-directories: target/check-live
           env-vars: CC CFLAGS CXX CMAKE RUST
-          key: x86_64-release-test-support-runtime-internals
+          key: x86_64-release-test-support-runtime-internals-portable
 
       - name: Set up Deno
         uses: denoland/setup-deno@v2
@@ -385,8 +385,8 @@ jobs:
 
       - name: Build live executables
         env:
-          CARGO_HOME: ${{ runner.temp }}/trellis-live-cargo-home
-          CARGO_TARGET_DIR: ${{ runner.temp }}/trellis-live-target
+          CARGO_HOME: .check-cargo/live
+          CARGO_TARGET_DIR: target/check-live
         run: deno run -A -c ts/deno.json integration/live_runner.ts --build-only
 
       - name: Upload live executables
