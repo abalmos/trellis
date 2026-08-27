@@ -413,6 +413,7 @@ export async function startTrellisProcess(
       cwd: command.cwd,
       env: {
         ...command.env,
+        TOKIO_WORKER_THREADS: command.env?.TOKIO_WORKER_THREADS ?? "2",
         TRELLIS_CONFIG: args.configPath,
         NO_COLOR: "1",
       },

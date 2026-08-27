@@ -83,7 +83,7 @@ Deno.test("startTrellisProcess reports early exit with output tails", async () =
             cmd: Deno.execPath(),
             args: [
               "eval",
-              "console.log('TRELLIS_CONFIG=' + Deno.env.get('TRELLIS_CONFIG')); console.log('TRELLIS_ADMIN_BOOTSTRAP_URL=http://127.0.0.1:9000/bootstrap'); console.error('NO_COLOR=' + Deno.env.get('NO_COLOR')); Deno.exit(23);",
+              "console.log('TRELLIS_CONFIG=' + Deno.env.get('TRELLIS_CONFIG')); console.log('TRELLIS_ADMIN_BOOTSTRAP_URL=http://127.0.0.1:9000/bootstrap'); console.error('NO_COLOR=' + Deno.env.get('NO_COLOR')); console.error('TOKIO_WORKER_THREADS=' + Deno.env.get('TOKIO_WORKER_THREADS')); Deno.exit(23);",
             ],
           },
         },
@@ -101,4 +101,5 @@ Deno.test("startTrellisProcess reports early exit with output tails", async () =
     "TRELLIS_ADMIN_BOOTSTRAP_URL=http://127.0.0.1:9000/bootstrap",
   );
   assertStringIncludes(error.message, "NO_COLOR=1");
+  assertStringIncludes(error.message, "TOKIO_WORKER_THREADS=2");
 });
