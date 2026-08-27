@@ -1,5 +1,6 @@
 import { assertEquals, assertExists, assertInstanceOf } from "@std/assert";
 import { Type } from "typebox";
+import { Value } from "typebox/value";
 import { getContractRuntime } from "../contract_support/contract_runtime.ts";
 import { AsyncResult, err, ok, type Result } from "../../result/mod.ts";
 import type { JsonValue } from "@qlever-llc/trellis";
@@ -28,7 +29,56 @@ import {
   TransportError,
   UnexpectedError,
 } from "../errors/index.ts";
-import type { SendTransferGrant, TransferBody } from "../transfer.ts";
+import {
+  ReceiveTransferGrantSchema,
+  type SendTransferGrant,
+  SendTransferGrantSchema,
+  type TransferBody,
+} from "../transfer.ts";
+
+Deno.test("transfer grant schemas preserve exact wire literals", () => {
+  const send = {
+    type: "TransferGrant",
+    direction: "send",
+    service: "service",
+    sessionKey: "session",
+    transferId: "transfer",
+    subject: "transfer.v1.upload.service.transfer",
+    expiresAt: "2099-01-01T00:00:00Z",
+    chunkBytes: 1,
+  };
+  const receive = {
+    type: "TransferGrant",
+    direction: "receive",
+    service: "service",
+    sessionKey: "session",
+    transferId: "transfer",
+    subject: "transfer.v1.download.service.transfer",
+    expiresAt: "2099-01-01T00:00:00Z",
+    chunkBytes: 1,
+    info: {
+      key: "object",
+      size: 0,
+      updatedAt: "2099-01-01T00:00:00Z",
+      digest: "SHA-256=47DEQpj8HBSa-_TImW-5JCeuQeRkm5NMpJWZG3hSuFU",
+      metadata: {},
+    },
+  };
+
+  assertEquals(Value.Parse(SendTransferGrantSchema, send), send);
+  assertEquals(Value.Parse(ReceiveTransferGrantSchema, receive), receive);
+  assertEquals(
+    Value.Check(SendTransferGrantSchema, { ...send, direction: "upload" }),
+    false,
+  );
+  assertEquals(
+    Value.Check(ReceiveTransferGrantSchema, {
+      ...receive,
+      type: "transfer.v1",
+    }),
+    false,
+  );
+});
 
 const schemas = {
   RefundInput: Type.Object({ chargeId: Type.String() }),

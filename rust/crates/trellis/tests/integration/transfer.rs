@@ -960,7 +960,10 @@ async fn transfer_client_downloads_file_via_receive_grant() {
 
     let download_grant = trellis_rs::client::download_transfer_grant_from_value(grant_value)
         .expect("parse download transfer grant");
-    assert_eq!(download_grant.kind, "receive");
+    assert_eq!(
+        download_grant.direction,
+        trellis_rs::client::DownloadTransferDirection::Receive
+    );
     assert_eq!(download_grant.info.key, download_key);
     assert_eq!(
         download_grant.info.content_type.as_deref(),

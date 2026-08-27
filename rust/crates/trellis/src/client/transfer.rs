@@ -81,12 +81,11 @@ pub struct FileInfo {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct UploadTransferGrant {
-    /// Protocol grant type. Must be `transfer.v1`.
+    /// Wire discriminator, always `TransferGrant`.
     #[serde(rename = "type")]
-    pub type_name: String,
-    /// Transfer direction. Must be `upload`.
-    #[serde(rename = "direction")]
-    pub kind: String,
+    pub type_name: TransferGrantType,
+    /// Caller-to-service transfer direction, always `send`.
+    pub direction: UploadTransferDirection,
     /// Service that issued and serves this grant.
     pub service: String,
     /// Session public key to which this grant is bound.
@@ -118,12 +117,11 @@ pub struct UploadTransferGrant {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct DownloadTransferGrant {
-    /// Protocol grant type. Must be `transfer.v1`.
+    /// Wire discriminator, always `TransferGrant`.
     #[serde(rename = "type")]
-    pub type_name: String,
-    /// Transfer direction. Must be `download`.
-    #[serde(rename = "direction")]
-    pub kind: String,
+    pub type_name: TransferGrantType,
+    /// Service-to-caller transfer direction, always `receive`.
+    pub direction: DownloadTransferDirection,
     /// Service that issued and serves this grant.
     pub service: String,
     /// Session public key to which this grant is bound.
@@ -139,6 +137,30 @@ pub struct DownloadTransferGrant {
     pub chunk_bytes: u64,
     /// Expected committed object metadata used for final verification.
     pub info: FileInfo,
+}
+
+/// Transfer grant wire discriminator.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub enum TransferGrantType {
+    /// Identifies a transfer grant.
+    #[serde(rename = "TransferGrant")]
+    TransferGrant,
+}
+
+/// Caller-to-service transfer direction.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub enum UploadTransferDirection {
+    /// The caller sends bytes to the service.
+    #[serde(rename = "send")]
+    Send,
+}
+
+/// Service-to-caller transfer direction.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub enum DownloadTransferDirection {
+    /// The caller receives bytes from the service.
+    #[serde(rename = "receive")]
+    Receive,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -744,7 +766,20 @@ mod tests {
     }
 
     #[test]
-    fn download_grant_deserialization_rejects_invalid_bounds_and_missing_digest() {
+    fn transfer_grants_validate_wire_literals_bounds_and_digest() {
+        let upload = serde_json::json!({
+            "type": "TransferGrant",
+            "direction": "send",
+            "service": "service",
+            "sessionKey": "session",
+            "transferId": "transfer",
+            "subject": "transfer.v1.upload.service.transfer",
+            "expiresAt": "2099-01-01T00:00:00Z",
+            "chunkBytes": 1
+        });
+        let upload_grant = serde_json::from_value::<UploadTransferGrant>(upload.clone()).unwrap();
+        assert_eq!(serde_json::to_value(upload_grant).unwrap(), upload);
+
         let grant = serde_json::json!({
             "type": "TransferGrant",
             "direction": "receive",
@@ -762,7 +797,20 @@ mod tests {
                 "metadata": {}
             }
         });
-        assert!(serde_json::from_value::<DownloadTransferGrant>(grant.clone()).is_ok());
+        let download_grant =
+            serde_json::from_value::<DownloadTransferGrant>(grant.clone()).unwrap();
+        assert_eq!(serde_json::to_value(download_grant).unwrap(), grant);
+
+        for (field, value) in [("type", "transfer.v1"), ("direction", "download")] {
+            let mut invalid = grant.clone();
+            invalid[field] = value.into();
+            assert!(serde_json::from_value::<DownloadTransferGrant>(invalid).is_err());
+        }
+        for (field, value) in [("type", "transfer.v1"), ("direction", "upload")] {
+            let mut invalid = upload.clone();
+            invalid[field] = value.into();
+            assert!(serde_json::from_value::<UploadTransferGrant>(invalid).is_err());
+        }
 
         for chunk_bytes in [0, MAX_TRANSFER_CHUNK_BYTES + 1] {
             let mut invalid = grant.clone();

@@ -111,7 +111,7 @@ async function createTransferProof(
     ? auth.contextDigest()
     : auth.contextDigest;
   if (contextDigest === undefined) {
-    throw new Error("contextDigest is required to sign v2 transfer proofs");
+    throw new Error("contextDigest is required to sign transfer proofs");
   }
   if (reply.length === 0) {
     throw new Error("transfer reply subject must not be empty");
