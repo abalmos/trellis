@@ -291,7 +291,10 @@ class AsyncValueBroadcaster<T> {
 
 class AsyncChunkQueue implements AsyncIterable<Uint8Array> {
   #values: Array<{ chunk: Uint8Array; consumed: () => void }> = [];
-  #resolvers: Array<(result: IteratorResult<Uint8Array>) => void> = [];
+  #pending: Array<{
+    resolve: (result: IteratorResult<Uint8Array>) => void;
+    reject: (error: unknown) => void;
+  }> = [];
   #closed = false;
   #error: unknown;
 
@@ -300,9 +303,9 @@ class AsyncChunkQueue implements AsyncIterable<Uint8Array> {
       return;
     }
 
-    const resolver = this.#resolvers.shift();
-    if (resolver) {
-      resolver({ value: chunk, done: false });
+    const pending = this.#pending.shift();
+    if (pending) {
+      pending.resolve({ value: chunk, done: false });
       return;
     }
 
@@ -316,8 +319,8 @@ class AsyncChunkQueue implements AsyncIterable<Uint8Array> {
       return;
     }
     this.#closed = true;
-    while (this.#resolvers.length > 0) {
-      this.#resolvers.shift()?.({ value: undefined, done: true });
+    while (this.#pending.length > 0) {
+      this.#pending.shift()?.resolve({ value: undefined, done: true });
     }
   }
 
@@ -330,8 +333,8 @@ class AsyncChunkQueue implements AsyncIterable<Uint8Array> {
     for (const value of this.#values.splice(0)) {
       value.consumed();
     }
-    while (this.#resolvers.length > 0) {
-      this.#resolvers.shift()?.({ value: undefined, done: true });
+    while (this.#pending.length > 0) {
+      this.#pending.shift()?.reject(error);
     }
   }
 
@@ -348,8 +351,8 @@ class AsyncChunkQueue implements AsyncIterable<Uint8Array> {
       return { value: undefined, done: true };
     }
 
-    return await new Promise<IteratorResult<Uint8Array>>((resolve) => {
-      this.#resolvers.push(resolve);
+    return await new Promise<IteratorResult<Uint8Array>>((resolve, reject) => {
+      this.#pending.push({ resolve, reject });
     });
   }
 
@@ -1292,7 +1295,15 @@ export class ServiceTransfer {
     }
     session.cancellation.abort(error);
     session.queue.fail(error);
-    void Promise.resolve(session.onError?.(error));
+    void (async () => {
+      const putResult = (await session.putPromise).take();
+      await session.onError?.(
+        isErr(putResult) ? error : new TransferError({
+          operation: "put",
+          context: { reason: "failed_upload_committed" },
+        }),
+      );
+    })();
     this.#cleanupUploadSession(subject);
   }
 
