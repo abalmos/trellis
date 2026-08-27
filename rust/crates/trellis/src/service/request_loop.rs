@@ -655,14 +655,18 @@ async fn publish_reply(
             .publish_with_headers(reply.reply_to, headers, reply.payload)
             .await
             .map_err(|error| ServerError::Nats(error.to_string()))?;
-        return Ok(());
+    } else {
+        client
+            .publish(reply.reply_to, reply.payload)
+            .await
+            .map_err(|error| ServerError::Nats(error.to_string()))?;
     }
 
+    // `publish` only queues locally; do not finish the request before NATS receives the reply.
     client
-        .publish(reply.reply_to, reply.payload)
+        .flush()
         .await
-        .map_err(|error| ServerError::Nats(error.to_string()))?;
-    Ok(())
+        .map_err(|error| ServerError::Nats(error.to_string()))
 }
 
 async fn publish_response(

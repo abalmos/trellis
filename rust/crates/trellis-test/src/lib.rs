@@ -5566,6 +5566,8 @@ file.close();
         ));
         reservation.release_listener();
         assert!(lock_path.exists());
+        let _listener = std::net::TcpListener::bind(("127.0.0.1", port))
+            .expect("retain released port during lock assertion");
         drop(reservation);
         competitor.try_lock().expect("acquire released port lock");
     }
