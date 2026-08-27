@@ -87,6 +87,39 @@ Deno.test({
   },
 });
 
+Deno.test({
+  name: "concurrent NATS starts bind distinct owned port leases",
+  ignore: !RUN_LIVE_NATS_SMOKE,
+  fn: async () => {
+    const workdirs = await Promise.all(
+      Array.from(
+        { length: 4 },
+        () => Deno.makeTempDir({ prefix: "trellis-nats-concurrent-" }),
+      ),
+    );
+    const containers: NatsTestContainer[] = [];
+    try {
+      containers.push(
+        ...await Promise.all(
+          workdirs.map((workdir) =>
+            NatsTestContainer.start(workdir, { startupMs: 60_000 })
+          ),
+        ),
+      );
+      const endpoints = containers.flatMap((container) => [
+        container.natsUrl,
+        container.websocketUrl,
+      ]);
+      assertEquals(new Set(endpoints).size, endpoints.length);
+    } finally {
+      await Promise.allSettled(containers.map((container) => container.stop()));
+      await Promise.allSettled(
+        workdirs.map((workdir) => Deno.remove(workdir, { recursive: true })),
+      );
+    }
+  },
+});
+
 function spawnSleepChild(): Deno.ChildProcess {
   return new Deno.Command("sh", {
     args: ["-c", "sleep 60"],

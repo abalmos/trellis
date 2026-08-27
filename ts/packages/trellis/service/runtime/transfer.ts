@@ -23,21 +23,37 @@ import {
 } from "../../session.ts";
 import type { StoreError } from "../../errors/StoreError.ts";
 import { TransferError } from "../../errors/TransferError.ts";
-import { type StoreInfo, TypedStore, TypedStoreEntry } from "../../store.ts";
+import { TypedStore, TypedStoreEntry } from "../../store.ts";
 import type {
   FileInfo,
   ReceiveTransferGrant,
   SendTransferGrant,
 } from "../../transfer.ts";
 import { transferFrameProofPayload } from "../../transfer_protocol.ts";
+import {
+  AsyncChunkQueue,
+  AsyncValueBroadcaster,
+  deferred,
+} from "./transfer/queue.ts";
+import type { DownloadSession } from "./transfer/download.ts";
+import {
+  DEFAULT_TRANSFER_CHUNK_BYTES,
+  DOWNLOAD_SUBJECT_PREFIX,
+  fileInfoFromStoreInfo,
+  parseSeq,
+  publishError,
+  replyError,
+  TRANSFER_CONTROL_HEADER,
+  TRANSFER_EOF_HEADER,
+  TRANSFER_SEQUENCE_HEADER,
+  UPLOAD_SUBJECT_PREFIX,
+} from "./transfer/protocol.ts";
+import {
+  effectiveUploadMaxBytes,
+  raceCancellation,
+  type UploadSession,
+} from "./transfer/upload.ts";
 import { MAX_TRANSFER_CHUNK_BYTES } from "../../transfer.ts";
-
-const UPLOAD_SUBJECT_PREFIX = "transfer.v2.upload";
-const DOWNLOAD_SUBJECT_PREFIX = "transfer.v2.download";
-const TRANSFER_SEQUENCE_HEADER = "trellis-transfer-seq";
-const TRANSFER_EOF_HEADER = "trellis-transfer-eof";
-const TRANSFER_CONTROL_HEADER = "trellis-transfer-control";
-const DEFAULT_TRANSFER_CHUNK_BYTES = 256 * 1024;
 
 export type TransferStoreHandle = {
   open(): AsyncResult<TypedStore, StoreError>;
@@ -91,326 +107,6 @@ export type StoredTransfer = {
   entry: TypedStoreEntry;
   info: FileInfo;
 };
-
-type UploadSession = {
-  kind: "upload";
-  subject: string;
-  transferId: string;
-  sessionKey: string;
-  permission: PermissionAtom | undefined;
-  requiredCapabilities: readonly string[];
-  expiresAtMs: number;
-  store: TypedStore;
-  key: string;
-  maxBytes?: number;
-  contentType?: string;
-  metadata?: Record<string, string>;
-  onProgress?: (
-    progress: RuntimeOperationTransferProgress,
-  ) => Promise<void> | void;
-  onComplete?: (info: FileInfo) => Promise<void> | void;
-  onError?: (error: TransferError) => Promise<void> | void;
-  onStored?: (stored: StoredTransfer) => Promise<void> | void;
-  subscription: Subscription;
-  timeoutId: ReturnType<typeof setTimeout>;
-  queue: AsyncChunkQueue;
-  putPromise: AsyncResult<void, StoreError>;
-  cancellation: AbortController;
-  committing: boolean;
-  nextSeq: number;
-  receivedBytes: number;
-  hasher: ReturnType<typeof sha256.create>;
-};
-
-function raceCancellation<T>(
-  promise: Promise<T>,
-  signal: AbortSignal,
-): Promise<T> {
-  if (signal.aborted) return Promise.reject(signal.reason);
-  return new Promise<T>((resolve, reject) => {
-    const cancel = () => {
-      finish();
-      reject(signal.reason);
-    };
-    const finish = () => signal.removeEventListener("abort", cancel);
-    signal.addEventListener("abort", cancel, { once: true });
-    promise.then(
-      (value) => {
-        finish();
-        resolve(value);
-      },
-      (error) => {
-        finish();
-        reject(error);
-      },
-    );
-  });
-}
-
-type DownloadSession = {
-  kind: "download";
-  subject: string;
-  transferId: string;
-  sessionKey: string;
-  permission: PermissionAtom;
-  requiredCapabilities: readonly string[];
-  inboxPrefix: string;
-  expiresAtMs: number;
-  store: TypedStore;
-  key: string;
-  info: FileInfo;
-  subscription: Subscription;
-  timeoutId: ReturnType<typeof setTimeout>;
-  reader?: ReadableStreamDefaultReader<Uint8Array>;
-  pending?: Uint8Array;
-  pendingOffset: number;
-  nextSeq: number;
-  sentBytes: number;
-  hasher: ReturnType<typeof sha256.create>;
-  cancellation: AbortController;
-};
-
-function effectiveUploadMaxBytes(
-  argsMaxBytes?: number,
-  storeMaxObjectBytes?: number,
-): number | undefined {
-  if (argsMaxBytes === undefined) {
-    return storeMaxObjectBytes;
-  }
-  if (storeMaxObjectBytes === undefined) {
-    return argsMaxBytes;
-  }
-  return Math.min(argsMaxBytes, storeMaxObjectBytes);
-}
-
-function deferred<T>(): { promise: Promise<T>; resolve(value: T): void } {
-  let resolve!: (value: T) => void;
-  const promise = new Promise<T>((r) => {
-    resolve = r;
-  });
-  return { promise, resolve };
-}
-
-class AsyncValueQueue<T> implements AsyncIterable<T> {
-  #values: T[] = [];
-  #resolvers: Array<(result: IteratorResult<T>) => void> = [];
-  #closed = false;
-
-  push(value: T): void {
-    if (this.#closed) {
-      return;
-    }
-
-    const resolver = this.#resolvers.shift();
-    if (resolver) {
-      resolver({ value, done: false });
-      return;
-    }
-
-    this.#values.push(value);
-  }
-
-  close(): void {
-    if (this.#closed) {
-      return;
-    }
-    this.#closed = true;
-    while (this.#resolvers.length > 0) {
-      const resolver = this.#resolvers.shift();
-      resolver?.({ value: undefined as T, done: true });
-    }
-  }
-
-  [Symbol.asyncIterator](): AsyncIterator<T> {
-    return {
-      next: async (): Promise<IteratorResult<T>> => {
-        const value = this.#values.shift();
-        if (value !== undefined) {
-          return { value, done: false };
-        }
-        if (this.#closed) {
-          return { value: undefined as T, done: true };
-        }
-        return await new Promise<IteratorResult<T>>((resolve) => {
-          this.#resolvers.push(resolve);
-        });
-      },
-    };
-  }
-}
-
-class AsyncValueBroadcaster<T> {
-  #subscribers = new Set<AsyncValueQueue<T>>();
-  #closed = false;
-
-  push(value: T): void {
-    if (this.#closed) {
-      return;
-    }
-
-    for (const subscriber of this.#subscribers) {
-      subscriber.push(value);
-    }
-  }
-
-  close(): void {
-    if (this.#closed) {
-      return;
-    }
-
-    this.#closed = true;
-    for (const subscriber of this.#subscribers) {
-      subscriber.close();
-    }
-    this.#subscribers.clear();
-  }
-
-  subscribe(): AsyncIterable<T> {
-    const subscriber = new AsyncValueQueue<T>();
-    if (this.#closed) {
-      subscriber.close();
-    } else {
-      this.#subscribers.add(subscriber);
-    }
-
-    const subscribers = this.#subscribers;
-
-    return {
-      async *[Symbol.asyncIterator]() {
-        try {
-          for await (const value of subscriber) {
-            yield value;
-          }
-        } finally {
-          subscribers.delete(subscriber);
-        }
-      },
-    };
-  }
-}
-
-class AsyncChunkQueue implements AsyncIterable<Uint8Array> {
-  #values: Array<{ chunk: Uint8Array; consumed: () => void }> = [];
-  #pending: Array<{
-    resolve: (result: IteratorResult<Uint8Array>) => void;
-    reject: (error: unknown) => void;
-  }> = [];
-  #closed = false;
-  #error: unknown;
-
-  async push(chunk: Uint8Array): Promise<void> {
-    if (this.#closed) {
-      return;
-    }
-
-    const pending = this.#pending.shift();
-    if (pending) {
-      pending.resolve({ value: chunk, done: false });
-      return;
-    }
-
-    await new Promise<void>((consumed) => {
-      this.#values.push({ chunk, consumed });
-    });
-  }
-
-  close(): void {
-    if (this.#closed) {
-      return;
-    }
-    this.#closed = true;
-    while (this.#pending.length > 0) {
-      this.#pending.shift()?.resolve({ value: undefined, done: true });
-    }
-  }
-
-  fail(error: unknown): void {
-    if (this.#closed) {
-      return;
-    }
-    this.#error = error;
-    this.#closed = true;
-    for (const value of this.#values.splice(0)) {
-      value.consumed();
-    }
-    while (this.#pending.length > 0) {
-      this.#pending.shift()?.reject(error);
-    }
-  }
-
-  async next(): Promise<IteratorResult<Uint8Array>> {
-    if (this.#values.length > 0) {
-      const value = this.#values.shift()!;
-      value.consumed();
-      return { value: value.chunk, done: false };
-    }
-    if (this.#error) {
-      throw this.#error;
-    }
-    if (this.#closed) {
-      return { value: undefined, done: true };
-    }
-
-    return await new Promise<IteratorResult<Uint8Array>>((resolve, reject) => {
-      this.#pending.push({ resolve, reject });
-    });
-  }
-
-  [Symbol.asyncIterator](): AsyncIterator<Uint8Array> {
-    return {
-      next: () => this.next(),
-    };
-  }
-}
-
-function fileInfoFromStoreInfo(info: StoreInfo): FileInfo {
-  return {
-    key: info.key,
-    size: info.size,
-    updatedAt: info.updatedAt,
-    ...(info.digest ? { digest: info.digest } : {}),
-    ...(info.contentType ? { contentType: info.contentType } : {}),
-    metadata: info.metadata,
-  };
-}
-
-function replyError(msg: Msg, error: TransferError): void {
-  const headers = natsHeaders();
-  headers.set("status", "error");
-  msg.respond(JSON.stringify(error.toSerializable()), { headers });
-}
-
-function publishError(
-  nc: NatsConnection,
-  subject: string,
-  error: TransferError,
-): void {
-  const headers = natsHeaders();
-  headers.set("status", "error");
-  nc.publish(subject, JSON.stringify(error.toSerializable()), { headers });
-}
-
-function parseSeq(msg: Msg): ResultType<number, TransferError> {
-  const raw = msg.headers?.get(TRANSFER_SEQUENCE_HEADER);
-  if (!raw) {
-    return Result.err(
-      new TransferError({
-        operation: "transfer",
-        context: { reason: "missing_sequence" },
-      }),
-    );
-  }
-  const value = Number(raw);
-  if (!Number.isInteger(value) || value < 0) {
-    return Result.err(
-      new TransferError({
-        operation: "transfer",
-        context: { reason: "invalid_sequence", raw },
-      }),
-    );
-  }
-  return Result.ok(value);
-}
 
 export class ServiceTransfer {
   readonly #name: string;

@@ -1,5 +1,5 @@
 const TRANSFER_FRAME_PROOF_DOMAIN = new TextEncoder().encode(
-  "trellis.transfer.v2.frame\0",
+  "trellis.transfer.v1.frame\0",
 );
 
 export function transferFrameProofPayload(

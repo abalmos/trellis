@@ -332,141 +332,178 @@ export class NatsTestContainer implements AsyncDisposable {
     workdir: string,
     options: StartNatsTestContainerOptions = {},
   ): Promise<NatsTestContainer> {
+    for (let attempt = 1;; attempt++) {
+      try {
+        return await NatsTestContainer.startOnce(workdir, options);
+      } catch (error) {
+        if (
+          attempt >= 3 ||
+          !String(error).toLowerCase().includes("address already in use")
+        ) {
+          throw error;
+        }
+      }
+    }
+  }
+
+  private static async startOnce(
+    workdir: string,
+    options: StartNatsTestContainerOptions,
+  ): Promise<NatsTestContainer> {
     const natsDir = join(workdir, "nats");
     await Deno.mkdir(natsDir, { recursive: true });
     await removeStaleNatsPidFiles(natsDir);
     const binaries = await ensureNatsBinaries();
-    const ports: NatsBootstrapPorts = {
+    const portLeases = {
       nats: reserveLocalPort(),
       http: reserveLocalPort(),
       websocket: reserveLocalPort(),
     };
-    const tenantIds = options.tenantIds ?? ["default"];
-    const manifests = options.tenantIds === undefined
-      ? {
-        default: await generateLocalNatsBootstrap({
-          outDir: natsDir,
-          ports,
-        }),
-      }
-      : (await generateLocalNatsBootstrapPool({
-        outDir: natsDir,
-        tenantIds,
-        ports,
-      })).tenants;
-    const manifest = manifests[tenantIds[0]];
-    const stdoutLog = await Deno.open(join(natsDir, "nats.stdout.log"), {
-      write: true,
-      create: true,
-      truncate: true,
-    });
-    const stderrLog = await Deno.open(join(natsDir, "nats.stderr.log"), {
-      write: true,
-      create: true,
-      truncate: true,
-    });
-    const stdoutTail = new TextTail(OUTPUT_TAIL_CHARS);
-    const stderrTail = new TextTail(OUTPUT_TAIL_CHARS);
-    let child: Deno.ChildProcess;
     try {
-      child = new Deno.Command(binaries.natsServer, {
-        args: ["-c", join(natsDir, manifest.paths.natsConfig)],
-        cwd: natsDir,
-        stdin: "null",
-        stdout: "piped",
-        stderr: "piped",
-      }).spawn();
-    } catch (error) {
-      try {
-        stdoutLog.close();
-        stderrLog.close();
-      } catch {
-        // best-effort fd cleanup on a failed spawn
-      }
-      throw error;
-    }
-    const status = child.status;
-    const pidFile = join(
-      natsDir,
-      `${NATS_PID_FILE_PREFIX}${Deno.pid}-${Date.now()}.pid`,
-    );
-    const readers: Promise<void>[] = [];
-    let pidFileContent: string | undefined;
-    let nc: NatsConnection | undefined;
-
-    try {
-      const identity = await recordProcessIdentity(
-        child.pid,
-        binaries.natsServer,
-      );
-      // Exclusive create: a leftover pid file from a live run must fail loudly
-      // instead of being clobbered.
-      const content = formatPidFile(identity);
-      await Deno.writeTextFile(pidFile, content, { createNew: true });
-      pidFileContent = content;
-      const stdoutReader = captureProcessOutput(
-        child.stdout,
-        stdoutTail,
-        () => undefined,
-        stdoutLog,
-      ).catch((error) => {
-        stdoutTail.append(`\n<failed to read stdout: ${String(error)}>\n`);
-      }).finally(() => {
-        stdoutLog.close();
-      });
-      const stderrReader = captureProcessOutput(
-        child.stderr,
-        stderrTail,
-        () => undefined,
-        stderrLog,
-      ).catch((error) => {
-        stderrTail.append(`\n<failed to read stderr: ${String(error)}>\n`);
-      }).finally(() => {
-        stderrLog.close();
-      });
-      readers.push(stdoutReader, stderrReader);
-      const output = () => {
-        const stdout = stdoutTail.toString().trimEnd() || "<empty>";
-        const stderr = stderrTail.toString().trimEnd() || "<empty>";
-        return `stdout tail:\n${stdout}\nstderr tail:\n${stderr}`;
+      const ports: NatsBootstrapPorts = {
+        nats: portLeases.nats.port,
+        http: portLeases.http.port,
+        websocket: portLeases.websocket.port,
       };
+      const tenantIds = options.tenantIds ?? ["default"];
+      const manifests = options.tenantIds === undefined
+        ? {
+          default: await generateLocalNatsBootstrap({
+            outDir: natsDir,
+            ports,
+          }),
+        }
+        : (await generateLocalNatsBootstrapPool({
+          outDir: natsDir,
+          tenantIds,
+          ports,
+        })).tenants;
+      const manifest = manifests[tenantIds[0]];
+      const stdoutLog = await Deno.open(join(natsDir, "nats.stdout.log"), {
+        write: true,
+        create: true,
+        truncate: true,
+      });
+      const stderrLog = await Deno.open(join(natsDir, "nats.stderr.log"), {
+        write: true,
+        create: true,
+        truncate: true,
+      });
+      const stdoutTail = new TextTail(OUTPUT_TAIL_CHARS);
+      const stderrTail = new TextTail(OUTPUT_TAIL_CHARS);
+      let child: Deno.ChildProcess;
+      try {
+        for (const lease of Object.values(portLeases)) lease.releaseForSpawn();
+        child = new Deno.Command(binaries.natsServer, {
+          args: ["-c", join(natsDir, manifest.paths.natsConfig)],
+          cwd: natsDir,
+          stdin: "null",
+          stdout: "piped",
+          stderr: "piped",
+        }).spawn();
+      } catch (error) {
+        for (const lease of Object.values(portLeases)) lease.release();
+        try {
+          stdoutLog.close();
+          stderrLog.close();
+        } catch {
+          // best-effort fd cleanup on a failed spawn
+        }
+        throw error;
+      }
+      const status = child.status;
+      const pidFile = join(
+        natsDir,
+        `${NATS_PID_FILE_PREFIX}${Deno.pid}-${Date.now()}.pid`,
+      );
+      const readers: Promise<void>[] = [];
+      let pidFileContent: string | undefined;
+      let nc: NatsConnection | undefined;
 
-      const startupMs = options.startupMs ?? DEFAULT_STARTUP_MS;
-      await waitForNatsPorts({
-        ports: [ports.nats, ports.http, ports.websocket],
-        startupMs,
-        status,
-        output,
-        readers,
-      });
-      const natsUrl = `nats://127.0.0.1:${ports.nats}`;
-      const websocketUrl = `ws://127.0.0.1:${ports.websocket}`;
-      nc = await connect({
-        servers: natsUrl,
-        authenticator: credsAuthenticator(
-          await Deno.readFile(
-            join(natsDir, manifest.paths.creds.trellisService),
+      try {
+        const identity = await recordProcessIdentity(
+          child.pid,
+          binaries.natsServer,
+        );
+        // Exclusive create: a leftover pid file from a live run must fail loudly
+        // instead of being clobbered.
+        const content = formatPidFile(identity);
+        await Deno.writeTextFile(pidFile, content, { createNew: true });
+        pidFileContent = content;
+        const stdoutReader = captureProcessOutput(
+          child.stdout,
+          stdoutTail,
+          () => undefined,
+          stdoutLog,
+        ).catch((error) => {
+          stdoutTail.append(`\n<failed to read stdout: ${String(error)}>\n`);
+        }).finally(() => {
+          stdoutLog.close();
+        });
+        const stderrReader = captureProcessOutput(
+          child.stderr,
+          stderrTail,
+          () => undefined,
+          stderrLog,
+        ).catch((error) => {
+          stderrTail.append(`\n<failed to read stderr: ${String(error)}>\n`);
+        }).finally(() => {
+          stderrLog.close();
+        });
+        readers.push(stdoutReader, stderrReader);
+        const output = () => {
+          const stdout = stdoutTail.toString().trimEnd() || "<empty>";
+          const stderr = stderrTail.toString().trimEnd() || "<empty>";
+          return `stdout tail:\n${stdout}\nstderr tail:\n${stderr}`;
+        };
+
+        const startupMs = options.startupMs ?? DEFAULT_STARTUP_MS;
+        await waitForNatsPorts({
+          ports: [ports.nats, ports.http, ports.websocket],
+          startupMs,
+          status,
+          output,
+          readers,
+        });
+        for (const lease of Object.values(portLeases)) lease.release();
+        const natsUrl = `nats://127.0.0.1:${ports.nats}`;
+        const websocketUrl = `ws://127.0.0.1:${ports.websocket}`;
+        nc = await connect({
+          servers: natsUrl,
+          authenticator: credsAuthenticator(
+            await Deno.readFile(
+              join(natsDir, manifest.paths.creds.trellisService),
+            ),
           ),
-        ),
-      });
-      await ensureSharedStreams(nc);
-      await recordTrellisTestProcessStart("nats", String(child.pid));
-      return new NatsTestContainer({
-        natsUrl,
-        websocketUrl,
-        manifest,
-        manifests,
-        nc,
-        child,
-        status,
-        pidFile,
-        pidFileContent,
-        readers,
-      });
-    } catch (error) {
-      if (nc && !nc.isClosed()) await nc.close().catch(() => undefined);
-      await stopNatsChild({ child, status, pidFile, pidFileContent, readers });
-      throw error;
+        });
+        await ensureSharedStreams(nc);
+        await recordTrellisTestProcessStart("nats", String(child.pid));
+        return new NatsTestContainer({
+          natsUrl,
+          websocketUrl,
+          manifest,
+          manifests,
+          nc,
+          child,
+          status,
+          pidFile,
+          pidFileContent,
+          readers,
+        });
+      } catch (error) {
+        for (const lease of Object.values(portLeases)) lease.release();
+        if (nc && !nc.isClosed()) await nc.close().catch(() => undefined);
+        await stopNatsChild({
+          child,
+          status,
+          pidFile,
+          pidFileContent,
+          readers,
+        });
+        throw error;
+      }
+    } finally {
+      for (const lease of Object.values(portLeases)) lease.release();
     }
   }
 

@@ -20,6 +20,7 @@ import {
 import {
   buildControlPlaneConfig,
   generateSessionSeed,
+  type ReservedPort,
   reserveLocalPort,
   writeTrellisConfig,
 } from "./control_plane_config.ts";
@@ -260,6 +261,7 @@ export class TrellisTestRuntime implements AsyncDisposable {
     });
     let nats: NatsTestContainer | undefined;
     let controlPlane: TrellisProcessHandle | undefined;
+    let portLease: ReservedPort | undefined;
     try {
       const timeouts = {
         startupMs: options.timeouts?.startupMs ?? 30_000,
@@ -326,28 +328,47 @@ export class TrellisTestRuntime implements AsyncDisposable {
         : await NatsTestContainer.start(workdir, {
           startupMs: timeouts.startupMs,
         });
-      const port = reserveLocalPort();
-      const trellisUrl = `http://127.0.0.1:${port}`;
-      const config = buildControlPlaneConfig({
-        workdir,
-        natsUrl: nats.natsUrl,
-        websocketUrl: nats.websocketUrl,
-        manifest: sharedManifest ?? nats.manifest,
-        port,
-        oauthProviders: options.oauthProviders,
-        webOrigins: options.webOrigins,
-      });
-      const configPath = await writeTrellisConfig({ workdir, config });
+      let config: ReturnType<typeof buildControlPlaneConfig>;
+      let configPath: string;
+      let startedControlPlane: TrellisProcessHandle;
+      for (let attempt = 1;; attempt++) {
+        portLease = reserveLocalPort();
+        const port = portLease.port;
+        const trellisUrl = `http://127.0.0.1:${port}`;
+        config = buildControlPlaneConfig({
+          workdir,
+          natsUrl: nats.natsUrl,
+          websocketUrl: nats.websocketUrl,
+          manifest: sharedManifest ?? nats.manifest,
+          port,
+          oauthProviders: options.oauthProviders,
+          webOrigins: options.webOrigins,
+        });
+        configPath = await writeTrellisConfig({ workdir, config });
+        try {
+          startedControlPlane = await startTrellisProcess({
+            trellisUrl,
+            configPath,
+            options: options.trellis,
+            startupTimeoutMs: timeouts.startupMs,
+            shutdownTimeoutMs: timeouts.shutdownMs,
+            portLease,
+          });
+          portLease = undefined;
+          break;
+        } catch (error) {
+          portLease = undefined;
+          if (
+            attempt >= 3 ||
+            !String(error).toLowerCase().includes("address already in use")
+          ) {
+            throw error;
+          }
+        }
+      }
       const deployment = options.deployment ?? "test";
       const adminPassword = options.adminPassword ??
         `trellis-test-${generateSessionSeed()}`;
-      const startedControlPlane = await startTrellisProcess({
-        trellisUrl,
-        configPath,
-        options: options.trellis,
-        startupTimeoutMs: timeouts.startupMs,
-        shutdownTimeoutMs: timeouts.shutdownMs,
-      });
       controlPlane = startedControlPlane;
       const admin = new TrellisTestAdminAutomation({
         trellisUrl: startedControlPlane.trellisUrl,
@@ -372,6 +393,7 @@ export class TrellisTestRuntime implements AsyncDisposable {
         admin,
       });
     } catch (error) {
+      portLease?.release();
       await controlPlane?.stop().catch(() => undefined);
       await nats?.stop().catch(() => undefined);
       if (!options.keepWorkdir) {
@@ -687,12 +709,15 @@ export class TrellisTestRuntime implements AsyncDisposable {
 
     await this.#admin.prepareForControlPlaneRestart();
     await this.#controlPlane.stop();
+    const port = Number(new URL(this.trellisUrl).port);
+    const portLease = reserveLocalPort(port);
     this.#controlPlane = await startTrellisProcess({
       trellisUrl: this.trellisUrl,
       configPath: this.#configPath,
       options: this.#trellisOptions,
       startupTimeoutMs: this.#timeouts.startupMs,
       shutdownTimeoutMs: this.#timeouts.shutdownMs,
+      portLease,
     });
   }
 

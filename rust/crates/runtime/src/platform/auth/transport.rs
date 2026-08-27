@@ -140,7 +140,7 @@ pub(crate) fn compile_transport_permissions(
         subscribe.extend(provided.rpc().values().cloned());
         for name in provided.rpc().keys() {
             if api_value["rpc"][name]["transfer"]["direction"].as_str() == Some("receive") {
-                subscribe.insert(format!("transfer.v2.download.{session_prefix}.*"));
+                subscribe.insert(format!("transfer.v1.download.{session_prefix}.*"));
             }
         }
         for operation in provided.operations().values() {
@@ -149,7 +149,7 @@ pub(crate) fn compile_transport_permissions(
         }
         for name in provided.operations().keys() {
             if api_value["operations"][name]["transfer"]["direction"].as_str() == Some("send") {
-                subscribe.insert(format!("transfer.v2.upload.{session_prefix}.*"));
+                subscribe.insert(format!("transfer.v1.upload.{session_prefix}.*"));
             }
         }
         subscribe.extend(provided.feeds().values().cloned());
@@ -237,7 +237,7 @@ fn compile_api_surface(
         (ApiSurfaceKind::Rpc, PermissionAction::Call) => {
             publish.insert(required_subject(subjects.rpc.get(name), "RPC", name)?);
             if api_value["rpc"][name]["transfer"]["direction"].as_str() == Some("receive") {
-                publish.insert("transfer.v2.download.*.*".to_owned());
+                publish.insert("transfer.v1.download.*.*".to_owned());
             }
         }
         (ApiSurfaceKind::Operation, PermissionAction::Invoke) => {
@@ -245,7 +245,7 @@ fn compile_api_surface(
             publish.insert(subject.clone());
             publish.insert(format!("{subject}.control"));
             if api_value["operations"][name]["transfer"]["direction"].as_str() == Some("send") {
-                publish.insert("transfer.v2.upload.*.*".to_owned());
+                publish.insert("transfer.v1.upload.*.*".to_owned());
             }
         }
         (ApiSurfaceKind::Operation, PermissionAction::Observe) => {

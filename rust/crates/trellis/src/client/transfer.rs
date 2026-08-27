@@ -55,54 +55,89 @@ impl Default for TransferCancellation {
     }
 }
 
+/// Metadata verified after a completed download or committed upload.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct FileInfo {
+    /// Logical object key within the authorized store resource.
     pub key: String,
+    /// Complete object size in bytes.
     pub size: u64,
+    /// Backend commit timestamp encoded as RFC 3339.
     pub updated_at: String,
+    /// Required SHA-256 digest used for independent end-to-end verification.
     pub digest: String,
+    /// Media type retained with the object when one was supplied.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub content_type: Option<String>,
+    /// Application metadata retained with the object.
     pub metadata: BTreeMap<String, String>,
 }
 
+/// Short-lived, session-bound authority to upload one object.
+///
+/// The client must use the declared subject and frame size unchanged. Completion
+/// is accepted only after the receiver verifies the authenticated size and digest.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct UploadTransferGrant {
+    /// Protocol grant type. Must be `transfer.v1`.
     #[serde(rename = "type")]
     pub type_name: String,
-    #[serde(rename = "direction", alias = "kind")]
+    /// Transfer direction. Must be `upload`.
+    #[serde(rename = "direction")]
     pub kind: String,
+    /// Service that issued and serves this grant.
     pub service: String,
+    /// Session public key to which this grant is bound.
     pub session_key: String,
+    /// Unique transfer identifier included in signed frame proofs.
     pub transfer_id: String,
+    /// Exact NATS endpoint authorized for this upload.
     pub subject: String,
+    /// Grant expiry encoded as RFC 3339.
     pub expires_at: String,
+    /// Maximum bytes in one non-completion data frame.
     #[serde(deserialize_with = "deserialize_chunk_bytes")]
     pub chunk_bytes: u64,
+    /// Optional complete-object size limit enforced by the receiver.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub max_bytes: Option<u64>,
+    /// Media type to retain with the committed object.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub content_type: Option<String>,
+    /// Application metadata to retain with the committed object.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub metadata: Option<BTreeMap<String, String>>,
 }
 
+/// Short-lived, session-bound authority to download one verified object.
+///
+/// Download requests pull one frame at a time. The client verifies the final
+/// byte count and digest against [`DownloadTransferGrant::info`].
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct DownloadTransferGrant {
+    /// Protocol grant type. Must be `transfer.v1`.
     #[serde(rename = "type")]
     pub type_name: String,
-    #[serde(rename = "direction", alias = "kind")]
+    /// Transfer direction. Must be `download`.
+    #[serde(rename = "direction")]
     pub kind: String,
+    /// Service that issued and serves this grant.
     pub service: String,
+    /// Session public key to which this grant is bound.
     pub session_key: String,
+    /// Unique transfer identifier included in signed frame proofs.
     pub transfer_id: String,
+    /// Exact NATS endpoint authorized for this download.
     pub subject: String,
+    /// Grant expiry encoded as RFC 3339.
     pub expires_at: String,
+    /// Maximum bytes returned in one data frame.
     #[serde(deserialize_with = "deserialize_chunk_bytes")]
     pub chunk_bytes: u64,
+    /// Expected committed object metadata used for final verification.
     pub info: FileInfo,
 }
 
@@ -716,7 +751,7 @@ mod tests {
             "service": "service",
             "sessionKey": "session",
             "transferId": "transfer",
-            "subject": "transfer.v2.download.service.transfer",
+            "subject": "transfer.v1.download.service.transfer",
             "expiresAt": "2099-01-01T00:00:00Z",
             "chunkBytes": 1,
             "info": {
@@ -811,7 +846,7 @@ mod tests {
     #[test]
     fn upload_headers_include_session_proof_sequence_and_control_kind() {
         let auth = test_auth();
-        let subject = "transfer.v2.upload.test.tx1";
+        let subject = "transfer.v1.upload.test.tx1";
         let reply = "_INBOX.test.reply";
         let payload = b"hello ";
 

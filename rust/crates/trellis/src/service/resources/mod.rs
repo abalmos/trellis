@@ -1,24 +1,27 @@
+mod streaming;
+
+use streaming::{GuardedUploadReader, UploadReadFailure};
+
 use std::{
     fmt,
     future::{pending, Future},
     io::Cursor,
-    pin::Pin,
     sync::{
         atomic::{AtomicBool, Ordering},
         Arc,
     },
-    task::{Context, Poll},
     time::Duration,
 };
 
-use async_nats::jetstream::kv::Operation;
-use async_nats::jetstream::object_store::{GetErrorKind, PutErrorKind};
 use bytes::Bytes;
-use futures_util::{pin_mut, Stream, StreamExt, TryStreamExt};
+use futures_util::{pin_mut, Stream};
 use time::OffsetDateTime;
-use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
+use tokio::io::{AsyncRead, AsyncWrite};
 
 use super::{KvResourceBinding, ServerError, StoreResourceBinding};
+
+mod backend;
+use backend::{BoundKvResourceClient, BoundStoreResourceClient};
 
 pub(crate) trait ResourceRuntimeClient {
     /// KV client type returned for a bound KV resource.
@@ -83,7 +86,6 @@ pub trait KvResourceClient: Clone + fmt::Debug + Send + Sync + 'static {
 
 /// Operation that produced a KV entry.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[doc = concat!("Public Trellis value set `", stringify!(KvResourceOperation), "`.")]
 pub enum KvResourceOperation {
     /// Value bytes were written for the key.
     Update,
@@ -93,22 +95,16 @@ pub enum KvResourceOperation {
 
 /// Latest KV entry metadata and bytes for a service-bound key.
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[doc = concat!("Public Trellis data type `", stringify!(KvResourceEntry), "`.")]
 pub struct KvResourceEntry {
     /// Key for this entry.
-    #[doc = concat!("The `", stringify!(key), "` value.")]
     pub key: String,
     /// Raw value bytes for this revision.
-    #[doc = concat!("The `", stringify!(value), "` value.")]
     pub value: Bytes,
     /// Monotonic bucket revision for this entry.
-    #[doc = concat!("The `", stringify!(revision), "` value.")]
     pub revision: u64,
     /// Timestamp assigned by the KV backend.
-    #[doc = concat!("The `", stringify!(timestamp), "` value.")]
     pub timestamp: OffsetDateTime,
     /// Operation that produced this entry.
-    #[doc = concat!("The `", stringify!(operation), "` value.")]
     pub operation: KvResourceOperation,
 }
 
@@ -191,7 +187,6 @@ where
     C: KvResourceClient,
 {
     /// Create a KV resource handle from a validated binding and opened client.
-    #[doc = concat!("Trellis API operation `", stringify!(new), "`.")]
     pub fn new(resource_name: impl Into<String>, binding: KvResourceBinding, client: C) -> Self {
         Self {
             resource_name: resource_name.into(),
@@ -201,37 +196,31 @@ where
     }
 
     /// Contract-local resource alias used to open this handle.
-    #[doc = concat!("Trellis API operation `", stringify!(resource_name), "`.")]
     pub fn resource_name(&self) -> &str {
         &self.resource_name
     }
 
     /// Concrete resource binding resolved during bootstrap.
-    #[doc = concat!("Trellis API operation `", stringify!(binding), "`.")]
     pub fn binding(&self) -> &KvResourceBinding {
         &self.binding
     }
 
     /// Read the latest bytes for `key`, or `None` when the key is absent.
-    #[doc = concat!("Asynchronous Trellis API operation `", stringify!(get), "`.")]
     pub async fn get(&self, key: &str) -> Result<Option<Bytes>, ServerError> {
         self.client.get(key).await
     }
 
     /// Read the latest entry metadata for `key`, including delete markers.
-    #[doc = concat!("Asynchronous Trellis API operation `", stringify!(get_entry), "`.")]
     pub async fn get_entry(&self, key: &str) -> Result<Option<KvResourceEntry>, ServerError> {
         self.client.get_entry(key).await
     }
 
     /// Persist `value` at `key`.
-    #[doc = concat!("Asynchronous Trellis API operation `", stringify!(put), "`.")]
     pub async fn put(&self, key: &str, value: impl Into<Bytes>) -> Result<(), ServerError> {
         self.client.put(key, value.into()).await
     }
 
     /// Persist `value` at `key` only if `key` is still at `revision`.
-    #[doc = concat!("Asynchronous Trellis API operation `", stringify!(update_revision), "`.")]
     pub async fn update_revision(
         &self,
         key: &str,
@@ -244,25 +233,21 @@ where
     }
 
     /// List active keys in this bucket.
-    #[doc = concat!("Asynchronous Trellis API operation `", stringify!(list), "`.")]
     pub async fn list(&self) -> Result<Vec<String>, ServerError> {
         self.client.list().await
     }
 
     /// Delete `key` from this bucket.
-    #[doc = concat!("Asynchronous Trellis API operation `", stringify!(delete), "`.")]
     pub async fn delete(&self, key: &str) -> Result<(), ServerError> {
         self.client.delete(key).await
     }
 
     /// Delete `key` only if `key` is still at `revision`.
-    #[doc = concat!("Asynchronous Trellis API operation `", stringify!(delete_revision), "`.")]
     pub async fn delete_revision(&self, key: &str, revision: u64) -> Result<(), ServerError> {
         self.client.delete_revision(key, revision).await
     }
 
     /// Watch updates and deletes for one key.
-    #[doc = concat!("Asynchronous Trellis API operation `", stringify!(watch), "`.")]
     pub async fn watch(&self, key: &str) -> Result<C::Watch, ServerError> {
         self.client.watch(key).await
     }
@@ -277,153 +262,12 @@ pub struct StoreResourceHandle<C> {
     client: C,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum UploadReadFailure {
-    TooLarge {
-        attempted_bytes: u64,
-        max_bytes: u64,
-    },
-    SizeMismatch {
-        expected_bytes: u64,
-        actual_bytes: u64,
-    },
-    Cancelled,
-}
-
-struct GuardedUploadReader<R> {
-    reader: R,
-    validated_eof: Arc<AtomicBool>,
-    expected_size: Option<u64>,
-    max_size: Option<u64>,
-    read: u64,
-    failure: Option<UploadReadFailure>,
-}
-
-impl<R> GuardedUploadReader<R> {
-    fn new(
-        reader: R,
-        expected_size: Option<u64>,
-        max_size: Option<u64>,
-        validated_eof: Arc<AtomicBool>,
-    ) -> Self {
-        Self {
-            reader,
-            validated_eof,
-            expected_size,
-            max_size,
-            read: 0,
-            failure: None,
-        }
-    }
-
-    fn limit(&self) -> Option<u64> {
-        match (self.expected_size, self.max_size) {
-            (Some(expected), Some(max)) => Some(expected.min(max)),
-            (Some(expected), None) => Some(expected),
-            (None, max) => max,
-        }
-    }
-
-    fn crossing_failure(&self) -> UploadReadFailure {
-        if let Some(expected_bytes) = self.expected_size {
-            UploadReadFailure::SizeMismatch {
-                expected_bytes,
-                actual_bytes: expected_bytes.saturating_add(1),
-            }
-        } else {
-            let max_bytes = self.max_size.expect("a crossing requires a size limit");
-            UploadReadFailure::TooLarge {
-                attempted_bytes: max_bytes.saturating_add(1),
-                max_bytes,
-            }
-        }
-    }
-}
-
-impl<R> AsyncRead for GuardedUploadReader<R>
-where
-    R: AsyncRead + Unpin,
-{
-    fn poll_read(
-        self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-        buf: &mut ReadBuf<'_>,
-    ) -> Poll<std::io::Result<()>> {
-        let this = self.get_mut();
-        if this.validated_eof.load(Ordering::Acquire) {
-            return Poll::Ready(Ok(()));
-        }
-        if this.failure.is_some() {
-            return Poll::Ready(Err(std::io::Error::other("guarded upload terminated")));
-        }
-        let limit = this.limit();
-        if limit.is_some_and(|limit| this.read == limit) {
-            let mut extra = [0_u8; 1];
-            let mut probe = ReadBuf::new(&mut extra);
-            return match Pin::new(&mut this.reader).poll_read(cx, &mut probe) {
-                Poll::Pending => Poll::Pending,
-                Poll::Ready(Err(error)) => Poll::Ready(Err(error)),
-                Poll::Ready(Ok(())) if probe.filled().is_empty() => {
-                    this.validated_eof.store(true, Ordering::Release);
-                    Poll::Ready(Ok(()))
-                }
-                Poll::Ready(Ok(())) => {
-                    this.failure = Some(this.crossing_failure());
-                    Poll::Ready(Err(std::io::Error::other(
-                        "store upload size limit exceeded",
-                    )))
-                }
-            };
-        }
-
-        let remaining = limit
-            .map(|limit| usize::try_from(limit - this.read).unwrap_or(usize::MAX))
-            .unwrap_or(buf.remaining())
-            .min(buf.remaining());
-        let unfilled = buf.initialize_unfilled_to(remaining);
-        let mut bounded = ReadBuf::new(unfilled);
-        match Pin::new(&mut this.reader).poll_read(cx, &mut bounded) {
-            Poll::Pending => Poll::Pending,
-            Poll::Ready(Err(error)) => Poll::Ready(Err(error)),
-            Poll::Ready(Ok(())) => {
-                let count = bounded.filled().len();
-                buf.advance(count);
-                let Some(actual) = this
-                    .read
-                    .checked_add(u64::try_from(count).unwrap_or(u64::MAX))
-                else {
-                    return Poll::Ready(Err(std::io::Error::other("store upload size overflow")));
-                };
-                this.read = actual;
-                if count == 0 {
-                    if let Some(expected_bytes) = this.expected_size {
-                        if actual != expected_bytes {
-                            this.failure = Some(UploadReadFailure::SizeMismatch {
-                                expected_bytes,
-                                actual_bytes: actual,
-                            });
-                            return Poll::Ready(Err(std::io::Error::other(
-                                "store upload size mismatch",
-                            )));
-                        }
-                    }
-                    this.validated_eof.store(true, Ordering::Release);
-                }
-                Poll::Ready(Ok(()))
-            }
-        }
-    }
-}
-
 /// Options for waiting until an object appears in a bound object store.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[doc = concat!("Public Trellis data type `", stringify!(StoreWaitOptions), "`.")]
 pub struct StoreWaitOptions {
     /// Maximum time to wait before returning [`ServerError::StoreWaitTimeout`].
-    #[doc = concat!("The `", stringify!(timeout), "` value.")]
     pub timeout: Option<Duration>,
     /// Delay between object existence checks. Defaults to 250ms.
-    #[doc = concat!("The `", stringify!(poll_interval), "` value.")]
     pub poll_interval: Duration,
 }
 
@@ -441,7 +285,6 @@ where
     C: StoreResourceClient,
 {
     /// Create a store resource handle from a validated binding and opened client.
-    #[doc = concat!("Trellis API operation `", stringify!(new), "`.")]
     pub fn new(
         service_name: impl Into<String>,
         resource_name: impl Into<String>,
@@ -457,13 +300,11 @@ where
     }
 
     /// Contract-local resource alias used to open this handle.
-    #[doc = concat!("Trellis API operation `", stringify!(resource_name), "`.")]
     pub fn resource_name(&self) -> &str {
         &self.resource_name
     }
 
     /// Concrete resource binding resolved during bootstrap.
-    #[doc = concat!("Trellis API operation `", stringify!(binding), "`.")]
     pub fn binding(&self) -> &StoreResourceBinding {
         &self.binding
     }
@@ -585,7 +426,6 @@ where
     }
 
     /// Read all bytes for `key`, or `None` when the object is absent.
-    #[doc = concat!("Asynchronous Trellis API operation `", stringify!(read), "`.")]
     pub async fn read(&self, key: &str) -> Result<Option<Bytes>, ServerError> {
         let mut writer = Cursor::new(Vec::new());
         Ok(self
@@ -599,7 +439,6 @@ where
     /// The handle checks immediately, then polls according to `options`. When
     /// `options.timeout` elapses before the object appears, this returns
     /// [`ServerError::StoreWaitTimeout`].
-    #[doc = concat!("Asynchronous Trellis API operation `", stringify!(wait_for), "`.")]
     pub async fn wait_for(
         &self,
         key: &str,
@@ -698,7 +537,6 @@ where
     }
 
     /// Persist `value` at `key`.
-    #[doc = concat!("Asynchronous Trellis API operation `", stringify!(write), "`.")]
     pub async fn write(&self, key: &str, value: impl Into<Bytes>) -> Result<(), ServerError> {
         let value = value.into();
         let expected_size = u64::try_from(value.len()).map_err(|_| {
@@ -711,13 +549,11 @@ where
     }
 
     /// List active object names in this store.
-    #[doc = concat!("Asynchronous Trellis API operation `", stringify!(list), "`.")]
     pub async fn list(&self) -> Result<Vec<String>, ServerError> {
         self.client.list().await
     }
 
     /// Delete `key` from this store.
-    #[doc = concat!("Asynchronous Trellis API operation `", stringify!(delete), "`.")]
     pub async fn delete(&self, key: &str) -> Result<(), ServerError> {
         self.client.delete(key).await
     }
@@ -754,233 +590,11 @@ where
     }
 }
 
-/// Concrete KV client used by connected service resources.
-#[derive(Debug, Clone)]
-#[doc = concat!("Public Trellis data type `", stringify!(BoundKvResourceClient), "`.")]
-pub struct BoundKvResourceClient {
-    store: async_nats::jetstream::kv::Store,
-}
-
-/// Watch stream for connected KV resources.
-#[doc = concat!("Public Trellis data type `", stringify!(BoundKvWatch), "`.")]
-pub struct BoundKvWatch {
-    inner: async_nats::jetstream::kv::Watch,
-}
-
-impl fmt::Debug for BoundKvWatch {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter
-            .debug_struct("BoundKvWatch")
-            .finish_non_exhaustive()
-    }
-}
-
-impl Stream for BoundKvWatch {
-    type Item = Result<KvResourceEntry, ServerError>;
-
-    fn poll_next(
-        mut self: Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-    ) -> Poll<Option<Self::Item>> {
-        Pin::new(&mut self.inner)
-            .poll_next(cx)
-            .map(|entry| entry.map(|entry| entry.map(kv_entry_from_nats).map_err(nats_error)))
-    }
-}
-
-impl KvResourceClient for BoundKvResourceClient {
-    type Watch = BoundKvWatch;
-
-    async fn get(&self, key: &str) -> Result<Option<Bytes>, ServerError> {
-        self.store.get(key.to_string()).await.map_err(nats_error)
-    }
-
-    async fn get_entry(&self, key: &str) -> Result<Option<KvResourceEntry>, ServerError> {
-        self.store
-            .entry(key.to_string())
-            .await
-            .map(|entry| entry.map(kv_entry_from_nats))
-            .map_err(nats_error)
-    }
-
-    async fn put(&self, key: &str, value: Bytes) -> Result<(), ServerError> {
-        self.store
-            .put(key, value)
-            .await
-            .map(|_| ())
-            .map_err(nats_error)
-    }
-
-    async fn update_revision(
-        &self,
-        key: &str,
-        value: Bytes,
-        revision: u64,
-    ) -> Result<u64, ServerError> {
-        match self.store.update(key, value, revision).await {
-            Ok(revision) => Ok(revision),
-            Err(error) if is_revision_mismatch(&error) => {
-                Err(self.kv_revision_mismatch(key, revision).await)
-            }
-            Err(error) => Err(nats_error(error)),
-        }
-    }
-
-    async fn list(&self) -> Result<Vec<String>, ServerError> {
-        let keys = self.store.keys().await.map_err(nats_error)?;
-        keys.try_collect().await.map_err(nats_error)
-    }
-
-    async fn delete(&self, key: &str) -> Result<(), ServerError> {
-        self.store.delete(key).await.map_err(nats_error)
-    }
-
-    async fn delete_revision(&self, key: &str, revision: u64) -> Result<(), ServerError> {
-        match self.store.delete_expect_revision(key, Some(revision)).await {
-            Ok(()) => Ok(()),
-            Err(error) if is_revision_mismatch(&error) => {
-                Err(self.kv_revision_mismatch(key, revision).await)
-            }
-            Err(error) => Err(nats_error(error)),
-        }
-    }
-
-    async fn watch(&self, key: &str) -> Result<Self::Watch, ServerError> {
-        self.store
-            .watch(key)
-            .await
-            .map(|inner| BoundKvWatch { inner })
-            .map_err(nats_error)
-    }
-}
-
-impl BoundKvResourceClient {
-    async fn kv_revision_mismatch(&self, key: &str, expected: u64) -> ServerError {
-        let actual = self
-            .store
-            .entry(key.to_string())
-            .await
-            .ok()
-            .flatten()
-            .map(|entry| entry.revision);
-        ServerError::KvRevisionMismatch {
-            key: key.to_string(),
-            expected,
-            actual,
-        }
-    }
-}
-
-fn is_revision_mismatch(error: &impl fmt::Display) -> bool {
-    let message = error.to_string().to_ascii_lowercase();
-    message.contains("wrong last sequence")
-        || message.contains("wrong last revision")
-        || message.contains("revision mismatch")
-        || message.contains("sequence mismatch")
-}
-
-fn kv_entry_from_nats(entry: async_nats::jetstream::kv::Entry) -> KvResourceEntry {
-    KvResourceEntry {
-        key: entry.key,
-        value: entry.value,
-        revision: entry.revision,
-        timestamp: entry.created,
-        operation: match entry.operation {
-            Operation::Put => KvResourceOperation::Update,
-            Operation::Delete | Operation::Purge => KvResourceOperation::Delete,
-        },
-    }
-}
-
-/// Concrete object-store client used by connected service resources.
-#[derive(Clone)]
-#[doc = concat!("Public Trellis data type `", stringify!(BoundStoreResourceClient), "`.")]
-pub struct BoundStoreResourceClient {
-    store: async_nats::jetstream::object_store::ObjectStore,
-}
-
 /// Connected handle for one contract-declared KV resource.
 pub type KvHandle = KvResourceHandle<BoundKvResourceClient>;
 
 /// Connected handle for one contract-declared object-store resource.
 pub type StoreHandle = StoreResourceHandle<BoundStoreResourceClient>;
-
-impl fmt::Debug for BoundStoreResourceClient {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter
-            .debug_struct("BoundStoreResourceClient")
-            .finish_non_exhaustive()
-    }
-}
-
-impl StoreResourceClient for BoundStoreResourceClient {
-    async fn read_into<W>(
-        &self,
-        key: &str,
-        writer: &mut W,
-    ) -> Result<Option<StoreObjectInfo>, ServerError>
-    where
-        W: AsyncWrite + Unpin + Send,
-    {
-        let mut object = match self.store.get(key).await {
-            Ok(object) => object,
-            Err(error) if error.kind() == GetErrorKind::NotFound => return Ok(None),
-            Err(error) => return Err(nats_error(error)),
-        };
-        let info = store_object_info(object.info())?;
-        tokio::io::copy(&mut object, writer)
-            .await
-            .map_err(nats_error)?;
-        Ok(Some(info))
-    }
-
-    async fn write_from<R>(&self, key: &str, reader: &mut R) -> Result<StoreObjectInfo, ServerError>
-    where
-        R: AsyncRead + Unpin + Send,
-    {
-        let mut reader = reader;
-        match self.store.put(key, &mut reader).await {
-            Ok(info) => store_object_info(&info),
-            Err(error) if error.kind() == PutErrorKind::PublishMetadata => {
-                Err(ServerError::StoreCommitIndeterminate {
-                    key: key.to_string(),
-                    message: error.to_string(),
-                })
-            }
-            Err(error) if error.kind() == PutErrorKind::PurgeOldChunks => {
-                Err(ServerError::StoreCommittedCleanupFailed {
-                    key: key.to_string(),
-                    message: error.to_string(),
-                })
-            }
-            Err(error) => Err(nats_error(error)),
-        }
-    }
-
-    async fn list(&self) -> Result<Vec<String>, ServerError> {
-        let objects = self.store.list().await.map_err(nats_error)?;
-        objects
-            .map(|object| object.map(|info| info.name).map_err(nats_error))
-            .try_collect()
-            .await
-    }
-
-    async fn delete(&self, key: &str) -> Result<(), ServerError> {
-        self.store.delete(key).await.map_err(nats_error)
-    }
-}
-
-fn store_object_info(
-    info: &async_nats::jetstream::object_store::ObjectInfo,
-) -> Result<StoreObjectInfo, ServerError> {
-    Ok(StoreObjectInfo {
-        key: info.name.clone(),
-        size: u64::try_from(info.size)
-            .map_err(|_| ServerError::Nats("store object size does not fit in u64".to_string()))?,
-        digest: info.digest.clone(),
-        modified_at: info.modified,
-    })
-}
 
 impl ResourceRuntimeClient for async_nats::Client {
     type Kv = BoundKvResourceClient;
@@ -1005,7 +619,6 @@ impl ResourceRuntimeClient for async_nats::Client {
     }
 }
 
-#[doc = concat!("Trellis API operation `", stringify!(validate_kv_binding), "`.")]
 pub fn validate_kv_binding(
     service_name: &str,
     resource_name: &str,
@@ -1054,7 +667,6 @@ pub fn validate_kv_binding(
     Ok(())
 }
 
-#[doc = concat!("Trellis API operation `", stringify!(validate_store_binding), "`.")]
 pub fn validate_store_binding(
     service_name: &str,
     resource_name: &str,
@@ -1123,7 +735,7 @@ fn is_valid_nats_resource_name(value: &str) -> bool {
         .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'))
 }
 
-fn nats_error(error: impl fmt::Display) -> ServerError {
+pub(super) fn nats_error(error: impl fmt::Display) -> ServerError {
     ServerError::Nats(error.to_string())
 }
 

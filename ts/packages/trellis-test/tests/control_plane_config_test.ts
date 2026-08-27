@@ -1,4 +1,4 @@
-import { assertEquals, assertStringIncludes } from "@std/assert";
+import { assertEquals, assertStringIncludes, assertThrows } from "@std/assert";
 import { join } from "@std/path";
 import {
   buildControlPlaneConfig,
@@ -38,7 +38,8 @@ function testManifest(): LocalNatsBootstrapManifest {
 }
 
 Deno.test("reserveLocalPort records a process-wide host lease", async () => {
-  const port = reserveLocalPort();
+  const lease = reserveLocalPort();
+  const port = lease.port;
   const lockRoot = Deno.env.get("TRELLIS_TEST_PORT_LOCK_DIR") ??
     (Deno.build.os === "windows" ? Deno.env.get("TEMP") : "/tmp");
   if (lockRoot === undefined) {
@@ -46,7 +47,23 @@ Deno.test("reserveLocalPort records a process-wide host lease", async () => {
   }
   const lockPath = `${lockRoot}/trellis-test-port-${port}.lock`;
 
-  assertEquals((await Deno.readTextFile(lockPath)).trim(), String(Deno.pid));
+  try {
+    assertEquals((await Deno.readTextFile(lockPath)).trim(), String(Deno.pid));
+    assertThrows(
+      () => Deno.listen({ hostname: "127.0.0.1", port }),
+      Deno.errors.AddrInUse,
+    );
+    lease.releaseForSpawn();
+    assertThrows(
+      () => reserveLocalPort(port),
+      Error,
+      "reserved by another test",
+    );
+    const listener = Deno.listen({ hostname: "127.0.0.1", port });
+    listener.close();
+  } finally {
+    lease.release();
+  }
 });
 
 Deno.test("reserveHostTestSlot enforces the configured host bound", async () => {

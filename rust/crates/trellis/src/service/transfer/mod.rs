@@ -1,20 +1,25 @@
-use std::collections::BTreeMap;
-use std::pin::Pin;
-use std::sync::{
-    atomic::{AtomicU8, Ordering},
-    Arc,
+mod download;
+mod protocol;
+mod upload;
+
+pub use download::run_download_transfer_endpoint;
+pub(crate) use protocol::transfer_frame_proof_payload;
+use protocol::{download_subject_prefix, upload_subject_prefix, UploadTransferControl};
+pub use protocol::{
+    DownloadTransferGrant, DownloadTransferGrantPlan, FileTransferInfo, TransferDownloadGrantArgs,
+    TransferUploadGrantArgs, UploadTransferAck, UploadTransferChunk, UploadTransferCompletion,
+    UploadTransferGrant, UploadTransferGrantPlan, MAX_TRANSFER_CHUNK_BYTES,
+    TRANSFER_CONTROL_HEADER, TRANSFER_EOF_HEADER, TRANSFER_SEQUENCE_HEADER,
 };
-use std::task::{Context, Poll};
+use std::sync::{atomic::Ordering, Arc};
 use std::time::Duration;
+pub use upload::UploadTransferSession;
+use upload::UPLOAD_COMMIT;
 
 use async_nats::header::HeaderMap;
-use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use bytes::Bytes;
 use futures_util::StreamExt;
-use serde::{Deserialize, Serialize};
-use sha2::{Digest as _, Sha256};
 use time::{format_description::well_known::Rfc3339, OffsetDateTime};
-use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt, ReadBuf};
 use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
 
@@ -24,586 +29,7 @@ use super::{
     ServiceResourceBindings, StoreResourceBinding, StoreResourceClient,
 };
 
-const UPLOAD_SUBJECT_PREFIX: &str = "transfer.v2.upload";
-const DOWNLOAD_SUBJECT_PREFIX: &str = "transfer.v2.download";
-/// Header carrying the zero-based transfer chunk sequence number.
-pub const TRANSFER_SEQUENCE_HEADER: &str = "trellis-transfer-seq";
-/// Header marking the final transfer frame.
-pub const TRANSFER_EOF_HEADER: &str = "trellis-transfer-eof";
-/// Header distinguishing signed transfer control payloads from arbitrary data.
-pub const TRANSFER_CONTROL_HEADER: &str = "trellis-transfer-control";
-/// Largest transfer frame accepted by Trellis runtimes.
-pub const MAX_TRANSFER_CHUNK_BYTES: u64 = 1024 * 1024;
-const TRANSFER_FRAME_PROOF_DOMAIN: &[u8] = b"trellis.transfer.v2.frame\0";
-
-pub(crate) fn transfer_frame_proof_payload(
-    seq: u64,
-    control: Option<&str>,
-    payload: &[u8],
-) -> Bytes {
-    let control = control.unwrap_or_default().as_bytes();
-    let mut framed = Vec::with_capacity(
-        TRANSFER_FRAME_PROOF_DOMAIN.len() + 8 + 4 + control.len() + payload.len(),
-    );
-    framed.extend_from_slice(TRANSFER_FRAME_PROOF_DOMAIN);
-    framed.extend_from_slice(&seq.to_be_bytes());
-    framed.extend_from_slice(&(control.len() as u32).to_be_bytes());
-    framed.extend_from_slice(control);
-    framed.extend_from_slice(payload);
-    Bytes::from(framed)
-}
-
-/// File metadata carried by receive transfer grants.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-#[doc = concat!("Public Trellis data type `", stringify!(FileTransferInfo), "`.")]
-pub struct FileTransferInfo {
-    /// Object key within the bound store.
-    #[doc = concat!("The `", stringify!(key), "` value.")]
-    pub key: String,
-    /// Object size in bytes.
-    #[doc = concat!("The `", stringify!(size), "` value.")]
-    pub size: u64,
-    /// Last update timestamp encoded as an ISO-8601 string.
-    #[doc = concat!("The `", stringify!(updated_at), "` value.")]
-    pub updated_at: String,
-    /// SHA-256 object digest supplied by the store.
-    #[doc = concat!("The `", stringify!(digest), "` value.")]
-    pub digest: String,
-    /// Optional object content type.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    #[doc = concat!("The `", stringify!(content_type), "` value.")]
-    pub content_type: Option<String>,
-    /// Store metadata associated with the object.
-    #[doc = concat!("The `", stringify!(metadata), "` value.")]
-    pub metadata: BTreeMap<String, String>,
-}
-
-/// Inputs for planning a service-owned upload transfer grant.
-#[derive(Debug)]
-pub struct TransferUploadGrantArgs<'a> {
-    /// Service name exposed in the transfer grant.
-    #[doc = concat!("The `", stringify!(service_name), "` value.")]
-    pub service_name: &'a str,
-    /// Caller session key that owns this transfer grant.
-    #[doc = concat!("The `", stringify!(session_key), "` value.")]
-    pub session_key: &'a str,
-    /// Service session key used to scope the NATS transfer subject.
-    #[doc = concat!("The `", stringify!(service_session_key), "` value.")]
-    pub service_session_key: &'a str,
-    /// Resolved service resource bindings from bootstrap.
-    #[doc = concat!("The `", stringify!(resources), "` value.")]
-    pub resources: &'a ServiceResourceBindings,
-    /// Contract-local store alias used by the transfer declaration.
-    #[doc = concat!("The `", stringify!(store), "` value.")]
-    pub store: &'a str,
-    /// Object key that will receive uploaded bytes.
-    #[doc = concat!("The `", stringify!(key), "` value.")]
-    pub key: &'a str,
-    /// Preallocated transfer id supplied by the caller.
-    #[doc = concat!("The `", stringify!(transfer_id), "` value.")]
-    pub transfer_id: &'a str,
-    /// Grant expiration timestamp encoded as an ISO-8601 string.
-    #[doc = concat!("The `", stringify!(expires_at), "` value.")]
-    pub expires_at: &'a str,
-    /// Maximum transfer frame size advertised to clients.
-    #[doc = concat!("The `", stringify!(chunk_bytes), "` value.")]
-    pub chunk_bytes: u64,
-    /// Optional operation-level upload size cap.
-    #[doc = concat!("The `", stringify!(max_bytes), "` value.")]
-    pub max_bytes: Option<u64>,
-    /// Optional content type for the stored object.
-    #[doc = concat!("The `", stringify!(content_type), "` value.")]
-    pub content_type: Option<&'a str>,
-    /// Optional object metadata to store with uploaded bytes.
-    #[doc = concat!("The `", stringify!(metadata), "` value.")]
-    pub metadata: BTreeMap<String, String>,
-}
-
-/// Inputs for planning a service-owned download transfer grant.
-#[derive(Debug)]
-pub struct TransferDownloadGrantArgs<'a> {
-    /// Service name exposed in the transfer grant.
-    #[doc = concat!("The `", stringify!(service_name), "` value.")]
-    pub service_name: &'a str,
-    /// Caller session key that owns this transfer grant.
-    #[doc = concat!("The `", stringify!(session_key), "` value.")]
-    pub session_key: &'a str,
-    /// Service session key used to scope the NATS transfer subject.
-    #[doc = concat!("The `", stringify!(service_session_key), "` value.")]
-    pub service_session_key: &'a str,
-    /// Resolved service resource bindings from bootstrap.
-    #[doc = concat!("The `", stringify!(resources), "` value.")]
-    pub resources: &'a ServiceResourceBindings,
-    /// Contract-local store alias used by the transfer declaration.
-    #[doc = concat!("The `", stringify!(store), "` value.")]
-    pub store: &'a str,
-    /// Preallocated transfer id supplied by the caller.
-    #[doc = concat!("The `", stringify!(transfer_id), "` value.")]
-    pub transfer_id: &'a str,
-    /// Grant expiration timestamp encoded as an ISO-8601 string.
-    #[doc = concat!("The `", stringify!(expires_at), "` value.")]
-    pub expires_at: &'a str,
-    /// Maximum transfer frame size advertised to clients.
-    #[doc = concat!("The `", stringify!(chunk_bytes), "` value.")]
-    pub chunk_bytes: u64,
-    /// Object metadata for the file that will be streamed later.
-    #[doc = concat!("The `", stringify!(info), "` value.")]
-    pub info: FileTransferInfo,
-}
-
-/// Public wire DTO for an upload transfer grant.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-#[doc = concat!("Public Trellis data type `", stringify!(UploadTransferGrant), "`.")]
-pub struct UploadTransferGrant {
-    #[serde(rename = "type")]
-    /// Discriminator matching Trellis transfer grant wire DTOs.
-    #[doc = concat!("The `", stringify!(type_name), "` value.")]
-    pub type_name: String,
-    /// Transfer direction, always `send` for upload grants.
-    #[doc = concat!("The `", stringify!(direction), "` value.")]
-    pub direction: String,
-    /// Service name exposed in the transfer grant.
-    #[doc = concat!("The `", stringify!(service), "` value.")]
-    pub service: String,
-    /// Caller session key that owns this transfer grant.
-    #[doc = concat!("The `", stringify!(session_key), "` value.")]
-    pub session_key: String,
-    /// Unique transfer id for the planned session.
-    #[doc = concat!("The `", stringify!(transfer_id), "` value.")]
-    pub transfer_id: String,
-    /// NATS subject that the follow-up upload session should bind.
-    #[doc = concat!("The `", stringify!(subject), "` value.")]
-    pub subject: String,
-    /// Grant expiration timestamp encoded as an ISO-8601 string.
-    #[doc = concat!("The `", stringify!(expires_at), "` value.")]
-    pub expires_at: String,
-    /// Maximum transfer frame size advertised to clients.
-    #[serde(deserialize_with = "deserialize_chunk_bytes")]
-    #[doc = concat!("The `", stringify!(chunk_bytes), "` value.")]
-    pub chunk_bytes: u64,
-    /// Effective upload cap after applying the bound store limit.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    #[doc = concat!("The `", stringify!(max_bytes), "` value.")]
-    pub max_bytes: Option<u64>,
-    /// Optional content type for the stored object.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    #[doc = concat!("The `", stringify!(content_type), "` value.")]
-    pub content_type: Option<String>,
-    /// Optional object metadata to store with uploaded bytes.
-    #[doc = concat!("The `", stringify!(metadata), "` value.")]
-    pub metadata: BTreeMap<String, String>,
-}
-
-/// Planned upload transfer grant plus binding metadata needed by follow-up streaming.
-#[derive(Debug, Clone, PartialEq, Eq)]
-#[doc = concat!("Public Trellis data type `", stringify!(UploadTransferGrantPlan), "`.")]
-pub struct UploadTransferGrantPlan {
-    /// Public transfer grant that is safe to serialize and return to callers.
-    #[doc = concat!("The `", stringify!(grant), "` value.")]
-    pub grant: UploadTransferGrant,
-    /// Contract-local store alias selected by the transfer declaration.
-    #[doc = concat!("The `", stringify!(store_alias), "` value.")]
-    pub store_alias: String,
-    /// Concrete object-store bucket name resolved from bindings.
-    #[doc = concat!("The `", stringify!(store), "` value.")]
-    pub store: String,
-    /// Object key that will receive uploaded bytes.
-    #[doc = concat!("The `", stringify!(key), "` value.")]
-    pub key: String,
-}
-
-/// Public wire DTO for a download transfer grant.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-#[doc = concat!("Public Trellis data type `", stringify!(DownloadTransferGrant), "`.")]
-pub struct DownloadTransferGrant {
-    #[serde(rename = "type")]
-    /// Discriminator matching Trellis transfer grant wire DTOs.
-    #[doc = concat!("The `", stringify!(type_name), "` value.")]
-    pub type_name: String,
-    /// Transfer direction, always `receive` for download grants.
-    #[doc = concat!("The `", stringify!(direction), "` value.")]
-    pub direction: String,
-    /// Service name exposed in the transfer grant.
-    #[doc = concat!("The `", stringify!(service), "` value.")]
-    pub service: String,
-    /// Caller session key that owns this transfer grant.
-    #[doc = concat!("The `", stringify!(session_key), "` value.")]
-    pub session_key: String,
-    /// Unique transfer id for the planned session.
-    #[doc = concat!("The `", stringify!(transfer_id), "` value.")]
-    pub transfer_id: String,
-    /// NATS subject that the follow-up download session should bind.
-    #[doc = concat!("The `", stringify!(subject), "` value.")]
-    pub subject: String,
-    /// Grant expiration timestamp encoded as an ISO-8601 string.
-    #[doc = concat!("The `", stringify!(expires_at), "` value.")]
-    pub expires_at: String,
-    /// Maximum transfer frame size advertised to clients.
-    #[serde(deserialize_with = "deserialize_chunk_bytes")]
-    #[doc = concat!("The `", stringify!(chunk_bytes), "` value.")]
-    pub chunk_bytes: u64,
-    /// Object metadata for the file that will be streamed later.
-    #[doc = concat!("The `", stringify!(info), "` value.")]
-    pub info: FileTransferInfo,
-}
-
-/// Planned download transfer grant plus binding metadata needed by follow-up streaming.
-#[derive(Debug, Clone, PartialEq, Eq)]
-#[doc = concat!("Public Trellis data type `", stringify!(DownloadTransferGrantPlan), "`.")]
-pub struct DownloadTransferGrantPlan {
-    /// Public transfer grant that is safe to serialize and return to callers.
-    #[doc = concat!("The `", stringify!(grant), "` value.")]
-    pub grant: DownloadTransferGrant,
-    /// Contract-local store alias selected by the transfer declaration.
-    #[doc = concat!("The `", stringify!(store_alias), "` value.")]
-    pub store_alias: String,
-    /// Concrete object-store bucket name resolved from bindings.
-    #[doc = concat!("The `", stringify!(store), "` value.")]
-    pub store: String,
-    /// Effective object size limit from the store binding, when configured.
-    #[doc = concat!("The `", stringify!(max_object_bytes), "` value.")]
-    pub max_object_bytes: Option<u64>,
-}
-
-/// One upload frame decoded from the transfer chunk protocol.
-#[derive(Debug, Clone, PartialEq, Eq)]
-#[doc = concat!("Public Trellis data type `", stringify!(UploadTransferChunk), "`.")]
-pub struct UploadTransferChunk {
-    /// Zero-based chunk sequence number from `trellis-transfer-seq`.
-    #[doc = concat!("The `", stringify!(seq), "` value.")]
-    pub seq: u64,
-    /// Raw chunk payload bytes.
-    #[doc = concat!("The `", stringify!(payload), "` value.")]
-    pub payload: Bytes,
-    /// Whether this chunk carries `trellis-transfer-eof: true`.
-    #[doc = concat!("The `", stringify!(eof), "` value.")]
-    pub eof: bool,
-    /// Whether this frame carries an authenticated cancellation control.
-    #[doc = concat!("The `", stringify!(cancel), "` value.")]
-    pub cancel: bool,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(tag = "action", rename_all = "lowercase")]
-enum UploadTransferControl {
-    Complete { size: u64, digest: String },
-    Cancel,
-}
-
-/// Service reply payload for an upload chunk request.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(tag = "status", rename_all = "lowercase")]
-#[doc = concat!("Public Trellis value set `", stringify!(UploadTransferAck), "`.")]
-pub enum UploadTransferAck {
-    /// More chunks are expected.
-    Continue,
-    /// EOF was accepted and bytes were stored.
-    Complete {
-        /// Metadata for the stored object.
-        info: FileTransferInfo,
-    },
-    /// Cancellation was authenticated and the endpoint terminated.
-    Cancelled,
-}
-
-/// Awaitable provider-side notification that an upload transfer reached durable storage.
-#[derive(Debug)]
-#[doc = concat!("Public Trellis data type `", stringify!(UploadTransferCompletion), "`.")]
-pub struct UploadTransferCompletion {
-    receiver: oneshot::Receiver<Result<FileTransferInfo, ServerError>>,
-}
-
-impl UploadTransferCompletion {
-    /// Wait until the upload endpoint has durably stored the object or observed a transfer error.
-    #[doc = concat!("Asynchronous Trellis API operation `", stringify!(completed), "`.")]
-    pub async fn completed(self) -> Result<FileTransferInfo, ServerError> {
-        self.receiver.await.map_err(|_| {
-            ServerError::Nats("upload transfer completion channel closed".to_string())
-        })?
-    }
-}
-
-/// Store-backed upload transfer executor for a single planned grant.
-#[doc = concat!("Public Trellis data type `", stringify!(UploadTransferSession), "`.")]
-pub struct UploadTransferSession {
-    plan: UploadTransferGrantPlan,
-    next_seq: u64,
-    transferred_bytes: u64,
-    hasher: Sha256,
-    pipe: Option<tokio::io::DuplexStream>,
-    upload_state: Arc<AtomicU8>,
-    upload_task: Option<JoinHandle<Result<super::StoreObjectInfo, ServerError>>>,
-    complete: bool,
-    updated_at: String,
-}
-
-impl std::fmt::Debug for UploadTransferSession {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter
-            .debug_struct("UploadTransferSession")
-            .field("plan", &self.plan)
-            .field("next_seq", &self.next_seq)
-            .field("transferred_bytes", &self.transferred_bytes)
-            .field("complete", &self.complete)
-            .field("updated_at", &self.updated_at)
-            .finish_non_exhaustive()
-    }
-}
-
-const UPLOAD_OPEN: u8 = 0;
-const UPLOAD_COMMIT: u8 = 1;
-const UPLOAD_ABORT: u8 = 2;
-
-struct UploadPipeReader {
-    reader: tokio::io::DuplexStream,
-    state: Arc<AtomicU8>,
-}
-
-impl AsyncRead for UploadPipeReader {
-    fn poll_read(
-        self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-        buf: &mut ReadBuf<'_>,
-    ) -> Poll<std::io::Result<()>> {
-        let this = self.get_mut();
-        let before = buf.filled().len();
-        match Pin::new(&mut this.reader).poll_read(cx, buf) {
-            Poll::Ready(Ok(()))
-                if buf.filled().len() == before
-                    && this.state.load(Ordering::Acquire) != UPLOAD_COMMIT =>
-            {
-                Poll::Ready(Err(std::io::Error::other("upload transfer aborted")))
-            }
-            result => result,
-        }
-    }
-}
-
-impl UploadTransferSession {
-    /// Create an upload transfer session with the timestamp to report on completion.
-    #[doc = concat!("Trellis API operation `", stringify!(new), "`.")]
-    pub fn new(plan: UploadTransferGrantPlan, updated_at: impl Into<String>) -> Self {
-        Self {
-            plan,
-            next_seq: 0,
-            transferred_bytes: 0,
-            hasher: Sha256::new(),
-            pipe: None,
-            upload_state: Arc::new(AtomicU8::new(UPLOAD_OPEN)),
-            upload_task: None,
-            complete: false,
-            updated_at: updated_at.into(),
-        }
-    }
-
-    /// NATS subject that this planned upload session accepts chunks on.
-    #[doc = concat!("Trellis API operation `", stringify!(subject), "`.")]
-    pub fn subject(&self) -> &str {
-        &self.plan.grant.subject
-    }
-
-    /// Caller session key that owns this planned upload session.
-    #[doc = concat!("Trellis API operation `", stringify!(session_key), "`.")]
-    pub fn session_key(&self) -> &str {
-        &self.plan.grant.session_key
-    }
-
-    /// Build the operation transfer progress snapshot that would result from this chunk.
-    #[doc = concat!("Trellis API operation `", stringify!(progress_for_chunk), "`.")]
-    pub fn progress_for_chunk(&self, chunk: &UploadTransferChunk) -> OperationTransferProgress {
-        OperationTransferProgress {
-            chunk_index: chunk.seq,
-            chunk_bytes: chunk.payload.len() as u64,
-            transferred_bytes: self
-                .transferred_bytes
-                .saturating_add(chunk.payload.len() as u64),
-        }
-    }
-
-    async fn start<C>(&mut self, store: C) -> Result<(), ServerError>
-    where
-        C: StoreResourceClient,
-    {
-        let capacity = usize::try_from(self.plan.grant.chunk_bytes)
-            .unwrap_or(usize::MAX)
-            .max(1);
-        let (writer, reader) = tokio::io::duplex(capacity);
-        let mut reader = UploadPipeReader {
-            reader,
-            state: Arc::clone(&self.upload_state),
-        };
-        let key = self.plan.key.clone();
-        self.pipe = Some(writer);
-        self.upload_task = Some(tokio::spawn(async move {
-            store.write_from(&key, &mut reader).await
-        }));
-        Ok(())
-    }
-
-    /// Accept one ordered upload chunk using an explicit timestamp for expiry checks.
-    async fn receive_at(
-        &mut self,
-        chunk: UploadTransferChunk,
-        now_iso: &str,
-    ) -> Result<UploadTransferAck, ServerError> {
-        if self.complete {
-            return Err(ServerError::TransferAlreadyComplete {
-                transfer_id: self.plan.grant.transfer_id.clone(),
-            });
-        }
-        enforce_transfer_not_expired(
-            &self.plan.grant.transfer_id,
-            &self.plan.grant.expires_at,
-            now_iso,
-        )?;
-
-        if chunk.seq != self.next_seq {
-            return Err(ServerError::TransferSequenceOutOfOrder {
-                transfer_id: self.plan.grant.transfer_id.clone(),
-                expected_seq: self.next_seq,
-                actual_seq: chunk.seq,
-            });
-        }
-
-        let chunk_limit = self.plan.grant.chunk_bytes;
-        if !chunk.eof && chunk.payload.len() as u64 > chunk_limit {
-            return Err(ServerError::TransferObjectTooLarge {
-                service_name: self.plan.grant.service.clone(),
-                store: self.plan.store_alias.clone(),
-                key: self.plan.key.clone(),
-                size: chunk.payload.len() as u64,
-                max_bytes: chunk_limit,
-            });
-        }
-
-        if !chunk.eof {
-            let next_size = self
-                .transferred_bytes
-                .checked_add(chunk.payload.len() as u64)
-                .ok_or_else(|| ServerError::Nats("upload transfer size overflow".to_string()))?;
-            enforce_upload_max_bytes(&self.plan, next_size)?;
-            self.pipe
-                .as_mut()
-                .ok_or_else(|| ServerError::Nats("upload transfer pipe is not open".to_string()))?
-                .write_all(&chunk.payload)
-                .await
-                .map_err(|error| ServerError::Nats(error.to_string()))?;
-            self.hasher.update(&chunk.payload);
-            self.transferred_bytes = next_size;
-            self.next_seq = self.next_seq.checked_add(1).ok_or_else(|| {
-                ServerError::Nats("upload transfer sequence overflow".to_string())
-            })?;
-            return Ok(UploadTransferAck::Continue);
-        }
-
-        let control: UploadTransferControl = serde_json::from_slice(&chunk.payload)?;
-        let UploadTransferControl::Complete { size, digest } = control else {
-            self.abort().await;
-            return Err(ServerError::TransferCancelled {
-                transfer_id: self.plan.grant.transfer_id.clone(),
-            });
-        };
-        if size != self.transferred_bytes {
-            self.abort().await;
-            return Err(ServerError::TransferObjectSizeMismatch {
-                store: self.plan.store_alias.clone(),
-                key: self.plan.key.clone(),
-                expected_size: size,
-                actual_size: self.transferred_bytes,
-            });
-        }
-        let actual_digest = format!(
-            "SHA-256={}",
-            URL_SAFE_NO_PAD.encode(self.hasher.clone().finalize())
-        );
-        if digest != actual_digest {
-            self.abort().await;
-            return Err(ServerError::TransferDigestMismatch {
-                transfer_id: self.plan.grant.transfer_id.clone(),
-                expected_digest: digest,
-                actual_digest,
-            });
-        }
-
-        self.upload_state.store(UPLOAD_COMMIT, Ordering::Release);
-        self.pipe.take();
-        let stored = self
-            .upload_task
-            .take()
-            .ok_or_else(|| ServerError::Nats("upload transfer task is not running".to_string()))?
-            .await
-            .map_err(|error| {
-                ServerError::Nats(format!("upload transfer task failed: {error}"))
-            })??;
-        if stored.key != self.plan.key {
-            return Err(ServerError::Nats(format!(
-                "upload stored key mismatch: expected {}, got {}",
-                self.plan.key, stored.key
-            )));
-        }
-        if stored.size != self.transferred_bytes {
-            return Err(ServerError::TransferObjectSizeMismatch {
-                store: self.plan.store_alias.clone(),
-                key: self.plan.key.clone(),
-                expected_size: self.transferred_bytes,
-                actual_size: stored.size,
-            });
-        }
-        let stored_digest = stored
-            .digest
-            .ok_or_else(|| ServerError::TransferDigestMismatch {
-                transfer_id: self.plan.grant.transfer_id.clone(),
-                expected_digest: actual_digest.clone(),
-                actual_digest: "missing backend digest".to_string(),
-            })?;
-        if !transfer_digests_match(&stored_digest, &actual_digest) {
-            return Err(ServerError::TransferDigestMismatch {
-                transfer_id: self.plan.grant.transfer_id.clone(),
-                expected_digest: actual_digest,
-                actual_digest: stored_digest,
-            });
-        }
-
-        let info = FileTransferInfo {
-            key: self.plan.key.clone(),
-            size: self.transferred_bytes,
-            updated_at: self.updated_at.clone(),
-            digest: actual_digest,
-            content_type: self.plan.grant.content_type.clone(),
-            metadata: self.plan.grant.metadata.clone(),
-        };
-        self.next_seq = self
-            .next_seq
-            .checked_add(1)
-            .ok_or_else(|| ServerError::Nats("upload transfer sequence overflow".to_string()))?;
-        self.complete = true;
-        Ok(UploadTransferAck::Complete { info })
-    }
-
-    async fn abort(&mut self) {
-        self.upload_state.store(UPLOAD_ABORT, Ordering::Release);
-        self.pipe.take();
-        abort_store_task(&mut self.upload_task).await;
-    }
-
-    /// Fail if the session has not received an EOF completion frame.
-    #[doc = concat!("Trellis API operation `", stringify!(ensure_complete), "`.")]
-    pub fn ensure_complete(&self) -> Result<(), ServerError> {
-        if self.complete {
-            Ok(())
-        } else {
-            Err(ServerError::TransferMissingEof {
-                transfer_id: self.plan.grant.transfer_id.clone(),
-            })
-        }
-    }
-}
-
 /// Decode one upload transfer request frame from NATS headers and payload.
-#[doc = concat!("Trellis API operation `", stringify!(decode_upload_transfer_chunk), "`.")]
 pub fn decode_upload_transfer_chunk(
     headers: Option<&HeaderMap>,
     payload: Bytes,
@@ -992,305 +418,6 @@ fn transfer_completion_error(error: &ServerError) -> ServerError {
     }
 }
 
-/// Run a NATS download transfer endpoint for a single planned grant until its subscriber closes.
-pub async fn run_download_transfer_endpoint<C, V>(
-    client: async_nats::Client,
-    subscriber: impl futures_util::Stream<Item = async_nats::Message>,
-    plan: DownloadTransferGrantPlan,
-    store: C,
-    validator: V,
-) -> Result<(), ServerError>
-where
-    C: StoreResourceClient,
-    V: RequestValidator + 'static,
-{
-    let mut subscriber = Box::pin(subscriber);
-    let capacity = usize::try_from(plan.grant.chunk_bytes).map_err(|_| {
-        ServerError::InvalidTransferChunkSize {
-            chunk_bytes: plan.grant.chunk_bytes,
-        }
-    })?;
-    validate_chunk_bytes(plan.grant.chunk_bytes)?;
-    let mut store = Some(store);
-    let mut pipe_reader = None;
-    let mut store_task = None;
-    let mut seq = 0_u64;
-    let mut transferred = 0_u64;
-    let mut hasher = Sha256::new();
-    let mut buffer = vec![0_u8; capacity];
-    let expiry = tokio::time::sleep(transfer_expiry_delay(&plan.grant.expires_at)?);
-    tokio::pin!(expiry);
-
-    loop {
-        let message = tokio::select! {
-            _ = &mut expiry => {
-                abort_store_task(&mut store_task).await;
-                return Ok(());
-            }
-            message = subscriber.next() => {
-                let Some(message) = message else {
-                    abort_store_task(&mut store_task).await;
-                    return Ok(());
-                };
-                message
-            }
-        };
-        let Some(reply_to) = message.reply.as_ref().map(ToString::to_string) else {
-            continue;
-        };
-        if let Err(error) = validate_download_transfer_message(&plan, &validator, &message).await {
-            publish_error_reply(&client, reply_to, &error).await?;
-            if matches!(error, ServerError::TransferExpired { .. }) {
-                abort_store_task(&mut store_task).await;
-                return Ok(());
-            }
-            continue;
-        }
-        let frame =
-            decode_upload_transfer_chunk(message.headers.as_ref(), message.payload.clone())?;
-        if frame.cancel {
-            if !matches!(
-                serde_json::from_slice(&message.payload),
-                Ok(UploadTransferControl::Cancel)
-            ) {
-                publish_error_reply(
-                    &client,
-                    reply_to,
-                    &ServerError::Nats("invalid download cancellation control".to_string()),
-                )
-                .await?;
-                continue;
-            }
-            abort_store_task(&mut store_task).await;
-            client
-                .publish(reply_to, Bytes::from_static(b"{\"status\":\"cancelled\"}"))
-                .await
-                .map_err(|error| ServerError::Nats(error.to_string()))?;
-            return Ok(());
-        }
-        if frame.seq != seq {
-            publish_error_reply(
-                &client,
-                reply_to,
-                &ServerError::TransferSequenceOutOfOrder {
-                    transfer_id: plan.grant.transfer_id.clone(),
-                    expected_seq: seq,
-                    actual_seq: frame.seq,
-                },
-            )
-            .await?;
-            continue;
-        }
-        if frame.eof || !message.payload.is_empty() {
-            publish_error_reply(
-                &client,
-                reply_to,
-                &ServerError::Nats("invalid download transfer control".to_string()),
-            )
-            .await?;
-            continue;
-        }
-
-        if pipe_reader.is_none() {
-            let (mut pipe_writer, reader) = tokio::io::duplex(capacity);
-            let key = plan.grant.info.key.clone();
-            let store = store.take().ok_or_else(|| {
-                ServerError::Nats("download transfer store already started".to_string())
-            })?;
-            pipe_reader = Some(reader);
-            store_task = Some(tokio::spawn(async move {
-                store.read_into(&key, &mut pipe_writer).await
-            }));
-        }
-
-        let count = match loop {
-            tokio::select! {
-                _ = &mut expiry => {
-                    abort_store_task(&mut store_task).await;
-                    return Ok(());
-                }
-                result = pipe_reader.as_mut().expect("download pipe initialized").read(&mut buffer) => break result,
-                control = subscriber.next() => {
-                    let Some(control) = control else {
-                        abort_store_task(&mut store_task).await;
-                        return Ok(());
-                    };
-                    let Some(control_reply) = control.reply.as_ref().map(ToString::to_string) else {
-                        continue;
-                    };
-                    if let Err(error) = validate_download_transfer_message(&plan, &validator, &control).await {
-                        publish_error_reply(&client, control_reply, &error).await?;
-                        continue;
-                    }
-                    let frame = decode_upload_transfer_chunk(
-                        control.headers.as_ref(),
-                        control.payload.clone(),
-                    )?;
-                    if frame.cancel && matches!(
-                        serde_json::from_slice(&control.payload),
-                        Ok(UploadTransferControl::Cancel)
-                    ) {
-                        abort_store_task(&mut store_task).await;
-                        client
-                            .publish(
-                                control_reply,
-                                Bytes::from_static(b"{\"status\":\"cancelled\"}"),
-                            )
-                            .await
-                            .map_err(|error| ServerError::Nats(error.to_string()))?;
-                        return Ok(());
-                    }
-                    publish_error_reply(
-                        &client,
-                        control_reply,
-                        &ServerError::Nats("download transfer already has a pending pull".to_string()),
-                    )
-                    .await?;
-                }
-            }
-        } {
-            Ok(count) => count,
-            Err(error) => {
-                abort_store_task(&mut store_task).await;
-                publish_error_reply(&client, reply_to, &ServerError::Nats(error.to_string()))
-                    .await?;
-                return Ok(());
-            }
-        };
-        if count == 0 {
-            let store_info = match store_task
-                .take()
-                .ok_or_else(|| ServerError::Nats("download transfer task missing".to_string()))?
-                .await
-            {
-                Ok(Ok(Some(info))) => info,
-                Ok(Ok(None)) => {
-                    publish_error_reply(
-                        &client,
-                        reply_to,
-                        &ServerError::TransferObjectMissing {
-                            store: plan.store_alias.clone(),
-                            key: plan.grant.info.key.clone(),
-                        },
-                    )
-                    .await?;
-                    return Ok(());
-                }
-                Ok(Err(error)) => {
-                    publish_error_reply(&client, reply_to, &error).await?;
-                    return Ok(());
-                }
-                Err(error) => {
-                    publish_error_reply(&client, reply_to, &ServerError::Nats(error.to_string()))
-                        .await?;
-                    return Ok(());
-                }
-            };
-            if store_info.key != plan.grant.info.key {
-                publish_error_reply(
-                    &client,
-                    reply_to,
-                    &ServerError::Nats(format!(
-                        "download stored key mismatch: expected {}, got {}",
-                        plan.grant.info.key, store_info.key
-                    )),
-                )
-                .await?;
-                return Ok(());
-            }
-            if transferred != plan.grant.info.size || store_info.size != transferred {
-                publish_error_reply(
-                    &client,
-                    reply_to,
-                    &ServerError::TransferObjectSizeMismatch {
-                        store: plan.store_alias.clone(),
-                        key: plan.grant.info.key.clone(),
-                        expected_size: plan.grant.info.size,
-                        actual_size: transferred,
-                    },
-                )
-                .await?;
-                return Ok(());
-            }
-            let digest = format!("SHA-256={}", URL_SAFE_NO_PAD.encode(hasher.finalize()));
-            if !transfer_digests_match(&plan.grant.info.digest, &digest) {
-                publish_error_reply(
-                    &client,
-                    reply_to,
-                    &ServerError::TransferDigestMismatch {
-                        transfer_id: plan.grant.transfer_id.clone(),
-                        expected_digest: plan.grant.info.digest.clone(),
-                        actual_digest: digest,
-                    },
-                )
-                .await?;
-                return Ok(());
-            }
-            let Some(expected) = store_info.digest.as_ref() else {
-                publish_error_reply(
-                    &client,
-                    reply_to,
-                    &ServerError::TransferDigestMismatch {
-                        transfer_id: plan.grant.transfer_id.clone(),
-                        expected_digest: plan.grant.info.digest.clone(),
-                        actual_digest: "missing backend digest".to_string(),
-                    },
-                )
-                .await?;
-                return Ok(());
-            };
-            if !transfer_digests_match(expected, &digest) {
-                publish_error_reply(
-                    &client,
-                    reply_to,
-                    &ServerError::TransferDigestMismatch {
-                        transfer_id: plan.grant.transfer_id.clone(),
-                        expected_digest: expected.clone(),
-                        actual_digest: digest,
-                    },
-                )
-                .await?;
-                return Ok(());
-            }
-            publish_download_chunk(&client, &reply_to, seq, Bytes::new(), true).await?;
-            return Ok(());
-        }
-
-        let next = transferred
-            .checked_add(count as u64)
-            .ok_or_else(|| ServerError::Nats("download transfer size overflow".to_string()))?;
-        if next > plan.grant.info.size || plan.max_object_bytes.is_some_and(|max| next > max) {
-            abort_store_task(&mut store_task).await;
-            publish_error_reply(
-                &client,
-                reply_to,
-                &ServerError::TransferObjectTooLarge {
-                    service_name: plan.grant.service.clone(),
-                    store: plan.store_alias.clone(),
-                    key: plan.grant.info.key.clone(),
-                    size: next,
-                    max_bytes: plan.max_object_bytes.unwrap_or(plan.grant.info.size),
-                },
-            )
-            .await?;
-            return Ok(());
-        }
-        publish_download_chunk(
-            &client,
-            &reply_to,
-            seq,
-            Bytes::copy_from_slice(&buffer[..count]),
-            false,
-        )
-        .await?;
-        hasher.update(&buffer[..count]);
-        transferred = next;
-        seq = seq
-            .checked_add(1)
-            .ok_or_else(|| ServerError::Nats("download transfer sequence overflow".to_string()))?;
-    }
-}
-
 async fn abort_store_task<T>(task: &mut Option<JoinHandle<T>>) {
     if let Some(task) = task.take() {
         task.abort();
@@ -1636,7 +763,6 @@ fn optional_header<'a>(headers: Option<&'a HeaderMap>, header: &str) -> Option<&
 }
 
 /// Build upload transfer grant metadata from resolved service resource bindings.
-#[doc = concat!("Trellis API operation `", stringify!(plan_upload_transfer_grant), "`.")]
 pub fn plan_upload_transfer_grant(
     args: TransferUploadGrantArgs<'_>,
 ) -> Result<UploadTransferGrantPlan, ServerError> {
@@ -1653,7 +779,7 @@ pub fn plan_upload_transfer_grant(
             session_key: args.session_key.to_string(),
             transfer_id: args.transfer_id.to_string(),
             subject: transfer_subject(
-                UPLOAD_SUBJECT_PREFIX,
+                upload_subject_prefix(),
                 args.service_session_key,
                 args.transfer_id,
             ),
@@ -1670,7 +796,6 @@ pub fn plan_upload_transfer_grant(
 }
 
 /// Build download transfer grant metadata from resolved service resource bindings.
-#[doc = concat!("Trellis API operation `", stringify!(plan_download_transfer_grant), "`.")]
 pub fn plan_download_transfer_grant(
     args: TransferDownloadGrantArgs<'_>,
 ) -> Result<DownloadTransferGrantPlan, ServerError> {
@@ -1692,7 +817,7 @@ pub fn plan_download_transfer_grant(
             session_key: args.session_key.to_string(),
             transfer_id: args.transfer_id.to_string(),
             subject: transfer_subject(
-                DOWNLOAD_SUBJECT_PREFIX,
+                download_subject_prefix(),
                 args.service_session_key,
                 args.transfer_id,
             ),
@@ -1786,19 +911,6 @@ fn validate_chunk_bytes(chunk_bytes: u64) -> Result<(), ServerError> {
     Ok(())
 }
 
-fn deserialize_chunk_bytes<'de, D>(deserializer: D) -> Result<u64, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    let chunk_bytes = u64::deserialize(deserializer)?;
-    if !(1..=MAX_TRANSFER_CHUNK_BYTES).contains(&chunk_bytes) {
-        return Err(serde::de::Error::custom(format!(
-            "transfer chunk size must be between 1 and {MAX_TRANSFER_CHUNK_BYTES} bytes"
-        )));
-    }
-    Ok(chunk_bytes)
-}
-
 fn current_time_iso() -> Result<String, ServerError> {
     OffsetDateTime::now_utc()
         .format(&Rfc3339)
@@ -1867,12 +979,17 @@ fn transfer_digests_match(left: &str, right: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::{
-        atomic::{AtomicUsize, Ordering},
-        Arc, Mutex,
+    use std::{
+        collections::BTreeMap,
+        sync::{
+            atomic::{AtomicUsize, Ordering},
+            Arc, Mutex,
+        },
     };
 
+    use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
     use futures_util::future::BoxFuture;
+    use sha2::{Digest, Sha256};
     use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite};
 
     use crate::service::{RequestValidation, StoreObjectInfo};
@@ -1956,7 +1073,7 @@ mod tests {
                 service: "test-service".to_string(),
                 session_key: "session".to_string(),
                 transfer_id: "transfer-1".to_string(),
-                subject: "transfer.v2.upload.service.transfer-1".to_string(),
+                subject: "transfer.v1.upload.service.transfer-1".to_string(),
                 expires_at: "2099-01-01T00:00:00Z".to_string(),
                 chunk_bytes,
                 max_bytes: Some(32),
@@ -2052,9 +1169,9 @@ mod tests {
     }
 
     #[test]
-    fn authenticated_framing_matches_shared_transfer_v2_vectors() {
+    fn authenticated_framing_matches_shared_transfer_v1_vectors() {
         let vectors: serde_json::Value = serde_json::from_str(include_str!(
-            "../../../../../conformance/transfer-v2-vectors.json"
+            "../../../../../../conformance/transfer-v1-vectors.json"
         ))
         .unwrap();
         for vector in vectors["vectors"].as_array().unwrap() {
@@ -2169,7 +1286,7 @@ mod tests {
             allowed: true,
         };
         let context = RequestContext {
-            subject: "transfer.v2.upload.session.transfer-1".to_string(),
+            subject: "transfer.v1.upload.session.transfer-1".to_string(),
             session_key: Some("wrong-session".to_string()),
             proof: Some("proof".to_string()),
             authorization_context: None,
@@ -2184,7 +1301,7 @@ mod tests {
         };
 
         let error = validate_transfer_request(
-            "transfer.v2.upload.session.transfer-1",
+            "transfer.v1.upload.session.transfer-1",
             &Bytes::new(),
             &context,
             "expected-session",
@@ -2209,7 +1326,7 @@ mod tests {
             allowed: true,
         };
         let context = RequestContext {
-            subject: "transfer.v2.upload.session.transfer-1".to_string(),
+            subject: "transfer.v1.upload.session.transfer-1".to_string(),
             session_key: Some("wrong-session".to_string()),
             proof: None,
             authorization_context: None,
@@ -2224,7 +1341,7 @@ mod tests {
         };
 
         let error = validate_transfer_request(
-            "transfer.v2.upload.session.transfer-1",
+            "transfer.v1.upload.session.transfer-1",
             &Bytes::new(),
             &context,
             "expected-session",
@@ -2245,7 +1362,7 @@ mod tests {
             allowed: false,
         };
         let context = RequestContext {
-            subject: "transfer.v2.download.session.transfer-1".to_string(),
+            subject: "transfer.v1.download.session.transfer-1".to_string(),
             session_key: Some("expected-session".to_string()),
             proof: Some("proof".to_string()),
             authorization_context: None,
@@ -2260,7 +1377,7 @@ mod tests {
         };
 
         let error = validate_transfer_request(
-            "transfer.v2.download.session.transfer-1",
+            "transfer.v1.download.session.transfer-1",
             &Bytes::new(),
             &context,
             "expected-session",

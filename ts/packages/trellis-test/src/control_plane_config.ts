@@ -106,12 +106,21 @@ export function generateSessionSeed(): string {
 }
 
 const heldProcessLocks = new Set<string>();
-const reservedPortLocks = new Map<string, Deno.FsFile>();
 const HOST_SLOT_ACQUIRE_TIMEOUT_MS = 120_000;
 
 /** Lease for one host-wide live integration case slot. */
 export type TrellisTestHostSlot = {
   /** Releases the slot for another live integration case. */
+  release(): void;
+};
+
+/** Owned localhost port reservation for a child process. */
+export type ReservedPort = {
+  /** Reserved TCP port. */
+  readonly port: number;
+  /** Releases the socket immediately before spawning the child. */
+  releaseForSpawn(): void;
+  /** Releases the socket and cooperative process lock. */
   release(): void;
 };
 
@@ -177,17 +186,18 @@ export async function reserveHostTestSlot(): Promise<
   }
 }
 
-/** Reserves a localhost TCP port for the spawned Trellis HTTP listener. */
-export function reserveLocalPort(): number {
+/** Reserves a localhost TCP port until a child process is ready to bind it. */
+export function reserveLocalPort(port = 0): ReservedPort {
   while (true) {
-    const listener = Deno.listen({ hostname: "127.0.0.1", port: 0 });
-    const port = listener.addr.port;
+    const listener = Deno.listen({ hostname: "127.0.0.1", port });
+    const reservedPort = listener.addr.port;
     const lockRoot = Deno.env.get("TRELLIS_TEST_PORT_LOCK_DIR") ??
       (Deno.build.os === "windows" ? Deno.env.get("TEMP") : "/tmp");
     if (lockRoot === undefined) {
+      listener.close();
       throw new Error("no temporary directory is configured");
     }
-    const lockPath = `${lockRoot}/trellis-test-port-${port}.lock`;
+    const lockPath = `${lockRoot}/trellis-test-port-${reservedPort}.lock`;
     let lockFile: Deno.FsFile | undefined;
     try {
       lockFile = tryAcquireProcessLock(lockPath);
@@ -196,11 +206,31 @@ export function reserveLocalPort(): number {
       throw error;
     }
     if (lockFile !== undefined) {
-      reservedPortLocks.set(lockPath, lockFile);
-      listener.close();
-      return port;
+      let socketHeld = true;
+      let lockHeld = true;
+      return {
+        port: reservedPort,
+        releaseForSpawn() {
+          if (!socketHeld) return;
+          socketHeld = false;
+          listener.close();
+        },
+        release() {
+          if (socketHeld) {
+            socketHeld = false;
+            listener.close();
+          }
+          if (lockHeld) {
+            lockHeld = false;
+            releaseProcessLock(lockPath, lockFile);
+          }
+        },
+      };
     }
     listener.close();
+    if (port !== 0) {
+      throw new Error(`localhost TCP port ${port} is reserved by another test`);
+    }
   }
 }
 

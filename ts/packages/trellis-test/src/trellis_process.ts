@@ -1,4 +1,5 @@
 import { dirname, join } from "@std/path";
+import type { ReservedPort } from "./control_plane_config.ts";
 import type { TrellisTestRuntimeStartOptions } from "./types.ts";
 import { recordTrellisTestProcessStart } from "./integration/metrics.ts";
 
@@ -40,6 +41,7 @@ export type StartTrellisProcessArgs = {
   options: TrellisTestRuntimeStartOptions["trellis"] | undefined;
   startupTimeoutMs: number;
   shutdownTimeoutMs: number;
+  portLease?: ReservedPort;
 };
 
 /** @internal Bounded text buffer for child process output tails. */
@@ -401,20 +403,29 @@ export async function startTrellisProcess(
     truncate: true,
   });
 
-  const child = new Deno.Command(command.cmd, {
-    args: command.args.map((arg) =>
-      arg.replaceAll("{config}", args.configPath)
-    ),
-    cwd: command.cwd,
-    env: {
-      ...command.env,
-      TRELLIS_CONFIG: args.configPath,
-      NO_COLOR: "1",
-    },
-    stdin: "null",
-    stdout: "piped",
-    stderr: "piped",
-  }).spawn();
+  let child: Deno.ChildProcess;
+  try {
+    args.portLease?.releaseForSpawn();
+    child = new Deno.Command(command.cmd, {
+      args: command.args.map((arg) =>
+        arg.replaceAll("{config}", args.configPath)
+      ),
+      cwd: command.cwd,
+      env: {
+        ...command.env,
+        TRELLIS_CONFIG: args.configPath,
+        NO_COLOR: "1",
+      },
+      stdin: "null",
+      stdout: "piped",
+      stderr: "piped",
+    }).spawn();
+  } catch (error) {
+    args.portLease?.release();
+    stdoutLog.close();
+    stderrLog.close();
+    throw error;
+  }
   await recordTrellisTestProcessStart("trellis", String(child.pid));
   const status = child.status;
 
@@ -464,8 +475,10 @@ export async function startTrellisProcess(
       stderrTail,
       readers: [stdoutReader, stderrReader],
     });
+    args.portLease?.release();
     return handle;
   } catch (error) {
+    args.portLease?.release();
     try {
       await handle.stop();
     } catch (cleanupError) {

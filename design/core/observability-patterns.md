@@ -18,6 +18,12 @@ order: 60
 This document defines Trellis observability, documentation, tracing, and
 request-correlation patterns.
 
+Public API documentation explains behavior that signatures cannot: ownership,
+validation and commit points, cancellation and drop semantics, backpressure, and
+failure cleanup. Do not add lint-satisfying prose that only repeats an item or
+field name. An obvious field may use a short semantic phrase; a public operation
+must document the guarantees callers need to use it safely.
+
 ## Service Observability
 
 Every service exposes:
