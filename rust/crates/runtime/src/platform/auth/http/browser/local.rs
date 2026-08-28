@@ -170,11 +170,14 @@ where
                     .collect()
             }),
         expires_at: Some(flow.expires_at),
-        password_policy: (flow.kind == super::super::super::AccountFlowKind::PasswordReset).then(
-            || AccountFlowPasswordPolicy {
-                min_length: state.service.password_min_length(),
-            },
-        ),
+        password_policy: matches!(
+            flow.kind,
+            super::super::super::AccountFlowKind::FirstAdmin
+                | super::super::super::AccountFlowKind::PasswordReset
+        )
+        .then(|| AccountFlowPasswordPolicy {
+            min_length: state.service.password_min_length(),
+        }),
     }))
 }
 

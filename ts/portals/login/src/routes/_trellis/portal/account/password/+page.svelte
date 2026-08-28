@@ -34,15 +34,16 @@
   let defaultsApplied = false;
 
   const active = $derived(flowState?.status === "active" ? flowState : null);
+  const isFirstAdminFlow = $derived(active?.kind === "first_admin");
   const isResetFlow = $derived(active?.kind === "password_reset");
-  const supportsLocal = $derived(Boolean(active && (isResetFlow || hasLocalProvider(active))));
+  const supportsLocal = $derived(Boolean(active && (isFirstAdminFlow || isResetFlow || hasLocalProvider(active))));
   const title = $derived(active ? passwordFlowTitle(active.kind) : "Set your password");
   const action = $derived(active ? passwordFlowAction(active.kind) : "Save password");
   const fixedUsername = $derived(active && !isResetFlow ? defaultProfileValue(active, "username").trim() : "");
   const passwordMinLength = $derived(active ? passwordMinimumLength(active) : null);
   const passwordCurrentError = $derived(active ? passwordPolicyError(active, password) : null);
   const passwordHelp = $derived(active ? passwordCurrentError ?? passwordPolicyHint(active) : "");
-  const canSubmit = $derived(Boolean(active && flowId && supportsLocal && (isResetFlow || fixedUsername) && password && !passwordCurrentError && !submitting && !completion));
+  const canSubmit = $derived(Boolean(active && flowId && supportsLocal && (isResetFlow || (isFirstAdminFlow ? username.trim() : fixedUsername)) && password && !passwordCurrentError && !submitting && !completion));
 
   function currentFlowId(): string | null {
     if (!browser) return null;
@@ -89,7 +90,7 @@
       completion = await completeAccountFlowLocalPassword(
         trellisUrl,
         flowId,
-        { username: isResetFlow ? "" : fixedUsername, password, name, email },
+        { username: isResetFlow ? "" : isFirstAdminFlow ? username.trim() : fixedUsername, password, name, email },
       );
       password = "";
     } catch (caught) {
@@ -137,7 +138,9 @@
         {#if !isExpectedPasswordFlow(active)}<div class="alert alert-warning text-sm" role="alert"><span>This link is for {flowKindLabel(active.kind)}, not password setup or reset. Continue only if this is expected.</span></div>{/if}
         {#if supportsLocal}
           <form class="grid gap-4" onsubmit={(event) => { event.preventDefault(); void submitLocal(); }}>
-            {#if !isResetFlow && fixedUsername}
+            {#if isFirstAdminFlow}
+              <label class="form-control gap-1.5"><span class="label-text text-sm font-medium text-base-content">Username</span><input class="input input-bordered w-full" autocomplete="username" disabled={submitting} required bind:value={username} /></label>
+            {:else if !isResetFlow && fixedUsername}
               <label class="form-control gap-1.5"><span class="label-text text-sm font-medium text-base-content">Username</span><input class="input input-bordered w-full" autocomplete="username" disabled readonly value={fixedUsername} /></label>
             {/if}
             <label class="form-control gap-1.5"><span class="label-text text-sm font-medium text-base-content">Password</span><input class="input input-bordered w-full" aria-describedby="password-help" autocomplete="new-password" disabled={submitting} minlength={passwordMinLength ?? undefined} required type="password" bind:value={password} /><span id="password-help" class={passwordCurrentError ? "text-xs text-error" : "text-xs text-base-content/55"}>{passwordHelp}</span></label>

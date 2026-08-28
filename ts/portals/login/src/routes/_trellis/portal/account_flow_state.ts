@@ -19,9 +19,9 @@ export type AccountFlowTarget = {
 
 /** Supported account-flow kinds surfaced to the built-in portal pages. */
 export type AccountFlowKind =
-  | "admin_bootstrap"
+  | "first_admin"
   | "identity_link"
-  | "local_password_reset";
+  | "password_reset";
 
 /** Active account-flow state returned by the backend. */
 export type ActiveAccountFlowState = {
@@ -275,9 +275,9 @@ export function flowKindLabel(kind: string): string {
   switch (kind) {
     case "identity_link":
       return "account link";
-    case "local_password_reset":
+    case "password_reset":
       return "password reset";
-    case "admin_bootstrap":
+    case "first_admin":
       return "admin bootstrap";
     default:
       return kind.replaceAll("_", " ");
