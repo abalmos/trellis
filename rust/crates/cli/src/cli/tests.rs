@@ -164,9 +164,24 @@ fn parses_login_logout_and_whoami_top_level_commands() {
     match cli.command {
         TopLevelCommand::Login(args) => {
             assert_eq!(args.trellis_url, "https://trellis.example.com");
+            assert!(!args.reset_trust);
         }
         other => panic!("unexpected top-level command: {other:?}"),
     }
+
+    let cli = Cli::parse_from([
+        "trellis",
+        "login",
+        "https://trellis.example.com",
+        "--reset-trust",
+    ]);
+    assert!(matches!(
+        cli.command,
+        TopLevelCommand::Login(LoginArgs {
+            reset_trust: true,
+            ..
+        })
+    ));
 
     let cli = Cli::parse_from(["trellis", "logout"]);
     assert!(matches!(cli.command, TopLevelCommand::Logout));

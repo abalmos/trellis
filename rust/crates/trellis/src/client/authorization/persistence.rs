@@ -117,6 +117,19 @@ impl FileAuthorizationContextStore {
         }
         result
     }
+
+    pub(crate) fn replace_trust(
+        &self,
+        state: AuthorizationClientState,
+    ) -> Result<AuthorizationClientState, TrellisClientError> {
+        let _update = self
+            .update
+            .lock()
+            .map_err(|_| TrellisClientError::Bootstrap("context store lock poisoned".into()))?;
+        validate_client_state_transition(None, &state)?;
+        self.write_file(&state)?;
+        Ok(state)
+    }
 }
 
 impl AuthorizationContextStore for FileAuthorizationContextStore {
@@ -283,6 +296,15 @@ mod tests {
         let mut rebound = test_state(9, "manifest-9");
         rebound.binding = "device:other".into();
         assert!(reopened.commit(rebound).is_err());
+        let mut accepted_replacement = test_state(1, "replacement-manifest");
+        accepted_replacement.binding = "installation:replacement".into();
+        accepted_replacement.trust.root_digest = "replacement-root".into();
+        reopened
+            .replace_trust(accepted_replacement)
+            .expect("replace explicitly accepted trust");
+        let replaced = reopened.load().expect("load replacement").expect("state");
+        assert_eq!(replaced.binding, "installation:replacement");
+        assert_eq!(replaced.trust.root_digest, "replacement-root");
         reopened.reset_trust().expect("remove test store");
     }
 }

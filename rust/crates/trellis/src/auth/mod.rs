@@ -12,7 +12,8 @@ mod session_store;
 pub use crate::sdk::auth::AuthClient;
 pub use crate::service::payload_hash_base64url;
 pub use browser_login::{
-    administration_participant_digest, administration_participant_grants, contract_digest,
+    administration_participant_digest, administration_participant_grants,
+    authenticate_admin_session, authenticate_admin_session_replacing_trust, contract_digest,
     generate_session_keypair, start_admin_reauth, start_agent_login,
 };
 pub use client::{connect_admin_client_async, session_public_key};
@@ -31,4 +32,6 @@ pub use models::{
     DeviceIdentity, StartAgentLoginOpts,
 };
 pub use protocol::AuthenticatedUser;
-pub use session_store::{clear_admin_session, load_admin_session, save_admin_session};
+pub use session_store::{
+    clear_admin_session, load_admin_authorization_state, load_admin_session, save_admin_session,
+};

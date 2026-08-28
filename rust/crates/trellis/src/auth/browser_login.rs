@@ -17,6 +17,7 @@ use super::models::{
     AdminLoginOutcome, AdminReauthOutcome, AdminSessionState, AgentLoginChallenge,
     BindResponseBound, BoundSession, StartAgentLoginOpts,
 };
+use super::session_store::replacing_admin_authorization_context_store;
 use super::TrellisAuthError;
 #[cfg(feature = "test-support")]
 use crate::client::MemoryAuthorizationContextStore;
@@ -278,7 +279,7 @@ impl AgentLoginChallenge {
     /// Wait for detached portal completion, then bind the session.
     #[doc = concat!("Asynchronous Trellis API operation `", stringify!(complete), "`.")]
     pub async fn complete(self, trellis_url: &str) -> Result<AdminLoginOutcome, TrellisAuthError> {
-        self.complete_with_client(trellis_url, None).await
+        authenticate_admin_session(self.wait_for_session(trellis_url).await?).await
     }
 
     /// Complete login with process-local context storage for integration tests.
@@ -288,20 +289,22 @@ impl AgentLoginChallenge {
         self,
         trellis_url: &str,
     ) -> Result<AdminLoginOutcome, TrellisAuthError> {
-        self.complete_with_client(
-            trellis_url,
+        authenticate_admin_session_with_store(
+            self.wait_for_session(trellis_url).await?,
             Some(std::sync::Arc::new(
                 MemoryAuthorizationContextStore::default(),
             )),
+            None,
         )
         .await
     }
 
-    async fn complete_with_client(
+    /// Wait for browser approval and bind the resulting session without committing trust.
+    #[doc(hidden)]
+    pub async fn wait_for_session(
         self,
         trellis_url: &str,
-        store: Option<std::sync::Arc<dyn crate::client::AuthorizationContextStore>>,
-    ) -> Result<AdminLoginOutcome, TrellisAuthError> {
+    ) -> Result<AdminSessionState, TrellisAuthError> {
         let AgentLoginChallenge {
             flow_id,
             login_url: _,
@@ -317,7 +320,7 @@ impl AgentLoginChallenge {
         )
         .await?;
         let bound = bind_session(trellis_url, &flow_id).await?;
-        let state = AdminSessionState {
+        Ok(AdminSessionState {
             trellis_url: trellis_url.to_string(),
             servers: bound.servers.clone(),
             session_seed,
@@ -328,77 +331,108 @@ impl AgentLoginChallenge {
             bootstrap_jwt: bound.bootstrap_jwt,
             authorization_context: bound.authorization_context,
             expires_at: bound.expires_at,
-        };
+        })
+    }
+}
 
-        let client = if let Some(store) = store {
-            connect_admin_client_with_context_store_async(
-                &state,
-                format!("test-admin:{}", state.trellis_url),
-                store,
-            )
-            .await?
+/// Verify and connect a bound admin session using the supplied durable trust state.
+#[doc(hidden)]
+pub async fn authenticate_admin_session(
+    state: AdminSessionState,
+) -> Result<AdminLoginOutcome, TrellisAuthError> {
+    authenticate_admin_session_with_store(state, None, None).await
+}
+
+/// Verify a bound admin session and atomically replace explicitly accepted durable trust.
+#[doc(hidden)]
+pub async fn authenticate_admin_session_replacing_trust(
+    state: AdminSessionState,
+) -> Result<AdminLoginOutcome, TrellisAuthError> {
+    authenticate_admin_session_with_store(
+        state,
+        Some(replacing_admin_authorization_context_store()),
+        Some("installation"),
+    )
+    .await
+}
+
+async fn authenticate_admin_session_with_store(
+    state: AdminSessionState,
+    store: Option<std::sync::Arc<dyn crate::client::AuthorizationContextStore>>,
+    binding_kind: Option<&str>,
+) -> Result<AdminLoginOutcome, TrellisAuthError> {
+    let client = if let Some(store) = store {
+        connect_admin_client_with_context_store_async(
+            &state,
+            format!(
+                "{}:{}",
+                binding_kind.unwrap_or("test-admin"),
+                state.trellis_url
+            ),
+            store,
+        )
+        .await?
+    } else {
+        connect_admin_client_async(&state).await?
+    };
+    let auth_client = AuthClient::new(&client);
+    let response = auth_client
+        .rpc()
+        .auth()
+        .sessions_me()
+        .await
+        .map_err(|error| TrellisAuthError::OperationFailed(error.to_string()))?;
+    let user = response.user.ok_or_else(|| {
+        TrellisAuthError::NotUserSession(response.session.participant_kind.as_str().to_owned())
+    })?;
+    if !user
+        .get("capabilities")
+        .and_then(serde_json::Value::as_array)
+        .is_some_and(|capabilities| capabilities.iter().any(|value| value == "admin"))
+    {
+        return Err(TrellisAuthError::NotAdmin);
+    }
+    let user = super::AuthenticatedUser {
+        user_id: user
+            .get("userId")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default()
+            .to_owned(),
+        principal_id: user
+            .get("identity")
+            .and_then(|identity| identity.get("identityId"))
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default()
+            .to_owned(),
+        state: if user.get("active").and_then(serde_json::Value::as_bool) == Some(true) {
+            "active"
         } else {
-            connect_admin_client_async(&state).await?
-        };
-        let auth_client = AuthClient::new(&client);
-        let response = auth_client
-            .rpc()
-            .auth()
-            .sessions_me()
-            .await
-            .map_err(|error| TrellisAuthError::OperationFailed(error.to_string()))?;
-        let user = response.user.ok_or_else(|| {
-            TrellisAuthError::NotUserSession(response.session.participant_kind.as_str().to_owned())
-        })?;
-        if !user
+            "disabled"
+        }
+        .to_owned(),
+        capabilities: user
             .get("capabilities")
             .and_then(serde_json::Value::as_array)
-            .is_some_and(|capabilities| capabilities.iter().any(|value| value == "admin"))
-        {
-            return Err(TrellisAuthError::NotAdmin);
-        }
-        let user = super::AuthenticatedUser {
-            user_id: user
-                .get("userId")
-                .and_then(serde_json::Value::as_str)
-                .unwrap_or_default()
-                .to_owned(),
-            principal_id: user
-                .get("identity")
-                .and_then(|identity| identity.get("identityId"))
-                .and_then(serde_json::Value::as_str)
-                .unwrap_or_default()
-                .to_owned(),
-            state: if user.get("active").and_then(serde_json::Value::as_bool) == Some(true) {
-                "active"
-            } else {
-                "disabled"
-            }
-            .to_owned(),
-            capabilities: user
-                .get("capabilities")
-                .and_then(serde_json::Value::as_array)
-                .into_iter()
-                .flatten()
-                .filter_map(serde_json::Value::as_str)
-                .map(str::to_owned)
-                .collect(),
-            email: user
-                .get("email")
-                .and_then(serde_json::Value::as_str)
-                .map(str::to_owned),
-            image: user
-                .get("image")
-                .and_then(serde_json::Value::as_str)
-                .map(str::to_owned),
-            name: user
-                .get("name")
-                .and_then(serde_json::Value::as_str)
-                .map(str::to_owned),
-        };
+            .into_iter()
+            .flatten()
+            .filter_map(serde_json::Value::as_str)
+            .map(str::to_owned)
+            .collect(),
+        email: user
+            .get("email")
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_owned),
+        image: user
+            .get("image")
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_owned),
+        name: user
+            .get("name")
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_owned),
+    };
 
-        Ok(AdminLoginOutcome { state, user })
-    }
+    Ok(AdminLoginOutcome { state, user })
 }
 
 /// Start the agent login flow against the detached Trellis portal.

@@ -1,9 +1,13 @@
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
 
 use super::{AdminSessionState, TrellisAuthError};
-use crate::client::{AuthorizationContextStore as _, FileAuthorizationContextStore};
+use crate::client::{
+    AuthorizationClientState, AuthorizationContextStore, FileAuthorizationContextStore,
+    TrellisClientError,
+};
 
 fn cli_config_dir() -> PathBuf {
     if let Ok(dir) = env::var("XDG_CONFIG_HOME") {
@@ -21,6 +25,62 @@ fn admin_session_state_path() -> PathBuf {
 
 pub(crate) fn admin_authorization_context_state_path() -> PathBuf {
     cli_config_dir().join("authorization-context.json")
+}
+
+/// Load the CLI installation's durable authorization trust and context state.
+#[doc(hidden)]
+pub fn load_admin_authorization_state() -> Result<Option<AuthorizationClientState>, TrellisAuthError>
+{
+    Ok(FileAuthorizationContextStore::new(admin_authorization_context_state_path()).load()?)
+}
+
+pub(crate) fn replacing_admin_authorization_context_store() -> Arc<dyn AuthorizationContextStore> {
+    Arc::new(ReplacingAdminAuthorizationContextStore(
+        FileAuthorizationContextStore::new(admin_authorization_context_state_path()),
+        Mutex::new(true),
+    ))
+}
+
+#[derive(Debug)]
+struct ReplacingAdminAuthorizationContextStore(FileAuthorizationContextStore, Mutex<bool>);
+
+impl AuthorizationContextStore for ReplacingAdminAuthorizationContextStore {
+    fn load(&self) -> Result<Option<AuthorizationClientState>, TrellisClientError> {
+        if *self
+            .1
+            .lock()
+            .map_err(|_| TrellisClientError::Bootstrap("context store lock poisoned".into()))?
+        {
+            Ok(None)
+        } else {
+            self.0.load()
+        }
+    }
+
+    fn commit(
+        &self,
+        state: AuthorizationClientState,
+    ) -> Result<AuthorizationClientState, TrellisClientError> {
+        let mut replace = self
+            .1
+            .lock()
+            .map_err(|_| TrellisClientError::Bootstrap("context store lock poisoned".into()))?;
+        let committed = if *replace {
+            self.0.replace_trust(state)
+        } else {
+            self.0.commit(state)
+        }?;
+        *replace = false;
+        Ok(committed)
+    }
+
+    fn clear_context(&self) -> Result<(), TrellisClientError> {
+        self.0.clear_context()
+    }
+
+    fn reset_trust(&self) -> Result<(), TrellisClientError> {
+        self.0.reset_trust()
+    }
 }
 
 fn write_private_file(path: &Path, contents: &str) -> Result<(), TrellisAuthError> {

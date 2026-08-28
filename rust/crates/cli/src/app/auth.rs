@@ -5,6 +5,7 @@ use miette::IntoDiagnostic;
 use qrcode::{render::unicode, QrCode};
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
+use std::io::{self, Write as _};
 use trellis_rs::auth as authlib;
 use trellis_rs::sdk::auth::types as auth_types;
 
@@ -453,12 +454,28 @@ async fn login_command(format: OutputFormat, args: &LoginArgs) -> miette::Result
         output::print_info(&render_agent_login_instructions(&login_url)?);
     }
 
-    let outcome = challenge
-        .complete(&args.trellis_url)
+    let state = challenge
+        .wait_for_session(&args.trellis_url)
         .await
         .into_diagnostic()?;
+    let replace_trust = approve_login_trust(format, args.reset_trust, &state)?;
+    let outcome = if replace_trust {
+        authlib::authenticate_admin_session_replacing_trust(state).await
+    } else {
+        authlib::authenticate_admin_session(state).await
+    }
+    .into_diagnostic()?;
     let state = outcome.state;
     let me = outcome.user;
+    let accepted_trust = if replace_trust {
+        let root = trellis_protocol::AuthorizationTrustRoot::parse(
+            &state.authorization_context.trust.root,
+        )
+        .into_diagnostic()?;
+        Some((root.key_id().to_string(), root.digest().into_diagnostic()?))
+    } else {
+        None
+    };
 
     authlib::save_admin_session(&state).into_diagnostic()?;
 
@@ -466,6 +483,10 @@ async fn login_command(format: OutputFormat, args: &LoginArgs) -> miette::Result
         let mut response = authenticated_user_json(&me);
         response["sessionKey"] = Value::String(state.session_key);
         response["expiresAt"] = state.expires_at.map(Value::from).unwrap_or(Value::Null);
+        if let Some((key_id, fingerprint)) = accepted_trust {
+            response["trustKeyId"] = Value::String(key_id);
+            response["trustFingerprint"] = Value::String(fingerprint);
+        }
         output::print_json(&response)?;
     } else {
         output::print_success("logged in delegated agent session");
@@ -474,9 +495,107 @@ async fn login_command(format: OutputFormat, args: &LoginArgs) -> miette::Result
         output::print_info(&format!("name={}", me.name.as_deref().unwrap_or("")));
         output::print_info(&format!("sessionKey={}", state.session_key));
         output::print_info(&format!("expiresAt={:?}", state.expires_at));
+        if let Some((key_id, fingerprint)) = accepted_trust {
+            output::print_info(&format!("trustedRoot={key_id} {fingerprint}"));
+        }
     }
 
     Ok(())
+}
+
+fn approve_login_trust(
+    format: OutputFormat,
+    reset_trust: bool,
+    state: &authlib::AdminSessionState,
+) -> miette::Result<bool> {
+    let root =
+        trellis_protocol::AuthorizationTrustRoot::parse(&state.authorization_context.trust.root)
+            .into_diagnostic()?;
+    let root_digest = root.digest().into_diagnostic()?;
+    let stored = match authlib::load_admin_authorization_state() {
+        Ok(Some(stored)) => StoredTrust::Valid {
+            binding: stored.binding,
+            authority: stored.trust.authority,
+            root_key_id: stored.trust.root_key_id,
+            root_digest: stored.trust.root_digest,
+        },
+        Ok(None) => StoredTrust::Missing,
+        Err(error) => StoredTrust::Unreadable(error.to_string()),
+    };
+    let binding = format!("installation:{}", state.trellis_url);
+    let prompt = match login_trust_prompt(
+        stored,
+        &binding,
+        root.authority(),
+        root.key_id(),
+        &root_digest,
+    ) {
+        None => return Ok(false),
+        Some(prompt) => prompt,
+    };
+
+    if !reset_trust {
+        if output::is_json(format) {
+            return Err(miette::miette!(
+                "{prompt}\nauthorization trust requires confirmation; rerun with --reset-trust"
+            ));
+        }
+        println!("{prompt}");
+        print!("Continue? [y/N] ");
+        io::stdout().flush().into_diagnostic()?;
+        let mut answer = String::new();
+        io::stdin().read_line(&mut answer).into_diagnostic()?;
+        if !matches!(answer.trim().to_ascii_lowercase().as_str(), "y" | "yes") {
+            return Err(miette::miette!("authorization trust was not accepted"));
+        }
+    }
+
+    Ok(true)
+}
+
+enum StoredTrust {
+    Missing,
+    Valid {
+        binding: String,
+        authority: String,
+        root_key_id: String,
+        root_digest: String,
+    },
+    Unreadable(String),
+}
+
+fn login_trust_prompt(
+    stored: StoredTrust,
+    binding: &str,
+    authority: &str,
+    root_key_id: &str,
+    root_digest: &str,
+) -> Option<String> {
+    match stored {
+        StoredTrust::Valid {
+            binding: stored_binding,
+            authority: stored_authority,
+            root_key_id: stored_key,
+            root_digest: stored_digest,
+        } if stored_binding == binding
+            && stored_authority == authority
+            && stored_key == root_key_id
+            && stored_digest == root_digest => None,
+        StoredTrust::Valid {
+            binding: old_binding,
+            authority: old_authority,
+            root_key_id: old_key,
+            root_digest: old_digest,
+        } => Some(format!(
+            "WARNING: authorization trust changed.\nOld deployment: {old_binding}\nOld authority: {old_authority}\nOld key: {old_key}\nOld fingerprint: {old_digest}\nNew deployment: {binding}\nNew authority: {authority}\nNew key: {root_key_id}\nNew fingerprint: {root_digest}\nReplace the stored trust root?"
+        )),
+        StoredTrust::Missing => Some(format!(
+            "Trust this Trellis deployment?\nAuthority: {authority}\nKey: {root_key_id}\nFingerprint: {root_digest}"
+        )),
+        StoredTrust::Unreadable(error) => Some(format!(
+            "WARNING: stored authorization trust cannot be read ({error}).\nNew authority: {authority}\nNew key: {root_key_id}\nNew fingerprint: {root_digest}\nDiscard the unreadable state and trust this root?"
+        )),
+    }
 }
 
 async fn logout_command(format: OutputFormat) -> miette::Result<()> {
@@ -716,10 +835,60 @@ async fn identity_grants_revoke_command(
 #[cfg(test)]
 mod tests {
     use super::{
-        authenticated_user_json, pending_agent_login_json, render_agent_login_instructions,
+        authenticated_user_json, login_trust_prompt, pending_agent_login_json,
+        render_agent_login_instructions, StoredTrust,
     };
     use serde_json::json;
     use trellis_rs::auth::AuthenticatedUser;
+
+    #[test]
+    fn login_trust_prompts_only_for_first_changed_or_unreadable_roots() {
+        assert!(login_trust_prompt(
+            StoredTrust::Valid {
+                binding: "installation:https://trellis.example.com".into(),
+                authority: "authority".into(),
+                root_key_id: "key".into(),
+                root_digest: "digest".into(),
+            },
+            "installation:https://trellis.example.com",
+            "authority",
+            "key",
+            "digest",
+        )
+        .is_none());
+        assert!(login_trust_prompt(
+            StoredTrust::Missing,
+            "installation:https://trellis.example.com",
+            "authority",
+            "key",
+            "digest",
+        )
+        .expect("first trust prompt")
+        .contains("Fingerprint: digest"));
+        assert!(login_trust_prompt(
+            StoredTrust::Valid {
+                binding: "installation:https://trellis.example.com".into(),
+                authority: "authority".into(),
+                root_key_id: "old-key".into(),
+                root_digest: "old-digest".into(),
+            },
+            "installation:https://trellis.example.com",
+            "authority",
+            "new-key",
+            "new-digest",
+        )
+        .expect("changed trust prompt")
+        .contains("Old fingerprint: old-digest"));
+        assert!(login_trust_prompt(
+            StoredTrust::Unreadable("invalid json".into()),
+            "installation:https://trellis.example.com",
+            "authority",
+            "key",
+            "digest",
+        )
+        .expect("unreadable trust prompt")
+        .contains("invalid json"));
+    }
 
     #[test]
     fn agent_login_instructions_include_plain_url_and_terminal_qr() {

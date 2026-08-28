@@ -6,6 +6,10 @@ pub struct LoginArgs {
     #[arg(value_name = "TRELLIS_URL")]
     /// Base URL for the Trellis deployment.
     pub trellis_url: String,
+
+    #[arg(long)]
+    /// Explicitly replace locally pinned authorization trust when it differs or is unreadable.
+    pub reset_trust: bool,
 }
 
 #[derive(Debug, Args)]
