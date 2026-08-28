@@ -662,7 +662,7 @@ where
             .replace_browser_flow(expected, approved.clone())
             .await?;
         return Ok(Redirect::temporary(&format!(
-            "{}/_trellis/portal/auth?flowId={}",
+            "{}/_trellis/portal/users/login?flowId={}",
             state.public_origin.trim_end_matches('/'),
             approved.flow_id,
         ))
@@ -676,7 +676,7 @@ where
         .replace_browser_flow(expected, flow.clone())
         .await?;
     Ok(Redirect::temporary(&format!(
-        "{}/_trellis/portal/auth?flowId={}",
+        "{}/_trellis/portal/users/login?flowId={}",
         state.public_origin.trim_end_matches('/'),
         flow.flow_id
     ))

@@ -279,7 +279,7 @@ fn portal_url(
     let entry = portal.entry_url.as_deref().map_or_else(
         || {
             format!(
-                "{}/_trellis/portal/auth",
+                "{}/_trellis/portal/users/login",
                 public_origin.trim_end_matches('/')
             )
         },
