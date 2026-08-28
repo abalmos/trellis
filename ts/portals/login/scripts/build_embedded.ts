@@ -15,6 +15,24 @@ const build = new Deno.Command(Deno.execPath(), {
 const status = await build.spawn().status;
 if (!status.success) Deno.exit(status.code);
 
+const fallbackPath = join(portalDir, "build/200.html");
+let fallback = await Deno.readTextFile(fallbackPath);
+const inlineScripts = [...fallback.matchAll(/<script>([\s\S]*?)<\/script>/g)];
+if (inlineScripts.length !== 1) {
+  throw new Error(
+    `expected one inline bootstrap script, found ${inlineScripts.length}`,
+  );
+}
+await Deno.writeTextFile(
+  join(portalDir, "build/_trellis/assets/bootstrap.js"),
+  inlineScripts[0][1],
+);
+fallback = fallback.replace(
+  inlineScripts[0][0],
+  '<script src="/_trellis/assets/bootstrap.js"></script>',
+);
+await Deno.writeTextFile(fallbackPath, fallback);
+
 await Deno.remove(destination, { recursive: true }).catch((error) => {
   if (!(error instanceof Deno.errors.NotFound)) throw error;
 });

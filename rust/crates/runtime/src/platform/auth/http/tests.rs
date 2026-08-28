@@ -287,12 +287,16 @@ fn oauth_portal_policy_digest_tracks_policy_not_wording() {
 
 #[test]
 fn embedded_portal_contains_fallback_and_assets() {
+    let fallback = EMBEDDED_PORTAL_ASSETS
+        .iter()
+        .find_map(|(path, bytes)| (*path == "200.html").then_some(*bytes))
+        .expect("embedded portal fallback");
+    let fallback = str::from_utf8(fallback).expect("embedded portal fallback is UTF-8");
+    assert!(!fallback.contains("<script>"));
+    assert!(fallback.contains("<script src=\"/_trellis/assets/bootstrap.js\"></script>"));
     assert!(EMBEDDED_PORTAL_ASSETS
         .iter()
-        .any(|(path, bytes)| *path == "200.html" && !bytes.is_empty()));
-    assert!(EMBEDDED_PORTAL_ASSETS
-        .iter()
-        .any(|(path, bytes)| path.starts_with("_trellis/assets/") && !bytes.is_empty()));
+        .any(|(path, bytes)| *path == "_trellis/assets/bootstrap.js" && !bytes.is_empty()));
 }
 
 #[test]
