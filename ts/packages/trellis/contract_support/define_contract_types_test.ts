@@ -34,6 +34,7 @@ const BuilderFailed = defineError({
 type Assert<T extends true> = T;
 type Not<T extends boolean> = T extends true ? false : true;
 type Extends<T, U> = T extends U ? true : false;
+type Equal<T, U> = Extends<T, U> extends true ? Extends<U, T> : false;
 type HasKey<T, K extends PropertyKey> = K extends keyof T ? true : false;
 type HasMember<T, U> = U extends T ? true : false;
 type HasSubject<T, TKey extends PropertyKey> = TKey extends keyof T ? true
@@ -57,6 +58,68 @@ function schemaRef<
 ) {
   return { schema } as const;
 }
+
+const distinctIdentity = defineServiceContract(
+  { schemas: { Empty: EmptySchema } },
+  (ref) => ({
+    id: "acme.orders-service@v1",
+    apiId: "acme.orders@v1",
+    displayName: "Orders Service",
+    description: "Prove participant and API identity remain distinct in types.",
+    capabilities: {
+      execute: { displayName: "Execute", description: "Execute an order." },
+    },
+    rpc: {
+      "Orders.Get": {
+        version: "v1",
+        input: ref.schema("Empty"),
+        output: ref.schema("Empty"),
+      },
+    },
+    operations: {
+      "Orders.Process": {
+        version: "v1",
+        input: ref.schema("Empty"),
+        output: ref.schema("Empty"),
+        capabilities: { call: ["execute"] },
+      },
+    },
+    events: {
+      "Orders.Processed": { version: "v1", event: ref.schema("Empty") },
+    },
+    feeds: {
+      "Orders.Live": {
+        version: "v1",
+        input: ref.schema("Empty"),
+        event: ref.schema("Empty"),
+      },
+    },
+  }),
+);
+const distinctIdentityRuntime = getContractRuntime(distinctIdentity);
+type _DistinctRpcUsesApiId = Assert<
+  Equal<typeof distinctIdentity.OrdersGet.contractId, "acme.orders@v1">
+>;
+type _DistinctOperationUsesApiId = Assert<
+  Equal<typeof distinctIdentity.OrdersProcess.contractId, "acme.orders@v1">
+>;
+type _DistinctEventUsesApiId = Assert<
+  Equal<
+    typeof distinctIdentity.OrdersProcessed.publish.contractId,
+    "acme.orders@v1"
+  >
+>;
+type _DistinctFeedUsesApiId = Assert<
+  Equal<typeof distinctIdentity.OrdersLive.contractId, "acme.orders@v1">
+>;
+type _DistinctCapabilityUsesApiNamespace = Assert<
+  Equal<
+    typeof distinctIdentityRuntime.ownedApi.operations["Orders.Process"][
+      "callerCapabilities"
+    ],
+    readonly ["acme.orders::execute"]
+  >
+>;
 
 const auth = defineServiceContract(
   {
@@ -536,6 +599,52 @@ const deviceContract = defineDeviceContract(() => ({
 getContractRuntime(deviceContract).usedApi.rpc["Auth.Sessions.Logout"].subject;
 
 if (false) {
+  // @ts-expect-error service contracts require an owned API identity
+  defineServiceContract({}, () => ({
+    id: "trellis.missing-service-api@v1",
+    displayName: "Missing Service API",
+    description: "Should fail type checking.",
+  }));
+
+  // @ts-expect-error registry-free app contracts require an owned API identity
+  defineAppContract(() => ({
+    id: "trellis.missing-app-api@v1",
+    displayName: "Missing App API",
+    description: "Should fail type checking.",
+  }));
+  // @ts-expect-error registry app contracts require an owned API identity
+  defineAppContract({}, () => ({
+    id: "trellis.missing-registry-app-api@v1",
+    displayName: "Missing Registry App API",
+    description: "Should fail type checking.",
+  }));
+
+  // @ts-expect-error registry-free agent contracts require an owned API identity
+  defineAgentContract(() => ({
+    id: "trellis.missing-agent-api@v1",
+    displayName: "Missing Agent API",
+    description: "Should fail type checking.",
+  }));
+  // @ts-expect-error registry agent contracts require an owned API identity
+  defineAgentContract({}, () => ({
+    id: "trellis.missing-registry-agent-api@v1",
+    displayName: "Missing Registry Agent API",
+    description: "Should fail type checking.",
+  }));
+
+  // @ts-expect-error registry-free device contracts require an owned API identity
+  defineDeviceContract(() => ({
+    id: "trellis.missing-device-api@v1",
+    displayName: "Missing Device API",
+    description: "Should fail type checking.",
+  }));
+  // @ts-expect-error registry device contracts require an owned API identity
+  defineDeviceContract({}, () => ({
+    id: "trellis.missing-registry-device-api@v1",
+    displayName: "Missing Registry Device API",
+    description: "Should fail type checking.",
+  }));
+
   const invalidRpcSchemas = {
     Empty: EmptySchema,
     Result: StringSchema,

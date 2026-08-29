@@ -1605,7 +1605,7 @@ type ProjectedFeeds<
 
 type OwnedApiFromSource<
   T extends {
-    id?: unknown;
+    apiId: string;
     capabilities?: unknown;
     schemas?: Readonly<Record<string, TSchema>>;
     errors?: unknown;
@@ -1619,7 +1619,7 @@ type OwnedApiFromSource<
   operations: ProjectedOperations<
     T["operations"],
     T["schemas"],
-    T["id"],
+    T["apiId"],
     T["capabilities"],
     T["errors"]
   >;
@@ -1632,6 +1632,7 @@ type ActionExportName<TName extends string> = PascalActionName<TName>;
 
 type ContractSourceShape = {
   id: string;
+  apiId: string;
   capabilities?: unknown;
   schemas?: Readonly<Record<string, TSchema>>;
   errors?: unknown;
@@ -1649,7 +1650,7 @@ type OwnedRpcActionDescriptors<T extends ContractSourceShape> = T["rpc"] extends
       } ? never
         : ActionExportName<K>
     ]: ActionDescriptor<
-      T["id"],
+      T["apiId"],
       K,
       "rpc",
       OwnedApiFromSource<T>["rpc"][K] & RPCDesc,
@@ -1662,7 +1663,7 @@ type OwnedOperationActionDescriptors<T extends ContractSourceShape> =
   T["operations"] extends Readonly<Record<string, ContractSourceOperation>> ? {
       [K in Extract<keyof T["operations"], string> as ActionExportName<K>]:
         ActionDescriptor<
-          T["id"],
+          T["apiId"],
           K,
           "operation",
           OwnedApiFromSource<T>["operations"][K] & OperationDesc,
@@ -1676,14 +1677,14 @@ type OwnedEventActionDescriptors<T extends ContractSourceShape> =
       [K in Extract<keyof T["events"], string> as ActionExportName<K>]:
         EventActions<
           ActionDescriptor<
-            T["id"],
+            T["apiId"],
             K,
             "event-subscribe",
             OwnedApiFromSource<T>["events"][K] & EventDesc,
             `on${ActionExportName<K>}`
           >,
           ActionDescriptor<
-            T["id"],
+            T["apiId"],
             K,
             "event-publish",
             OwnedApiFromSource<T>["events"][K] & EventDesc,
@@ -1697,7 +1698,7 @@ type OwnedFeedActionDescriptors<T extends ContractSourceShape> =
   T["feeds"] extends Readonly<Record<string, ContractSourceFeed>> ? {
       [K in Extract<keyof T["feeds"], string> as ActionExportName<K>]:
         ActionDescriptor<
-          T["id"],
+          T["apiId"],
           K,
           "feed",
           OwnedApiFromSource<T>["feeds"][K] & FeedDesc,
@@ -1825,11 +1826,7 @@ export type DefineContractInput<
       >
     >
     | undefined = undefined,
-> = {
-  id: string;
-  displayName: string;
-  description: string;
-  docs?: ContractDocs;
+> = ContractIdentityFields & {
   kind: ContractKind;
   capabilities?: ContractCapabilities;
   schemas?: TSchemas;
@@ -2209,7 +2206,7 @@ type ClientContractBodyInput<
 
 type BuiltContractSource<
   TRegistry extends AnyDefineContractRegistry,
-  TBody extends { id: string },
+  TBody extends ContractIdentityFields,
 > = Simplify<
   & Omit<TBody, "schemas" | "errors">
   & (TRegistry extends { schemas?: infer TSchemas } ? { schemas?: TSchemas }
@@ -2217,10 +2214,12 @@ type BuiltContractSource<
   & (TRegistry extends { errors?: infer TErrors } ? { errors?: TErrors } : {})
 >;
 
-type WithKind<TBody extends { id: string }, TKind extends ContractKind> =
-  Simplify<
-    Omit<TBody, "kind"> & { kind: TKind }
-  >;
+type WithKind<
+  TBody extends ContractIdentityFields,
+  TKind extends ContractKind,
+> = Simplify<
+  Omit<TBody, "kind"> & { kind: TKind }
+>;
 
 function createContractRefBuilder<
   TSchemas extends Readonly<Record<string, TSchema>> | undefined,
@@ -4303,6 +4302,9 @@ function defineContract(
     ...(registry.schemas ? { schemas: registry.schemas } : {}),
     ...(errorClasses ? { errors: errorClasses } : {}),
   }));
+  if (typeof body.apiId !== "string") {
+    throw new Error("Contract apiId must be a string");
+  }
   if ("state" in body || "jobs" in body || "resources" in body) {
     throw new Error(
       "Runtime features must be declared in uses with state(...), jobs(...), kv(...), or store(...)",

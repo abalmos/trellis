@@ -948,11 +948,11 @@ pub fn execute_auto_plan(
             .unwrap_or(Path::new("."))
             .join(format!("{}.json", entry.contract_id));
         if legacy != *current && !participant_outputs.contains_key(&legacy) {
-            let participant_id = current
-                .file_stem()
-                .and_then(|value| value.to_str())
-                .unwrap_or("");
-            remove_participant_output_if_owned(&legacy, participant_id)?;
+            remove_participant_output_if_owned(
+                &legacy,
+                &entry.contract_id,
+                Some(&entry.contract_id),
+            )?;
         }
     }
     Ok(summary)
@@ -993,15 +993,16 @@ fn cleanup_legacy_protocol_outputs(plan: &[AutoPlanEntry]) -> miette::Result<()>
         .collect::<BTreeSet<_>>();
     for entry in plan {
         if let Some(current) = &entry.protocol_participant_out {
-            let participant_id = current
-                .file_stem()
-                .and_then(|value| value.to_str())
-                .unwrap_or("");
-            for (legacy_id, expected_id) in [
-                (Some(entry.contract_id.as_str()), participant_id),
+            for (legacy_id, expected_id, expected_self_api) in [
+                (
+                    Some(entry.contract_id.as_str()),
+                    entry.contract_id.as_str(),
+                    Some(entry.contract_id.as_str()),
+                ),
                 (
                     entry.previous_participant_id.as_deref(),
                     entry.previous_participant_id.as_deref().unwrap_or(""),
+                    None,
                 ),
             ] {
                 let Some(legacy_id) = legacy_id else { continue };
@@ -1010,19 +1011,13 @@ fn cleanup_legacy_protocol_outputs(plan: &[AutoPlanEntry]) -> miette::Result<()>
                     .unwrap_or(Path::new("."))
                     .join(format!("{legacy_id}.json"));
                 if legacy != *current && !current_participant_outputs.contains(&legacy) {
-                    remove_participant_output_if_owned(&legacy, expected_id)?;
+                    remove_participant_output_if_owned(&legacy, expected_id, expected_self_api)?;
                 }
             }
         }
         if let Some(current) = &entry.cargo_participant_out {
-            let participant_id = entry
-                .protocol_participant_out
-                .as_deref()
-                .and_then(Path::file_stem)
-                .and_then(|value| value.to_str())
-                .unwrap_or("");
             for (legacy_id, expected_id) in [
-                (Some(entry.contract_id.as_str()), participant_id),
+                (Some(entry.contract_id.as_str()), entry.contract_id.as_str()),
                 (
                     entry.previous_participant_id.as_deref(),
                     entry.previous_participant_id.as_deref().unwrap_or(""),
@@ -1063,17 +1058,23 @@ fn cleanup_legacy_protocol_outputs(plan: &[AutoPlanEntry]) -> miette::Result<()>
     Ok(())
 }
 
-fn remove_participant_output_if_owned(path: &Path, expected_id: &str) -> miette::Result<()> {
+fn remove_participant_output_if_owned(
+    path: &Path,
+    expected_id: &str,
+    expected_self_api: Option<&str>,
+) -> miette::Result<()> {
     let owned = fs::read(path)
         .ok()
         .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok())
-        .and_then(|value| {
-            value
-                .get("id")
-                .and_then(|id| id.as_str())
-                .map(str::to_owned)
-        })
-        .is_some_and(|id| id == expected_id);
+        .is_some_and(|value| {
+            value.get("id").and_then(|id| id.as_str()) == Some(expected_id)
+                && expected_self_api.is_none_or(|api_id| {
+                    value
+                        .pointer("/implements/self/api")
+                        .and_then(|id| id.as_str())
+                        == Some(api_id)
+                })
+        });
     if owned {
         fs::remove_file(path).into_diagnostic()?;
     }

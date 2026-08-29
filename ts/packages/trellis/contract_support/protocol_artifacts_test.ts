@@ -23,6 +23,30 @@ import {
   store,
 } from "./mod.ts";
 import { actionRuntimeDescriptor, actionSource } from "./descriptors.ts";
+
+Deno.test("contract authoring rejects missing or non-string apiId immediately", () => {
+  for (
+    const body of [
+      {
+        id: "trellis.test.missing-api@v1",
+        displayName: "Missing API",
+        description: "Missing apiId.",
+      },
+      {
+        id: "trellis.test.invalid-api@v1",
+        apiId: 42,
+        displayName: "Invalid API",
+        description: "Non-string apiId.",
+      },
+    ]
+  ) {
+    assertThrows(
+      () => Reflect.apply(defineServiceContract, undefined, [{}, () => body]),
+      Error,
+      "Contract apiId must be a string",
+    );
+  }
+});
 import { canonicalizeJson, type JsonValue } from "./canonical.ts";
 import { CONTRACT_RUNTIME } from "./contract_runtime.ts";
 import {

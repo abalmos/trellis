@@ -784,7 +784,16 @@ fn prepare_generates_rust_participant_facade_for_local_device_uses() {
     fs::create_dir_all(legacy_participant.parent().unwrap()).unwrap();
     fs::write(
         &legacy_participant,
-        r#"{"format":"trellis.participant.v1","id":"trellis.orders-service@v1"}"#,
+        r#"{
+  "format": "trellis.participant.v1",
+  "id": "trellis.orders@v1",
+  "implements": {
+    "self": {
+      "api": "trellis.orders@v1",
+      "apiDigest": "legacy"
+    }
+  }
+}"#,
     )
     .unwrap();
     let legacy_facade = temp
@@ -793,7 +802,7 @@ fn prepare_generates_rust_participant_facade_for_local_device_uses() {
     fs::create_dir_all(legacy_facade.join("src")).unwrap();
     fs::write(
         legacy_facade.join("src/contract.rs"),
-        "pub const CONTRACT_ID: &str = \"trellis.orders-service@v1\";\n",
+        "pub const CONTRACT_ID: &str = \"trellis.orders@v1\";\n",
     )
     .unwrap();
 
