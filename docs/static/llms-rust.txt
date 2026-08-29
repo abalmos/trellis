@@ -1,6 +1,6 @@
 # Trellis AI guidance for Rust services
 
-Last verified against Trellis main (2026-08-02).
+Last verified against Trellis main (2026-08-28).
 
 Use this file for AI coding agents working in a Rust service repository that
 consumes Trellis. The language-neutral guide is:
@@ -40,6 +40,12 @@ https://raw.githubusercontent.com/qlever-llc/trellis/main/docs/static/llms-full.
   unsupported.
 - The participant facade embeds its canonical API and participant artifacts and
   their exact digests.
+- Rust authoring supplies participant and API identities independently.
+  `ContractBuilder::authoring(participant_id, api_id, ...)` takes the participant
+  ID first; `ContractBuilder::from_api(participant_id, api, kind)` also requires
+  it explicitly. `ApiBuilder::authoring(id, ...)` uses `id` only as API identity.
+  Generated participant facades expose `CONTRACT_ID`; generated API SDKs expose
+  `API_ID`.
 - Service connect options carry the immutable provisioned identity binding.
   User/device connect options carry the session-bound bootstrap JWT, session id,
   inbox prefix, session seed, and participant digest. No shared sentinel
@@ -358,3 +364,13 @@ idempotent.
   every workspace crate. Trellis supports the current stable Rust toolchain; no
   older compiler compatibility is promised.
   Run `cargo xtask prepare` when generated artifacts change.
+  Run `cargo xtask prepare --timings` to diagnose generation performance from
+  phase and per-contract resolution times, subprocess counts, cache validation,
+  generation outcomes, and installed file/byte totals. Prepare's persistent
+  resolution cache is repository-namespaced, disposable, and stored in the user
+  cache directory unless `TRELLIS_PREPARE_CACHE` overrides it. `--force`
+  bypasses it. Contract resolution must be deterministic from tracked source;
+  declare exceptional inputs under `[package.metadata.trellis.prepare]` with
+  `inputs = ["relative/glob/**"]` and `env = ["VARIABLE_NAME"]`. Undeclared
+  time, randomness, network, environment, and external-file inputs are
+  unsupported.

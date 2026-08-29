@@ -280,6 +280,9 @@ export async function startTrellisTestEventCapture<
     id: `trellis.test.event-capture.${
       captureContractName(args.options.name)
     }@v1`,
+    apiId: `trellis.test.event-capture.${
+      captureContractName(args.options.name)
+    }@v1`,
     displayName: `Trellis Test Event Capture: ${args.options.name}`,
     description: "Synthetic app participant for live test event capture.",
     uses: events,

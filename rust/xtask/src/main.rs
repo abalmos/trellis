@@ -1,5 +1,4 @@
 use std::env;
-use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
 
@@ -12,7 +11,11 @@ mod release;
 #[derive(Debug, Clone, Eq, PartialEq, Subcommand)]
 enum XtaskCommand {
     #[command(name = "prepare")]
-    Prepare,
+    Prepare {
+        /// Print prepare phase and subprocess timings.
+        #[arg(long)]
+        timings: bool,
+    },
     #[command(name = "prepare-watch")]
     PrepareWatch,
     #[command(name = "protocol-wasm")]
@@ -51,7 +54,7 @@ fn run() -> Result<()> {
         return Ok(());
     };
     match command {
-        XtaskCommand::Prepare => run_prepare(),
+        XtaskCommand::Prepare { timings } => run_prepare(timings),
         XtaskCommand::PrepareWatch => run_prepare_watch(),
         XtaskCommand::ProtocolWasm => generate_protocol_wasm(),
         XtaskCommand::Build { args } => run_build(&args),
@@ -102,8 +105,8 @@ where
     Ok(Some(command))
 }
 
-fn run_prepare() -> Result<()> {
-    run_generate_prepare(&["--no-npm"])
+fn run_prepare(timings: bool) -> Result<()> {
+    run_generate_prepare(false, timings)
 }
 
 fn build_embedded_login_portal() -> Result<()> {
@@ -202,29 +205,27 @@ fn base64(bytes: &[u8]) -> String {
 }
 
 fn run_prepare_watch() -> Result<()> {
-    run_generate_prepare(&["--watch"])
+    run_generate_prepare(true, false)
 }
 
-fn run_generate_prepare(extra_args: &[&str]) -> Result<()> {
-    let repo_root = repo_root()?;
-    let mut args = vec![OsString::from("prepare")];
-    args.extend(extra_args.iter().map(OsString::from));
-    args.push(repo_root.into_os_string());
-    let status = trellis_generate_runner::run_status(args)
-        .into_diagnostic()
-        .wrap_err("failed to run prepare workflow")?;
-
-    if status.success() {
-        Ok(())
-    } else {
-        Err(miette::miette!(
-            "prepare workflow failed with status {status}"
-        ))
-    }
+fn run_generate_prepare(watch: bool, timings: bool) -> Result<()> {
+    trellis_generate::app::run_prepare(
+        &trellis_generate::cli::PrepareArgs {
+            watch,
+            changes: false,
+            prefix: "@trellis-sdk/".to_string(),
+            out: None,
+            targets: Vec::new(),
+            no_npm: !watch,
+            timings,
+            root: repo_root()?,
+        },
+        false,
+    )
 }
 
 fn run_build(args: &[String]) -> Result<()> {
-    run_prepare()?;
+    run_prepare(false)?;
     generate_protocol_wasm()?;
     build_embedded_login_portal()?;
     let workspace_root = repo_root()?.join("rust");
@@ -272,7 +273,15 @@ mod tests {
         let command = parse_command(["prepare".to_string()].into_iter())
             .expect("parse prepare")
             .expect("prepare command");
-        assert_eq!(command, XtaskCommand::Prepare);
+        assert_eq!(command, XtaskCommand::Prepare { timings: false });
+    }
+
+    #[test]
+    fn parse_prepare_timings_command() {
+        let command = parse_command(["prepare", "--timings"].into_iter().map(str::to_string))
+            .expect("parse prepare timings")
+            .expect("prepare command");
+        assert_eq!(command, XtaskCommand::Prepare { timings: true });
     }
 
     #[test]

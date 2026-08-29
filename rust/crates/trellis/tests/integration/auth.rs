@@ -217,6 +217,7 @@ async fn start_fixture(user_jwt_ttl_ms: Option<u64>, use_test_oidc_provider: boo
         .await
         .expect("observe first administrator bootstrap URL");
     let auth_contract = trellis_test::TrellisTestContract::from_native_api_json(
+        auth_sdk::API_ID,
         auth_sdk::API_JSON,
         trellis_rs::contracts::ContractKind::App,
     )
@@ -230,6 +231,7 @@ async fn start_fixture(user_jwt_ttl_ms: Option<u64>, use_test_oidc_provider: boo
         .cloned()
         .collect::<Vec<_>>();
     let base_service_contract = trellis_test::TrellisTestContract::from_native_api_json(
+        SERVICE_ID,
         API_SOURCE,
         trellis_rs::contracts::ContractKind::Service,
     )
@@ -265,6 +267,7 @@ async fn start_fixture(user_jwt_ttl_ms: Option<u64>, use_test_oidc_provider: boo
     let client_contract =
         trellis_test::TrellisTestContract::from_builder_with_referenced_contracts(
             trellis_rs::contracts::ContractBuilder::authoring(
+                CLIENT_ID,
                 CLIENT_ID,
                 "Trusted Portal Integration Client",
                 "Exercises optional authority selected by a trusted portal.",
@@ -350,12 +353,14 @@ async fn provision_device_activation_case_with_delegation(
     requires_device_delegation: bool,
 ) -> DeviceActivationCase {
     let auth_contract = trellis_test::TrellisTestContract::from_native_api_json(
+        auth_sdk::API_ID,
         auth_sdk::API_JSON,
         trellis_rs::contracts::ContractKind::Service,
     )
     .expect("build Auth API reference contract");
     let contract = trellis_test::TrellisTestContract::from_builder_with_referenced_contracts(
         trellis_rs::contracts::ContractBuilder::authoring(
+            format!("trellis.integration.{case_id}.device@v1"),
             format!("trellis.integration.{case_id}.device@v1"),
             "Device Activation Integration Device",
             "Exercises current preregistered device activation.",
@@ -415,12 +420,14 @@ async fn provision_device_activation_case_with_delegation(
 
 async fn connect_device_activation_user(fixture: &mut Fixture, case_id: &str) -> Caller {
     let auth_contract = trellis_test::TrellisTestContract::from_native_api_json(
+        auth_sdk::API_ID,
         auth_sdk::API_JSON,
         trellis_rs::contracts::ContractKind::Service,
     )
     .expect("build Auth API reference contract");
     let contract = trellis_test::TrellisTestContract::from_builder_with_referenced_contracts(
         trellis_rs::contracts::ContractBuilder::authoring(
+            format!("trellis.integration.{case_id}.activator@v1"),
             format!("trellis.integration.{case_id}.activator@v1"),
             "Device Activation Integration User",
             "Exercises user activation and unprivileged review denial.",
@@ -452,6 +459,7 @@ async fn local_login_binds_approved_client_and_calls_authorized_rpc() {
     assert_runtime_case_registered("auth.local-login-binds-approved-client", "auth", "auth");
     let mut fixture = start_fixture(None, false).await;
     let auth_api = trellis_test::TrellisTestContract::from_native_api_json(
+        trellis_rs::sdk::auth::API_ID,
         trellis_rs::sdk::auth::API_JSON,
         trellis_rs::contracts::ContractKind::Service,
     )
@@ -459,6 +467,7 @@ async fn local_login_binds_approved_client_and_calls_authorized_rpc() {
     let client_contract =
         trellis_test::TrellisTestContract::from_builder_with_referenced_contracts(
             trellis_rs::contracts::ContractBuilder::authoring(
+                APPROVED_CLIENT_ID,
                 APPROVED_CLIENT_ID,
                 "Approved Integration Client",
                 "Exercises approved local-user binding and authenticated RPC.",
@@ -2849,6 +2858,7 @@ async fn hostile_old_context_is_denied_after_reduction() {
     );
     let mut fixture = start_fixture(None, false).await;
     let service_contract = trellis_test::TrellisTestContract::from_native_api_json(
+        SERVICE_ID,
         API_SOURCE,
         trellis_rs::contracts::ContractKind::Service,
     )
@@ -2856,6 +2866,7 @@ async fn hostile_old_context_is_denied_after_reduction() {
     let listener_contract =
         trellis_test::TrellisTestContract::from_builder_with_referenced_contracts(
             trellis_rs::contracts::ContractBuilder::authoring(
+                "trellis.integration.trusted-portal-listener@v1",
                 "trellis.integration.trusted-portal-listener@v1",
                 "Trusted Portal Replay Listener",
                 "Receives trusted-portal replay attempts through local proof validation.",

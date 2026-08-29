@@ -18,6 +18,7 @@ import { defineServiceContract } from "@qlever-llc/trellis";
 
 export const ordersService = defineServiceContract({}, () => ({
   id: "orders-service@v1",
+  apiId: "orders-service@v1",
   displayName: "Orders Service",
   description: "A simple service for managing orders.",
   uses: {},
@@ -42,9 +43,7 @@ Create `contracts/service.rs`:
 
 ```rust
 use serde_json::{json, Value};
-use trellis_contracts::{
-    ApiBuilder, ContractArtifacts, ContractBuilder, ContractKind, ContractsError,
-};
+use trellis_contracts::{ContractArtifacts, ContractBuilder, ContractKind, ContractsError};
 
 fn empty_object_schema() -> Value {
     json!({
@@ -54,19 +53,19 @@ fn empty_object_schema() -> Value {
 }
 
 pub fn contract_artifacts() -> Result<ContractArtifacts, ContractsError> {
-    let api = ApiBuilder::authoring(
+    ContractBuilder::authoring(
+        "orders-service@v1",
         "orders-service@v1",
         "Orders Service",
         "A simple service for managing orders.",
         ContractKind::Service,
     )
     .schema("Empty", empty_object_schema())
-    .build()?;
-    ContractBuilder::from_api(api.normalized_value()?, ContractKind::Service)?.build()
+    .build()
 }
 ```
 
-This is a valid, nearly empty service contract. Rust services should keep this Rust source as the authoring surface and treat generated native API/participant JSON and SDK crates as artifacts.
+This is a valid, nearly empty service contract. `ContractBuilder::authoring` receives the participant identity first and the independent API identity second. Generated participant facades expose the participant identity as `CONTRACT_ID`, while generated API SDKs expose the API identity as `API_ID`. Rust services should keep this Rust source as the authoring surface and treat generated native API/participant JSON and SDK crates as artifacts.
 
 Prepare the generated artifacts once so the SDK crate exists:
 

@@ -144,6 +144,7 @@ async fn service_bootstrap_denies_invalid_or_disabled_identity() {
         .await
         .expect("complete bootstrap");
     let base = TrellisTestContract::from_native_api_json(
+        SERVICE_ID,
         BASE_API,
         trellis_rs::contracts::ContractKind::Service,
     )
@@ -335,6 +336,7 @@ async fn invalid_authority_acceptance_preserves_desired_and_proposal_state() {
         .await
         .expect("observe invalid-acceptance bootstrap URL");
     let base = TrellisTestContract::from_native_api_json(
+        SERVICE_ID,
         BASE_API,
         trellis_rs::contracts::ContractKind::Service,
     )
@@ -345,6 +347,7 @@ async fn invalid_authority_acceptance_preserves_desired_and_proposal_state() {
         .await
         .expect("provision invalid-acceptance service");
     let additive = TrellisTestContract::from_native_api_json(
+        SERVICE_ID,
         ADDITIVE_API,
         trellis_rs::contracts::ContractKind::Service,
     )
@@ -464,11 +467,13 @@ async fn compatible_metadata_replacement_connects_without_approval() {
         .await
         .expect("complete bootstrap");
     let base = TrellisTestContract::from_native_api_json(
+        SERVICE_ID,
         BASE_API,
         trellis_rs::contracts::ContractKind::Service,
     )
     .expect("build base service contract");
     let metadata_source = TrellisTestContract::from_native_api_json(
+        SERVICE_ID,
         METADATA_API,
         trellis_rs::contracts::ContractKind::Service,
     )
@@ -506,6 +511,7 @@ async fn compatible_metadata_replacement_connects_without_approval() {
     let service_task = tokio::spawn(async move { service.run().await });
     let client_contract = TrellisTestContract::from_builder_with_referenced_contracts(
         trellis_rs::contracts::ContractBuilder::authoring(
+            "trellis.integration.authority-plan-metadata-client@v1",
             "trellis.integration.authority-plan-metadata-client@v1",
             "Authority Plan Metadata Client",
             "Calls the metadata-only replacement service.",
@@ -561,11 +567,13 @@ async fn accepted_incompatible_migration_replaces_service_contract() {
         .await
         .expect("complete bootstrap");
     let base = TrellisTestContract::from_native_api_json(
+        SERVICE_ID,
         BASE_API,
         trellis_rs::contracts::ContractKind::Service,
     )
     .expect("build base service contract");
     let incompatible_source = TrellisTestContract::from_native_api_json(
+        SERVICE_ID,
         INCOMPATIBLE_API,
         trellis_rs::contracts::ContractKind::Service,
     )
@@ -642,6 +650,7 @@ async fn accepted_incompatible_migration_replaces_service_contract() {
     let client_contract = TrellisTestContract::from_builder_with_referenced_contracts(
         trellis_rs::contracts::ContractBuilder::authoring(
             "trellis.integration.authority-plan-incompatible-client@v1",
+            "trellis.integration.authority-plan-incompatible-client@v1",
             "Authority Plan Incompatible Client",
             "Calls the accepted incompatible replacement.",
             trellis_rs::contracts::ContractKind::App,
@@ -687,11 +696,13 @@ async fn additive_approval_flow() {
         .await
         .expect("complete bootstrap");
     let base = TrellisTestContract::from_native_api_json(
+        SERVICE_ID,
         BASE_API,
         trellis_rs::contracts::ContractKind::Service,
     )
     .expect("build base service contract");
     let additive_source = TrellisTestContract::from_native_api_json(
+        SERVICE_ID,
         ADDITIVE_API,
         trellis_rs::contracts::ContractKind::Service,
     )
@@ -781,6 +792,7 @@ async fn additive_approval_flow() {
 
     let client_contract = TrellisTestContract::from_builder_with_referenced_contracts(
         trellis_rs::contracts::ContractBuilder::authoring(
+            "trellis.integration.authority-plan-client@v1",
             "trellis.integration.authority-plan-client@v1",
             "Authority Plan Integration Client",
             "Calls the service after authority approval.",

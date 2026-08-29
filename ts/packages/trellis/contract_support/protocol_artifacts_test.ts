@@ -35,12 +35,15 @@ import { resolveNativeProtocolPresentation } from "./protocol_resolution.ts";
 import { resolveParticipantV1WasmSync } from "../auth/protocol_wasm.ts";
 
 Deno.test("generated actions preserve canonical source artifact identity", () => {
-  const compiled = nativeProtocolPresentation(defineAppContract(() => ({
-    id: "trellis.test.auth-observer@v1",
-    displayName: "Auth observer",
-    description: "Checks generated dependency identity.",
-    uses: [AuthCapabilitiesList],
-  })));
+  const compiled = nativeProtocolPresentation(
+    defineAppContract(() => ({
+      id: "trellis.test.auth-observer@v1",
+      apiId: "trellis.test.auth-observer@v1",
+      displayName: "Auth observer",
+      description: "Checks generated dependency identity.",
+      uses: [AuthCapabilitiesList],
+    })),
+  );
 
   assertObjectMatch(compiled.participant, {
     uses: {
@@ -51,6 +54,35 @@ Deno.test("generated actions preserve canonical source artifact identity", () =>
       },
     },
   });
+});
+
+Deno.test("participant and owned API identities remain distinct", () => {
+  const contract = defineServiceContract(
+    { schemas: { Empty: Type.Object({}) } },
+    (ref) => ({
+      id: "trellis.test.identity-participant@v1",
+      apiId: "trellis.test.identity-api@v1",
+      displayName: "Identity test",
+      description: "Checks participant and API identity separation.",
+      rpc: {
+        "Identity.Ping": {
+          version: "v1",
+          input: ref.schema("Empty"),
+          output: ref.schema("Empty"),
+        },
+      },
+    }),
+  );
+  const compiled = nativeProtocolPresentation(contract);
+
+  assertEquals(contract.CONTRACT_ID, "trellis.test.identity-participant@v1");
+  assertEquals(compiled.participant.implements, {
+    self: {
+      api: "trellis.test.identity-api@v1",
+      apiDigest: apiDigest(compiled.api),
+    },
+  });
+  assertObjectMatch(compiled.api, { id: "trellis.test.identity-api@v1" });
 });
 
 Deno.test("participant digest matches Rust normalization for explicit empty defaults", () => {
@@ -79,6 +111,7 @@ Deno.test("service contracts retain authoring event-consumer runtime metadata", 
     { schemas: { Empty: Type.Object({}) } },
     (ref) => ({
       id: "trellis.test.consumer@v1",
+      apiId: "trellis.test.consumer@v1",
       displayName: "Consumer",
       description: "Checks event-consumer runtime metadata.",
       events: {
@@ -104,6 +137,7 @@ Deno.test("operation access retains native observe, cancel, and control selectio
     { schemas: { Empty: Type.Object({}) } },
     (ref) => ({
       id: "trellis.test.operation-provider@v1",
+      apiId: "trellis.test.operation-provider@v1",
       displayName: "Operation provider",
       description: "Checks operation control selections.",
       capabilities: {
@@ -129,6 +163,7 @@ Deno.test("operation access retains native observe, cancel, and control selectio
   );
   const consumer = defineAppContract(() => ({
     id: "trellis.test.operation-consumer@v1",
+    apiId: "trellis.test.operation-consumer@v1",
     displayName: "Operation consumer",
     description: "Uses operation control.",
     uses: [operationAccess(provider.Run, { cancel: true, control: true })],
@@ -155,6 +190,7 @@ Deno.test("inline actions preserve their provider API artifact", async () => {
     { schemas: { Empty: Type.Object({}) } },
     (ref) => ({
       id: "trellis.test.inline-provider@v1",
+      apiId: "trellis.test.inline-provider@v1",
       displayName: "Inline provider",
       description: "Checks inline action source identity.",
       capabilities: {
@@ -173,6 +209,7 @@ Deno.test("inline actions preserve their provider API artifact", async () => {
   );
   const consumer = defineAppContract(() => ({
     id: "trellis.test.inline-consumer@v1",
+    apiId: "trellis.test.inline-consumer@v1",
     displayName: "Inline consumer",
     description: "Uses the inline provider.",
     uses: [provider.InlineCall],
@@ -229,6 +266,7 @@ Deno.test("capability permissions affect API identity, wording does not", () => 
       { schemas: { Empty: Type.Object({}) } },
       (ref) => ({
         id: "trellis.test.capability-provider@v1",
+        apiId: "trellis.test.capability-provider@v1",
         displayName: "Capability provider",
         description: "Checks native capability identity.",
         capabilities: {
@@ -292,6 +330,7 @@ Deno.test("capability references require declared local or platform/global names
       { schemas: { Empty: Type.Object({}) } },
       (ref) => ({
         id: "trellis.test.capability-validation@v1",
+        apiId: "trellis.test.capability-validation@v1",
         displayName: "Capability validation",
         description: "Checks capability reference validation.",
         capabilities: {
@@ -327,6 +366,7 @@ Deno.test("resolved native presentation verifies participant identity and eviden
     { schemas: { Empty: Type.Object({}) } },
     (ref) => ({
       id: "trellis.test.presentation-provider@v1",
+      apiId: "trellis.test.presentation-provider@v1",
       displayName: "Presentation provider",
       description: "Provides exact API evidence.",
       rpc: {
@@ -341,6 +381,7 @@ Deno.test("resolved native presentation verifies participant identity and eviden
   );
   const consumer = defineAppContract(() => ({
     id: "trellis.test.presentation-consumer@v1",
+    apiId: "trellis.test.presentation-consumer@v1",
     displayName: "Presentation consumer",
     description: "Consumes exact API evidence.",
     uses: [provider.Call],
@@ -399,6 +440,7 @@ Deno.test("action sources reject conflicting and forged API revisions", () => {
     { schemas: { Empty: Type.Object({}) } },
     (ref) => ({
       id: "trellis.test.revision-provider@v1",
+      apiId: "trellis.test.revision-provider@v1",
       displayName: "Revision provider",
       description: "Checks exact action source evidence.",
       rpc: {
@@ -454,6 +496,7 @@ Deno.test("native authoring matches shared cross-language vectors", async () => 
     { schemas: { Payload: Type.Object({ id: Type.String() }) } },
     (ref) => ({
       id: "conformance.dependency@v1",
+      apiId: "conformance.dependency@v1",
       displayName: "Dependency",
       description: "Conformance dependency.",
       rpc: {
@@ -472,6 +515,7 @@ Deno.test("native authoring matches shared cross-language vectors", async () => 
     { schemas: { Payload: Type.Object({ id: Type.String() }) } },
     (ref) => ({
       id: "conformance.optional-dependency@v1",
+      apiId: "conformance.optional-dependency@v1",
       displayName: "Optional dependency",
       description: "Optional conformance dependency.",
       rpc: {
@@ -484,7 +528,8 @@ Deno.test("native authoring matches shared cross-language vectors", async () => 
     }),
   );
   const minimal = defineAppContract(() => ({
-    id: "conformance.minimal-app@v1",
+    id: "conformance.minimal-app-participant@v1",
+    apiId: "conformance.minimal-app@v1",
     displayName: "Minimal app",
     description: "Minimal native app.",
   }));
@@ -497,6 +542,7 @@ Deno.test("native authoring matches shared cross-language vectors", async () => 
     },
     (ref) => ({
       id: "conformance.service@v1",
+      apiId: "conformance.service@v1",
       displayName: "Conformance service",
       description: "Representative native service.",
       capabilities: {
@@ -601,12 +647,14 @@ Deno.test("native authoring matches shared cross-language vectors", async () => 
   );
   const device = defineDeviceContract(() => ({
     id: "conformance.device@v1",
+    apiId: "conformance.device@v1",
     displayName: "Device",
     description: "Native device.",
     uses: [dependency.DependencyCall],
   }));
   const agent = defineAgentContract(() => ({
     id: "conformance.agent@v1",
+    apiId: "conformance.agent@v1",
     displayName: "Agent",
     description: "Native agent.",
     uses: [dependency.DependencyChanged.subscribe],

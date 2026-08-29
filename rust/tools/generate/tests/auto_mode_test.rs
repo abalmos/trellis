@@ -22,7 +22,78 @@ fn write_ts_contract(path: &Path, id: &str, display_name: &str, kind: &str) {
     .unwrap();
 }
 
-fn write_rust_contract(path: &Path, manifest_name: &str, kind: &str) {
+fn write_orders_contract(path: &Path, description: &str) {
+    let api_digest = trellis_contracts::ApiBuilder::new(serde_json::json!({
+        "format": "trellis.api.v1",
+        "id": "trellis.orders@v1",
+        "displayName": "Orders",
+        "description": description,
+        "schemas": {
+            "Empty": { "type": "object", "properties": {}, "required": [] },
+            "Order": {
+                "type": "object",
+                "properties": {
+                    "id": { "type": "string" },
+                    "revision": { "const": description }
+                },
+                "required": ["id", "revision"]
+            }
+        },
+        "rpc": {
+            "Orders.Get": {
+                "version": "v1",
+                "input": { "schema": "Empty" },
+                "output": { "schema": "Order" }
+            }
+        },
+        "operations": {},
+        "events": {}
+    }))
+    .digest()
+    .unwrap();
+    fs::write(
+        path,
+        format!(
+            r#"const API = {{
+  format: "trellis.api.v1",
+  id: "trellis.orders@v1",
+  displayName: "Orders",
+  description: "{description}",
+  schemas: {{
+    Empty: {{ type: "object", properties: {{}}, required: [] }},
+    Order: {{
+      type: "object",
+      properties: {{ id: {{ type: "string" }}, revision: {{ const: "{description}" }} }},
+      required: ["id", "revision"],
+    }},
+  }},
+  rpc: {{
+    "Orders.Get": {{
+      version: "v1",
+      input: {{ schema: "Empty" }},
+      output: {{ schema: "Order" }},
+    }},
+  }},
+  operations: {{}},
+  events: {{}},
+}};
+const PARTICIPANT = {{
+  format: "trellis.participant.v1",
+  id: "trellis.orders-service@v1",
+  displayName: API.displayName,
+  description: "Fixture service participant",
+  kind: "service",
+  implements: {{ self: {{ api: API.id, apiDigest: "{api_digest}" }} }},
+}};
+
+export default {{ API, PARTICIPANT }};
+"#,
+        ),
+    )
+    .unwrap();
+}
+
+fn write_rust_contract(path: &Path, manifest_name: &str, participant_id: &str, kind: &str) {
     fs::write(
         path,
         format!(
@@ -40,7 +111,7 @@ fn write_rust_contract(path: &Path, manifest_name: &str, kind: &str) {
 
 pub fn contract_artifacts() -> Result<trellis_contracts::ContractArtifacts, trellis_contracts::ContractsError> {{
     let api = api_artifact()?.normalized_value()?;
-    trellis_contracts::ContractBuilder::from_api(api, trellis_contracts::ContractKind::{kind})?.build()
+    trellis_contracts::ContractBuilder::from_api("{participant_id}", api, trellis_contracts::ContractKind::{kind})?.build()
 }}
 "#
         ),
@@ -58,7 +129,16 @@ fn write_rust_manifest(path: &Path, version: &str) {
 
 fn run_prepare(root: &Path) -> std::process::Output {
     trellis_generate()
+        .env("TRELLIS_PREPARE_CACHE", root.join("target/prepare-cache"))
         .args(["prepare", root.to_str().unwrap()])
+        .output()
+        .unwrap()
+}
+
+fn run_prepare_timings(root: &Path) -> std::process::Output {
+    trellis_generate()
+        .env("TRELLIS_PREPARE_CACHE", root.join("target/prepare-cache"))
+        .args(["prepare", "--no-npm", "--timings", root.to_str().unwrap()])
         .output()
         .unwrap()
 }
@@ -66,6 +146,12 @@ fn run_prepare(root: &Path) -> std::process::Output {
 fn trellis_generate() -> Command {
     let mut command = Command::new(env!("CARGO_BIN_EXE_trellis-generate"));
     command.env("TRELLIS_TSC_BIN", fake_tsc_path());
+    command.env(
+        "TRELLIS_PREPARE_CACHE",
+        std::env::temp_dir()
+            .join("trellis-generate-test-cache")
+            .join(std::process::id().to_string()),
+    );
     command
 }
 
@@ -105,6 +191,184 @@ done
         );
     }
     path
+}
+
+#[test]
+fn prepare_warm_noop_uses_resolution_cache_and_rebuilds_deleted_target() {
+    let temp = tempfile::tempdir().unwrap();
+    let project = temp.path().join("service");
+    fs::create_dir_all(&project).unwrap();
+    fs::write(project.join("deno.json"), "{\"version\":\"0.1.0\"}\n").unwrap();
+    write_ts_contract(
+        &project.join("contract.ts"),
+        "trellis.cached@v1",
+        "Cached",
+        "service",
+    );
+
+    let first = run_prepare_timings(&project);
+    assert!(
+        first.status.success(),
+        "{}",
+        String::from_utf8_lossy(&first.stderr)
+    );
+
+    let second = run_prepare_timings(&project);
+    assert!(
+        second.status.success(),
+        "{}",
+        String::from_utf8_lossy(&second.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&second.stdout);
+    assert!(stdout.contains("hits                     1"), "{stdout}");
+    assert!(stdout.contains("misses                   0"), "{stdout}");
+    assert!(!stdout.contains("resolve TypeScript"), "{stdout}");
+    assert!(!stdout.contains("subprocesses"), "{stdout}");
+    assert!(
+        stdout.contains("installed               files=0 bytes=0"),
+        "{stdout}"
+    );
+
+    fs::remove_file(
+        project
+            .join("generated/packages/jsr/cached")
+            .join("descriptors.ts"),
+    )
+    .unwrap();
+    let rebuilt = run_prepare_timings(&project);
+    assert!(
+        rebuilt.status.success(),
+        "{}",
+        String::from_utf8_lossy(&rebuilt.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&rebuilt.stdout);
+    assert!(stdout.contains("hits                     1"), "{stdout}");
+    assert!(stdout.contains("misses                   0"), "{stdout}");
+    assert!(!stdout.contains("resolve TypeScript"), "{stdout}");
+    assert!(
+        stdout.contains("target jsr            generated=1"),
+        "{stdout}"
+    );
+
+    let source = project.join("contract.ts");
+    let unchanged = fs::read(&source).unwrap();
+    std::thread::sleep(std::time::Duration::from_millis(2));
+    fs::write(&source, unchanged).unwrap();
+    let touched = run_prepare_timings(&project);
+    assert!(
+        touched.status.success(),
+        "{}",
+        String::from_utf8_lossy(&touched.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&touched.stdout);
+    assert!(stdout.contains("hits                     1"), "{stdout}");
+    assert!(stdout.contains("hashed files                1"), "{stdout}");
+    assert!(!stdout.contains("resolve TypeScript"), "{stdout}");
+
+    fs::write(
+        &source,
+        format!(
+            "{}\n// semantic no-op\n",
+            fs::read_to_string(&source).unwrap()
+        ),
+    )
+    .unwrap();
+    let changed = run_prepare_timings(&project);
+    assert!(
+        changed.status.success(),
+        "{}",
+        String::from_utf8_lossy(&changed.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&changed.stdout);
+    assert!(stdout.contains("misses                   1"), "{stdout}");
+    assert!(stdout.contains("input changed            1"), "{stdout}");
+    assert!(stdout.contains("resolve TypeScript"), "{stdout}");
+    assert!(
+        stdout.contains("contracts               generated=0 verified=0 skipped=1"),
+        "{stdout}"
+    );
+
+    let cache_entry = glob::glob(
+        &project
+            .join("target/prepare-cache/repositories/*/contracts/*.json")
+            .to_string_lossy(),
+    )
+    .unwrap()
+    .next()
+    .unwrap()
+    .unwrap();
+    fs::write(&cache_entry, "not json").unwrap();
+    let recovered = run_prepare_timings(&project);
+    assert!(
+        recovered.status.success(),
+        "{}",
+        String::from_utf8_lossy(&recovered.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&recovered.stdout);
+    assert!(stdout.contains("corrupt                  1"), "{stdout}");
+    assert!(stdout.contains("resolve TypeScript"), "{stdout}");
+
+    fs::write(cache_entry.with_extension("resolved.json"), "{broken").unwrap();
+    let recovered = run_prepare_timings(&project);
+    assert!(
+        recovered.status.success(),
+        "{}",
+        String::from_utf8_lossy(&recovered.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&recovered.stdout);
+    assert!(stdout.contains("corrupt                  1"), "{stdout}");
+    assert!(stdout.contains("resolve TypeScript"), "{stdout}");
+
+    let cache_entry = glob::glob(
+        &project
+            .join("target/prepare-cache/repositories/*/contracts/*.json")
+            .to_string_lossy(),
+    )
+    .unwrap()
+    .find(|entry| {
+        entry.as_ref().is_ok_and(|path| {
+            !path
+                .file_name()
+                .is_some_and(|name| name.to_string_lossy().ends_with(".resolved.json"))
+        })
+    })
+    .unwrap()
+    .unwrap();
+    let mut entry: serde_json::Value =
+        serde_json::from_slice(&fs::read(&cache_entry).unwrap()).unwrap();
+    entry["schema_version"] = serde_json::json!(999);
+    fs::write(cache_entry, serde_json::to_vec(&entry).unwrap()).unwrap();
+    let schema_miss = run_prepare_timings(&project);
+    assert!(
+        schema_miss.status.success(),
+        "{}",
+        String::from_utf8_lossy(&schema_miss.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&schema_miss.stdout);
+    assert!(stdout.contains("invalid schema           1"), "{stdout}");
+
+    let forced = trellis_generate()
+        .env(
+            "TRELLIS_PREPARE_CACHE",
+            project.join("target/prepare-cache"),
+        )
+        .args([
+            "--force",
+            "prepare",
+            "--no-npm",
+            "--timings",
+            project.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        forced.status.success(),
+        "{}",
+        String::from_utf8_lossy(&forced.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&forced.stdout);
+    assert!(stdout.contains("forced                   1"), "{stdout}");
+    assert!(stdout.contains("resolve TypeScript"), "{stdout}");
 }
 
 fn write_executable(path: &Path, script: &str) {
@@ -229,79 +493,36 @@ fn prepare_bootstraps_repo_without_discover_summary() {
         "{\n  \"version\": \"0.4.0\"\n}\n",
     )
     .unwrap();
-    fs::write(apps.join("deno.json"), "{\n  \"version\": \"0.4.0\"\n}\n").unwrap();
+    let repo_root = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../..")
+        .canonicalize()
+        .unwrap();
     fs::write(
-        services.join("contracts/orders.ts"),
-        r#"const API = {
-  format: "trellis.api.v1",
-  id: "trellis.orders@v1",
-  displayName: "Orders",
-  description: "Fixture contract",
-  schemas: {
-    Empty: {
-      type: "object",
-      properties: {},
-      required: [],
-    },
-    Order: {
-      type: "object",
-      properties: { id: { type: "string" } },
-      required: ["id"],
-    },
-  },
-  rpc: {
-    "Orders.Get": {
-      version: "v1",
-      input: { schema: "Empty" },
-      output: { schema: "Order" },
-    },
-  },
-  operations: {},
-  events: {},
-};
-const PARTICIPANT = {
-  format: "trellis.participant.v1",
-  id: API.id,
-  displayName: API.displayName,
-  description: "Fixture service participant",
-  kind: "service",
-  implements: { self: { api: API.id, apiDigest: "zUfuTGEjjiCbjt57ucSJo1FS7MO5BQUFug0bRxCMwyM" } },
-};
-
-export default { API, PARTICIPANT };
-"#,
+        apps.join("deno.json"),
+        format!(
+            "{{\n  \"version\": \"0.4.0\",\n  \"imports\": {{\n    \"@trellis-sdk/trellis-orders\": \"../../generated/packages/jsr/orders/mod.ts\",\n    \"@qlever-llc/trellis\": \"file://{}/ts/packages/trellis/index.ts\",\n    \"@qlever-llc/trellis/\": \"file://{}/ts/packages/trellis/\"\n  }}\n}}\n",
+            repo_root.display(),
+            repo_root.display()
+        ),
     )
     .unwrap();
+    write_orders_contract(&services.join("contracts/orders.ts"), "Fixture contract");
     fs::write(
         apps.join("contracts/dashboard.ts"),
-        r#"const API = {
-  format: "trellis.api.v1",
-  id: "trellis.dashboard@v1",
+        r#"import * as Orders from "@trellis-sdk/trellis-orders";
+import { defineAppContract } from "@qlever-llc/trellis";
+void Orders;
+export default defineAppContract(() => ({
+  id: "trellis.dashboard-app@v1",
+  apiId: "trellis.dashboard@v1",
   displayName: "Dashboard",
   description: "Fixture contract",
-  schemas: {},
-  rpc: {},
-  operations: {},
-  events: {},
-};
-const PARTICIPANT = {
-  format: "trellis.participant.v1",
-  id: API.id,
-  displayName: API.displayName,
-  description: "Fixture app participant",
-  kind: "app",
-  implements: { self: { api: API.id, apiDigest: "IWSLPqsRVWP2jwWfRuC-arNDiq3ML32fNaH7Xit2WYs" } },
-};
-
-export default { API, PARTICIPANT };
+}));
 "#,
     )
     .unwrap();
 
-    let output = trellis_generate()
-        .args(["prepare", temp.path().to_str().unwrap()])
-        .output()
-        .unwrap();
+    let output = run_prepare_timings(temp.path());
     assert!(
         output.status.success(),
         "{}",
@@ -317,6 +538,14 @@ export default { API, PARTICIPANT };
     assert!(temp
         .path()
         .join("generated/protocol/apis/trellis.dashboard@v1.json")
+        .exists());
+    assert!(temp
+        .path()
+        .join("generated/protocol/participants/trellis.dashboard-app@v1.json")
+        .exists());
+    assert!(!temp
+        .path()
+        .join("generated/protocol/participants/trellis.dashboard@v1.json")
         .exists());
     assert!(temp
         .path()
@@ -337,6 +566,53 @@ export default { API, PARTICIPANT };
         .path()
         .join("generated/packages/cargo/dashboard/Cargo.toml")
         .exists());
+
+    let warm = run_prepare_timings(temp.path());
+    assert!(
+        warm.status.success(),
+        "{}",
+        String::from_utf8_lossy(&warm.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&warm.stdout);
+    assert!(stdout.contains("hits                     2"), "{stdout}");
+    assert!(stdout.contains("misses                   0"), "{stdout}");
+    assert!(!stdout.contains("resolve TypeScript"), "{stdout}");
+
+    let orders = services.join("contracts/orders.ts");
+    fs::write(
+        &orders,
+        format!(
+            "{}\n// semantic no-op\n",
+            fs::read_to_string(&orders).unwrap()
+        ),
+    )
+    .unwrap();
+    let changed = run_prepare_timings(temp.path());
+    assert!(
+        changed.status.success(),
+        "{}",
+        String::from_utf8_lossy(&changed.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&changed.stdout);
+    assert!(stdout.contains("hits                     2"), "{stdout}");
+    assert!(stdout.contains("misses                   1"), "{stdout}");
+    let resolutions = stdout.split("contract resolution").nth(1).unwrap();
+    assert!(resolutions.contains("orders.ts"), "{stdout}");
+    assert!(!resolutions.contains("dashboard.ts"), "{stdout}");
+
+    write_orders_contract(&orders, "Changed fixture contract");
+    let semantic_change = run_prepare_timings(temp.path());
+    assert!(
+        semantic_change.status.success(),
+        "{}",
+        String::from_utf8_lossy(&semantic_change.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&semantic_change.stdout);
+    assert!(stdout.contains("misses                   2"), "{stdout}");
+    assert!(stdout.contains("dependency changed       1"), "{stdout}");
+    let resolutions = stdout.split("contract resolution").nth(1).unwrap();
+    assert!(resolutions.contains("orders.ts"), "{stdout}");
+    assert!(resolutions.contains("dashboard.ts"), "{stdout}");
 }
 
 #[test]
@@ -487,14 +763,39 @@ fn prepare_generates_rust_participant_facade_for_local_device_uses() {
     write_rust_contract(
         &service.join("contracts/orders.rs"),
         "orders.json",
+        "trellis.orders-service@v1",
         "Service",
     );
     write_rust_contract(
         &inventory.join("contracts/inventory.rs"),
         "inventory.json",
+        "trellis.inventory-service@v1",
         "Service",
     );
-    write_rust_contract(&device.join("contracts/device.rs"), "device.json", "Device");
+    write_rust_contract(
+        &device.join("contracts/device.rs"),
+        "device.json",
+        "trellis.device@v1",
+        "Device",
+    );
+    let legacy_participant = temp
+        .path()
+        .join("generated/protocol/participants/trellis.orders@v1.json");
+    fs::create_dir_all(legacy_participant.parent().unwrap()).unwrap();
+    fs::write(
+        &legacy_participant,
+        r#"{"format":"trellis.participant.v1","id":"trellis.orders-service@v1"}"#,
+    )
+    .unwrap();
+    let legacy_facade = temp
+        .path()
+        .join("generated/packages/cargo-participants/orders");
+    fs::create_dir_all(legacy_facade.join("src")).unwrap();
+    fs::write(
+        legacy_facade.join("src/contract.rs"),
+        "pub const CONTRACT_ID: &str = \"trellis.orders-service@v1\";\n",
+    )
+    .unwrap();
 
     let output = run_prepare(temp.path());
     assert!(
@@ -506,6 +807,51 @@ fn prepare_generates_rust_participant_facade_for_local_device_uses() {
     assert!(temp
         .path()
         .join("generated/packages/cargo/orders/Cargo.toml")
+        .exists());
+    let service_participant = temp
+        .path()
+        .join("generated/packages/cargo-participants/orders-service");
+    assert!(
+        fs::read_to_string(service_participant.join("src/contract.rs"))
+            .unwrap()
+            .contains("pub const CONTRACT_ID: &str = \"trellis.orders-service@v1\";")
+    );
+    assert!(fs::read_to_string(
+        temp.path()
+            .join("generated/packages/cargo/orders/src/api.rs")
+    )
+    .unwrap()
+    .contains("pub const API_ID: &str = \"trellis.orders@v1\";"));
+    assert!(temp
+        .path()
+        .join("generated/protocol/participants/trellis.orders-service@v1.json")
+        .exists());
+    assert!(!legacy_participant.exists());
+    assert!(!legacy_facade.exists());
+    write_rust_contract(
+        &service.join("contracts/orders.rs"),
+        "orders.json",
+        "trellis.orders-renamed@v1",
+        "Service",
+    );
+    let output = run_prepare(temp.path());
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(!service_participant.exists());
+    assert!(!temp
+        .path()
+        .join("generated/protocol/participants/trellis.orders-service@v1.json")
+        .exists());
+    assert!(temp
+        .path()
+        .join("generated/packages/cargo-participants/orders-renamed")
+        .exists());
+    assert!(temp
+        .path()
+        .join("generated/protocol/participants/trellis.orders-renamed@v1.json")
         .exists());
     let participant = temp
         .path()
@@ -603,7 +949,12 @@ fn prepare_generates_rust_participant_facade_without_uses() {
 "#,
     )
     .unwrap();
-    write_rust_contract(&device.join("contracts/device.rs"), "device.json", "Device");
+    write_rust_contract(
+        &device.join("contracts/device.rs"),
+        "device.json",
+        "trellis.device@v1",
+        "Device",
+    );
 
     let output = run_prepare(temp.path());
     assert!(
@@ -1022,23 +1373,28 @@ printf '{\"api\":{\"format\":\"trellis.api.v1\",\"id\":\"trellis.node-orders@v1\
     );
     write_executable(
         &tsc_path,
-        &format!(
-            "#!/bin/sh
+        "#!/bin/sh
 set -eu
-if [ \"${{1:-}}\" = \"--version\" ]; then
+if [ \"${1:-}\" = \"--version\" ]; then
   printf 'Version 0.0.0-test\\n'
   exit 0
 fi
-out={}
-mkdir -p \"$out/esm\"
+config=tsconfig.json
+while [ \"$#\" -gt 0 ]; do
+  if [ \"$1\" = \"-p\" ]; then
+    shift
+    config=\"$1\"
+  fi
+  shift || true
+done
+out=$(awk -F'\"' '/\"outDir\"/ { print $4; exit }' \"$config\")
+mkdir -p \"$out\"
 for f in *.ts; do
   base=$(basename \"$f\" .ts)
-  cp \"$f\" \"$out/esm/$base.js\"
-  cp \"$f\" \"$out/esm/$base.d.ts\"
+  cp \"$f\" \"$out/$base.js\"
+  cp \"$f\" \"$out/$base.d.ts\"
 done
 ",
-            npm_out.to_string_lossy()
-        ),
     );
 
     let output = trellis_generate()
@@ -1236,6 +1592,7 @@ fn local_mode_generates_service_artifacts_from_rust_contract_sources() {
     write_rust_contract(
         &project.join("contracts/service.rs"),
         "service.manifest.json",
+        "trellis.rust-service-participant@v1",
         "Service",
     );
     fs::write(
@@ -1297,7 +1654,11 @@ fn local_mode_skips_when_generated_artifacts_are_up_to_date() {
     let metadata = project.join("generated/protocol/apis/trellis.orders@v1.trellis-generate.json");
     assert!(metadata.exists());
 
-    let second = trellis_generate().current_dir(&project).output().unwrap();
+    let second = trellis_generate()
+        .args(["prepare", "--timings"])
+        .current_dir(&project)
+        .output()
+        .unwrap();
     assert!(
         second.status.success(),
         "{}",
@@ -1307,6 +1668,9 @@ fn local_mode_skips_when_generated_artifacts_are_up_to_date() {
     let stdout = String::from_utf8(second.stdout).unwrap();
     assert!(stdout.contains("artifacts already up to date for trellis.orders@v1"));
     assert!(!stdout.contains("generated contract artifacts for trellis.orders@v1"));
+    assert!(stdout.contains("Timings"));
+    assert!(stdout.contains("contracts               generated=0 verified=0 skipped=1"));
+    assert!(stdout.contains("installed               files=0 bytes=0"));
 }
 
 #[test]

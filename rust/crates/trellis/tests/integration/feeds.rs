@@ -59,6 +59,7 @@ impl trellis_rs::service::GeneratedServiceContract for FeedsServiceContract {
 #[test]
 fn feeds_service_contract_evidence_is_exact() {
     let contract = trellis_test::TrellisTestContract::from_native_api_json(
+        FEEDS_SERVICE_ID,
         FEEDS_SERVICE_API_SOURCE_JSON,
         trellis_rs::contracts::ContractKind::Service,
     )
@@ -134,6 +135,7 @@ async fn feeds_client_receives_first_frame() {
     let mut admin = runtime.admin();
 
     let service_contract = trellis_test::TrellisTestContract::from_native_api_json(
+        FEEDS_SERVICE_ID,
         FEEDS_SERVICE_API_SOURCE_JSON,
         trellis_rs::contracts::ContractKind::Service,
     )
@@ -201,6 +203,7 @@ async fn feeds_client_receives_ordered_frames() {
     let mut admin = runtime.admin();
 
     let service_contract = trellis_test::TrellisTestContract::from_native_api_json(
+        FEEDS_SERVICE_ID,
         FEEDS_SERVICE_API_SOURCE_JSON,
         trellis_rs::contracts::ContractKind::Service,
     )
@@ -283,6 +286,7 @@ async fn feeds_abort_stops_client_subscription() {
     let mut admin = runtime.admin();
 
     let service_contract = trellis_test::TrellisTestContract::from_native_api_json(
+        FEEDS_SERVICE_ID,
         FEEDS_SERVICE_API_SOURCE_JSON,
         trellis_rs::contracts::ContractKind::Service,
     )
@@ -360,6 +364,7 @@ async fn feeds_denies_subscribe_without_authority() {
     let mut admin = runtime.admin();
 
     let service_contract = trellis_test::TrellisTestContract::from_native_api_json(
+        FEEDS_SERVICE_ID,
         FEEDS_SERVICE_API_SOURCE_JSON,
         trellis_rs::contracts::ContractKind::Service,
     )
@@ -450,6 +455,7 @@ fn feeds_client_contract(
 ) -> Result<trellis_test::TrellisTestContract, trellis_test::TrellisTestError> {
     let manifest = trellis_rs::contracts::ContractBuilder::authoring(
         FEEDS_CLIENT_ID,
+        FEEDS_CLIENT_ID,
         "Trellis Integration Feeds Client",
         "App/client participant for the feeds integration fixture.",
         trellis_rs::contracts::ContractKind::App,
@@ -469,6 +475,7 @@ fn feeds_unauthorized_client_contract(
     service_contract: &trellis_test::TrellisTestContract,
 ) -> Result<trellis_test::TrellisTestContract, trellis_test::TrellisTestError> {
     let manifest = trellis_rs::contracts::ContractBuilder::authoring(
+        "trellis.integration.feeds-unauthorized-client@v1",
         "trellis.integration.feeds-unauthorized-client@v1",
         "Trellis Integration Feeds Unauthorized Client",
         "App/client participant without feed subscribe authority.",

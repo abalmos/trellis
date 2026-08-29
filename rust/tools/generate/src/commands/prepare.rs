@@ -10,13 +10,14 @@ use crate::cli::{PackageTarget, PrepareArgs};
 use crate::discovery::discover_contracts;
 use crate::output;
 use crate::planning::{build_auto_plan_with_targets, execute_auto_plan, AutoPlanEntry};
+use crate::timings;
 
 pub fn run(args: &PrepareArgs, force: bool) -> miette::Result<()> {
     if args.watch {
         return watch(args, force);
     }
 
-    run_once(args, force)
+    timings::run(args.timings, || run_once(args, force))
 }
 
 fn run_once(args: &PrepareArgs, force: bool) -> miette::Result<()> {
@@ -31,12 +32,15 @@ fn build_prepare_plan(args: &PrepareArgs) -> miette::Result<Vec<AutoPlanEntry>> 
         None => canonical_root,
     };
     let targets = prepare_targets(args);
-    build_auto_plan_with_targets(
-        discover_contracts(&args.root)?,
-        Some(&output_root),
-        &args.prefix,
-        targets.as_deref(),
-    )
+    let discovered = timings::phase("discover", || discover_contracts(&args.root))?;
+    timings::phase("plan", || {
+        build_auto_plan_with_targets(
+            discovered,
+            Some(&output_root),
+            &args.prefix,
+            targets.as_deref(),
+        )
+    })
 }
 
 fn prepare_targets(args: &PrepareArgs) -> Option<Vec<PackageTarget>> {
@@ -82,7 +86,11 @@ fn execute_prepare_plan(
         output::print_info("No contracts found.");
         return Ok(());
     }
-    execute_auto_plan(plan, Some("Trellis Prepare"), false, force, prefix).map(|_| ())
+    let summary = timings::phase("execute", || {
+        execute_auto_plan(plan, Some("Trellis Prepare"), false, force, prefix)
+    })?;
+    timings::contracts(summary.generated, summary.verified, summary.skipped);
+    Ok(())
 }
 
 fn watch(args: &PrepareArgs, force: bool) -> miette::Result<()> {
@@ -1008,6 +1016,10 @@ mod tests {
                 language,
                 source_path: PathBuf::from(source_path),
             },
+            resolved: None,
+            cached_resolution: None,
+            previous_participant_id: None,
+            local_dependencies: Vec::new(),
             contract_id: contract_id.to_owned(),
             contract_kind,
             action: AutoAction::Generate,

@@ -288,6 +288,7 @@ async fn rpc_client_calls_service_success() {
     let mut admin = runtime.admin();
 
     let service_contract = trellis_test::TrellisTestContract::from_native_api_json(
+        RPC_SERVICE_ID,
         RPC_SERVICE_API_SOURCE_JSON,
         trellis_rs::contracts::ContractKind::Service,
     )
@@ -470,6 +471,7 @@ async fn authorization_registry_provider_cache_is_nats_local_and_revocation_live
         .expect("observe first admin bootstrap URL");
     let mut admin = runtime.admin();
     let service_contract = trellis_test::TrellisTestContract::from_native_api_json(
+        RPC_SERVICE_ID,
         RPC_SERVICE_API_SOURCE_JSON,
         trellis_rs::contracts::ContractKind::Service,
     )
@@ -611,6 +613,7 @@ async fn rpc_service_receives_caller_context() {
     let mut admin = runtime.admin();
 
     let service_contract = trellis_test::TrellisTestContract::from_native_api_json(
+        RPC_SERVICE_ID,
         RPC_SERVICE_API_SOURCE_JSON,
         trellis_rs::contracts::ContractKind::Service,
     )
@@ -688,6 +691,7 @@ async fn rpc_client_receives_declared_error() {
     let mut admin = runtime.admin();
 
     let service_contract = trellis_test::TrellisTestContract::from_native_api_json(
+        RPC_SERVICE_ID,
         RPC_SERVICE_API_SOURCE_JSON,
         trellis_rs::contracts::ContractKind::Service,
     )
@@ -764,6 +768,7 @@ async fn rpc_denies_client_without_call_authority() {
     let mut admin = runtime.admin();
 
     let service_contract = trellis_test::TrellisTestContract::from_native_api_json(
+        RPC_SERVICE_ID,
         RPC_SERVICE_API_SOURCE_JSON,
         trellis_rs::contracts::ContractKind::Service,
     )
@@ -823,6 +828,7 @@ async fn rpc_invalid_annotated_input_schema_validation() {
     let mut admin = runtime.admin();
 
     let service_contract = trellis_test::TrellisTestContract::from_native_api_json(
+        RPC_SERVICE_ID,
         RPC_SERVICE_API_SOURCE_JSON,
         trellis_rs::contracts::ContractKind::Service,
     )
@@ -885,6 +891,7 @@ async fn rpc_invalid_mixed_input_validation() {
     let mut admin = runtime.admin();
 
     let service_contract = trellis_test::TrellisTestContract::from_native_api_json(
+        RPC_SERVICE_ID,
         RPC_SERVICE_API_SOURCE_JSON,
         trellis_rs::contracts::ContractKind::Service,
     )
@@ -1023,6 +1030,7 @@ fn rpc_client_contract(
 ) -> Result<trellis_test::TrellisTestContract, trellis_test::TrellisTestError> {
     let manifest = trellis_rs::contracts::ContractBuilder::authoring(
         RPC_CLIENT_ID,
+        RPC_CLIENT_ID,
         "Trellis Integration RPC Client",
         "App/client participant for the RPC integration fixture.",
         trellis_rs::contracts::ContractKind::App,
@@ -1045,6 +1053,7 @@ fn rpc_client_contract(
 fn rpc_unauthorized_client_contract(
 ) -> Result<trellis_test::TrellisTestContract, trellis_test::TrellisTestError> {
     let manifest = trellis_rs::contracts::ContractBuilder::authoring(
+        RPC_UNAUTHORIZED_CLIENT_ID,
         RPC_UNAUTHORIZED_CLIENT_ID,
         "Trellis Integration Unauthorized RPC Client",
         "App/client without rpc.call authority for Entity.Get.",

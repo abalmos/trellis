@@ -131,9 +131,9 @@ function copy(source: JsonObject, target: JsonObject, key: string): void {
 
 function compileApi(contract: JsonObject): JsonObject {
   const api: JsonObject = { format: "trellis.api.v1" };
+  api.id = contract.apiId;
   for (
     const field of [
-      "id",
       "displayName",
       "description",
       "docs",
@@ -153,7 +153,7 @@ function compileApi(contract: JsonObject): JsonObject {
     throw new Error(`undeclared local capability '${name}'`);
   };
   const capabilityAllows: Record<string, JsonValue[]> = {};
-  const apiId = String(contract.id);
+  const apiId = String(contract.apiId);
   for (const name of Object.keys(declaredCapabilities)) {
     capabilityAllows[normalizeCapability(name)] = [];
   }

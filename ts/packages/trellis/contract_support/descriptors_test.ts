@@ -179,6 +179,7 @@ Deno.test("connected names preserve Rust-compatible acronym word boundaries", ()
 Deno.test("direct action descriptors emit deterministic canonical uses", () => {
   const contract = defineAppContract(() => ({
     id: "storefront@v1",
+    apiId: "storefront@v1",
     displayName: "Storefront",
     description: "Storefront descriptor test.",
     uses: [
@@ -203,12 +204,14 @@ Deno.test("direct action descriptors emit deterministic canonical uses", () => {
 Deno.test("local aliases do not change canonical contract identity", () => {
   const original = defineAppContract(() => ({
     id: "storefront@v1",
+    apiId: "storefront@v1",
     displayName: "Storefront",
     description: "Storefront descriptor test.",
     uses: [OrdersGet],
   }));
   const aliased = defineAppContract(() => ({
     id: "storefront@v1",
+    apiId: "storefront@v1",
     displayName: "Storefront",
     description: "Storefront descriptor test.",
     uses: [as("getOrder", OrdersGet)],

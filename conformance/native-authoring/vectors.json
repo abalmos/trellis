@@ -18,11 +18,11 @@
         "description": "Minimal native app.",
         "displayName": "Minimal app",
         "format": "trellis.participant.v1",
-        "id": "conformance.minimal-app@v1",
+        "id": "conformance.minimal-app-participant@v1",
         "kind": "app"
       },
-      "participantCanonicalJson": "{\"description\":\"Minimal native app.\",\"displayName\":\"Minimal app\",\"format\":\"trellis.participant.v1\",\"id\":\"conformance.minimal-app@v1\",\"kind\":\"app\"}",
-      "participantDigest": "yDXtgm7ArKGxNxCjY4ud3Tn0w1vddFE83idFxxqMueE",
+      "participantCanonicalJson": "{\"description\":\"Minimal native app.\",\"displayName\":\"Minimal app\",\"format\":\"trellis.participant.v1\",\"id\":\"conformance.minimal-app-participant@v1\",\"kind\":\"app\"}",
+      "participantDigest": "BcVFw4jzpQ-76flyYi-95cY6A_NpSDceeXKRSQVAayU",
       "participantNeeds": {
         "format": "trellis.participant-needs.v1",
         "optional": {
@@ -34,7 +34,7 @@
           "resources": {}
         },
         "participant": {
-          "id": "conformance.minimal-app@v1",
+          "id": "conformance.minimal-app-participant@v1",
           "kind": "app"
         },
         "provides": {
@@ -49,7 +49,7 @@
           "resources": {}
         }
       },
-      "participantNeedsDigest": "vlweGp1zJKzcNinOVmMQH2CJ-waj87Pm6pvWP-99DqE",
+      "participantNeedsDigest": "cpIcC0B_Q4Wv6HLYpyzWMGow1GKqUqX69e8jnUd10LI",
       "requiredGrants": {
         "format": "trellis.grant-set.v1",
         "permissions": []

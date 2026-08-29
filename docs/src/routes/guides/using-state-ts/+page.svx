@@ -38,6 +38,7 @@ const schemas = {
 
 export const notesApp = defineAppContract({ schemas }, (ref) => ({
   id: "notes-app@v1",
+  apiId: "notes-app@v1",
   displayName: "Notes App",
   description: "A browser app with cloud-backed drafts and preferences.",
   state: {

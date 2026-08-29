@@ -60,6 +60,7 @@ export function createRpcFixture(caseId: string) {
     { schemas: rpcSchemas, errors: { NotFoundError } },
     (ref) => ({
       id: `trellis.integration.rpc-service.${slug}@v1`,
+      apiId: `trellis.integration.rpc-service.${slug}@v1`,
       displayName: `Trellis Integration RPC Service (${slug})`,
       description:
         "Exercises client-to-service RPC through generated surfaces.",
@@ -100,6 +101,7 @@ export function createRpcFixture(caseId: string) {
 
   const clientContract = defineAppContract(() => ({
     id: `trellis.integration.rpc-client.${slug}@v1`,
+    apiId: `trellis.integration.rpc-client.${slug}@v1`,
     displayName: `Trellis Integration RPC Client (${slug})`,
     description: "App/client participant for the RPC integration fixture.",
     uses: [
@@ -112,6 +114,7 @@ export function createRpcFixture(caseId: string) {
 
   const unauthorizedClientContract = defineAppContract(() => ({
     id: `trellis.integration.rpc-unauthorized-client.${slug}@v1`,
+    apiId: `trellis.integration.rpc-unauthorized-client.${slug}@v1`,
     displayName: `Trellis Integration Unauthorized RPC Client (${slug})`,
     description: "App/client without rpc.call authority for Entity.Get.",
   }));

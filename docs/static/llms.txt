@@ -1,6 +1,6 @@
 # Trellis AI guide
 
-Last verified against Trellis main (2026-08-02).
+Last verified against Trellis main (2026-08-28).
 
 Canonical full guide:
 https://raw.githubusercontent.com/qlever-llc/trellis/main/docs/static/llms-full.txt
@@ -20,6 +20,11 @@ commands.
   registry, revocation, logout, or client-bootstrap API.
 - Runtime boundaries use `trellis.api.v1` and `trellis.participant.v1` artifacts.
   TypeScript contracts are compiled to those artifacts before bootstrap.
+- Contract authoring supplies participant and owned API identities independently.
+  TypeScript `define*Contract` bodies require both `id` and `apiId`. Rust
+  `ContractBuilder::authoring` and `ContractBuilder::from_api` receive the
+  participant ID explicitly. Generated participant facades expose `CONTRACT_ID`;
+  generated API SDKs expose `API_ID`.
 - Large Rust store and transfer bodies use borrowed Tokio readers and writers;
   whole-buffer helpers remain conveniences. Transfer completion and cancellation
   are authenticated and acknowledged, with completion bound to exact size and
@@ -315,6 +320,17 @@ commands.
 - Deployment authority plans expose `breakingChanges` as structured per-target
   compatibility failures for operator UI.
 - Wrap Rust Trellis generation in `cargo xtask prepare`.
+- Diagnose Rust generation performance with `cargo xtask prepare --timings`; the
+  report includes phase and per-contract resolution times, subprocess counts,
+  cache hits/misses and input validation, generation outcomes, and installed
+  file/byte totals.
+- Prepare caches canonical contract resolution in the platform user cache,
+  repository-namespaced and disposable. Set `TRELLIS_PREPARE_CACHE` to isolate
+  or relocate it; `--force` bypasses it. Declare exceptional deterministic
+  resolution inputs with `trellis.prepare.inputs` globs and
+  `trellis.prepare.env` names in `package.json`, or
+  `[package.metadata.trellis.prepare]` in `Cargo.toml`. Undeclared time,
+  randomness, network, environment, and external-file inputs are unsupported.
 - Rust owner SDKs are vocabulary-only. Rust services, apps, agents, and devices
   connect only through their materialized generated participant facade. Do not
   import `trellis_rs::client` or `trellis_rs::generated` in application code.

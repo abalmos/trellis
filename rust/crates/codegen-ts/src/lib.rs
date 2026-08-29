@@ -37,6 +37,9 @@ pub enum CodegenTsError {
 
     #[error("generated TypeScript export name collision: {0}")]
     ExportNameCollision(String),
+
+    #[error("generated TypeScript output path must stay within the package: {0}")]
+    InvalidOutputPath(PathBuf),
 }
 
 /// Options for generating one TypeScript SDK package.
@@ -73,14 +76,32 @@ pub enum TsRuntimeSource {
 
 /// Generate a TypeScript SDK package for one native API.
 pub fn generate_ts_sdk(opts: &GenerateTsSdkOpts) -> Result<(), CodegenTsError> {
-    let parent = opts.out_dir.parent().unwrap_or_else(|| Path::new("."));
+    let sources = collect_ts_sdk_sources(opts)?;
+    write_ts_sdk_sources(&opts.out_dir, &sources)
+}
+
+/// Atomically write a previously rendered TypeScript SDK package.
+pub fn write_ts_sdk_sources(
+    out_dir: &Path,
+    sources: &[GeneratedTsSource],
+) -> Result<(), CodegenTsError> {
+    for source in sources {
+        if source.path.is_absolute()
+            || source
+                .path
+                .components()
+                .any(|component| matches!(component, std::path::Component::ParentDir))
+        {
+            return Err(CodegenTsError::InvalidOutputPath(source.path.clone()));
+        }
+    }
+    let parent = out_dir.parent().unwrap_or_else(|| Path::new("."));
     fs::create_dir_all(parent)?;
     let nonce = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_nanos();
-    let stem = opts
-        .out_dir
+    let stem = out_dir
         .file_name()
         .and_then(|name| name.to_str())
         .unwrap_or("sdk");
@@ -88,16 +109,16 @@ pub fn generate_ts_sdk(opts: &GenerateTsSdkOpts) -> Result<(), CodegenTsError> {
     let backup = parent.join(format!(".{stem}.old-{}-{nonce}", std::process::id()));
     fs::create_dir(&staging)?;
 
-    for source in collect_ts_sdk_sources(opts)? {
-        write_generated_file(&staging.join(source.path), &source.contents)?;
+    for source in sources {
+        write_generated_file(&staging.join(&source.path), &source.contents)?;
     }
 
-    if opts.out_dir.exists() {
-        fs::rename(&opts.out_dir, &backup)?;
+    if out_dir.exists() {
+        fs::rename(out_dir, &backup)?;
     }
-    if let Err(error) = fs::rename(&staging, &opts.out_dir) {
+    if let Err(error) = fs::rename(&staging, out_dir) {
         if backup.exists() {
-            let _ = fs::rename(&backup, &opts.out_dir);
+            let _ = fs::rename(&backup, out_dir);
         }
         return Err(error.into());
     }
@@ -108,6 +129,14 @@ pub fn generate_ts_sdk(opts: &GenerateTsSdkOpts) -> Result<(), CodegenTsError> {
     Ok(())
 }
 
+/// Render the package configuration for a TypeScript SDK.
+pub fn render_ts_sdk_config(opts: &GenerateTsSdkOpts) -> Result<GeneratedTsSource, CodegenTsError> {
+    Ok(GeneratedTsSource {
+        path: PathBuf::from("deno.json"),
+        contents: format!("{}\n", serde_json::to_string_pretty(&deno_json(opts)?)?),
+    })
+}
+
 /// Render all files that make up a TypeScript SDK package without writing them.
 pub fn collect_ts_sdk_sources(
     opts: &GenerateTsSdkOpts,
@@ -115,13 +144,7 @@ pub fn collect_ts_sdk_sources(
     let loaded = load_sdk_source(&opts.api_path)?;
     validate_public_export_names(&loaded)?;
     Ok(vec![
-        GeneratedTsSource {
-            path: PathBuf::from("deno.json"),
-            contents: format!(
-                "{}\n",
-                serde_json::to_string_pretty(&deno_json(opts, &loaded)?)?
-            ),
-        },
+        render_ts_sdk_config(opts)?,
         GeneratedTsSource {
             path: PathBuf::from("descriptors.ts"),
             contents: render_descriptors_ts(opts, &loaded),
@@ -167,10 +190,7 @@ struct SchemaTypeAlias {
     schema: Value,
 }
 
-fn deno_json(
-    opts: &GenerateTsSdkOpts,
-    _loaded: &LoadedApi,
-) -> Result<serde_json::Map<String, Value>, CodegenTsError> {
+fn deno_json(opts: &GenerateTsSdkOpts) -> Result<serde_json::Map<String, Value>, CodegenTsError> {
     let mut root = serde_json::Map::new();
     let extends = resolved_extends(opts)?;
 
@@ -1244,6 +1264,50 @@ fn validate_typescript(path: &Path, contents: &str) -> Result<(), CodegenTsError
     })
 }
 
+/// Local module specifiers referenced by TypeScript source code.
+#[derive(Debug, PartialEq, Eq)]
+pub struct TypeScriptModuleDependencies {
+    /// Static and literal dynamic module specifiers in stable order.
+    pub specifiers: Vec<String>,
+    /// Whether a computed dynamic import prevents complete static discovery.
+    pub has_computed_dynamic_import: bool,
+    /// Whether parse errors prevent complete static discovery.
+    pub has_parse_errors: bool,
+}
+
+/// Parse TypeScript imports and re-exports for incremental input tracking.
+pub fn typescript_module_dependencies(contents: &str) -> TypeScriptModuleDependencies {
+    let allocator = Allocator::default();
+    let parsed = Parser::new(&allocator, contents, SourceType::tsx()).parse();
+    let has_parse_errors = !parsed.errors.is_empty();
+    let mut specifiers = parsed
+        .module_record
+        .requested_modules
+        .keys()
+        .map(ToString::to_string)
+        .collect::<Vec<_>>();
+    let mut has_computed_dynamic_import = false;
+    for dynamic_import in &parsed.module_record.dynamic_imports {
+        let source = &contents[dynamic_import.module_request.start as usize
+            ..dynamic_import.module_request.end as usize];
+        let literal = source
+            .strip_prefix(['\'', '"'])
+            .and_then(|source| source.strip_suffix(['\'', '"']));
+        if let Some(literal) = literal {
+            specifiers.push(literal.to_string());
+        } else {
+            has_computed_dynamic_import = true;
+        }
+    }
+    specifiers.sort();
+    specifiers.dedup();
+    TypeScriptModuleDependencies {
+        specifiers,
+        has_computed_dynamic_import,
+        has_parse_errors,
+    }
+}
+
 fn write_if_changed(path: &Path, contents: &str) -> Result<(), CodegenTsError> {
     if fs::read_to_string(path).ok().as_deref() == Some(contents) {
         return Ok(());
@@ -1818,6 +1882,60 @@ mod tests {
     }
 
     #[test]
+    fn module_dependencies_include_static_and_literal_dynamic_imports() {
+        let dependencies = typescript_module_dependencies(
+            r#"
+                import "./side-effect.ts";
+                import { value } from "./value.ts";
+                export { other } from "./other.ts";
+                export * from "./all.ts";
+                await import("./dynamic.ts");
+            "#,
+        );
+
+        assert_eq!(
+            dependencies.specifiers,
+            [
+                "./all.ts",
+                "./dynamic.ts",
+                "./other.ts",
+                "./side-effect.ts",
+                "./value.ts",
+            ]
+        );
+        assert!(!dependencies.has_computed_dynamic_import);
+    }
+
+    #[test]
+    fn module_dependencies_flag_computed_dynamic_imports() {
+        let dependencies = typescript_module_dependencies("await import(`./${name}.ts`);");
+
+        assert!(dependencies.specifiers.is_empty());
+        assert!(dependencies.has_computed_dynamic_import);
+    }
+
+    #[test]
+    fn module_dependencies_report_parse_errors() {
+        assert!(typescript_module_dependencies("import {").has_parse_errors);
+    }
+
+    #[test]
+    fn source_writer_rejects_paths_outside_package() {
+        let root = unique_temp_dir("invalid-output-path");
+        let error = write_ts_sdk_sources(
+            &root.join("sdk"),
+            &[GeneratedTsSource {
+                path: PathBuf::from("../escape.ts"),
+                contents: "export {};\n".to_string(),
+            }],
+        )
+        .unwrap_err();
+
+        assert!(matches!(error, CodegenTsError::InvalidOutputPath(_)));
+        assert!(!root.join("escape.ts").exists());
+    }
+
+    #[test]
     fn protocol_api_generation_uses_api_identity() {
         let manifest_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("../../../generated/protocol/apis/trellis.auth@v1.json");
@@ -2013,8 +2131,7 @@ mod tests {
                 repo_root: None,
             },
         };
-        let loaded = load_sdk_source(&manifest_path).unwrap();
-        let deno = deno_json(&opts, &loaded).unwrap();
+        let deno = deno_json(&opts).unwrap();
 
         let imports = deno.get("imports").and_then(Value::as_object).unwrap();
         assert_eq!(
@@ -2048,8 +2165,7 @@ mod tests {
                 repo_root: None,
             },
         };
-        let loaded = load_sdk_source(&manifest_path).unwrap();
-        let deno = deno_json(&opts, &loaded).unwrap();
+        let deno = deno_json(&opts).unwrap();
         let compiler_options = deno
             .get("compilerOptions")
             .and_then(Value::as_object)
@@ -2137,8 +2253,7 @@ mod tests {
                 repo_root: Some(repo_root.clone()),
             },
         };
-        let loaded = load_sdk_source(&manifest_path).unwrap();
-        let deno = deno_json(&opts, &loaded).unwrap();
+        let deno = deno_json(&opts).unwrap();
 
         assert_eq!(
             deno.get("extends").and_then(Value::as_str),

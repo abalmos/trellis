@@ -1,10 +1,12 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::{Mutex, OnceLock};
 
 use miette::IntoDiagnostic;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tempfile::TempDir;
 use trellis_contracts::{load_participant_source, load_sdk_source, LoadedApi, LoadedParticipant};
@@ -56,6 +58,69 @@ pub struct ResolvedNativeInput {
     _temp_dir: Option<TempDir>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct CachedNativeResolution {
+    pub api: Value,
+    pub participant: Option<Value>,
+    pub referenced_apis: Vec<Value>,
+    pub owner_version: Option<String>,
+}
+
+impl CachedNativeResolution {
+    pub fn from_resolved(resolved: &ResolvedNativeInput) -> Self {
+        Self {
+            api: resolved.api.value.clone(),
+            participant: resolved
+                .participant
+                .as_ref()
+                .map(|participant| participant.value.clone()),
+            referenced_apis: resolved
+                .referenced_apis
+                .iter()
+                .map(|api| api.value.clone())
+                .collect(),
+            owner_version: resolved.owner_version.clone(),
+        }
+    }
+}
+
+pub(crate) fn rehydrate_cached_resolution(
+    cached: &CachedNativeResolution,
+) -> miette::Result<ResolvedNativeInput> {
+    let temp_dir = TempDir::new().into_diagnostic()?;
+    let api_path = temp_dir.path().join("api.json");
+    fs::write(&api_path, cached.api.to_string()).into_diagnostic()?;
+    let participant_path = cached
+        .participant
+        .as_ref()
+        .map(|participant| {
+            let path = temp_dir.path().join("participant.json");
+            fs::write(&path, participant.to_string()).into_diagnostic()?;
+            Ok::<_, miette::Report>(path)
+        })
+        .transpose()?;
+    let referenced_apis = write_loaded_referenced_apis(
+        temp_dir.path(),
+        Some(&Value::Array(cached.referenced_apis.clone())),
+    )?;
+    let api = load_sdk_source(&api_path).into_diagnostic()?;
+    let participant = participant_path
+        .as_deref()
+        .map(load_participant_source)
+        .transpose()
+        .into_diagnostic()?;
+    Ok(ResolvedNativeInput {
+        api,
+        api_path,
+        participant,
+        participant_path,
+        referenced_apis,
+        owner_version: cached.owner_version.clone(),
+        _temp_dir: Some(temp_dir),
+    })
+}
+
 pub fn default_image_api_path() -> &'static str {
     DEFAULT_IMAGE_API_PATH
 }
@@ -67,7 +132,7 @@ pub fn warn_forward_incompatible_public_schemas(loaded: &LoadedApi) {
     }
 }
 
-fn forward_incompatible_public_schema_warnings(loaded: &LoadedApi) -> Vec<String> {
+pub(crate) fn forward_incompatible_public_schema_warnings(loaded: &LoadedApi) -> Vec<String> {
     let render_model = &loaded.render_model;
     let mut schema_names = BTreeSet::new();
 
@@ -318,25 +383,27 @@ fn resolve_rust_source_contract(
     let source_path = resolve_rust_contract_source_path(source_path, source_export)?;
     let temp_dir = TempDir::new().into_diagnostic()?;
     let api_path = temp_dir.path().join("api.json");
-    let api_source_json = evaluate_rust_native_artifact(&source_path, source_export)?;
-    let presentation = evaluate_rust_native_participant(&source_path)?;
+    let presentation = evaluate_rust_native_contract(&source_path, source_export)?;
     let participant_path = presentation
-        .as_ref()
-        .and_then(|value| value.get("participant"))
+        .get("participant")
+        .filter(|value| !value.is_null())
         .map(|participant| {
             let path = temp_dir.path().join("participant.json");
             fs::write(&path, participant.to_string()).into_diagnostic()?;
             Ok::<_, miette::Report>(path)
         })
         .transpose()?;
-    let referenced_apis = write_loaded_referenced_apis(
-        temp_dir.path(),
-        presentation
-            .as_ref()
-            .and_then(|value| value.get("referencedApis")),
-    )?;
+    let referenced_apis =
+        write_loaded_referenced_apis(temp_dir.path(), presentation.get("referencedApis"))?;
 
-    fs::write(&api_path, &api_source_json).into_diagnostic()?;
+    fs::write(
+        &api_path,
+        presentation
+            .get("api")
+            .ok_or_else(|| miette::miette!("Rust contract resolver did not return an API"))?
+            .to_string(),
+    )
+    .into_diagnostic()?;
     let loaded = load_sdk_source(&api_path).into_diagnostic()?;
     let participant = participant_path
         .as_deref()
@@ -354,7 +421,7 @@ fn resolve_rust_source_contract(
     })
 }
 
-fn resolve_rust_contract_source_path(
+pub(crate) fn resolve_rust_contract_source_path(
     source_path: &Path,
     source_export: &str,
 ) -> miette::Result<PathBuf> {
@@ -460,10 +527,7 @@ fn find_nearest_rust_package_dir(source_path: &Path) -> Option<PathBuf> {
     None
 }
 
-fn evaluate_rust_native_artifact(
-    source_path: &Path,
-    source_export: &str,
-) -> miette::Result<String> {
+fn evaluate_rust_native_contract(source_path: &Path, source_export: &str) -> miette::Result<Value> {
     let resolver_key = stable_resolver_key(source_path, source_export);
     let helper_dir = rust_contract_resolver_project_dir(&resolver_key);
     let src_dir = helper_dir.join("src");
@@ -477,9 +541,9 @@ fn evaluate_rust_native_artifact(
         rust_artifact_function_name(source_export)?
     };
 
-    fs::write(
-        helper_dir.join("Cargo.toml"),
-        format!(
+    write_if_changed(
+        &helper_dir.join("Cargo.toml"),
+        &format!(
             r#"[package]
 name = "trellis-rust-contract-resolver-{resolver_key}"
 version = "0.0.0"
@@ -494,11 +558,25 @@ trellis-contracts = {{ path = {} }}
 "#,
             toml_string_literal(&contracts_crate)
         ),
-    )
-    .into_diagnostic()?;
+    )?;
 
-    fs::write(
-        src_dir.join("main.rs"),
+    let has_contract_artifacts =
+        source_export == "API" && rust_source_has_function(&source, "contract_artifacts");
+    let main_rs = if has_contract_artifacts {
+        format!(
+            r#"#[path = {}]
+mod contract_source;
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {{
+    let artifacts = contract_source::contract_artifacts()?;
+    let referenced_apis = artifacts.referenced_apis().values().map(|api| api.normalized_value()).collect::<Result<Vec<_>, _>>()?;
+    print!("{{}}", serde_json::to_string(&serde_json::json!({{"api": artifacts.api_value()?, "participant": artifacts.participant_value()?, "referencedApis": referenced_apis}}))?);
+    Ok(())
+}}
+"#,
+            rust_string_literal(source_path)
+        )
+    } else {
         format!(
             r#"#[path = {}]
 mod contract_source;
@@ -521,16 +599,16 @@ impl IntoArtifactValue for Result<trellis_contracts::ApiArtifact, trellis_contra
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {{
     let artifact = IntoArtifactValue::into_artifact_value(contract_source::{builder_fn}())?;
-    print!("{{}}", serde_json::to_string(&artifact)?);
+    print!("{{}}", serde_json::to_string(&serde_json::json!({{"api": artifact, "participant": null, "referencedApis": []}}))?);
     Ok(())
 }}
 "#,
             rust_string_literal(source_path)
-        ),
-    )
-    .into_diagnostic()?;
+        )
+    };
+    write_if_changed(&src_dir.join("main.rs"), &main_rs)?;
 
-    let output = Command::new(cargo_binary())
+    let output = crate::timings::command(cargo_binary())
         .arg("run")
         .arg("--quiet")
         .arg("--manifest-path")
@@ -545,50 +623,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {{
         String::from_utf8_lossy(&output.stderr).trim()
     );
 
-    String::from_utf8(output.stdout).into_diagnostic()
+    serde_json::from_slice(&output.stdout).into_diagnostic()
 }
 
-fn evaluate_rust_native_participant(source_path: &Path) -> miette::Result<Option<Value>> {
-    let source = fs::read_to_string(source_path).into_diagnostic()?;
-    if !rust_source_has_function(&source, "contract_artifacts") {
-        return Ok(None);
+fn write_if_changed(path: &Path, contents: &str) -> miette::Result<()> {
+    if fs::read_to_string(path).ok().as_deref() != Some(contents) {
+        fs::write(path, contents).into_diagnostic()?;
     }
-    let resolver_key = stable_resolver_key(source_path, "contract_artifacts");
-    let helper_dir = rust_contract_resolver_project_dir(&resolver_key);
-    fs::create_dir_all(helper_dir.join("src")).into_diagnostic()?;
-    fs::write(
-        helper_dir.join("Cargo.toml"),
-        format!(
-            "[package]\nname = \"trellis-rust-participant-resolver-{resolver_key}\"\nversion = \"0.0.0\"\nedition = \"2021\"\npublish = false\n\n[workspace]\n\n[dependencies]\nserde_json = \"1.0.149\"\ntrellis-contracts = {{ path = {} }}\n",
-            toml_string_literal(&contracts_crate_path()?)
-        ),
-    )
-    .into_diagnostic()?;
-    fs::write(
-        helper_dir.join("src/main.rs"),
-        format!(
-            "#[path = {}]\nmod contract_source;\n\nfn main() -> Result<(), Box<dyn std::error::Error>> {{\n    let artifacts = contract_source::contract_artifacts()?;\n    let referenced_apis = artifacts.referenced_apis().values().map(|api| api.normalized_value()).collect::<Result<Vec<_>, _>>()?;\n    print!(\"{{}}\", serde_json::to_string(&serde_json::json!({{\"participant\": artifacts.participant_value()?, \"referencedApis\": referenced_apis}}))?);\n    Ok(())\n}}\n",
-            rust_string_literal(source_path)
-        ),
-    )
-    .into_diagnostic()?;
-    let output = Command::new(cargo_binary())
-        .arg("run")
-        .arg("--quiet")
-        .arg("--manifest-path")
-        .arg(helper_dir.join("Cargo.toml"))
-        .env("CARGO_TARGET_DIR", rust_contract_resolver_target_dir())
-        .output()
-        .into_diagnostic()?;
-    miette::ensure!(
-        output.status.success(),
-        "failed to resolve Rust participant source {}: {}",
-        source_path.display(),
-        String::from_utf8_lossy(&output.stderr).trim()
-    );
-    Ok(Some(
-        serde_json::from_slice(&output.stdout).into_diagnostic()?,
-    ))
+    Ok(())
 }
 
 fn write_loaded_referenced_apis(
@@ -696,7 +738,7 @@ fn resolve_image_contract(
     let resolved_api_path =
         inspect_image_api_path(&oci_tool, image_ref).unwrap_or_else(|| image_api_path.to_string());
 
-    let create = Command::new(&oci_tool)
+    let create = crate::timings::command(&oci_tool)
         .arg("create")
         .arg(image_ref)
         .output()
@@ -708,13 +750,13 @@ fn resolve_image_contract(
     );
     let container_id = String::from_utf8_lossy(&create.stdout).trim().to_string();
 
-    let copy = Command::new(&oci_tool)
+    let copy = crate::timings::command(&oci_tool)
         .arg("cp")
         .arg(format!("{container_id}:{resolved_api_path}"))
         .arg(&api_path)
         .output()
         .into_diagnostic()?;
-    let _ = Command::new(&oci_tool)
+    let _ = crate::timings::command(&oci_tool)
         .arg("rm")
         .arg("-f")
         .arg(&container_id)
@@ -857,7 +899,7 @@ fn read_workspace_cargo_version(path: &Path) -> Option<String> {
 }
 
 fn inspect_image_api_path(oci_tool: &str, image_ref: &str) -> Option<String> {
-    let output = Command::new(oci_tool)
+    let output = crate::timings::command(oci_tool)
         .arg("inspect")
         .arg(image_ref)
         .output()
@@ -894,7 +936,11 @@ fn find_oci_tool() -> miette::Result<String> {
     }
 
     for candidate in ["podman", "docker"] {
-        if Command::new(candidate).arg("--version").output().is_ok() {
+        if crate::timings::command(candidate)
+            .arg("--version")
+            .output()
+            .is_ok()
+        {
             return Ok(candidate.to_string());
         }
     }
@@ -1016,7 +1062,7 @@ fn build_source_resolution_command(
 ) -> miette::Result<Command> {
     match resolver {
         SourceResolverRuntime::Deno { binary } => {
-            let mut command = Command::new(binary);
+            let mut command = crate::timings::command(binary);
             command.arg("eval").arg("--quiet");
             if context.use_node_modules_dir {
                 command.arg("--node-modules-dir=auto");
@@ -1037,7 +1083,7 @@ fn build_source_resolution_command(
                 SourceModuleKind::JavaScript => "resolve-contract.mjs",
             });
             fs::write(&runner_path, node_resolution_script()).into_diagnostic()?;
-            let mut command = Command::new(binary);
+            let mut command = crate::timings::command(binary);
             command
                 .current_dir(&context.current_dir)
                 .arg(&runner_path)
@@ -1090,7 +1136,22 @@ fn resolve_command_binary(
 }
 
 fn command_exists(binary: &str) -> bool {
-    Command::new(binary).arg("--version").output().is_ok()
+    type AvailabilityCache = Mutex<BTreeMap<(String, Option<String>), bool>>;
+    static AVAILABILITY: OnceLock<AvailabilityCache> = OnceLock::new();
+    let key = (
+        binary.to_string(),
+        env::var_os("PATH").map(|path| path.to_string_lossy().into_owned()),
+    );
+    let mut availability = AVAILABILITY
+        .get_or_init(Default::default)
+        .lock()
+        .expect("resolver availability mutex poisoned");
+    *availability.entry(key).or_insert_with(|| {
+        crate::timings::command(binary)
+            .arg("--version")
+            .output()
+            .is_ok()
+    })
 }
 
 fn find_local_node_bin(package_json: &Path, binary_name: &str) -> Option<PathBuf> {

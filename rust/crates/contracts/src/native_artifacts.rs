@@ -29,7 +29,7 @@ impl ApiBuilder {
         }
     }
 
-    /// Start a native API builder from Rust authoring metadata and surfaces.
+    /// Start a native API builder whose `id` is only the API identity.
     pub fn authoring(
         id: impl Into<String>,
         display_name: impl Into<String>,
@@ -37,11 +37,10 @@ impl ApiBuilder {
     ) -> Self {
         Self {
             value: Value::Null,
-            authoring: Some(ContractAuthoringBuilder::new(
+            authoring: Some(ContractAuthoringBuilder::new_api(
                 id,
                 display_name,
                 description,
-                ContractKind::App,
             )),
         }
     }
@@ -247,9 +246,13 @@ impl ContractBuilder {
         }
     }
 
-    /// Start authoring one API and its participant from private in-memory state.
+    /// Start authoring a participant and its owned API.
+    ///
+    /// `participant_id` is first and `api_id` is second. They are independent
+    /// identities and may differ.
     pub fn authoring(
-        id: impl Into<String>,
+        participant_id: impl Into<String>,
+        api_id: impl Into<String>,
         display_name: impl Into<String>,
         description: impl Into<String>,
         kind: ContractKind,
@@ -258,8 +261,9 @@ impl ContractBuilder {
             api: Value::Null,
             participant: Value::Null,
             referenced_apis: BTreeMap::new(),
-            authoring: Some(ContractAuthoringBuilder::new(
-                id,
+            authoring: Some(ContractAuthoringBuilder::new_contract(
+                api_id,
+                participant_id,
                 display_name,
                 description,
                 kind,
@@ -371,7 +375,15 @@ impl ContractBuilder {
     }
 
     /// Start a native participant facade for an API-owned service source.
-    pub fn from_api(api: Value, kind: ContractKind) -> Result<Self, ContractsError> {
+    ///
+    /// `participant_id` is explicit and is never derived from the API. The
+    /// participant copies the API metadata and owned surfaces and pins that API
+    /// under `implements.self` with its exact digest.
+    pub fn from_api(
+        participant_id: impl Into<String>,
+        api: Value,
+        kind: ContractKind,
+    ) -> Result<Self, ContractsError> {
         let api_artifact = ApiBuilder::new(api).build()?;
         let api_value = api_artifact.normalized_value()?;
         let mut participant = Map::new();
@@ -380,8 +392,8 @@ impl ContractBuilder {
             Value::String("trellis.participant.v1".to_owned()),
         );
         participant.insert("kind".to_owned(), serde_json::to_value(kind)?);
+        participant.insert("id".to_owned(), Value::String(participant_id.into()));
         for field in [
-            "id",
             "displayName",
             "description",
             "docs",
@@ -877,7 +889,7 @@ fn build_participant_from_projection(
 
 fn api_projection(source: &AuthoringState) -> Result<Map<String, Value>, ContractsError> {
     let mut value = Map::new();
-    insert(&mut value, "id", &source.id)?;
+    insert(&mut value, "id", &source.api_id)?;
     insert(&mut value, "displayName", &source.display_name)?;
     insert(&mut value, "description", &source.description)?;
     insert_if_some(&mut value, "docs", source.docs.as_ref())?;
@@ -895,7 +907,14 @@ fn api_projection(source: &AuthoringState) -> Result<Map<String, Value>, Contrac
 
 fn participant_projection(source: &AuthoringState) -> Result<Map<String, Value>, ContractsError> {
     let mut value = Map::new();
-    insert(&mut value, "id", &source.id)?;
+    insert(
+        &mut value,
+        "id",
+        source
+            .participant_id
+            .as_ref()
+            .expect("participant projection requires ContractBuilder::authoring"),
+    )?;
     insert(&mut value, "displayName", &source.display_name)?;
     insert(&mut value, "description", &source.description)?;
     insert_if_some(&mut value, "docs", source.docs.as_ref())?;

@@ -17,6 +17,8 @@ import type { LiveTrellisRuntime } from "../_support/runtime.ts";
 const adminContract = defineAppContract(() => ({
   id:
     "trellis.integration.state-device-admin.state-activated-devices-rust-owner@v1",
+  apiId:
+    "trellis.integration.state-device-admin.state-activated-devices-rust-owner@v1",
   displayName: "Trellis Integration State Device Admin",
   description: "Provisions activated devices and inspects their State.",
   uses: [AuthDeviceUserAuthoritiesResolve],
@@ -31,6 +33,8 @@ const deviceContract = defineDeviceContract(
   },
   (ref) => ({
     id:
+      "trellis.integration.state-device.state-activated-devices-rust-owner@v1",
+    apiId:
       "trellis.integration.state-device.state-activated-devices-rust-owner@v1",
     displayName: "Trellis Integration State Device",
     description:

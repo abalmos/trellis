@@ -70,7 +70,7 @@ fn state_contract(
             ContractKind::Service,
         ),
     };
-    let mut builder = ContractBuilder::authoring(id, display_name, description, kind).use_ref(
+    let mut builder = ContractBuilder::authoring(id, id, display_name, description, kind).use_ref(
         "state",
         trellis_rs::contracts::use_contract("trellis.state@v1").with_rpc_call(
             match fixture {
@@ -133,6 +133,7 @@ fn state_contract(
         }
     }
     let state_api = trellis_test::TrellisTestContract::from_native_api_json(
+        trellis_rs::sdk::state::API_ID,
         trellis_rs::sdk::state::API_JSON,
         ContractKind::Service,
     )?;

@@ -17,6 +17,7 @@ const contract = defineAppContract(
   },
   (ref) => ({
     id: "trellis.integration.state-typescript.state-client-rust-owner@v1",
+    apiId: "trellis.integration.state-typescript.state-client-rust-owner@v1",
     displayName: "Trellis Integration TypeScript State Client",
     description: "Exercises the Rust-owned State runtime from TypeScript.",
     uses: [state({

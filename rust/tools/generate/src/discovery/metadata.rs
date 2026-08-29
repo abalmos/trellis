@@ -17,6 +17,83 @@ pub fn discover_contract_metadata(
     }
 }
 
+pub fn discover_static_typescript_metadata(
+    contract: &DiscoveredContractSource,
+) -> miette::Result<(String, ContractKind)> {
+    miette::ensure!(
+        contract.language == SourceLanguage::TypeScript,
+        "static TypeScript metadata requested for {}",
+        contract.source_path.display()
+    );
+    let source = fs::read_to_string(&contract.source_path).into_diagnostic()?;
+    Ok((
+        extract_typescript_api_id(&source).ok_or_else(|| {
+            miette::miette!(
+                "failed to infer contract id from {}",
+                contract.source_path.display()
+            )
+        })?,
+        discover_typescript_contract_kind(&source, &contract.source_path)?,
+    ))
+}
+
+fn extract_typescript_api_id(source: &str) -> Option<String> {
+    let artifact_id = ["\"trellis.api.v1\"", "'trellis.api.v1'"]
+        .into_iter()
+        .filter_map(|marker| source.find(marker))
+        .min()
+        .and_then(|format| {
+            let object_start = source[..format].rfind('{')?;
+            let object = &source[object_start..];
+            extract_quoted_source_field(object, "id")
+        });
+    artifact_id.or_else(|| {
+        [
+            "defineServiceContract(",
+            "defineAppContract(",
+            "defineDeviceContract(",
+            "defineAgentContract(",
+        ]
+        .into_iter()
+        .filter_map(|helper| source.find(helper))
+        .min()
+        .and_then(|start| extract_quoted_source_field(&source[start..], "apiId"))
+    })
+}
+
+pub fn discover_contract_kind(
+    contract: &DiscoveredContractSource,
+    resolved: &contract_input::ResolvedNativeInput,
+) -> miette::Result<ContractKind> {
+    if let Some(participant) = &resolved.participant {
+        return Ok(participant.render_model.kind.clone());
+    }
+    let source = fs::read_to_string(&contract.source_path).into_diagnostic()?;
+    match contract.language {
+        SourceLanguage::TypeScript => {
+            discover_typescript_contract_kind(&source, &contract.source_path)
+        }
+        SourceLanguage::Rust => [
+            ("ContractKind::Service", ContractKind::Service),
+            ("ContractKind::App", ContractKind::App),
+            ("ContractKind::Device", ContractKind::Device),
+            ("ContractKind::Agent", ContractKind::Agent),
+        ]
+        .into_iter()
+        .find_map(|(needle, kind)| source.contains(needle).then_some(kind))
+        .ok_or_else(|| {
+            miette::miette!(
+                "failed to infer contract kind from {}",
+                contract.source_path.display()
+            )
+        }),
+        SourceLanguage::Protocol => Err(miette::miette!(
+            "{} does not include a native participant",
+            contract.source_path.display()
+        )),
+    }
+}
+
 fn discover_typescript_contract_metadata(
     path: &std::path::Path,
 ) -> miette::Result<(String, ContractKind)> {
@@ -27,7 +104,7 @@ fn discover_typescript_contract_metadata(
             discover_typescript_contract_kind(&source, path).unwrap_or(resolved_kind),
         )),
         Err(error) => Ok((
-            extract_quoted_source_field(&source, "id").ok_or(error)?,
+            extract_quoted_source_field(&source, "apiId").ok_or(error)?,
             discover_typescript_contract_kind(&source, path)?,
         )),
     }
@@ -87,18 +164,22 @@ fn resolve_contract_metadata(path: &std::path::Path) -> miette::Result<(String, 
 }
 
 fn extract_quoted_source_field(source: &str, field: &str) -> Option<String> {
-    let needle = format!("{field}:");
     let mut offset = 0;
-    while let Some(found) = source[offset..].find(&needle) {
+    while let Some(found) = source[offset..].find(field) {
         let start = offset + found;
         let before = source[..start].chars().next_back();
-        if before.is_some_and(|ch| ch == '_' || ch.is_ascii_alphanumeric()) {
-            offset = start + needle.len();
+        if before.is_some_and(|ch| ch == '_' || ch == '$' || ch.is_ascii_alphanumeric()) {
+            offset = start + field.len();
             continue;
         }
-        let after = source[start + needle.len()..].trim_start();
-        let value = after.strip_prefix('"')?;
-        let end = value.find('"')?;
+        let mut after = &source[start + field.len()..];
+        if let Some(quote) = after.chars().next().filter(|ch| matches!(ch, '\'' | '"')) {
+            after = &after[quote.len_utf8()..];
+        }
+        let after = after.trim_start().strip_prefix(':')?.trim_start();
+        let quote = after.chars().next().filter(|ch| matches!(ch, '\'' | '"'))?;
+        let value = &after[quote.len_utf8()..];
+        let end = value.find(quote)?;
         return Some(value[..end].to_string());
     }
     None
@@ -132,6 +213,36 @@ mod tests {
     use tempfile::TempDir;
 
     use super::*;
+
+    #[test]
+    fn static_api_id_ignores_unrelated_earlier_id() {
+        let source = r#"
+const OTHER = { id: "trellis.other@v1" };
+const API = {
+  format: "trellis.api.v1",
+  id: "trellis.expected@v1",
+};
+"#;
+        assert_eq!(
+            extract_typescript_api_id(source).as_deref(),
+            Some("trellis.expected@v1")
+        );
+        assert_eq!(
+            extract_typescript_api_id(
+                r#"const OTHER = { id: "trellis.other@v1" };
+export default defineAppContract({ id: "trellis.app-participant@v1", apiId: "trellis.app@v1" });"#
+            )
+            .as_deref(),
+            Some("trellis.app@v1")
+        );
+        assert_eq!(
+            extract_typescript_api_id(
+                "export default defineAppContract({ id: 'trellis.app-participant@v1', apiId : 'trellis.app@v1' });"
+            )
+            .as_deref(),
+            Some("trellis.app@v1")
+        );
+    }
 
     #[test]
     fn discovers_typescript_metadata_via_deno_resolution() {
@@ -198,7 +309,8 @@ mod tests {
                 "import { defineAppContract } from '@qlever-llc/trellis/contracts';\n",
                 "import { auth } from '@qlever-llc/trellis/sdk/auth';\n",
                 "export const auditApp = defineAppContract(() => ({\n",
-                "  id: \"trellis.audit-app@v1\",\n",
+                "  id: \"trellis.audit-app-participant@v1\",\n",
+                "  apiId: \"trellis.audit-app@v1\",\n",
                 "  displayName: \"Audit App\",\n",
                 "  description: \"Audit UI\",\n",
                 "  uses: { auth },\n",
@@ -237,7 +349,8 @@ mod tests {
             concat!(
                 "import { defineAppContract } from '@qlever-llc/trellis/contracts';\n",
                 "export const inspectionApp = defineAppContract({ schemas: {} }, () => ({\n",
-                "  id: \"trellis.inspection-app@v1\",\n",
+                "  id: \"trellis.inspection-app-participant@v1\",\n",
+                "  apiId: \"trellis.inspection-app@v1\",\n",
                 "  displayName: \"Inspection App\",\n",
                 "  description: \"Inspection UI\",\n",
                 "  state: {\n",

@@ -643,8 +643,10 @@ pub struct ContractExports {
 /// Private in-memory state shared by the native API and participant builders.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct AuthoringState {
-    #[doc = concat!("The `", stringify!(id), "` contract value.")]
-    pub id: String,
+    /// Exact owned API identity.
+    pub api_id: String,
+    /// Stable participant identity when producing participant artifacts.
+    pub participant_id: Option<String>,
     #[doc = concat!("The `", stringify!(display_name), "` contract value.")]
     pub display_name: String,
     #[doc = concat!("The `", stringify!(description), "` contract value.")]

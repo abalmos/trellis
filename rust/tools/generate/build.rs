@@ -10,19 +10,33 @@ fn main() {
     println!("cargo:rerun-if-env-changed=TRELLIS_BUILD_SHA");
 
     let manifest_dir = PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").expect("manifest dir"));
-    println!(
-        "cargo:rerun-if-changed={}",
-        manifest_dir.join("../../.git/HEAD").display()
-    );
-
-    let inputs = fingerprint_inputs(&manifest_dir);
-
-    for path in &inputs {
+    let model_inputs = model_fingerprint_inputs(&manifest_dir);
+    let ts_inputs = ts_fingerprint_inputs(&manifest_dir, &model_inputs);
+    let npm_inputs = npm_fingerprint_inputs(&manifest_dir, &ts_inputs);
+    let rust_inputs = rust_fingerprint_inputs(&manifest_dir, &model_inputs);
+    let mut inputs = npm_inputs.clone();
+    inputs.extend(rust_inputs.iter().cloned());
+    inputs.sort();
+    inputs.dedup();
+    for path in inputs {
         println!("cargo:rerun-if-changed={}", path.display());
     }
-
-    let fingerprint = compute_fingerprint(&manifest_dir, &inputs);
-    println!("cargo:rustc-env=TRELLIS_GENERATE_FINGERPRINT={fingerprint}");
+    println!(
+        "cargo:rustc-env=TRELLIS_MODEL_FINGERPRINT={}",
+        compute_fingerprint(&manifest_dir, &model_inputs)
+    );
+    println!(
+        "cargo:rustc-env=TRELLIS_TS_CODEGEN_FINGERPRINT={}",
+        compute_fingerprint(&manifest_dir, &ts_inputs)
+    );
+    println!(
+        "cargo:rustc-env=TRELLIS_NPM_PACKAGING_FINGERPRINT={}",
+        compute_fingerprint(&manifest_dir, &npm_inputs)
+    );
+    println!(
+        "cargo:rustc-env=TRELLIS_RUST_CODEGEN_FINGERPRINT={}",
+        compute_fingerprint(&manifest_dir, &rust_inputs)
+    );
 
     let package_version = std::env::var("CARGO_PKG_VERSION").expect("package version");
     let build_version = build_version(&manifest_dir, &package_version);
@@ -65,21 +79,57 @@ fn git_output(manifest_dir: &Path, args: &[&str]) -> Option<String> {
     Some(String::from_utf8_lossy(&output.stdout).trim().to_string())
 }
 
-fn fingerprint_inputs(manifest_dir: &Path) -> Vec<PathBuf> {
+fn model_fingerprint_inputs(manifest_dir: &Path) -> Vec<PathBuf> {
     let mut paths = vec![
         manifest_dir.join("Cargo.toml"),
         manifest_dir.join("build.rs"),
+        manifest_dir.join("src/contract_input.rs"),
+        manifest_dir.join("src/resolution_cache.rs"),
+        manifest_dir.join("../../../ts/packages/trellis/deno.json"),
+        manifest_dir.join("../../../ts/packages/trellis/contract.ts"),
+        manifest_dir.join("../../../ts/packages/trellis/contracts.ts"),
     ];
-    paths.extend(collect_rust_files(&manifest_dir.join("src")));
-    paths.extend(collect_rust_files(
-        &manifest_dir.join("../../crates/codegen-ts/src"),
-    ));
-    paths.extend(collect_rust_files(
-        &manifest_dir.join("../../crates/codegen-rust/src"),
-    ));
     paths.extend(collect_rust_files(
         &manifest_dir.join("../../crates/contracts/src"),
     ));
+    paths.extend(collect_rust_files(&manifest_dir.join("src/discovery")));
+    for root in ["contract_support", "errors", "models"] {
+        paths.extend(collect_typescript_files(
+            &manifest_dir.join("../../../ts/packages/trellis").join(root),
+        ));
+    }
+    paths.sort();
+    paths.dedup();
+    paths
+}
+
+fn ts_fingerprint_inputs(manifest_dir: &Path, model: &[PathBuf]) -> Vec<PathBuf> {
+    let mut paths = model.to_vec();
+    paths.extend(collect_rust_files(
+        &manifest_dir.join("../../crates/codegen-ts/src"),
+    ));
+    paths.push(manifest_dir.join("src/artifacts.rs"));
+    normalize_paths(paths)
+}
+
+fn npm_fingerprint_inputs(manifest_dir: &Path, ts: &[PathBuf]) -> Vec<PathBuf> {
+    let mut paths = ts.to_vec();
+    paths.push(manifest_dir.join("../../../ts/deno.json"));
+    paths.push(manifest_dir.join("../../../ts/deno.lock"));
+    normalize_paths(paths)
+}
+
+fn rust_fingerprint_inputs(manifest_dir: &Path, model: &[PathBuf]) -> Vec<PathBuf> {
+    let mut paths = model.to_vec();
+    paths.extend(collect_rust_files(
+        &manifest_dir.join("../../crates/codegen-rust/src"),
+    ));
+    paths.push(manifest_dir.join("src/artifacts.rs"));
+    paths.push(manifest_dir.join("src/planning.rs"));
+    normalize_paths(paths)
+}
+
+fn normalize_paths(mut paths: Vec<PathBuf>) -> Vec<PathBuf> {
     paths.sort();
     paths.dedup();
     paths
@@ -89,6 +139,35 @@ fn collect_rust_files(root: &Path) -> Vec<PathBuf> {
     let mut out = Vec::new();
     collect_rust_files_into(root, &mut out);
     out
+}
+
+fn collect_typescript_files(root: &Path) -> Vec<PathBuf> {
+    let mut out = Vec::new();
+    collect_typescript_files_into(root, &mut out);
+    out
+}
+
+fn collect_typescript_files_into(root: &Path, out: &mut Vec<PathBuf>) {
+    let Ok(entries) = fs::read_dir(root) else {
+        return;
+    };
+    let mut entries = entries
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .collect::<Vec<_>>();
+    entries.sort();
+    for path in entries {
+        if path.is_dir() {
+            collect_typescript_files_into(&path, out);
+        } else if path.extension().and_then(|value| value.to_str()) == Some("ts")
+            && !path
+                .file_stem()
+                .and_then(|value| value.to_str())
+                .is_some_and(|name| name.ends_with("_test") || name.ends_with(".test"))
+        {
+            out.push(path);
+        }
+    }
 }
 
 fn collect_rust_files_into(root: &Path, out: &mut Vec<PathBuf>) {

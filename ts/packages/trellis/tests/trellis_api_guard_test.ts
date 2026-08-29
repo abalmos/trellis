@@ -112,6 +112,7 @@ const rpcTestContract = defineServiceContract(
   },
   (ref) => ({
     id: "trellis.client.rpc-guard-test@v1",
+    apiId: "trellis.client.rpc-guard-test@v1",
     displayName: "RPC Guard Test",
     description: "Covers RPC client guard behavior.",
     rpc: {
@@ -125,11 +126,15 @@ const rpcTestContract = defineServiceContract(
   }),
 );
 
-const emptyRpcContract = defineServiceContract({}, () => ({
-  id: "trellis.empty.rpc-guard-test@v1",
-  displayName: "Empty RPC Guard Test",
-  description: "Covers empty RPC facade behavior.",
-}));
+const emptyRpcContract = defineServiceContract(
+  {},
+  () => ({
+    id: "trellis.empty.rpc-guard-test@v1",
+    apiId: "trellis.empty.rpc-guard-test@v1",
+    displayName: "Empty RPC Guard Test",
+    description: "Covers empty RPC facade behavior.",
+  }),
+);
 
 Deno.test("private transport explains when no API surface was configured", async () => {
   const trellis = createTrellisInternal(

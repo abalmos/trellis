@@ -1,6 +1,6 @@
 # Trellis AI guidance for TypeScript services
 
-Last verified against Trellis main (2026-08-03).
+Last verified against Trellis main (2026-08-28).
 
 Use this file for AI coding agents working in a TypeScript service repository
 that consumes Trellis. The language-neutral guide is:
@@ -38,6 +38,9 @@ Rules:
 - every TypeScript contract source loaded by Trellis generation should
   default-export the `defineServiceContract(...)`, `defineAppContract(...)`,
   `defineAgentContract(...)`, or `defineDeviceContract(...)` result
+- every `define*Contract` body requires both `id` (stable participant identity)
+  and `apiId` (owned API identity), even when their values are equal. Generated
+  participant facades expose `CONTRACT_ID`; generated API SDKs expose `API_ID`.
 - import those normal contract helpers from the browser-safe
   `@qlever-llc/trellis` root. Keep service runtime, device activation,
   browser-auth, telemetry, generated SDK, and advanced contract tooling imports on
@@ -47,6 +50,12 @@ Rules:
   explicit expired/replaced review, not a review to follow silently. Resolve
   cancellation is unsupported.
 - `deno.json` should expose Trellis generation through `deno task prepare`
+- Prepare keeps a disposable, repository-namespaced resolution cache in the
+  platform user cache. Set `TRELLIS_PREPARE_CACHE` to isolate or relocate it.
+  For deterministic contract inputs outside the followed local import graph,
+  declare relative globs in `package.json` at `trellis.prepare.inputs` and
+  environment names at `trellis.prepare.env`. Undeclared time, randomness,
+  network, environment, and external-file inputs are unsupported.
 - service-boundary integration tests can use
   `@qlever-llc/trellis-test/integration` and
   `@qlever-llc/trellis-test/integration/runner`: define
@@ -585,6 +594,7 @@ by top-level `uses.required` or `uses.optional` alias;
 ```ts
 const contract = defineServiceContract({ schemas }, () => ({
   id: "shipment-projection@v1",
+  apiId: "shipment-projection@v1",
   displayName: "Shipment Projection",
   description: "Projects shipment events into local state.",
   uses: {

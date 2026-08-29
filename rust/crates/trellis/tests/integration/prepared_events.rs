@@ -84,6 +84,7 @@ async fn prepared_events_prepared_publish_preserves_custom_headers_and_annotates
         .expect("observe first admin bootstrap URL");
     let mut admin = runtime.admin();
     let contract = trellis_test::TrellisTestContract::from_native_api_json(
+        "trellis.integration.prepared-events-rust@v1",
         PREPARED_EVENTS_API_SOURCE_JSON,
         trellis_rs::contracts::ContractKind::Service,
     )
@@ -101,6 +102,7 @@ async fn prepared_events_prepared_publish_preserves_custom_headers_and_annotates
     let listener_contract =
         trellis_test::TrellisTestContract::from_builder_with_referenced_contracts(
             trellis_rs::contracts::ContractBuilder::authoring(
+                "trellis.integration.prepared-events-listener-rust@v1",
                 "trellis.integration.prepared-events-listener-rust@v1",
                 "Trellis Rust Prepared Events Listener",
                 "Consumes prepared events with explicit authority.",

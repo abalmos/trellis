@@ -3,7 +3,7 @@ use std::fs;
 use miette::IntoDiagnostic;
 
 use crate::artifacts::{
-    build_npm_package_from_ts_sources, current_generator_fingerprint,
+    build_npm_package_from_ts_sources, current_generator_fingerprints,
     default_rust_crate_name_from_id, format_generated_typescript_artifacts,
     generated_artifacts_are_fresh, generated_artifacts_metadata, infer_artifact_version,
     native_api_digest, native_api_json, resolve_contract, rust_runtime_deps, stage_npm_ts_sources,
@@ -146,7 +146,7 @@ pub fn all(args: &GenerateAllArgs, force: bool) -> miette::Result<()> {
         .crate_name
         .clone()
         .unwrap_or_else(|| default_rust_crate_name_from_id(&resolved.api.render_model.id));
-    let generator_fingerprint = current_generator_fingerprint();
+    let fingerprints = current_generator_fingerprints();
     let output_plan = ContractOutputPlan {
         artifact_version: &artifact_version,
         out_api: &args.out_api,
@@ -157,24 +157,28 @@ pub fn all(args: &GenerateAllArgs, force: bool) -> miette::Result<()> {
         crate_name: &crate_name,
         runtime_source: args.runtime_source,
         runtime_repo_root: args.runtime_repo_root.as_deref(),
-        generator_fingerprint,
+        fingerprints,
     };
     let metadata =
         generated_artifacts_metadata(&resolved, &native_api_digest(&resolved)?, &output_plan);
-    if !force
-        && generated_artifacts_are_fresh(
+    let freshness = if force {
+        Default::default()
+    } else {
+        generated_artifacts_are_fresh(
             &metadata,
             &args.out_api,
             args.jsr_out.as_deref(),
             args.npm_out.as_deref(),
             args.cargo_out.as_deref(),
         )
-    {
+    };
+    if freshness.all() {
         output::print_success(&format!(
             "artifacts already up to date for {}",
             resolved.api.render_model.id
         ));
         return Ok(());
     }
-    write_contract_outputs(&resolved, &output_plan)
+    write_contract_outputs(&resolved, &output_plan, freshness)?;
+    crate::artifacts::write_generated_artifacts_metadata(&args.out_api, &metadata)
 }

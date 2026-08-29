@@ -92,6 +92,7 @@ const contract = defineServiceContract(
   },
   (ref) => ({
     id: "trellis.prepared-events-test@v1",
+    apiId: "trellis.prepared-events-test@v1",
     displayName: "Prepared Events Test",
     description: "Covers prepared event behavior.",
     events: {

@@ -20,15 +20,41 @@ pub(crate) struct ContractAuthoringBuilder {
 
 impl ContractAuthoringBuilder {
     #[doc = concat!("Constructs or updates contract data with `", stringify!(new), "`.")]
-    pub fn new(
-        id: impl Into<String>,
+    pub fn new_api(
+        api_id: impl Into<String>,
+        display_name: impl Into<String>,
+        description: impl Into<String>,
+    ) -> Self {
+        Self::new(api_id, None, display_name, description, ContractKind::App)
+    }
+
+    pub fn new_contract(
+        api_id: impl Into<String>,
+        participant_id: impl Into<String>,
+        display_name: impl Into<String>,
+        description: impl Into<String>,
+        kind: ContractKind,
+    ) -> Self {
+        Self::new(
+            api_id,
+            Some(participant_id.into()),
+            display_name,
+            description,
+            kind,
+        )
+    }
+
+    fn new(
+        api_id: impl Into<String>,
+        participant_id: Option<String>,
         display_name: impl Into<String>,
         description: impl Into<String>,
         kind: ContractKind,
     ) -> Self {
         Self {
             manifest: AuthoringState {
-                id: id.into(),
+                api_id: api_id.into(),
+                participant_id,
                 display_name: display_name.into(),
                 description: description.into(),
                 docs: None,
@@ -226,7 +252,7 @@ fn project_contract_capabilities(
     manifest: &mut AuthoringState,
     declared: &ContractCapabilities,
 ) -> Result<(), ContractsError> {
-    let contract_id = manifest.id.clone();
+    let contract_id = manifest.api_id.clone();
     assert_declared_capabilities_do_not_duplicate_namespace(&contract_id, declared)?;
     manifest.capabilities = declared
         .iter()

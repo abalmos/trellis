@@ -73,7 +73,12 @@ pub fn contract_artifacts() -> Result<ContractArtifacts, ContractsError> {
     ))?;
     let api = api_artifact()?;
     let api_value = api.normalized_value()?;
-    let base = ContractBuilder::from_api(api_value.clone(), ContractKind::Device)?.build()?;
+    let base = ContractBuilder::from_api(
+        "trellis.demo-device@v1",
+        api_value.clone(),
+        ContractKind::Device,
+    )?
+    .build()?;
     let mut participant = base.participant_value()?;
     participant["uses"] = json!({
         "required": {

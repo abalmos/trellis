@@ -118,6 +118,7 @@ impl trellis_rs::service::GeneratedServiceContract for OperationsServiceContract
 #[test]
 fn operations_service_contract_evidence_is_exact() {
     let contract = trellis_test::TrellisTestContract::from_native_api_json(
+        OP_SERVICE_ID,
         OP_SERVICE_API_SOURCE_JSON,
         trellis_rs::contracts::ContractKind::Service,
     )
@@ -1113,6 +1114,7 @@ async fn start_control_operation_fixture(
     let mut admin = runtime.admin();
 
     let service_contract = trellis_test::TrellisTestContract::from_native_api_json(
+        OP_SERVICE_ID,
         OP_SERVICE_API_SOURCE_JSON,
         trellis_rs::contracts::ContractKind::Service,
     )
@@ -1172,6 +1174,7 @@ async fn operations_client_starts_operation() {
     let mut admin = runtime.admin();
 
     let service_contract = trellis_test::TrellisTestContract::from_native_api_json(
+        OP_SERVICE_ID,
         OP_SERVICE_API_SOURCE_JSON,
         trellis_rs::contracts::ContractKind::Service,
     )
@@ -1234,6 +1237,7 @@ async fn operations_client_watches_progress() {
     let mut admin = runtime.admin();
 
     let service_contract = trellis_test::TrellisTestContract::from_native_api_json(
+        OP_SERVICE_ID,
         OP_SERVICE_API_SOURCE_JSON,
         trellis_rs::contracts::ContractKind::Service,
     )
@@ -1320,6 +1324,7 @@ async fn operations_live_updates_are_typed_ordered_and_transient() {
     let mut admin = runtime.admin();
 
     let service_contract = trellis_test::TrellisTestContract::from_native_api_json(
+        OP_SERVICE_ID,
         OP_SERVICE_API_SOURCE_JSON,
         trellis_rs::contracts::ContractKind::Service,
     )
@@ -1453,6 +1458,7 @@ async fn operations_client_waits_for_completion() {
     let mut admin = runtime.admin();
 
     let service_contract = trellis_test::TrellisTestContract::from_native_api_json(
+        OP_SERVICE_ID,
         OP_SERVICE_API_SOURCE_JSON,
         trellis_rs::contracts::ContractKind::Service,
     )
@@ -1539,6 +1545,7 @@ async fn operations_watch_callbacks_deliver_accepted_first_in_order() {
     let mut admin = runtime.admin();
 
     let service_contract = trellis_test::TrellisTestContract::from_native_api_json(
+        OP_SERVICE_ID,
         OP_SERVICE_API_SOURCE_JSON,
         trellis_rs::contracts::ContractKind::Service,
     )
@@ -1660,6 +1667,7 @@ async fn operations_client_cancels_operation() {
     let mut admin = runtime.admin();
 
     let service_contract = trellis_test::TrellisTestContract::from_native_api_json(
+        OP_SERVICE_ID,
         OP_SERVICE_API_SOURCE_JSON,
         trellis_rs::contracts::ContractKind::Service,
     )
@@ -1758,6 +1766,7 @@ async fn operations_cancel_uses_cancel_capability() {
     let mut admin = runtime.admin();
 
     let service_contract = trellis_test::TrellisTestContract::from_native_api_json(
+        OP_SERVICE_ID,
         OP_SERVICE_API_SOURCE_JSON,
         trellis_rs::contracts::ContractKind::Service,
     )
@@ -1819,6 +1828,7 @@ async fn operations_rejects_cancel_for_noncancelable_operation() {
     let mut admin = runtime.admin();
 
     let service_contract = trellis_test::TrellisTestContract::from_native_api_json(
+        OP_SERVICE_ID,
         OP_SERVICE_API_SOURCE_JSON,
         trellis_rs::contracts::ContractKind::Service,
     )
@@ -1890,6 +1900,7 @@ async fn operations_client_signals_running_operation() {
     let mut admin = runtime.admin();
 
     let service_contract = trellis_test::TrellisTestContract::from_native_api_json(
+        OP_SERVICE_ID,
         OP_SERVICE_API_SOURCE_JSON,
         trellis_rs::contracts::ContractKind::Service,
     )
@@ -2032,6 +2043,7 @@ async fn operations_signals_persist_and_consume_in_acceptance_order() {
     let mut admin = runtime.admin();
 
     let service_contract = trellis_test::TrellisTestContract::from_native_api_json(
+        OP_SERVICE_ID,
         OP_SERVICE_API_SOURCE_JSON,
         trellis_rs::contracts::ContractKind::Service,
     )
@@ -2105,6 +2117,7 @@ async fn operations_queued_signal_delivered_before_live_signal() {
     let mut admin = runtime.admin();
 
     let service_contract = trellis_test::TrellisTestContract::from_native_api_json(
+        OP_SERVICE_ID,
         OP_SERVICE_API_SOURCE_JSON,
         trellis_rs::contracts::ContractKind::Service,
     )
@@ -2188,6 +2201,7 @@ async fn operations_rejects_invalid_signal_payload() {
     let mut admin = runtime.admin();
 
     let service_contract = trellis_test::TrellisTestContract::from_native_api_json(
+        OP_SERVICE_ID,
         OP_SERVICE_API_SOURCE_JSON,
         trellis_rs::contracts::ContractKind::Service,
     )
@@ -2258,6 +2272,7 @@ async fn operations_rejects_signal_after_terminal_state() {
     let mut admin = runtime.admin();
 
     let service_contract = trellis_test::TrellisTestContract::from_native_api_json(
+        OP_SERVICE_ID,
         OP_SERVICE_API_SOURCE_JSON,
         trellis_rs::contracts::ContractKind::Service,
     )
@@ -2352,6 +2367,7 @@ async fn operations_service_attach_job_waits_for_completion() {
     let mut admin = runtime.admin();
 
     let service_contract = trellis_test::TrellisTestContract::from_native_api_json(
+        OP_SERVICE_ID,
         OP_SERVICE_API_SOURCE_JSON,
         trellis_rs::contracts::ContractKind::Service,
     )
@@ -2828,6 +2844,7 @@ async fn operations_denies_start_without_call_authority() {
     let mut admin = runtime.admin();
 
     let service_contract = trellis_test::TrellisTestContract::from_native_api_json(
+        OP_SERVICE_ID,
         OP_SERVICE_API_SOURCE_JSON,
         trellis_rs::contracts::ContractKind::Service,
     )
@@ -2968,6 +2985,7 @@ fn operations_client_contract(
 ) -> Result<trellis_test::TrellisTestContract, trellis_test::TrellisTestError> {
     let manifest = trellis_rs::contracts::ContractBuilder::authoring(
         OP_CLIENT_ID,
+        OP_CLIENT_ID,
         "Trellis Integration Operations Client",
         "App/client participant for the operations integration fixture.",
         trellis_rs::contracts::ContractKind::App,
@@ -2990,6 +3008,7 @@ fn operations_unauthorized_client_contract(
     service_contract: &trellis_test::TrellisTestContract,
 ) -> Result<trellis_test::TrellisTestContract, trellis_test::TrellisTestError> {
     let manifest = trellis_rs::contracts::ContractBuilder::authoring(
+        OP_UNAUTHORIZED_CLIENT_ID,
         OP_UNAUTHORIZED_CLIENT_ID,
         "Trellis Integration Unauthorized Operations Client",
         "App/client without operation call authority for Entity.Process.",

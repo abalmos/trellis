@@ -17,7 +17,6 @@ fn new_top_level_help_is_available() {
         &["identity", "--help"],
         &["identity", "grants", "--help"],
         &["users", "--help"],
-        &["grants", "--help"],
         &["svc", "--help"],
         &["dev", "--help"],
         &["infra", "--help"],
@@ -48,6 +47,7 @@ fn removed_top_level_commands_and_aliases_are_rejected() {
         "self",
         "keygen",
         "approvals",
+        "grants",
     ] {
         let output = run_cli(&[command, "--help"]);
         assert!(!output.status.success(), "{command} should fail");

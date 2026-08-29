@@ -3531,13 +3531,15 @@ pub struct TrellisTestContract {
 }
 
 impl TrellisTestContract {
-    /// Build a self-implementing test participant from one exact native API.
+    /// Build an explicitly identified self-implementing participant from one exact native API.
     pub fn from_native_api_json(
+        participant_id: impl Into<String>,
         api_json: &str,
         kind: trellis_rs::contracts::ContractKind,
     ) -> Result<Self, TrellisTestError> {
-        let api = serde_json::from_str(api_json)?;
-        let artifacts = trellis_rs::contracts::ContractBuilder::from_api(api, kind)?.build()?;
+        let api: Value = serde_json::from_str(api_json)?;
+        let artifacts =
+            trellis_rs::contracts::ContractBuilder::from_api(participant_id, api, kind)?.build()?;
         Self::from_artifacts(artifacts)
     }
 

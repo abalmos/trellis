@@ -72,7 +72,7 @@ pub fn api_artifact() -> Result<ApiArtifact, ContractsError> {
 /// Build the native Event Log participant and API artifacts.
 pub fn contract_artifacts() -> Result<ContractArtifacts, ContractsError> {
     let api = api_artifact()?.normalized_value()?;
-    ContractBuilder::from_api(api, ContractKind::Service)?.build()
+    ContractBuilder::from_api("trellis.eventlog@v1", api, ContractKind::Service)?.build()
 }
 
 fn read_rpc(

@@ -105,6 +105,7 @@ Deno.test("root public API includes core runtime, contracts, and result helpers"
     },
     (ref) => ({
       id: "example.app@v1",
+      apiId: "example.app@v1",
       displayName: "Example App",
       description: "Example app contract.",
       rpc: {

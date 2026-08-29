@@ -59,7 +59,10 @@ import * as schemas from "../schemas.ts";
 export const ordersService = defineServiceContract(
   { schemas, errors },
   (ref) => ({
-    // ...
+    id: "orders-service@v1",
+    apiId: "orders-service@v1",
+    displayName: "Orders Service",
+    description: "A simple service for managing orders.",
 
     capabilities: {
       "orders.write": { /* ... */ },

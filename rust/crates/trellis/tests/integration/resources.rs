@@ -675,6 +675,7 @@ fn resources_client_contract(
 ) -> Result<trellis_test::TrellisTestContract, trellis_test::TrellisTestError> {
     let manifest = trellis_rs::contracts::ContractBuilder::authoring(
         RESOURCES_CLIENT_ID,
+        RESOURCES_CLIENT_ID,
         "Trellis Integration Resources Client",
         "App/client participant for the resources integration fixture.",
         trellis_rs::contracts::ContractKind::App,

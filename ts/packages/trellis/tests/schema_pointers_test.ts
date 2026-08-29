@@ -323,6 +323,7 @@ Deno.test("schema pointers", async (t) => {
       { schemas },
       () => ({
         id: "test@v1",
+        apiId: "test@v1",
         displayName: "Pointer Test",
         description:
           "Validate schema pointer tokenization during event emission.",

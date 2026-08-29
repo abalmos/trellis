@@ -40,6 +40,7 @@ import { defineDeviceContract } from "@qlever-llc/trellis";
 
 export const myDevice = defineDeviceContract(() => ({
   id: "my-device@v1",
+  apiId: "my-device@v1",
   displayName: "My Device",
   description: "An activated device that connects to Trellis after activation.",
 }));

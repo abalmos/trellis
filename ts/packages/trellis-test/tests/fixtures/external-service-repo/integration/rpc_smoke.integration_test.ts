@@ -26,30 +26,35 @@ const schemas = {
   PingOutput: Type.Object({ message: Type.String(), reply: Type.String() }),
 } as const;
 
-const serviceContract = defineServiceContract({ schemas }, (ref) => ({
-  id: "external.fixture.rpc-service" + "@v1",
-  displayName: `External Fixture RPC Service (${slug})`,
-  description:
-    "Out-of-tree style service contract used by trellis-test smoke coverage.",
-  capabilities: {
-    ping: {
-      displayName: "Ping service",
-      description: "Call the fixture service ping RPC.",
+const serviceContract = defineServiceContract(
+  { schemas },
+  (ref) => ({
+    id: "external.fixture.rpc-service" + "@v1",
+    apiId: "external.fixture.rpc-service" + "@v1",
+    displayName: `External Fixture RPC Service (${slug})`,
+    description:
+      "Out-of-tree style service contract used by trellis-test smoke coverage.",
+    capabilities: {
+      ping: {
+        displayName: "Ping service",
+        description: "Call the fixture service ping RPC.",
+      },
     },
-  },
-  rpc: {
-    "Echo.Ping": {
-      version: "v1",
-      input: ref.schema("PingInput"),
-      output: ref.schema("PingOutput"),
-      capabilities: { call: ["ping"] },
-      errors: [],
+    rpc: {
+      "Echo.Ping": {
+        version: "v1",
+        input: ref.schema("PingInput"),
+        output: ref.schema("PingOutput"),
+        capabilities: { call: ["ping"] },
+        errors: [],
+      },
     },
-  },
-}));
+  }),
+);
 
 const clientContract = defineAppContract(() => ({
   id: "external.fixture.rpc-client" + "@v1",
+  apiId: "external.fixture.rpc-client" + "@v1",
   displayName: `External Fixture RPC Client (${slug})`,
   description:
     "Out-of-tree style app contract used by trellis-test smoke coverage.",

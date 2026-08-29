@@ -465,6 +465,7 @@ export type ContractState = Record<string, ContractStateStore>;
 
 type ContractIdentityFields = {
   id: string;
+  apiId: string;
   displayName: string;
   description: string;
   docs?: ContractDocs;
@@ -1015,6 +1016,7 @@ export type ContractSourceUses = ContractSourceUsesGrouped;
 
 export type TrellisContractSource = {
   id: string;
+  apiId: string;
   displayName: string;
   description: string;
   docs?: ContractDocs;
@@ -1854,6 +1856,7 @@ export type DefineContractInput<
 
 type DefineContractSource = {
   id: string;
+  apiId: string;
   displayName: string;
   description: string;
   docs?: ContractDocs;
@@ -3261,7 +3264,7 @@ function buildOwnedApi(source: TrellisContractSource): RuntimeApiLike {
     sortedUnique(
       (names ?? []).map((name) =>
         source.capabilities?.[name]
-          ? globalCapabilityName(source.id, name)
+          ? globalCapabilityName(source.apiId, name)
           : name
       ),
     );
@@ -3316,7 +3319,7 @@ function buildOwnedApi(source: TrellisContractSource): RuntimeApiLike {
         ),
       ),
       permission: apiPermission(
-        source.id,
+        source.apiId,
         method.version,
         "rpc",
         name,
@@ -3376,7 +3379,7 @@ function buildOwnedApi(source: TrellisContractSource): RuntimeApiLike {
           )
           : undefined,
         permissions: operationPermissions(
-          source.id,
+          source.apiId,
           operation.version,
           name,
           operation.signals,
@@ -3436,14 +3439,14 @@ function buildOwnedApi(source: TrellisContractSource): RuntimeApiLike {
             resolveSchemaRef(source.schemas, event.event, `event '${name}'`),
           ),
           publishPermission: apiPermission(
-            source.id,
+            source.apiId,
             event.version,
             "event",
             name,
             "publish",
           ),
           subscribePermission: apiPermission(
-            source.id,
+            source.apiId,
             event.version,
             "event",
             name,
@@ -3468,7 +3471,7 @@ function buildOwnedApi(source: TrellisContractSource): RuntimeApiLike {
           resolveSchemaRef(source.schemas, feed.event, `feed '${name}' event`),
         ),
         permission: apiPermission(
-          source.id,
+          source.apiId,
           feed.version,
           "feed",
           name,
@@ -4227,7 +4230,7 @@ function buildOwnedActionDescriptors(
     add(
       name,
       rpcAction(
-        source.id,
+        source.apiId,
         name,
         ownedApi.rpc[name]!,
         actionExportName(name),
@@ -4239,7 +4242,7 @@ function buildOwnedActionDescriptors(
     add(
       name,
       operationAction(
-        source.id,
+        source.apiId,
         name,
         ownedApi.operations[name]!,
         actionExportName(name),
@@ -4251,7 +4254,7 @@ function buildOwnedActionDescriptors(
     add(
       name,
       eventActions(
-        source.id,
+        source.apiId,
         name,
         ownedApi.events[name]!,
         actionExportName(name),
@@ -4264,7 +4267,7 @@ function buildOwnedActionDescriptors(
     add(
       name,
       feedAction(
-        source.id,
+        source.apiId,
         name,
         ownedApi.feeds?.[name]!,
         actionExportName(name),
@@ -4326,6 +4329,7 @@ function defineContract(
   const { manifestUses, usedApi, actions } = normalizeContractUses(source);
   const emittedSource: TrellisContractSource = {
     id: source.id,
+    apiId: source.apiId,
     displayName: source.displayName,
     description: source.description,
     ...(source.docs ? { docs: source.docs } : {}),
@@ -4405,6 +4409,9 @@ function defineContract(
   const participantId = PARTICIPANT.id;
   if (typeof participantId !== "string" || participantId !== source.id) {
     throw new Error("Native participant identity does not match its source");
+  }
+  if (API.id !== source.apiId) {
+    throw new Error("Native API identity does not match its source");
   }
   const ownedActions = buildOwnedActionDescriptors(emittedSource, ownedApi, {
     api: API,

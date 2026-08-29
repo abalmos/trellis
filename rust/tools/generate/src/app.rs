@@ -18,6 +18,11 @@ pub fn run() -> miette::Result<()> {
     run_cli(Cli::parse())
 }
 
+/// Run prepare through the generator library without launching another process.
+pub fn run_prepare(args: &crate::cli::PrepareArgs, force: bool) -> miette::Result<()> {
+    prepare::run(args, force)
+}
+
 fn run_cli(cli: Cli) -> miette::Result<()> {
     match cli.command {
         Some(TopLevelCommand::Prepare(args)) => prepare::run(&args, cli.force),

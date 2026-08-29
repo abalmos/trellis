@@ -42,7 +42,10 @@ import * as schemas from "../schemas.ts";
 export const ordersService = defineServiceContract(
   { schemas },
   (ref) => ({
-    // ...
+    id: "orders-service@v1",
+    apiId: "orders-service@v1",
+    displayName: "Orders Service",
+    description: "A simple service for managing orders.",
     resources: {
       kv: {
         orders: {
@@ -114,10 +117,11 @@ fn order_schema() -> Value {
 Add the schema and KV resource to `contract_artifacts()`:
 
 ```rust
-use trellis_contracts::{kv, ApiBuilder, ContractArtifacts, ContractBuilder, ContractKind, ContractsError};
+use trellis_contracts::{kv, ContractArtifacts, ContractBuilder, ContractKind, ContractsError};
 
 pub fn contract_artifacts() -> Result<ContractArtifacts, ContractsError> {
-    let api = ApiBuilder::authoring(
+    ContractBuilder::authoring(
+        "orders-service@v1",
         "orders-service@v1",
         "Orders Service",
         "A simple service for managing orders.",
@@ -131,8 +135,7 @@ pub fn contract_artifacts() -> Result<ContractArtifacts, ContractsError> {
             .history(1)
             .ttl_ms(0),
     )
-    .build()?;
-    ContractBuilder::from_api(api.normalized_value()?, ContractKind::Service)?.build()
+    .build()
 }
 ```
 

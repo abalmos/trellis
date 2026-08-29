@@ -20,6 +20,7 @@ const testContract = defineAppContract(
   },
   (ref) => ({
     id: "trellis.svelte.context-test@v1",
+    apiId: "trellis.svelte.context-test@v1",
     displayName: "Trellis Svelte Context Test",
     description: "Typecheck the Svelte context public API.",
     uses: [

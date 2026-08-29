@@ -2,9 +2,8 @@
 
 use std::collections::BTreeSet;
 use std::fs;
-use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::Command;
 
 use serde::Deserialize;
 use serde_json::Value;
@@ -232,7 +231,8 @@ pub fn generate_rust_sdk(opts: &GenerateRustSdkOpts) -> Result<(), CodegenRustEr
     replace_generated_dir(&opts.out_dir, |staging_dir| {
         let mut staged = opts.clone();
         staged.out_dir = staging_dir.to_path_buf();
-        generate_rust_sdk_into(&staged)
+        generate_rust_sdk_into(&staged)?;
+        format_generated_rust_files(staging_dir)
     })
 }
 
@@ -436,7 +436,8 @@ pub fn generate_rust_participant_facade(
     replace_generated_dir(&opts.out_dir, |staging_dir| {
         let mut staged = opts.clone();
         staged.out_dir = staging_dir.to_path_buf();
-        generate_rust_participant_facade_into(&staged)
+        generate_rust_participant_facade_into(&staged)?;
+        format_generated_rust_files(staging_dir)
     })
 }
 
@@ -3643,46 +3644,45 @@ fn format_generated_rust_source(
         path: path.clone(),
         message: error.to_string(),
     })?;
-    format_rust_source_with_rustfmt(&path, &prettyplease::unparse(&file))
+    Ok(prettyplease::unparse(&file))
 }
 
-fn format_rust_source_with_rustfmt(path: &str, contents: &str) -> Result<String, CodegenRustError> {
-    let mut child = Command::new("rustfmt")
+fn format_generated_rust_files(root: &Path) -> Result<(), CodegenRustError> {
+    fn collect(dir: &Path, files: &mut Vec<PathBuf>) -> Result<(), std::io::Error> {
+        for entry in fs::read_dir(dir)? {
+            let path = entry?.path();
+            if path.is_dir() {
+                collect(&path, files)?;
+            } else if path.extension().is_some_and(|extension| extension == "rs") {
+                files.push(path);
+            }
+        }
+        Ok(())
+    }
+
+    let mut files = Vec::new();
+    collect(root, &mut files)?;
+    files.sort();
+    if files.is_empty() {
+        return Ok(());
+    }
+    let output = Command::new("rustfmt")
         .args(["--edition", "2021"])
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
+        .args(&files)
+        .output()
         .map_err(|error| CodegenRustError::RustFormat {
-            path: path.to_string(),
+            path: root.display().to_string(),
             message: format!("failed to start rustfmt: {error}"),
-        })?;
-
-    child
-        .stdin
-        .take()
-        .expect("rustfmt stdin should be piped")
-        .write_all(contents.as_bytes())
-        .map_err(|error| CodegenRustError::RustFormat {
-            path: path.to_string(),
-            message: format!("failed to write rustfmt input: {error}"),
-        })?;
-
-    let output = child
-        .wait_with_output()
-        .map_err(|error| CodegenRustError::RustFormat {
-            path: path.to_string(),
-            message: format!("failed to read rustfmt output: {error}"),
         })?;
 
     if !output.status.success() {
         return Err(CodegenRustError::RustFormat {
-            path: path.to_string(),
+            path: root.display().to_string(),
             message: String::from_utf8_lossy(&output.stderr).trim().to_string(),
         });
     }
 
-    Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+    Ok(())
 }
 
 fn key_to_pascal(value: &str) -> String {

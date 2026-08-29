@@ -1848,6 +1848,7 @@ fn jobs_admin_client_contract(
 ) -> Result<trellis_test::TrellisTestContract, trellis_test::TrellisTestError> {
     let manifest = trellis_rs::contracts::ContractBuilder::authoring(
         JOBS_ADMIN_CLIENT_ID,
+        JOBS_ADMIN_CLIENT_ID,
         "Trellis Integration Jobs Admin Client",
         "Uses generated Jobs admin RPCs for live acceptance coverage.",
         trellis_rs::contracts::ContractKind::App,
@@ -1869,6 +1870,7 @@ fn jobs_admin_client_contract(
     );
 
     let jobs_api = trellis_test::TrellisTestContract::from_native_api_json(
+        trellis_rs::sdk::jobs::API_ID,
         trellis_rs::sdk::jobs::API_JSON,
         trellis_rs::contracts::ContractKind::Service,
     )?;
@@ -1882,6 +1884,7 @@ fn jobs_client_contract(
     service_contract: &trellis_test::TrellisTestContract,
 ) -> Result<trellis_test::TrellisTestContract, trellis_test::TrellisTestError> {
     let manifest = trellis_rs::contracts::ContractBuilder::authoring(
+        JOBS_CLIENT_ID,
         JOBS_CLIENT_ID,
         "Trellis Integration Jobs Client",
         "App/client participant for the jobs integration fixture.",

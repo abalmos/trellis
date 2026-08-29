@@ -1,6 +1,6 @@
 # Trellis AI guidance for services and browser apps
 
-Last verified against Trellis main (2026-08-02).
+Last verified against Trellis main (2026-08-28).
 
 This file is for AI coding agents working in a service or browser app repository
 that consumes Trellis. The canonical URL is:
@@ -15,6 +15,12 @@ https://raw.githubusercontent.com/qlever-llc/trellis/main/docs/static/llms.txt
 
 - Trellis services are contract-driven participants. Contracts declare the public
   surfaces a participant owns and the external surfaces it uses.
+- Participant identity and owned API identity are independent. TypeScript
+  `define*Contract` bodies require `id` for the participant and `apiId` for its
+  owned API, even when the values are equal. Rust passes participant identity
+  explicitly to `ContractBuilder::authoring` or `ContractBuilder::from_api`.
+  Generated participant facades expose `CONTRACT_ID`; generated API SDKs expose
+  `API_ID`.
 - Durable `eventConsumers` are contract-declared deployment resources. A group
   selects subscribed dependency events with `uses: { alias: ["Event"] }`, where
   `alias` comes from top-level `uses`, and self-owned events with
@@ -397,6 +403,19 @@ Rules:
 The important pattern is that TypeScript services and apps run
 `deno task prepare`, Rust services run `cargo xtask prepare`, and source
 contracts remain the input.
+
+For Rust prepare performance diagnosis, run `cargo xtask prepare --timings`.
+Its opt-in report includes phase and per-contract resolution times, subprocess
+counts, resolution-cache validation, generation outcomes, and installed
+file/byte totals. Resolution totals are nested within the top-level planning and
+execution phases. Prepare's persistent cache is repository-namespaced,
+disposable, and stored in the platform user cache unless
+`TRELLIS_PREPARE_CACHE` overrides it; `--force` bypasses it. Resolution must be
+deterministic from tracked source. Declare exceptional file globs and
+environment names under `trellis.prepare.inputs` and `trellis.prepare.env` in
+`package.json`, or `[package.metadata.trellis.prepare]` in `Cargo.toml`.
+Undeclared time, randomness, network, environment, and external-file inputs are
+unsupported.
 
 ## Language-specific guides
 

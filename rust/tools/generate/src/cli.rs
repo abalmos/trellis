@@ -79,6 +79,10 @@ pub struct PrepareArgs {
     #[arg(long)]
     pub no_npm: bool,
 
+    /// Print phase timings, subprocess counts, and generation outcomes.
+    #[arg(long, conflicts_with = "watch")]
+    pub timings: bool,
+
     #[arg(default_value = ".")]
     pub root: PathBuf,
 }
@@ -372,6 +376,18 @@ mod tests {
         };
 
         assert!(args.no_npm);
+    }
+
+    #[test]
+    fn prepare_accepts_timings_without_watch() {
+        let cli = Cli::try_parse_from(["trellis-generate", "prepare", "--timings"]).unwrap();
+        let Some(TopLevelCommand::Prepare(args)) = cli.command else {
+            panic!("expected prepare command");
+        };
+        assert!(args.timings);
+        assert!(
+            Cli::try_parse_from(["trellis-generate", "prepare", "--watch", "--timings"]).is_err()
+        );
     }
 
     #[test]

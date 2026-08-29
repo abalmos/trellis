@@ -511,6 +511,7 @@ fn service_operation(
 fn builder() -> ContractBuilder {
     let builder = ContractBuilder::authoring(
         "trellis.demo-service@v1",
+        "trellis.demo-service@v1",
         "Field Ops Demo Service",
         "Consolidated Field Ops demo service for Trellis concepts.",
         ContractKind::Service,

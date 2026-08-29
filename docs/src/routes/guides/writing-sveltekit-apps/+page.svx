@@ -85,6 +85,7 @@ import { defineAppContract } from "@qlever-llc/trellis";
 
 const contract = defineAppContract(() => ({
   id: "my-app@v1",
+  apiId: "my-app@v1",
   displayName: "My App",
   description: "A browser app that reads auth state.",
 }));

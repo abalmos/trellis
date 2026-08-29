@@ -111,7 +111,7 @@ pub fn api_artifact() -> Result<ApiArtifact, ContractsError> {
 /// Build the native State participant and API artifacts.
 pub fn contract_artifacts() -> Result<ContractArtifacts, ContractsError> {
     let api = api_artifact()?.normalized_value()?;
-    ContractBuilder::from_api(api, ContractKind::Service)?.build()
+    ContractBuilder::from_api("trellis.state@v1", api, ContractKind::Service)?.build()
 }
 
 fn state_rpc(name: &str, input: &str, output: &str) -> trellis_contracts::ContractRpcMethod {

@@ -1171,6 +1171,7 @@ fn transfer_client_contract(
 ) -> Result<trellis_test::TrellisTestContract, trellis_test::TrellisTestError> {
     let manifest = trellis_rs::contracts::ContractBuilder::authoring(
         TRANSFER_CLIENT_ID,
+        TRANSFER_CLIENT_ID,
         "Trellis Integration Transfer Client",
         "App/client participant for the transfer integration fixture.",
         trellis_rs::contracts::ContractKind::App,

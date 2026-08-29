@@ -789,11 +789,23 @@ fn declaration_from_binding(
     contract_id: String,
     store: &str,
 ) -> Result<Declaration, ServerError> {
-    binding.resolve().map_err(unexpected)?;
+    let resolved = binding.resolve().map_err(unexpected)?;
+    let owned_api_id = resolved
+        .implemented_apis()
+        .iter()
+        .find(|implemented| implemented.alias() == "self")
+        .ok_or_else(|| {
+            validation(
+                "/store",
+                "participant does not implement its owned API under alias 'self'",
+            )
+        })?
+        .provided()
+        .api();
     let api_values: BTreeMap<String, Value> =
         serde_json::from_str(&binding.api_artifacts_json).map_err(unexpected)?;
     let api = api_values
-        .get(&contract_id)
+        .get(owned_api_id)
         .ok_or_else(|| validation("/store", "contract API artifact was not found"))?;
     let api = parse_api(api).map_err(unexpected)?;
     let definition = api
@@ -1245,29 +1257,46 @@ mod tests {
         });
         let parsed_api = parse_api(&api).expect("API");
         let api_digest = parsed_api.digest().expect("API digest");
+        let shared_api = json!({
+            "format": "trellis.api.v1",
+            "id": "example.shared@v1",
+            "displayName": "Shared",
+            "description": "State test dependency",
+            "schemas": {"State": {"type": "boolean"}},
+            "state": {"preferences": {"kind": "value", "schema": {"schema": "State"}}}
+        });
+        let parsed_shared_api = parse_api(&shared_api).expect("shared API");
+        let shared_api_digest = parsed_shared_api.digest().expect("shared API digest");
         let participant = json!({
             "format": "trellis.participant.v1",
-            "id": "example.device@v1",
+            "id": "example.device-participant@v1",
             "displayName": "Example Device",
             "description": "State test participant",
             "kind": "device",
-            "implements": {"self": {"api": "example.device@v1", "apiDigest": api_digest}}
+            "implements": {
+                "shared": {"api": "example.shared@v1", "apiDigest": shared_api_digest},
+                "self": {"api": "example.device@v1", "apiDigest": api_digest}
+            }
         });
         let parsed_participant = parse_participant(&participant).expect("participant");
         let participant_digest = parsed_participant.digest().expect("participant digest");
         let resolved = resolve_participant(
             &parsed_participant,
-            &BTreeMap::from([("example.device@v1".to_owned(), parsed_api)]),
+            &BTreeMap::from([
+                ("example.device@v1".to_owned(), parsed_api),
+                ("example.shared@v1".to_owned(), parsed_shared_api),
+            ]),
         )
         .expect("resolved participant");
         let binding = ParticipantBindingRecord {
-            participant_id: "example.device@v1".to_owned(),
+            participant_id: "example.device-participant@v1".to_owned(),
             participant_kind: ParticipantKind::Device,
             artifact_digest: participant_digest.clone(),
             needs_digest: resolved.needs().digest().expect("needs digest"),
             participant_json: serde_json::to_string(&participant).expect("participant JSON"),
             api_artifacts_json: serde_json::to_string(&json!({
-                "example.device@v1": api
+                "example.device@v1": api,
+                "example.shared@v1": shared_api
             }))
             .expect("API map JSON"),
             resolved_at: 0,
@@ -1278,11 +1307,12 @@ mod tests {
             binding,
             Scope::DeviceApp,
             "device-1".to_owned(),
-            "example.device@v1".to_owned(),
+            "example.device-participant@v1".to_owned(),
             "preferences",
         )
         .expect("declaration");
         assert_eq!(declaration.contract_digest, participant_digest);
+        assert_eq!(declaration.schema, json!({"type": "string"}));
         assert!(validate_admin_digest(declaration.clone(), &participant_digest).is_ok());
         let writer = StoredEnvelope {
             value: json!("value"),

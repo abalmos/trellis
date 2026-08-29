@@ -15,6 +15,7 @@ const selectionContract = defineServiceContract(
   },
   (ref) => ({
     id: "trellis.connect-typing-selection@v1",
+    apiId: "trellis.connect-typing-selection@v1",
     displayName: "Connect Typing Selection Service",
     description: "Expose multiple RPCs for selected-action typing tests.",
     rpc: {
@@ -34,6 +35,7 @@ const selectionContract = defineServiceContract(
 
 const appContract = defineAppContract(() => ({
   id: "trellis.connect-typing-app@v1",
+  apiId: "trellis.connect-typing-app@v1",
   displayName: "Connect Typing App",
   description: "Typecheck the flat caller runtime.",
   uses: [AuthSessionsMe, JobsQuery, selectionContract.SelectionSelected],

@@ -117,7 +117,7 @@ async fn connect_device_if_configured(args: &Args) -> anyhow::Result<Option<Conn
 
 async fn spawn_event_watchers(client: &ConnectedClient) -> anyhow::Result<()> {
     let mut activity = client
-        .trellis_demo_service()
+        .trellis_demo_service_v1()
         .subscribe_audit_recorded()
         .await?;
     tokio::spawn(async move {
@@ -130,7 +130,7 @@ async fn spawn_event_watchers(client: &ConnectedClient) -> anyhow::Result<()> {
     });
 
     let mut evidence = client
-        .trellis_demo_service()
+        .trellis_demo_service_v1()
         .subscribe_evidence_uploaded()
         .await?;
     tokio::spawn(async move {
@@ -143,7 +143,7 @@ async fn spawn_event_watchers(client: &ConnectedClient) -> anyhow::Result<()> {
     });
 
     let mut reports = client
-        .trellis_demo_service()
+        .trellis_demo_service_v1()
         .subscribe_reports_published()
         .await?;
     tokio::spawn(async move {
@@ -156,7 +156,7 @@ async fn spawn_event_watchers(client: &ConnectedClient) -> anyhow::Result<()> {
     });
 
     let mut sites = client
-        .trellis_demo_service()
+        .trellis_demo_service_v1()
         .subscribe_sites_refreshed()
         .await?;
     tokio::spawn(async move {
@@ -198,7 +198,7 @@ async fn wizard_loop(client: Option<&ConnectedClient>) -> anyhow::Result<()> {
 async fn list_sites(client: Option<&ConnectedClient>) -> anyhow::Result<()> {
     let sites = if let Some(client) = client {
         client
-            .trellis_demo_service()
+            .trellis_demo_service_v1()
             .sites_list(&SitesListRequest {
                 limit: LIST_LIMIT,
                 offset: Some(LIST_OFFSET),
@@ -268,7 +268,7 @@ async fn save_selected_site(
 async fn list_assignments(client: Option<&ConnectedClient>) -> anyhow::Result<()> {
     if let Some(client) = client {
         let response = client
-            .trellis_demo_service()
+            .trellis_demo_service_v1()
             .assignments_list(&AssignmentsListRequest {
                 limit: LIST_LIMIT,
                 offset: Some(LIST_OFFSET),
@@ -292,7 +292,7 @@ async fn list_assignments(client: Option<&ConnectedClient>) -> anyhow::Result<()
 async fn list_evidence(client: Option<&ConnectedClient>) -> anyhow::Result<()> {
     if let Some(client) = client {
         let response = client
-            .trellis_demo_service()
+            .trellis_demo_service_v1()
             .evidence_list(&EvidenceListRequest {
                 limit: LIST_LIMIT,
                 offset: Some(LIST_OFFSET),
@@ -315,7 +315,7 @@ async fn download_evidence(client: Option<&ConnectedClient>) -> anyhow::Result<(
         return Ok(());
     };
 
-    let service = client.trellis_demo_service();
+    let service = client.trellis_demo_service_v1();
     let response = service
         .evidence_download(&EvidenceDownloadRequest { key })
         .await?;
@@ -345,7 +345,7 @@ async fn upload_evidence(client: Option<&ConnectedClient>) -> anyhow::Result<()>
     };
 
     let started = client
-        .trellis_demo_service()
+        .trellis_demo_service_v1()
         .evidence_upload()
         .input(&input)
         .transfer(content.as_bytes())
@@ -394,7 +394,7 @@ async fn generate_report(client: Option<&ConnectedClient>) -> anyhow::Result<()>
     };
 
     let operation = client
-        .trellis_demo_service()
+        .trellis_demo_service_v1()
         .reports_generate()
         .start(&ReportsGenerateInput {
             inspection_id,

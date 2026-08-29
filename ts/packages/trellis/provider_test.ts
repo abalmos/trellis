@@ -46,6 +46,7 @@ const contract = defineServiceContract(
   { schemas: { Empty } },
   (ref) => ({
     id: "provider-test@v1",
+    apiId: "provider-test@v1",
     displayName: "Provider Test",
     description: "Verifies flat provider action binding.",
     events: {

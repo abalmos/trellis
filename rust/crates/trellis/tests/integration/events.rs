@@ -9,6 +9,7 @@ use crate::support::assertions::{assert_case_registered, assert_generated_servic
 fn events_service_contract() -> trellis_test::TrellisTestContract {
     let artifacts = trellis_rs::contracts::ContractBuilder::authoring(
         "trellis.integration.events-service@v1",
+        "trellis.integration.events-service@v1",
         "Trellis Integration Events Service",
         "Exercises generated event publish and subscribe surfaces.",
         trellis_rs::contracts::ContractKind::Service,
@@ -248,6 +249,7 @@ fn events_pubsub_client_contract(
 ) -> Result<trellis_test::TrellisTestContract, trellis_test::TrellisTestError> {
     let manifest = trellis_rs::contracts::ContractBuilder::authoring(
         "trellis.integration.events-pubsub-client@v1",
+        "trellis.integration.events-pubsub-client@v1",
         "Trellis Integration Events PubSub Client",
         "App/client participant with event publish and subscribe authority.",
         trellis_rs::contracts::ContractKind::App,
@@ -269,6 +271,7 @@ fn events_subscribe_only_client_contract(
     service_contract: &trellis_test::TrellisTestContract,
 ) -> Result<trellis_test::TrellisTestContract, trellis_test::TrellisTestError> {
     let manifest = trellis_rs::contracts::ContractBuilder::authoring(
+        "trellis.integration.events-subscribe-only-client@v1",
         "trellis.integration.events-subscribe-only-client@v1",
         "Trellis Integration Events Subscribe-Only Client",
         "App/client participant without event publish authority.",
@@ -349,6 +352,7 @@ fn events_publish_only_client_contract(
     service_contract: &trellis_test::TrellisTestContract,
 ) -> Result<trellis_test::TrellisTestContract, trellis_test::TrellisTestError> {
     let manifest = trellis_rs::contracts::ContractBuilder::authoring(
+        "trellis.integration.events-publish-only-client@v1",
         "trellis.integration.events-publish-only-client@v1",
         "Trellis Integration Events Publish-Only Client",
         "App/client participant without event subscribe authority.",

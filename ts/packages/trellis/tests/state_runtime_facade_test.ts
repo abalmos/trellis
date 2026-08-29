@@ -43,6 +43,7 @@ Deno.test("connected runtime exposes typed named state stores", async () => {
     },
     (ref) => ({
       id: "acme.state-runtime@v1",
+      apiId: "acme.state-runtime@v1",
       displayName: "State Runtime",
       description: "Exercise the connected state facade.",
       uses: [state({
@@ -210,6 +211,7 @@ Deno.test("connected runtime validates store-specific state writes before reques
     },
     (ref) => ({
       id: "acme.state-runtime-validation@v1",
+      apiId: "acme.state-runtime-validation@v1",
       displayName: "State Runtime Validation",
       description: "Exercise facade validation.",
       uses: [state({
@@ -270,6 +272,7 @@ Deno.test("connected runtime validates store-specific state reads after response
     },
     (ref) => ({
       id: "acme.state-runtime-read-validation@v1",
+      apiId: "acme.state-runtime-read-validation@v1",
       displayName: "State Runtime Read Validation",
       description: "Exercise facade response validation.",
       uses: [state({
@@ -337,6 +340,7 @@ Deno.test("connected runtime surfaces accepted state migrations without running 
     },
     (ref) => ({
       id: "acme.state-runtime-migration@v1",
+      apiId: "acme.state-runtime-migration@v1",
       displayName: "State Runtime Migration",
       description: "Exercise facade migration responses.",
       uses: [state({

@@ -1,19 +1,18 @@
 use std::ffi::OsString;
 use std::fs;
-use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
 
 use miette::IntoDiagnostic;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use sha2::{Digest, Sha256};
 use trellis_codegen_rust::{
     default_sdk_stem, rust_sdk_cargo_manifest_is_valid, GenerateRustParticipantFacadeOpts,
     GenerateRustSdkOpts, RustRuntimeDeps, RustRuntimeSource as CodegenRustRuntimeSource,
 };
 use trellis_codegen_ts::{
-    collect_ts_sdk_sources, GenerateTsSdkOpts, TsRuntimeDeps,
-    TsRuntimeSource as CodegenTsRuntimeSource,
+    collect_ts_sdk_sources, render_ts_sdk_config, write_ts_sdk_sources, GenerateTsSdkOpts,
+    GeneratedTsSource, TsRuntimeDeps, TsRuntimeSource as CodegenTsRuntimeSource,
 };
 use trellis_contracts::{canonicalize_json, ApiBuilder, ContractBuilder};
 
@@ -28,6 +27,7 @@ pub struct GeneratedArtifactsMetadata {
     pub schema_version: u8,
     pub contract_id: String,
     pub api_digest: String,
+    pub participant_digest: Option<String>,
     pub artifact_version: String,
     pub runtime_source: RuntimeSource,
     pub jsr_runtime_version: String,
@@ -36,7 +36,34 @@ pub struct GeneratedArtifactsMetadata {
     pub has_cargo_package: bool,
     pub package_name: String,
     pub crate_name: String,
-    pub generator_fingerprint: String,
+    pub model_fingerprint: String,
+    pub ts_codegen_fingerprint: String,
+    pub npm_packaging_fingerprint: String,
+    pub npm_toolchain_fingerprint: Option<String>,
+    pub rust_codegen_fingerprint: String,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct GeneratorFingerprints {
+    pub model: &'static str,
+    pub ts: &'static str,
+    pub npm: &'static str,
+    pub rust: &'static str,
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct TargetFreshness {
+    pub api: bool,
+    pub jsr: bool,
+    pub npm: bool,
+    pub cargo: bool,
+    pub participant: bool,
+}
+
+impl TargetFreshness {
+    pub fn all(self) -> bool {
+        self.api && self.jsr && self.npm && self.cargo && self.participant
+    }
 }
 
 pub struct NpmTsSources {
@@ -53,7 +80,7 @@ pub(crate) struct ContractOutputPlan<'a> {
     pub crate_name: &'a str,
     pub runtime_source: RuntimeSource,
     pub runtime_repo_root: Option<&'a Path>,
-    pub generator_fingerprint: &'a str,
+    pub fingerprints: GeneratorFingerprints,
 }
 
 pub struct ContractShellOutputPlan<'a> {
@@ -84,7 +111,7 @@ pub(crate) struct NpmPackageBuild<'a> {
 }
 
 impl GeneratedArtifactsMetadata {
-    const SCHEMA_VERSION: u8 = 2;
+    const SCHEMA_VERSION: u8 = 4;
 }
 
 pub fn detect_output_root(project_root: &Path) -> PathBuf {
@@ -132,16 +159,50 @@ pub fn resolve_contract(args: &ContractInputArgs) -> miette::Result<ResolvedNati
 pub(crate) fn write_contract_outputs(
     resolved: &ResolvedNativeInput,
     plan: &ContractOutputPlan<'_>,
+    freshness: TargetFreshness,
 ) -> miette::Result<()> {
     let api = native_api_artifact(resolved)?;
-    let metadata = generated_artifacts_metadata(resolved, &api.digest, plan);
     if let Some(parent) = plan.out_api.parent() {
         fs::create_dir_all(parent).into_diagnostic()?;
     }
-    write_if_changed(plan.out_api, &format!("{}\n", api.json))?;
+    if !freshness.api {
+        write_if_changed(plan.out_api, &format!("{}\n", api.json))?;
+    }
 
-    if let Some(ts_out) = plan.ts_out {
-        trellis_codegen_ts::generate_ts_sdk(&GenerateTsSdkOpts {
+    let ts_sources = if (plan.ts_out.is_some() && !freshness.jsr)
+        || (plan.npm_out.is_some() && !freshness.npm)
+    {
+        Some(
+            collect_ts_sdk_sources(&GenerateTsSdkOpts {
+                api_path: plan.out_api.to_path_buf(),
+                out_dir: plan
+                    .ts_out
+                    .or(plan.npm_out)
+                    .expect("checked TypeScript output")
+                    .to_path_buf(),
+                package_name: plan.package_name.to_string(),
+                package_version: plan.artifact_version.to_string(),
+                runtime_deps: ts_runtime_deps(
+                    RuntimeSource::Registry,
+                    trellis_package_version(),
+                    plan.runtime_repo_root.map(Path::to_path_buf),
+                ),
+            })
+            .into_diagnostic()?,
+        )
+    } else {
+        None
+    };
+
+    if let Some(ts_out) = plan.ts_out.filter(|_| !freshness.jsr) {
+        let parent = ts_out.parent().unwrap_or_else(|| Path::new("."));
+        fs::create_dir_all(parent).into_diagnostic()?;
+        let staging = tempfile::Builder::new()
+            .prefix(".trellis-jsr-")
+            .tempdir_in(parent)
+            .into_diagnostic()?;
+        let staged_out = staging.path().join("package");
+        let local_opts = GenerateTsSdkOpts {
             api_path: plan.out_api.to_path_buf(),
             out_dir: ts_out.to_path_buf(),
             package_name: plan.package_name.to_string(),
@@ -151,30 +212,37 @@ pub(crate) fn write_contract_outputs(
                 trellis_package_version(),
                 plan.runtime_repo_root.map(Path::to_path_buf),
             ),
-        })
-        .into_diagnostic()?;
+        };
+        let mut sources = ts_sources.clone().expect("rendered TypeScript sources");
+        let config = render_ts_sdk_config(&local_opts).into_diagnostic()?;
+        let config_path = config.path.clone();
+        *sources
+            .iter_mut()
+            .find(|source| source.path == config_path)
+            .expect("rendered SDK contains deno.json") = config;
+        write_ts_sdk_sources(&staged_out, &sources).into_diagnostic()?;
         rewrite_local_generated_ts_sdk_imports(
+            &staged_out,
             ts_out,
             plan.runtime_source,
             plan.runtime_repo_root,
         )?;
-        format_generated_typescript_artifacts(ts_out, plan.runtime_repo_root)?;
+        format_generated_typescript_artifacts(&staged_out, plan.runtime_repo_root)?;
         copy_embedded_trellis_owned_ts_sdk(
             &resolved.api.render_model.id,
-            ts_out,
+            &staged_out,
             plan.runtime_source,
             plan.runtime_repo_root,
         )?;
+        install_staged_directory(&staged_out, ts_out, staging.path())?;
     }
 
-    if let Some(npm_out) = plan.npm_out {
+    if let Some(npm_out) = plan.npm_out.filter(|_| !freshness.npm) {
         let staging_dir = tempfile::tempdir().into_diagnostic()?;
-        let npm_sources = stage_npm_ts_sources(
+        let npm_sources = stage_npm_ts_sources_from_sources(
             &resolved.api.render_model.id,
-            plan.out_api,
             staging_dir.path(),
-            plan.package_name,
-            plan.artifact_version,
+            ts_sources.as_deref().expect("rendered TypeScript sources"),
         )?;
         build_npm_package_from_ts_sources(&NpmPackageBuild {
             src_dir: &npm_sources.root_dir,
@@ -189,7 +257,7 @@ pub(crate) fn write_contract_outputs(
         })?;
     }
 
-    if let Some(rust_out) = plan.rust_out {
+    if let Some(rust_out) = plan.rust_out.filter(|_| !freshness.cargo) {
         trellis_codegen_rust::generate_rust_sdk(&GenerateRustSdkOpts {
             api_path: plan.out_api.to_path_buf(),
             out_dir: rust_out.to_path_buf(),
@@ -209,8 +277,6 @@ pub(crate) fn write_contract_outputs(
             plan.runtime_repo_root,
         )?;
     }
-
-    write_generated_artifacts_metadata(plan.out_api, &metadata)?;
 
     output::print_success(&format!(
         "generated contract artifacts for {}",
@@ -494,6 +560,7 @@ fn ts_shell_deno_json(
 
 fn rewrite_local_generated_ts_sdk_imports(
     ts_out: &Path,
+    logical_ts_out: &Path,
     runtime_source: RuntimeSource,
     runtime_repo_root: Option<&Path>,
 ) -> miette::Result<()> {
@@ -504,7 +571,7 @@ fn rewrite_local_generated_ts_sdk_imports(
     let repo_root = runtime_repo_root.ok_or_else(|| {
         miette::miette!("local generated TypeScript imports require a runtime repository root")
     })?;
-    let depth = ts_out
+    let depth = logical_ts_out
         .strip_prefix(repo_root)
         .into_diagnostic()?
         .components()
@@ -615,21 +682,25 @@ pub(crate) fn build_npm_package_from_ts_sources(plan: &NpmPackageBuild<'_>) -> m
             .into_diagnostic()?
             .join(plan.npm_out)
     };
-    if npm_out.exists() {
-        fs::remove_dir_all(&npm_out).into_diagnostic()?;
-    }
-    fs::create_dir_all(&npm_out).into_diagnostic()?;
-    let esm_dir = npm_out.join("esm");
+    let parent = npm_out.parent().unwrap_or_else(|| Path::new("."));
+    fs::create_dir_all(parent).into_diagnostic()?;
+    let staging = tempfile::Builder::new()
+        .prefix(".trellis-npm-")
+        .tempdir_in(parent)
+        .into_diagnostic()?;
+    let staged_out = staging.path().join("package");
+    fs::create_dir(&staged_out).into_diagnostic()?;
+    let esm_dir = staged_out.join("esm");
     write_if_changed(
         &plan.src_dir.join("tsconfig.json"),
-        &render_npm_tsconfig(&npm_out),
+        &render_npm_tsconfig(&staged_out),
     )?;
     write_if_changed(
         &plan.src_dir.join("package.json"),
         "{\n  \"type\": \"module\"\n}\n",
     )?;
     let tsc = resolve_tsc_bin()?;
-    let output = Command::new(&tsc)
+    let output = crate::timings::command(&tsc)
         .arg("-p")
         .arg(plan.src_dir.join("tsconfig.json"))
         .current_dir(plan.src_dir)
@@ -644,9 +715,9 @@ pub(crate) fn build_npm_package_from_ts_sources(plan: &NpmPackageBuild<'_>) -> m
             String::from_utf8_lossy(&output.stderr)
         ));
     }
-    write_npm_package_json(&npm_out, &plan.manifest)?;
+    write_npm_package_json(&staged_out, &plan.manifest)?;
     if let Ok(readme) = fs::read_to_string(plan.src_dir.join("README.md")) {
-        write_if_changed(&npm_out.join("README.md"), &readme)?;
+        write_if_changed(&staged_out.join("README.md"), &readme)?;
     }
     if !esm_dir.join("mod.js").exists() || !esm_dir.join("mod.d.ts").exists() {
         return Err(miette::miette!(
@@ -654,7 +725,26 @@ pub(crate) fn build_npm_package_from_ts_sources(plan: &NpmPackageBuild<'_>) -> m
             plan.manifest.package_name
         ));
     }
-    format_generated_npm_artifacts(&npm_out, plan.runtime_repo_root)?;
+    format_generated_npm_artifacts(&staged_out, plan.runtime_repo_root)?;
+
+    install_staged_directory(&staged_out, &npm_out, staging.path())
+}
+
+fn install_staged_directory(
+    staged: &Path,
+    destination: &Path,
+    backup_root: &Path,
+) -> miette::Result<()> {
+    let backup = backup_root.join("previous");
+    if destination.exists() {
+        fs::rename(destination, &backup).into_diagnostic()?;
+    }
+    if let Err(error) = fs::rename(staged, destination) {
+        if backup.exists() {
+            let _ = fs::rename(&backup, destination);
+        }
+        return Err(error).into_diagnostic();
+    }
     Ok(())
 }
 
@@ -674,18 +764,29 @@ pub fn stage_npm_ts_sources(
         package_version: package_version.to_string(),
         runtime_deps: ts_runtime_deps(RuntimeSource::Registry, trellis_package_version(), None),
     };
-    for source in collect_ts_sdk_sources(&opts).into_diagnostic()? {
+    let sources = collect_ts_sdk_sources(&opts).into_diagnostic()?;
+    stage_npm_ts_sources_from_sources(contract_id, staging_root, &sources)
+}
+
+fn stage_npm_ts_sources_from_sources(
+    contract_id: &str,
+    staging_root: &Path,
+    sources: &[GeneratedTsSource],
+) -> miette::Result<NpmTsSources> {
+    let root_dir = staging_root.join(sdk_output_stem(contract_id));
+    fs::create_dir_all(&root_dir).into_diagnostic()?;
+    for source in sources {
         if source
             .path
             .extension()
             .is_some_and(|extension| extension == "ts")
         {
             write_if_changed(
-                &root_dir.join(source.path),
+                &root_dir.join(&source.path),
                 &rewrite_npm_ts_imports(&source.contents),
             )?;
         } else if source.path == Path::new("README.md") {
-            write_if_changed(&root_dir.join(source.path), &source.contents)?;
+            write_if_changed(&root_dir.join(&source.path), &source.contents)?;
         }
     }
     Ok(NpmTsSources { root_dir })
@@ -762,6 +863,42 @@ fn rewrite_npm_ts_imports(contents: &str) -> String {
     contents.replace(".ts\"", ".js\"").replace(".ts'", ".js'")
 }
 
+fn npm_toolchain_fingerprint() -> Option<String> {
+    let binary = std::env::var_os("TRELLIS_TSC_BIN")
+        .filter(|binary| !binary.is_empty())
+        .or_else(|| find_tsc_in_node_modules(&std::env::current_dir().ok()?))
+        .and_then(resolve_binary_path)
+        .or_else(|| resolve_binary_path(OsString::from("tsc")))?;
+    let binary = binary.canonicalize().unwrap_or(binary);
+    let mut digest = Sha256::new();
+    digest.update(fs::read(&binary).ok()?);
+    if let Some(package) = binary
+        .ancestors()
+        .map(|directory| directory.join("package.json"))
+        .find(|path| path.is_file())
+    {
+        digest.update(fs::read(package).ok()?);
+    }
+    Some(
+        digest
+            .finalize()
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect(),
+    )
+}
+
+fn resolve_binary_path(binary: OsString) -> Option<PathBuf> {
+    let path = PathBuf::from(&binary);
+    if path.components().count() > 1 {
+        return path.is_file().then_some(path);
+    }
+    std::env::split_paths(&std::env::var_os("PATH")?).find_map(|directory| {
+        let candidate = directory.join(&binary);
+        candidate.is_file().then_some(candidate)
+    })
+}
+
 fn resolve_tsc_bin() -> miette::Result<OsString> {
     if let Some(bin) = std::env::var_os("TRELLIS_TSC_BIN") {
         if !bin.is_empty() {
@@ -805,7 +942,10 @@ fn find_tsc_in_node_modules(start: &Path) -> Option<OsString> {
 }
 
 fn binary_is_available(binary: &OsString) -> bool {
-    Command::new(binary).arg("--version").output().is_ok()
+    crate::timings::command(binary)
+        .arg("--version")
+        .output()
+        .is_ok()
 }
 
 pub(crate) fn generated_artifacts_metadata(
@@ -813,10 +953,28 @@ pub(crate) fn generated_artifacts_metadata(
     api_digest: &str,
     plan: &ContractOutputPlan<'_>,
 ) -> GeneratedArtifactsMetadata {
+    generated_artifacts_metadata_from_parts(
+        &resolved.api.render_model.id,
+        api_digest,
+        resolved
+            .participant
+            .as_ref()
+            .map(|participant| participant.digest.as_str()),
+        plan,
+    )
+}
+
+pub(crate) fn generated_artifacts_metadata_from_parts(
+    contract_id: &str,
+    api_digest: &str,
+    participant_digest: Option<&str>,
+    plan: &ContractOutputPlan<'_>,
+) -> GeneratedArtifactsMetadata {
     GeneratedArtifactsMetadata {
         schema_version: GeneratedArtifactsMetadata::SCHEMA_VERSION,
-        contract_id: resolved.api.render_model.id.clone(),
+        contract_id: contract_id.to_owned(),
         api_digest: api_digest.to_owned(),
+        participant_digest: participant_digest.map(str::to_owned),
         artifact_version: plan.artifact_version.to_string(),
         runtime_source: plan.runtime_source,
         jsr_runtime_version: trellis_package_version(),
@@ -825,7 +983,11 @@ pub(crate) fn generated_artifacts_metadata(
         has_cargo_package: plan.rust_out.is_some(),
         package_name: plan.package_name.to_string(),
         crate_name: plan.crate_name.to_string(),
-        generator_fingerprint: plan.generator_fingerprint.to_string(),
+        model_fingerprint: plan.fingerprints.model.to_string(),
+        ts_codegen_fingerprint: plan.fingerprints.ts.to_string(),
+        npm_packaging_fingerprint: plan.fingerprints.npm.to_string(),
+        npm_toolchain_fingerprint: plan.npm_out.and_then(|_| npm_toolchain_fingerprint()),
+        rust_codegen_fingerprint: plan.fingerprints.rust.to_string(),
     }
 }
 
@@ -835,16 +997,42 @@ pub fn generated_artifacts_are_fresh(
     ts_out: Option<&Path>,
     npm_out: Option<&Path>,
     rust_out: Option<&Path>,
-) -> bool {
+) -> TargetFreshness {
     let Some(existing) = read_generated_artifacts_metadata(out_api) else {
-        return false;
+        return TargetFreshness::default();
     };
-    existing == *expected
-        && out_api.exists()
-        && ts_key_outputs_exist(ts_out)
-        && embedded_trellis_owned_ts_sdk_key_outputs_exist(expected, out_api)
-        && npm_key_outputs_exist(npm_out)
-        && rust_key_outputs_exist(rust_out, expected, out_api)
+    let common = existing.schema_version == expected.schema_version
+        && existing.contract_id == expected.contract_id
+        && existing.api_digest == expected.api_digest
+        && existing.artifact_version == expected.artifact_version
+        && existing.runtime_source == expected.runtime_source
+        && existing.jsr_runtime_version == expected.jsr_runtime_version
+        && existing.package_name == expected.package_name
+        && existing.crate_name == expected.crate_name
+        && existing.model_fingerprint == expected.model_fingerprint;
+    let api = common && out_api.exists();
+    TargetFreshness {
+        api,
+        jsr: ts_out.is_none()
+            || (api
+                && existing.has_jsr_package
+                && existing.ts_codegen_fingerprint == expected.ts_codegen_fingerprint
+                && ts_key_outputs_exist(ts_out)
+                && embedded_trellis_owned_ts_sdk_key_outputs_exist(expected, out_api)),
+        npm: npm_out.is_none()
+            || (api
+                && existing.has_npm_package
+                && existing.ts_codegen_fingerprint == expected.ts_codegen_fingerprint
+                && existing.npm_packaging_fingerprint == expected.npm_packaging_fingerprint
+                && existing.npm_toolchain_fingerprint == expected.npm_toolchain_fingerprint
+                && npm_key_outputs_exist(npm_out)),
+        cargo: rust_out.is_none()
+            || (api
+                && existing.has_cargo_package
+                && existing.rust_codegen_fingerprint == expected.rust_codegen_fingerprint
+                && rust_key_outputs_exist(rust_out, expected, out_api)),
+        participant: existing.participant_digest == expected.participant_digest,
+    }
 }
 
 fn read_generated_artifacts_metadata(out_api: &Path) -> Option<GeneratedArtifactsMetadata> {
@@ -852,7 +1040,7 @@ fn read_generated_artifacts_metadata(out_api: &Path) -> Option<GeneratedArtifact
     serde_json::from_str(&contents).ok()
 }
 
-fn write_generated_artifacts_metadata(
+pub(crate) fn write_generated_artifacts_metadata(
     out_api: &Path,
     metadata: &GeneratedArtifactsMetadata,
 ) -> miette::Result<()> {
@@ -1007,9 +1195,9 @@ pub fn copy_embedded_trellis_owned_rust_sdk(
         };
         let dest_path = dest_dir.join(dest_name);
         let rewritten = rewrite_embedded_rust_sdk_source(&contents, is_root);
-        let formatted = format_embedded_rust_sdk_source(&dest_path, &rewritten)?;
-        write_if_changed(&dest_path, &formatted)?;
+        write_if_changed(&dest_path, &rewritten)?;
     }
+    format_rust_files(&dest_dir)?;
     Ok(())
 }
 
@@ -1099,7 +1287,7 @@ pub fn format_generated_typescript_artifacts(
         return Ok(());
     };
 
-    let mut command = Command::new("deno");
+    let mut command = crate::timings::command("deno");
     command.arg("fmt").arg("-c").arg(config);
     command.arg(path);
 
@@ -1126,118 +1314,109 @@ fn format_generated_npm_artifacts(
     else {
         return Ok(());
     };
-    if !npm_out.exists() {
+    let mut paths = Vec::new();
+    let mut javascript = Vec::new();
+    collect_npm_format_paths(npm_out, &mut paths, &mut javascript)?;
+    if !javascript.is_empty() {
+        let staging = tempfile::tempdir().into_diagnostic()?;
+        let mut staged = Vec::new();
+        for source in javascript {
+            let mut relative = source
+                .strip_prefix(npm_out)
+                .into_diagnostic()?
+                .to_path_buf();
+            relative.set_extension("ts");
+            let destination = staging.path().join(relative);
+            if let Some(parent) = destination.parent() {
+                fs::create_dir_all(parent).into_diagnostic()?;
+            }
+            fs::copy(&source, &destination).into_diagnostic()?;
+            staged.push((source, destination));
+        }
+        let output = crate::timings::command("deno")
+            .arg("fmt")
+            .arg("-c")
+            .arg(&config)
+            .arg(staging.path())
+            .output()
+            .into_diagnostic()?;
+        miette::ensure!(
+            output.status.success(),
+            "deno fmt failed for JavaScript in {}\nstdout:\n{}\nstderr:\n{}",
+            npm_out.display(),
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        for (source, formatted) in staged {
+            fs::copy(formatted, source).into_diagnostic()?;
+        }
+    }
+    if paths.is_empty() {
         return Ok(());
     }
-
-    for path in npm_format_paths(npm_out)? {
-        let Some(ext) = npm_format_extension(&path) else {
-            continue;
-        };
-        let contents = fs::read_to_string(&path).into_diagnostic()?;
-        let formatted = format_text_with_deno(&path, &config, ext, &contents)?;
-        write_if_changed(&path, &formatted)?;
-    }
+    paths.sort();
+    let output = crate::timings::command("deno")
+        .arg("fmt")
+        .arg("-c")
+        .arg(config)
+        .args(paths)
+        .output()
+        .into_diagnostic()?;
+    miette::ensure!(
+        output.status.success(),
+        "deno fmt failed for {}\nstdout:\n{}\nstderr:\n{}",
+        npm_out.display(),
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
     Ok(())
 }
 
-fn npm_format_paths(root: &Path) -> miette::Result<Vec<PathBuf>> {
-    let mut paths = Vec::new();
-    collect_npm_format_paths(root, &mut paths)?;
-    paths.sort();
-    Ok(paths)
-}
-
-fn collect_npm_format_paths(dir: &Path, paths: &mut Vec<PathBuf>) -> miette::Result<()> {
+fn collect_npm_format_paths(
+    dir: &Path,
+    paths: &mut Vec<PathBuf>,
+    javascript: &mut Vec<PathBuf>,
+) -> miette::Result<()> {
     for entry in fs::read_dir(dir).into_diagnostic()? {
-        let entry = entry.into_diagnostic()?;
-        let path = entry.path();
+        let path = entry.into_diagnostic()?.path();
         if path.is_dir() {
-            collect_npm_format_paths(&path, paths)?;
-        } else if npm_format_extension(&path).is_some() {
+            collect_npm_format_paths(&path, paths, javascript)?;
+        } else if path.extension().is_some_and(|extension| extension == "js") {
+            javascript.push(path);
+        } else if matches!(
+            path.extension().and_then(|extension| extension.to_str()),
+            Some("ts" | "json" | "md")
+        ) {
             paths.push(path);
         }
     }
     Ok(())
 }
 
-fn npm_format_extension(path: &Path) -> Option<&'static str> {
-    let extension = path.extension()?.to_str()?;
-    match extension {
-        // Generated npm .js files can still contain type-only syntax, so format
-        // them with the TypeScript parser rather than Deno's stricter JS parser.
-        "js" | "ts" => Some("ts"),
-        "json" => Some("json"),
-        "md" => Some("md"),
-        _ => None,
+fn format_rust_files(root: &Path) -> miette::Result<()> {
+    let mut paths = fs::read_dir(root)
+        .into_diagnostic()?
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .filter(|path| path.extension().is_some_and(|extension| extension == "rs"))
+        .collect::<Vec<_>>();
+    paths.sort();
+    if paths.is_empty() {
+        return Ok(());
     }
-}
-
-fn format_text_with_deno(
-    path: &Path,
-    config: &Path,
-    extension: &str,
-    contents: &str,
-) -> miette::Result<String> {
-    let mut child = Command::new("deno")
-        .arg("fmt")
-        .arg("--quiet")
-        .arg("-c")
-        .arg(config)
-        .arg("--ext")
-        .arg(extension)
-        .arg("-")
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .into_diagnostic()?;
-
-    child
-        .stdin
-        .take()
-        .expect("deno fmt stdin should be piped")
-        .write_all(contents.as_bytes())
-        .into_diagnostic()?;
-
-    let output = child.wait_with_output().into_diagnostic()?;
-    if !output.status.success() {
-        return Err(miette::miette!(
-            "deno fmt failed for {}\nstderr:\n{}",
-            path.display(),
-            String::from_utf8_lossy(&output.stderr)
-        ));
-    }
-
-    Ok(String::from_utf8_lossy(&output.stdout).into_owned())
-}
-
-fn format_embedded_rust_sdk_source(path: &Path, contents: &str) -> miette::Result<String> {
-    let mut child = Command::new("rustfmt")
+    let output = crate::timings::command("rustfmt")
         .args(["--edition", "2021"])
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
+        .args(paths)
+        .output()
         .into_diagnostic()?;
-
-    child
-        .stdin
-        .take()
-        .expect("rustfmt stdin should be piped")
-        .write_all(contents.as_bytes())
-        .into_diagnostic()?;
-
-    let output = child.wait_with_output().into_diagnostic()?;
     if !output.status.success() {
         return Err(miette::miette!(
             "rustfmt failed for {}\nstderr:\n{}",
-            path.display(),
+            root.display(),
             String::from_utf8_lossy(&output.stderr)
         ));
     }
-
-    Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+    Ok(())
 }
 
 fn write_if_changed(path: &Path, contents: &str) -> miette::Result<()> {
@@ -1251,8 +1430,13 @@ fn write_if_changed(path: &Path, contents: &str) -> miette::Result<()> {
     Ok(())
 }
 
-pub fn current_generator_fingerprint() -> &'static str {
-    env!("TRELLIS_GENERATE_FINGERPRINT")
+pub fn current_generator_fingerprints() -> GeneratorFingerprints {
+    GeneratorFingerprints {
+        model: env!("TRELLIS_MODEL_FINGERPRINT"),
+        ts: env!("TRELLIS_TS_CODEGEN_FINGERPRINT"),
+        npm: env!("TRELLIS_NPM_PACKAGING_FINGERPRINT"),
+        rust: env!("TRELLIS_RUST_CODEGEN_FINGERPRINT"),
+    }
 }
 
 pub fn infer_artifact_version(
@@ -1363,11 +1547,12 @@ mod tests {
     use crate::cli::RuntimeSource;
 
     use super::{
-        find_tsc_in_node_modules, format_embedded_rust_sdk_source,
+        find_tsc_in_node_modules, format_rust_files, generated_artifacts_are_fresh,
         generated_artifacts_metadata_path, render_npm_tsconfig, rewrite_embedded_rust_sdk_source,
-        rewrite_embedded_trellis_owned_ts_sdk_source, rewrite_npm_ts_imports,
-        trellis_package_version, ts_package_name_from_id, write_contract_shell_outputs,
-        ContractShellOutputPlan,
+        rewrite_embedded_trellis_owned_ts_sdk_source, rewrite_local_generated_ts_sdk_imports,
+        rewrite_npm_ts_imports, trellis_package_version, ts_package_name_from_id,
+        write_contract_shell_outputs, write_generated_artifacts_metadata, ContractShellOutputPlan,
+        GeneratedArtifactsMetadata,
     };
 
     #[test]
@@ -1376,6 +1561,101 @@ mod tests {
             ts_package_name_from_id("trellis.demo-service@v1", "@trellis-sdk/"),
             "@trellis-sdk/trellis-demo-service",
         );
+    }
+
+    #[test]
+    fn participant_digest_invalidates_participant_target_only() {
+        let temp = tempfile::tempdir().unwrap();
+        let out_api = temp.path().join("api.json");
+        fs::write(&out_api, "{}\n").unwrap();
+        let expected = GeneratedArtifactsMetadata {
+            schema_version: GeneratedArtifactsMetadata::SCHEMA_VERSION,
+            contract_id: "trellis.test@v1".to_string(),
+            api_digest: "api".to_string(),
+            participant_digest: Some("new".to_string()),
+            artifact_version: "1.0.0".to_string(),
+            runtime_source: RuntimeSource::Registry,
+            jsr_runtime_version: "1.0.0".to_string(),
+            has_jsr_package: false,
+            has_npm_package: false,
+            has_cargo_package: false,
+            package_name: "@test/sdk".to_string(),
+            crate_name: "test_sdk".to_string(),
+            model_fingerprint: "model".to_string(),
+            ts_codegen_fingerprint: "ts".to_string(),
+            npm_packaging_fingerprint: "npm".to_string(),
+            npm_toolchain_fingerprint: None,
+            rust_codegen_fingerprint: "rust".to_string(),
+        };
+        let mut existing = expected.clone();
+        existing.participant_digest = Some("old".to_string());
+        write_generated_artifacts_metadata(&out_api, &existing).unwrap();
+
+        let freshness = generated_artifacts_are_fresh(&expected, &out_api, None, None, None);
+        assert!(freshness.api);
+        assert!(!freshness.participant);
+        assert!(!freshness.all());
+    }
+
+    #[test]
+    fn npm_toolchain_change_invalidates_npm_target() {
+        let temp = tempfile::tempdir().unwrap();
+        let out_api = temp.path().join("api.json");
+        let npm_out = temp.path().join("npm");
+        fs::create_dir_all(npm_out.join("esm")).unwrap();
+        for path in ["package.json", "esm/mod.js", "esm/mod.d.ts"] {
+            fs::write(npm_out.join(path), "{}\n").unwrap();
+        }
+        fs::write(&out_api, "{}\n").unwrap();
+        let expected = GeneratedArtifactsMetadata {
+            schema_version: GeneratedArtifactsMetadata::SCHEMA_VERSION,
+            contract_id: "trellis.test@v1".to_string(),
+            api_digest: "api".to_string(),
+            participant_digest: None,
+            artifact_version: "1.0.0".to_string(),
+            runtime_source: RuntimeSource::Registry,
+            jsr_runtime_version: "1.0.0".to_string(),
+            has_jsr_package: false,
+            has_npm_package: true,
+            has_cargo_package: false,
+            package_name: "@test/sdk".to_string(),
+            crate_name: "test_sdk".to_string(),
+            model_fingerprint: "model".to_string(),
+            ts_codegen_fingerprint: "ts".to_string(),
+            npm_packaging_fingerprint: "npm".to_string(),
+            npm_toolchain_fingerprint: Some("new".to_string()),
+            rust_codegen_fingerprint: "rust".to_string(),
+        };
+        let mut existing = expected.clone();
+        existing.npm_toolchain_fingerprint = Some("old".to_string());
+        write_generated_artifacts_metadata(&out_api, &existing).unwrap();
+
+        assert!(
+            !generated_artifacts_are_fresh(&expected, &out_api, None, Some(&npm_out), None,).npm
+        );
+    }
+
+    #[test]
+    fn local_import_rewrite_uses_logical_output_depth() {
+        let temp = tempfile::tempdir().unwrap();
+        let staged = temp.path().join(".staging/package");
+        fs::create_dir_all(&staged).unwrap();
+        fs::write(
+            staged.join("types.ts"),
+            "import { TrellisError } from \"@qlever-llc/trellis/errors\";\n",
+        )
+        .unwrap();
+        rewrite_local_generated_ts_sdk_imports(
+            &staged,
+            &temp.path().join("generated/packages/jsr/test"),
+            RuntimeSource::Local,
+            Some(temp.path()),
+        )
+        .unwrap();
+
+        let rewritten = fs::read_to_string(staged.join("types.ts")).unwrap();
+        assert!(rewritten.contains("../../../../ts/packages/trellis/errors/index.ts"));
+        assert!(!rewritten.contains(".staging"));
     }
 
     #[test]
@@ -1460,8 +1740,9 @@ mod tests {
             "use trellis_rs::service::OperationFailureLike;\npub fn client( )->trellis_client::Result<()> { todo!() }\n",
             false,
         );
-        let formatted = format_embedded_rust_sdk_source(&dest, &rewritten)
-            .expect("format rewritten Rust SDK source");
+        fs::write(&dest, rewritten).expect("write rewritten Rust SDK source");
+        format_rust_files(temp.path()).expect("format rewritten Rust SDK source");
+        let formatted = fs::read_to_string(dest).expect("read formatted Rust SDK source");
 
         assert_eq!(
             formatted,

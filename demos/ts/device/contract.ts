@@ -34,6 +34,7 @@ const contract = defineDeviceContract(
   { schemas },
   (ref) => ({
     id: "trellis.demo-device@v1",
+    apiId: "trellis.demo-device@v1",
     displayName: "Field Device Demo",
     description: "Activated Field Device TUI for the consolidated demo.",
     docs: {

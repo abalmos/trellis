@@ -9,11 +9,14 @@ publish = false
 [dependencies]
 clap = { version = "4.6.0", features = ["derive"] }
 ignore = "0.4.25"
+glob = "0.3.3"
 miette = { version = "7.6.0", features = ["fancy"] }
 notify = "8.2.0"
 owo-colors = "4.3.0"
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.149"
+sha2 = "0.11.0"
+syn = { version = "2.0.117", features = ["full", "visit"] }
 toml = "1.1.2"
 self_update = { version = "0.44.0", default-features = false, features = ["archive-tar", "archive-zip", "compression-flate2", "compression-zip-deflate", "rustls", "ureq"] }
 tempfile = "3.27.0"

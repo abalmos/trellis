@@ -55,6 +55,7 @@ const typeTestContract = defineServiceContract(
   { schemas: typeTestSchemas },
   (ref) => ({
     id: "trellis.service-runtime.type-test@v1",
+    apiId: "trellis.service-runtime.type-test@v1",
     displayName: "Service Runtime Type Test",
     description: "Verify typed service surface.",
     rpc: {
@@ -101,6 +102,7 @@ const jobsTypeTestContract = defineServiceContract(
   { schemas: jobsTypeTestSchemas },
   (ref) => ({
     id: "trellis.service-runtime.jobs-type-test@v1",
+    apiId: "trellis.service-runtime.jobs-type-test@v1",
     displayName: "Jobs Type Test",
     description: "Verify typed service.jobs surface.",
     uses: [
@@ -129,6 +131,7 @@ const optionalKvTypeTestContract = defineServiceContract(
   { schemas: typeTestSchemas },
   (ref) => ({
     id: "trellis.service-runtime.optional-kv-type-test@v1",
+    apiId: "trellis.service-runtime.optional-kv-type-test@v1",
     displayName: "Optional KV Type Test",
     description:
       "Verify optional KV aliases stay optional in the service type.",
@@ -157,6 +160,7 @@ const operationsTypeTestContract = defineServiceContract(
   { schemas: operationsTypeTestSchemas },
   (ref) => ({
     id: "trellis.service-runtime.operations-type-test@v1",
+    apiId: "trellis.service-runtime.operations-type-test@v1",
     displayName: "Operations Type Test",
     description: "Verify typed service.operation surface.",
     operations: {
@@ -198,6 +202,7 @@ const depsTypeTestContract = defineServiceContract(
   { schemas: depsTypeTestSchemas },
   (ref) => ({
     id: "trellis.service-runtime.deps-type-test@v1",
+    apiId: "trellis.service-runtime.deps-type-test@v1",
     displayName: "Deps Type Test",
     description: "Verify bound service dependency injection types.",
     rpc: {

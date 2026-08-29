@@ -112,6 +112,7 @@ const billing = defineServiceContract(
   { schemas },
   () => ({
     id: "trellis.billing.test@v1",
+    apiId: "trellis.billing.test@v1",
     displayName: "Billing Test",
     description: "Exercise operations runtime helpers.",
     capabilities,

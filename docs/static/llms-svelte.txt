@@ -114,6 +114,7 @@ import { sdk as orders } from "#trellis-generated-sdk/orders";
 
 const contract = defineAppContract(() => ({
   id: "acme.dashboard@v1",
+  apiId: "acme.dashboard@v1",
   displayName: "Acme Dashboard",
   description: "Browser app for order workflows.",
   uses: {

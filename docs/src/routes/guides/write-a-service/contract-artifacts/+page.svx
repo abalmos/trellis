@@ -12,13 +12,14 @@ Operators also need a contract artifact they can submit as a service deployment 
 
 `generated/` is disposable build output. It is ignored by git and recreated by repo-local prepare tasks that run `trellis-generate` behind the scenes.
 
-For TypeScript contract sources, prepare resolves either a top-level `contract.ts` or `contract.js` for single-contract projects, or `contracts/*.ts` for multi-contract layouts, from the file's default export. Authors do not need to add named `CONTRACT` exports just for generation. For TypeScript authoring, schema and error registries belong in the first `define*Contract(...)` argument, while contract-owned capability metadata belongs in the returned contract body beside `id`, `displayName`, and `description`.
+For TypeScript contract sources, prepare resolves either a top-level `contract.ts` or `contract.js` for single-contract projects, or `contracts/*.ts` for multi-contract layouts, from the file's default export. Authors do not need to add named `CONTRACT` exports just for generation. For TypeScript authoring, schema and error registries belong in the first `define*Contract(...)` argument, while contract-owned capability metadata belongs in the returned contract body beside `id`, `apiId`, `displayName`, and `description`. `id` is the stable participant identity; `apiId` is the owned API identity. They must both be supplied even when their values are equal.
 
 You can also add docs metadata to the contract or to owned surfaces when generated docs need more than the short `displayName` and `description` copy:
 
 ```ts
 export const ordersService = defineServiceContract({ schemas }, (ref) => ({
   id: "orders-service@v1",
+  apiId: "orders-service@v1",
   displayName: "Orders Service",
   description: "A simple service for managing orders.",
   docs: {
@@ -49,6 +50,10 @@ Outputs include:
 - generated Cargo crates under `generated/packages/cargo/`
 - Rust build output under `generated/packages/cargo/*/target/`
 
+Generated participant facades expose `CONTRACT_ID`, while generated API SDKs expose `API_ID`. Participant JSON and facade paths use the participant `id`; API JSON and SDK paths use `apiId`.
+
+When a participant owns State or another implemented surface, authoring pins its owned API under `participant.implements.self` with the exact API digest. A participant may implement additional APIs under other aliases, but Trellis State resolves owned declarations only through `self`; a missing `self` is rejected rather than falling back to participant identity or store-name matching.
+
 JSR packages include `client.ts` facade types for consumers and concrete handler
 aliases for service implementations. Service contracts generate JSR, npm, and
 Cargo SDK packages; app contracts generate JSR and npm SDK packages so
@@ -64,6 +69,31 @@ Refresh the outputs with the repo workflow entrypoints:
 `trellis` is the runtime/operator CLI. Normal users should not need machine-global generator setup to refresh these artifacts.
 
 The Rust workspace treats the generated SDK crates under `generated/packages/cargo/` as build inputs. Run `cargo xtask prepare` before `cargo build` or `cargo install` from this repository. When you just want the normal Rust build workflow, prefer `cargo xtask build`, which runs `prepare` first and then invokes `cargo build`.
+
+Use `cargo xtask prepare --timings` when diagnosing generation performance. The opt-in report includes top-level phase times, per-contract resolution times and language totals, subprocess counts by executable, generated/skipped contract and target counts, and installed file/byte totals. Resolution totals are nested within the planning and execution phases, so do not add them to the top-level phase total. Timings are intentionally unavailable in watch mode because each report describes one complete prepare invocation.
+
+Prepare keeps a disposable, repository-namespaced resolution cache under the platform user cache directory (`$XDG_CACHE_HOME/trellis/prepare` or `~/.cache/trellis/prepare`), falling back to `generated/.trellis-prepare-cache` when no user cache directory is available. Set `TRELLIS_PREPARE_CACHE` to move or isolate it. An unchanged prepare validates tracked source inputs and generated outputs without evaluating contract source; corrupt, incompatible, or stale entries fall back to normal resolution. `--force` bypasses both resolution and target caches. Delete the cache directory whenever you want to reclaim it; it is never a release input.
+
+Contract resolution must be deterministic from tracked source. Trellis follows local TypeScript imports, Rust modules and literal includes, manifests, lockfiles, tool binaries, and generated-SDK dependencies. Declare exceptional file and environment inputs that affect resolution but are not visible through those graphs:
+
+```toml
+[package.metadata.trellis.prepare]
+inputs = ["schemas/*.json"]
+env = ["CONTRACT_FEATURE"]
+```
+
+```json
+{
+  "trellis": {
+    "prepare": {
+      "inputs": ["schemas/*.json"],
+      "env": ["CONTRACT_FEATURE"]
+    }
+  }
+}
+```
+
+Input globs are relative to the package root. Undeclared time, randomness, network responses, environment variables, and files outside the project are unsupported resolution inputs. Pin remote and package dependencies; mutable remote identities cannot produce reliable cache hits.
 
 <LanguageTabs>
 {#snippet ts()}

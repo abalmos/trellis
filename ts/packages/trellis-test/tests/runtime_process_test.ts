@@ -48,6 +48,7 @@ Deno.test("TrellisTestRuntime.start requires explicit trellis command", async ()
 
 const runtimeProcessContract = defineServiceContract({}, () => ({
   id: "trellis.test.runtime-process@v1",
+  apiId: "trellis.test.runtime-process@v1",
   displayName: "Trellis Test Runtime Process Service",
   description: "Verifies public service bootstrap against a spawned runtime.",
 }));
@@ -63,6 +64,7 @@ const entityContract = defineServiceContract(
   { schemas: entitySchemas },
   (ref) => ({
     id: "trellis.test.entity-live@v1",
+    apiId: "trellis.test.entity-live@v1",
     displayName: "Trellis Test Entity Live Service",
     description: "Service-repo style entity contract for live runtime tests.",
     capabilities: {
@@ -96,6 +98,7 @@ const entityContract = defineServiceContract(
 
 const entityClientContract = defineAppContract(() => ({
   id: "trellis.test.entity-live-client@v1",
+  apiId: "trellis.test.entity-live-client@v1",
   displayName: "Trellis Test Entity Live Client",
   description: "App/client participant for live runtime tests.",
   uses: [entityContract.EntityGet, entityContract.EntityChanged.publish],
@@ -105,6 +108,7 @@ const entitySubscriberContract = defineServiceContract(
   { schemas: entitySchemas },
   () => ({
     id: "trellis.test.entity-live-subscriber@v1",
+    apiId: "trellis.test.entity-live-subscriber@v1",
     displayName: "Trellis Test Entity Live Subscriber",
     description: "Dependent durable event consumer for live runtime tests.",
     uses: [entityContract.EntityChanged.subscribe],
@@ -122,6 +126,7 @@ const migrationContract = defineServiceContract(
   { schemas: entitySchemas },
   (ref) => ({
     id: "trellis.test.mutable-resource@v1",
+    apiId: "trellis.test.mutable-resource@v1",
     displayName: "Trellis Test Mutable Resource",
     description: "Exercises explicit migration-plan approval in tests.",
     uses: [kv({
@@ -138,6 +143,7 @@ const migrationContractV2 = defineServiceContract(
   { schemas: entitySchemas },
   (ref) => ({
     id: "trellis.test.mutable-resource@v1",
+    apiId: "trellis.test.mutable-resource@v1",
     displayName: "Trellis Test Mutable Resource",
     description: "Exercises explicit migration-plan approval in tests.",
     uses: [kv({

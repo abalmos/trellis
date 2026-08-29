@@ -14,7 +14,8 @@ use crate::{
 
 #[test]
 fn api_form_authoring_preserves_participant_event_consumers() {
-    let participant = ContractBuilder::authoring(
+    let artifacts = ContractBuilder::authoring(
+        "example.consumer-service@v1",
         "example.consumer@v1",
         "Consumer",
         "Consumes an event.",
@@ -48,9 +49,14 @@ fn api_form_authoring_preserves_participant_event_consumers() {
         },
     )
     .build()
-    .expect("build native artifacts")
-    .participant_value()
-    .expect("normalize participant");
+    .expect("build native artifacts");
+    let api = artifacts.api_value().expect("normalize API");
+    let participant = artifacts
+        .participant_value()
+        .expect("normalize participant");
+    assert_eq!(api["id"], "example.consumer@v1");
+    assert_eq!(participant["id"], "example.consumer-service@v1");
+    assert_eq!(participant["implements"]["self"]["api"], api["id"]);
     assert_eq!(participant["eventConsumers"]["ingest"]["maxDeliver"], 2);
     assert_eq!(
         participant["eventConsumers"]["ingest"]["events"]["self"][0],
@@ -93,6 +99,7 @@ fn native_authoring_matches_shared_vectors() {
 fn representative_native_cases() -> Vec<(&'static str, ContractArtifacts)> {
     let dependency = ContractBuilder::authoring(
         "conformance.dependency@v1",
+        "conformance.dependency@v1",
         "Dependency",
         "Conformance dependency.",
         ContractKind::Service,
@@ -105,6 +112,7 @@ fn representative_native_cases() -> Vec<(&'static str, ContractArtifacts)> {
     let dependency_api = dependency.api_value().unwrap();
     let optional_dependency = ContractBuilder::authoring(
         "conformance.optional-dependency@v1",
+        "conformance.optional-dependency@v1",
         "Optional dependency",
         "Optional conformance dependency.",
         ContractKind::Service,
@@ -116,6 +124,7 @@ fn representative_native_cases() -> Vec<(&'static str, ContractArtifacts)> {
     let optional_dependency_api = optional_dependency.api_value().unwrap();
 
     let minimal = ContractBuilder::authoring(
+        "conformance.minimal-app-participant@v1",
         "conformance.minimal-app@v1",
         "Minimal app",
         "Minimal native app.",
@@ -124,6 +133,7 @@ fn representative_native_cases() -> Vec<(&'static str, ContractArtifacts)> {
     .build()
     .unwrap();
     let service = ContractBuilder::authoring(
+        "conformance.service@v1",
         "conformance.service@v1",
         "Conformance service",
         "Representative native service.",
@@ -244,6 +254,7 @@ fn representative_native_cases() -> Vec<(&'static str, ContractArtifacts)> {
     .unwrap();
     let device = ContractBuilder::authoring(
         "conformance.device@v1",
+        "conformance.device@v1",
         "Device",
         "Native device.",
         ContractKind::Device,
@@ -256,6 +267,7 @@ fn representative_native_cases() -> Vec<(&'static str, ContractArtifacts)> {
     .build()
     .unwrap();
     let agent = ContractBuilder::authoring(
+        "conformance.agent@v1",
         "conformance.agent@v1",
         "Agent",
         "Native agent.",

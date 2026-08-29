@@ -28,6 +28,7 @@ export function createResourcesFixture(caseId: string) {
     { schemas: resourceSchemas },
     (ref) => ({
       id: `trellis.integration.resources-service.${slug}@v1`,
+      apiId: `trellis.integration.resources-service.${slug}@v1`,
       displayName: `Trellis Integration Resources Service (${slug})`,
       description: "Exercises service-bound KV and store resource handles.",
       uses: [
@@ -79,6 +80,7 @@ export function createResourcesFixture(caseId: string) {
 
   const clientContract = defineAppContract(() => ({
     id: `trellis.integration.resources-client.${slug}@v1`,
+    apiId: `trellis.integration.resources-client.${slug}@v1`,
     displayName: `Trellis Integration Resources Client (${slug})`,
     description:
       "App/client participant for the resources integration fixture.",

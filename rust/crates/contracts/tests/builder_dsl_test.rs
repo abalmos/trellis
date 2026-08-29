@@ -11,6 +11,7 @@ use trellis_contracts::{
 fn builder_minimal_manifest_defaults_format_and_validates() {
     let artifacts = ContractBuilder::authoring(
         "example.contract@v1",
+        "example.contract@v1",
         "Example Contract",
         "Example contract description.",
         ContractKind::Service,
@@ -24,8 +25,28 @@ fn builder_minimal_manifest_defaults_format_and_validates() {
 }
 
 #[test]
+fn builder_keeps_participant_and_api_identity_argument_order_explicit() {
+    let artifacts = ContractBuilder::authoring(
+        "example.participant@v1",
+        "example.api@v1",
+        "Example Contract",
+        "Example contract description.",
+        ContractKind::Service,
+    )
+    .build()
+    .expect("builder should preserve independent identities");
+
+    assert_eq!(artifacts.api_value().unwrap()["id"], "example.api@v1");
+    assert_eq!(
+        artifacts.participant_value().unwrap()["id"],
+        "example.participant@v1"
+    );
+}
+
+#[test]
 fn builder_does_not_model_runtime_health_transport_as_a_contract_use() {
     let artifacts = ContractBuilder::authoring(
+        "example.service@v1",
         "example.service@v1",
         "Example Service",
         "Example service description.",
@@ -41,6 +62,7 @@ fn builder_does_not_model_runtime_health_transport_as_a_contract_use() {
 fn builder_does_not_add_baseline_health_to_health_contract_itself() {
     let artifacts = ContractBuilder::authoring(
         "trellis.health@v1",
+        "trellis.health@v1",
         "Trellis Health",
         "Expose shared Trellis heartbeat events.",
         ContractKind::Service,
@@ -54,6 +76,7 @@ fn builder_does_not_add_baseline_health_to_health_contract_itself() {
 #[test]
 fn builder_does_not_add_health_contract_use_for_devices() {
     let artifacts = ContractBuilder::authoring(
+        "example.device@v1",
         "example.device@v1",
         "Example Device",
         "Example device manifest.",
@@ -73,6 +96,7 @@ fn builder_does_not_add_health_contract_use_for_devices() {
 #[test]
 fn builder_preserves_explicit_health_use_without_implicit_publish() {
     let artifacts = ContractBuilder::authoring(
+        "example.explicit-health@v1",
         "example.explicit-health@v1",
         "Example Explicit Health",
         "Example explicit health manifest.",
@@ -102,6 +126,7 @@ fn builder_preserves_explicit_health_use_without_implicit_publish() {
 fn builder_preserves_event_publish_and_subscribe_on_same_use() {
     let artifacts = ContractBuilder::authoring(
         "example.events-agent@v1",
+        "example.events-agent@v1",
         "Example Events Agent",
         "Example events agent manifest.",
         ContractKind::Agent,
@@ -129,6 +154,7 @@ fn builder_preserves_event_publish_and_subscribe_on_same_use() {
 #[test]
 fn builder_supports_uses_rpc_kv_store_and_job_queue_resources() {
     let artifacts = ContractBuilder::authoring(
+        "example.jobs@v1",
         "example.jobs@v1",
         "Example Jobs",
         "Example jobs manifest.",
@@ -221,6 +247,7 @@ fn builder_supports_uses_rpc_kv_store_and_job_queue_resources() {
 fn builder_rejects_local_capabilities_with_contract_namespace_prefix() {
     let error = ContractBuilder::authoring(
         "trellis.core@v1",
+        "trellis.core@v1",
         "Trellis Core",
         "Trellis core manifest.",
         ContractKind::Service,
@@ -247,6 +274,7 @@ fn builder_rejects_local_capabilities_with_contract_namespace_prefix() {
         .contains("must not start with contract namespace prefix 'trellis.core.'"));
 
     let error = ContractBuilder::authoring(
+        "trellis.core@v1",
         "trellis.core@v1",
         "Trellis Core",
         "Trellis core manifest.",
@@ -277,6 +305,7 @@ fn builder_rejects_local_capabilities_with_contract_namespace_prefix() {
 #[test]
 fn builder_supports_contract_local_error_declarations() {
     let artifacts = ContractBuilder::authoring(
+        "example.errors@v1",
         "example.errors@v1",
         "Example Errors",
         "Example error manifest.",
@@ -312,6 +341,7 @@ fn builder_supports_contract_local_error_declarations() {
 fn builder_supports_store_resources() {
     let artifacts = ContractBuilder::authoring(
         "example.store@v1",
+        "example.store@v1",
         "Example Store",
         "Example store manifest.",
         ContractKind::Service,
@@ -337,6 +367,7 @@ fn builder_supports_store_resources() {
 #[test]
 fn builder_supports_state_stores_exports_and_events() {
     let artifacts = ContractBuilder::authoring(
+        "example.device@v1",
         "example.device@v1",
         "Example Device",
         "Example device manifest.",
@@ -370,6 +401,7 @@ fn builder_supports_state_stores_exports_and_events() {
 fn builder_build_returns_validation_error_for_unknown_state_schema_ref() {
     let error = ContractBuilder::authoring(
         "example.device@v1",
+        "example.device@v1",
         "Example Device",
         "Example device manifest.",
         ContractKind::Device,
@@ -386,6 +418,7 @@ fn builder_build_returns_validation_error_for_unknown_state_schema_ref() {
 #[test]
 fn builder_build_returns_validation_error_for_unknown_schema_ref() {
     let error = ContractBuilder::authoring(
+        "example.contract@v1",
         "example.contract@v1",
         "Example Contract",
         "Example contract description.",
@@ -406,6 +439,7 @@ fn builder_build_returns_validation_error_for_unknown_schema_ref() {
 fn builder_build_returns_validation_error_for_unknown_kv_schema_ref() {
     let error = ContractBuilder::authoring(
         "example.kv@v1",
+        "example.kv@v1",
         "Example KV",
         "Example kv manifest.",
         ContractKind::Service,
@@ -423,6 +457,7 @@ fn builder_build_returns_validation_error_for_unknown_kv_schema_ref() {
 #[test]
 fn builder_supports_owned_and_used_operations() {
     let artifacts = ContractBuilder::authoring(
+        "example.operations@v1",
         "example.operations@v1",
         "Example Operations",
         "Example operations manifest.",
@@ -547,6 +582,7 @@ fn referenced_api(
 #[test]
 fn builder_build_returns_validation_error_for_unknown_operation_schema_ref() {
     let error = ContractBuilder::authoring(
+        "example.operations@v1",
         "example.operations@v1",
         "Example Operations",
         "Example operations manifest.",
