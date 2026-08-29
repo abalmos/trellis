@@ -456,21 +456,27 @@ Do not add commands like `trellis build project` with ambiguous behavior.
 ### Project API dependency files
 
 The CLI project model reads `trellis.toml` API dependencies keyed by stable API
-ID, with a Semantic Version requirement and a local path to a canonical
-`trellis.api.v1` JSON artifact. `trellis.lock` records the exact release
-version, semantic API digest, local path, and semantic manifest digest. Release
-version is package metadata; runtime evidence remains stable API ID plus
-semantic digest.
+ID, with a Semantic Version requirement and exactly one source: a local
+canonical artifact path or a named OCI registry. Registry configuration is a
+named host/repository prefix with an optional project default. `trellis.lock`
+records exact release and semantic API digests; remote entries also record the
+exact OCI manifest digest. Release and OCI distribution identity remain package
+metadata; runtime evidence remains stable API ID plus semantic digest.
 
-`trellis add`, `trellis rm`, and `trellis update` resolve only those local
-canonical artifact paths and write an exact lock. `trellis install` is
-lock-stable: it verifies the manifest digest and each locked ID, release,
-semantic digest, and path before materializing canonical APIs and generating
-consumer-local SDKs under disposable `.trellis/` output. It never executes a
-dependency producer's source and never changes `trellis.toml` or `trellis.lock`.
-Dependency SDKs are generated before the consumer's own participant source is
-evaluated, while participant evidence continues to pin only API ID plus semantic
-digest.
+`trellis add`, `trellis rm`, and `trellis update` resolve local paths or the
+highest matching Semantic Version OCI tag and write an exact lock. Remote
+artifacts are canonical `trellis.api.v1` JSON layers in deterministic OCI image
+manifests. `trellis install` is lock-stable: remote installs pull by OCI digest,
+validate the manifest, layer, API identity, release, and semantic digest, and
+use a content-addressed global cache. It then follows the same consumer-local
+SDK generation path as local dependencies under disposable `.trellis/` output.
+It never executes a dependency producer's source and never changes project
+files. `trellis publish` publishes project-owned canonical APIs, reuses
+Docker-compatible credentials, keeps release tags immutable, requires
+monotonically increasing releases, and uses `compare_api_replacement` to reject
+incompatible releases under an existing stable API ID. Dependency SDKs are
+generated before the consumer's own participant source is evaluated, while
+participant evidence continues to pin only API ID plus semantic digest.
 
 ## Contract boundary
 

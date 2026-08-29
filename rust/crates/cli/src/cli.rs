@@ -50,6 +50,8 @@ pub enum TopLevelCommand {
     Update(ProjectRootArgs),
     /// Recreate local generated artifacts from the exact lock.
     Install(ProjectRootArgs),
+    /// Publish every project-owned canonical API to OCI.
+    Publish(PublishArgs),
     /// Start a detached portal login against a Trellis auth service.
     Login(LoginArgs),
     /// Revoke the current admin session and clear local session state.
@@ -93,13 +95,26 @@ pub struct ProjectRootArgs {
 }
 
 #[derive(Debug, clap::Args)]
-/// Add one canonical local API artifact.
+/// Add one local canonical API artifact or remote API ID.
 pub struct AddArgs {
-    /// Path to one canonical `trellis.api.v1` JSON artifact.
-    pub api_json_path: PathBuf,
+    /// Relative artifact path or stable API ID such as `acme.orders@v1`.
+    pub source: String,
     #[arg(long)]
     /// Semantic Version requirement; defaults to a caret of the exact release.
     pub version: Option<String>,
+    #[arg(long)]
+    /// Named OCI registry for a remote API.
+    pub registry: Option<String>,
+    #[command(flatten)]
+    pub project: ProjectRootArgs,
+}
+
+#[derive(Debug, clap::Args)]
+/// Publish project-owned canonical APIs to OCI.
+pub struct PublishArgs {
+    #[arg(long)]
+    /// Named OCI registry; defaults to `default-registry`.
+    pub registry: Option<String>,
     #[command(flatten)]
     pub project: ProjectRootArgs,
 }

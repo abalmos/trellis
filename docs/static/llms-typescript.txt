@@ -13,12 +13,12 @@ https://raw.githubusercontent.com/qlever-llc/trellis/main/docs/static/llms-svelt
 
 ## Service repository setup
 
-- Manage local canonical API dependencies with `trellis add`, `trellis rm`,
+- Manage local or OCI canonical API dependencies with `trellis add`, `trellis rm`,
   `trellis update`, and lock-stable `trellis install`. Commit `trellis.toml` and
   `trellis.lock`, ignore `.trellis/`, link
   `.trellis/generated/ts/trellis-apis` in Deno, and import stable subpaths such
   as `@trellis/apis/acme.orders`. Install verifies exact API ID, release, and
-  semantic digest and never executes provider source.
+  semantic digest, and remote OCI digest and never executes provider source.
 
 Recommended TypeScript service shape:
 

@@ -9,13 +9,13 @@ https://raw.githubusercontent.com/qlever-llc/trellis/main/docs/static/llms-full.
 
 ## Repository setup
 
-- Manage local canonical API dependencies with `trellis add`, `trellis rm`,
+- Manage local or OCI canonical API dependencies with `trellis add`, `trellis rm`,
   `trellis update`, and lock-stable `trellis install`. Commit `trellis.toml` and
   `trellis.lock`, ignore `.trellis/`, and add
   `trellis-apis = { path = ".trellis/generated/rust/trellis-apis" }`. Imports
   remain stable under `trellis_apis::<module>` across release updates. Install
-  verifies exact API ID, release, and semantic digest and never executes provider
-  source.
+  verifies exact API ID, release, semantic digest, and remote OCI digest and never
+  executes provider source.
 - Expose contract/artifact generation through `cargo xtask prepare`.
 - Commit the generated SDKs, participant facades, manifests, and package outputs
   expected by the repository. Never edit generated files by hand.

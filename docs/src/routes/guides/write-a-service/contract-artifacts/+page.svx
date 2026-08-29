@@ -55,7 +55,7 @@ Generated participant facades expose `CONTRACT_ID`, while generated API SDKs exp
 
 ## Install API dependencies
 
-A consumer project records local canonical API artifacts in `trellis.toml`:
+A consumer project records local canonical API artifacts or named OCI registries in `trellis.toml`:
 
 ```toml
 format = 1
@@ -65,20 +65,37 @@ version = "^1.4"
 path = "../orders/generated/protocol/apis/acme.orders@v1.json"
 ```
 
+For a published API, configure a registry prefix and dependency source:
+
+```toml
+format = 1
+default-registry = "qlever"
+
+[registries.qlever]
+prefix = "ghcr.io/qlever-llc/trellis-apis"
+
+[apis."acme.orders@v1"]
+version = "^1.4"
+registry = "qlever"
+```
+
 Use the top-level package commands from the directory containing that file:
 
 ```sh
 trellis add ../orders/generated/protocol/apis/acme.orders@v1.json
+trellis add acme.orders@v1 --version '^1.4'
 trellis update
 trellis install
 trellis rm acme.orders@v1
 ```
 
-`add`, `rm`, and `update` write an exact `trellis.lock`; commit both project files. `install` never updates them. It fails if the manifest changed, the lock is missing, or the local artifact's exact API ID, release version, or semantic digest differs from the lock.
+`add`, `rm`, and `update` write an exact `trellis.lock`; commit both project files. `install` never updates them. Local entries pin the path, API ID, release, and semantic digest. Remote entries additionally pin the exact OCI manifest digest and install by that digest, not by a mutable tag. Docker-compatible registry credentials, including configured credential helpers, are reused automatically.
 
 Installed canonical APIs and consumer-generated SDKs live under disposable `.trellis/`. Add `.trellis/` to `.gitignore`. TypeScript projects link `.trellis/generated/ts/trellis-apis` from the root Deno `links` array and import stable subpaths such as `@trellis/apis/acme.orders`. Rust projects add `trellis-apis = { path = ".trellis/generated/rust/trellis-apis" }` and import stable modules such as `trellis_apis::orders`.
 
-The API release version is human package metadata. The stable API ID remains the protocol and security identity, and the semantic digest remains the exact machine identity recorded in participant evidence. Local paths are the only dependency source; installation does not execute provider contract source.
+The API release version and OCI digest are distribution metadata. The stable API ID remains the protocol and security identity, and the semantic digest remains the exact machine identity recorded in participant evidence. Installation never executes provider contract source.
+
+Producers configure the same registry prefix and run `trellis publish` after a lock-stable install. Trellis publishes only canonical APIs; consumers generate their own SDKs. Release tags are immutable, and each newer release under the same API ID must pass Trellis structural compatibility. A breaking API uses a new stable identity such as `@v2`.
 
 When a participant owns State or another implemented surface, authoring pins its owned API under `participant.implements.self` with the exact API digest. A participant may implement additional APIs under other aliases, but Trellis State resolves owned declarations only through `self`; a missing `self` is rejected rather than falling back to participant identity or store-name matching.
 

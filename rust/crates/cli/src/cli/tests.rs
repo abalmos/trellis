@@ -176,6 +176,33 @@ fn parses_login_logout_and_whoami_top_level_commands() {
 }
 
 #[test]
+fn parses_remote_add_and_publish_commands() {
+    let cli = Cli::parse_from([
+        "trellis",
+        "add",
+        "acme.orders@v1",
+        "--version",
+        "^1.4",
+        "--registry",
+        "qlever",
+    ]);
+    match cli.command {
+        TopLevelCommand::Add(args) => {
+            assert_eq!(args.source, "acme.orders@v1");
+            assert_eq!(args.version.as_deref(), Some("^1.4"));
+            assert_eq!(args.registry.as_deref(), Some("qlever"));
+        }
+        other => panic!("unexpected top-level command: {other:?}"),
+    }
+
+    let cli = Cli::parse_from(["trellis", "publish", "--registry", "qlever"]);
+    match cli.command {
+        TopLevelCommand::Publish(args) => assert_eq!(args.registry.as_deref(), Some("qlever")),
+        other => panic!("unexpected top-level command: {other:?}"),
+    }
+}
+
+#[test]
 fn parses_identity_grants_revoke_identity_grant_id_positional() {
     let cli = Cli::parse_from([
         "trellis",

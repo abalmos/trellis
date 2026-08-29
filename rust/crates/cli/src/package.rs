@@ -1,4 +1,4 @@
-//! Local path API dependency commands.
+//! Project API dependency and publication commands.
 
 use std::{collections::BTreeMap, fs, path::Path};
 
@@ -7,8 +7,8 @@ use semver::{Version, VersionReq};
 use serde::Serialize;
 
 use crate::{
-    cli::{AddArgs, OutputFormat, ProjectRootArgs, RmArgs},
-    output,
+    cli::{AddArgs, OutputFormat, ProjectRootArgs, PublishArgs, RmArgs},
+    oci, output,
     project::{
         read_lock, read_manifest, restore_project_files, write_lock, write_manifest_and_lock,
         ApiDependency, LockedApi, ProjectLock, ProjectManifest,
@@ -22,18 +22,42 @@ struct PackageResult {
     generated_projects: usize,
 }
 
-pub fn add(format: OutputFormat, args: &AddArgs) -> Result<()> {
+pub async fn add(format: OutputFormat, args: &AddArgs) -> Result<()> {
     let root = canonical_root(&args.project.root)?;
     let manifest_path = root.join("trellis.toml");
     let previous_manifest = fs::read(&manifest_path).into_diagnostic()?;
     let previous_lock = read_optional(&root.join("trellis.lock"))?;
     let mut manifest = read_manifest(&manifest_path)?;
-    if args.api_json_path.is_absolute() {
-        return Err(miette!(
-            "API paths in trellis.toml must be relative to the project root"
-        ));
-    }
-    let (id, release, _) = read_path_api(&root, "", &args.api_json_path.to_string_lossy())?;
+    let source_path = Path::new(&args.source);
+    let (id, release, path, registry) = if root.join(source_path).is_file() {
+        if source_path.is_absolute() {
+            return Err(miette!(
+                "API paths in trellis.toml must be relative to the project root"
+            ));
+        }
+        let (id, release, _) = read_path_api(&root, "", &args.source)?;
+        (id, release, Some(args.source.clone()), None)
+    } else {
+        trellis_protocol::validate_api_id(&args.source)
+            .map_err(|error| miette!("invalid API id '{}': {error}", args.source))?;
+        let registry = args
+            .registry
+            .clone()
+            .or_else(|| manifest.default_registry.clone())
+            .ok_or_else(|| miette!("remote add requires --registry or default-registry"))?;
+        let config = manifest
+            .registries
+            .get(&registry)
+            .ok_or_else(|| miette!("registry '{registry}' is not configured"))?;
+        let requirement = args
+            .version
+            .as_deref()
+            .map(VersionReq::parse)
+            .transpose()
+            .map_err(|error| miette!("invalid version requirement: {error}"))?;
+        let release = select_remote_version(config, &args.source, requirement.as_ref()).await?;
+        (args.source.clone(), release, None, Some(registry))
+    };
     let requirement = args
         .version
         .clone()
@@ -44,21 +68,23 @@ pub fn add(format: OutputFormat, args: &AddArgs) -> Result<()> {
         id.clone(),
         ApiDependency {
             version: requirement.clone(),
-            path: args.api_json_path.to_string_lossy().into_owned(),
+            path,
+            registry,
         },
     );
-    let lock = resolve_lock(&root, &manifest)?;
+    let lock = resolve_lock(&root, &manifest).await?;
     let result = commit_and_install(
         &root,
         &manifest,
         &lock,
         &previous_manifest,
         previous_lock.as_deref(),
-    )?;
+    )
+    .await?;
     print_result(format, &result, Some(format!("Added {id} {requirement}")))
 }
 
-pub fn remove(format: OutputFormat, args: &RmArgs) -> Result<()> {
+pub async fn remove(format: OutputFormat, args: &RmArgs) -> Result<()> {
     let root = canonical_root(&args.project.root)?;
     let previous_manifest = fs::read(root.join("trellis.toml")).into_diagnostic()?;
     let previous_lock = read_optional(&root.join("trellis.lock"))?;
@@ -66,24 +92,25 @@ pub fn remove(format: OutputFormat, args: &RmArgs) -> Result<()> {
     if manifest.apis.remove(&args.api_id).is_none() {
         return Err(miette!("API '{}' is not in trellis.toml", args.api_id));
     }
-    let lock = resolve_lock(&root, &manifest)?;
+    let lock = resolve_lock(&root, &manifest).await?;
     let result = commit_and_install(
         &root,
         &manifest,
         &lock,
         &previous_manifest,
         previous_lock.as_deref(),
-    )?;
+    )
+    .await?;
     print_result(format, &result, Some(format!("Removed {}", args.api_id)))
 }
 
-pub fn update(format: OutputFormat, args: &ProjectRootArgs) -> Result<()> {
+pub async fn update(format: OutputFormat, args: &ProjectRootArgs) -> Result<()> {
     let root = canonical_root(&args.root)?;
     let manifest = read_manifest(&root.join("trellis.toml"))?;
     let previous_lock = read_optional(&root.join("trellis.lock"))?;
-    let lock = resolve_lock(&root, &manifest)?;
+    let lock = resolve_lock(&root, &manifest).await?;
     write_lock(&root.join("trellis.lock"), &lock)?;
-    let result = match install_root(&root, &manifest, &lock) {
+    let result = match install_root(&root, &manifest, &lock).await {
         Ok(result) => result,
         Err(error) => {
             restore_project_files(
@@ -98,7 +125,7 @@ pub fn update(format: OutputFormat, args: &ProjectRootArgs) -> Result<()> {
     print_result(format, &result, None)
 }
 
-pub fn install(format: OutputFormat, args: &ProjectRootArgs) -> Result<()> {
+pub async fn install(format: OutputFormat, args: &ProjectRootArgs) -> Result<()> {
     let root = canonical_root(&args.root)?;
     let manifest = read_manifest(&root.join("trellis.toml"))?;
     let lock_path = root.join("trellis.lock");
@@ -106,8 +133,105 @@ pub fn install(format: OutputFormat, args: &ProjectRootArgs) -> Result<()> {
         return Err(miette!("trellis.lock is missing; run `trellis update`"));
     }
     let lock = read_lock(&lock_path)?;
-    let result = install_root(&root, &manifest, &lock)?;
+    let result = install_root(&root, &manifest, &lock).await?;
     print_result(format, &result, None)
+}
+
+pub async fn publish(format: OutputFormat, args: &PublishArgs) -> Result<()> {
+    let root = canonical_root(&args.project.root)?;
+    let manifest = read_manifest(&root.join("trellis.toml"))?;
+    let lock = read_lock(&root.join("trellis.lock"))?;
+    install_root(&root, &manifest, &lock).await?;
+    let registry = args
+        .registry
+        .as_ref()
+        .or(manifest.default_registry.as_ref())
+        .ok_or_else(|| miette!("publish requires --registry or default-registry"))?;
+    let config = manifest
+        .registries
+        .get(registry)
+        .ok_or_else(|| miette!("registry '{registry}' is not configured"))?;
+    let api_root = root.join(".trellis/generated/protocol/apis");
+    let mut paths = fs::read_dir(&api_root)
+        .into_diagnostic()
+        .wrap_err("project has no generated canonical APIs")?
+        .filter_map(|entry| entry.ok().map(|entry| entry.path()))
+        .filter(|path| path.extension().is_some_and(|ext| ext == "json"))
+        .collect::<Vec<_>>();
+    paths.sort();
+    if paths.is_empty() {
+        return Err(miette!("project has no owned canonical APIs to publish"));
+    }
+    let mut checked = Vec::new();
+    for path in paths {
+        let value =
+            serde_json::from_slice(&fs::read(&path).into_diagnostic()?).into_diagnostic()?;
+        let candidate =
+            trellis_protocol::parse_api(&value).map_err(|error| miette!(error.to_string()))?;
+        let version = Version::parse(candidate.version()).map_err(|error| miette!(error))?;
+        let versions = oci::versions(config, candidate.id()).await?;
+        if versions.binary_search(&version).is_ok() {
+            let remote = oci::pull_tag(config, candidate.id(), &version).await?;
+            if remote.manifest_digest != oci::artifact_digest(&candidate)? {
+                return Err(miette!(
+                    "release {} {} already exists with different content",
+                    candidate.id(),
+                    version
+                ));
+            }
+            let id = candidate.id().to_owned();
+            checked.push((
+                candidate,
+                id,
+                version.to_string(),
+                Some(remote.manifest_digest),
+            ));
+            continue;
+        }
+        if let Some(previous_version) = versions.last() {
+            if version <= *previous_version {
+                // ponytail: releases are monotonic; add historical backfills only when required.
+                return Err(miette!(
+                    "release {version} must be newer than {previous_version}"
+                ));
+            }
+            let previous = oci::pull_tag(config, candidate.id(), previous_version).await?;
+            let report = trellis_protocol::compare_api_replacement(&previous.api, &candidate)
+                .map_err(|error| miette!(error.to_string()))?;
+            if !report.compatible {
+                let issues = report
+                    .issues
+                    .iter()
+                    .map(|issue| issue.message.as_str())
+                    .collect::<Vec<_>>()
+                    .join("; ");
+                return Err(miette!("release {} {version} is not compatible with previous release {previous_version}: {issues}; use a new stable API identity such as @v2", candidate.id()));
+            }
+        }
+        let id = candidate.id().to_owned();
+        checked.push((candidate, id, version.to_string(), None));
+    }
+    let mut published = Vec::new();
+    for (candidate, id, version, existing_digest) in checked {
+        let (digest, changed) = match existing_digest {
+            Some(digest) => (digest, false),
+            None => (oci::publish(config, &candidate).await?, true),
+        };
+        published.push((id, version, digest, changed));
+    }
+    if output::is_json(format) {
+        output::print_json(&published)
+    } else {
+        for (id, version, digest, changed) in published {
+            if changed {
+                println!("Published {id} {version}");
+            } else {
+                println!("{id} {version} already published");
+            }
+            println!("{}@{digest}", oci::repository(config, &id)?);
+        }
+        Ok(())
+    }
 }
 
 fn canonical_root(root: &Path) -> Result<std::path::PathBuf> {
@@ -124,7 +248,7 @@ fn read_optional(path: &Path) -> Result<Option<Vec<u8>>> {
     }
 }
 
-fn commit_and_install(
+async fn commit_and_install(
     root: &Path,
     manifest: &ProjectManifest,
     lock: &ProjectLock,
@@ -134,7 +258,7 @@ fn commit_and_install(
     let manifest_path = root.join("trellis.toml");
     let lock_path = root.join("trellis.lock");
     write_manifest_and_lock(&manifest_path, manifest, &lock_path, lock)?;
-    match install_root(root, manifest, lock) {
+    match install_root(root, manifest, lock).await {
         Ok(result) => Ok(result),
         Err(error) => {
             restore_project_files(&manifest_path, previous_manifest, &lock_path, previous_lock)?;
@@ -148,7 +272,11 @@ fn resolve_path_api(
     expected_id: &str,
     dependency: &ApiDependency,
 ) -> Result<(String, Version, String)> {
-    let (id, version, digest) = read_path_api(root, expected_id, &dependency.path)?;
+    let path = dependency
+        .path
+        .as_deref()
+        .ok_or_else(|| miette!("API '{expected_id}' is not a path dependency"))?;
+    let (id, version, digest) = read_path_api(root, expected_id, path)?;
     let requirement = VersionReq::parse(&dependency.version).map_err(|error| miette!(error))?;
     if !requirement.matches(&version) {
         return Err(miette!(
@@ -185,15 +313,37 @@ fn read_path_api(
     Ok((api.id().to_owned(), version, digest))
 }
 
-fn resolve_lock(root: &Path, manifest: &ProjectManifest) -> Result<ProjectLock> {
+async fn resolve_lock(root: &Path, manifest: &ProjectManifest) -> Result<ProjectLock> {
     let mut api = Vec::with_capacity(manifest.apis.len());
     for (id, dependency) in &manifest.apis {
-        let (_, version, api_digest) = resolve_path_api(root, id, dependency)?;
+        let (version, api_digest, oci_digest) = if let Some(registry) = &dependency.registry {
+            let config = manifest
+                .registries
+                .get(registry)
+                .ok_or_else(|| miette!("registry '{registry}' is not configured"))?;
+            let requirement =
+                VersionReq::parse(&dependency.version).map_err(|error| miette!(error))?;
+            let version = select_remote_version(config, id, Some(&requirement)).await?;
+            let pulled = oci::pull_tag(config, id, &version).await?;
+            (
+                version,
+                pulled
+                    .api
+                    .digest()
+                    .map_err(|error| miette!(error.to_string()))?,
+                Some(pulled.manifest_digest),
+            )
+        } else {
+            let (_, version, digest) = resolve_path_api(root, id, dependency)?;
+            (version, digest, None)
+        };
         api.push(LockedApi {
             id: id.clone(),
             version: version.to_string(),
             api_digest,
             path: dependency.path.clone(),
+            registry: dependency.registry.clone(),
+            oci_digest,
         });
     }
     Ok(ProjectLock {
@@ -203,7 +353,7 @@ fn resolve_lock(root: &Path, manifest: &ProjectManifest) -> Result<ProjectLock> 
     })
 }
 
-fn install_root(
+async fn install_root(
     root: &Path,
     manifest: &ProjectManifest,
     lock: &ProjectLock,
@@ -224,26 +374,27 @@ fn install_root(
             .apis
             .get(&locked.id)
             .ok_or_else(|| miette!("locked API '{}' is absent from trellis.toml", locked.id))?;
-        if dependency.path != locked.path {
+        if dependency.path != locked.path || dependency.registry != locked.registry {
             return Err(miette!(
                 "locked path for '{}' does not match trellis.toml",
                 locked.id
             ));
         }
-        let (_, version, digest) = resolve_path_api(root, &locked.id, dependency)?;
-        if version.to_string() != locked.version {
-            return Err(miette!(
-                "locked {} is {} but path now contains {}; run `trellis update`",
-                locked.id,
-                locked.version,
-                version
-            ));
-        }
-        if digest != locked.api_digest {
-            return Err(miette!(
-                "locked API digest does not match canonical artifact at {}",
-                dependency.path
-            ));
+        if dependency.path.is_some() {
+            let (_, version, digest) = resolve_path_api(root, &locked.id, dependency)?;
+            if version.to_string() != locked.version {
+                return Err(miette!(
+                    "locked {} is {} but path now contains {}; run `trellis update`",
+                    locked.id,
+                    locked.version,
+                    version
+                ));
+            }
+            if digest != locked.api_digest {
+                return Err(miette!(
+                    "locked API digest does not match canonical path artifact"
+                ));
+            }
         }
     }
 
@@ -373,16 +524,25 @@ fn install_root(
     if trellis_root.exists() {
         fs::rename(&trellis_root, &backup).into_diagnostic()?;
     }
-    let install_result = (|| {
-        let changed_dependencies =
-            stage_dependencies(root, lock, has_ts, has_rust, &trellis_root, &marker)?;
+    let install_result: Result<PackageResult> = async {
+        let changed_dependencies = stage_dependencies(
+            root,
+            manifest,
+            lock,
+            has_ts,
+            has_rust,
+            &trellis_root,
+            &marker,
+        )
+        .await?;
         let generated = trellis_generate::commands::prepare::generate_project(root, &trellis_root)?;
         Ok(PackageResult {
             installed_apis: lock.api.len(),
             changed_dependencies,
             generated_projects: generated.generated,
         })
-    })();
+    }
+    .await;
     match install_result {
         Ok(result) => Ok(result),
         Err(error) => {
@@ -406,8 +566,9 @@ fn remove_path(path: &Path) -> Result<()> {
     Ok(())
 }
 
-fn stage_dependencies(
+async fn stage_dependencies(
     root: &Path,
+    manifest: &ProjectManifest,
     lock: &ProjectLock,
     has_ts: bool,
     has_rust: bool,
@@ -431,8 +592,36 @@ fn stage_dependencies(
             .join("trellis.api.json");
         let ts_out = has_ts.then(|| staged.join("generated/ts/packages").join(stem));
         let rust_out = has_rust.then(|| staged.join("generated/rust/packages").join(&package_stem));
+        let source = if let Some(path) = &locked.path {
+            root.join(path)
+        } else {
+            let registry = locked
+                .registry
+                .as_ref()
+                .ok_or_else(|| miette!("locked API '{}' has no registry", locked.id))?;
+            let config = manifest
+                .registries
+                .get(registry)
+                .ok_or_else(|| miette!("registry '{registry}' is not configured"))?;
+            let digest = locked
+                .oci_digest
+                .as_deref()
+                .ok_or_else(|| miette!("locked API '{}' has no OCI digest", locked.id))?;
+            let pulled = oci::pull_locked(
+                config,
+                &locked.id,
+                &locked.version,
+                &locked.api_digest,
+                digest,
+            )
+            .await?;
+            let source = staged.join("oci").join(format!("{}.json", locked.id));
+            fs::create_dir_all(source.parent().unwrap()).into_diagnostic()?;
+            fs::write(&source, pulled.bytes).into_diagnostic()?;
+            source
+        };
         trellis_generate::artifacts::generate_installed_api(
-            &root.join(&locked.path),
+            &source,
             &api_out,
             ts_out.as_deref(),
             rust_out.as_deref(),
@@ -460,6 +649,26 @@ fn stage_dependencies(
         &["apis", "generated/ts", "generated/rust", "install-digest"],
     )?;
     Ok(lock.api.len())
+}
+
+async fn select_remote_version(
+    config: &crate::project::RegistryConfig,
+    id: &str,
+    requirement: Option<&VersionReq>,
+) -> Result<Version> {
+    select_version(oci::versions(config, id).await?, requirement).ok_or_else(|| {
+        miette!(
+            "no release of {id} satisfies {}",
+            requirement.map_or("any version".to_owned(), ToString::to_string)
+        )
+    })
+}
+
+fn select_version(versions: Vec<Version>, requirement: Option<&VersionReq>) -> Option<Version> {
+    versions
+        .into_iter()
+        .filter(|version| requirement.is_none_or(|requirement| requirement.matches(version)))
+        .max()
 }
 
 fn replace_managed_paths(staged: &Path, root: &Path, relative_paths: &[&str]) -> Result<()> {
@@ -608,24 +817,126 @@ fn print_result(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use registry_testkit::{RegistryConfig as TestRegistryConfig, RegistryServer};
 
     #[test]
-    fn install_is_exact_and_preserves_previous_materialization_on_drift() {
+    fn remote_version_selection_uses_standard_semver_prerelease_rules() {
+        let versions = ["1.4.2", "1.5.0-rc.1", "1.5.0-rc.2"]
+            .map(|version| Version::parse(version).unwrap())
+            .to_vec();
+        assert_eq!(
+            select_version(
+                versions.clone(),
+                Some(&VersionReq::parse("^1.5.0-rc.1").unwrap())
+            )
+            .unwrap(),
+            Version::parse("1.5.0-rc.2").unwrap()
+        );
+        assert_eq!(
+            select_version(versions, Some(&VersionReq::parse("^1.4").unwrap())).unwrap(),
+            Version::parse("1.4.2").unwrap()
+        );
+    }
+
+    #[tokio::test]
+    async fn remote_lock_installs_from_oci_and_global_cache() {
+        let _guard = crate::oci::TEST_ENV_LOCK.lock().await;
+        let root = tempfile::tempdir().unwrap();
+        let cache = tempfile::tempdir().unwrap();
+        unsafe { std::env::set_var("TRELLIS_CACHE", cache.path()) };
+        let server = RegistryServer::new(TestRegistryConfig::memory())
+            .await
+            .unwrap();
+        let registry = crate::project::RegistryConfig {
+            prefix: format!("127.0.0.1:{}", server.port()),
+        };
+        let api = trellis_protocol::parse_api(&serde_json::json!({
+            "format": "trellis.api.v1",
+            "id": "acme.orders@v1",
+            "version": "1.4.2",
+            "displayName": "Orders",
+            "description": "Orders API"
+        }))
+        .unwrap();
+        let api_digest = api.digest().unwrap();
+        let oci_digest = crate::oci::publish(&registry, &api).await.unwrap();
+        let manifest = ProjectManifest {
+            format: 1,
+            default_registry: Some("local".into()),
+            registries: BTreeMap::from([("local".into(), registry)]),
+            apis: BTreeMap::from([(
+                api.id().into(),
+                ApiDependency {
+                    version: "^1.4".into(),
+                    path: None,
+                    registry: Some("local".into()),
+                },
+            )]),
+        };
+        let lock = ProjectLock {
+            format: 1,
+            manifest_digest: manifest.digest().unwrap(),
+            api: vec![LockedApi {
+                id: api.id().into(),
+                version: api.version().into(),
+                api_digest,
+                path: None,
+                registry: Some("local".into()),
+                oci_digest: Some(oci_digest),
+            }],
+        };
+
+        let first = install_root(root.path(), &manifest, &lock).await.unwrap();
+        assert_eq!(first.installed_apis, 1);
+        let docker_config = tempfile::tempdir().unwrap();
+        fs::write(docker_config.path().join("config.json"), "{").unwrap();
+        unsafe { std::env::set_var("DOCKER_CONFIG", docker_config.path()) };
+        assert_eq!(
+            install_root(root.path(), &manifest, &lock)
+                .await
+                .unwrap()
+                .changed_dependencies,
+            0
+        );
+        let second = tempfile::tempdir().unwrap();
+        assert_eq!(
+            install_root(second.path(), &manifest, &lock)
+                .await
+                .unwrap()
+                .installed_apis,
+            1
+        );
+        fs::remove_dir_all(root.path().join(".trellis")).unwrap();
+        let cached = install_root(root.path(), &manifest, &lock).await.unwrap();
+        assert_eq!(cached.installed_apis, 1);
+        assert!(root
+            .path()
+            .join(".trellis/apis/acme.orders@v1/1.4.2/trellis.api.json")
+            .is_file());
+        unsafe { std::env::remove_var("DOCKER_CONFIG") };
+        unsafe { std::env::remove_var("TRELLIS_CACHE") };
+    }
+
+    #[tokio::test]
+    async fn install_is_exact_and_preserves_previous_materialization_on_drift() {
         let root = tempfile::tempdir().unwrap();
         let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("../runtime/trellis.api.json");
         fs::copy(source, root.path().join("auth.json")).unwrap();
         let manifest = ProjectManifest {
             format: 1,
+            default_registry: None,
+            registries: BTreeMap::new(),
             apis: BTreeMap::from([(
                 "trellis.auth@v1".to_owned(),
                 ApiDependency {
                     version: "^1.0".to_owned(),
-                    path: "auth.json".to_owned(),
+                    path: Some("auth.json".to_owned()),
+                    registry: None,
                 },
             )]),
         };
-        let lock = resolve_lock(root.path(), &manifest).unwrap();
-        install_root(root.path(), &manifest, &lock).unwrap();
+        let lock = resolve_lock(root.path(), &manifest).await.unwrap();
+        install_root(root.path(), &manifest, &lock).await.unwrap();
         let installed = root
             .path()
             .join(".trellis/apis/trellis.auth@v1/1.0.0/trellis.api.json");
@@ -639,7 +950,9 @@ mod tests {
             serde_json::to_vec_pretty(&changed).unwrap(),
         )
         .unwrap();
-        let error = install_root(root.path(), &manifest, &lock).unwrap_err();
+        let error = install_root(root.path(), &manifest, &lock)
+            .await
+            .unwrap_err();
         assert!(error.to_string().contains("path now contains 1.0.1"));
         assert_eq!(fs::read(&installed).unwrap(), previous);
 
@@ -651,18 +964,22 @@ mod tests {
             serde_json::to_vec_pretty(&changed).unwrap(),
         )
         .unwrap();
-        let error = install_root(root.path(), &manifest, &lock).unwrap_err();
+        let error = install_root(root.path(), &manifest, &lock)
+            .await
+            .unwrap_err();
         assert!(error.to_string().contains("digest does not match"));
         assert_eq!(fs::read(installed).unwrap(), previous);
     }
 
-    #[test]
-    fn add_update_and_remove_share_the_locked_installer() {
+    #[tokio::test]
+    async fn add_update_and_remove_share_the_locked_installer() {
         let root = tempfile::tempdir().unwrap();
         crate::project::write_manifest(
             &root.path().join("trellis.toml"),
             &ProjectManifest {
                 format: 1,
+                default_registry: None,
+                registries: BTreeMap::new(),
                 apis: BTreeMap::new(),
             },
         )
@@ -680,13 +997,15 @@ mod tests {
         add(
             OutputFormat::Text,
             &AddArgs {
-                api_json_path: Path::new("auth.json").to_path_buf(),
+                source: "auth.json".to_owned(),
                 version: None,
+                registry: None,
                 project: ProjectRootArgs {
                     root: root.path().to_path_buf(),
                 },
             },
         )
+        .await
         .unwrap();
         let manifest = crate::project::read_manifest(&root.path().join("trellis.toml")).unwrap();
         assert_eq!(manifest.apis["acme.auth@v1"].version, "^1.4.2");
@@ -698,7 +1017,7 @@ mod tests {
         let project = ProjectRootArgs {
             root: root.path().to_path_buf(),
         };
-        update(OutputFormat::Text, &project).unwrap();
+        update(OutputFormat::Text, &project).await.unwrap();
         let updated_lock = crate::project::read_lock(&root.path().join("trellis.lock")).unwrap();
         assert_eq!(updated_lock.api[0].version, "1.4.3");
         assert_eq!(
@@ -717,6 +1036,7 @@ mod tests {
         api["version"] = serde_json::json!("2.0.0");
         fs::write(&api_path, serde_json::to_vec_pretty(&api).unwrap()).unwrap();
         assert!(update(OutputFormat::Text, &project)
+            .await
             .unwrap_err()
             .to_string()
             .contains("does not satisfy ^1.4.2"));
@@ -732,6 +1052,7 @@ mod tests {
                 project,
             },
         )
+        .await
         .unwrap();
         assert!(
             crate::project::read_manifest(&root.path().join("trellis.toml"))
@@ -754,6 +1075,7 @@ mod tests {
                 root: root.path().to_path_buf()
             }
         )
+        .await
         .unwrap_err()
         .to_string()
         .contains("trellis.lock is missing"));
@@ -764,7 +1086,8 @@ mod tests {
             "acme.auth@v1".to_owned(),
             ApiDependency {
                 version: "^1.4".to_owned(),
-                path: "auth.json".to_owned(),
+                path: Some("auth.json".to_owned()),
+                registry: None,
             },
         );
         crate::project::write_manifest(&root.path().join("trellis.toml"), &changed_manifest)
@@ -775,18 +1098,21 @@ mod tests {
                 root: root.path().to_path_buf()
             }
         )
+        .await
         .unwrap_err()
         .to_string()
         .contains("trellis.toml changed since trellis.lock"));
     }
 
-    #[test]
-    fn add_installs_a_prerelease_api() {
+    #[tokio::test]
+    async fn add_installs_a_prerelease_api() {
         let root = tempfile::tempdir().unwrap();
         crate::project::write_manifest(
             &root.path().join("trellis.toml"),
             &ProjectManifest {
                 format: 1,
+                default_registry: None,
+                registries: BTreeMap::new(),
                 apis: BTreeMap::new(),
             },
         )
@@ -807,13 +1133,15 @@ mod tests {
         add(
             OutputFormat::Text,
             &AddArgs {
-                api_json_path: Path::new("orders.json").to_path_buf(),
+                source: "orders.json".to_owned(),
                 version: Some("^1.5.0-rc.1".to_owned()),
+                registry: None,
                 project: ProjectRootArgs {
                     root: root.path().to_path_buf(),
                 },
             },
         )
+        .await
         .unwrap();
 
         let lock = crate::project::read_lock(&root.path().join("trellis.lock")).unwrap();
@@ -828,11 +1156,12 @@ mod tests {
                 root: root.path().to_path_buf(),
             },
         )
+        .await
         .unwrap();
     }
 
-    #[test]
-    fn install_bootstraps_typescript_dependency_before_participant() {
+    #[tokio::test]
+    async fn install_bootstraps_typescript_dependency_before_participant() {
         let repo = Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../..")
             .canonicalize()
@@ -904,17 +1233,20 @@ export default defineAppContract(() => ({
         .unwrap();
         let manifest = ProjectManifest {
             format: 1,
+            default_registry: None,
+            registries: BTreeMap::new(),
             apis: BTreeMap::from([(
                 "acme.auth@v1".to_owned(),
                 ApiDependency {
                     version: "^1.0".to_owned(),
-                    path: "auth.json".to_owned(),
+                    path: Some("auth.json".to_owned()),
+                    registry: None,
                 },
             )]),
         };
-        let lock = resolve_lock(root.path(), &manifest).unwrap();
+        let lock = resolve_lock(root.path(), &manifest).await.unwrap();
 
-        install_root(root.path(), &manifest, &lock).unwrap();
+        install_root(root.path(), &manifest, &lock).await.unwrap();
         let participant: serde_json::Value = serde_json::from_slice(
             &fs::read(
                 root.path()
@@ -932,7 +1264,7 @@ export default defineAppContract(() => ({
         assert_eq!(used["api"], "acme.auth@v1");
         assert_eq!(used["apiDigest"], lock.api[0].api_digest);
 
-        let warm = install_root(root.path(), &manifest, &lock).unwrap();
+        let warm = install_root(root.path(), &manifest, &lock).await.unwrap();
         assert_eq!(warm.changed_dependencies, 0);
         assert_eq!(warm.generated_projects, 0);
 
@@ -940,10 +1272,10 @@ export default defineAppContract(() => ({
             .path()
             .join(".trellis/generated/ts/trellis-apis/acme.auth.ts");
         fs::remove_file(&aggregate_export).unwrap();
-        let repaired = install_root(root.path(), &manifest, &lock).unwrap();
+        let repaired = install_root(root.path(), &manifest, &lock).await.unwrap();
         assert!(repaired.changed_dependencies > 0);
         assert!(aggregate_export.is_file());
-        let warm = install_root(root.path(), &manifest, &lock).unwrap();
+        let warm = install_root(root.path(), &manifest, &lock).await.unwrap();
         assert_eq!(warm.changed_dependencies, 0);
         assert_eq!(warm.generated_projects, 0);
 
@@ -957,14 +1289,16 @@ export default defineAppContract(() => ({
             serde_json::to_vec_pretty(&api).unwrap(),
         )
         .unwrap();
-        let next_lock = resolve_lock(root.path(), &manifest).unwrap();
+        let next_lock = resolve_lock(root.path(), &manifest).await.unwrap();
         let source = fs::read_to_string(root.path().join("contract.ts")).unwrap();
         fs::write(
             root.path().join("contract.ts"),
             format!("throw new Error(\"fixture failure\");\n{source}"),
         )
         .unwrap();
-        assert!(install_root(root.path(), &manifest, &next_lock).is_err());
+        assert!(install_root(root.path(), &manifest, &next_lock)
+            .await
+            .is_err());
         assert!(root
             .path()
             .join(".trellis/apis/acme.auth@v1/1.0.0/trellis.api.json")
@@ -976,8 +1310,8 @@ export default defineAppContract(() => ({
         assert_eq!(fs::read(participant_path).unwrap(), previous_participant);
     }
 
-    #[test]
-    fn install_bootstraps_rust_dependency_before_participant() {
+    #[tokio::test]
+    async fn install_bootstraps_rust_dependency_before_participant() {
         let repo = Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../..")
             .canonicalize()
@@ -1048,17 +1382,20 @@ pub fn contract_artifacts() -> Result<ContractArtifacts, ContractsError> {
         .unwrap();
         let manifest = ProjectManifest {
             format: 1,
+            default_registry: None,
+            registries: BTreeMap::new(),
             apis: BTreeMap::from([(
                 "trellis.jobs@v1".to_owned(),
                 ApiDependency {
                     version: "^1.0".to_owned(),
-                    path: "auth.json".to_owned(),
+                    path: Some("auth.json".to_owned()),
+                    registry: None,
                 },
             )]),
         };
-        let lock = resolve_lock(root.path(), &manifest).unwrap();
+        let lock = resolve_lock(root.path(), &manifest).await.unwrap();
 
-        install_root(root.path(), &manifest, &lock).unwrap();
+        install_root(root.path(), &manifest, &lock).await.unwrap();
         let participant: serde_json::Value = serde_json::from_slice(
             &fs::read(
                 root.path()
@@ -1102,10 +1439,10 @@ pub fn contract_artifacts() -> Result<ContractArtifacts, ContractsError> {
             .path()
             .join(".trellis/generated/rust/trellis-apis/src/lib.rs");
         fs::remove_file(&aggregate_lib).unwrap();
-        let repaired = install_root(root.path(), &manifest, &lock).unwrap();
+        let repaired = install_root(root.path(), &manifest, &lock).await.unwrap();
         assert!(repaired.changed_dependencies > 0);
         assert!(aggregate_lib.is_file());
-        let warm = install_root(root.path(), &manifest, &lock).unwrap();
+        let warm = install_root(root.path(), &manifest, &lock).await.unwrap();
         assert_eq!(warm.changed_dependencies, 0);
         assert_eq!(warm.generated_projects, 0);
     }

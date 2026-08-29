@@ -7,14 +7,26 @@ use miette::{miette, IntoDiagnostic, Result, WrapErr};
 use semver::{Version, VersionReq};
 use serde::{Deserialize, Serialize};
 
-/// One local canonical API dependency.
+/// One local or OCI canonical API dependency.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct ApiDependency {
     /// Accepted release versions.
     pub version: String,
     /// Path to a canonical `trellis.api.v1` JSON artifact.
-    pub path: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+    /// Named OCI registry.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub registry: Option<String>,
+}
+
+/// One named OCI registry.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct RegistryConfig {
+    /// Registry host and optional repository namespace.
+    pub prefix: String,
 }
 
 /// A project's `trellis.toml` dependency model.
@@ -23,6 +35,12 @@ pub struct ApiDependency {
 pub struct ProjectManifest {
     /// Manifest format version. Must be `1`.
     pub format: u32,
+    /// Registry used when a package command does not name one.
+    #[serde(rename = "default-registry", skip_serializing_if = "Option::is_none")]
+    pub default_registry: Option<String>,
+    /// Named OCI registries.
+    #[serde(default)]
+    pub registries: BTreeMap<String, RegistryConfig>,
     /// Dependencies keyed by stable API ID.
     #[serde(default)]
     pub apis: BTreeMap<String, ApiDependency>,
@@ -34,20 +52,44 @@ impl ProjectManifest {
         if self.format != 1 {
             return Err(miette!("manifest format must equal 1"));
         }
+        for (name, registry) in &self.registries {
+            if name.is_empty() || registry.prefix.is_empty() {
+                return Err(miette!("registry names and prefixes must not be empty"));
+            }
+            if registry
+                .prefix
+                .chars()
+                .any(|character| character.is_whitespace() || character.is_control())
+            {
+                return Err(miette!(
+                    "registry '{name}' prefix must not contain whitespace"
+                ));
+            }
+        }
+        if let Some(name) = &self.default_registry {
+            if !self.registries.contains_key(name) {
+                return Err(miette!("default registry '{name}' is not configured"));
+            }
+        }
         let mut lineages = BTreeMap::new();
         for (id, dependency) in &self.apis {
             trellis_protocol::validate_api_id(id)
                 .map_err(|error| miette!("invalid API id '{id}': {error}"))?;
             VersionReq::parse(&dependency.version)
                 .map_err(|error| miette!("invalid version requirement for API '{id}': {error}"))?;
-            // ponytail: paths stay declarative here; install owns filesystem resolution.
-            if dependency.path.is_empty() {
-                return Err(miette!("path for API '{id}' must not be empty"));
-            }
-            if Path::new(&dependency.path).is_absolute() {
-                return Err(miette!(
-                    "path for API '{id}' must be relative to the project root"
-                ));
+            match (&dependency.path, &dependency.registry) {
+                (Some(path), None) if !path.is_empty() && !Path::new(path).is_absolute() => {}
+                (None, Some(registry)) if self.registries.contains_key(registry) => {}
+                (None, Some(registry)) => {
+                    return Err(miette!(
+                        "registry '{registry}' for API '{id}' is not configured"
+                    ));
+                }
+                _ => {
+                    return Err(miette!(
+                        "API '{id}' must specify exactly one of path or registry"
+                    ))
+                }
             }
             let lineage = id.split('@').next().unwrap_or(id);
             if let Some(existing) = lineages.insert(lineage, id) {
@@ -78,7 +120,14 @@ pub struct LockedApi {
     /// Exact semantic API digest.
     pub api_digest: String,
     /// Path copied from the manifest dependency.
-    pub path: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+    /// Named OCI registry copied from the manifest dependency.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub registry: Option<String>,
+    /// Exact OCI manifest digest for remote dependencies.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub oci_digest: Option<String>,
 }
 
 /// A project's exact-release `trellis.lock` model.
@@ -109,14 +158,14 @@ impl ProjectLock {
             Version::parse(&api.version)
                 .map_err(|error| miette!("invalid version for API '{}': {error}", api.id))?;
             validate_digest("api-digest", &api.api_digest)?;
-            if api.path.is_empty() {
-                return Err(miette!("path for API '{}' must not be empty", api.id));
-            }
-            if Path::new(&api.path).is_absolute() {
-                return Err(miette!(
-                    "path for API '{}' must be relative to the project root",
-                    api.id
-                ));
+            match (&api.path, &api.registry, &api.oci_digest) {
+                (Some(path), None, None) if !path.is_empty() && !Path::new(path).is_absolute() => {}
+                (None, Some(registry), Some(digest))
+                    if !registry.is_empty()
+                        && digest.strip_prefix("sha256:").is_some_and(|hex| {
+                            hex.len() == 64 && hex.bytes().all(|byte| byte.is_ascii_hexdigit())
+                        }) => {}
+                _ => return Err(miette!("locked API '{}' has an invalid source", api.id)),
             }
             if ids.insert(&api.id, ()).is_some() {
                 return Err(miette!("duplicate locked API id '{}'", api.id));
@@ -302,14 +351,15 @@ version="^1.0"
             .apis
             .get_mut("acme.orders@v1")
             .unwrap()
-            .path = "/tmp/orders.json".into();
+            .path = Some("/tmp/orders.json".into());
         assert!(invalid_manifest.validate().is_err());
         invalid_manifest = first.clone();
         invalid_manifest.apis.insert(
             "acme.orders@v2".into(),
             ApiDependency {
                 version: "^2".into(),
-                path: "../apis/orders-v2.json".into(),
+                path: Some("../apis/orders-v2.json".into()),
+                registry: None,
             },
         );
         assert!(invalid_manifest.validate().is_err());
@@ -328,19 +378,59 @@ version="^1.0"
                     id: "trellis.jobs@v1".into(),
                     version: "1.0.0".into(),
                     api_digest: digest.clone(),
-                    path: "../apis/jobs.json".into(),
+                    path: Some("../apis/jobs.json".into()),
+                    registry: None,
+                    oci_digest: None,
                 },
                 LockedApi {
                     id: "acme.orders@v1".into(),
                     version: "1.4.2".into(),
                     api_digest: digest,
-                    path: "../apis/orders.json".into(),
+                    path: Some("../apis/orders.json".into()),
+                    registry: None,
+                    oci_digest: None,
                 },
             ],
         };
         let lock_path = directory.path().join("trellis.lock");
         write_lock(&lock_path, &lock).unwrap();
         assert_eq!(read_lock(&lock_path).unwrap().api[0].id, "acme.orders@v1");
+
+        let remote: ProjectManifest = toml::from_str(
+            r#"
+format = 1
+default-registry = "qlever"
+
+[registries.qlever]
+prefix = "ghcr.io/qlever-llc/trellis-apis"
+
+[apis."acme.orders@v1"]
+version = "^1.4"
+registry = "qlever"
+"#,
+        )
+        .unwrap();
+        remote.validate().unwrap();
+        let mut invalid_remote = remote.clone();
+        invalid_remote.apis.get_mut("acme.orders@v1").unwrap().path = Some("../orders.json".into());
+        assert!(invalid_remote.validate().is_err());
+        ProjectLock {
+            format: 1,
+            manifest_digest: remote.digest().unwrap(),
+            api: vec![LockedApi {
+                id: "acme.orders@v1".into(),
+                version: "1.4.2".into(),
+                api_digest: first.digest().unwrap(),
+                path: None,
+                registry: Some("qlever".into()),
+                oci_digest: Some(
+                    "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+                        .into(),
+                ),
+            }],
+        }
+        .validate()
+        .unwrap();
 
         let mut duplicate = lock;
         duplicate.api.push(duplicate.api[0].clone());

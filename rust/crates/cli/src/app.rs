@@ -38,10 +38,11 @@ pub async fn run() -> miette::Result<()> {
     let format = cli.format;
 
     match cli.command {
-        TopLevelCommand::Add(args) => package::add(format, &args)?,
-        TopLevelCommand::Rm(args) => package::remove(format, &args)?,
-        TopLevelCommand::Update(args) => package::update(format, &args)?,
-        TopLevelCommand::Install(args) => package::install(format, &args)?,
+        TopLevelCommand::Add(args) => package::add(format, &args).await?,
+        TopLevelCommand::Rm(args) => package::remove(format, &args).await?,
+        TopLevelCommand::Update(args) => package::update(format, &args).await?,
+        TopLevelCommand::Install(args) => package::install(format, &args).await?,
+        TopLevelCommand::Publish(args) => package::publish(format, &args).await?,
         TopLevelCommand::Login(args) => auth::login(format, &args).await?,
         TopLevelCommand::Logout => auth::logout(format).await?,
         TopLevelCommand::Whoami => auth::whoami(format).await?,

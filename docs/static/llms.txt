@@ -12,10 +12,11 @@ commands.
 
 ## Current model
 
-- Consumer projects manage local canonical API dependencies with `trellis add`,
+- Consumer projects manage local or OCI canonical API dependencies with `trellis add`,
   `trellis rm`, `trellis update`, and lock-stable `trellis install`. Commit
-  `trellis.toml` and `trellis.lock`; ignore `.trellis/`. Install verifies exact
-  API ID, release, and semantic digest, generates SDKs before participant source
+  `trellis.toml` and `trellis.lock`; ignore `.trellis/`. Remote locks include an
+  exact OCI manifest digest and reuse Docker credentials. Install verifies API
+  ID, release, semantic and OCI digests, generates SDKs before participant source
   evaluation, and never executes provider source. TypeScript links the local
   `@trellis/apis` aggregate; Rust path-depends on `trellis-apis`.
 - The Rust platform runtime is the sole auth owner. TypeScript owns portal source,
