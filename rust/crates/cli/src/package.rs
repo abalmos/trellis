@@ -33,14 +33,7 @@ pub fn add(format: OutputFormat, args: &AddArgs) -> Result<()> {
             "API paths in trellis.toml must be relative to the project root"
         ));
     }
-    let (id, release, _) = resolve_path_api(
-        &root,
-        "",
-        &ApiDependency {
-            version: "*".to_owned(),
-            path: args.api_json_path.to_string_lossy().into_owned(),
-        },
-    )?;
+    let (id, release, _) = read_path_api(&root, "", &args.api_json_path.to_string_lossy())?;
     let requirement = args
         .version
         .clone()
@@ -155,7 +148,23 @@ fn resolve_path_api(
     expected_id: &str,
     dependency: &ApiDependency,
 ) -> Result<(String, Version, String)> {
-    let path = root.join(&dependency.path);
+    let (id, version, digest) = read_path_api(root, expected_id, &dependency.path)?;
+    let requirement = VersionReq::parse(&dependency.version).map_err(|error| miette!(error))?;
+    if !requirement.matches(&version) {
+        return Err(miette!(
+            "{id} release {version} does not satisfy {}",
+            dependency.version
+        ));
+    }
+    Ok((id, version, digest))
+}
+
+fn read_path_api(
+    root: &Path,
+    expected_id: &str,
+    dependency_path: &str,
+) -> Result<(String, Version, String)> {
+    let path = root.join(dependency_path);
     let value: serde_json::Value = serde_json::from_slice(
         &fs::read(&path)
             .into_diagnostic()
@@ -172,15 +181,6 @@ fn resolve_path_api(
     }
     let version = Version::parse(api.version())
         .map_err(|error| miette!("invalid release version for '{}': {error}", api.id()))?;
-    let requirement = VersionReq::parse(&dependency.version).map_err(|error| miette!(error))?;
-    if !requirement.matches(&version) {
-        return Err(miette!(
-            "{} release {} does not satisfy {}",
-            api.id(),
-            version,
-            dependency.version
-        ));
-    }
     let digest = api.digest().map_err(|error| miette!(error.to_string()))?;
     Ok((api.id().to_owned(), version, digest))
 }
@@ -339,13 +339,23 @@ fn install_root(
             )
         })
         && (!has_rust
-            || trellis_root
-                .join("generated/rust/trellis-apis/Cargo.toml")
-                .is_file())
+            || ["Cargo.toml", "src/lib.rs"].iter().all(|path| {
+                trellis_root
+                    .join("generated/rust/trellis-apis")
+                    .join(path)
+                    .is_file()
+            }))
         && (!has_ts
-            || trellis_root
+            || (trellis_root
                 .join("generated/ts/trellis-apis/deno.json")
-                .is_file());
+                .is_file()
+                && lock.api.iter().all(|api| {
+                    let stem = api.id.split('@').next().unwrap_or(&api.id);
+                    trellis_root
+                        .join("generated/ts/trellis-apis")
+                        .join(format!("{stem}.ts"))
+                        .is_file()
+                })));
     if dependencies_fresh {
         let generated = trellis_generate::commands::prepare::generate_project(root, &trellis_root)?;
         return Ok(PackageResult {
@@ -771,6 +781,57 @@ mod tests {
     }
 
     #[test]
+    fn add_installs_a_prerelease_api() {
+        let root = tempfile::tempdir().unwrap();
+        crate::project::write_manifest(
+            &root.path().join("trellis.toml"),
+            &ProjectManifest {
+                format: 1,
+                apis: BTreeMap::new(),
+            },
+        )
+        .unwrap();
+        fs::write(
+            root.path().join("orders.json"),
+            serde_json::to_vec_pretty(&serde_json::json!({
+                "format": "trellis.api.v1",
+                "id": "acme.orders@v1",
+                "version": "1.5.0-rc.1",
+                "displayName": "Orders",
+                "description": "Prerelease fixture API"
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+
+        add(
+            OutputFormat::Text,
+            &AddArgs {
+                api_json_path: Path::new("orders.json").to_path_buf(),
+                version: Some("^1.5.0-rc.1".to_owned()),
+                project: ProjectRootArgs {
+                    root: root.path().to_path_buf(),
+                },
+            },
+        )
+        .unwrap();
+
+        let lock = crate::project::read_lock(&root.path().join("trellis.lock")).unwrap();
+        assert_eq!(lock.api[0].version, "1.5.0-rc.1");
+        assert!(root
+            .path()
+            .join(".trellis/apis/acme.orders@v1/1.5.0-rc.1/trellis.api.json")
+            .is_file());
+        install(
+            OutputFormat::Text,
+            &ProjectRootArgs {
+                root: root.path().to_path_buf(),
+            },
+        )
+        .unwrap();
+    }
+
+    #[test]
     fn install_bootstraps_typescript_dependency_before_participant() {
         let repo = Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../..")
@@ -871,6 +932,17 @@ export default defineAppContract(() => ({
         assert_eq!(used["api"], "acme.auth@v1");
         assert_eq!(used["apiDigest"], lock.api[0].api_digest);
 
+        let warm = install_root(root.path(), &manifest, &lock).unwrap();
+        assert_eq!(warm.changed_dependencies, 0);
+        assert_eq!(warm.generated_projects, 0);
+
+        let aggregate_export = root
+            .path()
+            .join(".trellis/generated/ts/trellis-apis/acme.auth.ts");
+        fs::remove_file(&aggregate_export).unwrap();
+        let repaired = install_root(root.path(), &manifest, &lock).unwrap();
+        assert!(repaired.changed_dependencies > 0);
+        assert!(aggregate_export.is_file());
         let warm = install_root(root.path(), &manifest, &lock).unwrap();
         assert_eq!(warm.changed_dependencies, 0);
         assert_eq!(warm.generated_projects, 0);
@@ -1025,5 +1097,16 @@ pub fn contract_artifacts() -> Result<ContractArtifacts, ContractsError> {
             "trellis-rs = \"{}\"",
             trellis_generate::artifacts::trellis_package_version()
         )));
+
+        let aggregate_lib = root
+            .path()
+            .join(".trellis/generated/rust/trellis-apis/src/lib.rs");
+        fs::remove_file(&aggregate_lib).unwrap();
+        let repaired = install_root(root.path(), &manifest, &lock).unwrap();
+        assert!(repaired.changed_dependencies > 0);
+        assert!(aggregate_lib.is_file());
+        let warm = install_root(root.path(), &manifest, &lock).unwrap();
+        assert_eq!(warm.changed_dependencies, 0);
+        assert_eq!(warm.generated_projects, 0);
     }
 }
