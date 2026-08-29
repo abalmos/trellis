@@ -14,6 +14,10 @@ native participant, validates it with `lint_participant_authoring` and
 `parse_participant`, and resolves it with `resolve_participant` against exact
 referenced APIs.
 
+Both authoring constructors require the owned API's independent Semantic Version
+release value. The release version is normalized into the API artifact but is
+excluded from its semantic digest and participant runtime evidence.
+
 `ContractArtifacts` is intentionally non-serializable. It returns native API and
 participant objects, API and participant digests, participant-needs digest, and
 required and optional grants. It is not a third wire format.

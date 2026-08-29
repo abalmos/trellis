@@ -466,6 +466,7 @@ export type ContractState = Record<string, ContractStateStore>;
 type ContractIdentityFields = {
   id: string;
   apiId: string;
+  apiVersion: string;
   displayName: string;
   description: string;
   docs?: ContractDocs;
@@ -1017,6 +1018,7 @@ export type ContractSourceUses = ContractSourceUsesGrouped;
 export type TrellisContractSource = {
   id: string;
   apiId: string;
+  apiVersion: string;
   displayName: string;
   description: string;
   docs?: ContractDocs;
@@ -1854,6 +1856,7 @@ export type DefineContractInput<
 type DefineContractSource = {
   id: string;
   apiId: string;
+  apiVersion: string;
   displayName: string;
   description: string;
   docs?: ContractDocs;
@@ -4305,6 +4308,9 @@ function defineContract(
   if (typeof body.apiId !== "string") {
     throw new Error("Contract apiId must be a string");
   }
+  if (typeof body.apiVersion !== "string") {
+    throw new Error("Contract apiVersion must be a string");
+  }
   if ("state" in body || "jobs" in body || "resources" in body) {
     throw new Error(
       "Runtime features must be declared in uses with state(...), jobs(...), kv(...), or store(...)",
@@ -4332,6 +4338,7 @@ function defineContract(
   const emittedSource: TrellisContractSource = {
     id: source.id,
     apiId: source.apiId,
+    apiVersion: source.apiVersion,
     displayName: source.displayName,
     description: source.description,
     ...(source.docs ? { docs: source.docs } : {}),

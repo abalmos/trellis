@@ -8,6 +8,7 @@ import { checkDeviceActivation } from "./deno.ts";
 const deviceContract = defineDeviceContract(() => ({
   id: "example.device@v1",
   apiId: "example.device@v1",
+  apiVersion: "1.0.0",
   displayName: "Example Device",
   description: "Test device contract.",
 }));

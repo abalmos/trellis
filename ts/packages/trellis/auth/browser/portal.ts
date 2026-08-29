@@ -108,6 +108,7 @@ function portalState(wire: BrowserFlowWire): PortalFlowState {
       ) => ({
         id: bundle.id,
         apiId: bundle.apiId,
+        apiVersion: "1.0.0",
         permissions: bundle.permissions,
       })),
       user: wire.user,

@@ -21,6 +21,7 @@ const STATUS: &str = "prepared-status";
 const PREPARED_EVENTS_API_SOURCE_JSON: &str = r#"{
   "format": "trellis.api.v1",
   "id": "trellis.integration.prepared-events-rust@v1",
+  "version": "1.0.0",
   "displayName": "Trellis Rust Prepared Events",
   "description": "Publishes and consumes prepared events for Rust integration parity.",
   "capabilities": {
@@ -104,6 +105,7 @@ async fn prepared_events_prepared_publish_preserves_custom_headers_and_annotates
             trellis_rs::contracts::ContractBuilder::authoring(
                 "trellis.integration.prepared-events-listener-rust@v1",
                 "trellis.integration.prepared-events-listener-rust@v1",
+                "1.0.0",
                 "Trellis Rust Prepared Events Listener",
                 "Consumes prepared events with explicit authority.",
                 trellis_rs::contracts::ContractKind::Service,

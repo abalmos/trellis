@@ -16,9 +16,12 @@ runtime-authority artifact.
 
 ## Identity
 
-Every normalized API has an `id` and semantic `apiDigest`. Consent wording is
-preserved in normalized API JSON but excluded from the semantic API digest;
-changing machine permissions changes the digest.
+Every normalized API has a stable `lineage@vN` `id`, an independently authored
+Semantic Version release `version`, and a semantic `apiDigest`. Release version,
+consent wording, and other human metadata are preserved in normalized API JSON
+but excluded from the semantic API digest; changing machine permissions changes
+the digest. Runtime evidence and permissions pin stable API ID plus semantic
+digest, not release version.
 
 Every normalized participant has an `id`, semantic `participantDigest`, and an
 authoritatively resolved `participantNeedsDigest`. Participant resolution also

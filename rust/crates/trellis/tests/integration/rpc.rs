@@ -18,6 +18,7 @@ const RPC_READ_CAPABILITY: &str = "trellis.integration.rpc-service::read";
 const RPC_SERVICE_API_SOURCE_JSON: &str = r#"{
   "format": "trellis.api.v1",
   "id": "trellis.integration.rpc-service@v1",
+  "version": "1.0.0",
   "displayName": "Trellis Integration RPC Service",
   "description": "Exercises client-to-service RPC through generated surfaces.",
   "capabilities": {
@@ -1031,6 +1032,7 @@ fn rpc_client_contract(
     let manifest = trellis_rs::contracts::ContractBuilder::authoring(
         RPC_CLIENT_ID,
         RPC_CLIENT_ID,
+        "1.0.0",
         "Trellis Integration RPC Client",
         "App/client participant for the RPC integration fixture.",
         trellis_rs::contracts::ContractKind::App,
@@ -1055,6 +1057,7 @@ fn rpc_unauthorized_client_contract(
     let manifest = trellis_rs::contracts::ContractBuilder::authoring(
         RPC_UNAUTHORIZED_CLIENT_ID,
         RPC_UNAUTHORIZED_CLIENT_ID,
+        "1.0.0",
         "Trellis Integration Unauthorized RPC Client",
         "App/client without rpc.call authority for Entity.Get.",
         trellis_rs::contracts::ContractKind::App,

@@ -645,6 +645,8 @@ pub struct ContractExports {
 pub(crate) struct AuthoringState {
     /// Exact owned API identity.
     pub api_id: String,
+    /// Independently authored API release version.
+    pub api_version: String,
     /// Stable participant identity when producing participant artifacts.
     pub participant_id: Option<String>,
     #[doc = concat!("The `", stringify!(display_name), "` contract value.")]

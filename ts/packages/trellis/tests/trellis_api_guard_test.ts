@@ -113,6 +113,7 @@ const rpcTestContract = defineServiceContract(
   (ref) => ({
     id: "trellis.client.rpc-guard-test@v1",
     apiId: "trellis.client.rpc-guard-test@v1",
+    apiVersion: "1.0.0",
     displayName: "RPC Guard Test",
     description: "Covers RPC client guard behavior.",
     rpc: {
@@ -131,6 +132,7 @@ const emptyRpcContract = defineServiceContract(
   () => ({
     id: "trellis.empty.rpc-guard-test@v1",
     apiId: "trellis.empty.rpc-guard-test@v1",
+    apiVersion: "1.0.0",
     displayName: "Empty RPC Guard Test",
     description: "Covers empty RPC facade behavior.",
   }),

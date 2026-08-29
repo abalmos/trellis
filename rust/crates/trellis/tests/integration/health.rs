@@ -23,6 +23,7 @@ const SERVICE_NAME: &str = "health-fixture-service";
 const SERVICE_API_SOURCE_JSON: &str = r#"{
   "format": "trellis.api.v1",
   "id": "trellis.integration.health-service@v1",
+  "version": "1.0.0",
   "displayName": "Trellis Integration Health Service",
   "description": "Publishes runtime health samples for projection coverage."
 }"#;
@@ -195,6 +196,7 @@ async fn health_projection_lifecycle_and_recovery() {
             trellis_rs::contracts::ContractBuilder::authoring(
                 "trellis.integration.health-observer@v1",
                 "trellis.integration.health-observer@v1",
+                "1.0.0",
                 "Trellis Integration Health Observer",
                 "Reads the Trellis health projection.",
                 trellis_rs::contracts::ContractKind::App,

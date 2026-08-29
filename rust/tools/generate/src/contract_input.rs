@@ -1529,7 +1529,7 @@ mod tests {
         write_executable(
             &tsx_path,
             "#!/bin/sh
- printf '{\"format\":\"trellis.api.v1\",\"id\":\"trellis.orders@v1\",\"displayName\":\"Orders\",\"description\":\"Orders\"}'
+ printf '{\"format\":\"trellis.api.v1\",\"id\":\"trellis.orders@v1\",\"version\":\"1.0.0\",\"displayName\":\"Orders\",\"description\":\"Orders\"}'
 ",
         );
         let mut session = EnvSession::new();

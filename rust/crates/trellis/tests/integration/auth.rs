@@ -31,6 +31,7 @@ const PUBLISH_CAPABILITY: &str = "trellis.integration.trusted-portal-service::pu
 const API_SOURCE: &str = r#"{
   "format": "trellis.api.v1",
   "id": "trellis.integration.trusted-portal-service@v1",
+  "version": "1.0.0",
   "displayName": "Trusted Portal Integration Service",
   "description": "Exercises trusted-portal authority transitions.",
   "capabilities": {
@@ -269,6 +270,7 @@ async fn start_fixture(user_jwt_ttl_ms: Option<u64>, use_test_oidc_provider: boo
             trellis_rs::contracts::ContractBuilder::authoring(
                 CLIENT_ID,
                 CLIENT_ID,
+                "1.0.0",
                 "Trusted Portal Integration Client",
                 "Exercises optional authority selected by a trusted portal.",
                 trellis_rs::contracts::ContractKind::App,
@@ -362,6 +364,7 @@ async fn provision_device_activation_case_with_delegation(
         trellis_rs::contracts::ContractBuilder::authoring(
             format!("trellis.integration.{case_id}.device@v1"),
             format!("trellis.integration.{case_id}.device@v1"),
+            "1.0.0",
             "Device Activation Integration Device",
             "Exercises current preregistered device activation.",
             trellis_rs::contracts::ContractKind::Device,
@@ -429,6 +432,7 @@ async fn connect_device_activation_user(fixture: &mut Fixture, case_id: &str) ->
         trellis_rs::contracts::ContractBuilder::authoring(
             format!("trellis.integration.{case_id}.activator@v1"),
             format!("trellis.integration.{case_id}.activator@v1"),
+            "1.0.0",
             "Device Activation Integration User",
             "Exercises user activation and unprivileged review denial.",
             trellis_rs::contracts::ContractKind::App,
@@ -469,6 +473,7 @@ async fn local_login_binds_approved_client_and_calls_authorized_rpc() {
             trellis_rs::contracts::ContractBuilder::authoring(
                 APPROVED_CLIENT_ID,
                 APPROVED_CLIENT_ID,
+                "1.0.0",
                 "Approved Integration Client",
                 "Exercises approved local-user binding and authenticated RPC.",
                 trellis_rs::contracts::ContractKind::App,
@@ -2868,6 +2873,7 @@ async fn hostile_old_context_is_denied_after_reduction() {
             trellis_rs::contracts::ContractBuilder::authoring(
                 "trellis.integration.trusted-portal-listener@v1",
                 "trellis.integration.trusted-portal-listener@v1",
+                "1.0.0",
                 "Trusted Portal Replay Listener",
                 "Receives trusted-portal replay attempts through local proof validation.",
                 trellis_rs::contracts::ContractKind::Service,

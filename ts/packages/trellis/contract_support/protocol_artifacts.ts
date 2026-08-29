@@ -132,6 +132,7 @@ function copy(source: JsonObject, target: JsonObject, key: string): void {
 function compileApi(contract: JsonObject): JsonObject {
   const api: JsonObject = { format: "trellis.api.v1" };
   api.id = contract.apiId;
+  api.version = contract.apiVersion;
   for (
     const field of [
       "displayName",

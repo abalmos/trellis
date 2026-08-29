@@ -32,6 +32,7 @@ impl ApiBuilder {
     /// Start a native API builder whose `id` is only the API identity.
     pub fn authoring(
         id: impl Into<String>,
+        version: impl Into<String>,
         display_name: impl Into<String>,
         description: impl Into<String>,
     ) -> Self {
@@ -39,6 +40,7 @@ impl ApiBuilder {
             value: Value::Null,
             authoring: Some(ContractAuthoringBuilder::new_api(
                 id,
+                version,
                 display_name,
                 description,
             )),
@@ -253,6 +255,7 @@ impl ContractBuilder {
     pub fn authoring(
         participant_id: impl Into<String>,
         api_id: impl Into<String>,
+        api_version: impl Into<String>,
         display_name: impl Into<String>,
         description: impl Into<String>,
         kind: ContractKind,
@@ -263,6 +266,7 @@ impl ContractBuilder {
             referenced_apis: BTreeMap::new(),
             authoring: Some(ContractAuthoringBuilder::new_contract(
                 api_id,
+                api_version,
                 participant_id,
                 display_name,
                 description,
@@ -492,6 +496,7 @@ fn build_api_from_projection(contract: &Map<String, Value>) -> Result<Value, Con
     );
     for field in [
         "id",
+        "version",
         "displayName",
         "description",
         "docs",
@@ -890,6 +895,7 @@ fn build_participant_from_projection(
 fn api_projection(source: &AuthoringState) -> Result<Map<String, Value>, ContractsError> {
     let mut value = Map::new();
     insert(&mut value, "id", &source.api_id)?;
+    insert(&mut value, "version", &source.api_version)?;
     insert(&mut value, "displayName", &source.display_name)?;
     insert(&mut value, "description", &source.description)?;
     insert_if_some(&mut value, "docs", source.docs.as_ref())?;

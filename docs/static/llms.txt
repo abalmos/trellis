@@ -20,11 +20,12 @@ commands.
   registry, revocation, logout, or client-bootstrap API.
 - Runtime boundaries use `trellis.api.v1` and `trellis.participant.v1` artifacts.
   TypeScript contracts are compiled to those artifacts before bootstrap.
-- Contract authoring supplies participant and owned API identities independently.
-  TypeScript `define*Contract` bodies require both `id` and `apiId`. Rust
-  `ContractBuilder::authoring` and `ContractBuilder::from_api` receive the
-  participant ID explicitly. Generated participant facades expose `CONTRACT_ID`;
-  generated API SDKs expose `API_ID`.
+- Contract authoring supplies participant identity, owned API identity, and API
+  release version independently. TypeScript `define*Contract` bodies require
+  `id`, `apiId`, and Semantic Version `apiVersion`. Rust
+  `ContractBuilder::authoring(participant_id, api_id, api_version, ...)` requires
+  the same values explicitly. API release version is metadata and does not enter
+  API digests, participant evidence, permissions, or transport subjects.
 - Large Rust store and transfer bodies use borrowed Tokio readers and writers;
   whole-buffer helpers remain conveniences. Transfer completion and cancellation
   are authenticated and acknowledged, with completion bound to exact size and

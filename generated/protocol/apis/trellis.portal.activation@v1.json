@@ -1,1 +1,1 @@
-{"description":"Trellis built-in app for authenticated device activation over the Auth.DeviceUserAuthorities.Resolve operation.","displayName":"Trellis Device Activation","format":"trellis.api.v1","id":"trellis.portal.activation@v1"}
+{"description":"Trellis built-in app for authenticated device activation over the Auth.DeviceUserAuthorities.Resolve operation.","displayName":"Trellis Device Activation","format":"trellis.api.v1","id":"trellis.portal.activation@v1","version":"1.0.0"}

@@ -31,6 +31,7 @@ const serviceContract = defineServiceContract(
   (ref) => ({
     id: "external.fixture.rpc-service" + "@v1",
     apiId: "external.fixture.rpc-service" + "@v1",
+    apiVersion: "1.0.0",
     displayName: `External Fixture RPC Service (${slug})`,
     description:
       "Out-of-tree style service contract used by trellis-test smoke coverage.",
@@ -55,6 +56,7 @@ const serviceContract = defineServiceContract(
 const clientContract = defineAppContract(() => ({
   id: "external.fixture.rpc-client" + "@v1",
   apiId: "external.fixture.rpc-client" + "@v1",
+  apiVersion: "1.0.0",
   displayName: `External Fixture RPC Client (${slug})`,
   description:
     "Out-of-tree style app contract used by trellis-test smoke coverage.",

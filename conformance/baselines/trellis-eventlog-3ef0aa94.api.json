@@ -99,6 +99,7 @@
   },
   "format": "trellis.api.v1",
   "id": "trellis.eventlog@v1",
+  "version": "1.0.0",
   "rpc": {
     "EventLog.Consumers.Inspect": {
       "errors": ["NotFoundError", "UnexpectedError", "ValidationError"],

@@ -1421,7 +1421,7 @@ mod tests {
         let source = concat!(
             "import {} from \"@trellis-sdk/example\";\n",
             "export default defineServiceContract({ ",
-            "id: \"example.participant@v1\", apiId: \"example.api@v1\" });\n",
+            "id: \"example.participant@v1\", apiId: \"example.api@v1\", apiVersion: \"1.0.0\" });\n",
         );
         let first = temp.path().join("first.ts");
         let second = temp.path().join("second.ts");

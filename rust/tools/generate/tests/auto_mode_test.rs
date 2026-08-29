@@ -8,6 +8,7 @@ fn write_ts_contract(path: &Path, id: &str, display_name: &str, kind: &str) {
     let api_digest = trellis_contracts::ApiBuilder::new(serde_json::json!({
         "format": "trellis.api.v1",
         "id": id,
+        "version": "1.0.0",
         "displayName": display_name,
         "description": "Fixture API",
     }))
@@ -16,7 +17,7 @@ fn write_ts_contract(path: &Path, id: &str, display_name: &str, kind: &str) {
     fs::write(
         path,
         format!(
-            "const API = {{\n  format: \"trellis.api.v1\",\n  id: \"{id}\",\n  displayName: \"{display_name}\",\n  description: \"Fixture API\",\n}};\nconst PARTICIPANT = {{\n  format: \"trellis.participant.v1\",\n  id: \"{id}\",\n  displayName: \"{display_name}\",\n  description: \"Fixture participant\",\n  kind: \"{kind}\",\n  implements: {{ self: {{ api: \"{id}\", apiDigest: \"{api_digest}\" }} }},\n}};\n\nexport default {{ API, PARTICIPANT }};\n"
+            "const API = {{\n  format: \"trellis.api.v1\",\n  id: \"{id}\",\n  version: \"1.0.0\",\n  displayName: \"{display_name}\",\n  description: \"Fixture API\",\n}};\nconst PARTICIPANT = {{\n  format: \"trellis.participant.v1\",\n  id: \"{id}\",\n  displayName: \"{display_name}\",\n  description: \"Fixture participant\",\n  kind: \"{kind}\",\n  implements: {{ self: {{ api: \"{id}\", apiDigest: \"{api_digest}\" }} }},\n}};\n\nexport default {{ API, PARTICIPANT }};\n"
         ),
     )
     .unwrap();
@@ -26,6 +27,7 @@ fn write_orders_contract(path: &Path, description: &str) {
     let api_digest = trellis_contracts::ApiBuilder::new(serde_json::json!({
         "format": "trellis.api.v1",
         "id": "trellis.orders@v1",
+        "version": "1.0.0",
         "displayName": "Orders",
         "description": description,
         "schemas": {
@@ -57,6 +59,7 @@ fn write_orders_contract(path: &Path, description: &str) {
             r#"const API = {{
   format: "trellis.api.v1",
   id: "trellis.orders@v1",
+  version: "1.0.0",
   displayName: "Orders",
   description: "{description}",
   schemas: {{
@@ -515,6 +518,7 @@ void Orders;
 export default defineAppContract(() => ({
   id: "trellis.dashboard-app@v1",
   apiId: "trellis.dashboard@v1",
+  apiVersion: "1.0.0",
   displayName: "Dashboard",
   description: "Fixture contract",
 }));
@@ -630,6 +634,7 @@ fn prepare_warns_for_public_closed_intersect_schemas() {
         r#"const API = {
   format: "trellis.api.v1",
   id: "trellis.orders@v1",
+  version: "1.0.0",
   displayName: "Orders",
   description: "Fixture contract",
   schemas: {
@@ -693,6 +698,7 @@ fn prepare_generates_rust_participant_facade_for_local_device_uses() {
         r#"{
   "format": "trellis.api.v1",
   "id": "trellis.orders@v1",
+  "version": "1.0.0",
   "displayName": "Orders",
   "description": "Fixture service contract",
   "kind": "service",
@@ -717,6 +723,7 @@ fn prepare_generates_rust_participant_facade_for_local_device_uses() {
         r#"{
   "format": "trellis.api.v1",
   "id": "trellis.inventory@v1",
+  "version": "1.0.0",
   "displayName": "Inventory",
   "description": "Fixture inventory contract",
   "kind": "service",
@@ -741,6 +748,7 @@ fn prepare_generates_rust_participant_facade_for_local_device_uses() {
         r#"{
   "format": "trellis.api.v1",
   "id": "trellis.device@v1",
+  "version": "1.0.0",
   "displayName": "Device",
   "description": "Fixture device contract",
   "kind": "device",
@@ -888,6 +896,7 @@ fn prepare_generates_rust_participant_facade_for_local_device_uses() {
         r#"{
   "format": "trellis.api.v1",
   "id": "trellis.device@v1",
+  "version": "1.0.0",
   "displayName": "Device",
   "description": "Fixture device contract",
   "kind": "device",
@@ -916,6 +925,7 @@ fn prepare_generates_rust_participant_facade_for_local_device_uses() {
         r#"{
   "format": "trellis.api.v1",
   "id": "trellis.device@v1",
+  "version": "1.0.0",
   "displayName": "Device",
   "description": "Fixture device contract",
   "kind": "device",
@@ -951,6 +961,7 @@ fn prepare_generates_rust_participant_facade_without_uses() {
         r#"{
   "format": "trellis.api.v1",
   "id": "trellis.device@v1",
+  "version": "1.0.0",
   "displayName": "Device",
   "description": "Fixture device contract",
   "kind": "device"
@@ -1143,6 +1154,7 @@ fn prepare_in_local_runtime_repo_keeps_typescript_package_specifiers() {
         r#"const API = {
   format: "trellis.api.v1",
   id: "trellis.dashboard@v1",
+  version: "1.0.0",
   displayName: "Dashboard",
   description: "Fixture contract",
   schemas: {
@@ -1358,6 +1370,7 @@ fn local_mode_generates_service_artifacts_from_node_project_contracts() {
             "export const API = {\n",
             "  format: 'trellis.api.v1',\n",
             "  id: CONTRACT_ID,\n",
+            "  version: '1.0.0',\n",
             "  displayName: 'Node Orders',\n",
             "  description: 'Orders from node project',\n",
             "};\n",
@@ -1377,7 +1390,7 @@ fn local_mode_generates_service_artifacts_from_node_project_contracts() {
     write_executable(
         &tsx_path,
         "#!/bin/sh
-printf '{\"api\":{\"format\":\"trellis.api.v1\",\"id\":\"trellis.node-orders@v1\",\"displayName\":\"Node Orders\",\"description\":\"Orders from node project\"},\"participant\":{\"format\":\"trellis.participant.v1\",\"id\":\"trellis.node-orders@v1\",\"displayName\":\"Node Orders\",\"description\":\"Node Orders service\",\"kind\":\"service\",\"implements\":{\"self\":{\"api\":\"trellis.node-orders@v1\",\"apiDigest\":\"7aZlI7NfeGJOqx4ypFKNCcsAf2CEL4PqJpY6IQfQLTQ\"}}}}'
+printf '{\"api\":{\"format\":\"trellis.api.v1\",\"id\":\"trellis.node-orders@v1\",\"version\":\"1.0.0\",\"displayName\":\"Node Orders\",\"description\":\"Orders from node project\"},\"participant\":{\"format\":\"trellis.participant.v1\",\"id\":\"trellis.node-orders@v1\",\"displayName\":\"Node Orders\",\"description\":\"Node Orders service\",\"kind\":\"service\",\"implements\":{\"self\":{\"api\":\"trellis.node-orders@v1\",\"apiDigest\":\"7aZlI7NfeGJOqx4ypFKNCcsAf2CEL4PqJpY6IQfQLTQ\"}}}}'
 ",
     );
     write_executable(
@@ -1610,6 +1623,7 @@ fn local_mode_generates_service_artifacts_from_rust_contract_sources() {
             "{\n",
             "  \"format\": \"trellis.api.v1\",\n",
             "  \"id\": \"trellis.rust-service@v1\",\n",
+            "  \"version\": \"1.0.0\",\n",
             "  \"displayName\": \"Rust Service\",\n",
             "  \"description\": \"Fixture contract\",\n",
             "  \"kind\": \"service\"\n",

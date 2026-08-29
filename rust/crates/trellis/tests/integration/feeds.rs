@@ -12,6 +12,7 @@ const FEEDS_CLIENT_ID: &str = "trellis.integration.feeds-client@v1";
 const FEEDS_SERVICE_API_SOURCE_JSON: &str = r#"{
   "format": "trellis.api.v1",
   "id": "trellis.integration.feeds-service@v1",
+  "version": "1.0.0",
   "displayName": "Trellis Integration Feeds Service",
   "description": "Exercises generated feed subscribe and handler surfaces.",
   "capabilities": {
@@ -51,7 +52,7 @@ impl trellis_rs::service::GeneratedServiceContract for FeedsServiceContract {
     const CONTRACT_DIGEST: &'static str = "xOv1lbED0Vjv7E0k4QDIj9_r61H2hEl4wVilyWuQByI";
     const PARTICIPANT_NEEDS_DIGEST: &'static str = "kT1qoEkOXt7g7rYKYLK7s9WR30UfrHVsKUt9ZNgINH0";
     const PARTICIPANT_JSON: &'static str = r#"{"description":"Exercises generated feed subscribe and handler surfaces.","displayName":"Trellis Integration Feeds Service","format":"trellis.participant.v1","id":"trellis.integration.feeds-service@v1","implements":{"self":{"api":"trellis.integration.feeds-service@v1","apiDigest":"rd9dgL_KGJ2owNkSnklK4gIYMPdQICBiOFi1X98tSBk"}},"kind":"service","schemas":{"FeedFrame":{"properties":{"message":{"type":"string"},"sequence":{"type":"number"},"topic":{"type":"string"}},"required":["topic","message","sequence"],"type":"object"},"FeedInput":{"properties":{"topic":{"type":"string"}},"required":["topic"],"type":"object"}}}"#;
-    const API_JSON: &'static str = r#"{"capabilities":{"readFeeds":{"allows":[{"action":"subscribe","target":{"api":"trellis.integration.feeds-service@v1","kind":"apiSurface","name":"Entity.Live","surface":"feed"}}]}},"description":"Exercises generated feed subscribe and handler surfaces.","displayName":"Trellis Integration Feeds Service","feeds":{"Entity.Live":{"event":{"schema":"FeedFrame"},"input":{"schema":"FeedInput"},"version":"v1"}},"format":"trellis.api.v1","id":"trellis.integration.feeds-service@v1","schemas":{"FeedFrame":{"properties":{"message":{"type":"string"},"sequence":{"type":"number"},"topic":{"type":"string"}},"required":["topic","message","sequence"],"type":"object"},"FeedInput":{"properties":{"topic":{"type":"string"}},"required":["topic"],"type":"object"}}}"#;
+    const API_JSON: &'static str = r#"{"capabilities":{"readFeeds":{"allows":[{"action":"subscribe","target":{"api":"trellis.integration.feeds-service@v1","kind":"apiSurface","name":"Entity.Live","surface":"feed"}}]}},"description":"Exercises generated feed subscribe and handler surfaces.","displayName":"Trellis Integration Feeds Service","feeds":{"Entity.Live":{"event":{"schema":"FeedFrame"},"input":{"schema":"FeedInput"},"version":"v1"}},"format":"trellis.api.v1","id":"trellis.integration.feeds-service@v1","version":"1.0.0","schemas":{"FeedFrame":{"properties":{"message":{"type":"string"},"sequence":{"type":"number"},"topic":{"type":"string"}},"required":["topic","message","sequence"],"type":"object"},"FeedInput":{"properties":{"topic":{"type":"string"}},"required":["topic"],"type":"object"}}}"#;
     const API_DIGEST: &'static str = "rd9dgL_KGJ2owNkSnklK4gIYMPdQICBiOFi1X98tSBk";
     const REFERENCED_API_ARTIFACTS: &'static [(&'static str, &'static str)] = &[];
 }
@@ -456,6 +457,7 @@ fn feeds_client_contract(
     let manifest = trellis_rs::contracts::ContractBuilder::authoring(
         FEEDS_CLIENT_ID,
         FEEDS_CLIENT_ID,
+        "1.0.0",
         "Trellis Integration Feeds Client",
         "App/client participant for the feeds integration fixture.",
         trellis_rs::contracts::ContractKind::App,
@@ -477,6 +479,7 @@ fn feeds_unauthorized_client_contract(
     let manifest = trellis_rs::contracts::ContractBuilder::authoring(
         "trellis.integration.feeds-unauthorized-client@v1",
         "trellis.integration.feeds-unauthorized-client@v1",
+        "1.0.0",
         "Trellis Integration Feeds Unauthorized Client",
         "App/client participant without feed subscribe authority.",
         trellis_rs::contracts::ContractKind::App,

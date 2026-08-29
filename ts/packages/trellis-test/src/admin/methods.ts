@@ -93,6 +93,7 @@ export const ADMIN_USERNAME = "admin";
 const adminDescriptors = defineAppContract(() => ({
   id: "trellis.test.admin@v1",
   apiId: "trellis.test.admin@v1",
+  apiVersion: "1.0.0",
   displayName: "Trellis Test Admin",
   description:
     "Automates Trellis test runtime administration through Auth RPCs.",

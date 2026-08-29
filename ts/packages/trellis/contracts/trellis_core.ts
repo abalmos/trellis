@@ -14,6 +14,7 @@ export const trellisCore = defineServiceContract(
   (ref) => ({
     id: "trellis.core@v1",
     apiId: "trellis.core@v1",
+    apiVersion: "1.0.0",
     displayName: "Trellis Core",
     description:
       "Trellis runtime RPCs available to all connected participants.",

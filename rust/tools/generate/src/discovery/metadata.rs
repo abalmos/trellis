@@ -230,14 +230,14 @@ const API = {
         assert_eq!(
             extract_typescript_api_id(
                 r#"const OTHER = { id: "trellis.other@v1" };
-export default defineAppContract({ id: "trellis.app-participant@v1", apiId: "trellis.app@v1" });"#
+export default defineAppContract({ id: "trellis.app-participant@v1", apiId: "trellis.app@v1", apiVersion: "1.0.0" });"#
             )
             .as_deref(),
             Some("trellis.app@v1")
         );
         assert_eq!(
             extract_typescript_api_id(
-                "export default defineAppContract({ id: 'trellis.app-participant@v1', apiId : 'trellis.app@v1' });"
+                "export default defineAppContract({ id: 'trellis.app-participant@v1', apiId : 'trellis.app@v1', apiVersion: '1.0.0' });"
             )
             .as_deref(),
             Some("trellis.app@v1")
@@ -263,6 +263,7 @@ export default defineAppContract({ id: "trellis.app-participant@v1", apiId: "tre
                 "const API = {\n",
                 "  format: 'trellis.api.v1',\n",
                 "  id: API_ID,\n",
+                "  version: '1.0.0',\n",
                 "  displayName: 'Orders',\n",
                 "  description: 'Orders',\n",
                 "};\n",
@@ -311,6 +312,7 @@ export default defineAppContract({ id: "trellis.app-participant@v1", apiId: "tre
                 "export const auditApp = defineAppContract(() => ({\n",
                 "  id: \"trellis.audit-app-participant@v1\",\n",
                 "  apiId: \"trellis.audit-app@v1\",\n",
+                "  apiVersion: \"1.0.0\",\n",
                 "  displayName: \"Audit App\",\n",
                 "  description: \"Audit UI\",\n",
                 "  uses: { auth },\n",
@@ -351,6 +353,7 @@ export default defineAppContract({ id: "trellis.app-participant@v1", apiId: "tre
                 "export const inspectionApp = defineAppContract({ schemas: {} }, () => ({\n",
                 "  id: \"trellis.inspection-app-participant@v1\",\n",
                 "  apiId: \"trellis.inspection-app@v1\",\n",
+                "  apiVersion: \"1.0.0\",\n",
                 "  displayName: \"Inspection App\",\n",
                 "  description: \"Inspection UI\",\n",
                 "  state: {\n",

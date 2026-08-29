@@ -20,6 +20,7 @@ const contract = defineServiceContract(
   (ref) => ({
     id: "trellis.request-error-test@v1",
     apiId: "trellis.request-error-test@v1",
+    apiVersion: "1.0.0",
     displayName: "Request Error Test",
     description: "Exercise declared RPC error reconstruction.",
     rpc: {

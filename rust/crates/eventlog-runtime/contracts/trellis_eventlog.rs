@@ -16,6 +16,7 @@ const NOT_FOUND_ERROR: &str = "NotFoundError";
 pub fn api_artifact() -> Result<ApiArtifact, ContractsError> {
     ApiBuilder::authoring(
         "trellis.eventlog@v1",
+        "1.0.0",
         "Trellis Event Log",
         "Read-only Event Log API for Trellis event stream observability.",
     )

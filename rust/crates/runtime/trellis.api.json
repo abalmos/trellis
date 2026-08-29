@@ -1,6 +1,7 @@
 {
   "format": "trellis.api.v1",
   "id": "trellis.auth@v1",
+  "version": "1.0.0",
   "displayName": "Trellis Auth",
   "description": "Authenticate Trellis principals and administer sessions, deployments, exact authority, devices, and login portals.",
   "docs": {

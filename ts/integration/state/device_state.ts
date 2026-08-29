@@ -19,6 +19,7 @@ const adminContract = defineAppContract(() => ({
     "trellis.integration.state-device-admin.state-activated-devices-rust-owner@v1",
   apiId:
     "trellis.integration.state-device-admin.state-activated-devices-rust-owner@v1",
+  apiVersion: "1.0.0",
   displayName: "Trellis Integration State Device Admin",
   description: "Provisions activated devices and inspects their State.",
   uses: [AuthDeviceUserAuthoritiesResolve],
@@ -36,6 +37,7 @@ const deviceContract = defineDeviceContract(
       "trellis.integration.state-device.state-activated-devices-rust-owner@v1",
     apiId:
       "trellis.integration.state-device.state-activated-devices-rust-owner@v1",
+    apiVersion: "1.0.0",
     displayName: "Trellis Integration State Device",
     description:
       "Exercises device-owned State through the public device client.",

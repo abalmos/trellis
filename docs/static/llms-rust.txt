@@ -40,10 +40,12 @@ https://raw.githubusercontent.com/qlever-llc/trellis/main/docs/static/llms-full.
   unsupported.
 - The participant facade embeds its canonical API and participant artifacts and
   their exact digests.
-- Rust authoring supplies participant and API identities independently.
-  `ContractBuilder::authoring(participant_id, api_id, ...)` takes the participant
-  ID first; `ContractBuilder::from_api(participant_id, api, kind)` also requires
-  it explicitly. `ApiBuilder::authoring(id, ...)` uses `id` only as API identity.
+- Rust authoring supplies participant identity, API identity, and API release
+  version independently. `ContractBuilder::authoring(participant_id, api_id,
+  api_version, ...)` takes those values in that order;
+  `ContractBuilder::from_api(participant_id, api, kind)` receives the version in
+  the API artifact. `ApiBuilder::authoring(id, version, ...)` requires an explicit
+  Semantic Version. Release version does not affect the semantic API digest.
   Generated participant facades expose `CONTRACT_ID`; generated API SDKs expose
   `API_ID`.
 - Service connect options carry the immutable provisioned identity binding.

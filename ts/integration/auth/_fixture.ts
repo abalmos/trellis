@@ -44,6 +44,7 @@ export function createAuthLocalLoginFixture(
     (ref) => ({
       id: serviceContractId,
       apiId: serviceContractId,
+      apiVersion: "1.0.0",
       displayName: `Trellis Integration Auth Local Login Service (${slug})`,
       description:
         "Service RPC used to prove an approved local-login app session can call services.",
@@ -70,6 +71,7 @@ export function createAuthLocalLoginFixture(
   const eventContract = defineServiceContract({ schemas }, (ref) => ({
     id: `trellis.integration.auth-local-login-events.${slug}@v1`,
     apiId: `trellis.integration.auth-local-login-events.${slug}@v1`,
+    apiVersion: "1.0.0",
     displayName: `Trellis Integration Auth Local Login Events (${slug})`,
     description: "Event API used to prove revoked event proofs fail closed.",
     capabilities: {
@@ -104,6 +106,7 @@ export function createAuthLocalLoginFixture(
   const clientContract = defineAppContract(() => ({
     id: `trellis.integration.auth-local-login-client.${slug}@v1`,
     apiId: `trellis.integration.auth-local-login-client.${slug}@v1`,
+    apiVersion: "1.0.0",
     displayName: clientDisplayName,
     description: "App participant for the auth local-login binding fixture.",
     uses: [
@@ -125,6 +128,7 @@ export function createAuthLocalLoginFixture(
   const agentContract = defineAgentContract(() => ({
     id: `trellis.integration.auth-local-login-agent.${slug}@v1`,
     apiId: `trellis.integration.auth-local-login-agent.${slug}@v1`,
+    apiVersion: "1.0.0",
     displayName: agentDisplayName,
     description: "Agent participant for the auth local-login binding fixture.",
     uses: [trellisAuth.AuthSessionsMe, serviceContract.AuthLoginPing],
@@ -133,6 +137,7 @@ export function createAuthLocalLoginFixture(
   const sessionAdminContract = defineAppContract(() => ({
     id: `trellis.integration.auth-session-revoke-admin.${slug}@v1`,
     apiId: `trellis.integration.auth-session-revoke-admin.${slug}@v1`,
+    apiVersion: "1.0.0",
     displayName: `Trellis Integration Auth Session Revoke Admin (${slug})`,
     description:
       "Admin participant for revoking app sessions through public Auth RPCs.",

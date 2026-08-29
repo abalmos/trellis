@@ -1968,6 +1968,7 @@ mod tests {
         json!({
             "format": "trellis.api.v1",
             "id": contract_id,
+            "version": "1.0.0",
             "displayName": "Test Contract",
             "description": "Fixture contract",
             "schemas": {},
@@ -1989,6 +1990,7 @@ mod tests {
             serde_json::to_string(&json!({
                 "format": "trellis.api.v1",
                 "id": contract_id,
+                "version": "1.0.0",
                 "displayName": "Example Contract",
                 "description": "Example contract for SDK generation tests.",
                 "schemas": {
@@ -2328,6 +2330,7 @@ mod tests {
             serde_json::to_string(&json!({
                 "format": "trellis.api.v1",
                 "id": "trellis.demo@v1",
+                "version": "1.0.0",
                 "displayName": "Demo",
                 "description": "Capability literal fixture.",
                 "capabilities": {
@@ -2542,6 +2545,7 @@ mod tests {
             r#"{
                 "format": "trellis.api.v1",
                 "id": "trellis.core@v1",
+                "version": "1.0.0",
                 "displayName": "Trellis Core",
                 "description": "Core contract.",
                 "schemas": {
@@ -2636,6 +2640,7 @@ mod tests {
             r#"{
                 "format": "trellis.api.v1",
                 "id": "example.local-errors@v1",
+                "version": "1.0.0",
                 "displayName": "Local Errors",
                 "description": "Local error sdk test.",
                 "schemas": {
@@ -2767,6 +2772,7 @@ mod tests {
             serde_json::to_string(&json!({
                 "format": "trellis.api.v1",
                 "id": "example.schemas@v1",
+                "version": "1.0.0",
                 "displayName": "Schema Exports",
                 "description": "Schema exports test.",
                 "schemas": {

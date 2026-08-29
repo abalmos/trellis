@@ -52,6 +52,7 @@ export function createOperationsFixture(
     (ref) => ({
       id: `trellis.integration.operations-service.${slug}@v1`,
       apiId: `trellis.integration.operations-service.${slug}@v1`,
+      apiVersion: "1.0.0",
       displayName: `Trellis Integration Operations Service (${slug})`,
       description: "Exercises generated operation start and watch surfaces.",
       capabilities: {
@@ -122,6 +123,7 @@ export function createOperationsFixture(
   const clientContract = defineAppContract(() => ({
     id: `trellis.integration.operations-client.${slug}@v1`,
     apiId: `trellis.integration.operations-client.${slug}@v1`,
+    apiVersion: "1.0.0",
     displayName: `Trellis Integration Operations Client (${slug})`,
     description:
       "App/client participant for the operations integration fixture.",
@@ -139,6 +141,7 @@ export function createOperationsFixture(
   const unauthorizedClientContract = defineAppContract(() => ({
     id: `trellis.integration.operations-unauthorized-client.${slug}@v1`,
     apiId: `trellis.integration.operations-unauthorized-client.${slug}@v1`,
+    apiVersion: "1.0.0",
     displayName: `Trellis Integration Unauthorized Operations Client (${slug})`,
     description:
       "App/client without operation call authority for Entity.Process.",

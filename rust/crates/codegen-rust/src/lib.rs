@@ -4682,6 +4682,7 @@ mod tests {
             r#"{
                 "format": "trellis.api.v1",
                 "id": "trellis.core@v1",
+                "version": "1.0.0",
                 "displayName": "Trellis Core",
                 "description": "Trellis core runtime surface.",
                 "schemas": {
@@ -5157,6 +5158,7 @@ mod tests {
             json!({
                 "format": "trellis.api.v1",
                 "id": "example.events@v1",
+                "version": "1.0.0",
                 "displayName": "Example Events",
                 "description": "Example event-only contract.",
                 "schemas": {
@@ -5244,6 +5246,7 @@ mod tests {
             json!({
                 "format": "trellis.api.v1",
                 "id": "device@v1",
+                "version": "1.0.0",
                 "displayName": "Device",
                 "description": "Device.",
             }),
@@ -5254,6 +5257,7 @@ mod tests {
             json!({
                 "format": "trellis.api.v1",
                 "id": "trellis.core@v1",
+                "version": "1.0.0",
                 "displayName": "Trellis Core",
                 "description": "Core.",
                 "schemas": {
@@ -5325,6 +5329,7 @@ mod tests {
             json!({
                 "format": "trellis.api.v1",
                 "id": "audit@v1",
+                "version": "1.0.0",
                 "displayName": "Audit",
                 "description": "Audit service.",
                 "schemas": {
@@ -5355,6 +5360,7 @@ mod tests {
             json!({
                 "format": "trellis.api.v1",
                 "id": "trellis.core@v1",
+                "version": "1.0.0",
                 "displayName": "Trellis Core",
                 "description": "Core.",
                 "schemas": {
@@ -5384,6 +5390,7 @@ mod tests {
             json!({
                 "format": "trellis.api.v1",
                 "id": "trellis.auth@v1",
+                "version": "1.0.0",
                 "displayName": "Trellis Auth",
                 "description": "Auth.",
                 "schemas": {
@@ -5587,6 +5594,7 @@ where
             json!({
                 "format": "trellis.api.v1",
                 "id": "ops@v1",
+                "version": "1.0.0",
                 "displayName": "Ops",
                 "description": "Operation-only service.",
                 "schemas": {
@@ -5647,6 +5655,7 @@ where
             json!({
                 "format": "trellis.api.v1",
                 "id": "compile@v1",
+                "version": "1.0.0",
                 "displayName": "Compile",
                 "description": "Compile-test service.",
                 "schemas": {
@@ -5755,6 +5764,7 @@ where
                 json!({
                     "format": "trellis.api.v1",
                     "id": format!("fixture.{kind}@v1"),
+                    "version": "1.0.0",
                     "displayName": format!("Fixture {kind}"),
                     "description": "Compile fixture.",
                     "schemas": {
@@ -5834,6 +5844,7 @@ where
             json!({
                 "format": "trellis.api.v1",
                 "id": "device@v1",
+                "version": "1.0.0",
                 "displayName": "Device",
                 "description": "Device.",
                 "schemas": {
@@ -5965,6 +5976,7 @@ where
             json!({
                 "format": "trellis.api.v1",
                 "id": "participant@v1",
+                "version": "1.0.0",
                 "displayName": "Participant",
                 "description": "Participant.",
                 "schemas": {}
@@ -5976,6 +5988,7 @@ where
             json!({
                 "format": "trellis.api.v1",
                 "id": "evidence@v1",
+                "version": "1.0.0",
                 "displayName": "Evidence",
                 "description": "Evidence.",
                 "schemas": {
@@ -6082,6 +6095,7 @@ where
             json!({
                 "format": "trellis.api.v1",
                 "id": "participant@v1",
+                "version": "1.0.0",
                 "displayName": "Participant",
                 "description": "Participant.",
             }),
@@ -6092,6 +6106,7 @@ where
             json!({
                 "format": "trellis.api.v1",
                 "id": "evidence@v1",
+                "version": "1.0.0",
                 "displayName": "Evidence",
                 "description": "Evidence.",
                 "feeds": {}
@@ -6153,6 +6168,7 @@ where
             json!({
                 "format": "trellis.api.v1",
                 "id": "ops@v1",
+                "version": "1.0.0",
                 "displayName": "Ops With Errors",
                 "description": "Operation with declared errors.",
                 "schemas": {

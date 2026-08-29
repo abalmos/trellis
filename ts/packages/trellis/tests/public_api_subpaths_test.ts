@@ -65,6 +65,7 @@ Deno.test("contracts subpath exposes only kind-specific contract helpers", () =>
     (ref) => ({
       id: "example.device@v1",
       apiId: "example.device@v1",
+      apiVersion: "1.0.0",
       displayName: "Example Device",
       description: "Example device contract.",
       rpc: {

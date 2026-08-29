@@ -19,6 +19,7 @@ import { defineServiceContract } from "@qlever-llc/trellis";
 export const ordersService = defineServiceContract({}, () => ({
   id: "orders-service@v1",
   apiId: "orders-service@v1",
+  apiVersion: "1.0.0",
   displayName: "Orders Service",
   description: "A simple service for managing orders.",
   uses: {},
@@ -56,6 +57,7 @@ pub fn contract_artifacts() -> Result<ContractArtifacts, ContractsError> {
     ContractBuilder::authoring(
         "orders-service@v1",
         "orders-service@v1",
+        "1.0.0",
         "Orders Service",
         "A simple service for managing orders.",
         ContractKind::Service,

@@ -64,6 +64,7 @@ const distinctIdentity = defineServiceContract(
   (ref) => ({
     id: "acme.orders-service@v1",
     apiId: "acme.orders@v1",
+    apiVersion: "1.0.0",
     displayName: "Orders Service",
     description: "Prove participant and API identity remain distinct in types.",
     capabilities: {
@@ -128,6 +129,7 @@ const auth = defineServiceContract(
   () => ({
     id: "trellis.auth@v1",
     apiId: "trellis.auth@v1",
+    apiVersion: "1.0.0",
     displayName: "Trellis Auth",
     description: "Expose Trellis auth RPCs and events for tests.",
     exports: {
@@ -172,6 +174,7 @@ const audit = defineServiceContract(
   () => ({
     id: "trellis.audit@v1",
     apiId: "trellis.audit@v1",
+    apiVersion: "1.0.0",
     displayName: "Audit",
     description: "Expose audit RPCs and subscribe to auth events for tests.",
     uses: [
@@ -213,6 +216,7 @@ type _AuthContractDoesNotExposeCatalog = Assert<
 const dashboard = defineAppContract(() => ({
   id: "trellis.dashboard@v1",
   apiId: "trellis.dashboard@v1",
+  apiVersion: "1.0.0",
   displayName: "Dashboard",
   description: "Consume audit events in contract typing tests.",
   uses: [audit.AuditRecorded.subscribe],
@@ -230,6 +234,7 @@ const preferencesApp = defineAppContract(
   (ref) => ({
     id: "trellis.preferences@v1",
     apiId: "trellis.preferences@v1",
+    apiVersion: "1.0.0",
     displayName: "Preferences",
     description: "Declare named state stores for client contracts.",
     uses: [state({
@@ -257,6 +262,7 @@ if (false) {
     (ref) => ({
       id: "trellis.invalid-state@v1",
       apiId: "trellis.invalid-state@v1",
+      apiVersion: "1.0.0",
       displayName: "Invalid State",
       description: "Should fail type checking.",
       // @ts-expect-error invalid state feature is not a valid contract selection
@@ -306,6 +312,7 @@ const billing = defineServiceContract(
   () => ({
     id: "trellis.billing@v1",
     apiId: "trellis.billing@v1",
+    apiVersion: "1.0.0",
     displayName: "Billing",
     description: "Expose billing operations for contract typing tests.",
     capabilities: billingCapabilities,
@@ -344,6 +351,7 @@ const payments = defineServiceContract(
   () => ({
     id: "trellis.payments@v1",
     apiId: "trellis.payments@v1",
+    apiVersion: "1.0.0",
     displayName: "Payments",
     description: "Consume billing operations for contract typing tests.",
     uses: [billing.BillingRefund],
@@ -383,6 +391,7 @@ const inlineSchemaContract = defineServiceContract(
   () => ({
     id: "trellis.inline-schemas@v1",
     apiId: "trellis.inline-schemas@v1",
+    apiVersion: "1.0.0",
     displayName: "Inline Schemas",
     description: "Use inline schema refs without a local helper.",
     rpc: {
@@ -423,6 +432,7 @@ const topLevelJobsContract = defineServiceContract(
   () => ({
     id: "trellis.top-level-jobs@v1",
     apiId: "trellis.top-level-jobs@v1",
+    apiVersion: "1.0.0",
     displayName: "Top Level Jobs",
     description: "Ensure jobs are typed as a first-class contract surface.",
     uses: [jobs({
@@ -447,6 +457,7 @@ if (false) {
     () => ({
       id: "trellis.invalid-jobs-resource@v1",
       apiId: "trellis.invalid-jobs-resource@v1",
+      apiVersion: "1.0.0",
       displayName: "Invalid Jobs Resource",
       description: "Should fail type checking.",
       // @ts-expect-error runtime features must be declared in uses
@@ -475,6 +486,7 @@ const transferContract = defineServiceContract(
   (ref) => ({
     id: "trellis.transfer@v1",
     apiId: "trellis.transfer@v1",
+    apiVersion: "1.0.0",
     displayName: "Transfer",
     description: "Exercise transfer-capable operation typing.",
     uses: [
@@ -526,6 +538,7 @@ const builderContract = defineServiceContract(
   (ref) => ({
     id: "trellis.builder@v1",
     apiId: "trellis.builder@v1",
+    apiVersion: "1.0.0",
     displayName: "Builder Contract",
     description: "Exercise the builder-style contract authoring API.",
     rpc: {
@@ -581,6 +594,7 @@ acceptBuilderOperationError;
 const appContract = defineAppContract(() => ({
   id: "trellis.builder-app@v1",
   apiId: "trellis.builder-app@v1",
+  apiVersion: "1.0.0",
   displayName: "Builder App",
   description: "Exercise the app helper.",
   uses: [auth.AuthSessionsMe],
@@ -591,6 +605,7 @@ getContractRuntime(appContract).usedApi.rpc["Auth.Sessions.Me"].subject;
 const deviceContract = defineDeviceContract(() => ({
   id: "trellis.builder-device@v1",
   apiId: "trellis.builder-device@v1",
+  apiVersion: "1.0.0",
   displayName: "Builder Device",
   description: "Exercise the device helper.",
   uses: [auth.AuthSessionsLogout],
@@ -670,6 +685,7 @@ if (false) {
     () => ({
       id: "trellis.invalid-job-schema@v1",
       apiId: "trellis.invalid-job-schema@v1",
+      apiVersion: "1.0.0",
       displayName: "Invalid Job Schema",
       description: "Should fail type checking.",
       // @ts-expect-error job queue schema refs must use local schema keys
@@ -690,6 +706,7 @@ if (false) {
     (ref) => ({
       id: "trellis.invalid-kv-schema@v1",
       apiId: "trellis.invalid-kv-schema@v1",
+      apiVersion: "1.0.0",
       displayName: "Invalid KV Schema",
       description: "Should fail type checking.",
       uses: [kv({
@@ -714,6 +731,7 @@ if (false) {
     (ref) => ({
       id: "trellis.invalid-builder@v1",
       apiId: "trellis.invalid-builder@v1",
+      apiVersion: "1.0.0",
       displayName: "Invalid Builder",
       description: "Should fail type checking.",
       rpc: {
@@ -743,6 +761,7 @@ if (false) {
     (ref) => ({
       id: "trellis.invalid-operation-error@v1",
       apiId: "trellis.invalid-operation-error@v1",
+      apiVersion: "1.0.0",
       displayName: "Invalid Operation Error",
       description: "Should fail type checking.",
       operations: {
@@ -764,6 +783,7 @@ if (false) {
   defineAppContract(() => ({
     id: "trellis.invalid-app@v1",
     apiId: "trellis.invalid-app@v1",
+    apiVersion: "1.0.0",
     displayName: "Invalid App",
     description: "Should fail type checking.",
     // @ts-expect-error app contracts may not declare local schemas
@@ -778,6 +798,7 @@ if (false) {
     () => ({
       id: "trellis.invalid-service-exports@v1",
       apiId: "trellis.invalid-service-exports@v1",
+      apiVersion: "1.0.0",
       displayName: "Invalid Service Exports",
       description: "Should fail type checking.",
     }),
@@ -791,6 +812,7 @@ if (false) {
     () => ({
       id: "trellis.invalid-app-exports@v1",
       apiId: "trellis.invalid-app-exports@v1",
+      apiVersion: "1.0.0",
       displayName: "Invalid App Exports",
       description: "Should fail type checking.",
     }),
@@ -804,6 +826,7 @@ if (false) {
     () => ({
       id: "trellis.invalid-agent-exports@v1",
       apiId: "trellis.invalid-agent-exports@v1",
+      apiVersion: "1.0.0",
       displayName: "Invalid Agent Exports",
       description: "Should fail type checking.",
     }),
@@ -817,6 +840,7 @@ if (false) {
     () => ({
       id: "trellis.invalid-device-exports@v1",
       apiId: "trellis.invalid-device-exports@v1",
+      apiVersion: "1.0.0",
       displayName: "Invalid Device Exports",
       description: "Should fail type checking.",
     }),
@@ -831,6 +855,7 @@ if (false) {
     () => ({
       id: "trellis.invalid-raw-subjects@v1",
       apiId: "trellis.invalid-raw-subjects@v1",
+      apiVersion: "1.0.0",
       displayName: "Invalid Raw Subjects",
       description: "Should fail type checking.",
       // @ts-expect-error raw subject ownership is not contract authoring API
@@ -843,6 +868,7 @@ if (false) {
   defineDeviceContract(() => ({
     id: "trellis.invalid-device@v1",
     apiId: "trellis.invalid-device@v1",
+    apiVersion: "1.0.0",
     displayName: "Invalid Device",
     description: "Should fail type checking.",
     // @ts-expect-error device contracts may not declare resources

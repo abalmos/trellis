@@ -38,9 +38,10 @@ Rules:
 - every TypeScript contract source loaded by Trellis generation should
   default-export the `defineServiceContract(...)`, `defineAppContract(...)`,
   `defineAgentContract(...)`, or `defineDeviceContract(...)` result
-- every `define*Contract` body requires both `id` (stable participant identity)
-  and `apiId` (owned API identity), even when their values are equal. Generated
-  participant facades expose `CONTRACT_ID`; generated API SDKs expose `API_ID`.
+- every `define*Contract` body requires `id` (stable participant identity),
+  `apiId` (owned API identity), and `apiVersion` (Semantic Version release
+  metadata), even when the identities are equal. Release version does not affect
+  the semantic API digest, participant evidence, permissions, or subjects.
 - import those normal contract helpers from the browser-safe
   `@qlever-llc/trellis` root. Keep service runtime, device activation,
   browser-auth, telemetry, generated SDK, and advanced contract tooling imports on
@@ -595,6 +596,7 @@ by top-level `uses.required` or `uses.optional` alias;
 const contract = defineServiceContract({ schemas }, () => ({
   id: "shipment-projection@v1",
   apiId: "shipment-projection@v1",
+  apiVersion: "1.0.0",
   displayName: "Shipment Projection",
   description: "Projects shipment events into local state.",
   uses: {

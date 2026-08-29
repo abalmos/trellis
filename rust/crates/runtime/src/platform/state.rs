@@ -1250,6 +1250,7 @@ mod tests {
         let api = json!({
             "format": "trellis.api.v1",
             "id": "example.device@v1",
+            "version": "1.0.0",
             "displayName": "Example Device",
             "description": "State test API",
             "schemas": {"State": {"type": "string"}},
@@ -1260,6 +1261,7 @@ mod tests {
         let shared_api = json!({
             "format": "trellis.api.v1",
             "id": "example.shared@v1",
+            "version": "1.0.0",
             "displayName": "Shared",
             "description": "State test dependency",
             "schemas": {"State": {"type": "boolean"}},

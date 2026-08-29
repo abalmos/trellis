@@ -836,4 +836,5 @@ export const API = {
       "type": "object",
     },
   },
+  "version": "1.0.0",
 } as const;

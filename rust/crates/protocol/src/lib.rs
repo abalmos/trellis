@@ -129,6 +129,7 @@
 //! let raw = json!({
 //!     "format": "trellis.api.v1",
 //!     "id": "documents@v1",
+//!     "version": "1.0.0",
 //!     "displayName": "Documents",
 //!     "description": "Document APIs.",
 //!     "schemas": { "Input": true, "Output": true },
@@ -166,11 +167,11 @@
 //! use trellis_protocol::{compare_api_replacement, parse_api};
 //!
 //! let old = parse_api(&json!({
-//!     "format": "trellis.api.v1", "id": "documents@v1",
+//!     "format": "trellis.api.v1", "id": "documents@v1", "version": "1.0.0",
 //!     "displayName": "Documents", "description": "Documents."
 //! }))?;
 //! let additive = parse_api(&json!({
-//!     "format": "trellis.api.v1", "id": "documents@v1",
+//!     "format": "trellis.api.v1", "id": "documents@v1", "version": "1.1.0",
 //!     "displayName": "Documents", "description": "Documents.",
 //!     "schemas": { "Input": true, "Output": true },
 //!     "rpc": { "Documents.Get": {
@@ -181,7 +182,7 @@
 //! assert!(compare_api_replacement(&old, &additive)?.compatible);
 //!
 //! let wrong_lineage = parse_api(&json!({
-//!     "format": "trellis.api.v1", "id": "archive@v1",
+//!     "format": "trellis.api.v1", "id": "archive@v1", "version": "1.0.0",
 //!     "displayName": "Archive", "description": "Archive."
 //! }))?;
 //! assert!(!compare_api_replacement(&old, &wrong_lineage)?.compatible);
@@ -200,11 +201,11 @@
 //! use trellis_protocol::{parse_api, parse_participant, resolve_participant};
 //!
 //! let documents = parse_api(&json!({
-//!     "format": "trellis.api.v1", "id": "documents@v1",
+//!     "format": "trellis.api.v1", "id": "documents@v1", "version": "1.0.0",
 //!     "displayName": "Documents", "description": "Documents."
 //! }))?;
 //! let billing = parse_api(&json!({
-//!     "format": "trellis.api.v1", "id": "billing@v1",
+//!     "format": "trellis.api.v1", "id": "billing@v1", "version": "1.0.0",
 //!     "displayName": "Billing", "description": "Billing.",
 //!     "schemas": { "Input": true, "Output": true },
 //!     "rpc": {
@@ -221,7 +222,7 @@
 //!     } }
 //! }))?;
 //! let health = parse_api(&json!({
-//!     "format": "trellis.api.v1", "id": "health@v1",
+//!     "format": "trellis.api.v1", "id": "health@v1", "version": "1.0.0",
 //!     "displayName": "Health", "description": "Health.",
 //!     "schemas": { "Input": true, "Event": true },
 //!     "feeds": { "Health.Watch": {
@@ -304,6 +305,7 @@ pub use canonical::{canonicalize_json, digest_json, sha256_base64url};
 pub use error::{
     AuthorizationErrorCode, ProtocolError, ResolutionErrorCode, SessionProofErrorCode,
 };
+pub use identifiers::validate_api_id;
 pub use participant::{
     lint_participant_authoring, parse_participant, ParticipantArtifact, ParticipantKind,
     PARTICIPANT_AUTHORING_SCHEMA_V1_JSON, PARTICIPANT_FORMAT_V1,

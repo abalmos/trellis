@@ -66,6 +66,7 @@ import { defineAppContract } from "@qlever-llc/trellis";
 export const portalContract = defineAppContract(() => ({
   id: "my-portal@v1",
   apiId: "my-portal@v1",
+  apiVersion: "1.0.0",
   displayName: "My Portal",
   description: "Portal-hosted app routes used after login.",
 }));

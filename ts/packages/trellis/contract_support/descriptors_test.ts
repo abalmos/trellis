@@ -180,6 +180,7 @@ Deno.test("direct action descriptors emit deterministic canonical uses", () => {
   const contract = defineAppContract(() => ({
     id: "storefront@v1",
     apiId: "storefront@v1",
+    apiVersion: "1.0.0",
     displayName: "Storefront",
     description: "Storefront descriptor test.",
     uses: [
@@ -205,6 +206,7 @@ Deno.test("local aliases do not change canonical contract identity", () => {
   const original = defineAppContract(() => ({
     id: "storefront@v1",
     apiId: "storefront@v1",
+    apiVersion: "1.0.0",
     displayName: "Storefront",
     description: "Storefront descriptor test.",
     uses: [OrdersGet],
@@ -212,6 +214,7 @@ Deno.test("local aliases do not change canonical contract identity", () => {
   const aliased = defineAppContract(() => ({
     id: "storefront@v1",
     apiId: "storefront@v1",
+    apiVersion: "1.0.0",
     displayName: "Storefront",
     description: "Storefront descriptor test.",
     uses: [as("getOrder", OrdersGet)],

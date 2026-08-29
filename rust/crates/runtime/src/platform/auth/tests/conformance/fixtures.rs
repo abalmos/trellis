@@ -47,6 +47,7 @@ pub(super) fn participant_fixture_with_resources(
     let required_api = parse_api(&json!({
         "format": "trellis.api.v1",
         "id": "required.api@v1",
+        "version": "1.0.0",
         "displayName": "Required API",
         "description": "Required API fixture.",
         "schemas": { "Input": true, "Output": true },
@@ -61,6 +62,7 @@ pub(super) fn participant_fixture_with_resources(
     let optional_api = parse_api(&json!({
         "format": "trellis.api.v1",
         "id": "optional.api@v1",
+        "version": "1.0.0",
         "displayName": "Optional API",
         "description": "Optional API fixture.",
         "schemas": { "Input": true, "Output": true },

@@ -7,7 +7,7 @@ use serde_json::{Map, Value};
 use crate::{
     canonicalize_json, digest_json,
     identifiers::{
-        api_error, sort_deduplicate, validate_api_id, validate_logical_name,
+        api_error, sort_deduplicate, validate_api_id_at as validate_api_id, validate_logical_name,
         validate_nonempty_text, validate_protocol_identifier, validate_version,
     },
     schema_profile::{
@@ -60,6 +60,7 @@ pub fn lint_api_authoring(value: &Value) -> Result<(), ProtocolError> {
 pub struct ApiArtifact {
     format: String,
     id: String,
+    version: String,
     display_name: String,
     description: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -109,6 +110,11 @@ impl ApiArtifact {
     /// Return the stable versioned API lineage identifier.
     pub fn id(&self) -> &str {
         &self.id
+    }
+
+    /// Return the independently released Semantic Version.
+    pub fn version(&self) -> &str {
+        &self.version
     }
 
     /// Return one declared State definition by name.
@@ -249,6 +255,8 @@ impl ApiArtifact {
             ));
         }
         validate_api_id("/id", &wire.id, api_error)?;
+        semver::Version::parse(&wire.version)
+            .map_err(|error| api_error("/version", format!("must be Semantic Version: {error}")))?;
         validate_nonempty_text("/displayName", &wire.display_name, api_error)?;
         validate_nonempty_text("/description", &wire.description, api_error)?;
         if let Some(docs) = &wire.docs {
@@ -535,6 +543,7 @@ impl ApiArtifact {
         let artifact = Self {
             format: wire.format,
             id: wire.id,
+            version: wire.version,
             display_name: wire.display_name,
             description: wire.description,
             docs: wire.docs,
@@ -577,6 +586,7 @@ impl<'de> Deserialize<'de> for ApiArtifact {
 struct WireApiArtifact {
     format: String,
     id: String,
+    version: String,
     display_name: String,
     description: String,
     #[serde(default)]
@@ -1073,6 +1083,7 @@ mod tests {
         let value = json!({
             "format": API_FORMAT_V1,
             "id": " documents@v1",
+            "version": "1.0.0",
             "displayName": "Documents",
             "description": "Invalid API identifier."
         });
@@ -1083,10 +1094,53 @@ mod tests {
     }
 
     #[test]
+    fn release_version_is_validated_but_excluded_from_semantic_identity() {
+        let release = |version| {
+            json!({
+                "format": API_FORMAT_V1,
+                "id": "acme.orders@v1",
+                "version": version,
+                "displayName": "Orders",
+                "description": "Orders API."
+            })
+        };
+        let previous = parse_api(&release("1.4.2")).unwrap();
+        let candidate = parse_api(&release("1.5.0-rc.1")).unwrap();
+        assert_eq!(previous.id(), "acme.orders@v1");
+        assert_eq!(previous.version(), "1.4.2");
+        assert_eq!(previous.digest().unwrap(), candidate.digest().unwrap());
+        assert!(
+            crate::compare_api_replacement(&previous, &candidate)
+                .unwrap()
+                .compatible
+        );
+        let mut previous_shape = release("1.4.2");
+        previous_shape["schemas"] = json!({"Order": {"type": "string"}});
+        previous_shape["rpc"] = json!({"Orders.Get": {
+            "version": "v1",
+            "input": {"schema": "Order"},
+            "output": {"schema": "Order"}
+        }});
+        let mut breaking_shape = release("1.5.0");
+        breaking_shape["schemas"] = json!({"Order": {"type": "integer"}});
+        breaking_shape["rpc"] = previous_shape["rpc"].clone();
+        assert!(
+            !crate::compare_api_replacement(
+                &parse_api(&previous_shape).unwrap(),
+                &parse_api(&breaking_shape).unwrap(),
+            )
+            .unwrap()
+            .compatible
+        );
+        assert_api_error(&release("banana"), "/version");
+    }
+
+    #[test]
     fn api_authored_nested_keys_are_json_pointer_encoded() {
         let signal = json!({
             "format": API_FORMAT_V1,
             "id": "example@v1",
+            "version": "1.0.0",
             "displayName": "Example",
             "description": "Example API.",
             "schemas": { "Any": true },
@@ -1105,6 +1159,7 @@ mod tests {
         let accepted_version = json!({
             "format": API_FORMAT_V1,
             "id": "example@v1",
+            "version": "1.0.0",
             "displayName": "Example",
             "description": "Example API.",
             "schemas": { "Any": true },
@@ -1171,6 +1226,7 @@ mod tests {
             let value = json!({
                 "format": API_FORMAT_V1,
                 "id": "example@v1",
+                "version": "1.0.0",
                 "displayName": "Example",
                 "description": "Example API.",
                 "schemas": { "Input": schema },
@@ -1189,6 +1245,7 @@ mod tests {
         let private = json!({
             "format": API_FORMAT_V1,
             "id": "example@v1",
+            "version": "1.0.0",
             "displayName": "Example",
             "description": "Example API.",
             "schemas": {
@@ -1211,6 +1268,7 @@ mod tests {
         let base = json!({
             "format": API_FORMAT_V1,
             "id": "example@v1",
+            "version": "1.0.0",
             "displayName": "Example",
             "description": "Example API.",
             "schemas": {
@@ -1283,6 +1341,7 @@ mod tests {
         let base = json!({
             "format": API_FORMAT_V1,
             "id": "example@v1",
+            "version": "1.0.0",
             "displayName": "Example",
             "description": "Example API.",
             "schemas": { "Any": true },

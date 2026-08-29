@@ -47,6 +47,63 @@ Deno.test("contract authoring rejects missing or non-string apiId immediately", 
     );
   }
 });
+
+Deno.test("contract authoring requires a string apiVersion", () => {
+  for (
+    const body of [
+      {
+        id: "trellis.test.missing-version@v1",
+        apiId: "trellis.test.missing-version@v1",
+        displayName: "Missing version",
+        description: "Missing apiVersion.",
+      },
+      {
+        id: "trellis.test.invalid-version@v1",
+        apiId: "trellis.test.invalid-version@v1",
+        apiVersion: 42,
+        displayName: "Invalid version",
+        description: "Non-string apiVersion.",
+      },
+    ]
+  ) {
+    assertThrows(
+      () => Reflect.apply(defineServiceContract, undefined, [{}, () => body]),
+      Error,
+      "Contract apiVersion must be a string",
+    );
+  }
+});
+
+Deno.test("API release version does not change semantic or participant identity", () => {
+  const defineRelease = (apiVersion: string) =>
+    defineServiceContract({}, () => ({
+      id: "trellis.test.release-version@v1",
+      apiId: "trellis.test.release-version@v1",
+      apiVersion,
+      displayName: "Release version",
+      description: "Version-only release identity test.",
+    }));
+  const previous = defineRelease("1.4.2");
+  const candidate = defineRelease("1.5.0-rc.1");
+  assertEquals(previous.API.version, "1.4.2");
+  assertEquals(previous.API_DIGEST, candidate.API_DIGEST);
+  assertEquals(previous.CONTRACT_DIGEST, candidate.CONTRACT_DIGEST);
+});
+
+Deno.test("canonical protocol validation rejects malformed API SemVer", async () => {
+  const contract = defineServiceContract({}, () => ({
+    id: "trellis.test.invalid-semver@v1",
+    apiId: "trellis.test.invalid-semver@v1",
+    apiVersion: "banana",
+    displayName: "Invalid SemVer",
+    description: "Canonical validation test.",
+  }));
+  await assertRejects(
+    () => resolveNativeProtocolPresentation(contract),
+    Error,
+    "/version",
+  );
+});
 import { canonicalizeJson, type JsonValue } from "./canonical.ts";
 import { CONTRACT_RUNTIME } from "./contract_runtime.ts";
 import {
@@ -63,6 +120,7 @@ Deno.test("generated actions preserve canonical source artifact identity", () =>
     defineAppContract(() => ({
       id: "trellis.test.auth-observer@v1",
       apiId: "trellis.test.auth-observer@v1",
+      apiVersion: "1.0.0",
       displayName: "Auth observer",
       description: "Checks generated dependency identity.",
       uses: [AuthCapabilitiesList],
@@ -86,6 +144,7 @@ Deno.test("participant and owned API identities remain distinct", () => {
     (ref) => ({
       id: "trellis.test.identity-participant@v1",
       apiId: "trellis.test.identity-api@v1",
+      apiVersion: "1.0.0",
       displayName: "Identity test",
       description: "Checks participant and API identity separation.",
       rpc: {
@@ -136,6 +195,7 @@ Deno.test("service contracts retain authoring event-consumer runtime metadata", 
     (ref) => ({
       id: "trellis.test.consumer@v1",
       apiId: "trellis.test.consumer@v1",
+      apiVersion: "1.0.0",
       displayName: "Consumer",
       description: "Checks event-consumer runtime metadata.",
       events: {
@@ -162,6 +222,7 @@ Deno.test("operation access retains native observe, cancel, and control selectio
     (ref) => ({
       id: "trellis.test.operation-provider@v1",
       apiId: "trellis.test.operation-provider@v1",
+      apiVersion: "1.0.0",
       displayName: "Operation provider",
       description: "Checks operation control selections.",
       capabilities: {
@@ -188,6 +249,7 @@ Deno.test("operation access retains native observe, cancel, and control selectio
   const consumer = defineAppContract(() => ({
     id: "trellis.test.operation-consumer@v1",
     apiId: "trellis.test.operation-consumer@v1",
+    apiVersion: "1.0.0",
     displayName: "Operation consumer",
     description: "Uses operation control.",
     uses: [operationAccess(provider.Run, { cancel: true, control: true })],
@@ -215,6 +277,7 @@ Deno.test("inline actions preserve their provider API artifact", async () => {
     (ref) => ({
       id: "trellis.test.inline-provider@v1",
       apiId: "trellis.test.inline-provider@v1",
+      apiVersion: "1.0.0",
       displayName: "Inline provider",
       description: "Checks inline action source identity.",
       capabilities: {
@@ -234,6 +297,7 @@ Deno.test("inline actions preserve their provider API artifact", async () => {
   const consumer = defineAppContract(() => ({
     id: "trellis.test.inline-consumer@v1",
     apiId: "trellis.test.inline-consumer@v1",
+    apiVersion: "1.0.0",
     displayName: "Inline consumer",
     description: "Uses the inline provider.",
     uses: [provider.InlineCall],
@@ -291,6 +355,7 @@ Deno.test("capability permissions affect API identity, wording does not", () => 
       (ref) => ({
         id: "trellis.test.capability-provider@v1",
         apiId: "trellis.test.capability-provider@v1",
+        apiVersion: "1.0.0",
         displayName: "Capability provider",
         description: "Checks native capability identity.",
         capabilities: {
@@ -355,6 +420,7 @@ Deno.test("capability references require declared local or platform/global names
       (ref) => ({
         id: "trellis.test.capability-validation@v1",
         apiId: "trellis.test.capability-validation@v1",
+        apiVersion: "1.0.0",
         displayName: "Capability validation",
         description: "Checks capability reference validation.",
         capabilities: {
@@ -391,6 +457,7 @@ Deno.test("resolved native presentation verifies participant identity and eviden
     (ref) => ({
       id: "trellis.test.presentation-provider@v1",
       apiId: "trellis.test.presentation-provider@v1",
+      apiVersion: "1.0.0",
       displayName: "Presentation provider",
       description: "Provides exact API evidence.",
       rpc: {
@@ -406,6 +473,7 @@ Deno.test("resolved native presentation verifies participant identity and eviden
   const consumer = defineAppContract(() => ({
     id: "trellis.test.presentation-consumer@v1",
     apiId: "trellis.test.presentation-consumer@v1",
+    apiVersion: "1.0.0",
     displayName: "Presentation consumer",
     description: "Consumes exact API evidence.",
     uses: [provider.Call],
@@ -465,6 +533,7 @@ Deno.test("action sources reject conflicting and forged API revisions", () => {
     (ref) => ({
       id: "trellis.test.revision-provider@v1",
       apiId: "trellis.test.revision-provider@v1",
+      apiVersion: "1.0.0",
       displayName: "Revision provider",
       description: "Checks exact action source evidence.",
       rpc: {
@@ -521,6 +590,7 @@ Deno.test("native authoring matches shared cross-language vectors", async () => 
     (ref) => ({
       id: "conformance.dependency@v1",
       apiId: "conformance.dependency@v1",
+      apiVersion: "1.0.0",
       displayName: "Dependency",
       description: "Conformance dependency.",
       rpc: {
@@ -540,6 +610,7 @@ Deno.test("native authoring matches shared cross-language vectors", async () => 
     (ref) => ({
       id: "conformance.optional-dependency@v1",
       apiId: "conformance.optional-dependency@v1",
+      apiVersion: "1.0.0",
       displayName: "Optional dependency",
       description: "Optional conformance dependency.",
       rpc: {
@@ -554,6 +625,7 @@ Deno.test("native authoring matches shared cross-language vectors", async () => 
   const minimal = defineAppContract(() => ({
     id: "conformance.minimal-app-participant@v1",
     apiId: "conformance.minimal-app@v1",
+    apiVersion: "1.0.0",
     displayName: "Minimal app",
     description: "Minimal native app.",
   }));
@@ -567,6 +639,7 @@ Deno.test("native authoring matches shared cross-language vectors", async () => 
     (ref) => ({
       id: "conformance.service@v1",
       apiId: "conformance.service@v1",
+      apiVersion: "1.0.0",
       displayName: "Conformance service",
       description: "Representative native service.",
       capabilities: {
@@ -672,6 +745,7 @@ Deno.test("native authoring matches shared cross-language vectors", async () => 
   const device = defineDeviceContract(() => ({
     id: "conformance.device@v1",
     apiId: "conformance.device@v1",
+    apiVersion: "1.0.0",
     displayName: "Device",
     description: "Native device.",
     uses: [dependency.DependencyCall],
@@ -679,6 +753,7 @@ Deno.test("native authoring matches shared cross-language vectors", async () => 
   const agent = defineAgentContract(() => ({
     id: "conformance.agent@v1",
     apiId: "conformance.agent@v1",
+    apiVersion: "1.0.0",
     displayName: "Agent",
     description: "Native agent.",
     uses: [dependency.DependencyChanged.subscribe],

@@ -17,6 +17,7 @@ const NOT_FOUND_ERROR: &str = "NotFoundError";
 pub fn api_artifact() -> Result<ApiArtifact, ContractsError> {
     ApiBuilder::authoring(
         "trellis.jobs@v1",
+        "1.0.0",
         "Trellis Jobs",
         "Trellis-managed background job administration API.",
     )

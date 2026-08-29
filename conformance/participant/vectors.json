@@ -2207,6 +2207,7 @@
       "input": {
         "format": "trellis.api.v1",
         "id": "invalid-worker",
+        "version": "1.0.0",
         "displayName": "Invalid Worker",
         "description": "Wrong format.",
         "kind": "service"

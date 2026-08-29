@@ -191,6 +191,7 @@ export function createDeviceActivationFixture(caseId: string) {
   const adminContract = defineAppContract(() => ({
     id: `trellis.integration.device-activation-admin.${slug}@v1`,
     apiId: `trellis.integration.device-activation-admin.${slug}@v1`,
+    apiVersion: "1.0.0",
     displayName: `Trellis Integration Device Activation Admin (${slug})`,
     description:
       "Admin participant for the device activation integration fixture.",
@@ -225,6 +226,7 @@ export function createDeviceActivationFixture(caseId: string) {
   const deviceContract = defineDeviceContract(() => ({
     id: `trellis.integration.device-activation-device.${slug}@v1`,
     apiId: `trellis.integration.device-activation-device.${slug}@v1`,
+    apiVersion: "1.0.0",
     displayName: `Trellis Integration Activated Device (${slug})`,
     description:
       "Activated device participant for the device activation integration fixture.",

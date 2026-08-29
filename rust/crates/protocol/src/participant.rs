@@ -8,8 +8,8 @@ use serde_json::{Map, Value};
 use crate::{
     canonicalize_json, digest_json,
     identifiers::{
-        participant_error, sort_deduplicate, validate_api_id, validate_logical_name,
-        validate_nonempty_text, validate_protocol_identifier,
+        participant_error, sort_deduplicate, validate_api_id_at as validate_api_id,
+        validate_logical_name, validate_nonempty_text, validate_protocol_identifier,
     },
     schema_profile::{
         lint_participant_authoring as lint_participant_schema, validate_embedded_schema,

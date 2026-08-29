@@ -94,6 +94,7 @@ export const contract = defineAppContract(
   () => ({
     id: "trellis.console@v1",
     apiId: "trellis.console@v1",
+    apiVersion: "1.0.0",
     displayName: "Trellis Console",
     description:
       "Drive the Trellis admin console's contract-declared Auth, Health, and Jobs access.",

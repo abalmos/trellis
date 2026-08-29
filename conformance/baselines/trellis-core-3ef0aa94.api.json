@@ -30,6 +30,7 @@
   "errors": { "UnexpectedError": {}, "ValidationError": {} },
   "format": "trellis.api.v1",
   "id": "trellis.core@v1",
+  "version": "1.0.0",
   "rpc": {
     "Trellis.Surface.Status": {
       "docs": {

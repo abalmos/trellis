@@ -453,6 +453,16 @@ The CLI prefers explicit commands over vague orchestration commands.
 
 Do not add commands like `trellis build project` with ambiguous behavior.
 
+### Project API dependency files
+
+The CLI project model reads `trellis.toml` API dependencies keyed by stable API
+ID, with a Semantic Version requirement and a local path to a canonical
+`trellis.api.v1` JSON artifact. `trellis.lock` records the exact release
+version, semantic API digest, local path, and semantic manifest digest. Release
+version is package metadata; runtime evidence remains stable API ID plus
+semantic digest. These data models do not resolve, install, fetch, or execute
+dependency source.
+
 ## Contract boundary
 
 The developer-facing CLI boundary is the contract source.

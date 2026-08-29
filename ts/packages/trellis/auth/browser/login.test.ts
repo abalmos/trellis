@@ -15,6 +15,7 @@ import { resolveNativeProtocolPresentation } from "../../contract_support/protoc
 const TEST_CONTRACT = defineAppContract(() => ({
   id: "demo.app@v1",
   apiId: "demo.app@v1",
+  apiVersion: "1.0.0",
   displayName: "Demo app",
   description: "Demo app contract.",
 }));
@@ -22,6 +23,7 @@ const TEST_CONTRACT = defineAppContract(() => ({
 const SIGNED_CONTRACT = defineAppContract(() => ({
   id: "demo.app@v1",
   apiId: "demo.app@v1",
+  apiVersion: "1.0.0",
   displayName: "Demo app",
   description: "Demo app contract.",
   capabilities: {

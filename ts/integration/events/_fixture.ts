@@ -19,6 +19,7 @@ export function createEventsFixture(caseId: string) {
     (ref) => ({
       id: `trellis.integration.events-service.${slug}@v1`,
       apiId: `trellis.integration.events-service.${slug}@v1`,
+      apiVersion: "1.0.0",
       displayName: `Trellis Integration Events Service (${slug})`,
       description: "Exercises generated event publish and subscribe surfaces.",
       capabilities: {
@@ -49,6 +50,7 @@ export function createEventsFixture(caseId: string) {
   const pubSubClientContract = defineAppContract(() => ({
     id: `trellis.integration.events-pubsub-client.${slug}@v1`,
     apiId: `trellis.integration.events-pubsub-client.${slug}@v1`,
+    apiVersion: "1.0.0",
     displayName: `Trellis Integration Events PubSub Client (${slug})`,
     description:
       "App/client participant with event publish and subscribe authority.",
@@ -61,6 +63,7 @@ export function createEventsFixture(caseId: string) {
   const subscribeOnlyClientContract = defineAppContract(() => ({
     id: `trellis.integration.events-subscribe-only-client.${slug}@v1`,
     apiId: `trellis.integration.events-subscribe-only-client.${slug}@v1`,
+    apiVersion: "1.0.0",
     displayName: `Trellis Integration Events Subscribe-Only Client (${slug})`,
     description: "App/client participant without event publish authority.",
     uses: [serviceContract.EntityChanged.subscribe],
@@ -69,6 +72,7 @@ export function createEventsFixture(caseId: string) {
   const publishOnlyClientContract = defineAppContract(() => ({
     id: `trellis.integration.events-publish-only-client.${slug}@v1`,
     apiId: `trellis.integration.events-publish-only-client.${slug}@v1`,
+    apiVersion: "1.0.0",
     displayName: `Trellis Integration Events Publish-Only Client (${slug})`,
     description: "App/client participant without event subscribe authority.",
     uses: [serviceContract.EntityChanged.publish],

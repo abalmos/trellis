@@ -128,6 +128,7 @@ const schemas = {
 const billingServiceContract = defineServiceContract({ schemas }, (ref) => ({
   id: "billing.invoice-service@v1",
   apiId: "billing.invoice-service@v1",
+  apiVersion: "1.0.0",
   displayName: "Billing Invoice Service",
   description: "Integration-test invoice service.",
   capabilities: {
@@ -151,6 +152,7 @@ const billingServiceContract = defineServiceContract({ schemas }, (ref) => ({
 const billingClientContract = defineAppContract(() => ({
   id: "billing.invoice-client@v1",
   apiId: "billing.invoice-client@v1",
+  apiVersion: "1.0.0",
   displayName: "Billing Invoice Client",
   description: "Integration-test invoice client.",
   uses: {

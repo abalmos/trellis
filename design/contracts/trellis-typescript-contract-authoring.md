@@ -13,6 +13,10 @@ matching participant-kind helper. The callback returns authoring source:
 schemas, owned surfaces, selected dependency actions, resources, jobs, event
 consumers, capabilities, and consent wording.
 
+Every source explicitly supplies independent `id`, `apiId`, and `apiVersion`
+fields. `apiVersion` is Semantic Version release metadata for the owned API; it
+is not encoded into `apiId` and does not affect the semantic API digest.
+
 The result preserves typed action and runtime descriptors and exposes exactly:
 
 - `CONTRACT_ID`

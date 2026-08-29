@@ -5,12 +5,14 @@
       "previous": {
         "format": "trellis.api.v1",
         "id": "example@v1",
+        "version": "1.0.0",
         "displayName": "Example",
         "description": "Example API."
       },
       "candidate": {
         "format": "trellis.api.v1",
         "id": "example@v1",
+        "version": "1.0.0",
         "displayName": "Example",
         "description": "Example API."
       },
@@ -22,6 +24,7 @@
       "previous": {
         "format": "trellis.api.v1",
         "id": "example@v1",
+        "version": "1.0.0",
         "displayName": "Old",
         "description": "Old description.",
         "capabilities": { "empty": { "allows": [] } },
@@ -36,6 +39,7 @@
       "candidate": {
         "format": "trellis.api.v1",
         "id": "example@v1",
+        "version": "1.0.0",
         "displayName": "New",
         "description": "New description.",
         "docs": { "markdown": "# New" },
@@ -56,12 +60,14 @@
       "previous": {
         "format": "trellis.api.v1",
         "id": "example@v1",
+        "version": "1.0.0",
         "displayName": "Example",
         "description": "Example API."
       },
       "candidate": {
         "format": "trellis.api.v1",
         "id": "example@v1",
+        "version": "1.0.0",
         "displayName": "Example",
         "description": "Example API.",
         "schemas": { "Any": true },
@@ -81,6 +87,7 @@
       "previous": {
         "format": "trellis.api.v1",
         "id": "example@v1",
+        "version": "1.0.0",
         "displayName": "Example",
         "description": "Example API.",
         "schemas": { "Any": true },
@@ -95,6 +102,7 @@
       "candidate": {
         "format": "trellis.api.v1",
         "id": "example@v1",
+        "version": "1.0.0",
         "displayName": "Example",
         "description": "Example API."
       },
@@ -106,6 +114,7 @@
       "previous": {
         "format": "trellis.api.v1",
         "id": "example@v1",
+        "version": "1.0.0",
         "displayName": "Example",
         "description": "Example API.",
         "schemas": { "Any": true },
@@ -120,6 +129,7 @@
       "candidate": {
         "format": "trellis.api.v1",
         "id": "example@v1",
+        "version": "1.0.0",
         "displayName": "Example",
         "description": "Example API.",
         "schemas": { "Any": true },
@@ -142,6 +152,7 @@
       "previous": {
         "format": "trellis.api.v1",
         "id": "example@v1",
+        "version": "1.0.0",
         "displayName": "Example",
         "description": "Example API.",
         "schemas": {
@@ -163,6 +174,7 @@
       "candidate": {
         "format": "trellis.api.v1",
         "id": "example@v1",
+        "version": "1.0.0",
         "displayName": "Example",
         "description": "Example API.",
         "schemas": {
@@ -194,6 +206,7 @@
       "previous": {
         "format": "trellis.api.v1",
         "id": "example@v1",
+        "version": "1.0.0",
         "displayName": "Example",
         "description": "Example API.",
         "schemas": {
@@ -214,6 +227,7 @@
       "candidate": {
         "format": "trellis.api.v1",
         "id": "example@v1",
+        "version": "1.0.0",
         "displayName": "Example",
         "description": "Example API.",
         "schemas": {
@@ -242,6 +256,7 @@
       "previous": {
         "format": "trellis.api.v1",
         "id": "example@v1",
+        "version": "1.0.0",
         "displayName": "Example",
         "description": "Example API.",
         "schemas": {
@@ -263,6 +278,7 @@
       "candidate": {
         "format": "trellis.api.v1",
         "id": "example@v1",
+        "version": "1.0.0",
         "displayName": "Example",
         "description": "Example API.",
         "schemas": {
@@ -288,6 +304,7 @@
       "previous": {
         "format": "trellis.api.v1",
         "id": "example@v1",
+        "version": "1.0.0",
         "displayName": "Example",
         "description": "Example API.",
         "schemas": {
@@ -309,6 +326,7 @@
       "candidate": {
         "format": "trellis.api.v1",
         "id": "example@v1",
+        "version": "1.0.0",
         "displayName": "Example",
         "description": "Example API.",
         "schemas": {
@@ -338,6 +356,7 @@
       "previous": {
         "format": "trellis.api.v1",
         "id": "example@v1",
+        "version": "1.0.0",
         "displayName": "Example",
         "description": "Example API.",
         "schemas": {
@@ -360,6 +379,7 @@
       "candidate": {
         "format": "trellis.api.v1",
         "id": "example@v1",
+        "version": "1.0.0",
         "displayName": "Example",
         "description": "Example API.",
         "schemas": {
@@ -390,6 +410,7 @@
       "previous": {
         "format": "trellis.api.v1",
         "id": "example@v1",
+        "version": "1.0.0",
         "displayName": "Example",
         "description": "Example API.",
         "schemas": {
@@ -411,6 +432,7 @@
       "candidate": {
         "format": "trellis.api.v1",
         "id": "example@v1",
+        "version": "1.0.0",
         "displayName": "Example",
         "description": "Example API.",
         "schemas": {
@@ -438,6 +460,7 @@
       "previous": {
         "format": "trellis.api.v1",
         "id": "example@v1",
+        "version": "1.0.0",
         "displayName": "Example",
         "description": "Example API.",
         "schemas": {
@@ -454,6 +477,7 @@
       "candidate": {
         "format": "trellis.api.v1",
         "id": "example@v1",
+        "version": "1.0.0",
         "displayName": "Example",
         "description": "Example API.",
         "schemas": {
@@ -478,6 +502,7 @@
       "previous": {
         "format": "trellis.api.v1",
         "id": "example@v1",
+        "version": "1.0.0",
         "displayName": "Example",
         "description": "Example API.",
         "schemas": {
@@ -501,6 +526,7 @@
       "candidate": {
         "format": "trellis.api.v1",
         "id": "example@v1",
+        "version": "1.0.0",
         "displayName": "Example",
         "description": "Example API.",
         "schemas": {
@@ -534,6 +560,7 @@
       "previous": {
         "format": "trellis.api.v1",
         "id": "example@v1",
+        "version": "1.0.0",
         "displayName": "Example",
         "description": "Example API.",
         "schemas": {
@@ -555,6 +582,7 @@
       "candidate": {
         "format": "trellis.api.v1",
         "id": "example@v1",
+        "version": "1.0.0",
         "displayName": "Example",
         "description": "Example API.",
         "schemas": {
@@ -580,6 +608,7 @@
       "previous": {
         "format": "trellis.api.v1",
         "id": "example@v1",
+        "version": "1.0.0",
         "displayName": "Example",
         "description": "Example API.",
         "schemas": { "Input": true, "Event": { "enum": ["a", "b"] } },
@@ -594,6 +623,7 @@
       "candidate": {
         "format": "trellis.api.v1",
         "id": "example@v1",
+        "version": "1.0.0",
         "displayName": "Example",
         "description": "Example API.",
         "schemas": { "Input": true, "Event": { "const": "a" } },
@@ -613,6 +643,7 @@
       "previous": {
         "format": "trellis.api.v1",
         "id": "example@v1",
+        "version": "1.0.0",
         "displayName": "Example",
         "description": "Example API.",
         "schemas": {
@@ -630,6 +661,7 @@
       "candidate": {
         "format": "trellis.api.v1",
         "id": "example@v1",
+        "version": "1.0.0",
         "displayName": "Example",
         "description": "Example API.",
         "schemas": {
@@ -652,6 +684,7 @@
       "previous": {
         "format": "trellis.api.v1",
         "id": "example@v1",
+        "version": "1.0.0",
         "displayName": "Example",
         "description": "Example API.",
         "schemas": { "Input": { "type": "string" }, "Output": true },
@@ -666,6 +699,7 @@
       "candidate": {
         "format": "trellis.api.v1",
         "id": "example@v1",
+        "version": "1.0.0",
         "displayName": "Example",
         "description": "Example API.",
         "schemas": { "Input": { "type": "number" }, "Output": true },
@@ -687,6 +721,7 @@
       "previous": {
         "format": "trellis.api.v1",
         "id": "example@v1",
+        "version": "1.0.0",
         "displayName": "Example",
         "description": "Example API.",
         "schemas": { "Any": true },
@@ -701,6 +736,7 @@
       "candidate": {
         "format": "trellis.api.v1",
         "id": "example@v1",
+        "version": "1.0.0",
         "displayName": "Example",
         "description": "Example API.",
         "schemas": { "Any": true },
@@ -721,6 +757,7 @@
       "previous": {
         "format": "trellis.api.v1",
         "id": "example@v1",
+        "version": "1.0.0",
         "displayName": "Example",
         "description": "Example API.",
         "schemas": { "Any": true },
@@ -731,6 +768,7 @@
       "candidate": {
         "format": "trellis.api.v1",
         "id": "example@v1",
+        "version": "1.0.0",
         "displayName": "Example",
         "description": "Example API.",
         "schemas": { "Any": true },
@@ -750,6 +788,7 @@
       "previous": {
         "format": "trellis.api.v1",
         "id": "example@v1",
+        "version": "1.0.0",
         "displayName": "Example",
         "description": "Example API.",
         "schemas": { "Any": true },
@@ -764,6 +803,7 @@
       "candidate": {
         "format": "trellis.api.v1",
         "id": "example@v1",
+        "version": "1.0.0",
         "displayName": "Example",
         "description": "Example API.",
         "schemas": { "Any": true },
@@ -784,6 +824,7 @@
       "previous": {
         "format": "trellis.api.v1",
         "id": "example@v1",
+        "version": "1.0.0",
         "displayName": "Example",
         "description": "Example API.",
         "schemas": { "Any": true },
@@ -794,6 +835,7 @@
       "candidate": {
         "format": "trellis.api.v1",
         "id": "example@v1",
+        "version": "1.0.0",
         "displayName": "Example",
         "description": "Example API.",
         "schemas": { "Any": true },
@@ -813,6 +855,7 @@
       "previous": {
         "format": "trellis.api.v1",
         "id": "example@v1",
+        "version": "1.0.0",
         "displayName": "Example",
         "description": "Example API.",
         "schemas": { "Any": true },
@@ -823,6 +866,7 @@
       "candidate": {
         "format": "trellis.api.v1",
         "id": "example@v1",
+        "version": "1.0.0",
         "displayName": "Example",
         "description": "Example API."
       },
@@ -834,6 +878,7 @@
       "previous": {
         "format": "trellis.api.v1",
         "id": "example@v1",
+        "version": "1.0.0",
         "displayName": "Example",
         "description": "Example API.",
         "schemas": { "State": { "type": "string" } },
@@ -844,6 +889,7 @@
       "candidate": {
         "format": "trellis.api.v1",
         "id": "example@v1",
+        "version": "1.0.0",
         "displayName": "Example",
         "description": "Example API.",
         "schemas": { "State": { "type": "number" } },
@@ -861,6 +907,7 @@
       "previous": {
         "format": "trellis.api.v1",
         "id": "example@v1",
+        "version": "1.0.0",
         "displayName": "Example",
         "description": "Example API.",
         "schemas": { "Public": true },
@@ -869,6 +916,7 @@
       "candidate": {
         "format": "trellis.api.v1",
         "id": "example@v1",
+        "version": "1.0.0",
         "displayName": "Example",
         "description": "Example API."
       },
@@ -882,12 +930,14 @@
       "previous": {
         "format": "trellis.api.v1",
         "id": "example@v1",
+        "version": "1.0.0",
         "displayName": "Example",
         "description": "Example API."
       },
       "candidate": {
         "format": "trellis.api.v1",
         "id": "example@v1",
+        "version": "1.0.0",
         "displayName": "Example",
         "description": "Example API.",
         "schemas": { "Public": true },
@@ -901,6 +951,7 @@
       "previous": {
         "format": "trellis.api.v1",
         "id": "example@v1",
+        "version": "1.0.0",
         "displayName": "Example",
         "description": "Example API.",
         "capabilities": { "empty": { "allows": [] } }
@@ -908,6 +959,7 @@
       "candidate": {
         "format": "trellis.api.v1",
         "id": "example@v1",
+        "version": "1.0.0",
         "displayName": "Example",
         "description": "Example API."
       },
@@ -921,6 +973,7 @@
       "previous": {
         "format": "trellis.api.v1",
         "id": "example@v1",
+        "version": "1.0.0",
         "displayName": "Example",
         "description": "Example API.",
         "schemas": { "Any": true },
@@ -950,6 +1003,7 @@
       "candidate": {
         "format": "trellis.api.v1",
         "id": "example@v1",
+        "version": "1.0.0",
         "displayName": "Example",
         "description": "Example API.",
         "schemas": { "Any": true },
@@ -970,6 +1024,7 @@
       "previous": {
         "format": "trellis.api.v1",
         "id": "example@v1",
+        "version": "1.0.0",
         "displayName": "Example",
         "description": "Example API.",
         "schemas": { "Any": true },
@@ -1002,6 +1057,7 @@
       "candidate": {
         "format": "trellis.api.v1",
         "id": "example@v1",
+        "version": "1.0.0",
         "displayName": "Example",
         "description": "Example API.",
         "schemas": { "Any": true },
@@ -1041,12 +1097,14 @@
       "previous": {
         "format": "trellis.api.v1",
         "id": "example@v1",
+        "version": "1.0.0",
         "displayName": "Example",
         "description": "Example API."
       },
       "candidate": {
         "format": "trellis.api.v1",
         "id": "example@v1",
+        "version": "1.0.0",
         "displayName": "Example",
         "description": "Example API.",
         "capabilities": { "empty": { "allows": [] } }
@@ -1059,6 +1117,7 @@
       "previous": {
         "format": "trellis.api.v1",
         "id": "example@v1",
+        "version": "1.0.0",
         "displayName": "Example",
         "description": "Example API.",
         "schemas": {
@@ -1079,6 +1138,7 @@
       "candidate": {
         "format": "trellis.api.v1",
         "id": "example@v1",
+        "version": "1.0.0",
         "displayName": "Example",
         "description": "Example API.",
         "schemas": {
@@ -1103,6 +1163,7 @@
       "previous": {
         "format": "trellis.api.v1",
         "id": "example@v1",
+        "version": "1.0.0",
         "displayName": "Example",
         "description": "Example API.",
         "schemas": {
@@ -1120,6 +1181,7 @@
       "candidate": {
         "format": "trellis.api.v1",
         "id": "example@v1",
+        "version": "1.0.0",
         "displayName": "Example",
         "description": "Example API.",
         "schemas": {
@@ -1144,12 +1206,14 @@
       "previous": {
         "format": "trellis.api.v1",
         "id": "old@v1",
+        "version": "1.0.0",
         "displayName": "Old",
         "description": "Old API."
       },
       "candidate": {
         "format": "trellis.api.v1",
         "id": "new@v1",
+        "version": "1.0.0",
         "displayName": "New",
         "description": "New API."
       },
@@ -1161,6 +1225,7 @@
       "previous": {
         "format": "trellis.api.v1",
         "id": "example@v1",
+        "version": "1.0.0",
         "displayName": "Example",
         "description": "Example API.",
         "schemas": {
@@ -1178,6 +1243,7 @@
       "candidate": {
         "format": "trellis.api.v1",
         "id": "example@v1",
+        "version": "1.0.0",
         "displayName": "Example",
         "description": "Example API.",
         "schemas": {
@@ -1202,6 +1268,7 @@
       "previous": {
         "format": "trellis.api.v1",
         "id": "example@v1",
+        "version": "1.0.0",
         "displayName": "Example",
         "description": "Example API.",
         "schemas": { "Any": true, "Public": true },
@@ -1239,6 +1306,7 @@
       "candidate": {
         "format": "trellis.api.v1",
         "id": "example@v1",
+        "version": "1.0.0",
         "displayName": "Example",
         "description": "Example API."
       },
@@ -1259,6 +1327,7 @@
       "previous": {
         "format": "trellis.api.v1",
         "id": "example@v1",
+        "version": "1.0.0",
         "displayName": "Example",
         "description": "Example API.",
         "schemas": {
@@ -1303,6 +1372,7 @@
       "candidate": {
         "format": "trellis.api.v1",
         "id": "example@v1",
+        "version": "1.0.0",
         "displayName": "Example",
         "description": "Example API.",
         "schemas": { "Any": true, "New": { "type": "number" } },

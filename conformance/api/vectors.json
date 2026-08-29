@@ -7,12 +7,14 @@
       "input": {
         "format": "trellis.api.v1",
         "id": "documents@v1",
+        "version": "1.0.0",
         "displayName": "Documents",
         "description": "Document APIs."
       },
       "normalized": {
         "format": "trellis.api.v1",
         "id": "documents@v1",
+        "version": "1.0.0",
         "displayName": "Documents",
         "description": "Document APIs."
       },
@@ -35,6 +37,7 @@
       "input": {
         "format": "trellis.api.v1",
         "id": "documents@v1",
+        "version": "1.0.0",
         "displayName": "Documents",
         "description": "Document APIs.",
         "schemas": {},
@@ -51,6 +54,7 @@
       "normalized": {
         "format": "trellis.api.v1",
         "id": "documents@v1",
+        "version": "1.0.0",
         "displayName": "Documents",
         "description": "Document APIs."
       },
@@ -65,6 +69,7 @@
       "input": {
         "format": "trellis.api.v1",
         "id": "documents@v1",
+        "version": "1.0.0",
         "displayName": "Documents",
         "description": "Document APIs.\nFor storage and retrieval.",
         "docs": {
@@ -93,6 +98,7 @@
       "normalized": {
         "format": "trellis.api.v1",
         "id": "documents@v1",
+        "version": "1.0.0",
         "displayName": "Documents",
         "description": "Document APIs.\nFor storage and retrieval.",
         "docs": {
@@ -141,6 +147,7 @@
       "input": {
         "format": "trellis.api.v1",
         "id": "documents@v10",
+        "version": "1.0.0",
         "displayName": "Documents",
         "description": "Document APIs.",
         "schemas": { "Input": true, "Output": true },
@@ -167,6 +174,7 @@
       "input": {
         "format": "trellis.api.v1",
         "id": "documents@v1",
+        "version": "1.0.0",
         "displayName": "Documents",
         "description": "Document APIs and events.",
         "docs": { "summary": "Documents API", "markdown": "# Documents" },
@@ -491,6 +499,7 @@
       "input": {
         "format": "trellis.api.v1",
         "id": "documents@v1",
+        "version": "1.0.0",
         "displayName": "Documents",
         "description": "Document APIs.",
         "docs": { "markdown": "# Documents" },
@@ -541,6 +550,7 @@
       "input": {
         "format": "trellis.api.v1",
         "id": "documents@v1",
+        "version": "1.0.0",
         "displayName": "Document Center",
         "description": "Updated human description.",
         "docs": { "summary": "Updated", "markdown": "# Updated docs" },
@@ -593,6 +603,7 @@
       "input": {
         "format": "trellis.api.v1",
         "id": "documents@v1",
+        "version": "1.0.0",
         "displayName": "Documents",
         "description": "Document APIs.",
         "docs": { "markdown": "# Documents" },
@@ -647,6 +658,7 @@
       "input": {
         "format": "trellis.api.v1",
         "id": "documents@v1",
+        "version": "1.0.0",
         "displayName": "Documents",
         "description": "Document APIs.",
         "schemas": { "Input": true, "Output": true, "Changed": true },
@@ -698,6 +710,7 @@
       "input": {
         "format": "trellis.api.v1",
         "id": "documents@v1",
+        "version": "1.0.0",
         "displayName": "Documents",
         "description": "Document APIs.",
         "schemas": { "Payload": { "type": "string" } },
@@ -712,6 +725,7 @@
       "input": {
         "format": "trellis.api.v1",
         "id": "documents@v1",
+        "version": "1.0.0",
         "displayName": "Documents",
         "description": "Document APIs.",
         "schemas": { "Payload": { "type": "number" } },
@@ -727,6 +741,7 @@
       "input": {
         "format": "trellis.api.v1",
         "id": "documents@v1",
+        "version": "1.0.0",
         "displayName": "Documents",
         "description": "Document APIs.",
         "schemas": {
@@ -746,6 +761,7 @@
       "input": {
         "format": "trellis.api.v1",
         "id": "documents@v1",
+        "version": "1.0.0",
         "displayName": "Documents",
         "description": "Document APIs.",
         "schemas": {
@@ -764,6 +780,7 @@
       "input": {
         "format": "trellis.api.v1",
         "id": "schema-data@v1",
+        "version": "1.0.0",
         "displayName": "Schema Data",
         "description": "Keyword-like property and data values remain ordinary JSON.",
         "schemas": {
@@ -792,6 +809,7 @@
       "input": {
         "format": "trellis.api.v1",
         "id": "documents@v1",
+        "version": "1.0.0",
         "displayName": "Documents",
         "description": "Document APIs.",
         "schemas": { "Event": true },
@@ -810,6 +828,7 @@
       "input": {
         "format": "trellis.api.v1",
         "id": "documents@v1",
+        "version": "1.0.0",
         "displayName": "Documents",
         "description": "Document APIs.",
         "schemas": { "Input": true },
@@ -825,6 +844,7 @@
       "input": {
         "format": "trellis.api.v1",
         "id": "documents@v1",
+        "version": "1.0.0",
         "displayName": "Documents",
         "description": "Document APIs.",
         "schemas": { "Input": true },
@@ -846,6 +866,7 @@
       "input": {
         "format": "trellis.api.v1",
         "id": "documents@v1",
+        "version": "1.0.0",
         "displayName": "Documents",
         "description": "Document APIs.",
         "schemas": { "Event": true },
@@ -866,6 +887,7 @@
       "input": {
         "format": "trellis.api.v1",
         "id": "documents@v1",
+        "version": "1.0.0",
         "displayName": "Documents",
         "description": "Document APIs.",
         "schemas": { "A": true, "B": true },
@@ -879,6 +901,7 @@
       "input": {
         "format": "trellis.api.v1",
         "id": "documents@v1",
+        "version": "1.0.0",
         "displayName": "Documents",
         "description": "Document APIs.",
         "schemas": { "A": true, "B": true },
@@ -893,6 +916,7 @@
       "input": {
         "format": "trellis.api.v1",
         "id": "documents@v1",
+        "version": "1.0.0",
         "displayName": "Documents",
         "description": "Document APIs.",
         "schemas": { "Input": true, "Output": true }
@@ -905,6 +929,7 @@
       "input": {
         "format": "trellis.api.v1",
         "id": "documents@v1",
+        "version": "1.0.0",
         "displayName": "Documents",
         "description": "Document APIs.",
         "schemas": { "Input": true, "Output": true },
@@ -925,6 +950,7 @@
       "input": {
         "format": "trellis.api.v1",
         "id": "documents@v1",
+        "version": "1.0.0",
         "displayName": "Documents",
         "description": "Document APIs.",
         "schemas": { "Payload": { "$ref": "https://example.com/schema.json" } }
@@ -937,6 +963,7 @@
       "input": {
         "format": "trellis.api.v1",
         "id": "documents@v1",
+        "version": "1.0.0",
         "displayName": "Documents",
         "description": "Document APIs.",
         "schemas": { "Payload": { "$dynamicRef": "file:///tmp/schema.json" } }
@@ -949,6 +976,7 @@
       "input": {
         "format": "trellis.api.v1",
         "id": "documents@v1",
+        "version": "1.0.0",
         "displayName": "Documents",
         "description": "Document APIs.",
         "schemas": { "Payload": { "$id": "urn:payload", "type": "string" } }
@@ -961,6 +989,7 @@
       "input": {
         "format": "trellis.api.v1",
         "id": "documents@v1",
+        "version": "1.0.0",
         "displayName": "Documents",
         "description": "Document APIs.",
         "schemas": {
@@ -978,6 +1007,7 @@
       "input": {
         "format": "trellis.api.v1",
         "id": "documents@v1",
+        "version": "1.0.0",
         "displayName": "Documents",
         "description": "Document APIs.",
         "schemas": { "Payload": { "type": 7 } }
@@ -990,6 +1020,7 @@
       "input": {
         "format": "trellis.api.v1",
         "id": "documents@v1",
+        "version": "1.0.0",
         "displayName": "Documents",
         "description": "Document APIs.",
         "schemas": { "Payload": { "$ref": "#/$defs/Missing" } }
@@ -1002,6 +1033,7 @@
       "input": {
         "format": "trellis.api.v1",
         "id": "documents@v1",
+        "version": "1.0.0",
         "displayName": "Documents",
         "description": "Document APIs.",
         "schemas": { "Input": true },
@@ -1021,6 +1053,7 @@
       "input": {
         "format": "trellis.api.v1",
         "id": "documents@v1",
+        "version": "1.0.0",
         "displayName": "Documents",
         "description": "Document APIs.",
         "schemas": { "Input": true, "Output": true },
@@ -1041,6 +1074,7 @@
       "input": {
         "format": "trellis.api.v1",
         "id": "documents@v1",
+        "version": "1.0.0",
         "displayName": "Documents",
         "description": "Document APIs.",
         "schemas": { "Input": true, "Output": true },
@@ -1075,6 +1109,7 @@
       "input": {
         "format": "trellis.api.v1",
         "id": "documents@v1",
+        "version": "1.0.0",
         "displayName": "Documents",
         "description": "Document APIs.",
         "capabilities": {
@@ -1101,6 +1136,7 @@
       "input": {
         "format": "trellis.api.v1",
         "id": "documents@v1",
+        "version": "1.0.0",
         "displayName": "Documents",
         "description": "Document APIs.",
         "capabilities": {
@@ -1127,6 +1163,7 @@
       "input": {
         "format": "trellis.api.v1",
         "id": "documents@v1",
+        "version": "1.0.0",
         "displayName": "Documents",
         "description": "Document APIs.",
         "capabilities": {
@@ -1153,6 +1190,7 @@
       "input": {
         "format": "trellis.api.v1",
         "id": "documents@v1",
+        "version": "1.0.0",
         "displayName": "Documents",
         "description": "Document APIs.",
         "schemas": { "Input": true },
@@ -1183,6 +1221,7 @@
       "input": {
         "format": "trellis.api.v1",
         "id": "documents@v1",
+        "version": "1.0.0",
         "displayName": "Documents",
         "description": "Document APIs.",
         "schemas": { "Input": true },
@@ -1213,6 +1252,7 @@
       "input": {
         "format": "trellis.api.v1",
         "id": "documents@v1",
+        "version": "1.0.0",
         "displayName": "Documents",
         "description": "Document APIs.",
         "consent": {
@@ -1231,6 +1271,7 @@
       "input": {
         "format": "trellis.api.v1",
         "id": "documents@v1",
+        "version": "1.0.0",
         "displayName": "Documents",
         "description": "Document APIs.",
         "kind": "service",
@@ -1248,6 +1289,7 @@
       "input": {
         "format": "trellis.api.v1",
         "id": "documents@v1",
+        "version": "1.0.0",
         "displayName": "Documents",
         "description": "Document APIs.",
         "schemas": { "Input": true, "Output": true },
@@ -1268,6 +1310,7 @@
       "input": {
         "format": "trellis.api.v1",
         "id": "documents@v1",
+        "version": "1.0.0",
         "displayName": "Documents",
         "description": "Document APIs.",
         "schemas": { "Event": true },
@@ -1287,6 +1330,7 @@
       "input": {
         "format": "trellis.api.v1",
         "id": "documents@v1",
+        "version": "1.0.0",
         "displayName": "Documents",
         "description": "Document APIs.",
         "schemas": { "Event": true },
@@ -1306,6 +1350,7 @@
       "input": {
         "format": "trellis.api.v1",
         "id": "documents@v1",
+        "version": "1.0.0",
         "displayName": "Documents",
         "description": "Document APIs.",
         "schemas": { "Event": true },
@@ -1325,6 +1370,7 @@
       "input": {
         "format": "trellis.api.v1",
         "id": "documents@v1",
+        "version": "1.0.0",
         "displayName": "Documents",
         "description": "Document APIs.",
         "schemas": { "Event": true },
@@ -1348,6 +1394,7 @@
       "input": {
         "format": "trellis.api.v1",
         "id": "documents@v1",
+        "version": "1.0.0",
         "displayName": "Documents",
         "description": "Document APIs.",
         "schemas": { "Event": true },
@@ -1372,6 +1419,7 @@
       "input": {
         "format": "trellis.api.v1",
         "id": "documents@v1",
+        "version": "1.0.0",
         "displayName": "Documents",
         "description": "Document APIs.",
         "schemas": { "Event": true },
@@ -1412,6 +1460,7 @@
       "input": {
         "format": "trellis.api.v1",
         "id": "documents",
+        "version": "1.0.0",
         "displayName": "Documents",
         "description": "Document APIs."
       }
@@ -1423,6 +1472,7 @@
       "input": {
         "format": "trellis.api.v1",
         "id": "documents@v01",
+        "version": "1.0.0",
         "displayName": "Documents",
         "description": "Document APIs."
       }
@@ -1434,6 +1484,7 @@
       "input": {
         "format": "trellis.api.v1",
         "id": "documents@v1",
+        "version": "1.0.0",
         "displayName": "Documents",
         "description": "Document APIs.",
         "schemas": { "Input": true, "Output": true },
@@ -1453,6 +1504,7 @@
       "input": {
         "format": "trellis.api.v1",
         "id": "documents@v1",
+        "version": "1.0.0",
         "displayName": "Documents",
         "description": "Document APIs.",
         "schemas": { "Input": true, "Output": true },
@@ -1472,6 +1524,7 @@
       "input": {
         "format": "trellis.api.v1",
         "id": "documents@v1",
+        "version": "1.0.0",
         "displayName": "Documents",
         "description": "Document APIs.",
         "schemas": { "Input": true, "Output": true },
@@ -1491,6 +1544,7 @@
       "input": {
         "format": "trellis.api.v1",
         "id": "documents@v1",
+        "version": "1.0.0",
         "displayName": "Documents",
         "description": "Document APIs.",
         "schemas": { "Input": true, "Output": true },
@@ -1510,6 +1564,7 @@
       "input": {
         "format": "trellis.api.v1",
         "id": "documents@v1",
+        "version": "1.0.0",
         "displayName": "Documents",
         "description": "Document APIs.",
         "schemas": {
@@ -1532,6 +1587,7 @@
       "input": {
         "format": "trellis.api.v1",
         "id": "documents@v1",
+        "version": "1.0.0",
         "displayName": "Documents",
         "description": "Document APIs.",
         "schemas": {
@@ -1554,6 +1610,7 @@
       "input": {
         "format": "trellis.api.v1",
         "id": "documents@v1",
+        "version": "1.0.0",
         "displayName": "Documents",
         "description": "Document APIs.",
         "extra": true
@@ -1561,6 +1618,7 @@
       "normalized": {
         "format": "trellis.api.v1",
         "id": "documents@v1",
+        "version": "1.0.0",
         "displayName": "Documents",
         "description": "Document APIs."
       },
@@ -1574,6 +1632,7 @@
       "input": {
         "format": "trellis.api.v1",
         "id": "documents@v1",
+        "version": "1.0.0",
         "displayName": "Documents",
         "description": "Document APIs.",
         "schemas": { "Input": true, "Output": true },
@@ -1588,6 +1647,7 @@
       "normalized": {
         "format": "trellis.api.v1",
         "id": "documents@v1",
+        "version": "1.0.0",
         "displayName": "Documents",
         "description": "Document APIs.",
         "schemas": { "Input": true, "Output": true },
@@ -1607,6 +1667,7 @@
       "input": {
         "format": "trellis.api.v1",
         "id": "documents@v1",
+        "version": "1.0.0",
         "displayName": "Documents",
         "description": "Document APIs.",
         "docs": null
@@ -1619,6 +1680,7 @@
       "input": {
         "format": "trellis.api.v1",
         "id": "documents@v1",
+        "version": "1.0.0",
         "displayName": "Documents",
         "description": "Document APIs.",
         "schemas": { "Input": true, "Output": true },
@@ -1639,6 +1701,7 @@
       "input": {
         "format": "trellis.api.v1",
         "id": "documents@v1",
+        "version": "1.0.0",
         "displayName": "Documents",
         "description": "Document APIs.",
         "schemas": { "Input": true },
@@ -1658,6 +1721,7 @@
       "input": {
         "format": "trellis.api.v1",
         "id": "documents@v1",
+        "version": "1.0.0",
         "displayName": "Documents",
         "description": "Document APIs.",
         "docs": { "markdown": "# Documents", "summary": null }
@@ -1670,6 +1734,7 @@
       "input": {
         "format": "trellis.api.v1",
         "id": "wire-profile@v1",
+        "version": "1.0.0",
         "displayName": "Wire Profile",
         "description": "Exercises valid additive schemas.",
         "schemas": {
@@ -1693,6 +1758,7 @@
       "input": {
         "format": "trellis.api.v1",
         "id": "wire-profile@v1",
+        "version": "1.0.0",
         "displayName": "Wire Profile",
         "description": "Rejects field-sensitive wire schemas.",
         "schemas": {
@@ -1711,6 +1777,7 @@
       "input": {
         "format": "trellis.api.v1",
         "id": "wire-profile@v1",
+        "version": "1.0.0",
         "displayName": "Wire Profile",
         "description": "Rejects field-sensitive wire schemas.",
         "schemas": {
@@ -1726,6 +1793,7 @@
       "input": {
         "format": "trellis.api.v1",
         "id": "wire-profile@v1",
+        "version": "1.0.0",
         "displayName": "Wire Profile",
         "description": "Rejects field-sensitive wire schemas.",
         "schemas": {
@@ -1741,6 +1809,7 @@
       "input": {
         "format": "trellis.api.v1",
         "id": "wire-profile@v1",
+        "version": "1.0.0",
         "displayName": "Wire Profile",
         "description": "Rejects field-sensitive wire schemas.",
         "schemas": {
@@ -1760,6 +1829,7 @@
       "input": {
         "format": "trellis.api.v1",
         "id": "wire-profile@v1",
+        "version": "1.0.0",
         "displayName": "Wire Profile",
         "description": "Rejects field-sensitive wire schemas.",
         "schemas": {
@@ -1778,6 +1848,7 @@
       "input": {
         "format": "trellis.api.v1",
         "id": "wire-profile@v1",
+        "version": "1.0.0",
         "displayName": "Wire Profile",
         "description": "Rejects field-sensitive wire schemas.",
         "schemas": {
@@ -1796,6 +1867,7 @@
       "input": {
         "format": "trellis.api.v1",
         "id": "wire-profile@v1",
+        "version": "1.0.0",
         "displayName": "Wire Profile",
         "description": "Rejects field-sensitive wire schemas.",
         "schemas": { "Wire": { "const": { "fixed": true } } },
@@ -1809,6 +1881,7 @@
       "input": {
         "format": "trellis.api.v1",
         "id": "wire-profile@v1",
+        "version": "1.0.0",
         "displayName": "Wire Profile",
         "description": "Rejects field-sensitive wire schemas.",
         "schemas": { "Wire": { "enum": ["open", { "fixed": true }] } },
@@ -1822,6 +1895,7 @@
       "input": {
         "format": "trellis.api.v1",
         "id": "wire-profile@v1",
+        "version": "1.0.0",
         "displayName": "Wire Profile",
         "description": "Rejects field-sensitive wire schemas.",
         "schemas": {
@@ -1839,6 +1913,7 @@
       "input": {
         "format": "trellis.api.v1",
         "id": "wire-profile@v1",
+        "version": "1.0.0",
         "displayName": "Wire Profile",
         "description": "Rejects field-sensitive wire schemas.",
         "schemas": {
@@ -1861,6 +1936,7 @@
       "input": {
         "format": "trellis.api.v1",
         "id": "wire-profile@v1",
+        "version": "1.0.0",
         "displayName": "Wire Profile",
         "description": "Rejects non-monotonic exclusive object branches.",
         "schemas": {
@@ -1882,6 +1958,7 @@
       "input": {
         "format": "trellis.api.v1",
         "id": "wire-profile@v1",
+        "version": "1.0.0",
         "displayName": "Wire Profile",
         "description": "Preserves scalar exclusive branches.",
         "schemas": {
@@ -1901,6 +1978,7 @@
       "input": {
         "format": "trellis.api.v1",
         "id": "wire-profile@v1",
+        "version": "1.0.0",
         "displayName": "Wire Profile",
         "description": "Rejects uniqueness over possible object items.",
         "schemas": {
@@ -1916,6 +1994,7 @@
       "input": {
         "format": "trellis.api.v1",
         "id": "wire-profile@v1",
+        "version": "1.0.0",
         "displayName": "Wire Profile",
         "description": "Preserves uniqueness over scalar prefix and tail items.",
         "schemas": {
@@ -1938,6 +2017,7 @@
       "input": {
         "format": "trellis.api.v1",
         "id": "wire-profile@v1",
+        "version": "1.0.0",
         "displayName": "Wire Profile",
         "description": "Rejects upper bounds on object-capable contains matches.",
         "schemas": {
@@ -1957,6 +2037,7 @@
       "input": {
         "format": "trellis.api.v1",
         "id": "wire-profile@v1",
+        "version": "1.0.0",
         "displayName": "Wire Profile",
         "description": "Preserves upper bounds on scalar contains matches.",
         "schemas": {
@@ -1978,6 +2059,7 @@
       "input": {
         "format": "trellis.api.v1",
         "id": "wire-profile@v1",
+        "version": "1.0.0",
         "displayName": "Wire Profile",
         "description": "Rejects nested objects in exact constants.",
         "schemas": { "Wire": { "const": [{}] } },
@@ -1993,6 +2075,7 @@
       "input": {
         "format": "trellis.api.v1",
         "id": "wire-profile@v1",
+        "version": "1.0.0",
         "displayName": "Wire Profile",
         "description": "Rejects nested objects in exact enumerations.",
         "schemas": { "Wire": { "enum": [[{}], "other"] } },
@@ -2006,6 +2089,7 @@
       "input": {
         "format": "trellis.api.v1",
         "id": "wire-profile@v1",
+        "version": "1.0.0",
         "displayName": "Wire Profile",
         "description": "Preserves scalar and scalar-array exact literals.",
         "schemas": {
@@ -2024,6 +2108,7 @@
       "input": {
         "format": "trellis.api.v1",
         "id": "wire-profile@v1",
+        "version": "1.0.0",
         "displayName": "Wire Profile",
         "description": "Rejects dynamic references until dynamic scope is supported.",
         "schemas": {
@@ -2044,6 +2129,7 @@
       "input": {
         "format": "trellis.api.v1",
         "id": "wire-profile@v1",
+        "version": "1.0.0",
         "displayName": "Wire Profile",
         "description": "Preserves ordinary local references.",
         "schemas": {
@@ -2062,6 +2148,7 @@
       "input": {
         "format": "trellis.api.v1",
         "id": "wire-profile@v1",
+        "version": "1.0.0",
         "displayName": "Wire Profile",
         "description": "Leaves unused private schemas outside the wire profile.",
         "schemas": {

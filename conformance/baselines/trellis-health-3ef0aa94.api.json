@@ -92,6 +92,7 @@
   },
   "format": "trellis.api.v1",
   "id": "trellis.health@v1",
+  "version": "1.0.0",
   "rpc": {
     "Health.Inspect": {
       "docs": {

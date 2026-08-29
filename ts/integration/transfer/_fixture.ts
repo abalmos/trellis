@@ -128,6 +128,7 @@ export function createTransferFixture(
     (ref) => ({
       id: `trellis.integration.transfer-service.${slug}@v1`,
       apiId: `trellis.integration.transfer-service.${slug}@v1`,
+      apiVersion: "1.0.0",
       displayName: `Trellis Integration Transfer Service (${slug})`,
       description: "Exercises generated operation and RPC transfer surfaces.",
       uses: [store({
@@ -175,6 +176,7 @@ export function createTransferFixture(
   const clientContract = defineAppContract(() => ({
     id: `trellis.integration.transfer-client.${slug}@v1`,
     apiId: `trellis.integration.transfer-client.${slug}@v1`,
+    apiVersion: "1.0.0",
     displayName: `Trellis Integration Transfer Client (${slug})`,
     description: "App/client participant for the transfer integration fixture.",
     uses: [serviceContract.FilesUpload, serviceContract.FilesDownload],

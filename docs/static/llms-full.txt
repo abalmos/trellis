@@ -15,10 +15,12 @@ https://raw.githubusercontent.com/qlever-llc/trellis/main/docs/static/llms.txt
 
 - Trellis services are contract-driven participants. Contracts declare the public
   surfaces a participant owns and the external surfaces it uses.
-- Participant identity and owned API identity are independent. TypeScript
-  `define*Contract` bodies require `id` for the participant and `apiId` for its
-  owned API, even when the values are equal. Rust passes participant identity
-  explicitly to `ContractBuilder::authoring` or `ContractBuilder::from_api`.
+- Participant identity, owned API identity, and API release version are
+  independent. TypeScript `define*Contract` bodies require `id`, `apiId`, and
+  Semantic Version `apiVersion`. Rust passes all authored identity and release
+  values explicitly to `ContractBuilder::authoring`; `ContractBuilder::from_api`
+  receives release metadata in the API artifact. Release version does not affect
+  semantic API digests, participant evidence, permissions, or subjects.
   Generated participant facades expose `CONTRACT_ID`; generated API SDKs expose
   `API_ID`.
 - Durable `eventConsumers` are contract-declared deployment resources. A group

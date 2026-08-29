@@ -15,6 +15,7 @@ const RESOURCES_CLIENT_ID: &str = "trellis.integration.resources-client@v1";
 const RESOURCES_SERVICE_API_SOURCE_JSON: &str = r#"{
   "format": "trellis.api.v1",
   "id": "trellis.integration.resources-service@v1",
+  "version": "1.0.0",
   "displayName": "Trellis Integration Resources Service",
   "description": "Exercises service-bound KV and store resource handles.",
   "schemas": {
@@ -86,7 +87,7 @@ impl trellis_rs::service::GeneratedServiceContract for ResourcesServiceContract 
     const CONTRACT_DIGEST: &'static str = "IAO9LmNUK6YM43HPC_fIUZVGsrkYg6Tq80P7yJqX-xI";
     const PARTICIPANT_NEEDS_DIGEST: &'static str = "bSMYkpggI01vow5ZOPltbIhIw5SescdyyIyDagnRFUo";
     const PARTICIPANT_JSON: &'static str = r#"{"description":"Exercises service-bound KV and store resource handles.","displayName":"Trellis Integration Resources Service","format":"trellis.participant.v1","id":"trellis.integration.resources-service@v1","implements":{"self":{"api":"trellis.integration.resources-service@v1","apiDigest":"57mdEkPnoUIBPrIJWRSTCVBpgX7knh_c13raUKtl4n4"}},"kind":"service","resources":{"kv":{"optionalRecords":{"purpose":"Store optional integration resource records","required":false,"schema":{"schema":"ResourceRecord"}},"records":{"purpose":"Store integration resource records","schema":{"schema":"ResourceRecord"}}},"store":{"blobs":{"maxObjectBytes":1048576,"maxTotalBytes":4194304,"purpose":"Store integration resource blobs"},"optionalBlobs":{"maxObjectBytes":1048576,"maxTotalBytes":4194304,"purpose":"Store optional integration resource blobs","required":false}}},"schemas":{"ResourceRecord":{"properties":{"message":{"type":"string"}},"required":["message"],"type":"object"}}}"#;
-    const API_JSON: &'static str = r#"{"description":"Exercises service-bound KV and store resource handles.","displayName":"Trellis Integration Resources Service","format":"trellis.api.v1","id":"trellis.integration.resources-service@v1","rpc":{"Resources.Exercise":{"input":{"schema":"ResourceExerciseInput"},"output":{"schema":"ResourceExerciseOutput"},"version":"v1"}},"schemas":{"ResourceExerciseInput":{"properties":{"key":{"type":"string"},"message":{"type":"string"}},"required":["key","message"],"type":"object"},"ResourceExerciseOutput":{"properties":{"kvMessage":{"type":"string"},"provider":{"type":"string"},"storeText":{"type":"string"}},"required":["provider","storeText","kvMessage"],"type":"object"},"ResourceRecord":{"properties":{"message":{"type":"string"}},"required":["message"],"type":"object"}}}"#;
+    const API_JSON: &'static str = r#"{"description":"Exercises service-bound KV and store resource handles.","displayName":"Trellis Integration Resources Service","format":"trellis.api.v1","id":"trellis.integration.resources-service@v1","version":"1.0.0","rpc":{"Resources.Exercise":{"input":{"schema":"ResourceExerciseInput"},"output":{"schema":"ResourceExerciseOutput"},"version":"v1"}},"schemas":{"ResourceExerciseInput":{"properties":{"key":{"type":"string"},"message":{"type":"string"}},"required":["key","message"],"type":"object"},"ResourceExerciseOutput":{"properties":{"kvMessage":{"type":"string"},"provider":{"type":"string"},"storeText":{"type":"string"}},"required":["provider","storeText","kvMessage"],"type":"object"},"ResourceRecord":{"properties":{"message":{"type":"string"}},"required":["message"],"type":"object"}}}"#;
     const API_DIGEST: &'static str = "57mdEkPnoUIBPrIJWRSTCVBpgX7knh_c13raUKtl4n4";
     const REFERENCED_API_ARTIFACTS: &'static [(&'static str, &'static str)] = &[];
 }
@@ -676,6 +677,7 @@ fn resources_client_contract(
     let manifest = trellis_rs::contracts::ContractBuilder::authoring(
         RESOURCES_CLIENT_ID,
         RESOURCES_CLIENT_ID,
+        "1.0.0",
         "Trellis Integration Resources Client",
         "App/client participant for the resources integration fixture.",
         trellis_rs::contracts::ContractKind::App,

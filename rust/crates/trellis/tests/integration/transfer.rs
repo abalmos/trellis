@@ -32,6 +32,7 @@ const TRANSFER_CLIENT_ID: &str = "trellis.integration.transfer-client@v1";
 const TRANSFER_SERVICE_API_SOURCE_JSON: &str = r#"{
   "format": "trellis.api.v1",
   "id": "trellis.integration.transfer-service@v1",
+  "version": "1.0.0",
   "displayName": "Trellis Integration Transfer Service",
   "description": "Exercises generated operation and RPC transfer surfaces.",
   "schemas": {
@@ -128,7 +129,7 @@ impl trellis_rs::service::GeneratedServiceContract for TransferServiceContract {
     const CONTRACT_DIGEST: &'static str = "YTQ-BoYHwCu9k6fr3wd5oHjrFLYwJgDGoDoHvmkazeY";
     const PARTICIPANT_NEEDS_DIGEST: &'static str = "g2qRnNV9Z37EXxGkBIB12s44SjFb-4wQ_5CNoJhq88M";
     const PARTICIPANT_JSON: &'static str = r#"{"description":"Exercises generated operation and RPC transfer surfaces.","displayName":"Trellis Integration Transfer Service","format":"trellis.participant.v1","id":"trellis.integration.transfer-service@v1","implements":{"self":{"api":"trellis.integration.transfer-service@v1","apiDigest":"j1yShiNVWyBOd6bvpZHyltUZaIkY5wK-ji4GmUI0ww0","operationTransfers":{"Files.Upload":{"contentType":"/contentType","expiresInMs":60000,"key":"/key","maxBytes":1048576,"store":"uploads"}}}},"kind":"service","resources":{"store":{"uploads":{"maxObjectBytes":1024,"maxTotalBytes":4194304,"purpose":"Temporary integration transfer files"}}}}"#;
-    const API_JSON: &'static str = r#"{"description":"Exercises generated operation and RPC transfer surfaces.","displayName":"Trellis Integration Transfer Service","format":"trellis.api.v1","id":"trellis.integration.transfer-service@v1","operations":{"Files.Upload":{"input":{"schema":"UploadInput"},"output":{"schema":"UploadOutput"},"transfer":{"direction":"send"},"version":"v1"}},"rpc":{"Files.Download":{"input":{"schema":"DownloadInput"},"output":{"schema":"DownloadGrant"},"transfer":{"direction":"receive"},"version":"v1"}},"schemas":{"DownloadGrant":{"properties":{"chunkBytes":{"type":"integer"},"direction":{"type":"string"},"expiresAt":{"type":"string"},"info":{"properties":{"contentType":{"type":"string"},"key":{"type":"string"},"metadata":{"type":"object"},"size":{"type":"integer"},"updatedAt":{"type":"string"}},"type":"object"},"service":{"type":"string"},"sessionKey":{"type":"string"},"subject":{"type":"string"},"transferId":{"type":"string"},"type":{"type":"string"}},"type":"object"},"DownloadInput":{"properties":{"key":{"type":"string"}},"required":["key"],"type":"object"},"UploadInput":{"properties":{"contentType":{"type":"string"},"key":{"type":"string"}},"required":["key"],"type":"object"},"UploadOutput":{"properties":{"contentType":{"type":"string"},"key":{"type":"string"},"size":{"type":"integer"}},"required":["key","size"],"type":"object"}}}"#;
+    const API_JSON: &'static str = r#"{"description":"Exercises generated operation and RPC transfer surfaces.","displayName":"Trellis Integration Transfer Service","format":"trellis.api.v1","id":"trellis.integration.transfer-service@v1","version":"1.0.0","operations":{"Files.Upload":{"input":{"schema":"UploadInput"},"output":{"schema":"UploadOutput"},"transfer":{"direction":"send"},"version":"v1"}},"rpc":{"Files.Download":{"input":{"schema":"DownloadInput"},"output":{"schema":"DownloadGrant"},"transfer":{"direction":"receive"},"version":"v1"}},"schemas":{"DownloadGrant":{"properties":{"chunkBytes":{"type":"integer"},"direction":{"type":"string"},"expiresAt":{"type":"string"},"info":{"properties":{"contentType":{"type":"string"},"key":{"type":"string"},"metadata":{"type":"object"},"size":{"type":"integer"},"updatedAt":{"type":"string"}},"type":"object"},"service":{"type":"string"},"sessionKey":{"type":"string"},"subject":{"type":"string"},"transferId":{"type":"string"},"type":{"type":"string"}},"type":"object"},"DownloadInput":{"properties":{"key":{"type":"string"}},"required":["key"],"type":"object"},"UploadInput":{"properties":{"contentType":{"type":"string"},"key":{"type":"string"}},"required":["key"],"type":"object"},"UploadOutput":{"properties":{"contentType":{"type":"string"},"key":{"type":"string"},"size":{"type":"integer"}},"required":["key","size"],"type":"object"}}}"#;
     const API_DIGEST: &'static str = "j1yShiNVWyBOd6bvpZHyltUZaIkY5wK-ji4GmUI0ww0";
     const REFERENCED_API_ARTIFACTS: &'static [(&'static str, &'static str)] = &[];
 }
@@ -1172,6 +1173,7 @@ fn transfer_client_contract(
     let manifest = trellis_rs::contracts::ContractBuilder::authoring(
         TRANSFER_CLIENT_ID,
         TRANSFER_CLIENT_ID,
+        "1.0.0",
         "Trellis Integration Transfer Client",
         "App/client participant for the transfer integration fixture.",
         trellis_rs::contracts::ContractKind::App,

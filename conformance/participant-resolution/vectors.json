@@ -3,6 +3,7 @@
     {
       "format": "trellis.api.v1",
       "id": "consumer@v1",
+      "version": "1.0.0",
       "displayName": "Consumer API",
       "description": "Exercises every selectable API surface.",
       "schemas": {
@@ -225,6 +226,7 @@
     {
       "format": "trellis.api.v1",
       "id": "optional@v1",
+      "version": "1.0.0",
       "displayName": "Optional API",
       "description": "An optional feed.",
       "schemas": { "Any": true },
@@ -260,6 +262,7 @@
     {
       "format": "trellis.api.v1",
       "id": "provider@v1",
+      "version": "1.0.0",
       "displayName": "Provider API",
       "description": "An implemented transfer API.",
       "schemas": {
@@ -295,6 +298,7 @@
     {
       "format": "trellis.api.v1",
       "id": "𐀀@v1",
+      "version": "1.0.0",
       "displayName": "Supplementary API",
       "description": "Unicode ordering API.",
       "schemas": { "Any": true },
@@ -309,6 +313,7 @@
     {
       "format": "trellis.api.v1",
       "id": "@v1",
+      "version": "1.0.0",
       "displayName": "Private Use API",
       "description": "Unicode ordering API.",
       "schemas": { "Any": true },
@@ -323,6 +328,7 @@
     {
       "format": "trellis.api.v1",
       "id": "unicode-provider@v1",
+      "version": "1.0.0",
       "displayName": "Unicode Provider",
       "description": "Unicode provider evidence ordering.",
       "schemas": { "Any": true },
@@ -344,6 +350,7 @@
     {
       "format": "trellis.api.v1",
       "id": "implemented-events@v1",
+      "version": "1.0.0",
       "displayName": "Implemented Events API",
       "description": "Events implemented by a participant.",
       "schemas": { "Any": true },
@@ -361,6 +368,7 @@
     {
       "format": "trellis.api.v1",
       "id": "bad-pointer@v1",
+      "version": "1.0.0",
       "displayName": "Bad Pointer API",
       "description": "Contains an unprovable event pointer.",
       "schemas": {

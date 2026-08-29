@@ -20,6 +20,7 @@ struct EventConsumerContract;
 const SOURCE_API_SOURCE_JSON: &str = r#"{
   "format": "trellis.api.v1",
   "id": "trellis.integration.event-consumers-source-rust@v1",
+  "version": "1.0.0",
   "displayName": "Trellis Rust Event Consumers Source",
   "description": "Publishes source events for Rust durable consumer integration tests.",
   "capabilities": {
@@ -2045,6 +2046,7 @@ fn test_contract(manifest_json: &str) -> trellis_test::TrellisTestContract {
         _ => panic!("unknown event consumer fixture"),
     };
     let mut builder = trellis_rs::contracts::ContractBuilder::authoring(id, id,
+    "1.0.0",
     display_name,
     description,
     trellis_rs::contracts::ContractKind::Service,)
@@ -2146,6 +2148,7 @@ fn publisher_contract() -> trellis_test::TrellisTestContract {
     let manifest = trellis_rs::contracts::ContractBuilder::authoring(
         "trellis.integration.event-consumers-publisher-rust@v1",
         "trellis.integration.event-consumers-publisher-rust@v1",
+        "1.0.0",
         "Trellis Rust Event Consumers Publisher",
         "Publishes source events through a Rust app facade.",
         trellis_rs::contracts::ContractKind::App,

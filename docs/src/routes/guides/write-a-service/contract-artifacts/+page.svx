@@ -20,6 +20,7 @@ You can also add docs metadata to the contract or to owned surfaces when generat
 export const ordersService = defineServiceContract({ schemas }, (ref) => ({
   id: "orders-service@v1",
   apiId: "orders-service@v1",
+  apiVersion: "1.0.0",
   displayName: "Orders Service",
   description: "A simple service for managing orders.",
   docs: {

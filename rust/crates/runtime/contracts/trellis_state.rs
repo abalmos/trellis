@@ -13,6 +13,7 @@ const VALIDATION_ERROR: &str = "ValidationError";
 pub fn api_artifact() -> Result<ApiArtifact, ContractsError> {
     ApiBuilder::authoring(
         "trellis.state@v1",
+        "1.0.0",
         "Trellis State",
         "Trellis-managed app state for authenticated app and device participants.",
     )

@@ -29,6 +29,7 @@ const JOBS_ADMIN_CLIENT_ID: &str = "trellis.integration.jobs-admin-client@v1";
 const JOBS_SERVICE_API_SOURCE_JSON: &str = r#"{
   "format": "trellis.api.v1",
   "id": "trellis.integration.jobs-service@v1",
+  "version": "1.0.0",
   "displayName": "Trellis Integration Jobs Service",
   "description": "Exercises service-local jobs behind a client-visible RPC.",
     "schemas": {
@@ -1849,6 +1850,7 @@ fn jobs_admin_client_contract(
     let manifest = trellis_rs::contracts::ContractBuilder::authoring(
         JOBS_ADMIN_CLIENT_ID,
         JOBS_ADMIN_CLIENT_ID,
+        "1.0.0",
         "Trellis Integration Jobs Admin Client",
         "Uses generated Jobs admin RPCs for live acceptance coverage.",
         trellis_rs::contracts::ContractKind::App,
@@ -1886,6 +1888,7 @@ fn jobs_client_contract(
     let manifest = trellis_rs::contracts::ContractBuilder::authoring(
         JOBS_CLIENT_ID,
         JOBS_CLIENT_ID,
+        "1.0.0",
         "Trellis Integration Jobs Client",
         "App/client participant for the jobs integration fixture.",
         trellis_rs::contracts::ContractKind::App,

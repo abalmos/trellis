@@ -153,6 +153,7 @@
   },
   "format": "trellis.api.v1",
   "id": "trellis.jobs@v1",
+  "version": "1.0.0",
   "rpc": {
     "Jobs.Cancel": {
       "docs": {

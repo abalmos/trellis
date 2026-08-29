@@ -41,6 +41,7 @@
   "errors": { "AuthError": {}, "UnexpectedError": {}, "ValidationError": {} },
   "format": "trellis.api.v1",
   "id": "trellis.state@v1",
+  "version": "1.0.0",
   "rpc": {
     "State.Admin.Delete": {
       "docs": {

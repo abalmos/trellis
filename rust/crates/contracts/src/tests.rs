@@ -17,6 +17,7 @@ fn api_form_authoring_preserves_participant_event_consumers() {
     let artifacts = ContractBuilder::authoring(
         "example.consumer-service@v1",
         "example.consumer@v1",
+        "1.0.0",
         "Consumer",
         "Consumes an event.",
         ContractKind::Service,
@@ -100,6 +101,7 @@ fn representative_native_cases() -> Vec<(&'static str, ContractArtifacts)> {
     let dependency = ContractBuilder::authoring(
         "conformance.dependency@v1",
         "conformance.dependency@v1",
+        "1.0.0",
         "Dependency",
         "Conformance dependency.",
         ContractKind::Service,
@@ -113,6 +115,7 @@ fn representative_native_cases() -> Vec<(&'static str, ContractArtifacts)> {
     let optional_dependency = ContractBuilder::authoring(
         "conformance.optional-dependency@v1",
         "conformance.optional-dependency@v1",
+        "1.0.0",
         "Optional dependency",
         "Optional conformance dependency.",
         ContractKind::Service,
@@ -126,6 +129,7 @@ fn representative_native_cases() -> Vec<(&'static str, ContractArtifacts)> {
     let minimal = ContractBuilder::authoring(
         "conformance.minimal-app-participant@v1",
         "conformance.minimal-app@v1",
+        "1.0.0",
         "Minimal app",
         "Minimal native app.",
         ContractKind::App,
@@ -135,6 +139,7 @@ fn representative_native_cases() -> Vec<(&'static str, ContractArtifacts)> {
     let service = ContractBuilder::authoring(
         "conformance.service@v1",
         "conformance.service@v1",
+        "1.0.0",
         "Conformance service",
         "Representative native service.",
         ContractKind::Service,
@@ -255,6 +260,7 @@ fn representative_native_cases() -> Vec<(&'static str, ContractArtifacts)> {
     let device = ContractBuilder::authoring(
         "conformance.device@v1",
         "conformance.device@v1",
+        "1.0.0",
         "Device",
         "Native device.",
         ContractKind::Device,
@@ -269,6 +275,7 @@ fn representative_native_cases() -> Vec<(&'static str, ContractArtifacts)> {
     let agent = ContractBuilder::authoring(
         "conformance.agent@v1",
         "conformance.agent@v1",
+        "1.0.0",
         "Agent",
         "Native agent.",
         ContractKind::Agent,
@@ -346,6 +353,8 @@ fn native_builder_keeps_protocol_subjects_derived() {
     let api = json!({
         "format": "trellis.api.v1",
         "id": "example.api@v1",
+       "version": "1.0.0",
+        "version": "1.0.0",
         "displayName": "Example",
         "description": "Example API.",
         "schemas": {

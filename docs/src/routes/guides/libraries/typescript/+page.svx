@@ -213,6 +213,7 @@ import { sdk as orders } from "@my-org/orders-service-sdk";
 export default defineAppContract(() => ({
   id: "orders-console@v1",
   apiId: "orders-console@v1",
+  apiVersion: "1.0.0",
   displayName: "Orders Console",
   description: "Operator UI for order lookup.",
   uses: {
@@ -655,6 +656,7 @@ import { sdk as orders } from "#trellis-generated-sdk/orders";
 const contract = defineAppContract(() => ({
   id: "acme.dashboard@v1",
   apiId: "acme.dashboard@v1",
+  apiVersion: "1.0.0",
   displayName: "Acme Dashboard",
   description: "Browser app for order workflows.",
   uses: {

@@ -47,7 +47,7 @@ pub(crate) fn validate_nonempty_text(
     Ok(())
 }
 
-pub(crate) fn validate_api_id(
+pub(crate) fn validate_api_id_at(
     path: &str,
     value: &str,
     error: ValidationErrorFactory,
@@ -66,6 +66,15 @@ pub(crate) fn validate_api_id(
         ));
     }
     validate_positive_decimal(path, major, error)
+}
+
+/// Validate one stable `lineage@vN` API identifier.
+///
+/// # Errors
+///
+/// Returns [`ProtocolError::ApiValidation`] when `value` is not a valid API ID.
+pub fn validate_api_id(value: &str) -> Result<(), ProtocolError> {
+    validate_api_id_at("/id", value, api_error)
 }
 
 pub(crate) fn validate_version(
