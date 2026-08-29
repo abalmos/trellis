@@ -18,7 +18,7 @@ use crate::contract_input::{
 };
 use crate::discovery::{DiscoveredContractSource, SourceLanguage};
 
-const SCHEMA_VERSION: u32 = 2;
+const SCHEMA_VERSION: u32 = 3;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct CachedContractResolution {
@@ -30,6 +30,7 @@ pub(crate) struct CachedContractResolution {
     language: String,
     contract_id: String,
     contract_kind: ContractKind,
+    api_version: String,
     api_digest: String,
     generated_api_digest: String,
     participant_digest: Option<String>,
@@ -70,6 +71,10 @@ impl CachedContractResolution {
 
     pub(crate) fn api_digest(&self) -> &str {
         &self.api_digest
+    }
+
+    pub(crate) fn api_version(&self) -> &str {
+        &self.api_version
     }
 
     pub(crate) fn generated_api_digest(&self) -> &str {
@@ -316,6 +321,7 @@ impl ResolutionCache {
             language: language_name(contract.language).to_string(),
             contract_id: resolved.api.render_model.id.clone(),
             contract_kind: contract_kind.clone(),
+            api_version: resolved.api.api.version().to_string(),
             api_digest: resolved.api.digest.clone(),
             generated_api_digest: crate::artifacts::native_api_digest(resolved)?,
             participant_digest: resolved

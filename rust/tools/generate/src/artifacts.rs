@@ -26,6 +26,7 @@ const TRELLIS_DENO_JSON: &str = include_str!("../../../../ts/packages/trellis/de
 pub struct GeneratedArtifactsMetadata {
     pub schema_version: u8,
     pub contract_id: String,
+    pub api_version: String,
     pub api_digest: String,
     pub participant_digest: Option<String>,
     pub artifact_version: String,
@@ -111,7 +112,7 @@ pub(crate) struct NpmPackageBuild<'a> {
 }
 
 impl GeneratedArtifactsMetadata {
-    const SCHEMA_VERSION: u8 = 4;
+    const SCHEMA_VERSION: u8 = 5;
 }
 
 pub fn detect_output_root(project_root: &Path) -> PathBuf {
@@ -955,6 +956,7 @@ pub(crate) fn generated_artifacts_metadata(
 ) -> GeneratedArtifactsMetadata {
     generated_artifacts_metadata_from_parts(
         &resolved.api.render_model.id,
+        resolved.api.api.version(),
         api_digest,
         resolved
             .participant
@@ -966,6 +968,7 @@ pub(crate) fn generated_artifacts_metadata(
 
 pub(crate) fn generated_artifacts_metadata_from_parts(
     contract_id: &str,
+    api_version: &str,
     api_digest: &str,
     participant_digest: Option<&str>,
     plan: &ContractOutputPlan<'_>,
@@ -973,6 +976,7 @@ pub(crate) fn generated_artifacts_metadata_from_parts(
     GeneratedArtifactsMetadata {
         schema_version: GeneratedArtifactsMetadata::SCHEMA_VERSION,
         contract_id: contract_id.to_owned(),
+        api_version: api_version.to_owned(),
         api_digest: api_digest.to_owned(),
         participant_digest: participant_digest.map(str::to_owned),
         artifact_version: plan.artifact_version.to_string(),
@@ -1003,6 +1007,7 @@ pub fn generated_artifacts_are_fresh(
     };
     let common = existing.schema_version == expected.schema_version
         && existing.contract_id == expected.contract_id
+        && existing.api_version == expected.api_version
         && existing.api_digest == expected.api_digest
         && existing.artifact_version == expected.artifact_version
         && existing.runtime_source == expected.runtime_source
@@ -1571,6 +1576,7 @@ mod tests {
         let expected = GeneratedArtifactsMetadata {
             schema_version: GeneratedArtifactsMetadata::SCHEMA_VERSION,
             contract_id: "trellis.test@v1".to_string(),
+            api_version: "1.0.0".to_string(),
             api_digest: "api".to_string(),
             participant_digest: Some("new".to_string()),
             artifact_version: "1.0.0".to_string(),
@@ -1610,6 +1616,7 @@ mod tests {
         let expected = GeneratedArtifactsMetadata {
             schema_version: GeneratedArtifactsMetadata::SCHEMA_VERSION,
             contract_id: "trellis.test@v1".to_string(),
+            api_version: "1.0.0".to_string(),
             api_digest: "api".to_string(),
             participant_digest: None,
             artifact_version: "1.0.0".to_string(),

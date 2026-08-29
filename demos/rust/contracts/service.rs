@@ -1,7 +1,7 @@
 use serde_json::{json, Value};
 use trellis_contracts::{
-    event, feed, job_queue, kv, operation, rpc, schema_ref, store, ApiArtifact,
-    ContractArtifacts, ContractBuilder, ContractKind, ContractsError,
+    event, feed, job_queue, kv, operation, rpc, schema_ref, store, ApiArtifact, ContractArtifacts,
+    ContractBuilder, ContractKind, ContractsError,
 };
 
 fn empty_object_schema() -> Value {
@@ -512,6 +512,7 @@ fn builder() -> ContractBuilder {
     let builder = ContractBuilder::authoring(
         "trellis.demo-service@v1",
         "trellis.demo-service@v1",
+        "1.0.0",
         "Field Ops Demo Service",
         "Consolidated Field Ops demo service for Trellis concepts.",
         ContractKind::Service,

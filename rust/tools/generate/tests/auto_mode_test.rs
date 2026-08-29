@@ -197,7 +197,7 @@ done
 }
 
 #[test]
-fn prepare_warm_noop_uses_resolution_cache_and_rebuilds_deleted_target() {
+fn prepare_warm_noop_tracks_api_version_and_rebuilds_deleted_target() {
     let temp = tempfile::tempdir().unwrap();
     let project = temp.path().join("service");
     fs::create_dir_all(&project).unwrap();
@@ -223,6 +223,53 @@ fn prepare_warm_noop_uses_resolution_cache_and_rebuilds_deleted_target() {
         String::from_utf8_lossy(&second.stderr)
     );
     let stdout = String::from_utf8_lossy(&second.stdout);
+    assert!(stdout.contains("hits                     1"), "{stdout}");
+    assert!(stdout.contains("misses                   0"), "{stdout}");
+    assert!(!stdout.contains("resolve TypeScript"), "{stdout}");
+    assert!(!stdout.contains("subprocesses"), "{stdout}");
+    assert!(
+        stdout.contains("installed               files=0 bytes=0"),
+        "{stdout}"
+    );
+
+    let source_path = project.join("contract.ts");
+    let source = fs::read_to_string(&source_path).unwrap();
+    fs::write(
+        &source_path,
+        source.replacen("version: \"1.0.0\"", "version: \"1.0.1\"", 1),
+    )
+    .unwrap();
+    let version_update = run_prepare_timings(&project);
+    assert!(
+        version_update.status.success(),
+        "{}",
+        String::from_utf8_lossy(&version_update.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&version_update.stdout);
+    assert!(
+        stdout.contains("target api            generated=1"),
+        "{stdout}"
+    );
+    assert!(
+        stdout.contains("target jsr            generated=1"),
+        "{stdout}"
+    );
+    let api: serde_json::Value = serde_json::from_str(
+        &fs::read_to_string(project.join("generated/protocol/apis/trellis.cached@v1.json"))
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(api["version"], "1.0.1");
+    let sdk = fs::read_to_string(project.join("generated/packages/jsr/cached/api.ts")).unwrap();
+    assert!(sdk.contains(r#""version":"1.0.1""#), "{sdk}");
+
+    let version_noop = run_prepare_timings(&project);
+    assert!(
+        version_noop.status.success(),
+        "{}",
+        String::from_utf8_lossy(&version_noop.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&version_noop.stdout);
     assert!(stdout.contains("hits                     1"), "{stdout}");
     assert!(stdout.contains("misses                   0"), "{stdout}");
     assert!(!stdout.contains("resolve TypeScript"), "{stdout}");

@@ -11,6 +11,7 @@ mod service;
 pub fn api_artifact() -> Result<ApiArtifact, ContractsError> {
     ApiBuilder::authoring(
         "trellis.demo-device@v1",
+        "1.0.0",
         "Field Device Demo",
         "Activated Field Device TUI for the consolidated demo.",
     )

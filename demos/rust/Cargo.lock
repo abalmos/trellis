@@ -2554,6 +2554,7 @@ dependencies = [
  "futures-util",
  "serde",
  "serde_json",
+ "tokio",
  "trellis-contracts",
  "trellis-rs",
  "trellis-sdk-demo-device",
@@ -2582,6 +2583,7 @@ dependencies = [
  "jsonptr",
  "jsonschema",
  "nkeys",
+ "semver",
  "serde",
  "serde_json",
  "serde_json_canonicalizer",
@@ -2661,7 +2663,7 @@ dependencies = [
 
 [[package]]
 name = "trellis-sdk-demo-device"
-version = "0.12.0"
+version = "1.0.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -2671,7 +2673,7 @@ dependencies = [
 
 [[package]]
 name = "trellis-sdk-demo-service"
-version = "0.12.0"
+version = "1.0.0"
 dependencies = [
  "futures-util",
  "serde",

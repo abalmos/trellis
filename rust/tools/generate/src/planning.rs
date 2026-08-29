@@ -632,6 +632,7 @@ pub fn execute_auto_plan(
             };
             let metadata = generated_artifacts_metadata_from_parts(
                 &entry.contract_id,
+                cached.api_version(),
                 cached.generated_api_digest(),
                 cached.participant_digest(),
                 &output_plan,
