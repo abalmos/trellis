@@ -20,6 +20,8 @@ struct PackageResult {
     installed_apis: usize,
     changed_dependencies: usize,
     generated_projects: usize,
+    #[serde(skip)]
+    owned_api_paths: Vec<std::path::PathBuf>,
 }
 
 pub async fn add(format: OutputFormat, args: &AddArgs) -> Result<()> {
@@ -141,7 +143,7 @@ pub async fn publish(format: OutputFormat, args: &PublishArgs) -> Result<()> {
     let root = canonical_root(&args.project.root)?;
     let manifest = read_manifest(&root.join("trellis.toml"))?;
     let lock = read_lock(&root.join("trellis.lock"))?;
-    install_root(&root, &manifest, &lock).await?;
+    let install = install_root(&root, &manifest, &lock).await?;
     let registry = args
         .registry
         .as_ref()
@@ -151,13 +153,7 @@ pub async fn publish(format: OutputFormat, args: &PublishArgs) -> Result<()> {
         .registries
         .get(registry)
         .ok_or_else(|| miette!("registry '{registry}' is not configured"))?;
-    let api_root = root.join(".trellis/generated/protocol/apis");
-    let mut paths = fs::read_dir(&api_root)
-        .into_diagnostic()
-        .wrap_err("project has no generated canonical APIs")?
-        .filter_map(|entry| entry.ok().map(|entry| entry.path()))
-        .filter(|path| path.extension().is_some_and(|ext| ext == "json"))
-        .collect::<Vec<_>>();
+    let mut paths = install.owned_api_paths;
     paths.sort();
     if paths.is_empty() {
         return Err(miette!("project has no owned canonical APIs to publish"));
@@ -168,48 +164,9 @@ pub async fn publish(format: OutputFormat, args: &PublishArgs) -> Result<()> {
             serde_json::from_slice(&fs::read(&path).into_diagnostic()?).into_diagnostic()?;
         let candidate =
             trellis_protocol::parse_api(&value).map_err(|error| miette!(error.to_string()))?;
-        let version = Version::parse(candidate.version()).map_err(|error| miette!(error))?;
-        let versions = oci::versions(config, candidate.id()).await?;
-        if versions.binary_search(&version).is_ok() {
-            let remote = oci::pull_tag(config, candidate.id(), &version).await?;
-            if remote.manifest_digest != oci::artifact_digest(&candidate)? {
-                return Err(miette!(
-                    "release {} {} already exists with different content",
-                    candidate.id(),
-                    version
-                ));
-            }
-            let id = candidate.id().to_owned();
-            checked.push((
-                candidate,
-                id,
-                version.to_string(),
-                Some(remote.manifest_digest),
-            ));
-            continue;
-        }
-        if let Some(previous_version) = versions.last() {
-            if version <= *previous_version {
-                // ponytail: releases are monotonic; add historical backfills only when required.
-                return Err(miette!(
-                    "release {version} must be newer than {previous_version}"
-                ));
-            }
-            let previous = oci::pull_tag(config, candidate.id(), previous_version).await?;
-            let report = trellis_protocol::compare_api_replacement(&previous.api, &candidate)
-                .map_err(|error| miette!(error.to_string()))?;
-            if !report.compatible {
-                let issues = report
-                    .issues
-                    .iter()
-                    .map(|issue| issue.message.as_str())
-                    .collect::<Vec<_>>()
-                    .join("; ");
-                return Err(miette!("release {} {version} is not compatible with previous release {previous_version}: {issues}; use a new stable API identity such as @v2", candidate.id()));
-            }
-        }
+        let (version, existing_digest) = check_publication(config, &candidate).await?;
         let id = candidate.id().to_owned();
-        checked.push((candidate, id, version.to_string(), None));
+        checked.push((candidate, id, version.to_string(), existing_digest));
     }
     let mut published = Vec::new();
     for (candidate, id, version, existing_digest) in checked {
@@ -232,6 +189,46 @@ pub async fn publish(format: OutputFormat, args: &PublishArgs) -> Result<()> {
         }
         Ok(())
     }
+}
+
+async fn check_publication(
+    config: &crate::project::RegistryConfig,
+    candidate: &trellis_protocol::ApiArtifact,
+) -> Result<(Version, Option<String>)> {
+    let version = Version::parse(candidate.version()).map_err(|error| miette!(error))?;
+    let versions = oci::versions(config, candidate.id()).await?;
+    if versions.binary_search(&version).is_ok() {
+        let remote = oci::pull_tag(config, candidate.id(), &version).await?;
+        if remote.manifest_digest != oci::artifact_digest(candidate)? {
+            return Err(miette!(
+                "release {} {} already exists with different content",
+                candidate.id(),
+                version
+            ));
+        }
+        return Ok((version, Some(remote.manifest_digest)));
+    }
+    if let Some(previous_version) = versions.last() {
+        if version <= *previous_version {
+            // ponytail: releases are monotonic; add historical backfills only when required.
+            return Err(miette!(
+                "release {version} must be newer than {previous_version}"
+            ));
+        }
+        let previous = oci::pull_tag(config, candidate.id(), previous_version).await?;
+        let report = trellis_protocol::compare_api_replacement(&previous.api, candidate)
+            .map_err(|error| miette!(error.to_string()))?;
+        if !report.compatible {
+            let issues = report
+                .issues
+                .iter()
+                .map(|issue| issue.message.as_str())
+                .collect::<Vec<_>>()
+                .join("; ");
+            return Err(miette!("release {} {version} is not compatible with previous release {previous_version}: {issues}; use a new stable API identity such as @v2", candidate.id()));
+        }
+    }
+    Ok((version, None))
 }
 
 fn canonical_root(root: &Path) -> Result<std::path::PathBuf> {
@@ -513,6 +510,7 @@ async fn install_root(
             installed_apis: lock.api.len(),
             changed_dependencies: 0,
             generated_projects: generated.generated,
+            owned_api_paths: generated.owned_api_paths,
         });
     }
 
@@ -540,6 +538,7 @@ async fn install_root(
             installed_apis: lock.api.len(),
             changed_dependencies,
             generated_projects: generated.generated,
+            owned_api_paths: generated.owned_api_paths,
         })
     }
     .await;
@@ -816,8 +815,250 @@ fn print_result(
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use super::*;
+    use axum::{
+        body::{to_bytes, Body},
+        extract::State,
+        http::{header::HOST, Request, Response, StatusCode},
+        routing::any,
+        Router,
+    };
     use registry_testkit::{RegistryConfig as TestRegistryConfig, RegistryServer};
+
+    #[derive(Clone)]
+    struct PagingRegistry {
+        backend: String,
+        tags: Arc<Vec<String>>,
+        client: reqwest::Client,
+    }
+
+    async fn paging_registry(
+        State(state): State<PagingRegistry>,
+        request: Request<Body>,
+    ) -> Response<Body> {
+        if request.uri().path().ends_with("/tags/list") {
+            let last = request
+                .uri()
+                .query()
+                .and_then(|query| query.split('&').find_map(|part| part.strip_prefix("last=")));
+            let start = last
+                .and_then(|last| state.tags.iter().position(|tag| tag == last))
+                .map_or(0, |position| position + 1);
+            let tags = state.tags.iter().skip(start).take(1).collect::<Vec<_>>();
+            return Response::builder()
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::to_vec(&serde_json::json!({
+                        "name": "acme.orders-v1",
+                        "tags": tags,
+                    }))
+                    .unwrap(),
+                ))
+                .unwrap();
+        }
+
+        let (parts, body) = request.into_parts();
+        let body = match to_bytes(body, usize::MAX).await {
+            Ok(body) => body,
+            Err(_) => return Response::new(Body::empty()),
+        };
+        let mut forwarded = state
+            .client
+            .request(parts.method, format!("{}{}", state.backend, parts.uri));
+        for (name, value) in &parts.headers {
+            if name != HOST {
+                forwarded = forwarded.header(name, value);
+            }
+        }
+        match forwarded.body(body).send().await {
+            Ok(response) => {
+                let status = response.status();
+                let headers = response.headers().clone();
+                match response.bytes().await {
+                    Ok(body) => {
+                        let mut forwarded = Response::builder().status(status);
+                        for (name, value) in headers {
+                            if let Some(name) = name {
+                                forwarded = forwarded.header(name, value);
+                            }
+                        }
+                        forwarded.body(Body::from(body)).unwrap()
+                    }
+                    Err(_) => Response::builder()
+                        .status(StatusCode::BAD_GATEWAY)
+                        .body(Body::empty())
+                        .unwrap(),
+                }
+            }
+            Err(_) => Response::builder()
+                .status(StatusCode::BAD_GATEWAY)
+                .body(Body::empty())
+                .unwrap(),
+        }
+    }
+
+    async fn start_paging_registry(
+        backend_port: u16,
+        tags: Vec<String>,
+    ) -> (String, tokio::task::JoinHandle<()>) {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let app = Router::new()
+            .fallback(any(paging_registry))
+            .with_state(PagingRegistry {
+                backend: format!("http://127.0.0.1:{backend_port}"),
+                tags: Arc::new(tags),
+                client: reqwest::Client::new(),
+            });
+        let task = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        (format!("127.0.0.1:{}", address.port()), task)
+    }
+
+    #[tokio::test]
+    async fn paginated_releases_drive_update_and_publish_compatibility() {
+        let _guard = crate::oci::TEST_ENV_LOCK.lock().await;
+        let cache = tempfile::tempdir().unwrap();
+        unsafe { std::env::set_var("TRELLIS_CACHE", cache.path()) };
+        let backend = RegistryServer::new(TestRegistryConfig::memory())
+            .await
+            .unwrap();
+        let tags = ["1.0.0", "1.1.0", "1.2.0"].map(str::to_owned).to_vec();
+        let (prefix, proxy) = start_paging_registry(backend.port(), tags).await;
+        let registry = crate::project::RegistryConfig { prefix };
+        for version in ["1.0.0", "1.1.0"] {
+            let api = trellis_protocol::parse_api(&serde_json::json!({
+                "format": "trellis.api.v1",
+                "id": "acme.orders@v1",
+                "version": version,
+                "displayName": "Orders",
+                "description": "Orders API"
+            }))
+            .unwrap();
+            crate::oci::publish(&registry, &api).await.unwrap();
+        }
+        let latest = trellis_protocol::parse_api(&serde_json::json!({
+            "format": "trellis.api.v1",
+            "id": "acme.orders@v1",
+            "version": "1.2.0",
+            "displayName": "Orders",
+            "description": "Orders API",
+            "schemas": {
+                "Empty": { "type": "object", "properties": {}, "required": [] }
+            },
+            "rpc": {
+                "Orders.Get": {
+                    "version": "v1",
+                    "input": { "schema": "Empty" },
+                    "output": { "schema": "Empty" }
+                }
+            }
+        }))
+        .unwrap();
+        crate::oci::publish(&registry, &latest).await.unwrap();
+
+        let root = tempfile::tempdir().unwrap();
+        crate::project::write_manifest(
+            &root.path().join("trellis.toml"),
+            &ProjectManifest {
+                format: 1,
+                default_registry: Some("local".into()),
+                registries: BTreeMap::from([("local".into(), registry.clone())]),
+                apis: BTreeMap::from([(
+                    "acme.orders@v1".into(),
+                    ApiDependency {
+                        version: "^1.0".into(),
+                        path: None,
+                        registry: Some("local".into()),
+                    },
+                )]),
+            },
+        )
+        .unwrap();
+        update(
+            OutputFormat::Text,
+            &ProjectRootArgs {
+                root: root.path().to_path_buf(),
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            crate::project::read_lock(&root.path().join("trellis.lock"))
+                .unwrap()
+                .api[0]
+                .version,
+            "1.2.0"
+        );
+
+        let candidate = trellis_protocol::parse_api(&serde_json::json!({
+            "format": "trellis.api.v1",
+            "id": "acme.orders@v1",
+            "version": "1.3.0",
+            "displayName": "Orders",
+            "description": "Orders API"
+        }))
+        .unwrap();
+        let error = check_publication(&registry, &candidate).await.unwrap_err();
+        assert!(error.to_string().contains("previous release 1.2.0"));
+        proxy.abort();
+        unsafe { std::env::remove_var("TRELLIS_CACHE") };
+    }
+
+    #[tokio::test]
+    async fn publish_ignores_stale_owned_api_output_after_source_removal() {
+        let root = tempfile::tempdir().unwrap();
+        let manifest = ProjectManifest {
+            format: 1,
+            default_registry: Some("unused".into()),
+            registries: BTreeMap::from([(
+                "unused".into(),
+                crate::project::RegistryConfig {
+                    prefix: "registry.invalid".into(),
+                },
+            )]),
+            apis: BTreeMap::new(),
+        };
+        crate::project::write_manifest(&root.path().join("trellis.toml"), &manifest).unwrap();
+        let lock = ProjectLock {
+            format: 1,
+            manifest_digest: manifest.digest().unwrap(),
+            api: Vec::new(),
+        };
+        crate::project::write_lock(&root.path().join("trellis.lock"), &lock).unwrap();
+        install_root(root.path(), &manifest, &lock).await.unwrap();
+        let stale = root
+            .path()
+            .join(".trellis/generated/protocol/apis/acme.a@v1.json");
+        fs::create_dir_all(stale.parent().unwrap()).unwrap();
+        fs::write(
+            &stale,
+            serde_json::to_vec(&serde_json::json!({
+                "format": "trellis.api.v1",
+                "id": "acme.a@v1",
+                "version": "1.0.0",
+                "displayName": "A",
+                "description": "Deleted contract"
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+
+        let error = publish(
+            OutputFormat::Text,
+            &PublishArgs {
+                registry: None,
+                project: ProjectRootArgs {
+                    root: root.path().to_path_buf(),
+                },
+            },
+        )
+        .await
+        .unwrap_err();
+        assert!(error.to_string().contains("no owned canonical APIs"));
+        assert!(stale.is_file());
+    }
 
     #[test]
     fn remote_version_selection_uses_standard_semver_prerelease_rules() {

@@ -51,11 +51,12 @@ pub struct AutoPlanEntry {
     pub runtime_repo_root: Option<PathBuf>,
 }
 
-#[derive(Debug, Default, Clone, Copy)]
+#[derive(Debug, Default, Clone)]
 pub struct AutoExecutionSummary {
     pub generated: usize,
     pub verified: usize,
     pub skipped: usize,
+    pub owned_api_paths: Vec<PathBuf>,
 }
 
 pub fn build_auto_plan(
@@ -587,7 +588,13 @@ pub fn execute_auto_plan(
     }
 
     let fingerprints = current_generator_fingerprints();
-    let mut summary = AutoExecutionSummary::default();
+    let mut summary = AutoExecutionSummary {
+        owned_api_paths: plan
+            .iter()
+            .filter_map(|entry| entry.out_api.clone())
+            .collect(),
+        ..AutoExecutionSummary::default()
+    };
     let mut cargo_metadata = BTreeMap::new();
     let mut current_api_digests = BTreeMap::new();
     let mut participant_outputs = plan

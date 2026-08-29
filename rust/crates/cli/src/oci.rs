@@ -1,6 +1,12 @@
 //! OCI distribution, Docker credentials, and the content-addressed API cache.
 
-use std::{collections::BTreeMap, fmt::Write as _, fs, path::PathBuf, str::FromStr};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    fmt::Write as _,
+    fs,
+    path::PathBuf,
+    str::FromStr,
+};
 
 use docker_credential::{CredentialRetrievalError, DockerCredential};
 use miette::{miette, IntoDiagnostic, Result, WrapErr};
@@ -52,20 +58,36 @@ pub async fn versions(config: &RegistryConfig, api_id: &str) -> Result<Vec<semve
     let reference = Reference::from_str(&format!("{}:probe", repository(config, api_id)?))
         .map_err(|error| miette!(error.to_string()))?;
     let auth = registry_auth(reference.resolve_registry())?;
-    let response = match client(reference.resolve_registry())?
-        .list_tags(&reference, &auth, None, None)
-        .await
-    {
-        Ok(response) => response,
-        Err(error) if missing_repository(&error) => return Ok(Vec::new()),
-        Err(error) => return Err(miette!("failed to list releases for '{api_id}': {error}")),
-    };
-    let mut versions = response
-        .tags
+    let client = client(reference.resolve_registry())?;
+    let mut tags = Vec::new();
+    let mut cursors = BTreeSet::new();
+    let mut last = None;
+    loop {
+        let response = match client
+            .list_tags(&reference, &auth, Some(100), last.as_deref())
+            .await
+        {
+            Ok(response) => response,
+            Err(error) if tags.is_empty() && missing_repository(&error) => return Ok(Vec::new()),
+            Err(error) => return Err(miette!("failed to list releases for '{api_id}': {error}")),
+        };
+        let Some(next) = response.tags.last().cloned() else {
+            break;
+        };
+        if !cursors.insert(next.clone()) {
+            return Err(miette!(
+                "registry returned a non-advancing tag page for '{api_id}'"
+            ));
+        }
+        tags.extend(response.tags);
+        last = Some(next);
+    }
+    let mut versions = tags
         .into_iter()
         .filter_map(|tag| semver::Version::parse(&tag).ok())
         .collect::<Vec<_>>();
     versions.sort();
+    versions.dedup();
     Ok(versions)
 }
 
