@@ -73,6 +73,7 @@ pub struct NpmTsSources {
 
 pub(crate) struct ContractOutputPlan<'a> {
     pub artifact_version: &'a str,
+    pub runtime_version: &'a str,
     pub out_api: &'a Path,
     pub ts_out: Option<&'a Path>,
     pub npm_out: Option<&'a Path>,
@@ -266,7 +267,7 @@ pub(crate) fn write_contract_outputs(
             crate_version: plan.artifact_version.to_string(),
             runtime_deps: rust_runtime_deps(
                 plan.runtime_source,
-                plan.artifact_version.to_string(),
+                plan.runtime_version.to_owned(),
                 plan.runtime_repo_root.map(Path::to_path_buf),
             ),
         })
@@ -286,6 +287,80 @@ pub(crate) fn write_contract_outputs(
     output::print_detail("api", plan.out_api.display().to_string());
     output::print_detail("digest", &api.digest);
     Ok(())
+}
+
+/// Generate consumer-local SDKs from one canonical API artifact.
+pub fn generate_installed_api(
+    api_path: &Path,
+    materialized_api: &Path,
+    ts_out: Option<&Path>,
+    rust_out: Option<&Path>,
+) -> miette::Result<bool> {
+    let resolved = resolve_contract(&ContractInputArgs {
+        api: Some(api_path.to_path_buf()),
+        participant: None,
+        referenced_api: Vec::new(),
+        source: None,
+        image: None,
+        source_export: "API".to_owned(),
+        image_api_path: "/trellis/api.json".to_owned(),
+    })?;
+    let version = resolved.api.api.version().to_owned();
+    let id = &resolved.api.render_model.id;
+    let package_name = format!("@trellis/{}", id.split('@').next().unwrap_or(id));
+    let crate_name = default_rust_crate_name_from_id(id);
+    let runtime_version = trellis_package_version();
+    let plan = ContractOutputPlan {
+        artifact_version: &version,
+        runtime_version: &runtime_version,
+        out_api: materialized_api,
+        ts_out,
+        npm_out: None,
+        rust_out,
+        package_name: &package_name,
+        crate_name: &crate_name,
+        runtime_source: RuntimeSource::Registry,
+        runtime_repo_root: None,
+        fingerprints: current_generator_fingerprints(),
+    };
+    let metadata = generated_artifacts_metadata(&resolved, &native_api_digest(&resolved)?, &plan);
+    let freshness =
+        generated_artifacts_are_fresh(&metadata, materialized_api, ts_out, None, rust_out);
+    if freshness.all() {
+        return Ok(false);
+    }
+    write_contract_outputs(&resolved, &plan, freshness)?;
+    write_generated_artifacts_metadata(materialized_api, &metadata)?;
+    Ok(true)
+}
+
+/// Check whether consumer-local SDK outputs match one exact locked API.
+pub fn installed_api_is_fresh(
+    id: &str,
+    version: &str,
+    digest: &str,
+    materialized_api: &Path,
+    ts_out: Option<&Path>,
+    rust_out: Option<&Path>,
+) -> bool {
+    let package_name = format!("@trellis/{}", id.split('@').next().unwrap_or(id));
+    let crate_name = default_rust_crate_name_from_id(id);
+    let runtime_version = trellis_package_version();
+    let plan = ContractOutputPlan {
+        artifact_version: version,
+        runtime_version: &runtime_version,
+        out_api: materialized_api,
+        ts_out,
+        npm_out: None,
+        rust_out,
+        package_name: &package_name,
+        crate_name: &crate_name,
+        runtime_source: RuntimeSource::Registry,
+        runtime_repo_root: None,
+        fingerprints: current_generator_fingerprints(),
+    };
+    let expected = generated_artifacts_metadata_from_parts(id, version, digest, None, &plan);
+    generated_artifacts_are_fresh(&expected, materialized_api, ts_out, None, rust_out).all()
 }
 
 struct NativeApiOutput {

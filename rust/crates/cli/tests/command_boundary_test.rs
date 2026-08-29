@@ -12,6 +12,10 @@ fn run_cli(args: &[&str]) -> std::process::Output {
 fn new_top_level_help_is_available() {
     for args in [
         &["login", "--help"][..],
+        &["add", "--help"],
+        &["rm", "--help"],
+        &["update", "--help"],
+        &["install", "--help"],
         &["logout", "--help"],
         &["whoami", "--help"],
         &["identity", "--help"],

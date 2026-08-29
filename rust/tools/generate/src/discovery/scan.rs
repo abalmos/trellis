@@ -11,6 +11,7 @@ const API_ARTIFACT_FILE: &str = "trellis.api.json";
 const PARTICIPANT_ARTIFACT_FILE: &str = "trellis.participant.json";
 const SKIPPED_DISCOVERY_DIRS: &[&str] = &[
     ".git",
+    ".trellis",
     ".worktrees",
     ".svelte-kit",
     "build",

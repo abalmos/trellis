@@ -25,6 +25,29 @@ fn run_once(args: &PrepareArgs, force: bool) -> miette::Result<()> {
     execute_prepare_plan(&plan, force, Some(&args.root), &args.prefix)
 }
 
+/// Generate one project's local API, SDK, participant, and facade artifacts.
+pub fn generate_project(
+    root: &Path,
+    output_root: &Path,
+) -> miette::Result<crate::planning::AutoExecutionSummary> {
+    let discovered = discover_contracts(root)?;
+    let plan = build_auto_plan_with_targets(
+        discovered,
+        Some(output_root),
+        "@trellis-sdk/",
+        Some(&[PackageTarget::Api, PackageTarget::Jsr, PackageTarget::Cargo]),
+    )?;
+    let runtime_version = crate::artifacts::trellis_package_version();
+    execute_auto_plan(
+        &plan,
+        None,
+        false,
+        false,
+        "@trellis-sdk/",
+        Some(&runtime_version),
+    )
+}
+
 fn build_prepare_plan(args: &PrepareArgs) -> miette::Result<Vec<AutoPlanEntry>> {
     let canonical_root = args.root.canonicalize().into_diagnostic()?;
     let output_root = match &args.out {
@@ -87,7 +110,7 @@ fn execute_prepare_plan(
         return Ok(());
     }
     let summary = timings::phase("execute", || {
-        execute_auto_plan(plan, Some("Trellis Prepare"), false, force, prefix)
+        execute_auto_plan(plan, Some("Trellis Prepare"), false, force, prefix, None)
     })?;
     timings::contracts(summary.generated, summary.verified, summary.skipped);
     Ok(())

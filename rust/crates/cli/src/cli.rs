@@ -42,6 +42,14 @@ pub enum OutputFormat {
 #[derive(Debug, Subcommand)]
 /// Root command tree for Trellis operator, admin, and local development tasks.
 pub enum TopLevelCommand {
+    /// Add or replace one local API dependency, lock it, and install.
+    Add(AddArgs),
+    /// Remove one API dependency and reconcile installed outputs.
+    Rm(RmArgs),
+    /// Resolve local API dependencies into a fresh lock and install.
+    Update(ProjectRootArgs),
+    /// Recreate local generated artifacts from the exact lock.
+    Install(ProjectRootArgs),
     /// Start a detached portal login against a Trellis auth service.
     Login(LoginArgs),
     /// Revoke the current admin session and clear local session state.
@@ -74,6 +82,35 @@ pub enum TopLevelCommand {
     Completion { shell: Shell },
     /// Run the Trellis runtime with an auto-managed local NATS server.
     Server(ServerArgs),
+}
+
+#[derive(Debug, clap::Args)]
+/// Shared project-root selection for local package commands.
+pub struct ProjectRootArgs {
+    #[arg(long, default_value = ".")]
+    /// Directory containing `trellis.toml`.
+    pub root: PathBuf,
+}
+
+#[derive(Debug, clap::Args)]
+/// Add one canonical local API artifact.
+pub struct AddArgs {
+    /// Path to one canonical `trellis.api.v1` JSON artifact.
+    pub api_json_path: PathBuf,
+    #[arg(long)]
+    /// Semantic Version requirement; defaults to a caret of the exact release.
+    pub version: Option<String>,
+    #[command(flatten)]
+    pub project: ProjectRootArgs,
+}
+
+#[derive(Debug, clap::Args)]
+/// Remove one API dependency by stable API ID.
+pub struct RmArgs {
+    /// Stable API ID such as `acme.orders@v1`.
+    pub api_id: String,
+    #[command(flatten)]
+    pub project: ProjectRootArgs,
 }
 
 #[derive(Debug, clap::Args)]

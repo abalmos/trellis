@@ -460,8 +460,17 @@ ID, with a Semantic Version requirement and a local path to a canonical
 `trellis.api.v1` JSON artifact. `trellis.lock` records the exact release
 version, semantic API digest, local path, and semantic manifest digest. Release
 version is package metadata; runtime evidence remains stable API ID plus
-semantic digest. These data models do not resolve, install, fetch, or execute
-dependency source.
+semantic digest.
+
+`trellis add`, `trellis rm`, and `trellis update` resolve only those local
+canonical artifact paths and write an exact lock. `trellis install` is
+lock-stable: it verifies the manifest digest and each locked ID, release,
+semantic digest, and path before materializing canonical APIs and generating
+consumer-local SDKs under disposable `.trellis/` output. It never executes a
+dependency producer's source and never changes `trellis.toml` or `trellis.lock`.
+Dependency SDKs are generated before the consumer's own participant source is
+evaluated, while participant evidence continues to pin only API ID plus semantic
+digest.
 
 ## Contract boundary
 

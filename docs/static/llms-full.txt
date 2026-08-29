@@ -1,6 +1,6 @@
 # Trellis AI guidance for services and browser apps
 
-Last verified against Trellis main (2026-08-28).
+Last verified against Trellis main (2026-08-29).
 
 This file is for AI coding agents working in a service or browser app repository
 that consumes Trellis. The canonical URL is:
@@ -13,6 +13,14 @@ https://raw.githubusercontent.com/qlever-llc/trellis/main/docs/static/llms.txt
 
 ## Operating model
 
+- `trellis.toml` declares local canonical API artifact paths and `trellis.lock`
+  pins exact API ID, release, semantic digest, and path. Use `trellis add`,
+  `trellis rm`, and `trellis update` to mutate them and lock-stable
+  `trellis install` to generate disposable `.trellis/` outputs. Install generates
+  dependency SDKs before participant source evaluation and never executes
+  provider source. TypeScript links `@trellis/apis`; Rust path-depends on
+  `trellis-apis`. Release remains package metadata; participant and runtime
+  evidence remain API ID plus semantic digest.
 - Trellis services are contract-driven participants. Contracts declare the public
   surfaces a participant owns and the external surfaces it uses.
 - Participant identity, owned API identity, and API release version are

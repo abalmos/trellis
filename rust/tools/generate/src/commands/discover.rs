@@ -16,6 +16,7 @@ pub fn local_generate(force: bool) -> miette::Result<()> {
         false,
         force,
         "@trellis-sdk/",
+        None,
     )
     .map(|_| ())
 }
@@ -36,7 +37,7 @@ pub fn discover(args: &DiscoverArgs, force: bool) -> miette::Result<()> {
     }
     output::print_section("Plan");
     output::print_discover_summary(&discover_summary_lines(&plan));
-    let summary = execute_auto_plan(&plan, None, true, force, "@trellis-sdk/")?;
+    let summary = execute_auto_plan(&plan, None, true, force, "@trellis-sdk/", None)?;
     output::print_section("Result");
     output::print_info(&output::summary_line("generated", summary.generated));
     output::print_info(&output::summary_line("verified", summary.verified));

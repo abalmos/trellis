@@ -3,6 +3,7 @@ use std::io;
 
 use crate::cli::*;
 use crate::output;
+use crate::package;
 use crate::self_update::{ReleaseChannel, SelfUpdateTarget};
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine as _;
@@ -37,6 +38,10 @@ pub async fn run() -> miette::Result<()> {
     let format = cli.format;
 
     match cli.command {
+        TopLevelCommand::Add(args) => package::add(format, &args)?,
+        TopLevelCommand::Rm(args) => package::remove(format, &args)?,
+        TopLevelCommand::Update(args) => package::update(format, &args)?,
+        TopLevelCommand::Install(args) => package::install(format, &args)?,
         TopLevelCommand::Login(args) => auth::login(format, &args).await?,
         TopLevelCommand::Logout => auth::logout(format).await?,
         TopLevelCommand::Whoami => auth::whoami(format).await?,

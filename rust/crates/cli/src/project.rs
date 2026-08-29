@@ -34,6 +34,7 @@ impl ProjectManifest {
         if self.format != 1 {
             return Err(miette!("manifest format must equal 1"));
         }
+        let mut lineages = BTreeMap::new();
         for (id, dependency) in &self.apis {
             trellis_protocol::validate_api_id(id)
                 .map_err(|error| miette!("invalid API id '{id}': {error}"))?;
@@ -42,6 +43,17 @@ impl ProjectManifest {
             // ponytail: paths stay declarative here; install owns filesystem resolution.
             if dependency.path.is_empty() {
                 return Err(miette!("path for API '{id}' must not be empty"));
+            }
+            if Path::new(&dependency.path).is_absolute() {
+                return Err(miette!(
+                    "path for API '{id}' must be relative to the project root"
+                ));
+            }
+            let lineage = id.split('@').next().unwrap_or(id);
+            if let Some(existing) = lineages.insert(lineage, id) {
+                return Err(miette!(
+                    "API lineage '{lineage}' collides between '{existing}' and '{id}'; install only one transport major"
+                ));
             }
         }
         Ok(())
@@ -90,6 +102,7 @@ impl ProjectLock {
         }
         validate_digest("manifest-digest", &self.manifest_digest)?;
         let mut ids = BTreeMap::new();
+        let mut lineages = BTreeMap::new();
         for api in &self.api {
             trellis_protocol::validate_api_id(&api.id)
                 .map_err(|error| miette!("invalid API id '{}': {error}", api.id))?;
@@ -99,8 +112,21 @@ impl ProjectLock {
             if api.path.is_empty() {
                 return Err(miette!("path for API '{}' must not be empty", api.id));
             }
+            if Path::new(&api.path).is_absolute() {
+                return Err(miette!(
+                    "path for API '{}' must be relative to the project root",
+                    api.id
+                ));
+            }
             if ids.insert(&api.id, ()).is_some() {
                 return Err(miette!("duplicate locked API id '{}'", api.id));
+            }
+            let lineage = api.id.split('@').next().unwrap_or(&api.id);
+            if let Some(existing) = lineages.insert(lineage, &api.id) {
+                return Err(miette!(
+                    "API lineage '{lineage}' collides between '{existing}' and '{}'; install only one transport major",
+                    api.id
+                ));
             }
         }
         Ok(())
@@ -140,6 +166,66 @@ pub fn write_lock(path: &Path, lock: &ProjectLock) -> Result<()> {
     let mut sorted = lock.clone();
     sorted.api.sort_by(|left, right| left.id.cmp(&right.id));
     write_atomic_if_changed(path, toml::to_string(&sorted).into_diagnostic()?.as_bytes())
+}
+
+/// Replace `trellis.toml` and `trellis.lock` from fully validated values.
+pub fn write_manifest_and_lock(
+    manifest_path: &Path,
+    manifest: &ProjectManifest,
+    lock_path: &Path,
+    lock: &ProjectLock,
+) -> Result<()> {
+    manifest.validate()?;
+    lock.validate()?;
+    let manifest_bytes = toml::to_string(manifest).into_diagnostic()?.into_bytes();
+    let mut sorted_lock = lock.clone();
+    sorted_lock
+        .api
+        .sort_by(|left, right| left.id.cmp(&right.id));
+    let lock_bytes = toml::to_string(&sorted_lock)
+        .into_diagnostic()?
+        .into_bytes();
+    let parent = manifest_path.parent().unwrap_or_else(|| Path::new("."));
+    fs::create_dir_all(parent).into_diagnostic()?;
+    let old_manifest = fs::read(manifest_path).ok();
+    let mut manifest_temp = tempfile::NamedTempFile::new_in(parent).into_diagnostic()?;
+    let mut lock_temp = tempfile::NamedTempFile::new_in(parent).into_diagnostic()?;
+    std::io::Write::write_all(&mut manifest_temp, &manifest_bytes).into_diagnostic()?;
+    std::io::Write::write_all(&mut lock_temp, &lock_bytes).into_diagnostic()?;
+    manifest_temp.as_file().sync_all().into_diagnostic()?;
+    lock_temp.as_file().sync_all().into_diagnostic()?;
+    manifest_temp
+        .persist(manifest_path)
+        .map_err(|error| miette!(error))?;
+    if let Err(error) = lock_temp.persist(lock_path) {
+        match old_manifest {
+            Some(bytes) => write_atomic_if_changed(manifest_path, &bytes)?,
+            None => {
+                let _ = fs::remove_file(manifest_path);
+            }
+        }
+        return Err(miette!(error));
+    }
+    Ok(())
+}
+
+/// Restore the exact prior project-file bytes after a failed package mutation.
+pub fn restore_project_files(
+    manifest_path: &Path,
+    manifest: &[u8],
+    lock_path: &Path,
+    lock: Option<&[u8]>,
+) -> Result<()> {
+    write_atomic_if_changed(manifest_path, manifest)?;
+    match lock {
+        Some(bytes) => write_atomic_if_changed(lock_path, bytes),
+        None => {
+            if lock_path.exists() {
+                fs::remove_file(lock_path).into_diagnostic()?;
+            }
+            Ok(())
+        }
+    }
 }
 
 fn validate_digest(name: &str, value: &str) -> Result<()> {
@@ -210,6 +296,22 @@ version="^1.0"
             .get_mut("acme.orders@v1")
             .unwrap()
             .version = "banana".into();
+        assert!(invalid_manifest.validate().is_err());
+        invalid_manifest = first.clone();
+        invalid_manifest
+            .apis
+            .get_mut("acme.orders@v1")
+            .unwrap()
+            .path = "/tmp/orders.json".into();
+        assert!(invalid_manifest.validate().is_err());
+        invalid_manifest = first.clone();
+        invalid_manifest.apis.insert(
+            "acme.orders@v2".into(),
+            ApiDependency {
+                version: "^2".into(),
+                path: "../apis/orders-v2.json".into(),
+            },
+        );
         assert!(invalid_manifest.validate().is_err());
 
         let directory = tempfile::tempdir().unwrap();

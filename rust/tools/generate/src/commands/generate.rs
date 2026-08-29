@@ -149,6 +149,7 @@ pub fn all(args: &GenerateAllArgs, force: bool) -> miette::Result<()> {
     let fingerprints = current_generator_fingerprints();
     let output_plan = ContractOutputPlan {
         artifact_version: &artifact_version,
+        runtime_version: &artifact_version,
         out_api: &args.out_api,
         ts_out: args.jsr_out.as_deref(),
         npm_out: args.npm_out.as_deref(),

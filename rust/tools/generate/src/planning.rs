@@ -264,7 +264,8 @@ pub fn build_auto_plan_with_targets(
     Ok(plan)
 }
 
-fn validate_output_identity(kind: &str, id: &str) -> miette::Result<()> {
+/// Reject identities that cannot safely name generated filesystem outputs.
+pub fn validate_output_identity(kind: &str, id: &str) -> miette::Result<()> {
     miette::ensure!(
         !id.contains(['/', '\\']) && !id.contains("..") && !id.chars().any(char::is_whitespace),
         "{kind} id {id:?} cannot be used as a generated output name"
@@ -577,6 +578,7 @@ pub fn execute_auto_plan(
     show_title: bool,
     force: bool,
     prefix: &str,
+    runtime_version: Option<&str>,
 ) -> miette::Result<AutoExecutionSummary> {
     if show_title {
         output::print_section("Run");
@@ -620,6 +622,7 @@ pub fn execute_auto_plan(
                 .ok_or_else(|| miette::miette!("missing manifest output for generated contract"))?;
             let output_plan = ContractOutputPlan {
                 artifact_version,
+                runtime_version: runtime_version.unwrap_or(artifact_version),
                 out_api,
                 ts_out: entry.jsr_out.as_deref(),
                 npm_out: entry.npm_out.as_deref(),
@@ -790,6 +793,7 @@ pub fn execute_auto_plan(
                 }
                 let output_plan = ContractOutputPlan {
                     artifact_version: &artifact_version,
+                    runtime_version: runtime_version.unwrap_or(&artifact_version),
                     out_api,
                     ts_out: entry.jsr_out.as_deref(),
                     npm_out: entry.npm_out.as_deref(),
@@ -894,7 +898,7 @@ pub fn execute_auto_plan(
                             crate_version: artifact_version.clone(),
                             runtime_deps: rust_runtime_deps(
                                 entry.runtime_source,
-                                artifact_version.clone(),
+                                runtime_version.unwrap_or(&artifact_version).to_owned(),
                                 entry.runtime_repo_root.clone(),
                             ),
                             owned_sdk_crate_name: Some(crate_name.clone()),
@@ -1176,6 +1180,11 @@ fn participant_alias_mappings(
             continue;
         }
 
+        if let Some(mapping) = installed_rust_alias_mapping(entry, alias, &use_ref.api)? {
+            mappings.push(mapping);
+            continue;
+        }
+
         if let Some(mapping) =
             external_rust_alias_mapping(entry, alias, &use_ref.api, cargo_metadata)?
         {
@@ -1190,6 +1199,47 @@ fn participant_alias_mappings(
         ));
     }
     Ok(mappings)
+}
+
+fn installed_rust_alias_mapping(
+    entry: &AutoPlanEntry,
+    alias: &str,
+    contract_id: &str,
+) -> miette::Result<Option<trellis_codegen_rust::ParticipantAliasMapping>> {
+    let Some(root) = entry
+        .discovered
+        .source_path
+        .ancestors()
+        .find(|directory| directory.join(".trellis").is_dir())
+    else {
+        return Ok(None);
+    };
+    let crate_path = root
+        .join(".trellis/generated/rust/packages")
+        .join(sdk_output_stem(contract_id));
+    if !crate_path.join("Cargo.toml").is_file() {
+        return Ok(None);
+    }
+    let api_root = root.join(".trellis/apis").join(contract_id);
+    let mut installed = fs::read_dir(&api_root)
+        .into_diagnostic()?
+        .filter_map(Result::ok)
+        .map(|entry| entry.path().join("trellis.api.json"))
+        .filter(|path| path.is_file())
+        .collect::<Vec<_>>();
+    installed.sort();
+    miette::ensure!(
+        installed.len() == 1,
+        "installed API '{}' must have exactly one materialized release",
+        contract_id
+    );
+    Ok(Some(trellis_codegen_rust::ParticipantAliasMapping {
+        alias: alias.to_string(),
+        crate_name: default_rust_crate_name_from_id(contract_id),
+        api_path: installed.remove(0),
+        crate_path: Some(crate_path),
+        cargo_dependency: None,
+    }))
 }
 
 fn external_rust_alias_mapping(

@@ -1,6 +1,6 @@
 # Trellis AI guide
 
-Last verified against Trellis main (2026-08-28).
+Last verified against Trellis main (2026-08-29).
 
 Canonical full guide:
 https://raw.githubusercontent.com/qlever-llc/trellis/main/docs/static/llms-full.txt
@@ -12,6 +12,12 @@ commands.
 
 ## Current model
 
+- Consumer projects manage local canonical API dependencies with `trellis add`,
+  `trellis rm`, `trellis update`, and lock-stable `trellis install`. Commit
+  `trellis.toml` and `trellis.lock`; ignore `.trellis/`. Install verifies exact
+  API ID, release, and semantic digest, generates SDKs before participant source
+  evaluation, and never executes provider source. TypeScript links the local
+  `@trellis/apis` aggregate; Rust path-depends on `trellis-apis`.
 - The Rust platform runtime is the sole auth owner. TypeScript owns portal source,
   generated SDKs, clients, proof bindings, and tests, but no auth runtime state.
 - HTTP is limited to browser/account flows, initial service/device bootstrap,

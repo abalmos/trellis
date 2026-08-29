@@ -533,6 +533,39 @@ fn evaluate_rust_native_contract(source_path: &Path, source_export: &str) -> mie
     let src_dir = helper_dir.join("src");
     fs::create_dir_all(&src_dir).into_diagnostic()?;
     let contracts_crate = contracts_crate_path()?;
+    let trellis_crate = contracts_crate
+        .parent()
+        .map(|directory| directory.join("trellis"))
+        .filter(|path| path.join("Cargo.toml").is_file());
+    let local_runtime_patches = trellis_crate
+        .as_deref()
+        .map(|path| {
+            format!(
+                "\n[patch.crates-io]\ntrellis-contracts = {{ path = {} }}\ntrellis-rs = {{ path = {} }}\n",
+                toml_string_literal(&contracts_crate),
+                toml_string_literal(path)
+            )
+        })
+        .unwrap_or_default();
+    let mut current = source_path.parent();
+    let mut installed_apis = None;
+    while let Some(directory) = current {
+        let candidate = directory.join(".trellis/generated/rust/trellis-apis");
+        if candidate.join("Cargo.toml").is_file() {
+            installed_apis = Some(candidate);
+            break;
+        }
+        current = directory.parent();
+    }
+    let installed_dependency = installed_apis
+        .as_deref()
+        .map(|path| {
+            format!(
+                "trellis-apis = {{ path = {} }}\n",
+                toml_string_literal(path)
+            )
+        })
+        .unwrap_or_default();
     let source = fs::read_to_string(source_path).into_diagnostic()?;
     let builder_fn = if source_export == "API" && rust_source_has_function(&source, "api_artifact")
     {
@@ -555,6 +588,8 @@ publish = false
 [dependencies]
 serde_json = "1.0.149"
 trellis-contracts = {{ path = {} }}
+{installed_dependency}
+{local_runtime_patches}
 "#,
             toml_string_literal(&contracts_crate)
         ),
