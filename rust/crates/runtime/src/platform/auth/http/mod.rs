@@ -52,6 +52,8 @@ use security::{
 
 const EMBEDDED_PORTAL_ASSETS: &[(&str, &[u8])] =
     include!(concat!(env!("OUT_DIR"), "/portal_assets.rs"));
+const EMBEDDED_CONSOLE_ASSETS: &[(&str, &[u8])] =
+    include!(concat!(env!("OUT_DIR"), "/console_assets.rs"));
 const MAX_AUTH_REQUEST_BODY_BYTES: usize = 4 * 1024 * 1024;
 use url::Url;
 
@@ -215,6 +217,7 @@ pub(super) struct AuthHttpState<R, E> {
     websocket_nats_servers: Vec<String>,
     oidc_providers: BTreeMap<String, OidcProvider>,
     proof_policy: SessionProofPolicy,
+    browser_proof_policy: SessionProofPolicy,
     portal_override_dir: Option<PathBuf>,
 }
 

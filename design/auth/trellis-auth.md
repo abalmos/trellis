@@ -275,8 +275,10 @@ The callout pipeline is:
 6. load the published, active context and verify root, manifest, signature,
    policy, digest, and revocation state
 7. require the NATS NKey to encode the signed context's session key
-8. load the exact participant binding and current physical resource bindings
-9. compile transport permissions directly from signed grants and those bindings
+8. load the exact transport permissions committed with the durable active
+   context
+9. reject missing or malformed context permissions without reopening participant
+   or API artifacts
 10. issue the short-lived target-account user JWT and record connection presence
 
 The outer AuthResponse is signed by the Auth-account signing key. The inner user
@@ -284,11 +286,14 @@ JWT is signed by the target-account signing key. Its expiry is bounded by the
 configured maximum, context expiry, session expiry, effective authority expiry,
 and device delegation expiry.
 
-Transport permissions are deterministic projections of exact grants, API
-descriptors, typed resource bindings, the session inbox, and narrow built-in
-subjects. Request and event validation resolve the exact API action and require
-its atom; capability metadata authorizes only when every mapped atom is present.
-Transport subjects and bindings are never read back as authority.
+Transport permissions are deterministic projections of exact grants, a compact
+digest-bound participant transport projection, typed resource bindings, the
+session inbox, and narrow built-in subjects. Full participant and API artifacts
+are validated when the participant binding is written; they are not parsed in
+context issuance or NATS admission. Context issuance commits exact permissions
+with the context. Request and event validation resolve the exact API action and
+require its atom; capability metadata authorizes only when every mapped atom is
+present. Transport subjects and bindings are never read back as authority.
 
 Connected providers use the authorization registry over internal NATS KV, not
 HTTP. They establish the current-manifest and revocation watches, verify the
@@ -328,6 +333,13 @@ V1003 adds trust floors, signed context records, optimistic issuance snapshot
 tokens, publication state, and revocation lifecycle. SQLite is the sole complete
 production-faithful persistence implementation for this milestone; repository
 ports remain backend-neutral for a future PostgreSQL owner.
+
+V1005 stores compact participant transport projections keyed by exact artifact
+digests and exact transport permissions committed with authorization contexts.
+Existing bindings are validated and projected once when first used after
+migration. Existing contexts are revoked during migration, their pending publish
+actions are removed, and durable revoke actions are retained or created so
+registry consumers converge before clients refresh.
 
 Accepted migration files are immutable. V1001 remains byte-identical to the
 accepted Milestone 7 migration; V1002 performs M8 evolution and is verified

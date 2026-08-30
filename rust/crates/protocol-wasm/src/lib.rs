@@ -2,13 +2,17 @@
 
 #![deny(missing_docs)]
 
+#[cfg(feature = "resolver")]
 use std::collections::BTreeMap;
 
 use serde::Deserialize;
 use serde_json::{json, Value};
+#[cfg(feature = "resolver")]
 use trellis_protocol::{
-    parse_api, parse_authorization_context, parse_issuer_manifest, parse_participant,
-    resolve_participant as resolve_participant_protocol,
+    parse_api, parse_participant, resolve_participant as resolve_participant_protocol,
+};
+use trellis_protocol::{
+    parse_authorization_context, parse_issuer_manifest,
     session_proof_request_digest as session_proof_request_digest_protocol,
     session_proof_signing_digest as session_proof_signing_digest_protocol,
     verify_authorization_context as verify_authorization_context_protocol,
@@ -392,6 +396,7 @@ pub fn verify_authorization_manifest(
 }
 
 /// Resolve one participant against its exact native API artifacts.
+#[cfg(feature = "resolver")]
 #[wasm_bindgen]
 pub fn resolve_participant(participant_json: &str, apis_json: &str) -> Result<String, JsError> {
     let participant_value: Value =

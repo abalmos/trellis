@@ -1,17 +1,29 @@
 import { Value } from "typebox/value";
-import type { NativeProtocolContract } from "../../contract_support/protocol_artifacts.ts";
-import { resolveNativeProtocolPresentation } from "../../contract_support/protocol_resolution.ts";
+import {
+  type NativeProtocolContract,
+  nativeProtocolPresentation,
+} from "../../contract_support/protocol_artifacts.ts";
 import {
   type AuthStartRequest,
   AuthStartRequestSchema,
   type AuthStartResponse,
   AuthStartResponseSchema,
+  AuthStartWireResponseSchema,
   type BindResponse,
   BindResponseSchema,
   type BindSuccessResponse,
 } from "../schemas.ts";
+import {
+  sessionNkeyFromPublicKey,
+  sessionProofRequestDigest,
+  signSessionProof,
+} from "../session_proof.ts";
+import { bindFlowSig, getPublicSessionKey } from "./session.ts";
 import type { SessionKeyHandle } from "./session.ts";
-import { bindFlowSig, getPublicSessionKey, oauthInitSig } from "./session.ts";
+
+export type AuthConfig = {
+  authUrl: string;
+};
 
 export type {
   AuthStartFlowResponse,
@@ -23,106 +35,28 @@ export type {
   SentinelCreds,
 } from "../schemas.ts";
 
-export type AuthConfig = {
-  authUrl: string;
-};
-
-type BuildLoginUrlArgs = {
-  config: AuthConfig;
-  provider?: string;
-  redirectTo: string;
-  handle: SessionKeyHandle;
-  contract: NativeProtocolContract;
-  context?: unknown;
-};
-
 type BuildLoginUrlFlatArgs = {
   authUrl: string;
-  provider?: string;
   redirectTo: string;
   handle: SessionKeyHandle;
   contract: NativeProtocolContract;
-  context?: unknown;
 };
 
 type StartAuthRequestArgs = {
   authUrl: string;
-  provider?: string;
   redirectTo: string;
   handle: SessionKeyHandle;
   contract: NativeProtocolContract;
-  context?: unknown;
 };
 
-function contextRecord(value: unknown): Record<string, unknown> | undefined {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return undefined;
-  }
-  return value as Record<string, unknown>;
-}
-
 export async function buildLoginUrl(
-  config: AuthConfig,
-  provider: string | undefined,
-  redirectTo: string,
-  handle: SessionKeyHandle,
-  contract: NativeProtocolContract,
-  context?: unknown,
-): Promise<string>;
-export async function buildLoginUrl(
-  args: {
-    authUrl: string;
-    provider?: string;
-    redirectTo: string;
-    handle: SessionKeyHandle;
-    contract: NativeProtocolContract;
-    context?: unknown;
-  },
-): Promise<string>;
-export async function buildLoginUrl(
-  args: {
-    config: AuthConfig;
-    provider?: string;
-    redirectTo: string;
-    handle: SessionKeyHandle;
-    contract: NativeProtocolContract;
-    context?: unknown;
-  },
-): Promise<string>;
-export async function buildLoginUrl(
-  argsOrConfig: BuildLoginUrlArgs | BuildLoginUrlFlatArgs | AuthConfig,
-  provider?: string,
-  redirectTo?: string,
-  handle?: SessionKeyHandle,
-  contract?: NativeProtocolContract,
-  context?: unknown,
+  args: BuildLoginUrlFlatArgs,
 ): Promise<string> {
-  const resolved = isNestedBuildLoginUrlArgs(argsOrConfig)
-    ? argsOrConfig
-    : isFlatBuildLoginUrlArgs(argsOrConfig)
-    ? {
-      config: { authUrl: argsOrConfig.authUrl },
-      provider: argsOrConfig.provider,
-      redirectTo: argsOrConfig.redirectTo,
-      handle: argsOrConfig.handle,
-      contract: argsOrConfig.contract,
-      context: argsOrConfig.context,
-    }
-    : buildLoginUrlArgsFromPositional(
-      argsOrConfig,
-      provider,
-      redirectTo,
-      handle,
-      contract,
-      context,
-    );
   const response = await startAuthRequest({
-    authUrl: resolved.config.authUrl,
-    provider: resolved.provider,
-    redirectTo: resolved.redirectTo,
-    handle: resolved.handle,
-    contract: resolved.contract,
-    context: resolved.context,
+    authUrl: args.authUrl,
+    redirectTo: args.redirectTo,
+    handle: args.handle,
+    contract: args.contract,
   });
   if (response.status !== "flow_started") {
     throw new Error("Auth request completed without starting a browser flow");
@@ -133,31 +67,44 @@ export async function buildLoginUrl(
 export async function startAuthRequest(
   args: StartAuthRequestArgs,
 ): Promise<AuthStartResponse> {
-  const context = contextRecord(args.context);
-  const presentation = await resolveNativeProtocolPresentation(args.contract);
+  const presentation = nativeProtocolPresentation(args.contract);
   const participantDigest = args.contract.CONTRACT_DIGEST;
   const participantEvidence = {
     participantId: args.contract.CONTRACT_ID,
     participantArtifactDigest: participantDigest,
-    participantNeedsDigest: presentation.participantNeedsDigest,
     participantArtifact: presentation.participant,
     referencedApiArtifacts: [presentation.api, ...presentation.referencedApis],
   };
-  const sig = await oauthInitSig(
-    args.handle,
-    args.redirectTo,
-    context,
-    args.provider,
-    participantEvidence,
-  );
-  const request = Value.Parse(AuthStartRequestSchema, {
-    redirectTo: args.redirectTo,
-    sessionKey: getPublicSessionKey(args.handle),
-    sig,
+  const requestId = crypto.randomUUID();
+  const issuedAt = Date.now();
+  const sessionPublicKey = getPublicSessionKey(args.handle);
+  const sessionNkey = sessionNkeyFromPublicKey(sessionPublicKey);
+  const request = {
+    requestId,
+    issuedAt,
+    sessionPublicKey,
+    sessionNkey,
     ...participantEvidence,
-    ...(args.provider ? { provider: args.provider } : {}),
-    ...(context ? { context } : {}),
-  }) as AuthStartRequest;
+    redirectTarget: args.redirectTo,
+    proof: { format: "trellis.session-proof.v1", signature: "" },
+  } satisfies AuthStartRequest;
+  const requestDigest = await sessionProofRequestDigest(request);
+  request.proof = await signSessionProof(
+    {
+      purpose: "userAuthRequest",
+      requestId,
+      issuedAt,
+      sessionPublicKey,
+      sessionNkey,
+      participantId: participantEvidence.participantId,
+      participantDigest,
+      redirectTarget: args.redirectTo,
+      requestDigest,
+    },
+    args.handle.privateKey,
+    sessionPublicKey,
+  );
+  Value.Parse(AuthStartRequestSchema, request);
 
   const response = await fetch(`${args.authUrl}/auth/requests`, {
     method: "POST",
@@ -169,48 +116,12 @@ export async function startAuthRequest(
     throw new Error(`Auth request failed: ${response.status} ${text}`);
   }
 
-  return Value.Parse(
-    AuthStartResponseSchema,
-    await response.json(),
-  ) as AuthStartResponse;
-}
-
-function buildLoginUrlArgsFromPositional(
-  config: AuthConfig,
-  provider: string | undefined,
-  redirectTo: string | undefined,
-  handle: SessionKeyHandle | undefined,
-  contract: NativeProtocolContract | undefined,
-  context: unknown,
-): BuildLoginUrlArgs {
-  if (
-    redirectTo === undefined || handle === undefined || contract === undefined
-  ) {
-    throw new TypeError(
-      "buildLoginUrl requires redirectTo, handle, and contract",
-    );
-  }
-  return {
-    config,
-    provider,
-    redirectTo,
-    handle,
-    contract,
-    context,
-  };
-}
-
-function isNestedBuildLoginUrlArgs(
-  value: BuildLoginUrlArgs | BuildLoginUrlFlatArgs | AuthConfig,
-): value is BuildLoginUrlArgs {
-  return "config" in value;
-}
-
-function isFlatBuildLoginUrlArgs(
-  value: BuildLoginUrlArgs | BuildLoginUrlFlatArgs | AuthConfig,
-): value is BuildLoginUrlFlatArgs {
-  return "authUrl" in value && "redirectTo" in value && "handle" in value &&
-    "contract" in value;
+  const wire = Value.Parse(AuthStartWireResponseSchema, await response.json());
+  return Value.Parse(AuthStartResponseSchema, {
+    status: "flow_started",
+    flowId: wire.flowId,
+    loginUrl: wire.portalUrl,
+  }) as AuthStartResponse;
 }
 
 export function isBindSuccessResponse(

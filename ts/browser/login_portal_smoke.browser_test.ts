@@ -53,6 +53,7 @@ import {
 } from "../integration/device-activation/_fixture.ts";
 
 const buildDir = resolve("portals/login/build");
+const consoleBuildDir = resolve("apps/console/build-embedded");
 const coverageDir = resolve("coverage/browser");
 const liveLocalLoginCaseId = "browser.login-portal-live-local-login";
 const liveLocalLoginFixture = createAuthLocalLoginFixture(
@@ -284,27 +285,27 @@ Deno.test("browser.login-portal static routes render browser-only states", async
         for (
           const route of [
             {
-              pathname: "/_trellis/portal/users/login",
+              pathname: "/login",
               text: "Session expired",
             },
             {
-              pathname: "/_trellis/portal/admin/bootstrap",
+              pathname: "/login/admin/bootstrap",
               text: "Missing bootstrap flow id.",
             },
             {
-              pathname: "/_trellis/portal/admin/invite",
+              pathname: "/login/admin/invite",
               text: "Missing invitation flow id.",
             },
             {
-              pathname: "/_trellis/portal/account/link",
+              pathname: "/login/account/link",
               text: "Missing account-link flow id.",
             },
             {
-              pathname: "/_trellis/portal/account/password",
+              pathname: "/login/account/password",
               text: "Missing password flow id.",
             },
             {
-              pathname: "/_trellis/portal/devices/activate",
+              pathname: "/login/device",
               text: "Missing flow id.",
             },
           ] as const
@@ -322,6 +323,75 @@ Deno.test("browser.login-portal static routes render browser-only states", async
     );
   } finally {
     await server?.shutdown();
+  }
+});
+
+Deno.test("browser.embedded-console starts same-origin login under production CSP", async () => {
+  let authRequests = 0;
+  const cspViolations: string[] = [];
+  const server = Deno.serve(
+    { hostname: "127.0.0.1", port: 0, onListen() {} },
+    async (request) => {
+      const url = new URL(request.url);
+      if (url.pathname === "/auth/requests") {
+        authRequests += 1;
+        const body = await request.json() as Record<string, unknown>;
+        assertEquals(typeof body.requestId, "string");
+        assertEquals(typeof body.issuedAt, "number");
+        assertEquals(typeof body.sessionPublicKey, "string");
+        assertEquals(typeof body.sessionNkey, "string");
+        assertEquals(typeof body.redirectTarget, "string");
+        assertEquals(typeof body.proof, "object");
+        assertEquals("redirectTo" in body, false);
+        assertEquals("sig" in body, false);
+        return new Response(
+          JSON.stringify({ error: "test_stop_after_same_origin_request" }),
+          { status: 400, headers: { "content-type": "application/json" } },
+        );
+      }
+      const relativePath = url.pathname.startsWith("/console/")
+        ? url.pathname.slice("/console/".length)
+        : "index.html";
+      const candidate = resolve(consoleBuildDir, relativePath || "index.html");
+      const path =
+        isInside(consoleBuildDir, candidate) && await exists(candidate)
+          ? candidate
+          : join(consoleBuildDir, "index.html");
+      return new Response(await Deno.readFile(path), {
+        headers: {
+          "content-type": contentType(path),
+          "content-security-policy":
+            "default-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' ws://127.0.0.1:8080",
+        },
+      });
+    },
+  );
+
+  try {
+    await withCoveredPage(
+      "browser.embedded-console starts same-origin login under production CSP",
+      async ({ page }) => {
+        page.on("console", (message) => {
+          if (message.text().includes("Content Security Policy")) {
+            cspViolations.push(message.text());
+          }
+        });
+        const authRequest = page.waitForRequest((request) =>
+          new URL(request.url()).pathname === "/auth/requests"
+        );
+        await page.goto(`http://127.0.0.1:${server.addr.port}/console`, {
+          waitUntil: "domcontentloaded",
+        });
+        const request = await authRequest;
+
+        assertEquals(new URL(request.url()).origin, new URL(page.url()).origin);
+        assertEquals(await page.locator("#auth-url").count(), 0);
+        assertEquals(authRequests, 1);
+        assertEquals(cspViolations, []);
+      },
+    );
+  } finally {
+    await server.shutdown();
   }
 });
 
@@ -359,7 +429,7 @@ withLivePortalPage(
         disabled: false,
         portalId: liveLocalLoginPortalId,
         displayName: "Browser Login Portal",
-        entryUrl: `${portalOrigin}/_trellis/portal/users/login`,
+        entryUrl: `${portalOrigin}/login`,
         expectedVersion: null,
         idempotencyKey: crypto.randomUUID(),
         loginSettings: {
@@ -1401,7 +1471,7 @@ Deno.test("browser.login-portal live OIDC role mapping", async () => {
             disabled: false,
             portalId: liveOidcRolePortalId,
             displayName: "OIDC Role Portal",
-            entryUrl: `${portalOrigin}/_trellis/portal/users/login`,
+            entryUrl: `${portalOrigin}/login`,
             expectedVersion: null,
             idempotencyKey: crypto.randomUUID(),
             loginSettings: {
@@ -1585,7 +1655,7 @@ Deno.test("browser.login-portal live OIDC role mapping", async () => {
           const linkResponse = await page.goto(
             accountFlowPortalUrl(
               portalOrigin,
-              "/_trellis/portal/account/link",
+              "/login/account/link",
               flowId,
             ),
             { waitUntil: "networkidle" },
@@ -1709,7 +1779,7 @@ withLivePortalPage(
 
       const resetUrl = accountFlowPortalUrl(
         portalOrigin,
-        "/_trellis/portal/account/password",
+        "/login/account/password",
         resetToken,
       );
       const response = await page.goto(
@@ -1811,7 +1881,7 @@ withLivePortalPage(
       const response = await page.goto(
         accountFlowPortalUrl(
           portalOrigin,
-          "/_trellis/portal/account/password",
+          "/login/account/password",
           resetToken,
         ),
         { waitUntil: "networkidle" },
@@ -1881,7 +1951,7 @@ withLivePortalPage(
       const response = await page.goto(
         accountFlowPortalUrl(
           portalOrigin,
-          "/_trellis/portal/account/password",
+          "/login/account/password",
           `missing-flow-${integrationSlug(liveMissingAccountFlowCaseId)}`,
         ),
         { waitUntil: "networkidle" },
@@ -1930,7 +2000,7 @@ withLivePortalPage(
       const resetToken = accountFlowToken(reset.flow.completionUrl);
       const url = accountFlowPortalUrl(
         portalOrigin,
-        "/_trellis/portal/account/password",
+        "/login/account/password",
         resetToken,
       );
 
@@ -2251,7 +2321,7 @@ withLivePortalPage(
   "browser.login-portal live invalid device activation shows error",
   async ({ page, portalOrigin }) => {
     const response = await page.goto(
-      new URL("/_trellis/portal/devices/activate", portalOrigin).toString(),
+      new URL("/login/device", portalOrigin).toString(),
       { waitUntil: "networkidle" },
     );
     assertEquals(response?.status(), 200);
@@ -2430,7 +2500,7 @@ function deviceActivationPortalUrl(
   portalOrigin: string,
   flowId: string,
 ): string {
-  const url = new URL("/_trellis/portal/devices/activate", portalOrigin);
+  const url = new URL("/login/device", portalOrigin);
   url.searchParams.set("flowId", flowId);
   return url.toString();
 }
@@ -2516,7 +2586,7 @@ async function setupDeviceActivationPortalUser(args: {
     disabled: false,
     portalId: args.portalId,
     displayName: "Browser Device Activation Portal",
-    entryUrl: `${args.portalOrigin}/_trellis/portal/users/login`,
+    entryUrl: `${args.portalOrigin}/login`,
     expectedVersion: null,
     idempotencyKey: crypto.randomUUID(),
     loginSettings: {
@@ -2550,7 +2620,7 @@ async function configureLocalLoginPortal(args: {
     disabled: false,
     portalId: args.portalId,
     displayName: "Browser Login Portal",
-    entryUrl: `${args.portalOrigin}/_trellis/portal/users/login`,
+    entryUrl: `${args.portalOrigin}/login`,
     expectedVersion: null,
     idempotencyKey: crypto.randomUUID(),
     loginSettings: {

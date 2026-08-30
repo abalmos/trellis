@@ -9,7 +9,7 @@ import {
 } from "./contract_support/mod.ts";
 import { getContractRuntime } from "./contract_support/contract_runtime.ts";
 import type { NativeProtocolContract } from "./contract_support/protocol_artifacts.ts";
-import { resolveNativeProtocolPresentation } from "./contract_support/protocol_resolution.ts";
+import { nativeProtocolPresentation } from "./contract_support/protocol_artifacts.ts";
 import { type CallerRuntime, createCallerRuntime } from "./caller.ts";
 import {
   base64urlDecode,
@@ -819,7 +819,7 @@ async function buildSessionKeyLoginUrl(args: {
   const startedAt = performance.now();
   const requestId = ulid();
   const issuedAt = Date.now();
-  const presentation = await resolveNativeProtocolPresentation(args.contract);
+  const presentation = nativeProtocolPresentation(args.contract);
   if (
     args.participant.id !== args.contract.CONTRACT_ID ||
     args.participant.artifactDigest !== args.contract.CONTRACT_DIGEST
@@ -833,7 +833,6 @@ async function buildSessionKeyLoginUrl(args: {
     sessionNkey: args.identity.sessionNkey,
     participantId: args.participant.id,
     participantArtifactDigest: args.participant.artifactDigest,
-    participantNeedsDigest: presentation.participantNeedsDigest,
     participantArtifact: presentation.participant,
     referencedApiArtifacts: [presentation.api, ...presentation.referencedApis],
     redirectTarget: args.redirectTo,

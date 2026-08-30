@@ -1,14 +1,25 @@
-FROM docker.io/denoland/deno:2.8.3 AS portal
+FROM docker.io/library/rust:bookworm AS protocol-wasm
 
 WORKDIR /src
 
-COPY js /src/js
+COPY rust /src/rust
+COPY ts /src/ts
+
+RUN rustup target add wasm32-unknown-unknown \
+    && cargo run --locked --manifest-path rust/xtask/Cargo.toml -- protocol-wasm
+
+FROM docker.io/denoland/deno:2.8.3 AS browser-apps
+
+WORKDIR /src
+
+COPY ts /src/ts
 COPY generated /src/generated
 COPY art /src/art
+COPY --from=protocol-wasm /src/ts/packages/trellis/auth/protocol_wasm /src/ts/packages/trellis/auth/protocol_wasm
 
 RUN mkdir -p /src/rust/crates/runtime/generated \
     && deno install --config ts/deno.json --lock ts/deno.lock --frozen \
-    && deno task --config ts/portals/login/deno.json build:embedded
+    && deno task --config ts/deno.json browser:embedded
 
 FROM docker.io/library/rust:bookworm AS build
 
@@ -17,8 +28,8 @@ WORKDIR /src
 COPY rust /src/rust
 COPY generated /src/generated
 COPY conformance /src/conformance
-COPY js /src/js
-COPY --from=portal /src/rust/crates/runtime/generated/portal /src/rust/crates/runtime/generated/portal
+COPY ts /src/ts
+COPY --from=browser-apps /src/rust/crates/runtime/generated /src/rust/crates/runtime/generated
 
 RUN cargo build --locked --manifest-path rust/Cargo.toml --release \
     --package trellis-runtime --bin trellis-server \

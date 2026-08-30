@@ -1,7 +1,6 @@
 use axum::body::Body;
 use axum::http::header::{
-    CONTENT_SECURITY_POLICY, COOKIE, ORIGIN, REFERRER_POLICY, X_CONTENT_TYPE_OPTIONS,
-    X_FRAME_OPTIONS,
+    COOKIE, ORIGIN, REFERRER_POLICY, X_CONTENT_TYPE_OPTIONS, X_FRAME_OPTIONS,
 };
 use axum::http::{HeaderMap, HeaderName, HeaderValue, Request};
 use axum::middleware::Next;
@@ -149,12 +148,6 @@ pub(super) async fn security_headers(request: Request<Body>, next: Next) -> Resp
     headers.insert(
         HeaderName::from_static("permissions-policy"),
         HeaderValue::from_static("camera=(), microphone=(), geolocation=()"),
-    );
-    headers.insert(
-        CONTENT_SECURITY_POLICY,
-        HeaderValue::from_static(
-            "default-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'",
-        ),
     );
     response
 }

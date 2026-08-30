@@ -161,14 +161,18 @@ jobs:
         with:
           deno-version: ${{ env.DENO_VERSION }}
 
-      - name: Build embedded portal
-        run: deno task -c ts/portals/login/deno.json build:embedded
+      - name: Build embedded browser apps
+        run: deno task -c ts/deno.json browser:embedded
 
-      - name: Upload embedded portal
+      - name: Test embedded Console in Chromium
+        working-directory: ts
+        run: deno task test:browser:embedded
+
+      - name: Upload embedded browser apps
         uses: actions/upload-artifact@v4
         with:
           name: check-portal
-          path: rust/crates/runtime/generated/portal
+          path: rust/crates/runtime/generated
           retention-days: 1
 
   rust:
@@ -190,7 +194,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: check-portal
-          path: rust/crates/runtime/generated/portal
+          path: rust/crates/runtime/generated
 
       - name: Expose installed Cargo binaries
         run: echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
@@ -332,7 +336,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: check-portal
-          path: rust/crates/runtime/generated/portal
+          path: rust/crates/runtime/generated
 
       - name: Download protocol WASM
         uses: actions/download-artifact@v4

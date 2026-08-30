@@ -1,30 +1,17 @@
-import { assertEquals, assertRejects } from "@std/assert";
+import { assertEquals, assertExists, assertRejects } from "@std/assert";
 
-import { bindFlow, buildLoginUrl, startAuthRequest } from "./login.ts";
+import { bindFlow, buildLoginUrl } from "./login.ts";
 import { defineAppContract } from "../../contract_support/mod.ts";
 import type { SessionKeyHandle } from "./session.ts";
 import {
-  base64urlDecode,
-  canonicalizeJsonValue,
-  sha256,
-  toArrayBuffer,
-  utf8,
-} from "../utils.ts";
-import { resolveNativeProtocolPresentation } from "../../contract_support/protocol_resolution.ts";
+  sessionProofRequestDigest,
+  verifySessionProof,
+} from "../session_proof.ts";
 
 const TEST_CONTRACT = defineAppContract(() => ({
   id: "demo.app@v1",
   displayName: "Demo app",
   description: "Demo app contract.",
-}));
-
-const SIGNED_CONTRACT = defineAppContract(() => ({
-  id: "demo.app@v1",
-  displayName: "Demo app",
-  description: "Demo app contract.",
-  capabilities: {
-    admin: { displayName: "Admin", description: "Admin access" },
-  },
 }));
 
 async function createHandle(): Promise<SessionKeyHandle> {
@@ -49,173 +36,60 @@ async function createHandle(): Promise<SessionKeyHandle> {
   };
 }
 
-Deno.test("buildLoginUrl targets auth chooser when provider is omitted", async () => {
+Deno.test("buildLoginUrl sends the protocol-owned user auth proof", async () => {
   const originalFetch = globalThis.fetch;
   try {
+    const handle = await createHandle();
     globalThis.fetch = (async (input, init) => {
       assertEquals(String(input), "http://localhost:3000/auth/requests");
       assertEquals(init?.method, "POST");
       const body = JSON.parse(String(init?.body));
-      assertEquals(body.redirectTo, "http://localhost:5173/profile");
+      assertExists(body.requestId);
+      assertEquals(Number.isSafeInteger(body.issuedAt), true);
+      assertEquals(body.sessionPublicKey, handle.sessionKey);
+      assertExists(body.sessionNkey);
+      assertEquals(body.redirectTarget, "http://localhost:5173/profile");
       assertEquals(body.participantId, TEST_CONTRACT.CONTRACT_ID);
       assertEquals(body.participantArtifact, TEST_CONTRACT.PARTICIPANT);
-      assertEquals("contract" in body, false);
-      assertEquals(body.context, { subtitle: "Welcome back" });
+      const requestDigest = await sessionProofRequestDigest(body);
+      await verifySessionProof(
+        {
+          purpose: "userAuthRequest",
+          requestId: body.requestId,
+          issuedAt: body.issuedAt,
+          sessionPublicKey: body.sessionPublicKey,
+          sessionNkey: body.sessionNkey,
+          participantId: body.participantId,
+          participantDigest: body.participantArtifactDigest,
+          redirectTarget: body.redirectTarget,
+          requestDigest,
+        },
+        body.proof,
+        handle.sessionKey,
+        body.issuedAt,
+        {
+          maximumAgeMs: 1_000,
+          maximumFutureSkewMs: 1_000,
+        },
+      );
       return new Response(JSON.stringify({
-        status: "flow_started",
+        state: "flow",
         flowId: "flow-1",
-        loginUrl:
-          "http://localhost:3000/_trellis/portal/users/login?flowId=flow-1",
+        portalUrl: "http://localhost:3000/login?flowId=flow-1",
       }));
     }) as typeof fetch;
 
     const url = await buildLoginUrl({
       authUrl: "http://localhost:3000",
       redirectTo: "http://localhost:5173/profile",
-      handle: await createHandle(),
+      handle,
       contract: TEST_CONTRACT,
-      context: { subtitle: "Welcome back" },
     });
 
     assertEquals(
       url,
-      "http://localhost:3000/_trellis/portal/users/login?flowId=flow-1",
+      "http://localhost:3000/login?flowId=flow-1",
     );
-  } finally {
-    globalThis.fetch = originalFetch;
-  }
-});
-
-Deno.test("buildLoginUrl preserves explicit provider selection through flow creation", async () => {
-  const originalFetch = globalThis.fetch;
-  try {
-    globalThis.fetch = (async (_input, init) => {
-      const body = JSON.parse(String(init?.body));
-      assertEquals(body.provider, "github");
-      return new Response(JSON.stringify({
-        status: "flow_started",
-        flowId: "flow-1",
-        loginUrl: "http://localhost:3000/auth/login/github?flowId=flow-1",
-      }));
-    }) as typeof fetch;
-
-    const url = await buildLoginUrl({
-      authUrl: "http://localhost:3000",
-      provider: "github",
-      redirectTo: "http://localhost:5173/profile",
-      handle: await createHandle(),
-      contract: TEST_CONTRACT,
-    });
-
-    assertEquals(url, "http://localhost:3000/auth/login/github?flowId=flow-1");
-  } finally {
-    globalThis.fetch = originalFetch;
-  }
-});
-
-Deno.test("startAuthRequest returns bound immediately when auth auto-approves", async () => {
-  const originalFetch = globalThis.fetch;
-  try {
-    globalThis.fetch = (async () =>
-      new Response(JSON.stringify({
-        status: "bound",
-        inboxPrefix: "_INBOX.abc123",
-        expires: "2026-01-01T00:00:00.000Z",
-        sentinel: { jwt: "jwt", seed: "seed" },
-        transports: {
-          native: { natsServers: ["nats://localhost:4222"] },
-        },
-      }))) as typeof fetch;
-
-    const response = await startAuthRequest({
-      authUrl: "http://localhost:3000",
-      redirectTo: "http://localhost:5173/profile",
-      handle: await createHandle(),
-      contract: TEST_CONTRACT,
-    });
-
-    assertEquals(response.status, "bound");
-  } finally {
-    globalThis.fetch = originalFetch;
-  }
-});
-
-Deno.test("startAuthRequest omits scalar context from both request body and signature input", async () => {
-  const originalFetch = globalThis.fetch;
-  try {
-    globalThis.fetch = (async (_input, init) => {
-      const body = JSON.parse(String(init?.body));
-      assertEquals("context" in body, false);
-      return new Response(JSON.stringify({
-        status: "flow_started",
-        flowId: "flow-ctx",
-        loginUrl:
-          "http://localhost:3000/_trellis/portal/users/login?flowId=flow-ctx",
-      }));
-    }) as typeof fetch;
-
-    const response = await startAuthRequest({
-      authUrl: "http://localhost:3000",
-      redirectTo: "http://localhost:5173/profile",
-      handle: await createHandle(),
-      contract: TEST_CONTRACT,
-      context: "scalar-context",
-    });
-
-    assertEquals(response.status, "flow_started");
-  } finally {
-    globalThis.fetch = originalFetch;
-  }
-});
-
-Deno.test("startAuthRequest signs provider, contract, and canonical context", async () => {
-  const signedPresentation = await resolveNativeProtocolPresentation(
-    SIGNED_CONTRACT,
-  );
-  const originalFetch = globalThis.fetch;
-  try {
-    const handle = await createHandle();
-    globalThis.fetch = (async (_input, init) => {
-      const body = JSON.parse(String(init?.body));
-      const digest = await sha256(
-        utf8(
-          `oauth-init:http://localhost:5173/profile:github:${
-            canonicalizeJsonValue({
-              participantId: SIGNED_CONTRACT.CONTRACT_ID,
-              participantArtifactDigest: SIGNED_CONTRACT.CONTRACT_DIGEST,
-              participantNeedsDigest: signedPresentation.participantNeedsDigest,
-              participantArtifact: SIGNED_CONTRACT.PARTICIPANT,
-              referencedApiArtifacts: [
-                SIGNED_CONTRACT.API,
-              ],
-            })
-          }:{"subtitle":"Welcome back"}`,
-        ),
-      );
-      const verified = await crypto.subtle.verify(
-        { name: "Ed25519" },
-        handle.publicKey,
-        toArrayBuffer(base64urlDecode(body.sig)),
-        toArrayBuffer(digest),
-      );
-      assertEquals(verified, true);
-      return new Response(JSON.stringify({
-        status: "flow_started",
-        flowId: "flow-signed",
-        loginUrl: "http://localhost:3000/auth/login/github?flowId=flow-signed",
-      }));
-    }) as typeof fetch;
-
-    const response = await startAuthRequest({
-      authUrl: "http://localhost:3000",
-      provider: "github",
-      redirectTo: "http://localhost:5173/profile",
-      handle,
-      contract: SIGNED_CONTRACT,
-      context: { subtitle: "Welcome back" },
-    });
-
-    assertEquals(response.status, "flow_started");
   } finally {
     globalThis.fetch = originalFetch;
   }

@@ -45,7 +45,7 @@ Deno.test("device activation auth callback only matches explicit callback marker
   assertEquals(
     isDeviceActivationAuthCallback(
       new URL(
-        "https://auth.example.com/_trellis/portal/devices/activate?flowId=device-flow",
+        "https://auth.example.com/login/device?flowId=device-flow",
       ),
       { flowId: "device-flow", callbackToken: "callback-token" },
     ),
@@ -55,7 +55,7 @@ Deno.test("device activation auth callback only matches explicit callback marker
   assertEquals(
     isDeviceActivationAuthCallback(
       new URL(
-        "https://auth.example.com/_trellis/portal/devices/activate?portalCallback=callback-token&flowId=auth-flow",
+        "https://auth.example.com/login/device?portalCallback=callback-token&flowId=auth-flow",
       ),
       { flowId: "device-flow", callbackToken: "callback-token" },
     ),

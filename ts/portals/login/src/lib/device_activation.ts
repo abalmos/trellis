@@ -41,7 +41,7 @@ function createPortalAuthState(
     },
     async signIn(options) {
       const redirectTo = new URL(
-        options?.redirectTo ?? "/_trellis/portal/users/login",
+        options?.redirectTo ?? "/login",
         window.location.href,
       ).toString();
       await TrellisClient.connect({

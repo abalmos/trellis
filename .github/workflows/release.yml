@@ -190,8 +190,8 @@ jobs:
             time cargo run --manifest-path xtask/Cargo.toml -- release check-metadata
           fi
 
-      - name: Build embedded login portal
-        run: deno task -c ts/portals/login/deno.json build:embedded
+      - name: Build embedded browser apps
+        run: deno task -c ts/deno.json browser:embedded
 
       - name: Write release notes
         if: env.RELEASE_TAG != ''

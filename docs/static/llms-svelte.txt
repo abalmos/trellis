@@ -33,6 +33,10 @@ export const trellisApp = createTrellisApp({
 
 Rules:
 
+- Trellis itself serves the built-in login portal at `/login` and a same-origin
+  administration Console at `/console`. Independently hosted apps remain
+  contract-driven clients and must use an explicitly allowed Trellis origin.
+
 - `createTrellisApp(...)`, `TrellisProvider`, `SvelteTrellisConnection`, and
   browser client auth mode `"browser"` are the intended browser-app wiring.
 - Browser HTTP is limited to browser flows, initial bootstrap, proof-bound

@@ -32,6 +32,8 @@ services/<name>/
 
 Rules:
 
+- The runtime-owned login portal and administration Console are available at
+  `/login` and `/console`; TypeScript services do not host or proxy them.
 - single-contract services normally expose `contract.ts`; multi-contract services
   may use `contracts/*.ts` and optionally re-export the primary default contract
   from `contract.ts`

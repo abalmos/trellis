@@ -1351,6 +1351,7 @@ mod tests {
         let config = render_trellis_config(&options, &nats_manifest);
 
         assert!(config.contains("port = 4242"));
+        assert!(config.contains("origins = [\"https://trellis.example.test/\"]"));
         for path in [
             "./data/platform.sqlite",
             "./data/jobs.sqlite",

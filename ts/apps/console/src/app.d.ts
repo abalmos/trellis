@@ -8,6 +8,7 @@ declare global {
   var __TRELLIS_RUNTIME_CONFIG__:
     | {
       authUrl?: string;
+      embedded?: boolean;
     }
     | undefined;
 }

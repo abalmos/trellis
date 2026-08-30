@@ -90,7 +90,9 @@
 
         if (result.status === "approval_required") {
           await auth.resetSession();
-          window.location.href = loginUrl();
+          window.location.href = loginUrl(
+            "App access still requires administrator approval.",
+          );
           return;
         }
 
@@ -103,13 +105,13 @@
 
         if (result.status === "error") {
           await auth.resetSession();
-          window.location.href = loginUrl();
+          window.location.href = loginUrl(result.message);
           return;
         }
       } catch (error) {
         if (isRecoverableConsoleAuthError(error)) {
           await auth.resetSession();
-          window.location.href = loginUrl();
+          window.location.href = loginUrl(errorMessage(error));
           return;
         }
         authError = errorMessage(error);

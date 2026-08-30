@@ -42,6 +42,8 @@ const config = {
     dedupe: ["svelte"],
   },
   server: {
+    port: 5173,
+    strictPort: true,
     fs: {
       allow: [resolve(rootDir, "../../..")],
     },

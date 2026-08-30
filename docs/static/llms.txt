@@ -18,6 +18,10 @@ commands.
   proof-bound recovery, and portal assets. Connected control uses
   generated RPC, operation, and event APIs over NATS; there is no HTTP context
   registry, revocation, logout, or client-bootstrap API.
+- A Trellis runtime serves its built-in login portal at `/login` and its
+  same-origin administration Console at `/console`. The embedded Console binds
+  to that origin and starts login automatically; external browser apps still
+  require explicitly allowed origins.
 - Runtime boundaries use `trellis.api.v1` and `trellis.participant.v1` artifacts.
   TypeScript contracts are compiled to those artifacts before bootstrap.
 - Large Rust store and transfer bodies use borrowed Tokio readers and writers;

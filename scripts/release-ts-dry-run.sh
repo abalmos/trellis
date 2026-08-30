@@ -13,6 +13,7 @@ do
 done
 
 test -s ts/packages/trellis/auth/protocol_wasm/trellis_protocol_wasm_bg.wasm
+test -s ts/packages/trellis/auth/protocol_wasm/trellis_protocol_resolver_wasm_bg.wasm
 
 for package in \
   ts/packages/result \

@@ -516,7 +516,7 @@ where
             oauth.version += 1;
             state.ephemeral.replace_oauth_state(expected, oauth).await?;
             return Ok(Redirect::temporary(&format!(
-                "{}/_trellis/portal/account/complete",
+                "{}/login/account/complete",
                 state.public_origin.trim_end_matches('/')
             ))
             .into_response());
@@ -570,7 +570,7 @@ where
         oauth.version += 1;
         state.ephemeral.replace_oauth_state(expected, oauth).await?;
         return Ok(Redirect::temporary(&format!(
-            "{}/_trellis/portal/account/complete",
+            "{}/login/account/complete",
             state.public_origin.trim_end_matches('/')
         ))
         .into_response());
@@ -662,7 +662,7 @@ where
             .replace_browser_flow(expected, approved.clone())
             .await?;
         return Ok(Redirect::temporary(&format!(
-            "{}/_trellis/portal/users/login?flowId={}",
+            "{}/login?flowId={}",
             state.public_origin.trim_end_matches('/'),
             approved.flow_id,
         ))
@@ -676,7 +676,7 @@ where
         .replace_browser_flow(expected, flow.clone())
         .await?;
     Ok(Redirect::temporary(&format!(
-        "{}/_trellis/portal/users/login?flowId={}",
+        "{}/login?flowId={}",
         state.public_origin.trim_end_matches('/'),
         flow.flow_id
     ))

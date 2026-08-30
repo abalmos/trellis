@@ -1,12 +1,15 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+use axum::http::header::CONTENT_SECURITY_POLICY;
 use axum::http::{HeaderValue, Method};
 use axum::middleware;
 use axum::routing::{get, post};
 use axum::Router;
 use tower_governor::governor::GovernorConfigBuilder;
 use tower_governor::GovernorLayer;
+use tower_http::compression::predicate::{DefaultPredicate, NotForContentType, Predicate};
+use tower_http::compression::CompressionLayer;
 use tower_http::cors::{AllowHeaders, AllowOrigin, CorsLayer};
 use tower_http::limit::RequestBodyLimitLayer;
 use tower_http::set_header::SetResponseHeaderLayer;
@@ -14,9 +17,9 @@ use url::Url;
 
 use super::bootstrap::{device_bootstrap, service_bootstrap};
 use super::browser::{
-    bind_flow, complete_first_admin, decide_approval, get_account_flow, get_flow, local_login,
-    oidc_callback, portal_asset, portal_index, portal_page, register_local,
-    start_account_flow_oidc, start_auth, start_oidc,
+    bind_flow, complete_first_admin, console_index, console_page, decide_approval,
+    get_account_flow, get_flow, local_login, oidc_callback, portal_asset, portal_index,
+    portal_page, register_local, start_account_flow_oidc, start_auth, start_oidc,
 };
 use super::security::{canonical_origin, security_headers};
 use super::well_known::refresh_context;
@@ -54,6 +57,8 @@ enum RouteHandler {
     PortalIndex,
     PortalPage,
     PortalAsset,
+    ConsoleIndex,
+    ConsolePage,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -136,18 +141,28 @@ const ROUTES: &[RouteDefinition] = &[
     },
     RouteDefinition {
         method: RouteMethod::Get,
-        path: "/_trellis/portal",
+        path: "/login",
         handler: RouteHandler::PortalIndex,
     },
     RouteDefinition {
         method: RouteMethod::Get,
-        path: "/_trellis/portal/*path",
+        path: "/login/*path",
         handler: RouteHandler::PortalPage,
     },
     RouteDefinition {
         method: RouteMethod::Get,
-        path: "/_trellis/assets/*path",
+        path: "/assets/login/*path",
         handler: RouteHandler::PortalAsset,
+    },
+    RouteDefinition {
+        method: RouteMethod::Get,
+        path: "/console",
+        handler: RouteHandler::ConsoleIndex,
+    },
+    RouteDefinition {
+        method: RouteMethod::Get,
+        path: "/console/*path",
+        handler: RouteHandler::ConsolePage,
     },
 ];
 
@@ -223,6 +238,12 @@ where
         (RouteMethod::Get, RouteHandler::PortalAsset) => {
             routes.route(route.path, get(portal_asset::<R, E>))
         }
+        (RouteMethod::Get, RouteHandler::ConsoleIndex) => {
+            routes.route(route.path, get(console_index::<R, E>))
+        }
+        (RouteMethod::Get, RouteHandler::ConsolePage) => {
+            routes.route(route.path, get(console_page::<R, E>))
+        }
         _ => unreachable!("auth route inventory method and handler disagree"),
     }
 }
@@ -250,6 +271,7 @@ where
         AuthorizationStateError::InvalidRecord("HTTP public origin is invalid".to_owned())
     })?;
     let use_hsts = public_url.scheme() == "https";
+    let content_security_policy = content_security_policy(&options.websocket_nats_servers)?;
     let allowed_origins = if options.allowed_origins.is_empty() {
         vec![options.public_origin.clone()]
     } else {
@@ -298,23 +320,20 @@ where
         websocket_nats_servers: options.websocket_nats_servers,
         oidc_providers: options.oidc_providers,
         proof_policy: trellis_protocol::SessionProofPolicy::default(),
+        browser_proof_policy: trellis_protocol::SessionProofPolicy::new(300_000, 300_000)
+            .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?,
         portal_override_dir: options.portal_override_dir,
     };
-    let mut routes: Router<AuthHttpState<R, E>> = Router::new();
+    let mut api_routes: Router<AuthHttpState<R, E>> = Router::new();
+    let mut browser_routes: Router<AuthHttpState<R, E>> = Router::new();
     for route in ROUTES {
-        routes = add_route::<R, E>(routes, *route);
+        if is_browser_route(route.handler) {
+            browser_routes = add_route::<R, E>(browser_routes, *route);
+        } else {
+            api_routes = add_route::<R, E>(api_routes, *route);
+        }
     }
-    let mut routes = routes
-        .layer(RequestBodyLimitLayer::new(MAX_AUTH_REQUEST_BODY_BYTES))
-        .layer(cors)
-        .layer(middleware::from_fn(security_headers))
-        .with_state(state);
-    if use_hsts {
-        routes = routes.layer(SetResponseHeaderLayer::if_not_present(
-            axum::http::header::STRICT_TRANSPORT_SECURITY,
-            HeaderValue::from_static("max-age=31536000; includeSubDomains"),
-        ));
-    }
+    let mut api_routes = api_routes.with_state(state.clone());
     if options.rate_limit_max > 0 {
         let mut builder = GovernorConfigBuilder::default();
         builder
@@ -325,22 +344,89 @@ where
         let config = builder.finish().ok_or_else(|| {
             AuthorizationStateError::InvalidRecord("HTTP rate limit is invalid".to_owned())
         })?;
-        routes = routes.layer(GovernorLayer {
+        api_routes = api_routes.layer(GovernorLayer {
             config: Arc::new(config),
         });
     }
+    let mut routes = api_routes
+        .merge(browser_routes.with_state(state))
+        .layer(RequestBodyLimitLayer::new(MAX_AUTH_REQUEST_BODY_BYTES))
+        .layer(cors)
+        .layer(browser_compression_layer())
+        .layer(middleware::from_fn(security_headers))
+        .layer(SetResponseHeaderLayer::overriding(
+            CONTENT_SECURITY_POLICY,
+            content_security_policy,
+        ));
+    if use_hsts {
+        routes = routes.layer(SetResponseHeaderLayer::if_not_present(
+            axum::http::header::STRICT_TRANSPORT_SECURITY,
+            HeaderValue::from_static("max-age=31536000; includeSubDomains"),
+        ));
+    }
     Ok(routes)
+}
+
+fn is_browser_route(handler: RouteHandler) -> bool {
+    matches!(
+        handler,
+        RouteHandler::PortalIndex
+            | RouteHandler::PortalPage
+            | RouteHandler::PortalAsset
+            | RouteHandler::ConsoleIndex
+            | RouteHandler::ConsolePage
+    )
+}
+
+fn browser_compression_layer() -> CompressionLayer<impl Predicate> {
+    CompressionLayer::new().compress_when(
+        DefaultPredicate::new().and(NotForContentType::const_new("application/json")),
+    )
+}
+
+fn content_security_policy(
+    websocket_nats_servers: &[String],
+) -> Result<HeaderValue, AuthorizationStateError> {
+    let mut connect_sources = vec!["'self'".to_owned()];
+    for server in websocket_nats_servers {
+        let url = Url::parse(server).map_err(|_| {
+            AuthorizationStateError::InvalidRecord(
+                "NATS WebSocket URL is invalid for browser CSP".to_owned(),
+            )
+        })?;
+        if !matches!(url.scheme(), "ws" | "wss")
+            || !url.username().is_empty()
+            || url.password().is_some()
+        {
+            return Err(AuthorizationStateError::InvalidRecord(
+                "NATS WebSocket URL is invalid for browser CSP".to_owned(),
+            ));
+        }
+        connect_sources.push(url.origin().ascii_serialization());
+    }
+    connect_sources.sort();
+    connect_sources.dedup();
+    let policy = format!(
+        "default-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src {}",
+        connect_sources.join(" ")
+    );
+    HeaderValue::from_str(&policy).map_err(|_| {
+        AuthorizationStateError::InvalidRecord(
+            "browser content security policy is invalid".to_owned(),
+        )
+    })
 }
 
 #[cfg(test)]
 mod tests {
     use axum::body::Body;
+    use axum::http::header::{ACCEPT_ENCODING, CONTENT_ENCODING, CONTENT_TYPE};
     use axum::http::{Method, Request, StatusCode};
     use axum::routing::{get, post};
     use axum::Router;
     use tower::ServiceExt;
 
-    use super::{RouteMethod, ROUTES};
+    use super::{browser_compression_layer, content_security_policy, RouteMethod, ROUTES};
 
     fn route_inventory() -> Vec<(Method, String)> {
         ROUTES
@@ -414,5 +500,53 @@ mod tests {
                 .unwrap();
             assert_ne!(response.status(), StatusCode::NOT_FOUND, "{method} {path}");
         }
+    }
+
+    #[tokio::test]
+    async fn browser_responses_are_compressed() {
+        let app = Router::new()
+            .route("/", get(|| async { "x".repeat(32_768) }))
+            .route(
+                "/json",
+                get(|| async { ([(CONTENT_TYPE, "application/json")], "x".repeat(32_768)) }),
+            )
+            .layer(browser_compression_layer());
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/")
+                    .header(ACCEPT_ENCODING, "br")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.headers()[CONTENT_ENCODING], "br");
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/json")
+                    .header(ACCEPT_ENCODING, "br")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert!(!response.headers().contains_key(CONTENT_ENCODING));
+    }
+
+    #[test]
+    fn browser_csp_allows_wasm_and_exact_nats_websocket_origins() {
+        let policy = content_security_policy(&[
+            "ws://localhost:8080/nats".to_owned(),
+            "wss://nats.example.test/connect".to_owned(),
+        ])
+        .unwrap();
+        let policy = policy.to_str().unwrap();
+        assert!(policy.contains("script-src 'self' 'wasm-unsafe-eval'"));
+        assert!(policy.contains("connect-src 'self' ws://localhost:8080 wss://nats.example.test"));
+        assert!(content_security_policy(&["https://nats.example.test".to_owned()]).is_err());
     }
 }

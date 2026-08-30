@@ -4,7 +4,6 @@ import init, {
   type VerifiedAuthorizationContextHandle as WasmAuthorizationContextHandle,
 } from "./protocol_wasm/trellis_protocol_wasm.js";
 import * as protocolWasmModule from "./protocol_wasm/trellis_protocol_wasm.js";
-import { PROTOCOL_WASM_BASE64 } from "./protocol_wasm/trellis_protocol_wasm_bytes.ts";
 import { base64urlDecode, type JsonValue } from "./utils.ts";
 
 type JsonObject = { [key: string]: JsonValue };
@@ -81,19 +80,6 @@ export type PermissionAtom = {
 export type GrantSet = {
   format: "trellis.grant-set.v1";
   permissions: PermissionAtom[];
-};
-
-/** Native participant resolution returned by the Rust protocol boundary. */
-export type ResolvedParticipant = {
-  apiArtifacts: Record<string, JsonObject>;
-  apiDigests: Record<string, string>;
-  participant: JsonObject;
-  participantDigest: string;
-  participantNeeds: JsonObject;
-  participantNeedsDigest: string;
-  requiredGrants: GrantSet;
-  optionalGrants: GrantSet;
-  authorityProposal: JsonObject;
 };
 
 /** Stable principal projection returned by the protocol verifier. */
@@ -292,8 +278,10 @@ async function wasmBytes(): Promise<Uint8Array> {
 }
 
 async function initialize(): Promise<void> {
+  if (initializedSync) return;
   initialized ??= (async () => {
     await init({ module_or_path: await wasmBytes() });
+    initializedSync = true;
   })();
   await initialized;
 }
@@ -328,27 +316,9 @@ function initializeSync(): void {
     initializedSync = true;
     return;
   }
-  const binary = atob(PROTOCOL_WASM_BASE64);
-  const bytes = new Uint8Array(binary.length);
-  for (let index = 0; index < binary.length; index += 1) {
-    bytes[index] = binary.charCodeAt(index);
-  }
-  initSync({ module: bytes as SyncInitInput });
-  initializedSync = true;
-}
-
-/** Resolve a native participant through the authoritative Rust protocol resolver. */
-export function resolveParticipantV1WasmSync(args: {
-  participant: unknown;
-  apis: Record<string, unknown>;
-}): ResolvedParticipant {
-  initializeSync();
-  return JSON.parse(
-    protocolWasm.resolve_participant(
-      JSON.stringify(args.participant),
-      JSON.stringify(args.apis),
-    ),
-  ) as ResolvedParticipant;
+  throw new Error(
+    "synchronous authorization protocol initialization requires Deno or Node; call an async protocol API first in browsers",
+  );
 }
 
 /** Verify a complete signed authorization context through Rust/WASM. */

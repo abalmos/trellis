@@ -13,6 +13,17 @@ All generated UI MUST follow this specification.
 
 ## PRIMARY DESIGN INTENT
 
+### Deployment Modes
+
+The Trellis runtime embeds Console at `/console`. That build is bound to
+`globalThis.location.origin`, hides the endpoint selector, and automatically
+starts the built-in `/login` flow when no Console session exists. The embedded
+build returns through `/console/callback` to the requested Console route.
+
+Console may also be hosted independently. An external build uses its configured
+auth URL or asks the operator which Trellis origin to use. That origin must
+explicitly allow the Console origin through its browser-origin policy.
+
 Trellis Console is built for **operators managing live systems**, not for
 analytics or exploration.
 

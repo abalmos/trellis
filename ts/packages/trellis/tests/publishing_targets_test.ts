@@ -110,18 +110,21 @@ Deno.test("release workflows use generated package-manager targets", async () =>
   const generateReleaseSdk = prepareRelease.indexOf(
     "- name: Generate release SDK artifacts",
   );
-  const buildEmbeddedPortal = prepareRelease.indexOf(
-    "- name: Build embedded login portal",
+  const buildEmbeddedBrowserApps = prepareRelease.indexOf(
+    "- name: Build embedded browser apps",
   );
   const uploadPreparedRelease = prepareRelease.indexOf(
     "- name: Upload prepared release workspace",
   );
   assertStringIncludes(
     prepareRelease,
-    "deno task -c ts/portals/login/deno.json build:embedded",
+    "deno task -c ts/deno.json browser:embedded",
   );
-  assertEquals(generateReleaseSdk < buildEmbeddedPortal, true);
-  assertEquals(buildEmbeddedPortal < uploadPreparedRelease, true);
+  assertEquals(generateReleaseSdk >= 0, true);
+  assertEquals(buildEmbeddedBrowserApps >= 0, true);
+  assertEquals(uploadPreparedRelease >= 0, true);
+  assertEquals(generateReleaseSdk < buildEmbeddedBrowserApps, true);
+  assertEquals(buildEmbeddedBrowserApps < uploadPreparedRelease, true);
   assertStringIncludes(
     releaseWorkflow,
     `cp "rust/target/\${target}/release/trellis-generate"`,

@@ -11,6 +11,7 @@ const LOOPBACK_HOSTS = new Set([
 
 type RuntimeAppConfig = {
   authUrl?: string;
+  embedded?: boolean;
 };
 
 function readRuntimeConfig(): RuntimeAppConfig {
@@ -27,6 +28,7 @@ const viteEnv = (import.meta as ImportMeta & {
 
 export const APP_CONFIG = {
   authUrl: runtimeConfig.authUrl ?? viteEnv["VITE_TRELLIS_AUTH_URL"],
+  embedded: runtimeConfig.embedded ?? false,
 };
 
 function normalizeConfiguredUrl(value: string): string {
@@ -60,13 +62,18 @@ function getStorage(
 function applySelectedAuthUrl(
   url: URL,
   authUrl: string | null | undefined,
+  config: Pick<typeof APP_CONFIG, "authUrl" | "embedded"> = APP_CONFIG,
 ): void {
+  if (config.embedded) {
+    url.searchParams.delete(AUTH_URL_QUERY_PARAM);
+    return;
+  }
   const normalized = tryNormalizeConfiguredUrl(authUrl);
   if (!normalized) {
     url.searchParams.delete(AUTH_URL_QUERY_PARAM);
     return;
   }
-  if (normalized === APP_CONFIG.authUrl) {
+  if (normalized === config.authUrl) {
     url.searchParams.delete(AUTH_URL_QUERY_PARAM);
     return;
   }
@@ -76,7 +83,11 @@ function applySelectedAuthUrl(
 export function getSelectedAuthUrl(
   location: URL | Location = globalThis.location,
   storage?: Pick<Storage, "getItem" | "setItem" | "removeItem"> | null,
+  config: Pick<typeof APP_CONFIG, "authUrl" | "embedded"> = APP_CONFIG,
 ): string | undefined {
+  if (config.embedded) {
+    return config.authUrl;
+  }
   const current = toUrl(location);
   const store = getStorage(storage);
   const fromQuery = tryNormalizeConfiguredUrl(
@@ -94,14 +105,18 @@ export function getSelectedAuthUrl(
     return fromStorage;
   }
 
-  return APP_CONFIG.authUrl;
+  return config.authUrl;
 }
 
 export function persistSelectedAuthUrl(
   authUrl: string,
   storage?: Pick<Storage, "getItem" | "setItem" | "removeItem"> | null,
+  config: Pick<typeof APP_CONFIG, "authUrl" | "embedded"> = APP_CONFIG,
 ): string | undefined {
-  const normalized = tryNormalizeConfiguredUrl(authUrl) ?? APP_CONFIG.authUrl;
+  if (config.embedded) {
+    return config.authUrl;
+  }
+  const normalized = tryNormalizeConfiguredUrl(authUrl) ?? config.authUrl;
   const store = getStorage(storage);
 
   if (!normalized) {

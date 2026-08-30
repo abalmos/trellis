@@ -108,16 +108,25 @@ export type BindInsufficientCapabilitiesResponse = StaticDecode<
 >;
 
 export const AuthStartRequestSchema = Type.Object({
-  provider: Type.Optional(Type.String({ minLength: 1 })),
-  redirectTo: Type.String(),
-  sessionKey: SessionKeySchema,
-  sig: SignatureSchema,
+  requestId: Type.String({ minLength: 1 }),
+  issuedAt: Type.Integer(),
+  sessionPublicKey: SessionKeySchema,
+  sessionNkey: Type.String({ minLength: 1 }),
   participantId: Type.String({ minLength: 1 }),
   participantArtifactDigest: ContractDigestSchema,
-  participantNeedsDigest: ContractDigestSchema,
   participantArtifact: OpenObjectSchema,
   referencedApiArtifacts: Type.Array(OpenObjectSchema, { minItems: 1 }),
-  context: Type.Optional(OpenObjectSchema),
+  redirectTarget: Type.String(),
+  proof: Type.Object({
+    format: Type.Literal("trellis.session-proof.v1"),
+    signature: SignatureSchema,
+  }),
+});
+
+export const AuthStartWireResponseSchema = Type.Object({
+  state: Type.Literal("flow"),
+  flowId: Type.String({ minLength: 1 }),
+  portalUrl: Type.String({ minLength: 1 }),
 });
 
 export const AuthStartFlowResponseSchema = Type.Object({
@@ -132,6 +141,9 @@ export const AuthStartResponseSchema = Type.Union([
 ]);
 
 export type AuthStartRequest = StaticDecode<typeof AuthStartRequestSchema>;
+export type AuthStartWireResponse = StaticDecode<
+  typeof AuthStartWireResponseSchema
+>;
 export type AuthStartFlowResponse = StaticDecode<
   typeof AuthStartFlowResponseSchema
 >;

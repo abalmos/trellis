@@ -13,6 +13,10 @@ https://raw.githubusercontent.com/qlever-llc/trellis/main/docs/static/llms.txt
 
 ## Operating model
 
+- A Trellis runtime serves its built-in login portal at `/login` and its
+  same-origin administration Console at `/console`. The embedded Console binds
+  to that origin and starts login automatically. Independently hosted Console
+  and browser apps remain supported through explicit origin configuration.
 - Trellis services are contract-driven participants. Contracts declare the public
   surfaces a participant owns and the external surfaces it uses.
 - Durable `eventConsumers` are contract-declared deployment resources. A group

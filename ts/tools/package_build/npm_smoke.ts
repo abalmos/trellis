@@ -247,6 +247,8 @@ async function assertNoGeneratedBuildReferences(projectDir: string) {
 async function writeConsumerProject(projectDir: string) {
   const esmWasmSmoke = `
 const contextAuth = await import("@qlever-llc/trellis/auth");
+const contracts = await import("@qlever-llc/trellis/contracts");
+const device = await import("@qlever-llc/trellis/device");
 try {
   const cache = new contextAuth.AuthorizationContextCache(
     "https://trellis.test",
@@ -262,6 +264,33 @@ try {
   throw new Error("invalid authorization context unexpectedly verified");
 } catch (error) {
   if (/ENOENT|authorization protocol WASM returned HTTP/.test(String(error))) throw error;
+}
+const contract = contracts.defineDeviceContract(() => ({
+  id: "example.smoke-device@v1",
+  displayName: "Smoke device",
+  description: "Node resolver smoke test.",
+}));
+const originalFetch = globalThis.fetch;
+globalThis.fetch = async () => { throw new Error("resolver-smoke-complete"); };
+try {
+  await device.startDeviceActivationWithDeps({
+    trellisUrl: "https://trellis.test",
+    contract,
+    rootSecret: new Uint8Array(32).fill(1),
+    identity: {
+      deploymentId: "smoke.default",
+      instanceId: "dev_smoke",
+      principalId: "device_smoke",
+      participantId: contract.CONTRACT_ID,
+      participantArtifactDigest: contract.CONTRACT_DIGEST,
+      participantNeedsDigest: "tJfNUJfVPAN68Gbfd7XpD3iKCCrNeyM9EBZ9y7k1YgI",
+    },
+  }, { now: () => 1 });
+  throw new Error("device bootstrap unexpectedly completed");
+} catch (error) {
+  if (!String(error).includes("resolver-smoke-complete")) throw error;
+} finally {
+  globalThis.fetch = originalFetch;
 }
 `;
   const cjsWasmSmoke = esmWasmSmoke.replace(

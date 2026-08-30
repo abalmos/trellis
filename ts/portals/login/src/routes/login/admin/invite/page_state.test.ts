@@ -11,7 +11,7 @@ Deno.test("invite accountFlowIdFromUrl reads non-empty flow id", () => {
   assertEquals(
     accountFlowIdFromUrl(
       new URL(
-        "https://auth.example.com/_trellis/portal/admin/invite?flowId=flow-1",
+        "https://auth.example.com/login/admin/invite?flowId=flow-1",
       ),
     ),
     "flow-1",
@@ -21,14 +21,14 @@ Deno.test("invite accountFlowIdFromUrl reads non-empty flow id", () => {
 Deno.test("invite accountFlowIdFromUrl rejects missing and blank flow id", () => {
   assertEquals(
     accountFlowIdFromUrl(
-      new URL("https://auth.example.com/_trellis/portal/admin/invite"),
+      new URL("https://auth.example.com/login/admin/invite"),
     ),
     null,
   );
   assertEquals(
     accountFlowIdFromUrl(
       new URL(
-        "https://auth.example.com/_trellis/portal/admin/invite?flowId=%20",
+        "https://auth.example.com/login/admin/invite?flowId=%20",
       ),
     ),
     null,

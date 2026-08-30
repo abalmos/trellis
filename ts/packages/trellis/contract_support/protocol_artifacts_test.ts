@@ -32,7 +32,7 @@ import {
   participantDigest,
 } from "./protocol_artifacts.ts";
 import { resolveNativeProtocolPresentation } from "./protocol_resolution.ts";
-import { resolveParticipantV1WasmSync } from "../auth/protocol_wasm.ts";
+import { resolveParticipantV1WasmSync } from "../auth/protocol_resolver_wasm.ts";
 
 Deno.test("generated actions preserve canonical source artifact identity", () => {
   const compiled = nativeProtocolPresentation(defineAppContract(() => ({

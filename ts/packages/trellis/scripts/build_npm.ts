@@ -773,18 +773,19 @@ await buildDntPackage({
 });
 
 for (const format of ["esm", "script"]) {
-  const target = new URL(
-    `${format}/auth/protocol_wasm/trellis_protocol_wasm_bg.wasm`,
-    npmDirUrl,
-  );
-  await Deno.mkdir(new URL("./", target), { recursive: true });
-  await Deno.copyFile(
-    new URL(
-      "../auth/protocol_wasm/trellis_protocol_wasm_bg.wasm",
-      import.meta.url,
-    ),
-    target,
-  );
+  for (
+    const file of [
+      "trellis_protocol_wasm_bg.wasm",
+      "trellis_protocol_resolver_wasm_bg.wasm",
+    ]
+  ) {
+    const target = new URL(`${format}/auth/protocol_wasm/${file}`, npmDirUrl);
+    await Deno.mkdir(new URL("./", target), { recursive: true });
+    await Deno.copyFile(
+      new URL(`../auth/protocol_wasm/${file}`, import.meta.url),
+      target,
+    );
+  }
 }
 
 await normalizeModuleSpecifiers();

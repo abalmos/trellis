@@ -38,7 +38,6 @@ fn join_native_servers(servers: &[String]) -> Result<String, TrellisAuthError> {
 struct AdministrationParticipant {
     id: String,
     digest: String,
-    needs_digest: String,
     required_grants: trellis_protocol::GrantSet,
 }
 
@@ -58,7 +57,6 @@ fn administration_participant() -> Result<AdministrationParticipant, TrellisAuth
     Ok(AdministrationParticipant {
         id: participant.id().to_owned(),
         digest: participant.digest()?,
-        needs_digest: resolved.needs().digest()?,
         required_grants: resolved.proposal().required().grant_set().clone(),
     })
 }
@@ -95,7 +93,7 @@ pub fn generate_session_keypair() -> (String, String) {
 
 #[doc = concat!("Trellis API operation `", stringify!(detached_login_redirect_to), "`.")]
 pub fn detached_login_redirect_to() -> Result<String, TrellisAuthError> {
-    Ok("/_trellis/portal/users/login".to_string())
+    Ok("/login".to_string())
 }
 
 async fn start_auth_request(
@@ -114,7 +112,6 @@ async fn start_auth_request(
         "sessionNkey": session_nkey,
         "participantId": participant.id,
         "participantArtifactDigest": participant.digest,
-        "participantNeedsDigest": participant.needs_digest,
         "participantArtifact": null,
         "referencedApiArtifacts": [],
         "redirectTarget": redirect_to,

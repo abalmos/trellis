@@ -198,7 +198,7 @@ sequenceDiagram
     W->>T: POST /bootstrap/device (proof-bound initial bootstrap)
     T-->>W: Return activationUrl with flowId
     W->>U: Show activation URL or QR payload
-    U->>P: Open /_trellis/portal/devices/activate?flowId=...
+    U->>P: Open /login/device?flowId=...
     U->>P: Authenticate and complete portal business logic
     P->>T: Activate known device instance
     W->>T: Retry POST /bootstrap/device with fresh request proof

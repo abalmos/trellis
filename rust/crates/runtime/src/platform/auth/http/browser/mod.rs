@@ -12,5 +12,6 @@ pub(super) use local::{
 };
 pub(super) use oidc::{oidc_callback, start_account_flow_oidc, start_oidc};
 pub(super) use request::{
-    portal_asset, portal_index, portal_page, select_device_portal, start_auth,
+    console_index, console_page, portal_asset, portal_index, portal_page, select_device_portal,
+    start_auth,
 };

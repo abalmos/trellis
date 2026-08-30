@@ -14,8 +14,8 @@ export type ResolvedNativeProtocolPresentation = NativeProtocolPresentation & {
 export async function resolveNativeProtocolPresentation(
   contract: NativeProtocolContract,
 ): Promise<ResolvedNativeProtocolPresentation> {
-  const { resolveParticipantV1WasmSync } = await import(
-    "../auth/protocol_wasm.ts"
+  const { resolveParticipantV1Wasm } = await import(
+    "../auth/protocol_resolver_wasm.ts"
   );
   const intrinsic = nativeProtocolPresentation(contract);
   const apis = Object.fromEntries(
@@ -25,7 +25,7 @@ export async function resolveNativeProtocolPresentation(
     ]),
   );
   const ownedApiId = String(intrinsic.api.id);
-  const resolved = resolveParticipantV1WasmSync({
+  const resolved = await resolveParticipantV1Wasm({
     participant: intrinsic.participant,
     apis,
   });

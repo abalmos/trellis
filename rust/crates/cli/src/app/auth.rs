@@ -892,14 +892,12 @@ mod tests {
 
     #[test]
     fn agent_login_instructions_include_plain_url_and_terminal_qr() {
-        let instructions = render_agent_login_instructions(
-            "https://auth.example.com/_trellis/portal/users/login?flowId=flow_123",
-        )
-        .expect("render instructions");
+        let instructions =
+            render_agent_login_instructions("https://auth.example.com/login?flowId=flow_123")
+                .expect("render instructions");
 
         assert!(instructions.contains("Open this activation URL:"));
-        assert!(instructions
-            .contains("https://auth.example.com/_trellis/portal/users/login?flowId=flow_123"));
+        assert!(instructions.contains("https://auth.example.com/login?flowId=flow_123"));
         assert!(instructions.contains("Scan this QR code:"));
         assert!(
             instructions.contains("█") || instructions.contains("▀") || instructions.contains("▄")
@@ -909,12 +907,10 @@ mod tests {
     #[test]
     fn pending_agent_login_json_includes_login_url() {
         assert_eq!(
-            pending_agent_login_json(
-                "https://auth.example.com/_trellis/portal/users/login?flowId=flow_123"
-            ),
+            pending_agent_login_json("https://auth.example.com/login?flowId=flow_123"),
             json!({
                 "status": "pending",
-                "loginUrl": "https://auth.example.com/_trellis/portal/users/login?flowId=flow_123",
+                "loginUrl": "https://auth.example.com/login?flowId=flow_123",
             })
         );
     }

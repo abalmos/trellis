@@ -13,6 +13,8 @@ GET /auth/account-flow/:flow_token/login/:provider_id
 GET /auth/callback/:provider_id
 POST /auth/flow/:flow_id/approval
 POST /auth/flow/:flow_id/bind
-GET /_trellis/portal
-GET /_trellis/portal/*path
-GET /_trellis/assets/*path
+GET /login
+GET /login/*path
+GET /assets/login/*path
+GET /console
+GET /console/*path

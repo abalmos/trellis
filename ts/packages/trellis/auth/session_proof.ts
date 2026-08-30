@@ -166,6 +166,13 @@ function assertNkey(
   return bytes;
 }
 
+/** Encode an Ed25519 session public key as its canonical NATS User NKey. */
+export function sessionNkeyFromPublicKey(publicKey: string): string {
+  return new TextDecoder().decode(
+    Codec.encode(Prefix.User, assertPublicKey(publicKey, "sessionPublicKey")),
+  );
+}
+
 function optionalDigest(value: string | null, name: string): Uint8Array {
   return value === null ? new Uint8Array() : decodeFixed(value, 32, name);
 }

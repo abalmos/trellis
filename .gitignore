@@ -15,8 +15,10 @@ coverage/
 .netlify
 .wrangler
 .svelte-kit
+.svelte-kit-embedded
 .vite
 build
+build-embedded
 
 # Database
 .sqlite3

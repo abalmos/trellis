@@ -81,7 +81,7 @@
     if (page.url.searchParams.has("flowId")) {
       if (selectedAuthUrl) {
         const portalUrl = new URL(
-          "/_trellis/portal/users/login",
+          "/login",
           selectedAuthUrl,
         );
         portalUrl.search = page.url.search;
@@ -102,6 +102,9 @@
           auth.setAuthUrl(selectedAuthUrl);
         }
         await auth.init();
+        if (APP_CONFIG.embedded && !queryAuthError) {
+          await continueToSignIn();
+        }
       } catch (error) {
         authError = errorMessage(error);
       } finally {
@@ -151,17 +154,19 @@
                 void continueToSignIn();
               }}
             >
-              <div class="form-control">
-                <label class="label" for="auth-url"><span class="label-text">Trellis endpoint</span></label>
-                <input
-                  id="auth-url"
-                  bind:value={selectedAuthUrl}
-                  type="url"
-                  class="input input-bordered"
-                  placeholder={APP_CONFIG.authUrl ?? "https://auth.example.com"}
-                  required={requiresAuthUrl}
-                />
-              </div>
+              {#if requiresAuthUrl}
+                <div class="form-control">
+                  <label class="label" for="auth-url"><span class="label-text">Trellis endpoint</span></label>
+                  <input
+                    id="auth-url"
+                    bind:value={selectedAuthUrl}
+                    type="url"
+                    class="input input-bordered"
+                    placeholder="https://auth.example.com"
+                    required
+                  />
+                </div>
+              {/if}
               <button type="submit" class="btn btn-primary btn-block gap-2">
                 <svg class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                   <path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4" />

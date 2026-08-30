@@ -27,6 +27,7 @@ pub fn render_trellis_config(options: &TrellisBootstrapOptions) -> String {
 /// Build the shared Rust runtime config value for a bootstrap bundle.
 #[must_use]
 pub fn trellis_runtime_config(options: &TrellisBootstrapOptions) -> RuntimeConfig {
+    let browser_origins = vec![options.runtime.public_origin.clone()];
     RuntimeConfig {
         instance_name: Some(options.runtime.name.clone()),
         event_session_seed_file: Some(PathBuf::from("../session.seed")),
@@ -34,8 +35,8 @@ pub fn trellis_runtime_config(options: &TrellisBootstrapOptions) -> RuntimeConfi
         http: Some(HttpConfig {
             port: Some(options.runtime.trellis_port),
             public_origin: Some(options.runtime.public_origin.clone()),
-            origins: Some(vec![options.runtime.public_origin.clone()]),
-            allow_insecure_origins: Some(vec![options.runtime.public_origin.clone()]),
+            origins: Some(browser_origins.clone()),
+            allow_insecure_origins: Some(browser_origins),
             rate_limit_max: Some(60),
             rate_limit_window_ms: Some(60_000),
         }),

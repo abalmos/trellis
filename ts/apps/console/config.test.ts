@@ -130,3 +130,28 @@ Deno.test("persistSelectedAuthUrl returns undefined when invalid and no default 
   assertEquals(selected, undefined);
   assertEquals(storage.getItem("trellis.console.authUrl"), null);
 });
+
+Deno.test("embedded Console cannot override its serving Trellis origin", () => {
+  const storage = createMemoryStorage();
+  storage.setItem("trellis.console.authUrl", "https://stored.example");
+  const embedded = { authUrl: "https://runtime.example", embedded: true };
+
+  assertEquals(
+    getSelectedAuthUrl(
+      new URL(
+        "https://runtime.example/console/login?authUrl=https://evil.example",
+      ),
+      storage,
+      embedded,
+    ),
+    "https://runtime.example",
+  );
+  assertEquals(
+    persistSelectedAuthUrl("https://evil.example", storage, embedded),
+    "https://runtime.example",
+  );
+  assertEquals(
+    storage.getItem("trellis.console.authUrl"),
+    "https://stored.example",
+  );
+});

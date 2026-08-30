@@ -9,12 +9,7 @@ fn device_activation_url(
     review_id: &str,
 ) -> Result<String, HttpError> {
     let entry = portal.entry_url.as_deref().map_or_else(
-        || {
-            format!(
-                "{}/_trellis/portal/device",
-                public_origin.trim_end_matches('/')
-            )
-        },
+        || format!("{}/login/device", public_origin.trim_end_matches('/')),
         ToOwned::to_owned,
     );
     let mut url = Url::parse(&entry).map_err(|_| HttpError::internal("portal_entry_invalid"))?;

@@ -1,37 +1,48 @@
 import { dirname, fromFileUrl, join } from "@std/path";
 
-const portalDir = dirname(dirname(fromFileUrl(import.meta.url)));
+const consoleDir = dirname(dirname(fromFileUrl(import.meta.url)));
+const buildDir = join(consoleDir, "build-embedded");
 const destination = join(
-  portalDir,
-  "../../../rust/crates/runtime/generated/portal",
+  consoleDir,
+  "../../../rust/crates/runtime/generated/console",
 );
 
 const build = new Deno.Command(Deno.execPath(), {
   args: ["task", "build:static:prebuilt"],
-  cwd: portalDir,
+  cwd: consoleDir,
+  env: {
+    SITE_BASE_PATH: "/console",
+    TRELLIS_CONSOLE_BUILD_DIR: buildDir,
+    TRELLIS_CONSOLE_VERSION: "embedded",
+  },
   stdout: "inherit",
   stderr: "inherit",
 });
 const status = await build.spawn().status;
 if (!status.success) Deno.exit(status.code);
 
-const fallbackPath = join(portalDir, "build/200.html");
+const root = buildDir;
+const fallbackPath = join(root, "index.html");
 let fallback = await Deno.readTextFile(fallbackPath);
 const inlineScripts = [...fallback.matchAll(/<script>([\s\S]*?)<\/script>/g)];
-if (inlineScripts.length !== 1) {
+if (inlineScripts.length !== 2) {
   throw new Error(
-    `expected one inline bootstrap script, found ${inlineScripts.length}`,
+    `expected route restoration and bootstrap scripts, found ${inlineScripts.length}`,
   );
 }
-await Deno.writeTextFile(
-  join(portalDir, "build/assets/login/bootstrap.js"),
-  inlineScripts[0][1],
-);
-fallback = fallback.replace(
-  inlineScripts[0][0],
-  '<script src="/assets/login/bootstrap.js"></script>',
-);
+for (const [index, script] of inlineScripts.entries()) {
+  const name = index === 0 ? "restore-route.js" : "bootstrap.js";
+  await Deno.writeTextFile(join(root, `assets/${name}`), script[1]);
+  fallback = fallback.replace(
+    script[0],
+    `<script src="/console/assets/${name}"></script>`,
+  );
+}
 await Deno.writeTextFile(fallbackPath, fallback);
+await Deno.writeTextFile(
+  join(root, "runtime-config.js"),
+  "globalThis.__TRELLIS_RUNTIME_CONFIG__ = { authUrl: globalThis.location.origin, embedded: true };\n",
+);
 
 await Deno.remove(destination, { recursive: true }).catch((error) => {
   if (!(error instanceof Deno.errors.NotFound)) throw error;
@@ -47,4 +58,4 @@ async function copyDirectory(source: string, target: string): Promise<void> {
   }
 }
 
-await copyDirectory(join(portalDir, "build"), destination);
+await copyDirectory(root, destination);

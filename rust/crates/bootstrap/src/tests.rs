@@ -265,6 +265,8 @@ fn trellis_config_uses_expected_paths_urls_and_name() {
     assert!(config.contains("[http]"));
     assert!(config.contains("port = 4242"));
     assert!(config.contains("public_origin = \"https://trellis.example.test/\""));
+    assert!(!config.contains("http://localhost:5173"));
+    assert!(!config.contains("http://localhost:5174"));
     assert!(config.contains("[nats]"));
     assert!(config.contains("servers = \"nats://nats.example.test:4222\""));
     assert!(config.contains("[nats.runtime]"));
