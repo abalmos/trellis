@@ -9,7 +9,7 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 use trellis_protocol::{
     parse_api, parse_participant, resolve_participant, session_proof_request_digest,
-    SessionProofInput, UserAuthRequestSessionProofInput,
+    SessionProofInput, UserAuthBindSessionProofInput, UserAuthRequestSessionProofInput,
 };
 
 use super::client::{connect_admin_client_async, connect_admin_client_with_context_store_async};
@@ -37,7 +37,6 @@ fn join_native_servers(servers: &[String]) -> Result<String, TrellisAuthError> {
 struct AdministrationParticipant {
     id: String,
     digest: String,
-    needs_digest: String,
     required_grants: trellis_protocol::GrantSet,
 }
 
@@ -57,7 +56,6 @@ fn administration_participant() -> Result<AdministrationParticipant, TrellisAuth
     Ok(AdministrationParticipant {
         id: participant.id().to_owned(),
         digest: participant.digest()?,
-        needs_digest: resolved.needs().digest()?,
         required_grants: resolved.proposal().required().grant_set().clone(),
     })
 }
@@ -113,7 +111,6 @@ async fn start_auth_request(
         "sessionNkey": session_nkey,
         "participantId": participant.id,
         "participantArtifactDigest": participant.digest,
-        "participantNeedsDigest": participant.needs_digest,
         "participantArtifact": null,
         "referencedApiArtifacts": [],
         "redirectTarget": redirect_to,
@@ -166,7 +163,7 @@ async fn start_auth_request(
 #[serde(rename_all = "camelCase")]
 struct AuthStartResponse {
     flow_id: String,
-    portal_url: String,
+    login_url: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -213,7 +210,7 @@ pub async fn poll_agent_flow_until_ready(
             .as_str()
         {
             "approved" | "consumed" => return Ok(flow_id.to_string()),
-            "choose_provider" | "authenticated" | "approval_required" => {}
+            "choose_provider" | "approval_required" => {}
             "approval_denied" => {
                 return Err(TrellisAuthError::AuthFlowFailed(
                     "approval_denied".to_string(),
@@ -232,19 +229,36 @@ pub async fn poll_agent_flow_until_ready(
     }
 }
 
-async fn bind_session(trellis_url: &str, flow_id: &str) -> Result<BoundSession, TrellisAuthError> {
+async fn bind_session(
+    trellis_url: &str,
+    flow_id: &str,
+    auth: &SessionAuth,
+) -> Result<BoundSession, TrellisAuthError> {
     let client = HttpClient::builder().build()?;
     let bind_url = format!(
         "{}/auth/flow/{}/bind",
         trellis_url.trim_end_matches('/'),
         flow_id
     );
+    let request_id = ulid::Ulid::new().to_string();
+    let issued_at = now_ms()?;
+    let mut request = json!({
+        "requestId": request_id,
+        "issuedAt": issued_at,
+        "proof": { "format": "trellis.session-proof.v1", "signature": "" },
+    });
+    let input = SessionProofInput::user_auth_bind(UserAuthBindSessionProofInput {
+        request_id,
+        issued_at,
+        flow_id: flow_id.to_owned(),
+        session_public_key: auth.session_key.clone(),
+        request_digest: session_proof_request_digest(&request)?,
+    })?;
+    request["proof"] = serde_json::to_value(auth.sign_session_proof(&input)?)?;
     let response = client
         .post(bind_url)
         .header(reqwest::header::ORIGIN, trellis_url.trim_end_matches('/'))
-        .json(&json!({
-            "idempotencyKey": flow_id,
-        }))
+        .json(&request)
         .send()
         .await?;
     let status = response.status();
@@ -262,7 +276,15 @@ async fn bind_session(trellis_url: &str, flow_id: &str) -> Result<BoundSession, 
         inbox_prefix: session.inbox_prefix,
         session_id: session.session_id,
         expires_at: session.expires_at,
-        servers: join_native_servers(&nats.servers)?,
+        servers: join_native_servers(
+            &nats
+                .transports
+                .native
+                .ok_or_else(|| {
+                    TrellisAuthError::UnexpectedBindStatus("missing_native_transport".to_owned())
+                })?
+                .nats_servers,
+        )?,
         bootstrap_jwt: nats.jwt,
         authorization_context,
     })
@@ -316,7 +338,7 @@ impl AgentLoginChallenge {
             Duration::from_secs(300),
         )
         .await?;
-        let bound = bind_session(trellis_url, &flow_id).await?;
+        let bound = bind_session(trellis_url, &flow_id, &auth).await?;
         let state = AdminSessionState {
             trellis_url: trellis_url.to_string(),
             servers: bound.servers.clone(),
@@ -418,7 +440,7 @@ pub async fn start_agent_login(
 
     Ok(AgentLoginChallenge {
         flow_id: response.flow_id,
-        login_url: response.portal_url,
+        login_url: response.login_url,
         session_seed,
         participant_digest,
         auth,
@@ -439,7 +461,7 @@ pub async fn start_admin_reauth(
     let response = start_auth_request(&state.trellis_url, &redirect_to, &auth).await?;
     Ok(AdminReauthOutcome::Flow(Box::new(AgentLoginChallenge {
         flow_id: response.flow_id,
-        login_url: response.portal_url,
+        login_url: response.login_url,
         session_seed: state.session_seed.clone(),
         participant_digest: administration_participant()?.digest,
         auth,

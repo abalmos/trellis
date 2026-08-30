@@ -4054,7 +4054,6 @@ async fn start_auth_request(
         .as_millis() as i64;
     let participant = compiled.participant_value()?;
     let participant_digest = compiled.participant_digest()?;
-    let participant_needs_digest = compiled.participant_needs_digest()?;
     let participant_id = participant["id"]
         .as_str()
         .expect("compiled participant has an id");
@@ -4066,7 +4065,6 @@ async fn start_auth_request(
         "sessionNkey": session_nkey,
         "participantId": participant_id,
         "participantArtifactDigest": participant_digest,
-        "participantNeedsDigest": participant_needs_digest,
         "participantArtifact": participant,
         "referencedApiArtifacts": referenced_api_artifacts,
         "redirectTarget": redirect_to,
@@ -4132,7 +4130,6 @@ async fn register_local_user(
             "password": password,
             "name": username,
             "email": null,
-            "idempotencyKey": random_session_seed(),
         }),
     )
     .await

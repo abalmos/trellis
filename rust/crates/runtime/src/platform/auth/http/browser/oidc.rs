@@ -187,6 +187,8 @@ where
             portal_policy_digest,
             claim_owner: None,
             result_digest: None,
+            authenticated_principal_id: None,
+            authenticated_roles: Vec::new(),
             created_at: now,
             expires_at: checked_add(now, 15 * 60_000)?,
             version: 1,
@@ -279,6 +281,37 @@ where
         .get_oauth_state(&query.state)
         .await?
         .ok_or_else(|| HttpError::bad_request("oauth_state_invalid"))?;
+    if pending.kind == AuthOAuthKind::Browser
+        && matches!(
+            pending.status,
+            AuthOAuthStatus::ExchangeStarted | AuthOAuthStatus::Completed
+        )
+        && pending.provider_id == provider_id
+        && pending.expires_at >= now_ms()?
+    {
+        require_oauth_browser_binding(&query.state, &pending, headers)?;
+        if pending.status == AuthOAuthStatus::ExchangeStarted
+            && pending.authenticated_principal_id.is_some()
+        {
+            return complete_browser_oauth(&state, pending, now_ms()?).await;
+        }
+        let flow = load_flow(&state.ephemeral, &pending.flow_id).await?;
+        if pending.status == AuthOAuthStatus::Completed
+            && matches!(
+                flow.state,
+                AuthBrowserFlowState::ApprovalRequired
+                    | AuthBrowserFlowState::Approved
+                    | AuthBrowserFlowState::Consumed
+            )
+        {
+            return Ok(Redirect::temporary(&format!(
+                "{}/_trellis/portal/auth?flowId={}",
+                state.public_origin.trim_end_matches('/'),
+                flow.flow_id,
+            ))
+            .into_response());
+        }
+    }
     if pending.status != AuthOAuthStatus::Pending
         || pending.provider_id != provider_id
         || pending.expires_at < now_ms()?
@@ -628,57 +661,78 @@ where
         }
     };
     let expected = oauth.version;
-    oauth.status = AuthOAuthStatus::Completed;
-    oauth.result_digest = Some(digest_parts(&[&principal_id]));
+    oauth.authenticated_principal_id = Some(principal_id);
+    oauth.authenticated_roles = provider_attributes.roles;
     oauth.version += 1;
     state
         .ephemeral
         .replace_oauth_state(expected, oauth.clone())
         .await?;
-    let mut flow = load_flow(&state.ephemeral, &oauth.flow_id).await?;
-    if flow.state != AuthBrowserFlowState::ChooseProvider {
-        return Err(HttpError::conflict("flow_not_pending"));
-    }
-    let expected = flow.version;
-    flow.state = AuthBrowserFlowState::Authenticated;
-    flow.principal_id = Some(principal_id);
-    flow.version += 1;
-    state
-        .ephemeral
-        .replace_browser_flow(expected, flow.clone())
-        .await?;
-    if let Some(mut approved) = super::consent::apply_trusted_portal_authority(
+    complete_browser_oauth(state, oauth, now).await
+}
+
+async fn complete_browser_oauth<R, E>(
+    state: &AuthHttpState<R, E>,
+    mut oauth: AuthOAuthState,
+    now: i64,
+) -> Result<Response, HttpError>
+where
+    R: AccountRepository
+        + AuthorityEvidenceRepository
+        + AuthorityRepository
+        + ContextRepository
+        + DeploymentRepository
+        + OutboxRepository
+        + PortalRepository
+        + ProvisioningRepository
+        + SessionRepository
+        + Clone
+        + Send
+        + Sync
+        + 'static,
+    E: AuthEphemeralRepository + Clone,
+{
+    let principal_id = oauth
+        .authenticated_principal_id
+        .clone()
+        .ok_or_else(|| HttpError::internal("oauth_result_missing_principal"))?;
+    let flow = load_flow(&state.ephemeral, &oauth.flow_id).await?;
+    let completed = super::consent::complete_authenticated_flow(
         state,
-        flow.clone(),
-        provider_attributes,
+        flow,
+        principal_id.clone(),
+        ProviderLoginAttributes {
+            provider_id: oauth.provider_id.clone(),
+            roles: oauth.authenticated_roles.clone(),
+        },
         now,
     )
-    .await?
-    {
-        let expected = flow.version;
-        approved.version += 1;
-        state
-            .ephemeral
-            .replace_browser_flow(expected, approved.clone())
-            .await?;
-        return Ok(Redirect::temporary(&format!(
-            "{}/_trellis/portal/auth?flowId={}",
-            state.public_origin.trim_end_matches('/'),
-            approved.flow_id,
-        ))
-        .into_response());
+    .await?;
+    let expected = oauth.version;
+    oauth.status = AuthOAuthStatus::Completed;
+    oauth.result_digest = Some(digest_parts(&[&principal_id]));
+    oauth.version += 1;
+    let state_id = oauth.state_id.clone();
+    match state.ephemeral.replace_oauth_state(expected, oauth).await {
+        Ok(()) => {}
+        Err(AuthorizationStateError::StorageConflict) => {
+            let current = state
+                .ephemeral
+                .get_oauth_state(&state_id)
+                .await?
+                .ok_or_else(|| HttpError::bad_request("oauth_state_invalid"))?;
+            if current.status != AuthOAuthStatus::Completed
+                || current.authenticated_principal_id.as_deref() != Some(&principal_id)
+            {
+                return Err(HttpError::conflict("oauth_completion_conflict"));
+            }
+        }
+        Err(error) => return Err(error.into()),
     }
-    let expected = flow.version;
-    flow.state = AuthBrowserFlowState::ApprovalRequired;
-    flow.version += 1;
-    state
-        .ephemeral
-        .replace_browser_flow(expected, flow.clone())
-        .await?;
     Ok(Redirect::temporary(&format!(
         "{}/_trellis/portal/auth?flowId={}",
         state.public_origin.trim_end_matches('/'),
-        flow.flow_id
+        completed.flow_id
     ))
     .into_response())
 }

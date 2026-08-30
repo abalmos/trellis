@@ -9,7 +9,6 @@ pub(in crate::platform::auth::http) struct AuthStartRequest {
     session_nkey: String,
     participant_id: String,
     participant_artifact_digest: String,
-    participant_needs_digest: String,
     participant_artifact: Option<Value>,
     #[serde(default)]
     referenced_api_artifacts: Vec<Value>,
@@ -104,7 +103,6 @@ where
             .map_err(|_| HttpError::bad_request("participant_resolution_failed"))?;
         if resolved.participant_id() != request.participant_id
             || resolved.participant_digest() != request.participant_artifact_digest
-            || needs_digest != request.participant_needs_digest
         {
             tracing::warn!(
                 participant_id = %request.participant_id,
@@ -146,10 +144,8 @@ where
             tracing::warn!(participant_id = %request.participant_id, "auth request participant binding is unknown");
             HttpError::bad_request("participant_binding_unknown")
         })?;
-    if binding.state != ParticipantBindingState::Resolved
-        || binding.needs_digest != request.participant_needs_digest
-    {
-        tracing::warn!(participant_id = %request.participant_id, "auth request participant binding does not match declared needs");
+    if binding.state != ParticipantBindingState::Resolved {
+        tracing::warn!(participant_id = %request.participant_id, "auth request participant binding is unresolved");
         return Err(HttpError::bad_request("participant_binding_mismatch"));
     }
     let consent = browser_consent(&binding)?;
@@ -170,7 +166,7 @@ where
         request_digest,
         participant_id: request.participant_id,
         participant_artifact_digest: request.participant_artifact_digest,
-        participant_needs_digest: request.participant_needs_digest,
+        participant_needs_digest: binding.needs_digest,
         consent,
         session_public_key: request.session_public_key,
         session_nkey: request.session_nkey,

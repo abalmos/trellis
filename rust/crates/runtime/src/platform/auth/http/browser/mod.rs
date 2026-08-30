@@ -10,6 +10,8 @@ pub(super) use local::{
     complete_first_admin, get_account_flow, get_flow, local_login, register_local,
     BrowserFlowResponse,
 };
+#[cfg(test)]
+pub(super) use local::{FirstAdminRequest, LocalRegistrationRequest};
 pub(super) use oidc::{oidc_callback, start_account_flow_oidc, start_oidc};
 #[cfg(test)]
 pub(super) use request::AuthStartRequest;

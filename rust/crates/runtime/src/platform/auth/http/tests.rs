@@ -182,16 +182,48 @@ fn browser_start_wire_rejects_retired_fields() {
         "sessionNkey": "nkey",
         "participantId": "app",
         "participantArtifactDigest": DIGEST,
-        "participantNeedsDigest": DIGEST,
         "participantArtifact": null,
         "referencedApiArtifacts": [],
         "redirectTarget": "https://app.example/complete",
         "proof": {},
     });
     assert!(serde_json::from_value::<super::browser::AuthStartRequest>(request.clone()).is_ok());
-    let mut retired = request;
-    retired["sessionKey"] = serde_json::json!("retired");
-    assert!(serde_json::from_value::<super::browser::AuthStartRequest>(retired).is_err());
+    let retired = request;
+    for field in ["participantNeedsDigest", "sessionKey"] {
+        let mut invalid = retired.clone();
+        invalid[field] = serde_json::json!("retired");
+        assert!(serde_json::from_value::<super::browser::AuthStartRequest>(invalid).is_err());
+    }
+}
+
+#[test]
+fn browser_account_bodies_reject_unknown_and_retired_fields() {
+    let first_admin = serde_json::json!({
+        "username": "admin",
+        "password": "password",
+        "name": null,
+        "email": null,
+    });
+    assert!(
+        serde_json::from_value::<super::browser::FirstAdminRequest>(first_admin.clone()).is_ok()
+    );
+    let mut unknown = first_admin;
+    unknown["unexpected"] = serde_json::json!(true);
+    assert!(serde_json::from_value::<super::browser::FirstAdminRequest>(unknown).is_err());
+
+    let registration = serde_json::json!({
+        "username": "user",
+        "password": "password",
+        "name": null,
+        "email": null,
+    });
+    assert!(
+        serde_json::from_value::<super::browser::LocalRegistrationRequest>(registration.clone())
+            .is_ok()
+    );
+    let mut retired = registration;
+    retired["idempotencyKey"] = serde_json::json!("retired");
+    assert!(serde_json::from_value::<super::browser::LocalRegistrationRequest>(retired).is_err());
 }
 
 #[test]
@@ -290,6 +322,8 @@ fn oauth_cookie_binds_one_browser_and_uses_callback_security_policy() {
         portal_policy_digest: Some(super::digest_parts(&["policy"])),
         claim_owner: None,
         result_digest: None,
+        authenticated_principal_id: None,
+        authenticated_roles: Vec::new(),
         created_at: 1,
         expires_at: 2,
         version: 1,

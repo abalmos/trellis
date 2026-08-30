@@ -12,6 +12,7 @@ use trellis_protocol::{
 };
 
 use super::super::ephemeral::AuthEphemeralRepository;
+use super::super::AuthorizationStateError;
 use super::{
     map_issuance_error, now_ms, AccountRepository, AuthHttpState, AuthorityEvidenceRepository,
     AuthorityRepository, ContextRepository, DeploymentRepository, HttpError, OutboxRepository,
@@ -72,7 +73,7 @@ where
         .repository()
         .get_session(&request.session_id)
         .await?
-        .ok_or_else(|| HttpError::unauthorized("auth_required"))?;
+        .ok_or_else(|| map_issuance_error(AuthorizationStateError::SessionMissing))?;
     let session_nkey = KeyPair::from_public_key(&request.session_nkey)
         .map_err(|_| HttpError::unauthorized("invalid_proof"))?;
     let (_, session_nkey_bytes) = nkeys::from_public_key(&request.session_nkey)
@@ -147,12 +148,17 @@ where
         )
         .await
         .map_err(map_issuance_error)?;
-    let signed_context =
-        trellis_protocol::parse_authorization_context(&authorization_context.context)
-            .map_err(|_| HttpError::internal("authorization context is invalid"))?;
-    let authorization_context_digest = signed_context
-        .digest()
-        .map_err(|_| HttpError::internal("authorization context is invalid"))?;
+    let signed_context = trellis_protocol::parse_authorization_context(
+        &authorization_context.context,
+    )
+    .map_err(|error| {
+        tracing::error!(%error, "issued authorization context is invalid");
+        HttpError::internal("internal_error")
+    })?;
+    let authorization_context_digest = signed_context.digest().map_err(|error| {
+        tracing::error!(%error, "issued authorization context digest is invalid");
+        HttpError::internal("internal_error")
+    })?;
     let issued = state
         .authorization_contexts
         .require_current_context(

@@ -85,6 +85,8 @@ fn oauth_state() -> AuthOAuthState {
         portal_policy_digest: Some(DIGEST.to_owned()),
         claim_owner: None,
         result_digest: None,
+        authenticated_principal_id: None,
+        authenticated_roles: Vec::new(),
         created_at: 100,
         expires_at: 1_000,
         version: 1,
@@ -103,46 +105,61 @@ async fn repository_conformance(repository: impl AuthEphemeralRepository + Clone
         Err(AuthorizationStateError::StorageConflict)
     );
 
-    let mut authenticated = flow.clone();
-    authenticated.state = AuthBrowserFlowState::Authenticated;
-    authenticated.principal_id = Some("user-1".to_owned());
-    authenticated.version = 2;
+    let mut directly_approved = flow.clone();
+    directly_approved.flow_id = "flow-approved".to_owned();
     repository
-        .replace_browser_flow(1, authenticated.clone())
+        .create_browser_flow(directly_approved.clone())
+        .await
+        .unwrap();
+    directly_approved.state = AuthBrowserFlowState::Approved;
+    directly_approved.principal_id = Some("user-1".to_owned());
+    directly_approved.durable_result_digest = Some(DIGEST.to_owned());
+    directly_approved.completed_at = Some(200);
+    directly_approved.version = 2;
+    repository
+        .replace_browser_flow(1, directly_approved)
+        .await
+        .unwrap();
+
+    let mut approval_required = flow.clone();
+    approval_required.state = AuthBrowserFlowState::ApprovalRequired;
+    approval_required.principal_id = Some("user-1".to_owned());
+    approval_required.version = 2;
+    repository
+        .replace_browser_flow(1, approval_required.clone())
         .await
         .unwrap();
     assert_eq!(
         repository
-            .replace_browser_flow(1, authenticated.clone())
+            .replace_browser_flow(1, approval_required.clone())
             .await,
         Err(AuthorizationStateError::StorageConflict)
     );
     for changed_consent in [
         {
-            let mut consent = authenticated.consent.clone();
+            let mut consent = approval_required.consent.clone();
             consent.consent_view = serde_json::json!({ "title": "Changed" });
             consent
         },
         {
-            let mut consent = authenticated.consent.clone();
+            let mut consent = approval_required.consent.clone();
             consent.consent_view_digest = DIGEST.replace('A', "B");
             consent
         },
         {
-            let mut consent = authenticated.consent.clone();
+            let mut consent = approval_required.consent.clone();
             consent.proposal_digest = DIGEST.replace('A', "C");
             consent
         },
         {
-            let mut consent = authenticated.consent.clone();
+            let mut consent = approval_required.consent.clone();
             consent
                 .optional_capability_definitions
                 .insert("extra".to_owned(), GrantSet::new(Vec::new()));
             consent
         },
     ] {
-        let mut changed = authenticated.clone();
-        changed.state = AuthBrowserFlowState::ApprovalRequired;
+        let mut changed = approval_required.clone();
         changed.consent = changed_consent;
         changed.version = 3;
         assert_eq!(
@@ -150,7 +167,7 @@ async fn repository_conformance(repository: impl AuthEphemeralRepository + Clone
             Err(AuthorizationStateError::StorageConflict)
         );
     }
-    let mut changed_transcript = authenticated;
+    let mut changed_transcript = approval_required;
     changed_transcript.request_id = "changed".to_owned();
     changed_transcript.version = 3;
     assert_eq!(
@@ -163,9 +180,8 @@ async fn repository_conformance(repository: impl AuthEphemeralRepository + Clone
         .create_browser_flow(skipped_state.clone())
         .await
         .unwrap();
-    skipped_state.state = AuthBrowserFlowState::Approved;
+    skipped_state.state = AuthBrowserFlowState::ApprovalDenied;
     skipped_state.principal_id = Some("user-1".to_owned());
-    skipped_state.durable_result_digest = Some(DIGEST.to_owned());
     skipped_state.completed_at = Some(200);
     skipped_state.version = 2;
     assert_eq!(
@@ -234,6 +250,7 @@ async fn repository_conformance(repository: impl AuthEphemeralRepository + Clone
         .await
         .unwrap();
     completed.status = AuthOAuthStatus::ExchangeStarted;
+    completed.authenticated_principal_id = Some("user-1".to_owned());
     completed.version += 1;
     repository
         .replace_oauth_state(completed.version - 1, completed.clone())

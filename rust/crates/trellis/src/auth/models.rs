@@ -93,8 +93,23 @@ pub struct BoundSessionRecord {
 pub struct BoundNatsRecord {
     #[doc = concat!("The `", stringify!(jwt), "` value.")]
     pub jwt: String,
-    #[doc = concat!("The `", stringify!(servers), "` value.")]
-    pub servers: Vec<String>,
+    /// Typed native and WebSocket transport endpoints.
+    pub transports: BoundNatsTransports,
+}
+
+/// Typed transport endpoints returned with a bound browser session.
+#[derive(Debug, Clone, Deserialize)]
+pub struct BoundNatsTransports {
+    /// Native NATS endpoints, when configured.
+    pub native: Option<BoundNatsTransport>,
+}
+
+/// Endpoints for one NATS transport kind.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BoundNatsTransport {
+    /// NATS server URLs for this transport.
+    pub nats_servers: Vec<String>,
 }
 
 /// An in-progress agent login flow waiting for completion.

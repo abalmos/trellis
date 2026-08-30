@@ -464,7 +464,18 @@ struct ServiceBootstrapSession {
 struct ServiceBootstrapNats {
     jwt: String,
     jwt_expires_at: i64,
-    servers: Vec<String>,
+    transports: ServiceBootstrapTransports,
+}
+
+#[derive(Debug, Deserialize)]
+struct ServiceBootstrapTransports {
+    native: Option<ServiceBootstrapTransport>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ServiceBootstrapTransport {
+    nats_servers: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -1188,6 +1199,10 @@ async fn connect_bootstrapped_service(
     let nats_credential = bootstrap
         .nats
         .ok_or_else(|| TrellisClientError::Bootstrap("missing NATS bootstrap credential".into()))?;
+    let native_transport = nats_credential
+        .transports
+        .native
+        .ok_or_else(|| TrellisClientError::Bootstrap("missing native NATS transport".into()))?;
     let authorization_context = bootstrap.authorization_context.ok_or_else(|| {
         TrellisClientError::Bootstrap("missing authorization context bundle".into())
     })?;
@@ -1216,7 +1231,7 @@ async fn connect_bootstrapped_service(
             "authorization context binding mismatch".into(),
         ));
     }
-    if nats_credential.servers.is_empty() {
+    if native_transport.nats_servers.is_empty() {
         return Err(TrellisClientError::Bootstrap(
             "native NATS transport has no servers".into(),
         ));
@@ -1270,7 +1285,7 @@ async fn connect_bootstrapped_service(
     })
     .connection_timeout(std::time::Duration::from_millis(timeout_ms))
     .custom_inbox_prefix(inbox_prefix.clone())
-    .connect(nats_credential.servers)
+    .connect(native_transport.nats_servers)
     .await
     .map_err(|error| {
         TrellisClientError::NatsConnect(format!(
@@ -1586,6 +1601,10 @@ impl TrellisClient {
         let nats_credential = response.nats.ok_or_else(|| {
             TrellisClientError::Bootstrap("missing device NATS credential".into())
         })?;
+        let native_transport = nats_credential
+            .transports
+            .native
+            .ok_or_else(|| TrellisClientError::Bootstrap("missing native NATS transport".into()))?;
         let authorization_context = response.authorization_context.ok_or_else(|| {
             TrellisClientError::Bootstrap("missing device authorization context bundle".into())
         })?;
@@ -1600,7 +1619,7 @@ impl TrellisClient {
                 "device authorization participant mismatch".into(),
             ));
         }
-        let servers = nats_credential.servers.join(",");
+        let servers = native_transport.nats_servers.join(",");
         let mut connected = Self::connect_user(UserConnectOptions::new(
             opts.trellis_url,
             &servers,

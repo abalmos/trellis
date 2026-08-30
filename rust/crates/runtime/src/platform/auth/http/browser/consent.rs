@@ -1,7 +1,6 @@
 use super::super::*;
 use super::local::BrowserFlowResponse;
 use crate::platform::auth::policy::portal_allows_authenticated_provider;
-use crate::platform::auth::MaterializationState;
 
 #[derive(Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -154,56 +153,12 @@ where
             AuthorizationStateError::StorageConflict => HttpError::conflict("authority_changed"),
             error => error.into(),
         })?;
-    let authority_id = durable.authority_id.clone();
-    let durable_record = DesiredAuthorityRecord::Identity(durable.clone());
+    let durable_record = DesiredAuthorityRecord::Identity(durable);
     let durable_result_digest = trellis_protocol::digest_json(
         &serde_json::to_value(&durable_record)
             .map_err(|_| HttpError::internal("authority_encode"))?,
     )
     .map_err(|_| HttpError::internal("authority_digest"))?;
-    let authority_target =
-        AuthorityTarget::new(AuthorityKind::Identity, authority_id).map_err(HttpError::from)?;
-    let evidence_required = state
-        .service
-        .repository()
-        .get_materialized_authority(authority_target.kind, &authority_target.authority_id)
-        .await?
-        .is_none_or(|materialization| {
-            materialization.authority.state != MaterializationState::Available
-                || materialization.authority.authority_version != durable.version
-        });
-    if evidence_required {
-        super::super::super::ensure_identity_resources(
-            state.service.repository(),
-            AuthorityEvidenceScope {
-                target: authority_target.clone(),
-                participant_id: flow.participant_id.clone(),
-                participant_artifact_digest: flow.participant_artifact_digest.clone(),
-                participant_needs_digest: flow.participant_needs_digest.clone(),
-            },
-            &binding,
-            &principal_id,
-            now,
-        )
-        .await?;
-        super::super::super::ensure_authority_dependencies(
-            state.service.repository(),
-            AuthorityEvidenceScope {
-                target: authority_target.clone(),
-                participant_id: flow.participant_id.clone(),
-                participant_artifact_digest: flow.participant_artifact_digest.clone(),
-                participant_needs_digest: flow.participant_needs_digest.clone(),
-            },
-            &binding,
-            now,
-        )
-        .await?;
-    }
-    state
-        .service
-        .authorization()
-        .reconcile_authority(&authority_target, now)
-        .await?;
     let expected = flow.version;
     flow.state = AuthBrowserFlowState::Approved;
     flow.durable_result_digest = Some(durable_result_digest);
@@ -410,6 +365,87 @@ where
     );
     flow.completed_at = Some(now);
     Ok(Some(flow))
+}
+
+pub(super) async fn complete_authenticated_flow<R, E>(
+    state: &AuthHttpState<R, E>,
+    mut flow: AuthBrowserFlow,
+    principal_id: String,
+    attributes: ProviderLoginAttributes,
+    now: i64,
+) -> Result<AuthBrowserFlow, HttpError>
+where
+    R: AccountRepository
+        + AuthorityEvidenceRepository
+        + AuthorityRepository
+        + ContextRepository
+        + DeploymentRepository
+        + OutboxRepository
+        + PortalRepository
+        + ProvisioningRepository
+        + SessionRepository
+        + Clone
+        + Send
+        + Sync
+        + 'static,
+    E: AuthEphemeralRepository + Clone,
+{
+    if flow.state != AuthBrowserFlowState::ChooseProvider {
+        if flow.principal_id.as_deref() == Some(&principal_id)
+            && matches!(
+                flow.state,
+                AuthBrowserFlowState::ApprovalRequired
+                    | AuthBrowserFlowState::Approved
+                    | AuthBrowserFlowState::Consumed
+            )
+        {
+            return Ok(flow);
+        }
+        return Err(HttpError::conflict("flow_not_pending"));
+    }
+    let expected = flow.version;
+    flow.principal_id = Some(principal_id);
+    let mut completed = if let Some(approved) =
+        apply_trusted_portal_authority(state, flow.clone(), attributes, now).await?
+    {
+        approved
+    } else {
+        flow.state = AuthBrowserFlowState::ApprovalRequired;
+        flow
+    };
+    completed.version += 1;
+    match state
+        .ephemeral
+        .replace_browser_flow(expected, completed.clone())
+        .await
+    {
+        Ok(()) => Ok(completed),
+        Err(AuthorizationStateError::StorageConflict) => {
+            let current = load_flow(&state.ephemeral, &completed.flow_id).await?;
+            let converged = current.principal_id == completed.principal_id
+                && (current.state == completed.state
+                    || matches!(
+                        (completed.state, current.state),
+                        (
+                            AuthBrowserFlowState::ApprovalRequired,
+                            AuthBrowserFlowState::Approved | AuthBrowserFlowState::Consumed
+                        ) | (
+                            AuthBrowserFlowState::Approved,
+                            AuthBrowserFlowState::Consumed
+                        )
+                    ))
+                && completed
+                    .durable_result_digest
+                    .as_ref()
+                    .is_none_or(|digest| current.durable_result_digest.as_ref() == Some(digest));
+            if converged {
+                Ok(current)
+            } else {
+                Err(HttpError::conflict("flow_completion_conflict"))
+            }
+        }
+        Err(error) => Err(error.into()),
+    }
 }
 
 #[derive(Deserialize)]

@@ -179,7 +179,7 @@ where
 }
 
 #[derive(Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct FirstAdminRequest {
     username: Option<String>,
     password: String,
@@ -400,7 +400,7 @@ where
         + 'static,
     E: AuthEphemeralRepository + Clone,
 {
-    let mut flow = load_flow(&state.ephemeral, &request.flow_id).await?;
+    let flow = load_flow(&state.ephemeral, &request.flow_id).await?;
     let (portal, settings) = state
         .service
         .repository()
@@ -430,43 +430,18 @@ where
         LocalAuthentication::Authenticated { principal, .. } => principal,
         LocalAuthentication::Denied => return Err(HttpError::unauthorized("invalid_credentials")),
     };
-    let expected = flow.version;
-    flow.state = AuthBrowserFlowState::Authenticated;
-    flow.principal_id = Some(principal.principal_id);
-    flow.version += 1;
-    state
-        .ephemeral
-        .replace_browser_flow(expected, flow.clone())
-        .await?;
-    if let Some(mut approved) = super::consent::apply_trusted_portal_authority(
+    let completed = super::consent::complete_authenticated_flow(
         &state,
-        flow.clone(),
+        flow,
+        principal.principal_id,
         ProviderLoginAttributes {
             provider_id: "local".to_owned(),
             roles: Vec::new(),
         },
         now,
     )
-    .await?
-    {
-        let expected = flow.version;
-        approved.version += 1;
-        state
-            .ephemeral
-            .replace_browser_flow(expected, approved.clone())
-            .await?;
-        let mut response = flow_response(approved);
-        response.providers = vec!["local".to_owned()];
-        return Ok(Json(response));
-    }
-    let expected = flow.version;
-    flow.state = AuthBrowserFlowState::ApprovalRequired;
-    flow.version += 1;
-    state
-        .ephemeral
-        .replace_browser_flow(expected, flow.clone())
-        .await?;
-    let mut response = flow_response(flow);
+    .await?;
+    let mut response = flow_response(completed);
     response.providers = vec!["local".to_owned()];
     Ok(Json(response))
 }
@@ -478,7 +453,6 @@ pub(crate) struct LocalRegistrationRequest {
     password: String,
     name: Option<String>,
     email: Option<String>,
-    idempotency_key: String,
 }
 
 pub(crate) async fn register_local<R, E>(
@@ -503,7 +477,7 @@ where
         + 'static,
     E: AuthEphemeralRepository + Clone,
 {
-    let mut flow = load_flow(&state.ephemeral, &flow_id).await?;
+    let flow = load_flow(&state.ephemeral, &flow_id).await?;
     if flow.state != AuthBrowserFlowState::ChooseProvider {
         return Err(HttpError::conflict("flow_not_pending"));
     }
@@ -543,7 +517,7 @@ where
                 &flow_id,
                 "browser.local.register",
                 &flow.session_public_key,
-                &request.idempotency_key,
+                &flow_id,
                 &request_digest,
                 now,
             )?,
@@ -558,39 +532,16 @@ where
             .ok_or_else(|| HttpError::internal("invalid_registration_replay"))?
             .to_owned(),
     };
-    let expected = flow.version;
-    flow.state = AuthBrowserFlowState::Authenticated;
-    flow.principal_id = Some(principal_id);
-    flow.version += 1;
-    state
-        .ephemeral
-        .replace_browser_flow(expected, flow.clone())
-        .await?;
-    if let Some(mut approved) = super::consent::apply_trusted_portal_authority(
+    let completed = super::consent::complete_authenticated_flow(
         &state,
-        flow.clone(),
+        flow,
+        principal_id,
         ProviderLoginAttributes {
             provider_id: "local".to_owned(),
             roles: Vec::new(),
         },
         now,
     )
-    .await?
-    {
-        let expected = flow.version;
-        approved.version += 1;
-        state
-            .ephemeral
-            .replace_browser_flow(expected, approved.clone())
-            .await?;
-        return Ok(Json(flow_response(approved)));
-    }
-    let expected = flow.version;
-    flow.state = AuthBrowserFlowState::ApprovalRequired;
-    flow.version += 1;
-    state
-        .ephemeral
-        .replace_browser_flow(expected, flow.clone())
-        .await?;
-    Ok(Json(flow_response(flow)))
+    .await?;
+    Ok(Json(flow_response(completed)))
 }

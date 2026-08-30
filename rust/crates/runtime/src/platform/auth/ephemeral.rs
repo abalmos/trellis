@@ -35,7 +35,6 @@ pub(crate) enum AuthBrowserFlowKind {
 #[serde(rename_all = "snake_case")]
 pub(crate) enum AuthBrowserFlowState {
     ChooseProvider,
-    Authenticated,
     ApprovalRequired,
     ApprovalDenied,
     Approved,
@@ -191,9 +190,7 @@ impl AuthBrowserFlow {
         let completed = self.completed_at.is_some();
         let valid = match self.state {
             AuthBrowserFlowState::ChooseProvider => !principal && !claim && !result && !completed,
-            AuthBrowserFlowState::Authenticated | AuthBrowserFlowState::ApprovalRequired => {
-                principal && !claim && !result && !completed
-            }
+            AuthBrowserFlowState::ApprovalRequired => principal && !claim && !result && !completed,
             AuthBrowserFlowState::ApprovalDenied => principal && !claim && !result && completed,
             AuthBrowserFlowState::Approved => principal && !claim && result && completed,
             AuthBrowserFlowState::Consumed => principal && claim && result && completed,
@@ -261,6 +258,8 @@ pub(crate) struct AuthOAuthState {
     pub portal_policy_digest: Option<String>,
     pub claim_owner: Option<String>,
     pub result_digest: Option<String>,
+    pub authenticated_principal_id: Option<String>,
+    pub authenticated_roles: Vec<String>,
     pub created_at: i64,
     pub expires_at: i64,
     pub version: u64,
@@ -343,6 +342,16 @@ impl AuthOAuthState {
             return invalid("OAuth portal ID and policy digest must both be present or absent");
         }
         validate_optional_text("claimOwner", self.claim_owner.as_deref())?;
+        validate_optional_text(
+            "authenticatedPrincipalId",
+            self.authenticated_principal_id.as_deref(),
+        )?;
+        for role in &self.authenticated_roles {
+            require_nonempty("authenticatedRoles entry", role)?;
+        }
+        if self.authenticated_principal_id.is_none() && !self.authenticated_roles.is_empty() {
+            return invalid("OAuth authenticated roles require a principal");
+        }
         if let Some(value) = self.result_digest.as_deref() {
             require_digest("resultDigest", value)?;
         }
@@ -355,13 +364,17 @@ impl AuthOAuthState {
 
         let claimed = self.claim_owner.is_some();
         let result = self.result_digest.is_some();
+        let authenticated = self.authenticated_principal_id.is_some();
         let valid = match self.status {
-            AuthOAuthStatus::Pending => !claimed && !result,
-            AuthOAuthStatus::Claimed
-            | AuthOAuthStatus::ExchangeStarted
-            | AuthOAuthStatus::RestartRequired => claimed && !result,
-            AuthOAuthStatus::Completed => claimed && result,
-            AuthOAuthStatus::Expired => !result,
+            AuthOAuthStatus::Pending => !claimed && !result && !authenticated,
+            AuthOAuthStatus::Claimed | AuthOAuthStatus::RestartRequired => {
+                claimed && !result && !authenticated
+            }
+            AuthOAuthStatus::ExchangeStarted => claimed && !result,
+            AuthOAuthStatus::Completed => {
+                claimed && result && (self.kind != AuthOAuthKind::Browser || authenticated)
+            }
+            AuthOAuthStatus::Expired => !result && !authenticated,
         };
         if !valid {
             return invalid("OAuth claim/result fields do not match status");
@@ -639,9 +652,6 @@ fn valid_browser_transition(current: AuthBrowserFlowState, next: AuthBrowserFlow
         (current, next),
         (
             AuthBrowserFlowState::ChooseProvider,
-            AuthBrowserFlowState::Authenticated | AuthBrowserFlowState::Expired
-        ) | (
-            AuthBrowserFlowState::Authenticated,
             AuthBrowserFlowState::ApprovalRequired
                 | AuthBrowserFlowState::Approved
                 | AuthBrowserFlowState::Expired
