@@ -1,6 +1,7 @@
 import { assertEquals, assertExists, assertRejects } from "@std/assert";
 
 import { bindFlow, buildLoginUrl } from "./login.ts";
+import { testAuthorizationContext } from "../test_context.ts";
 import { defineAppContract } from "../../contract_support/mod.ts";
 import type { SessionKeyHandle } from "./session.ts";
 import {
@@ -33,6 +34,7 @@ async function createHandle(): Promise<SessionKeyHandle> {
     publicKey: keyPair.publicKey,
     publicKeyRaw,
     sessionKey,
+    persistence: "temporary",
   };
 }
 
@@ -98,6 +100,7 @@ Deno.test("buildLoginUrl sends the protocol-owned user auth proof", async () => 
 Deno.test("bindFlow posts a flow-scoped bind request", async () => {
   const originalFetch = globalThis.fetch;
   try {
+    const handle = await createHandle();
     globalThis.fetch = (async (input, init) => {
       const url = String(input);
       assertEquals(url, "http://localhost:3000/auth/flow/flow-123/bind");
@@ -108,14 +111,19 @@ Deno.test("bindFlow posts a flow-scoped bind request", async () => {
       assertEquals(Object.keys(body), ["idempotencyKey"]);
       return new Response(
         JSON.stringify({
-          status: "bound",
-          inboxPrefix: "_INBOX.abc123",
-          expires: "2026-01-01T00:00:00.000Z",
-          sentinel: { jwt: "jwt", seed: "seed" },
-          transports: {
-            native: { natsServers: ["nats://localhost:4222"] },
-            websocket: { natsServers: ["ws://localhost:8080"] },
+          serverNow: Date.now(),
+          session: {
+            sessionId: "session-1",
+            inboxPrefix: "_INBOX.abc123",
+            participantArtifactDigest: TEST_CONTRACT.CONTRACT_DIGEST,
           },
+          nats: {
+            jwt: "jwt",
+            jwtExpiresAt: Date.now() + 60_000,
+            servers: ["ws://localhost:8080"],
+          },
+          authorizationContext: testAuthorizationContext(),
+          redirectTarget: "http://localhost:5173/profile",
         }),
         {
           status: 200,
@@ -126,15 +134,14 @@ Deno.test("bindFlow posts a flow-scoped bind request", async () => {
 
     const response = await bindFlow(
       { authUrl: "http://localhost:3000" },
+      handle,
       "flow-123",
     );
     assertEquals(response.status, "bound");
+    assertEquals(handle.sessionId, "session-1");
     if (response.status !== "bound") {
       throw new Error("expected bound response");
     }
-    assertEquals(response.transports.websocket?.natsServers, [
-      "ws://localhost:8080",
-    ]);
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -143,6 +150,7 @@ Deno.test("bindFlow posts a flow-scoped bind request", async () => {
 Deno.test("bindFlow surfaces expired flow responses without a parse error", async () => {
   const originalFetch = globalThis.fetch;
   try {
+    const handle = await createHandle();
     globalThis.fetch = (async () => {
       return new Response(
         JSON.stringify({ status: "expired" }),
@@ -157,6 +165,7 @@ Deno.test("bindFlow surfaces expired flow responses without a parse error", asyn
       () =>
         bindFlow(
           { authUrl: "http://localhost:3000" },
+          handle,
           "flow-expired",
         ),
       Error,

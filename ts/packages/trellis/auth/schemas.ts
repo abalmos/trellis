@@ -1,6 +1,8 @@
 import type { StaticDecode } from "typebox";
 import { Type } from "typebox";
 
+import { AuthorizationContextBundleSchema } from "./authorization/types.ts";
+
 const SessionKeySchema = Type.String({
   pattern: "^[A-Za-z0-9_-]{43}$",
 });
@@ -79,12 +81,24 @@ export function approvalCapabilityKeys(approval: ContractApproval): string[] {
   return Object.keys(approval.capabilities);
 }
 
+export const BindWireResponseSchema = Type.Object({
+  serverNow: Type.Integer(),
+  session: Type.Object({
+    sessionId: Type.String({ minLength: 1 }),
+    inboxPrefix: Type.String({ minLength: 1 }),
+    participantArtifactDigest: Type.String({ minLength: 1 }),
+  }, { additionalProperties: true }),
+  nats: Type.Object({
+    jwt: Type.String({ minLength: 1 }),
+    jwtExpiresAt: Type.Integer({ minimum: 1 }),
+    servers: Type.Array(Type.String({ minLength: 1 }), { minItems: 1 }),
+  }),
+  authorizationContext: AuthorizationContextBundleSchema,
+  redirectTarget: Type.Union([Type.String(), Type.Null()]),
+}, { additionalProperties: true });
+
 export const BindSuccessResponseSchema = Type.Object({
   status: Type.Literal("bound"),
-  inboxPrefix: Type.String(),
-  expires: Type.String({ format: "date-time" }),
-  sentinel: SentinelCredsSchema,
-  transports: ClientTransportsSchema,
 });
 
 export const BindInsufficientCapabilitiesResponseSchema = Type.Object({

@@ -69,6 +69,7 @@ class ConsoleAuthState {
     try {
       return await bindFlow(
         { authUrl: this.#requireAuthUrl() },
+        await this.init(),
         flowId,
       );
     } catch (error) {

@@ -10,15 +10,15 @@ import {
   AuthStartResponseSchema,
   AuthStartWireResponseSchema,
   type BindResponse,
-  BindResponseSchema,
   type BindSuccessResponse,
+  BindWireResponseSchema,
 } from "../schemas.ts";
 import {
   sessionNkeyFromPublicKey,
   sessionProofRequestDigest,
   signSessionProof,
 } from "../session_proof.ts";
-import { getPublicSessionKey } from "./session.ts";
+import { getPublicSessionKey, setSessionId } from "./session.ts";
 import type { SessionKeyHandle } from "./session.ts";
 
 export type AuthConfig = {
@@ -132,6 +132,7 @@ export function isBindSuccessResponse(
 
 export async function bindFlow(
   config: AuthConfig,
+  handle: SessionKeyHandle,
   flowId: string,
 ): Promise<BindResponse> {
   const response = await fetch(
@@ -153,5 +154,7 @@ export async function bindFlow(
     throw new Error("Bind failed: expired");
   }
 
-  return Value.Parse(BindResponseSchema, payload) as BindResponse;
+  const parsed = Value.Parse(BindWireResponseSchema, payload);
+  await setSessionId(handle, parsed.session.sessionId);
+  return { status: "bound" };
 }

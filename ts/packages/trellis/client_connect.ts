@@ -20,6 +20,7 @@ import {
   type SessionKeyOptions,
   setSessionId,
 } from "./auth/browser.ts";
+import { BindWireResponseSchema } from "./auth/schemas.ts";
 import { createAuth, type TrellisAuth } from "./auth/session_auth.ts";
 import {
   AuthorizationContextBundleSchema,
@@ -371,21 +372,6 @@ function createTransportError(args: {
   });
 }
 
-const BindWireSchema = Type.Object({
-  serverNow: Type.Integer(),
-  session: Type.Object({
-    sessionId: Type.String({ minLength: 1 }),
-    inboxPrefix: Type.String({ minLength: 1 }),
-    participantArtifactDigest: Type.String({ minLength: 1 }),
-  }, { additionalProperties: true }),
-  nats: Type.Object({
-    jwt: Type.String({ minLength: 1 }),
-    jwtExpiresAt: Type.Integer({ minimum: 1 }),
-    servers: Type.Array(Type.String({ minLength: 1 }), { minItems: 1 }),
-  }),
-  authorizationContext: AuthorizationContextBundleSchema,
-}, { additionalProperties: true });
-
 async function readJsonResponse(
   response: Response,
   args: {
@@ -583,10 +569,10 @@ async function bindClientFlow(args: {
       context: { flowId: args.flowId },
     });
   }
-  let parsed: StaticDecode<typeof BindWireSchema>;
+  let parsed: StaticDecode<typeof BindWireResponseSchema>;
   try {
-    parsed = Value.Parse(BindWireSchema, payload) as StaticDecode<
-      typeof BindWireSchema
+    parsed = Value.Parse(BindWireResponseSchema, payload) as StaticDecode<
+      typeof BindWireResponseSchema
     >;
   } catch (cause) {
     throw createTransportError({
