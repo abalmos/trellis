@@ -6,8 +6,8 @@ use super::authority::{AuthorityReconciliationOutcome, IssuanceSnapshot};
 use super::materializer::{protocol_authority_kind, protocol_principal_kind};
 use super::{
     AuthorityState, AuthorityTarget, AuthorizationStateError, ContextRepository,
-    DesiredAuthorityRecord, IssuableAuthorizationState, MaterializationState, PrincipalKind,
-    PrincipalState, RuntimeEvidence, SessionState,
+    DesiredAuthorityRecord, IssuableAuthorizationState, MaterializationState,
+    ParticipantBindingState, PrincipalKind, PrincipalState, RuntimeEvidence, SessionState,
 };
 
 const MAX_RECONCILIATION_ATTEMPTS: usize = 3;
@@ -124,7 +124,9 @@ pub(super) fn resolve_snapshot(
     if binding.needs_digest != session.participant_needs_digest {
         return Err(AuthorizationStateError::NeedsDigestMismatch);
     }
-    binding.resolve()?;
+    if binding.state != ParticipantBindingState::Resolved {
+        return Err(AuthorizationStateError::ParticipantMissing);
+    }
 
     let runtime = snapshot
         .runtime
