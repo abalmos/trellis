@@ -241,18 +241,10 @@ jobs:
 
       - name: Verify publishable Rust packages
         run: |
-          cargo package --manifest-path rust/Cargo.toml --workspace --allow-dirty \
-            --exclude trellis-local-bootstrap \
-            --exclude trellis-bootstrap \
-            --exclude trellis-local-nats \
-            --exclude trellis-jobs-runtime \
-            --exclude trellis-eventlog-runtime \
-            --exclude trellis-test \
-            --exclude trellis-protocol-wasm \
-            --exclude trellis-codegen-ts \
-            --exclude trellis-codegen-rust \
-            --exclude trellis-cli \
-            --exclude trellis-runtime
+          cargo package --manifest-path rust/Cargo.toml --allow-dirty \
+            -p trellis-protocol \
+            -p trellis-contracts \
+            -p trellis-rs
 
   package-js:
     name: Verify JavaScript packages
