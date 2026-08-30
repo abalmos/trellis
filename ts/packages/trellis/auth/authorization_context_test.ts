@@ -248,8 +248,8 @@ function providerNats(
   const connection = {
     info: undefined,
     options: { inboxPrefix: "_INBOX.test" },
-    closed: async () => undefined,
-    close: async () => {},
+    closed: () => Promise.resolve(undefined),
+    close: () => Promise.resolve(),
     publish: () => {},
     publishMessage: () => {},
     respondMessage: () => true,
@@ -268,13 +268,15 @@ function providerNats(
           closed = true;
           resolveClosed();
         },
-        drain: async () => {
+        drain: () => {
           closed = true;
           resolveClosed();
+          return Promise.resolve();
         },
-        [Symbol.asyncDispose]: async () => {
+        [Symbol.asyncDispose]: () => {
           closed = true;
           resolveClosed();
+          return Promise.resolve();
         },
         isDraining: () => false,
         isClosed: () => closed,
@@ -381,22 +383,22 @@ function providerNats(
       }
       return response({});
     },
-    requestMany: async () => (async function* () {})(),
-    flush: async () => {},
-    drain: async () => {},
+    requestMany: () => Promise.resolve((async function* () {})()),
+    flush: () => Promise.resolve(),
+    drain: () => Promise.resolve(),
     isClosed: () => false,
     isDraining: () => false,
     getServer: () => "nats://127.0.0.1:4222",
     getServerVersion: () => "2.10.0",
     status,
     stats: () => ({ inBytes: 0, outBytes: 0, inMsgs: 0, outMsgs: 0 }),
-    rtt: async () => 0,
-    reconnect: async () => {},
+    rtt: () => Promise.resolve(0),
+    reconnect: () => Promise.resolve(),
     setServers: () => {},
     getServers: () => [],
     features: { get: () => ({ min: "2.10.0", ok: true }) },
     _resub: () => {},
-    [Symbol.asyncDispose]: async () => {},
+    [Symbol.asyncDispose]: () => Promise.resolve(),
   } as NatsConnection;
   return connection;
 }
@@ -772,6 +774,7 @@ Deno.test("expired context restores as recovery evidence without clearing trust"
     context: bundle,
     contextDigest: chain.contextDigest,
     contextExpiresAt: 1_300,
+    serverClockOffsetMs: 0,
     routing: { bootstrapJwt: "route", bootstrapJwtExpiresAt: 2_000 },
   });
   const cache = new AuthorizationContextCache(
@@ -817,6 +820,7 @@ Deno.test("file context store keeps the trust floor across restart", async () =>
     context: null,
     contextDigest: null,
     contextExpiresAt: null,
+    serverClockOffsetMs: 0,
     routing: null,
   });
   const restarted = new FileAuthorizationContextStore(path);
@@ -910,6 +914,7 @@ Deno.test("authorization trust pin survives context clearing", async () => {
     context: null,
     contextDigest: null,
     contextExpiresAt: null,
+    serverClockOffsetMs: 0,
     routing: null,
   });
   await store.clearContext();

@@ -9,14 +9,14 @@ import {
   importEd25519PrivateKeyFromSeedBase64url,
   publicKeyBase64urlFromPrivateKey,
 } from "./keys.ts";
-import {
-  type AuthDeviceUserAuthoritiesListResponseSchema,
-  type AuthDeviceUserAuthoritiesListSchema,
-  type AuthDeviceUserAuthoritiesRevokeResponseSchema,
-  type AuthDeviceUserAuthoritiesRevokeSchema,
-  type AuthResolveDeviceUserAuthoritiesProgressSchema,
-  type AuthResolveDeviceUserAuthoritiesResponseSchema,
-  type AuthResolveDeviceUserAuthoritiesSchema,
+import type {
+  AuthDeviceUserAuthoritiesListResponseSchema,
+  AuthDeviceUserAuthoritiesListSchema,
+  AuthDeviceUserAuthoritiesRevokeResponseSchema,
+  AuthDeviceUserAuthoritiesRevokeSchema,
+  AuthResolveDeviceUserAuthoritiesProgressSchema,
+  AuthResolveDeviceUserAuthoritiesResponseSchema,
+  AuthResolveDeviceUserAuthoritiesSchema,
 } from "./protocol.ts";
 import {
   base64urlDecode,

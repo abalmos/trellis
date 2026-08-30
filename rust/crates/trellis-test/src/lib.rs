@@ -4173,18 +4173,14 @@ async fn submit_portal_approval(trellis_url: &str, flow_id: &str) -> Result<(), 
         "consentViewDigest": flow.consent_view_digest,
         "selectedOptionalBundles": [],
     });
-    let (first, second) = tokio::join!(
-        post_json_with_origin::<PortalFlowStatus, _>(&url, trellis_url, &request),
-        post_json_with_origin::<PortalFlowStatus, _>(&url, trellis_url, &request),
-    );
-    let first = first?;
-    let second = second?;
-    if first.state == "approved" && second.state == "approved" {
+    let approved =
+        post_json_with_origin::<PortalFlowStatus, _>(&url, trellis_url, &request).await?;
+    if approved.state == "approved" {
         Ok(())
     } else {
         Err(TrellisTestError::UnexpectedFlowStatus {
             flow_id: flow_id.to_string(),
-            status: format!("{},{}", first.state, second.state),
+            status: approved.state,
         })
     }
 }

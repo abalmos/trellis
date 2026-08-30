@@ -65,6 +65,7 @@ export class FileAuthorizationContextStore
           contextDigest: null,
           contextExpiresAt: null,
           routing: null,
+          serverClockOffsetMs: 0,
         });
       }
       return true;

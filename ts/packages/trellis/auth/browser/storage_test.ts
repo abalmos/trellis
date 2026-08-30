@@ -28,6 +28,7 @@ function state(
     context: null,
     contextDigest: null,
     contextExpiresAt: null,
+    serverClockOffsetMs: 0,
     routing: null,
   };
 }

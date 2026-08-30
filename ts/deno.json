@@ -1,6 +1,7 @@
 {
   "workspace": [
     "./apps/console",
+    "./browser",
     "./integration",
     "./packages/result",
     "./packages/trellis-svelte",

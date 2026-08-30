@@ -76,7 +76,8 @@ export function validateAuthorizationClientStateTransition(
   if (
     next.format !== CLIENT_STATE_FORMAT ||
     next.trust.format !== CLIENT_TRUST_FORMAT ||
-    !next.binding.trim()
+    !next.binding.trim() ||
+    !Number.isFinite(next.serverClockOffsetMs)
   ) {
     throw new Error("authorization client state is invalid");
   }

@@ -223,6 +223,7 @@ export class BrowserAuthorizationContextStore
             contextDigest: null,
             contextExpiresAt: null,
             routing: null,
+            serverClockOffsetMs: 0,
           });
         }
       };

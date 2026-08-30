@@ -792,7 +792,7 @@ withLivePortalPage(
 );
 
 withLivePortalPage(
-  "browser.login-portal live capability denial and trusted portal grant",
+  "browser.login-portal live refresh persists and reconnects after authority change",
   async ({ page, portalOrigin, runtime }) => {
     const fixture = liveInsufficientCapabilitiesFixture;
     const service = await fixture.setupService(runtime);

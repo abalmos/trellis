@@ -50,9 +50,7 @@ export class AuthorizationContextCache {
     }
   }
 
-  async restore(
-    nowUnixSeconds = this.correctedNowSeconds(),
-  ): Promise<boolean> {
+  async restore(nowUnixSeconds?: number): Promise<boolean> {
     const state = await this.store.load();
     if (!state) return false;
     if (state.binding !== this.binding) {
@@ -60,6 +58,8 @@ export class AuthorizationContextCache {
         "authorization context storage belongs to another identity",
       );
     }
+    this.#clockOffsetMs = state.serverClockOffsetMs;
+    const restoreNowUnixSeconds = nowUnixSeconds ?? this.correctedNowSeconds();
     if (
       (state.context === null) !== (state.contextDigest === null) ||
       (state.context === null) !== (state.contextExpiresAt === null) ||
@@ -88,7 +88,7 @@ export class AuthorizationContextCache {
     return await this.installRecoverable(
       state.context,
       state.routing,
-      nowUnixSeconds,
+      restoreNowUnixSeconds,
       state.contextExpiresAt ?? undefined,
       state.runtime,
     );
@@ -193,6 +193,7 @@ export class AuthorizationContextCache {
       contextDigest: verified.contextDigest,
       contextExpiresAt: verified.context.expiresAt,
       routing: structuredClone(routing),
+      serverClockOffsetMs: this.#clockOffsetMs,
       ...(nextRuntime === undefined
         ? {}
         : { runtime: structuredClone(nextRuntime) }),
@@ -327,6 +328,10 @@ export class AuthorizationContextCache {
 
   setServerClockOffsetMs(offsetMs: number): void {
     this.#clockOffsetMs = offsetMs;
+  }
+
+  serverClockOffsetMs(): number {
+    return this.#clockOffsetMs;
   }
 
   correctedNowSeconds(): number {

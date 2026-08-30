@@ -891,7 +891,6 @@ export async function connectDeviceWithDeps<
   });
   let nc: NatsConnection | undefined;
   let authorizationProviderCache: AuthorizationProviderCache | undefined;
-  let stopContextRefresh: (() => void) | undefined;
   try {
     nc = await transport.connect({
       servers: selectRuntimeTransportServers(connectInfo.transports),
@@ -910,12 +909,10 @@ export async function connectDeviceWithDeps<
     authorizationProviderCache.start();
     await authorizationProviderCache.waitReady();
     void connectedNats.closed().finally(() => {
-      stopContextRefresh?.();
       authorizationProviderCache?.stop();
     });
   } catch (cause) {
     authorizationProviderCache?.stop();
-    stopContextRefresh?.();
     if (nc && !nc.isClosed()) await nc.close();
     throw createTransportError({
       code: "trellis.runtime.connect_failed",
@@ -943,15 +940,18 @@ export async function connectDeviceWithDeps<
   connection.subscribe((status) =>
     authorizationProviderCache.observeConnectionPhase(status.phase)
   );
-  stopContextRefresh = startAuthorizationContextRefresh({
+  const stopContextRefresh = startAuthorizationContextRefresh({
     trellisUrl: args.trellisUrl,
     sessionId: connectInfo.sessionId,
     auth: bootstrap.sessionAuth,
     cache: authorizationContexts,
     onRefresh: () =>
       connection.status.phase === "connected" ? undefined : nc.reconnect(),
-    onTerminalFailure: () => nc.drain(),
+    onTerminalFailure: async () => {
+      if (!nc.isClosed()) await nc.drain();
+    },
   });
+  void nc.closed().then(stopContextRefresh, stopContextRefresh);
 
   const trellis = new Trellis<
     RuntimeApi,

@@ -639,6 +639,10 @@ async function recoverClientBootstrapWithRetry(args: {
   try {
     await args.cache.restore();
     args.cache.sessionBinding();
+    args.offsetState.serverClockOffsetMs = args.cache.serverClockOffsetMs();
+    args.identity.auth.setServerClockOffsetMs(
+      args.offsetState.serverClockOffsetMs + args.deps.now() - Date.now(),
+    );
   } catch (error) {
     if (
       error instanceof Error &&
@@ -1074,7 +1078,6 @@ export async function connectClientWithDeps<
   });
   let nc: NatsConnection | undefined;
   let authorizationProviderCache: AuthorizationProviderCache | undefined;
-  let stopContextRefresh: (() => void) | undefined;
   try {
     const natsStartedAt = performance.now();
     nc = await transport.connect({
@@ -1096,7 +1099,6 @@ export async function connectClientWithDeps<
     authorizationProviderCache.start();
     await authorizationProviderCache.waitReady();
     void connectedNats.closed().finally(() => {
-      stopContextRefresh?.();
       authorizationProviderCache?.stop();
     });
     recordTrellisDuration(
@@ -1110,7 +1112,6 @@ export async function connectClientWithDeps<
     );
   } catch (error) {
     authorizationProviderCache?.stop();
-    stopContextRefresh?.();
     if (nc && !nc.isClosed()) await nc.close();
     runtimeAuth.stop();
     throw createTransportError({
@@ -1152,14 +1153,17 @@ export async function connectClientWithDeps<
   connection.subscribe((status) =>
     authorizationProviderCache.observeConnectionPhase(status.phase)
   );
-  stopContextRefresh = startAuthorizationContextRefresh({
+  const stopContextRefresh = startAuthorizationContextRefresh({
     trellisUrl: args.trellisUrl,
     sessionId: runtimeState.sessionId,
     auth: identity.auth,
     cache: authorizationContexts,
     onRefresh: () => nc.reconnect(),
-    onTerminalFailure: () => nc.drain(),
+    onTerminalFailure: async () => {
+      if (!nc.isClosed()) await nc.drain();
+    },
   });
+  void nc.closed().then(stopContextRefresh, stopContextRefresh);
 
   const api = getContractRuntime(args.contract).usedApi as RuntimeApi;
   const state = args.contract[CONTRACT_STATE_METADATA] as TrellisOpts<

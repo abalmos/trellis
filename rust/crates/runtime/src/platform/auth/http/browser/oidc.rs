@@ -322,7 +322,7 @@ where
         if pending.status == AuthOAuthStatus::ExchangeStarted
             && pending.authenticated_principal_id.is_some()
         {
-            return complete_browser_oauth(&state, pending, now_ms()?).await;
+            return complete_browser_oauth(state, pending, now_ms()?).await;
         }
         if pending.status == AuthOAuthStatus::ExchangeStarted {
             let mut pending = pending;

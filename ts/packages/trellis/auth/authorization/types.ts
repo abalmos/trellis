@@ -126,6 +126,7 @@ export type AuthorizationClientState = {
   contextDigest: string | null;
   contextExpiresAt: number | null;
   routing: AuthorizationRoutingMaterial | null;
+  serverClockOffsetMs: number;
   runtime?: AuthorizationRuntimeBinding;
 };
 

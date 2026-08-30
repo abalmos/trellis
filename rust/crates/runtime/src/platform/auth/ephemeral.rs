@@ -642,6 +642,19 @@ fn validate_oauth_replacement(
 ) -> Result<(), AuthorizationStateError> {
     if current.version != expected_version
         || !current.preserves_transcript(replacement)
+        || current.claim_owner.is_some() && current.claim_owner != replacement.claim_owner
+        || current.authenticated_principal_id.is_some()
+            && (current.authenticated_principal_id != replacement.authenticated_principal_id
+                || current.authenticated_roles != replacement.authenticated_roles)
+        || current.authenticated_principal_id.is_none()
+            && replacement.authenticated_principal_id.is_some()
+            && !matches!(
+                (current.status, replacement.status),
+                (
+                    AuthOAuthStatus::ExchangeStarted,
+                    AuthOAuthStatus::ExchangeStarted
+                )
+            )
         || !valid_oauth_transition(current.status, replacement.status)
     {
         return Err(AuthorizationStateError::StorageConflict);
@@ -683,7 +696,9 @@ fn valid_oauth_transition(current: AuthOAuthStatus, next: AuthOAuthStatus) -> bo
             AuthOAuthStatus::ExchangeStarted | AuthOAuthStatus::Expired
         ) | (
             AuthOAuthStatus::ExchangeStarted,
-            AuthOAuthStatus::Completed | AuthOAuthStatus::RestartRequired
+            AuthOAuthStatus::ExchangeStarted
+                | AuthOAuthStatus::Completed
+                | AuthOAuthStatus::RestartRequired
         ) | (AuthOAuthStatus::RestartRequired, AuthOAuthStatus::Expired)
     )
 }

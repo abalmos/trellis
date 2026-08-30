@@ -348,7 +348,9 @@ where
                 Err(AuthorizationStateError::PortalPolicyChanged) => {
                     return Err(HttpError::conflict("portal_policy_changed"));
                 }
-                Err(AuthorizationStateError::StorageConflict) if attempt < 2 => continue,
+                Err(AuthorizationStateError::StorageConflict) if attempt < 2 => {
+                    continue;
+                }
                 Err(error) => return Err(error.into()),
             }
         }

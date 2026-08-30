@@ -319,14 +319,13 @@ mod tests {
     fn test_admin_session_state() -> AdminSessionState {
         AdminSessionState {
             trellis_url: "http://localhost:3000".to_string(),
-            servers: "localhost".to_string(),
+            nats_servers: "localhost".to_string(),
             session_seed: "seed".to_string(),
             session_key: "key".to_string(),
             participant_digest: "digest".to_string(),
             session_id: "ses_test".to_string(),
             inbox_prefix: "_INBOX.ses_test".to_string(),
             bootstrap_jwt: "jwt".to_string(),
-            bootstrap_jwt_expires_at: 2_000_000_000,
             authorization_context: serde_json::from_value(serde_json::json!({
                 "context": {},
                 "trust": {
