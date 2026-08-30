@@ -104,9 +104,8 @@ Deno.test("bindFlow posts a flow-scoped bind request", async () => {
       assertEquals(init?.method, "POST");
       assertEquals(init?.headers, { "Content-Type": "application/json" });
       const body = JSON.parse(String(init?.body));
-      assertEquals(body.sessionKey.length, 43);
-      assertEquals(typeof body.sig, "string");
-      assertEquals("authToken" in body, false);
+      assertEquals(typeof body.idempotencyKey, "string");
+      assertEquals(Object.keys(body), ["idempotencyKey"]);
       return new Response(
         JSON.stringify({
           status: "bound",
@@ -127,7 +126,6 @@ Deno.test("bindFlow posts a flow-scoped bind request", async () => {
 
     const response = await bindFlow(
       { authUrl: "http://localhost:3000" },
-      await createHandle(),
       "flow-123",
     );
     assertEquals(response.status, "bound");
@@ -145,7 +143,6 @@ Deno.test("bindFlow posts a flow-scoped bind request", async () => {
 Deno.test("bindFlow surfaces expired flow responses without a parse error", async () => {
   const originalFetch = globalThis.fetch;
   try {
-    const handle = await createHandle();
     globalThis.fetch = (async () => {
       return new Response(
         JSON.stringify({ status: "expired" }),
@@ -160,7 +157,6 @@ Deno.test("bindFlow surfaces expired flow responses without a parse error", asyn
       () =>
         bindFlow(
           { authUrl: "http://localhost:3000" },
-          handle,
           "flow-expired",
         ),
       Error,

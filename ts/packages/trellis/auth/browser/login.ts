@@ -18,7 +18,7 @@ import {
   sessionProofRequestDigest,
   signSessionProof,
 } from "../session_proof.ts";
-import { bindFlowSig, getPublicSessionKey } from "./session.ts";
+import { getPublicSessionKey } from "./session.ts";
 import type { SessionKeyHandle } from "./session.ts";
 
 export type AuthConfig = {
@@ -132,18 +132,14 @@ export function isBindSuccessResponse(
 
 export async function bindFlow(
   config: AuthConfig,
-  handle: SessionKeyHandle,
   flowId: string,
 ): Promise<BindResponse> {
-  const sessionKey = getPublicSessionKey(handle);
-  const sig = await bindFlowSig(handle, flowId);
-
   const response = await fetch(
     `${config.authUrl}/auth/flow/${encodeURIComponent(flowId)}/bind`,
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ sessionKey, sig }),
+      body: JSON.stringify({ idempotencyKey: crypto.randomUUID() }),
     },
   );
 
