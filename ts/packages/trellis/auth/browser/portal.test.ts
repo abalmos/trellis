@@ -75,6 +75,7 @@ Deno.test("fetchPortalFlowState returns auth-owned portal state directly", async
       assertEquals(String(input), "https://auth.example.com/auth/flow/flow-1");
       return new Response(JSON.stringify({
         flowId: "flow-1",
+        expiresAt: 2_000_000_000_000,
         state: "choose_provider",
         providers: ["github", "auth0"],
         registrationEnabled: false,
@@ -88,6 +89,7 @@ Deno.test("fetchPortalFlowState returns auth-owned portal state directly", async
             description: "User-facing auth portal",
           },
           required: { permissions: [], capabilities: [] },
+          optionalBundles: [],
         },
       }));
     }) as typeof fetch;
@@ -134,6 +136,7 @@ Deno.test("submitPortalApproval posts decision and parses next state", async () 
       if (call !== 2) {
         return new Response(JSON.stringify({
           flowId: "flow-1",
+          expiresAt: 2_000_000_000_000,
           state: call === 1 ? "approval_required" : "approved",
           providers: ["local"],
           registrationEnabled: false,
@@ -147,6 +150,7 @@ Deno.test("submitPortalApproval posts decision and parses next state", async () 
               description: "Admin console",
             },
             required: { permissions: [], capabilities: [] },
+            optionalBundles: [],
           },
           user: {
             origin: "trellis",
@@ -167,7 +171,7 @@ Deno.test("submitPortalApproval posts decision and parses next state", async () 
       assertEquals(body.approved, true);
       assertEquals(body.consentViewDigest, "consent-digest");
       assertEquals(body.selectedOptionalBundles, []);
-      assertEquals(typeof body.idempotencyKey, "string");
+      assertEquals(body.idempotencyKey, undefined);
 
       return new Response(JSON.stringify({ state: "approved" }));
     }) as typeof fetch;

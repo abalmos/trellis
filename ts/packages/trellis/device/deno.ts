@@ -470,7 +470,7 @@ export async function checkDeviceActivation<
   } catch (error) {
     if (
       error instanceof TransportError &&
-      error.code === "trellis.auth.device_activation_unavailable" &&
+      error.code === "device_activation_unavailable" &&
       error.getContext().status === "ready"
     ) {
       if (localState?.status === "pending") {
@@ -480,7 +480,7 @@ export async function checkDeviceActivation<
     }
     if (
       error instanceof TransportError &&
-      error.code === "trellis.auth.device_activation_unavailable" &&
+      error.code === "device_activation_unavailable" &&
       error.getContext().status === "not_ready"
     ) {
       return { status: "not_ready", reason: "activation_rejected" };

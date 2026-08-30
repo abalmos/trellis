@@ -84,7 +84,9 @@ Deno.test("checkDeviceActivation reports an already active device", async () => 
           nats: {
             jwt: "jwt",
             jwtExpiresAt: 2_000_000_000,
-            servers: ["nats://127.0.0.1:4222"],
+            transports: {
+              native: { natsServers: ["nats://127.0.0.1:4222"] },
+            },
           },
         }),
       )) as typeof fetch;

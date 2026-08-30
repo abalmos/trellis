@@ -39,10 +39,10 @@ Deno.test("mapDeviceActivationFailure uses auth error context reasons for expire
   );
 });
 
-Deno.test("mapDeviceActivationFailure uses terminal auth error messages", () => {
+Deno.test("mapDeviceActivationFailure uses exact terminal auth codes", () => {
   assertEquals(
     mapDeviceActivationFailure("flow_123", {
-      message: "Auth failed: device_activation_flow_not_found",
+      reason: "device_activation_flow_not_found",
     }),
     {
       mode: "invalid_flow",
@@ -52,7 +52,7 @@ Deno.test("mapDeviceActivationFailure uses terminal auth error messages", () => 
   );
   assertEquals(
     mapDeviceActivationFailure("flow_123", {
-      message: "Auth failed: device_activation_flow_expired",
+      reason: "device_activation_flow_expired",
     }),
     {
       mode: "expired",
@@ -60,6 +60,12 @@ Deno.test("mapDeviceActivationFailure uses terminal auth error messages", () => 
       reason:
         "The activation request expired. Start again from the auth service.",
     },
+  );
+  assertEquals(
+    mapDeviceActivationFailure("flow_123", {
+      message: "Auth failed: device_activation_flow_expired",
+    }),
+    null,
   );
 });
 

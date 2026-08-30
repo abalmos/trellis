@@ -5,7 +5,7 @@
   import type { AuthSessionsMeOutput } from "@trellis/apis/trellis.auth";
   import type { Snippet } from "svelte";
   import { onDestroy, onMount } from "svelte";
-  import { auth } from "../auth";
+  import { signOut as logout } from "../auth";
   import {
     getVisibleNavSections,
     isAdmin,
@@ -59,7 +59,7 @@
   }
 
   async function signOut(): Promise<void> {
-    await auth.signOut();
+    await logout();
   }
 
   afterNavigate(({ to }) => {

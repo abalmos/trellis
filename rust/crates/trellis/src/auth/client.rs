@@ -28,7 +28,7 @@ pub(super) async fn connect_admin_client_with_context_store_async(
 ) -> Result<Caller, TrellisAuthError> {
     Ok(Caller::connect_user(UserConnectOptions::new(
         &state.trellis_url,
-        &state.servers,
+        &state.nats_servers,
         &state.inbox_prefix,
         5_000,
         UserSessionCredentials {

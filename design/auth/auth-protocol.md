@@ -461,11 +461,13 @@ Flow summary:
    app without showing a transient expiration screen; missing flows do not
    receive an invented return URL.
 5. `POST /auth/flow/:flowId/approval` accepts only the current consent-view
-   digest, selected server-issued optional bundle ids, decision, and idempotency
-   key. The server re-resolves the participant and rejects stale wording,
-   unknown bundles, caller-authored grants/capabilities, and reserved authority.
+   digest, selected server-issued optional bundle ids, and decision. The server
+   re-resolves the participant and rejects stale wording, unknown bundles,
+   caller-authored grants/capabilities, and reserved authority.
 6. `POST /auth/flow/:flowId/bind` completes the browser bind from
-   `{ sessionKey, sig }`.
+   `{ requestId, issuedAt, proof: { format: "trellis.session-proof.v1", signature } }`.
+   The transcript is bound to the immutable `flowId` and the session key
+   enrolled by the start request.
 
 When a caller's participant changes, it starts the normal auth request flow with
 the current canonical participant and referenced API artifacts. Human wording
@@ -478,8 +480,8 @@ Bind proof rules:
 
 - browser flow creation uses the purpose-specific `trellis.session-proof.v1`
   request transcript over the complete request with its signature removed
-- bind consumes the server-owned proof-bound flow with a durable idempotency
-  key; it does not accept a second concatenated-signature format
+- bind consumes the server-owned proof-bound flow with server-owned durable
+  idempotency by `flowId`; signed `requestId` is freshness metadata only
 - browser clients treat flow claims as internal auth-service state rather than a
   fragment-delivered public contract
 

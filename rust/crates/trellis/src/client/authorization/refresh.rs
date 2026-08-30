@@ -30,9 +30,35 @@ struct RefreshRequest {
 #[serde(rename_all = "camelCase")]
 struct RefreshResponse {
     server_now: i64,
+    session: RefreshSession,
+    nats: RefreshNats,
     authorization_context: AuthorizationContextBundle,
-    bootstrap_jwt: String,
-    bootstrap_jwt_expires_at: i64,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RefreshSession {
+    session_id: String,
+    inbox_prefix: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RefreshNats {
+    jwt: String,
+    jwt_expires_at: i64,
+    transports: RefreshTransports,
+}
+
+#[derive(Deserialize)]
+struct RefreshTransports {
+    native: Option<RefreshTransport>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RefreshTransport {
+    nats_servers: Vec<String>,
 }
 
 /// Refresh the current context through the proof-bound auth endpoint.
@@ -124,12 +150,25 @@ pub(crate) async fn refresh(
         .and_then(|sum| sum.checked_div(2))
         .ok_or_else(|| TrellisClientError::Bootstrap("context refresh time overflow".into()))?;
     cache.set_server_clock_offset_ms(response.server_now - midpoint);
+    if response.session.session_id != request.session_id
+        || response.session.inbox_prefix.trim().is_empty()
+        || response
+            .nats
+            .transports
+            .native
+            .as_ref()
+            .is_none_or(|transport| transport.nats_servers.is_empty())
+    {
+        return Err(TrellisClientError::Bootstrap(
+            "context refresh returned invalid session or native transport metadata".into(),
+        ));
+    }
     cache
         .install(
             response.authorization_context,
             AuthorizationRoutingMaterial {
-                bootstrap_jwt: response.bootstrap_jwt,
-                bootstrap_jwt_expires_at: response.bootstrap_jwt_expires_at,
+                bootstrap_jwt: response.nats.jwt,
+                bootstrap_jwt_expires_at: response.nats.jwt_expires_at,
             },
             response.server_now.div_euclid(1_000),
         )

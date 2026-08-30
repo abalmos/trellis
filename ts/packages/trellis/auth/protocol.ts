@@ -5,7 +5,6 @@ import { PageResponseSchema } from "../contract_support/protocol.ts";
 import {
   ClientTransportsSchema,
   ContractApprovalCapabilitySchema,
-  SentinelCredsSchema,
   UserParticipantKindSchema,
 } from "./schemas.ts";
 
@@ -1442,25 +1441,6 @@ export const AuthDeviceUserAuthoritiesResolvedEventSchema = Type.Object({
   reviewId: Type.Optional(Type.String({ minLength: 1 })),
 });
 
-export const DeviceConnectInfoSchema = Type.Object({
-  instanceId: Type.String({ minLength: 1 }),
-  deploymentId: Type.String({ minLength: 1 }),
-  contractId: Type.String({ minLength: 1 }),
-  contractDigest: DigestSchema,
-  transports: ClientTransportsSchema,
-  transport: Type.Object({
-    sentinel: SentinelCredsSchema,
-  }),
-  auth: Type.Object({
-    mode: Type.Literal("device_identity"),
-    authority: Type.Union([
-      Type.Literal("admin_reviewed"),
-      Type.Literal("user_delegated"),
-    ]),
-    iatSkewSeconds: Type.Number(),
-  }),
-});
-
 export const AuthDevicesProvisionSchema = Type.Object({
   deploymentId: Type.String({ minLength: 1 }),
   publicIdentityKey: Type.String({ minLength: 1 }),
@@ -1527,17 +1507,6 @@ export const AuthResolveDeviceUserAuthoritiesResponseSchema = Type.Union([
     reason: Type.Optional(Type.String({ minLength: 1 })),
   }),
 ]);
-
-export const AuthDevicesConnectInfoGetSchema = Type.Object({
-  publicIdentityKey: Type.String({ minLength: 1 }),
-  contractDigest: DigestSchema,
-  iat: Type.Number(),
-  sig: Type.String({ minLength: 1 }),
-});
-export const AuthDevicesConnectInfoGetResponseSchema = Type.Object({
-  status: Type.Literal("ready"),
-  connectInfo: DeviceConnectInfoSchema,
-});
 
 export const AuthDeviceUserAuthoritiesListSchema = Type.Object({
   instanceId: Type.Optional(Type.String({ minLength: 1 })),

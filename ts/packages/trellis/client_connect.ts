@@ -36,8 +36,7 @@ import {
   sessionProofRequestDigest,
 } from "./auth/session_proof.ts";
 import { estimateMidpointClockOffsetMs } from "./auth/time.ts";
-import { sha256, toArrayBuffer, utf8 } from "./auth/browser.ts";
-import { canonicalizeJsonValue } from "./auth/utils.ts";
+import { toArrayBuffer } from "./auth/browser.ts";
 import {
   importEd25519PrivateKeyFromSeedBase64url,
   publicKeyBase64urlFromSeed,
@@ -63,12 +62,7 @@ import {
 import { type StaticDecode, Type } from "typebox";
 import { Value } from "typebox/value";
 import { ulid } from "ulid";
-import {
-  bindFlowSig,
-  oauthInitSig,
-  type SessionKeyHandle,
-  signBytes,
-} from "./auth/browser/session.ts";
+import { type SessionKeyHandle, signBytes } from "./auth/browser/session.ts";
 import {
   observeNatsTrellisConnection,
   type TrellisConnection,
@@ -242,13 +236,6 @@ type ClientRuntimeIdentity = {
   setSessionId(sessionId: string): Promise<void>;
   auth: TrellisAuth;
   sign(data: Uint8Array): Promise<Uint8Array>;
-  oauthInitSig(
-    redirectTo: string,
-    context?: unknown,
-    provider?: string,
-    contract?: Record<string, unknown> | string,
-  ): Promise<string>;
-  bindFlowSig(flowId: string): Promise<string>;
 };
 
 const ClientTransportEndpointsSchema = Type.Object({
@@ -317,15 +304,9 @@ function selectClientRuntimeTransportServers(
     if (transports.websocket?.natsServers?.length) {
       return transports.websocket.natsServers;
     }
-    if (transports.native?.natsServers?.length) {
-      return transports.native.natsServers;
-    }
   } else {
     if (transports.native?.natsServers?.length) {
       return transports.native.natsServers;
-    }
-    if (transports.websocket?.natsServers?.length) {
-      return transports.websocket.natsServers;
     }
   }
 
@@ -375,16 +356,38 @@ const BindWireSchema = Type.Object({
   serverNow: Type.Integer(),
   session: Type.Object({
     sessionId: Type.String({ minLength: 1 }),
+    principalId: Type.String({ minLength: 1 }),
+    principalKind: Type.Union([
+      Type.Literal("user"),
+      Type.Literal("service"),
+      Type.Literal("device"),
+    ]),
+    participantId: Type.String({ minLength: 1 }),
+    participantKind: Type.Union([
+      Type.Literal("app"),
+      Type.Literal("agent"),
+      Type.Literal("device"),
+      Type.Literal("service"),
+    ]),
     inboxPrefix: Type.String({ minLength: 1 }),
     participantArtifactDigest: Type.String({ minLength: 1 }),
-  }, { additionalProperties: true }),
+    participantNeedsDigest: Type.String({ minLength: 1 }),
+    sessionPublicKey: Type.String({ minLength: 1 }),
+    sessionKeyId: Type.String({ minLength: 1 }),
+    state: Type.Literal("active"),
+    createdAt: Type.Integer(),
+    lastSeenAt: Type.Integer(),
+    expiresAt: Type.Integer(),
+    revokedAt: Type.Union([Type.Integer(), Type.Null()]),
+    version: Type.Integer({ minimum: 1 }),
+  }, { additionalProperties: false }),
   nats: Type.Object({
     jwt: Type.String({ minLength: 1 }),
     jwtExpiresAt: Type.Integer({ minimum: 1 }),
-    servers: Type.Array(Type.String({ minLength: 1 }), { minItems: 1 }),
-  }),
+    transports: ClientTransportsSchema,
+  }, { additionalProperties: false }),
   authorizationContext: AuthorizationContextBundleSchema,
-}, { additionalProperties: true });
+}, { additionalProperties: false });
 
 async function readJsonResponse(
   response: Response,
@@ -447,20 +450,6 @@ function resolveConfiguredRedirectTo(
   return typeof redirectTo === "function" ? redirectTo() : redirectTo;
 }
 
-async function signDomainValue(
-  sign: (data: Uint8Array) => Promise<Uint8Array>,
-  prefix: string,
-  value: string,
-): Promise<string> {
-  const digest = await sha256(utf8(`${prefix}:${value}`));
-  const signature = await sign(digest);
-  const binary = String.fromCharCode(...signature);
-  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(
-    /=+$/g,
-    "",
-  );
-}
-
 async function createSessionKeyRuntimeIdentity(
   sessionKeySeed: string,
   sessionId?: string,
@@ -492,23 +481,13 @@ async function createSessionKeyRuntimeIdentity(
       return Promise.resolve();
     },
     sign,
-    oauthInitSig: (redirectTo, context, provider, contract) =>
-      signDomainValue(
-        sign,
-        "oauth-init",
-        contract === undefined
-          ? `${redirectTo}:${canonicalizeJsonValue(context ?? null)}`
-          : `${redirectTo}:${provider ?? ""}:${
-            canonicalizeJsonValue(contract)
-          }:${canonicalizeJsonValue(context ?? null)}`,
-      ),
-    bindFlowSig: (flowId) => signDomainValue(sign, "bind-flow", flowId),
   };
   return identity;
 }
 
 async function resolveClientIdentity(
   auth: ClientAuthOptions | undefined,
+  storageScope: string,
 ): Promise<ClientRuntimeIdentity> {
   if (auth?.mode === "session_key") {
     return await createSessionKeyRuntimeIdentity(
@@ -517,7 +496,10 @@ async function resolveClientIdentity(
     );
   }
 
-  const handle = auth?.handle ?? await getOrCreateSessionKey(auth?.sessionKey);
+  const handle = auth?.handle ?? await getOrCreateSessionKey({
+    ...auth?.sessionKey,
+    storageScope,
+  });
   const sessionAuth = await createAuth({
     sessionKeySeed: base64urlEncode(handle.seed),
   });
@@ -531,9 +513,6 @@ async function resolveClientIdentity(
     setSessionId: (sessionId) =>
       Promise.resolve(setSessionId(handle, sessionId)),
     sign: (data) => signBytes(handle, data),
-    oauthInitSig: (redirectTo, context, provider, contract) =>
-      oauthInitSig(handle, redirectTo, context, provider, contract),
-    bindFlowSig: (flowId) => bindFlowSig(handle, flowId),
   };
 }
 
@@ -545,6 +524,14 @@ async function bindClientFlow(args: {
   participant: ClientConnectArgsFor<ClientContract>["participant"];
 }): Promise<ClientBootstrapReady> {
   const startedAt = performance.now();
+  const requestId = ulid();
+  const issuedAt = Date.now();
+  const unsigned = {
+    requestId,
+    issuedAt,
+    proof: { format: SESSION_PROOF_FORMAT_V1, signature: "" },
+  };
+  const requestDigest = await sessionProofRequestDigest(unsigned);
   const response = await fetch(
     `${args.trellisUrl}/auth/flow/${encodeURIComponent(args.flowId)}/bind`,
     {
@@ -553,13 +540,23 @@ async function bindClientFlow(args: {
         "Content-Type": "application/json",
         Origin: args.origin,
       },
-      body: JSON.stringify({ idempotencyKey: ulid() }),
+      body: JSON.stringify({
+        ...unsigned,
+        proof: await args.identity.auth.signSessionProof({
+          purpose: "userAuthBind",
+          requestId,
+          issuedAt,
+          flowId: args.flowId,
+          sessionPublicKey: args.identity.sessionKey,
+          requestDigest,
+        }),
+      }),
     },
   );
   if (!response.ok) {
     const reason = await response.text();
     throw createTransportError({
-      code: "trellis.auth.bind_failed",
+      code: "bind_failed",
       message: "Trellis could not finish the sign-in step.",
       hint: "Start the sign-in flow again.",
       context: { status: response.status, trellisUrl: args.trellisUrl, reason },
@@ -567,7 +564,7 @@ async function bindClientFlow(args: {
   }
 
   const payload = await readJsonResponse(response, {
-    code: "trellis.auth.bind_invalid_response",
+    code: "bind_invalid_response",
     message: "Trellis returned an invalid sign-in response.",
     hint: "Start the sign-in flow again.",
     context: { flowId: args.flowId },
@@ -577,7 +574,7 @@ async function bindClientFlow(args: {
     (payload as { status?: unknown }).status === "expired"
   ) {
     throw createTransportError({
-      code: "trellis.auth.bind_expired",
+      code: "flow_expired",
       message: "The Trellis sign-in step expired.",
       hint: "Start the sign-in flow again.",
       context: { flowId: args.flowId },
@@ -590,7 +587,7 @@ async function bindClientFlow(args: {
     >;
   } catch (cause) {
     throw createTransportError({
-      code: "trellis.auth.bind_invalid_response",
+      code: "bind_invalid_response",
       message: "Trellis returned an invalid sign-in response.",
       hint: "Start the sign-in flow again.",
       cause,
@@ -612,9 +609,9 @@ async function bindClientFlow(args: {
     serverNow: parsed.serverNow / 1_000,
     connectInfo: {
       sessionId: parsed.session.sessionId,
-      participantId: args.participant.id,
+      participantId: parsed.session.participantId,
       participantDigest: parsed.session.participantArtifactDigest,
-      transports: { websocket: { natsServers: parsed.nats.servers } },
+      transports: parsed.nats.transports,
       transport: {
         inboxPrefix: parsed.session.inboxPrefix,
         jwt: parsed.nats.jwt,
@@ -774,7 +771,7 @@ function cleanupBrowserCallbackUrl(currentUrl: URL): void {
 
 function isExpiredBindError(error: unknown): boolean {
   return error instanceof TransportError &&
-    error.code === "trellis.auth.bind_expired";
+    error.code === "flow_expired";
 }
 
 function needsReauth(
@@ -814,7 +811,7 @@ async function buildSessionKeyLoginUrl(args: {
   participant: ClientConnectArgsFor<ClientContract>["participant"];
   contract: ClientContract;
 }): Promise<
-  { status: "flow_started"; loginUrl: string }
+  { status: "auth_required"; loginUrl: string }
 > {
   const startedAt = performance.now();
   const requestId = ulid();
@@ -833,7 +830,6 @@ async function buildSessionKeyLoginUrl(args: {
     sessionNkey: args.identity.sessionNkey,
     participantId: args.participant.id,
     participantArtifactDigest: args.participant.artifactDigest,
-    participantNeedsDigest: presentation.participantNeedsDigest,
     participantArtifact: presentation.participant,
     referencedApiArtifacts: [presentation.api, ...presentation.referencedApis],
     redirectTarget: args.redirectTo,
@@ -861,7 +857,7 @@ async function buildSessionKeyLoginUrl(args: {
   if (!response.ok) {
     const reason = await response.text();
     throw createTransportError({
-      code: "trellis.auth.login_failed",
+      code: "auth_request_failed",
       message: "Trellis could not start sign-in.",
       hint:
         "Retry sign-in. If it keeps failing, check Trellis availability and access.",
@@ -870,16 +866,19 @@ async function buildSessionKeyLoginUrl(args: {
   }
 
   const payload = await readJsonResponse(response, {
-    code: "trellis.auth.login_invalid_response",
+    code: "auth_request_invalid_response",
     message: "Trellis returned an invalid sign-in response.",
     hint: "Retry sign-in. If it keeps happening, start the sign-in flow again.",
     context: { trellisUrl: args.trellisUrl },
   });
-  if (
-    payload && typeof payload === "object" &&
-    (payload as { state?: unknown }).state === "flow" &&
-    typeof (payload as { portalUrl?: unknown }).portalUrl === "string"
-  ) {
+  const start = Value.Parse(
+    Type.Object({
+      flowId: Type.String({ minLength: 1 }),
+      loginUrl: Type.String({ minLength: 1 }),
+    }, { additionalProperties: false }),
+    payload,
+  );
+  if (start) {
     recordTrellisDuration(
       "trellis.connect.duration",
       performance.now() - startedAt,
@@ -890,12 +889,12 @@ async function buildSessionKeyLoginUrl(args: {
       },
     );
     return {
-      status: "flow_started",
-      loginUrl: (payload as { portalUrl: string }).portalUrl,
+      status: "auth_required",
+      loginUrl: start.loginUrl,
     };
   }
   throw createTransportError({
-    code: "trellis.auth.login_invalid_response",
+    code: "auth_request_invalid_response",
     message: "Trellis returned an invalid sign-in response.",
     hint: "Retry sign-in. If it keeps happening, start the sign-in flow again.",
     context: { trellisUrl: args.trellisUrl },
@@ -910,7 +909,10 @@ export async function connectClientWithDeps<
 ): Promise<CallerRuntime<TContract>> {
   const totalStartedAt = performance.now();
   const trellisUrl = normalizeTrellisUrl(args.trellisUrl);
-  const identity = await resolveClientIdentity(args.auth);
+  const trustScope = `${
+    new URL(trellisUrl).origin
+  }:${args.participant.id}:${args.participant.artifactDigest}`;
+  const identity = await resolveClientIdentity(args.auth, trustScope);
   const currentUrl = args.auth?.mode === "session_key"
     ? null
     : resolveCurrentUrl(args.auth);
@@ -924,7 +926,6 @@ export async function connectClientWithDeps<
     : currentUrl?.searchParams.get("authError") ?? undefined;
   const offsetState: ClockOffsetState = { serverClockOffsetMs: 0 };
 
-  const trustScope = new URL(trellisUrl).origin;
   if (
     args.auth?.mode === "session_key" &&
     !args.auth.authorizationContextStore &&
@@ -950,7 +951,7 @@ export async function connectClientWithDeps<
   if (callbackAuthError) {
     if (currentUrl) cleanupBrowserCallbackUrl(currentUrl);
     throw createTransportError({
-      code: `trellis.auth.${callbackAuthError}`,
+      code: callbackAuthError,
       message: "Trellis sign-in did not complete.",
       hint: "Start sign-in again if you want to approve access.",
       context: { reason: callbackAuthError, trellisUrl },
@@ -1156,8 +1157,7 @@ export async function connectClientWithDeps<
     sessionId: runtimeState.sessionId,
     auth: identity.auth,
     cache: authorizationContexts,
-    onRefresh: () =>
-      connection.status.phase === "connected" ? undefined : nc.reconnect(),
+    onRefresh: () => nc.reconnect(),
     onTerminalFailure: () => nc.drain(),
   });
 

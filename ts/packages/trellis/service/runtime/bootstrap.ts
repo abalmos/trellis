@@ -179,20 +179,47 @@ const ServiceBootstrapReadySchema = Type.Object({
   session: Type.Object({
     sessionId: Type.String({ minLength: 1 }),
     inboxPrefix: Type.String({ minLength: 1 }),
-  }, { additionalProperties: true }),
+    principalId: Type.String({ minLength: 1 }),
+    principalKind: Type.Literal("service"),
+    participantId: Type.String({ minLength: 1 }),
+    participantKind: Type.Literal("service"),
+    participantArtifactDigest: Type.String({ minLength: 1 }),
+    participantNeedsDigest: Type.String({ minLength: 1 }),
+    sessionPublicKey: Type.String({ minLength: 1 }),
+    sessionKeyId: Type.String({ minLength: 1 }),
+    state: Type.Literal("active"),
+    createdAt: Type.Integer(),
+    lastSeenAt: Type.Integer(),
+    expiresAt: Type.Integer(),
+    revokedAt: Type.Union([Type.Integer(), Type.Null()]),
+    version: Type.Integer({ minimum: 1 }),
+  }, { additionalProperties: false }),
   authorization: Type.Object({
     participantId: Type.String({ minLength: 1 }),
     participantArtifactDigest: Type.String({ minLength: 1 }),
     participantNeedsDigest: Type.String({ minLength: 1 }),
+    participantJson: Type.String({ minLength: 1 }),
+    effectiveGrants: Type.Unknown(),
+    resourceBindings: Type.Array(Type.Unknown()),
     resourceRuntime: ContractResourceBindingsSchema,
-  }, { additionalProperties: true }),
+    effectiveAuthorityExpiresAt: Type.Union([Type.Integer(), Type.Null()]),
+  }, { additionalProperties: false }),
   nats: Type.Object({
     jwt: Type.String({ minLength: 1 }),
     jwtExpiresAt: Type.Integer({ minimum: 1 }),
-    servers: Type.Array(Type.String({ minLength: 1 }), { minItems: 1 }),
-  }),
+    transports: Type.Object({
+      native: Type.Optional(Type.Object({
+        natsServers: Type.Array(Type.String({ minLength: 1 }), { minItems: 1 }),
+      }, { additionalProperties: false })),
+      websocket: Type.Optional(Type.Object({
+        natsServers: Type.Array(Type.String({ minLength: 1 }), { minItems: 1 }),
+      }, { additionalProperties: false })),
+    }, { additionalProperties: false }),
+  }, { additionalProperties: false }),
   authorizationContext: AuthorizationContextBundleSchema,
-}, { additionalProperties: true });
+  activation: Type.Union([Type.Unknown(), Type.Null()]),
+  proposal: Type.Union([Type.Unknown(), Type.Null()]),
+}, { additionalProperties: false });
 
 const ServiceBootstrapFailureSchema = Type.Object({
   reason: Type.String({ minLength: 1 }),
@@ -494,6 +521,14 @@ export async function fetchServiceBootstrapInfo(args: {
     });
     args.identityAuth.setServerClockOffsetMs(serverClockOffsetMs);
     args.sessionAuth.setServerClockOffsetMs(serverClockOffsetMs);
+    const native = response.nats.transports.native;
+    if (!native) {
+      throw new TransportError({
+        code: "trellis.bootstrap.invalid_response",
+        message: "Service bootstrap returned no native NATS transport.",
+        hint: "Configure native NATS endpoints for the Trellis runtime.",
+      });
+    }
     return {
       status: "ready",
       serverNow: response.serverNow / 1_000,
@@ -505,7 +540,7 @@ export async function fetchServiceBootstrapInfo(args: {
         deploymentId: args.identity.deploymentId,
         contractId: args.contractId,
         contractDigest: args.contractDigest,
-        transports: { websocket: { natsServers: response.nats.servers } },
+        transports: { native: { natsServers: native.natsServers } },
         jwt: response.nats.jwt,
         jwtExpiresAt: response.nats.jwtExpiresAt,
         authorizationContext: response.authorizationContext,

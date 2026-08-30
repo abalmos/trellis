@@ -47,6 +47,7 @@ export async function storeKeyPair(
   publicKeyRaw: Uint8Array,
   seed: Uint8Array,
   options: StoredKeyPairOptions = {},
+  id = KEY_ID,
 ): Promise<void> {
   const db = await openDB();
   return new Promise((resolve, reject) => {
@@ -54,7 +55,7 @@ export async function storeKeyPair(
     const store = tx.objectStore(STORE_NAME);
 
     const record: StoredKeyPair = {
-      id: KEY_ID,
+      id,
       privateKey: keyPair.privateKey,
       publicKey: keyPair.publicKey,
       publicKeyRaw,
@@ -74,23 +75,23 @@ export async function storeKeyPair(
   });
 }
 
-export async function loadKeyPair(): Promise<StoredKeyPair | null> {
+export async function loadKeyPair(id = KEY_ID): Promise<StoredKeyPair | null> {
   const db = await openDB();
   return new Promise((resolve, reject) => {
     const tx = db.transaction(STORE_NAME, "readwrite");
     const store = tx.objectStore(STORE_NAME);
 
-    const request = store.get(KEY_ID);
+    const request = store.get(id);
     request.onerror = () => reject(request.error);
     request.onsuccess = () => {
       const result = request.result as StoredKeyPair | undefined;
       if (result !== undefined && !(result.seed instanceof Uint8Array)) {
-        store.delete(KEY_ID);
+        store.delete(id);
         resolve(null);
         return;
       }
       if (result?.expiresAt !== undefined && result.expiresAt <= Date.now()) {
-        store.delete(KEY_ID);
+        store.delete(id);
         resolve(null);
         return;
       }
@@ -102,12 +103,15 @@ export async function loadKeyPair(): Promise<StoredKeyPair | null> {
 }
 
 /** Associates the durable session ID returned after browser binding. */
-export async function storeSessionId(sessionId: string): Promise<void> {
+export async function storeSessionId(
+  sessionId: string,
+  id = KEY_ID,
+): Promise<void> {
   const db = await openDB();
   return new Promise((resolve, reject) => {
     const tx = db.transaction(STORE_NAME, "readwrite");
     const store = tx.objectStore(STORE_NAME);
-    const request = store.get(KEY_ID);
+    const request = store.get(id);
     request.onerror = () => reject(request.error);
     request.onsuccess = () => {
       const record = request.result as StoredKeyPair | undefined;
@@ -244,13 +248,13 @@ export class BrowserAuthorizationContextStore
   }
 }
 
-export async function deleteKeyPair(): Promise<void> {
+export async function deleteKeyPair(id = KEY_ID): Promise<void> {
   const db = await openDB();
   return new Promise((resolve, reject) => {
     const tx = db.transaction(STORE_NAME, "readwrite");
     const store = tx.objectStore(STORE_NAME);
 
-    const request = store.delete(KEY_ID);
+    const request = store.delete(id);
     request.onerror = () => reject(request.error);
     request.onsuccess = () => resolve();
 
@@ -258,7 +262,7 @@ export async function deleteKeyPair(): Promise<void> {
   });
 }
 
-export async function hasKeyPair(): Promise<boolean> {
-  const keyPair = await loadKeyPair();
+export async function hasKeyPair(id = KEY_ID): Promise<boolean> {
+  const keyPair = await loadKeyPair(id);
   return keyPair !== null;
 }

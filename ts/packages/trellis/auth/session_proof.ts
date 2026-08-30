@@ -18,6 +18,7 @@ export const SESSION_PROOF_FORMAT_V1 = "trellis.session-proof.v1" as const;
 /** One fixed session-proof signature domain. */
 export type SessionProofPurpose =
   | "userAuthRequest"
+  | "userAuthBind"
   | "serviceBootstrap"
   | "deviceBootstrap"
   | "authorizationContextRefresh";
@@ -29,6 +30,12 @@ type CommonInput = {
 
 /** Validated purpose-specific values used to construct one session proof. */
 export type SessionProofInput =
+  | CommonInput & {
+    purpose: "userAuthBind";
+    flowId: string;
+    sessionPublicKey: string;
+    requestDigest: string;
+  }
   | CommonInput & {
     purpose: "userAuthRequest";
     sessionPublicKey: string;
@@ -191,6 +198,7 @@ function concat(parts: Uint8Array[]): Uint8Array {
 function signerKeyId(input: SessionProofInput): Promise<string> | string {
   switch (input.purpose) {
     case "userAuthRequest":
+    case "userAuthBind":
       return sha256(assertPublicKey(input.sessionPublicKey, "sessionPublicKey"))
         .then(base64urlEncode);
     case "serviceBootstrap":
@@ -207,7 +215,7 @@ function assertSignerPublicKey(
   signerPublicKey: string,
 ): void {
   if (
-    input.purpose === "userAuthRequest" &&
+    (input.purpose === "userAuthRequest" || input.purpose === "userAuthBind") &&
     input.sessionPublicKey !== signerPublicKey
   ) {
     throw new Error(
@@ -250,6 +258,13 @@ export function buildSessionProofTranscript(
       );
       break;
     }
+    case "userAuthBind":
+      fields.push(
+        assertText(input.flowId, "flowId"),
+        assertPublicKey(input.sessionPublicKey, "sessionPublicKey"),
+        decodeFixed(input.requestDigest, 32, "requestDigest"),
+      );
+      break;
     case "serviceBootstrap": {
       const sessionKey = assertPublicKey(
         input.newSessionPublicKey,

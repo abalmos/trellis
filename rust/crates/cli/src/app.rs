@@ -326,6 +326,7 @@ mod tests {
             session_id: "ses_test".to_string(),
             inbox_prefix: "_INBOX.ses_test".to_string(),
             bootstrap_jwt: "jwt".to_string(),
+            bootstrap_jwt_expires_at: 2_000_000_000,
             authorization_context: serde_json::from_value(serde_json::json!({
                 "context": {},
                 "trust": {

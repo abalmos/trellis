@@ -158,8 +158,6 @@ export type AuthorizationProviderEvent = {
 export const AuthorizationContextRefreshResponseSchema = Type.Object({
   serverNow: Type.Integer({ minimum: 0 }),
   authorizationContext: AuthorizationContextBundleSchema,
-  bootstrapJwt: Type.String({ minLength: 1 }),
-  bootstrapJwtExpiresAt: Type.Integer({ minimum: 1 }),
   session: Type.Object({
     sessionId: Type.String({ minLength: 1 }),
     participantId: Type.String({ minLength: 1 }),
@@ -170,7 +168,6 @@ export const AuthorizationContextRefreshResponseSchema = Type.Object({
   nats: Type.Object({
     jwt: Type.String({ minLength: 1 }),
     jwtExpiresAt: Type.Integer({ minimum: 1 }),
-    servers: Type.Array(Type.String({ minLength: 1 })),
     transports: Type.Object({
       native: Type.Optional(Type.Object({
         natsServers: Type.Array(Type.String({ minLength: 1 }), {
@@ -183,8 +180,8 @@ export const AuthorizationContextRefreshResponseSchema = Type.Object({
         }),
       }, { additionalProperties: true })),
     }, { additionalProperties: true }),
-  }, { additionalProperties: true }),
-}, { additionalProperties: true });
+  }, { additionalProperties: false }),
+}, { additionalProperties: false });
 
 /** Proactive refresh response with its verified installed context. */
 export type AuthorizationContextRefreshResponse = Static<

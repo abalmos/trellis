@@ -572,8 +572,6 @@ Deno.test("context refresh renews routing material and supports null recovery", 
     return Promise.resolve(Response.json({
       serverNow: policy.nowUnixSeconds * 1_000,
       authorizationContext: bundle,
-      bootstrapJwt: `route-${route}`,
-      bootstrapJwtExpiresAt: 2_000,
       session: {
         sessionId: "ses_test",
         participantId: "documents-web",
@@ -584,7 +582,6 @@ Deno.test("context refresh renews routing material and supports null recovery", 
       nats: {
         jwt: `route-${route}`,
         jwtExpiresAt: 2_000,
-        servers: ["nats://127.0.0.1:4222"],
         transports: {
           native: { natsServers: ["nats://127.0.0.1:4222"] },
         },

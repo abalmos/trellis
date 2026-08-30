@@ -3,8 +3,7 @@
   import { browser } from "$app/environment";
   import { goto } from "$app/navigation";
   import { resolve } from "$app/paths";
-  import { getCanonicalLoopbackRedirectUrl, getSelectedAuthUrl } from "../lib/config";
-  import { auth } from "../lib/auth";
+  import { getCanonicalLoopbackRedirectUrl } from "../lib/config";
 
   onMount(async () => {
     if (!browser) return;
@@ -13,12 +12,7 @@
       window.location.replace(canonicalRedirect);
       return;
     }
-    const selectedAuthUrl = getSelectedAuthUrl(window.location);
-    if (selectedAuthUrl) {
-      auth.setAuthUrl(selectedAuthUrl);
-    }
-    await auth.init();
-    await goto(resolve("/login"));
+    await goto(resolve("/profile"));
   });
 </script>
 

@@ -1821,7 +1821,7 @@ impl TrellisTestAdmin {
             self.client = Some(
                 Caller::connect_user(UserConnectOptions::new(
                     &state.trellis_url,
-                    &state.servers,
+                    &state.nats_servers,
                     &state.inbox_prefix,
                     DEFAULT_ADMIN_RPC_TIMEOUT_MS,
                     trellis_rs::client::UserSessionCredentials {

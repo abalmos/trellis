@@ -14,20 +14,6 @@ import vectors from "../../../../conformance/authorization-context/vectors.json"
   type: "json",
 };
 
-type Fixture = {
-  name: string;
-  seed: string;
-  sessionKey: string;
-  oauthInit: {
-    redirectTo: string;
-    sig: string;
-  };
-  flowBind: {
-    flowId: string;
-    sig: string;
-  };
-};
-
 type Chain = {
   sessionSeed: string;
   sessionPublicKey: string;
@@ -59,33 +45,6 @@ type VectorDefaults = {
 function toHex(bytes: Uint8Array): string {
   return Array.from(bytes).map((b) => b.toString(16).padStart(2, "0")).join("");
 }
-
-Deno.test("shared auth-proof vectors match TypeScript implementation", async () => {
-  const fixtures = JSON.parse(
-    await Deno.readTextFile(
-      new URL(
-        "../../../../conformance/auth-proof/vectors.json",
-        import.meta.url,
-      ),
-    ),
-  ) as Fixture[];
-
-  assert(fixtures.length >= 2);
-
-  for (const fixture of fixtures) {
-    const auth = await createAuth({ sessionKeySeed: fixture.seed });
-    assertEquals(auth.sessionKey, fixture.sessionKey);
-
-    assertEquals(
-      await auth.oauthInitSig(fixture.oauthInit.redirectTo),
-      fixture.oauthInit.sig,
-    );
-    assertEquals(
-      await auth.bindFlowSig(fixture.flowBind.flowId),
-      fixture.flowBind.sig,
-    );
-  }
-});
 
 Deno.test("request and event proof v1 match language-neutral vectors", async () => {
   const chain = vectors.completeChain as unknown as Chain;

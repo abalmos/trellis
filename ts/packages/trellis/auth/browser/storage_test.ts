@@ -1,5 +1,6 @@
 import "fake-indexeddb/auto";
 import { assert, assertEquals, assertRejects } from "@std/assert";
+import { ulid } from "ulid";
 
 import type { AuthorizationClientState } from "../authorization_context.ts";
 import { BrowserAuthorizationContextStore } from "./storage.ts";
@@ -32,7 +33,7 @@ function state(
 }
 
 Deno.test("browser trust updates are atomic across concurrent tabs", async () => {
-  const scope = `https://${crypto.randomUUID()}.example.com`;
+  const scope = `https://${ulid()}.example.com`;
   const first = new BrowserAuthorizationContextStore(scope);
   const second = new BrowserAuthorizationContextStore(scope);
   await first.commit(state(7, "manifest-7"));

@@ -276,7 +276,7 @@ async fn bind_session(
         inbox_prefix: session.inbox_prefix,
         session_id: session.session_id,
         expires_at: session.expires_at,
-        servers: join_native_servers(
+        nats_servers: join_native_servers(
             &nats
                 .transports
                 .native
@@ -341,7 +341,7 @@ impl AgentLoginChallenge {
         let bound = bind_session(trellis_url, &flow_id, &auth).await?;
         let state = AdminSessionState {
             trellis_url: trellis_url.to_string(),
-            servers: bound.servers.clone(),
+            nats_servers: bound.nats_servers.clone(),
             session_seed,
             session_key: auth.session_key.clone(),
             participant_digest,

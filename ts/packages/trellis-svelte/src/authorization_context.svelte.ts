@@ -157,11 +157,6 @@ export class AuthorizationContextController {
         this.#status = "degraded";
         this.#error = error;
       },
-      onExpired: (error) => {
-        this.#context = undefined;
-        this.#status = "expired";
-        this.#error = error;
-      },
     });
   }
 

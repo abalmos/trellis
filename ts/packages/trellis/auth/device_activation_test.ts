@@ -114,34 +114,39 @@ Deno.test("device activation wait retries the bootstrap route until ready", asyn
   const identity = await deriveDeviceIdentity(new Uint8Array(32).fill(5));
   const waitArgs = bootstrapWaitArgs(identity);
   const urls: string[] = [];
+  const sessionKeys: string[] = [];
   let calls = 0;
 
   try {
-    globalThis.fetch =
-      ((input: URL | Request | string, _init?: RequestInit) => {
-        urls.push(String(input));
-        calls += 1;
-        const body = calls === 1
-          ? activationPendingBody()
-          : bootstrapReadyBody();
-        return Promise.resolve(
-          new Response(
-            JSON.stringify(body),
-            {
-              status: 200,
-              headers: { "Content-Type": "application/json" },
-            },
-          ),
-        );
-      }) as typeof fetch;
+    globalThis.fetch = ((input: URL | Request | string, init?: RequestInit) => {
+      urls.push(String(input));
+      sessionKeys.push(
+        (JSON.parse(String(init?.body)) as { newSessionPublicKey: string })
+          .newSessionPublicKey,
+      );
+      calls += 1;
+      const body = calls === 1 ? activationPendingBody() : bootstrapReadyBody();
+      return Promise.resolve(
+        new Response(
+          JSON.stringify(body),
+          {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          },
+        ),
+      );
+    }) as typeof fetch;
 
-    await waitForDeviceActivation({
+    const ready = await waitForDeviceActivation({
       ...waitArgs,
       pollIntervalMs: 0,
     });
 
     assertEquals(calls, 2);
     assert(urls.every((url) => url.endsWith("/bootstrap/device")));
+    assertEquals(sessionKeys[0], sessionKeys[1]);
+    assertEquals(ready.sessionIdentity.sessionKey, sessionKeys[0]);
+    assertEquals(ready.bundle.state, "ready");
   } finally {
     globalThis.fetch = originalFetch;
   }

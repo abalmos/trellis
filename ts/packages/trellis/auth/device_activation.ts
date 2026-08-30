@@ -365,10 +365,19 @@ export async function waitForDeviceActivation(args: {
   nonce?: string;
   signal?: AbortSignal;
   pollIntervalMs?: number;
-}): Promise<void> {
+}): Promise<{
+  state: "ready";
+  sessionIdentity: Awaited<ReturnType<typeof createAuth>>;
+  bundle: Record<string, unknown>;
+}> {
   const pollIntervalMs = args.pollIntervalMs ?? DEFAULT_WAIT_POLL_INTERVAL_MS;
   const nonce = args.nonce ?? ulid();
   const identitySeed = normalizeSecretBytes(args.identitySeed, "identitySeed");
+  const sessionIdentity = await createAuth({
+    sessionKeySeed: base64urlEncode(
+      crypto.getRandomValues(new Uint8Array(32)),
+    ),
+  });
   const challengeDigest = base64urlEncode(await sha256(utf8(nonce)));
   const confirmationCode = await deriveDeviceConfirmationCode({
     activationKey: args.activationKey,
@@ -386,11 +395,6 @@ export async function waitForDeviceActivation(args: {
     const identityAuth = await createAuth({
       sessionKeySeed: base64urlEncode(identitySeed),
     });
-    const sessionAuth = await createAuth({
-      sessionKeySeed: base64urlEncode(
-        crypto.getRandomValues(new Uint8Array(32)),
-      ),
-    });
     const deviceIdentityKeyId = base64urlEncode(
       await sha256(base64urlDecode(identityAuth.sessionKey)),
     );
@@ -404,8 +408,8 @@ export async function waitForDeviceActivation(args: {
       identityPublicKey: identityAuth.sessionKey,
       provisioningSecret: null,
       expectedSecretVersion: null,
-      newSessionPublicKey: sessionAuth.sessionKey,
-      newSessionNkey: sessionAuth.sessionNkey,
+      newSessionPublicKey: sessionIdentity.sessionKey,
+      newSessionNkey: sessionIdentity.sessionNkey,
       participantId: args.participantId,
       participantArtifactDigest: args.participantArtifactDigest,
       participantNeedsDigest: args.participantNeedsDigest,
@@ -431,8 +435,8 @@ export async function waitForDeviceActivation(args: {
               deploymentId: args.deploymentId,
               instanceId: args.instanceId,
               deviceIdentityKeyId,
-              newSessionPublicKey: sessionAuth.sessionKey,
-              newSessionNkey: sessionAuth.sessionNkey,
+              newSessionPublicKey: sessionIdentity.sessionKey,
+              newSessionNkey: sessionIdentity.sessionNkey,
               participantId: args.participantId,
               participantDigest: args.participantArtifactDigest,
               challengeDigest,
@@ -462,7 +466,11 @@ export async function waitForDeviceActivation(args: {
     }
     const state = Reflect.get(body, "state") as unknown;
     if (state === "ready") {
-      return;
+      return {
+        state,
+        sessionIdentity,
+        bundle: body as Record<string, unknown>,
+      };
     }
     const activation = Reflect.get(body, "activation") as
       | Record<

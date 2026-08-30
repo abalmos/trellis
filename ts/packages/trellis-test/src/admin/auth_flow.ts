@@ -1,4 +1,5 @@
 import type { ClientAuthContinuation } from "@qlever-llc/trellis";
+import { fetchPortalFlowState } from "@qlever-llc/trellis/auth/browser";
 
 import { ADMIN_USERNAME } from "./methods.ts";
 import { recordTrellisDuration } from "./metrics.ts";
@@ -37,22 +38,16 @@ export async function approveLocalFlowIfNeeded(args: {
 }): Promise<void> {
   const startedAt = performance.now();
   const initialFetchStartedAt = performance.now();
-  const response = await fetch(
-    `${args.trellisUrl}/auth/flow/${encodeURIComponent(args.flowId)}`,
+  const state = await fetchPortalFlowState(
+    { authUrl: args.trellisUrl },
+    args.flowId,
   );
-  if (!response.ok) {
-    throw new Error(`Failed to load portal flow (${response.status})`);
-  }
-  const state = await response.json() as {
-    state: string;
-    consentViewDigest?: string;
-  };
   recordTrellisDuration(
     "trellis.auth.flow.duration",
     performance.now() - initialFetchStartedAt,
     { phase: "approval_fetch" },
   );
-  if (state.state === "bound") {
+  if (state.status === "redirect") {
     recordTrellisDuration(
       "trellis.auth.flow.duration",
       performance.now() - startedAt,
@@ -60,12 +55,9 @@ export async function approveLocalFlowIfNeeded(args: {
     );
     return;
   }
-  if (state.state === "approval_required") {
-    if (typeof state.consentViewDigest !== "string") {
-      throw new Error("Trellis auth approval did not include a consent digest");
-    }
+  if (state.status === "approval_required") {
     const approvalStartedAt = performance.now();
-    const approved = await postJson(
+    await postJson(
       `${args.trellisUrl}/auth/flow/${
         encodeURIComponent(args.flowId)
       }/approval`,
@@ -73,15 +65,18 @@ export async function approveLocalFlowIfNeeded(args: {
         approved: true,
         consentViewDigest: state.consentViewDigest,
         selectedOptionalBundles: [],
-        idempotencyKey: crypto.randomUUID(),
       },
-    ) as { state: string };
+    );
+    const approved = await fetchPortalFlowState(
+      { authUrl: args.trellisUrl },
+      args.flowId,
+    );
     recordTrellisDuration(
       "trellis.auth.flow.duration",
       performance.now() - approvalStartedAt,
       { phase: "approval_submit" },
     );
-    if (approved.state === "approved") {
+    if (approved.status === "redirect") {
       recordTrellisDuration(
         "trellis.auth.flow.duration",
         performance.now() - startedAt,
@@ -90,11 +85,11 @@ export async function approveLocalFlowIfNeeded(args: {
       return;
     }
     throw new Error(
-      `Trellis auth approval did not complete; portal state is '${approved.state}'`,
+      `Trellis auth approval did not complete; portal state is '${approved.status}'`,
     );
   }
   throw new Error(
-    `Trellis local login did not reach approval; portal state is '${state.state}'`,
+    `Trellis local login did not reach approval; portal state is '${state.status}'`,
   );
 }
 

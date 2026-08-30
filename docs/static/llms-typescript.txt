@@ -53,7 +53,13 @@ Rules:
   `@qlever-llc/trellis` root. Keep service runtime, device activation,
   browser-auth, telemetry, generated SDK, and advanced contract tooling imports on
   their explicit subpaths.
-- Device activation wait repeats `/bootstrap/device` with a fresh proof and uses
+- Browser apps use `TrellisClient.connect(...)` as the sole auth lifecycle owner.
+  Do not start or bind flows, persist auth state, or classify auth messages in UI
+  wrappers. Browser bundles require `nats.transports.websocket`; service and Deno
+  device runtimes require `nats.transports.native`. Refresh installs the complete
+  returned session, JWT, transport, clock, and authorization-context bundle.
+- Device activation wait repeats `/bootstrap/device` with a fresh proof over the
+  same target session identity and uses
   `expiresAt - serverNow` as a monotonic duration. A changed review id is an
   explicit expired/replaced review, not a review to follow silently. Resolve
   cancellation is unsupported.

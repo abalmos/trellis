@@ -40,13 +40,6 @@ export type TrellisAuth = {
   /** Local verifier for received requests and events. */
   authorizationProviderCache?: AuthorizationProviderCache;
 
-  oauthInitSig: (
-    redirectTo: string,
-    context?: unknown,
-    provider?: string,
-    contract?: Record<string, unknown>,
-  ) => Promise<string>;
-  bindFlowSig: (flowId: string) => Promise<string>;
   createProof: (
     subject: string,
     payloadHash: Uint8Array,
@@ -94,30 +87,6 @@ export async function createAuth(
     return new Uint8Array(sig);
   };
 
-  const signDomainHash = async (
-    prefix: string,
-    value: string,
-  ): Promise<string> => {
-    const digest = await sha256(utf8(`${prefix}:${value}`));
-    const sigBytes = await sign(digest);
-    return base64urlEncode(sigBytes);
-  };
-
-  const signOauthInit = async (
-    redirectTo: string,
-    context?: unknown,
-    provider?: string,
-    contract?: Record<string, unknown>,
-  ): Promise<string> => {
-    const canonicalContext = canonicalizeJsonValue(context ?? null);
-    const payload = contract === undefined
-      ? `${redirectTo}:${canonicalContext}`
-      : `${redirectTo}:${provider ?? ""}:${
-        canonicalizeJsonValue(contract)
-      }:${canonicalContext}`;
-    return await signDomainHash("oauth-init", payload);
-  };
-
   const currentIat = (): number =>
     correctedIatSeconds(Date.now(), serverClockOffsetMs);
 
@@ -130,8 +99,6 @@ export async function createAuth(
       serverClockOffsetMs = clockOffsetMs;
     },
     contextDigest: resolveContextDigest,
-    oauthInitSig: signOauthInit,
-    bindFlowSig: (flowId) => signDomainHash("bind-flow", flowId),
     createProof: (subject, payloadHash, reply, requestId, iat) =>
       createProof(privateKey, {
         contextDigest: resolveContextDigest(),

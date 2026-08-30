@@ -75,6 +75,10 @@ https://raw.githubusercontent.com/qlever-llc/trellis/main/docs/static/llms-full.
   persisted before the live floor advances and wakes the existing own-context
   refresh task. Connected trust lookup uses exact NATS KV direct reads and fixed
   manifest/revocation watches, not HTTP or whole-bucket access.
+- Rust native clients select only `nats.transports.native`; browser/WebSocket
+  endpoints are not a native fallback. Context refresh replaces authoritative
+  session, route-JWT expiry, typed transport, server-clock, and context metadata
+  together before reconnect.
 - The deny-all bootstrap JWT grants no authority. Context refresh is restart
   recovery: it renews the route credential and installs its exact expiry
   atomically with the verified context. It only routes Auth Callout and remains

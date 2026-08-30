@@ -242,8 +242,15 @@ const DeviceBootstrapReadySchema = Type.Object({
   nats: Type.Object({
     jwt: Type.String({ minLength: 1 }),
     jwtExpiresAt: Type.Integer({ minimum: 1 }),
-    servers: Type.Array(Type.String({ minLength: 1 }), { minItems: 1 }),
-  }),
+    transports: Type.Object({
+      native: Type.Optional(Type.Object({
+        natsServers: Type.Array(Type.String({ minLength: 1 }), { minItems: 1 }),
+      }, { additionalProperties: false })),
+      websocket: Type.Optional(Type.Object({
+        natsServers: Type.Array(Type.String({ minLength: 1 }), { minItems: 1 }),
+      }, { additionalProperties: false })),
+    }, { additionalProperties: false }),
+  }, { additionalProperties: false }),
   authorizationContext: AuthorizationContextBundleSchema,
 });
 
@@ -277,7 +284,10 @@ type DeviceBootstrapReady = {
     deploymentId: string;
     participantId: string;
     participantDigest: string;
-    transports: { websocket: { natsServers: string[] } };
+    transports: {
+      native?: { natsServers: string[] };
+      websocket?: { natsServers: string[] };
+    };
     transport: { jwt: string; jwtExpiresAt: number; inboxPrefix: string };
     authorizationContext: AuthorizationContextBundle;
   };
@@ -542,6 +552,11 @@ async function fetchDeviceBootstrap(args: {
   signal?: AbortSignal;
 }): Promise<DeviceBootstrapResponse> {
   const presentation = await resolveNativeProtocolPresentation(args.contract);
+  const sessionAuth = await createAuth({
+    sessionKeySeed: base64urlEncode(
+      crypto.getRandomValues(new Uint8Array(32)),
+    ),
+  });
   for (let attempt = 0; attempt < 2; attempt += 1) {
     const requestStartedAtMs = args.now();
     const issuedAt = Math.trunc(
@@ -550,11 +565,6 @@ async function fetchDeviceBootstrap(args: {
     const requestId = ulid();
     const identityAuth = await createAuth({
       sessionKeySeed: base64urlEncode(args.deviceIdentity.identitySeed),
-    });
-    const sessionAuth = await createAuth({
-      sessionKeySeed: base64urlEncode(
-        crypto.getRandomValues(new Uint8Array(32)),
-      ),
     });
     const deviceIdentityKeyId = base64urlEncode(
       await sha256(base64urlDecode(identityAuth.sessionKey)),
@@ -676,7 +686,7 @@ async function fetchDeviceBootstrap(args: {
           deploymentId: args.provisioned.deploymentId,
           participantId: args.provisioned.participantId,
           participantDigest: ready.authorization.participantArtifactDigest,
-          transports: { websocket: { natsServers: ready.nats.servers } },
+          transports: ready.nats.transports,
           transport: {
             jwt: ready.nats.jwt,
             jwtExpiresAt: ready.nats.jwtExpiresAt,
@@ -742,7 +752,7 @@ export async function startDeviceActivationWithDeps<
   });
   if (activation.status !== "activation_required") {
     throw createTransportError({
-      code: "trellis.auth.device_activation_unavailable",
+      code: "device_activation_unavailable",
       message: "The device does not require activation.",
       hint: "Connect the device directly.",
       context: { status: activation.status },

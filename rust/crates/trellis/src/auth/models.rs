@@ -11,9 +11,7 @@ pub struct AdminSessionState {
     #[doc = concat!("The `", stringify!(trellis_url), "` value.")]
     pub trellis_url: String,
     /// Comma-separated runtime server list returned by Trellis.
-    #[serde(rename = "nats_servers", alias = "servers")]
-    #[doc = concat!("The `", stringify!(servers), "` value.")]
-    pub servers: String,
+    pub nats_servers: String,
     /// Session-key seed used to sign subsequent Trellis requests.
     #[doc = concat!("The `", stringify!(session_seed), "` value.")]
     pub session_seed: String,
@@ -54,9 +52,7 @@ pub struct BoundSession {
     #[doc = concat!("The `", stringify!(expires_at), "` value.")]
     pub expires_at: Option<i64>,
     /// Comma-separated native transport endpoints for the session.
-    #[serde(rename = "nats_servers", alias = "servers")]
-    #[doc = concat!("The `", stringify!(servers), "` value.")]
-    pub servers: String,
+    pub nats_servers: String,
     /// Deny-all Auth-account JWT used to enter NATS Auth Callout.
     #[doc = concat!("The `", stringify!(bootstrap_jwt), "` value.")]
     pub bootstrap_jwt: String,

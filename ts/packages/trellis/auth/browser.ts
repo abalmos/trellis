@@ -5,19 +5,6 @@
  */
 
 export {
-  type AuthConfig,
-  type AuthStartFlowResponse,
-  type AuthStartRequest,
-  type AuthStartResponse,
-  bindFlow,
-  type BindResponse,
-  type BindSuccessResponse,
-  buildLoginUrl,
-  isBindSuccessResponse,
-  type SentinelCreds,
-  startAuthRequest,
-} from "./browser/login.ts";
-export {
   completeSessionLogout,
   type CompleteSessionLogoutArgs,
   logoutSession,
@@ -33,7 +20,6 @@ export {
   submitPortalApproval,
 } from "./browser/portal.ts";
 export {
-  bindFlowSig,
   clearSessionKey,
   createRpcProof,
   generateSessionKey,
@@ -60,31 +46,6 @@ export type {
   BrowserAuthRecoveryClassification,
   BrowserAuthRecoveryKind,
 } from "./browser_recovery.ts";
-export {
-  approvalCapabilityKeys,
-  type ApprovalDecision as ApprovalDecisionData,
-  ApprovalDecisionSchema,
-  type AuthStartFlowResponse as AuthStartFlowResponseData,
-  AuthStartFlowResponseSchema,
-  type AuthStartRequest as AuthStartRequestData,
-  AuthStartRequestSchema,
-  type AuthStartResponse as AuthStartResponseData,
-  AuthStartResponseSchema,
-  type BindResponse as BindResponseData,
-  BindResponseSchema,
-  type BindSuccessResponse as BindSuccessResponseData,
-  BindSuccessResponseSchema,
-  type ClientTransportEndpoints as ClientTransportEndpointsData,
-  ClientTransportEndpointsSchema,
-  type ClientTransports as ClientTransportsData,
-  ClientTransportsSchema,
-  type ContractApproval as ContractApprovalData,
-  type ContractApprovalCapability as ContractApprovalCapabilityData,
-  ContractApprovalSchema,
-  type SentinelCreds as SentinelCredsData,
-  SentinelCredsSchema,
-} from "./schemas.ts";
-
 export {
   base64urlDecode,
   base64urlEncode,

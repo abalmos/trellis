@@ -1,10 +1,8 @@
 import {
   base64urlDecode,
   base64urlEncode,
-  canonicalizeJsonValue,
   sha256,
   toArrayBuffer,
-  utf8,
 } from "../utils.ts";
 import {
   importEd25519PrivateKeyFromSeedBase64url,
@@ -29,6 +27,7 @@ export type SessionKeyHandle = {
   sessionKey: string;
   persistence?: SessionKeyPersistenceMode;
   expiresAt?: number;
+  storageId?: string;
 };
 
 export type SessionKeyPersistenceMode = "temporary" | "remembered";
@@ -40,6 +39,8 @@ export type SessionKeyOptions = {
   expiresAt?: number | Date;
   /** Relative expiry for remembered keys. Ignored when expiresAt is set. */
   ttlMs?: number;
+  /** @internal Participant-and-origin storage scope. */
+  storageScope?: string;
 };
 
 let temporarySessionKey: SessionKeyHandle | null = null;
@@ -55,6 +56,9 @@ export async function generateSessionKey(
   options: SessionKeyOptions = {},
 ): Promise<SessionKeyHandle> {
   const persistence = options.persistence ?? "remembered";
+  const storageId = options.storageScope
+    ? `trellis-session-key:${options.storageScope}`
+    : undefined;
   const expiresAt = resolveExpiresAt(options);
   const seed = crypto.getRandomValues(new Uint8Array(32));
   const sessionKey = publicKeyBase64urlFromSeed(seed);
@@ -74,23 +78,27 @@ export async function generateSessionKey(
     sessionKey,
     persistence,
     ...(expiresAt === undefined ? {} : { expiresAt }),
+    ...(storageId === undefined ? {} : { storageId }),
   };
 
   if (persistence === "temporary") {
     temporarySessionKey = handle;
   } else {
-    await storeKeyPair(keyPair, publicKeyRaw, seed, { expiresAt });
+    await storeKeyPair(keyPair, publicKeyRaw, seed, { expiresAt }, storageId);
   }
 
   return handle;
 }
 
 export async function loadSessionKey(
-  options: Pick<SessionKeyOptions, "persistence"> = {},
+  options: Pick<SessionKeyOptions, "persistence" | "storageScope"> = {},
 ): Promise<SessionKeyHandle | null> {
   const persistence = options.persistence ?? "remembered";
   if (persistence === "temporary") return temporarySessionKey;
-  const stored = await loadKeyPair();
+  const storageId = options.storageScope
+    ? `trellis-session-key:${options.storageScope}`
+    : undefined;
+  const stored = await loadKeyPair(storageId);
   if (!stored) return null;
   return {
     privateKey: stored.privateKey,
@@ -101,6 +109,7 @@ export async function loadSessionKey(
     sessionKey: base64urlEncode(stored.publicKeyRaw),
     persistence: "remembered",
     ...(stored.expiresAt === undefined ? {} : { expiresAt: stored.expiresAt }),
+    ...(storageId === undefined ? {} : { storageId }),
   };
 }
 
@@ -110,7 +119,9 @@ export async function setSessionId(
   sessionId: string,
 ): Promise<void> {
   handle.sessionId = sessionId;
-  if (handle.persistence !== "temporary") await storeSessionId(sessionId);
+  if (handle.persistence !== "temporary") {
+    await storeSessionId(sessionId, handle.storageId);
+  }
 }
 
 export async function getOrCreateSessionKey(
@@ -137,33 +148,6 @@ export function getPublicSessionKey(handle: SessionKeyHandle): string {
   return handle.sessionKey;
 }
 
-export async function oauthInitSig(
-  handle: SessionKeyHandle,
-  redirectTo: string,
-  context?: unknown,
-  provider?: string,
-  contract?: Record<string, unknown> | string,
-): Promise<string> {
-  const canonicalContext = canonicalizeJsonValue(context ?? null);
-  const payload = contract === undefined
-    ? `${redirectTo}:${canonicalContext}`
-    : `${redirectTo}:${provider ?? ""}:${
-      canonicalizeJsonValue(contract)
-    }:${canonicalContext}`;
-  const digest = await sha256(utf8(`oauth-init:${payload}`));
-  const sig = await signBytes(handle, digest);
-  return base64urlEncode(sig);
-}
-
-export async function bindFlowSig(
-  handle: SessionKeyHandle,
-  flowId: string,
-): Promise<string> {
-  const digest = await sha256(utf8(`bind-flow:${flowId}`));
-  const sig = await signBytes(handle, digest);
-  return base64urlEncode(sig);
-}
-
 export async function createRpcProof(
   handle: SessionKeyHandle,
   contextDigest: string,
@@ -185,21 +169,27 @@ export async function createRpcProof(
 }
 
 export async function clearSessionKey(
-  options: Pick<SessionKeyOptions, "persistence"> = {},
+  options: Pick<SessionKeyOptions, "persistence" | "storageScope"> = {},
 ): Promise<void> {
   const persistence = options.persistence;
   if (persistence === undefined || persistence === "temporary") {
     temporarySessionKey = null;
   }
   if (persistence === undefined || persistence === "remembered") {
-    await deleteKeyPair();
+    const storageId = options.storageScope
+      ? `trellis-session-key:${options.storageScope}`
+      : undefined;
+    await deleteKeyPair(storageId);
   }
 }
 
 export async function hasSessionKey(
-  options: Pick<SessionKeyOptions, "persistence"> = {},
+  options: Pick<SessionKeyOptions, "persistence" | "storageScope"> = {},
 ): Promise<boolean> {
   const persistence = options.persistence ?? "remembered";
   if (persistence === "temporary") return temporarySessionKey !== null;
-  return await hasKeyPair();
+  const storageId = options.storageScope
+    ? `trellis-session-key:${options.storageScope}`
+    : undefined;
+  return await hasKeyPair(storageId);
 }

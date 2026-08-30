@@ -151,6 +151,13 @@ https://raw.githubusercontent.com/qlever-llc/trellis/main/docs/static/llms.txt
   context. Every NATS connect uses the standard nonce signature and a digest-only
   context token; shared sentinel credentials and second Trellis handshake proofs
   are retired.
+- `TrellisClient.connect(...)` solely owns browser restore, auth request, redirect
+  continuation, `userAuthBind`, coherent bundle persistence, WebSocket connect,
+  refresh, reconnect, and terminal cleanup. Start returns exactly
+  `{ flowId, loginUrl }`; approval has no caller idempotency key; bind replay is
+  server-owned by immutable `flowId`. Refresh returns and atomically replaces the
+  complete session, route JWT and expiry, typed transports, server clock, and
+  authorization context.
 - The trust chain is a pinned authorization root, a root-signed current manifest
   containing active issuer public keys, and an issuer-signed short-lived context.
   Clients durably retain the

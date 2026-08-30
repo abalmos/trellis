@@ -93,6 +93,14 @@ function vectorInput(
         redirectTarget: field(value, "redirectTarget"),
         requestDigest: vector.requestDigest ?? "",
       };
+    case "userAuthBind":
+      return {
+        ...common,
+        purpose: vector.purpose,
+        flowId: field(value, "flowId"),
+        sessionPublicKey: field(value, "sessionPublicKey"),
+        requestDigest: vector.requestDigest ?? "",
+      };
     case "serviceBootstrap":
       return {
         ...common,

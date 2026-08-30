@@ -4,8 +4,8 @@
   import { onMount } from "svelte";
   import { setSelectedTrellisUrl, trellisApp } from "$lib/trellis-context.svelte";
   import AuthenticatedApp from "../../lib/components/AuthenticatedApp.svelte";
-  import { auth, buildConsoleLoginUrl } from "../../lib/auth";
-  import { APP_CONFIG, getSelectedAuthUrl, persistSelectedAuthUrl } from "../../lib/config";
+  import { buildConsoleLoginUrl, resetSession } from "../../lib/auth";
+  import { APP_CONFIG } from "../../lib/config";
 
   type Props = {
     children: Snippet;
@@ -25,22 +25,13 @@
 
   let { children }: Props = $props();
   let initialized = $state(false);
-  let authUrl = $state<string | undefined>(APP_CONFIG.authUrl);
 
   function currentPath(): string {
     return window.location.pathname + window.location.search;
   }
 
   onMount(() => {
-    const selectedAuthUrl = getSelectedAuthUrl(window.location);
-    if (selectedAuthUrl) {
-      const persistedAuthUrl = persistSelectedAuthUrl(selectedAuthUrl);
-      if (persistedAuthUrl) {
-        authUrl = persistedAuthUrl;
-      }
-    }
-
-    if (!authUrl) {
+    if (!APP_CONFIG.authUrl) {
       window.location.href = buildConsoleLoginUrl({
         redirectTo: currentPath(),
         location: window.location,
@@ -48,8 +39,7 @@
       return;
     }
 
-    setSelectedTrellisUrl(authUrl);
-    auth.setAuthUrl(authUrl);
+    setSelectedTrellisUrl(APP_CONFIG.authUrl);
     initialized = true;
   });
 
@@ -82,7 +72,7 @@
   async function recoverAuth(): Promise<void> {
     if (recovering) return;
     recovering = true;
-    await auth.resetSession();
+    await resetSession();
     window.location.href = buildConsoleLoginUrl({
       redirectTo: currentPath(),
       location: window.location,
@@ -90,7 +80,7 @@
   }
 
   async function signInAgain(): Promise<void> {
-    await auth.resetSession();
+    await resetSession();
     window.location.href = buildConsoleLoginUrl({
       redirectTo: currentPath(),
       location: window.location,
@@ -98,7 +88,7 @@
   }
 </script>
 
-{#if initialized && authUrl}
+{#if initialized}
   <ConsoleTrellisProvider
     {trellisApp}
     auth={{ redirectTo: () => window.location.href }}

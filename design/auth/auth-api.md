@@ -77,8 +77,10 @@ Proofs include a format, signer identity, request id, safe-integer issue time,
 payload digest, domain-separated purpose, and Ed25519 signature over the
 protocol-owned length-prefixed transcript.
 
-Browser bind consumes the proof-bound server flow with an idempotency key. It
-does not accept a second concatenated-signature format.
+Browser bind is durably idempotent by immutable `flowId`. Its
+`trellis.session-proof.v1` request carries only canonical ULID `requestId`,
+safe-integer `issuedAt`, and the proof; `requestId` is signed freshness
+metadata, not a second durable idempotency identity.
 
 Successful bootstrap or bind returns:
 
@@ -117,9 +119,7 @@ the state. Unknown identities register only when current portal policy permits
 it; identity-link flows remain target-bound and never self-register.
 
 The flow response contains a server-owned consent view and digest. Approval
-accepts only
-`{ approved, consentViewDigest, selectedOptionalBundles,
-idempotencyKey }`;
+accepts only `{ approved, consentViewDigest, selectedOptionalBundles }`;
 caller-authored grants, capabilities, expiry, resource atoms, and platform
 authority are rejected. It re-resolves the exact participant before deciding the
 same immutable authority proposal used by administrative flows. Bind creates the

@@ -1,26 +1,9 @@
 import type { StaticDecode } from "typebox";
 import { Type } from "typebox";
 
-const SessionKeySchema = Type.String({
-  pattern: "^[A-Za-z0-9_-]{43}$",
-});
-
-const SignatureSchema = Type.String({
-  pattern: "^[A-Za-z0-9_-]{86}$",
-});
-
 export const ContractDigestSchema = Type.String({
   pattern: "^[A-Za-z0-9_-]+$",
 });
-
-const OpenObjectSchema = Type.Object({}, { additionalProperties: true });
-
-export const SentinelCredsSchema = Type.Object({
-  jwt: Type.String(),
-  seed: Type.String(),
-});
-
-export type SentinelCreds = StaticDecode<typeof SentinelCredsSchema>;
 
 export const ClientTransportEndpointsSchema = Type.Object({
   natsServers: Type.Array(Type.String({ minLength: 1 }), { minItems: 1 }),
@@ -78,61 +61,3 @@ export type ContractApproval = StaticDecode<typeof ContractApprovalSchema>;
 export function approvalCapabilityKeys(approval: ContractApproval): string[] {
   return Object.keys(approval.capabilities);
 }
-
-export const BindSuccessResponseSchema = Type.Object({
-  status: Type.Literal("bound"),
-  inboxPrefix: Type.String(),
-  expires: Type.String({ format: "date-time" }),
-  sentinel: SentinelCredsSchema,
-  transports: ClientTransportsSchema,
-});
-
-export const BindInsufficientCapabilitiesResponseSchema = Type.Object({
-  status: Type.Literal("insufficient_capabilities"),
-  approval: ContractApprovalSchema,
-  missingCapabilities: Type.Array(Type.String()),
-  userCapabilities: Type.Array(Type.String()),
-});
-
-export const BindResponseSchema = Type.Union([
-  BindSuccessResponseSchema,
-  BindInsufficientCapabilitiesResponseSchema,
-]);
-
-export type BindResponse = StaticDecode<typeof BindResponseSchema>;
-export type BindSuccessResponse = StaticDecode<
-  typeof BindSuccessResponseSchema
->;
-export type BindInsufficientCapabilitiesResponse = StaticDecode<
-  typeof BindInsufficientCapabilitiesResponseSchema
->;
-
-export const AuthStartRequestSchema = Type.Object({
-  provider: Type.Optional(Type.String({ minLength: 1 })),
-  redirectTo: Type.String(),
-  sessionKey: SessionKeySchema,
-  sig: SignatureSchema,
-  participantId: Type.String({ minLength: 1 }),
-  participantArtifactDigest: ContractDigestSchema,
-  participantNeedsDigest: ContractDigestSchema,
-  participantArtifact: OpenObjectSchema,
-  referencedApiArtifacts: Type.Array(OpenObjectSchema, { minItems: 1 }),
-  context: Type.Optional(OpenObjectSchema),
-});
-
-export const AuthStartFlowResponseSchema = Type.Object({
-  status: Type.Literal("flow_started"),
-  flowId: Type.String({ minLength: 1 }),
-  loginUrl: Type.String({ minLength: 1 }),
-});
-
-export const AuthStartResponseSchema = Type.Union([
-  BindSuccessResponseSchema,
-  AuthStartFlowResponseSchema,
-]);
-
-export type AuthStartRequest = StaticDecode<typeof AuthStartRequestSchema>;
-export type AuthStartFlowResponse = StaticDecode<
-  typeof AuthStartFlowResponseSchema
->;
-export type AuthStartResponse = StaticDecode<typeof AuthStartResponseSchema>;

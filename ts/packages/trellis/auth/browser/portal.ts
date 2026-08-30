@@ -1,45 +1,65 @@
 import { type PortalFlowState, PortalFlowStateSchema } from "../protocol.ts";
-import type { ApprovalDecision } from "../schemas.ts";
-import type { AuthConfig } from "./login.ts";
+import type { StaticDecode } from "typebox";
+import { Type } from "typebox";
 import { Value } from "typebox/value";
 
 export type { PortalFlowState } from "../protocol.ts";
-export type { ApprovalDecision } from "../schemas.ts";
+export type ApprovalDecision = "approved" | "denied";
+export type AuthConfig = { authUrl: string };
 
 function authBaseUrl(config: AuthConfig): string {
   return config.authUrl.replace(/\/$/, "");
 }
 
-type BrowserFlowWire = {
-  flowId: string;
-  state: string;
-  providers: string[];
-  registrationEnabled: boolean;
-  federatedRegistrationEnabled: boolean;
-  consentView: {
-    participant: {
-      id: string;
-      digest: string;
-      displayName: string;
-      description: string;
-    };
-    required: { permissions: unknown[]; capabilities: string[] };
-    optionalBundles?: {
-      id: string;
-      apiId: string;
-      permissions: Record<string, unknown>[];
-    }[];
-  };
-  consentViewDigest: string;
-  user?: {
-    origin: string;
-    id: string;
-    name?: string;
-    email?: string;
-    image?: string;
-  } | null;
-  redirectTarget?: string | null;
-};
+const BrowserFlowWireSchema = Type.Object({
+  flowId: Type.String({ minLength: 1 }),
+  expiresAt: Type.Integer(),
+  state: Type.Union([
+    Type.Literal("choose_provider"),
+    Type.Literal("authenticated"),
+    Type.Literal("approval_required"),
+    Type.Literal("approval_denied"),
+    Type.Literal("approved"),
+    Type.Literal("consumed"),
+    Type.Literal("expired"),
+  ]),
+  providers: Type.Array(Type.String({ minLength: 1 })),
+  registrationEnabled: Type.Boolean(),
+  federatedRegistrationEnabled: Type.Boolean(),
+  consentView: Type.Object({
+    participant: Type.Object({
+      id: Type.String({ minLength: 1 }),
+      digest: Type.String({ minLength: 1 }),
+      displayName: Type.String({ minLength: 1 }),
+      description: Type.String(),
+    }, { additionalProperties: false }),
+    required: Type.Object({
+      permissions: Type.Array(Type.Unknown()),
+      capabilities: Type.Array(Type.String({ minLength: 1 })),
+    }, { additionalProperties: false }),
+    optionalBundles: Type.Optional(Type.Array(Type.Object({
+      id: Type.String({ minLength: 1 }),
+      apiId: Type.String({ minLength: 1 }),
+      permissions: Type.Array(Type.Record(Type.String(), Type.Unknown())),
+    }, { additionalProperties: false }))),
+  }, { additionalProperties: false }),
+  consentViewDigest: Type.String({ minLength: 1 }),
+  user: Type.Optional(Type.Union([
+    Type.Null(),
+    Type.Object({
+      origin: Type.String({ minLength: 1 }),
+      id: Type.String({ minLength: 1 }),
+      name: Type.Optional(Type.String({ minLength: 1 })),
+      email: Type.Optional(Type.String({ minLength: 1 })),
+      image: Type.Optional(Type.String({ minLength: 1 })),
+    }, { additionalProperties: false }),
+  ])),
+  redirectTarget: Type.Optional(Type.Union([
+    Type.Null(),
+    Type.String({ minLength: 1 }),
+  ])),
+}, { additionalProperties: false });
+type BrowserFlowWire = StaticDecode<typeof BrowserFlowWireSchema>;
 
 function approval(wire: BrowserFlowWire) {
   const capabilities: Record<
@@ -108,7 +128,6 @@ function portalState(wire: BrowserFlowWire): PortalFlowState {
       ) => ({
         id: bundle.id,
         apiId: bundle.apiId,
-        apiVersion: "1.0.0",
         permissions: bundle.permissions,
       })),
       user: wire.user,
@@ -128,7 +147,7 @@ function portalState(wire: BrowserFlowWire): PortalFlowState {
     const location = new URL(wire.redirectTarget);
     location.searchParams.set("flowId", wire.flowId);
     state = { status: "redirect", location: location.toString() };
-  } else {
+  } else if (wire.state === "expired") {
     state = {
       status: "expired",
       ...(wire.redirectTarget ? { returnLocation: wire.redirectTarget } : {}),
@@ -147,7 +166,7 @@ async function fetchBrowserFlowWire(
   if (!response.ok) {
     throw new Error(`Failed to load portal flow (${response.status})`);
   }
-  return await response.json() as BrowserFlowWire;
+  return Value.Parse(BrowserFlowWireSchema, await response.json());
 }
 
 export function portalFlowIdFromUrl(url: URL): string | null {
@@ -188,7 +207,6 @@ export async function submitPortalApproval(
         approved: decision === "approved",
         consentViewDigest: flow.consentViewDigest,
         selectedOptionalBundles,
-        idempotencyKey: crypto.randomUUID(),
       }),
     },
   );

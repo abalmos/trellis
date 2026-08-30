@@ -100,8 +100,8 @@ export async function refreshAuthorizationContextWithMetadata(args: {
   const context = await args.cache.install(
     next.authorizationContext,
     {
-      bootstrapJwt: next.bootstrapJwt,
-      bootstrapJwtExpiresAt: next.bootstrapJwtExpiresAt,
+      bootstrapJwt: next.nats.jwt,
+      bootstrapJwtExpiresAt: next.nats.jwtExpiresAt,
     },
     Math.floor(next.serverNow / 1_000),
     args.shouldInstall,

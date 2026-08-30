@@ -882,7 +882,6 @@ withLivePortalPage(
                 password: liveInsufficientCapabilitiesPassword,
                 name: "Browser Missing Capability User",
                 email: `${liveInsufficientCapabilitiesUsername}@example.test`,
-                idempotencyKey: crypto.randomUUID(),
               }),
             },
           );
@@ -959,7 +958,6 @@ withLivePortalPage(
                 password: liveTrustedRegistrationPassword,
                 name: "Browser Trusted Registration User",
                 email: `${liveTrustedRegistrationUsername}@example.test`,
-                idempotencyKey: crypto.randomUUID(),
               }),
             },
           );
@@ -2776,7 +2774,6 @@ async function completeLocalLoginByFetch(args: {
           approved: true,
           consentViewDigest: state.consentViewDigest,
           selectedOptionalBundles: [],
-          idempotencyKey: crypto.randomUUID(),
         }),
       },
     );

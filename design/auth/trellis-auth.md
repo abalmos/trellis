@@ -229,11 +229,11 @@ Browser requests are proof-bound to a session key and exact participant
 artifact. Flow state is CAS-backed. Portal routing selects UX only; it does not
 grant authority. The server stores one exact consent proposal derived from the
 resolved participant. Approval accepts only its consent-view digest, selected
-server-issued optional bundle ids, the decision, and an idempotency key; callers
-cannot submit grants, capabilities, resource atoms, or platform authority.
-Approval decides the standard authority proposal, and bind calls the shared
-session constructor. The server-owned consent proposal is part of the immutable
-browser-flow transcript and cannot change during a state transition.
+server-issued optional bundle ids, and the decision; callers cannot submit
+grants, capabilities, resource atoms, or platform authority. Approval decides
+the standard authority proposal, and bind calls the shared session constructor.
+The server-owned consent proposal is part of the immutable browser-flow
+transcript and cannot change during a state transition.
 
 The built-in portal is compiled reproducibly from `ts/portals/login` and
 embedded in the Rust binary. A development-only `TRELLIS_BUILTIN_PORTAL_DIR`
