@@ -2,6 +2,7 @@
 //! and connected NATS-backed provider-side resolution.
 
 mod bootstrap_http;
+pub(crate) use bootstrap_http::persisted_signed_context;
 mod core;
 mod own_context;
 mod persistence;

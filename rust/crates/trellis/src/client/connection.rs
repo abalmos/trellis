@@ -1662,7 +1662,22 @@ impl TrellisClient {
         )?;
         let authorization_contexts = Arc::new(authorization_contexts);
         let now = now_context_seconds()?;
-        if !authorization_contexts.restore(now).await?
+        let supplied_context_digest = super::authorization::persisted_signed_context(
+            &opts.authorization.bundle,
+        )
+        .and_then(|context| {
+            context
+                .digest()
+                .map_err(|error| TrellisClientError::Bootstrap(error.to_string()))
+        })?;
+        if !authorization_contexts
+            .restore_matching(
+                now,
+                &opts.credentials.session_id,
+                &opts.credentials.participant_digest,
+                &supplied_context_digest,
+            )
+            .await?
             && !authorization_contexts
                 .install_recoverable(
                     opts.authorization.bundle,

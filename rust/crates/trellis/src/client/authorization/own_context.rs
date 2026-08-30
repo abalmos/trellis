@@ -118,6 +118,23 @@ impl AuthorizationContextCache {
         self.install_recoverable_locked(bundle, routing, now_unix_seconds)
     }
 
+    pub(crate) async fn restore_matching(
+        &self,
+        now_unix_seconds: i64,
+        session_id: &str,
+        participant_digest: &str,
+        context_digest: &str,
+    ) -> Result<bool, TrellisClientError> {
+        if !self.restore(now_unix_seconds).await? {
+            return Ok(false);
+        }
+        let (stored_session_id, stored_context_digest, stored_participant_digest, _, _) =
+            self.refresh_evidence()?;
+        Ok(stored_session_id == session_id
+            && stored_participant_digest == participant_digest
+            && stored_context_digest == context_digest)
+    }
+
     pub(crate) async fn install_recoverable(
         &self,
         bundle: AuthorizationContextBundle,
@@ -644,6 +661,56 @@ mod tests {
             bootstrap_jwt: "route".into(),
             bootstrap_jwt_expires_at: 2_000,
         });
+        let bundle = state.context.clone().unwrap();
+        let routing = state.routing.clone().unwrap();
+        let signed = persisted_signed_context(&bundle).unwrap();
+        let expected_session_id = signed.unsigned.session_id.clone();
+        let expected_participant_digest = signed.unsigned.participant.artifact_digest.clone();
+        let expected_context_digest = signed.digest().unwrap();
+        let matching_store = Arc::new(MemoryAuthorizationContextStore::default());
+        let matching_cache = AuthorizationContextCache::new(
+            "https://trellis.test",
+            "service:dep:instance",
+            matching_store.clone(),
+        )
+        .unwrap();
+        assert!(matching_cache
+            .install_recoverable(bundle, routing, 1_100)
+            .await
+            .unwrap());
+        let restored_cache = AuthorizationContextCache::new(
+            "https://trellis.test",
+            "service:dep:instance",
+            matching_store,
+        )
+        .unwrap();
+        assert!(!restored_cache
+            .restore_matching(
+                1_100,
+                "another-session",
+                &expected_participant_digest,
+                "another-context",
+            )
+            .await
+            .unwrap());
+        assert!(!restored_cache
+            .restore_matching(
+                1_100,
+                &expected_session_id,
+                &expected_participant_digest,
+                "another-context",
+            )
+            .await
+            .unwrap());
+        assert!(restored_cache
+            .restore_matching(
+                1_100,
+                &expected_session_id,
+                &expected_participant_digest,
+                &expected_context_digest,
+            )
+            .await
+            .unwrap());
         store.commit(state).unwrap();
         let cache = AuthorizationContextCache::new(
             "https://trellis.test",
