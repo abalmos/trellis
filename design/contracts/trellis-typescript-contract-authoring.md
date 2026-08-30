@@ -55,10 +55,9 @@ emitted only for a consumer that requires static JSON. Generated participant
 modules expose contract/participant identity and exact owned and referenced API
 evidence. Action sources always carry the exact native API artifact and digest.
 
-Canonical JSON is generated under `generated/protocol/apis` and
-`generated/protocol/participants`. Edit source modules and run
-`deno task
-prepare`; never edit generated files.
+Canonical JSON is generated under `.trellis/generated/protocol/apis` and
+`.trellis/generated/protocol/participants`. Edit source modules and run
+`trellis install`; never edit generated files.
 
 ## Runtime presentation
 

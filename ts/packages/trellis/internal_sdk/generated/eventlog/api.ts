@@ -1,0 +1,470 @@
+// Generated from ./rust/crates/eventlog-runtime/.trellis/generated/protocol/apis/trellis.eventlog@v1.json
+
+export const API_ID = "trellis.eventlog@v1" as const;
+export const API_DIGEST =
+  "ldHKKyQCxcEYuuIRjwPa9CZMEKV8mNUyGkAtSh9MzZ8" as const;
+export const API = {
+  "capabilities": {
+    "trellis.eventlog::events.read": {
+      "allows": [{
+        "action": "call",
+        "target": {
+          "api": "trellis.eventlog@v1",
+          "kind": "apiSurface",
+          "name": "EventLog.Consumers.Inspect",
+          "surface": "rpc",
+        },
+      }, {
+        "action": "call",
+        "target": {
+          "api": "trellis.eventlog@v1",
+          "kind": "apiSurface",
+          "name": "EventLog.Consumers.Query",
+          "surface": "rpc",
+        },
+      }, {
+        "action": "call",
+        "target": {
+          "api": "trellis.eventlog@v1",
+          "kind": "apiSurface",
+          "name": "EventLog.Inspect",
+          "surface": "rpc",
+        },
+      }, {
+        "action": "call",
+        "target": {
+          "api": "trellis.eventlog@v1",
+          "kind": "apiSurface",
+          "name": "EventLog.Metrics",
+          "surface": "rpc",
+        },
+      }, {
+        "action": "call",
+        "target": {
+          "api": "trellis.eventlog@v1",
+          "kind": "apiSurface",
+          "name": "EventLog.Query",
+          "surface": "rpc",
+        },
+      }],
+    },
+    "trellis.eventlog::events.stream": {
+      "allows": [{
+        "action": "subscribe",
+        "target": {
+          "api": "trellis.eventlog@v1",
+          "kind": "apiSurface",
+          "name": "EventLog.Watch",
+          "surface": "feed",
+        },
+      }],
+    },
+  },
+  "consent": {
+    "trellis.eventlog::events.read": {
+      "consequence": "",
+      "description": "View projected Trellis events and event consumer health.",
+      "title": "Read Event Log data",
+    },
+    "trellis.eventlog::events.stream": {
+      "consequence": "",
+      "description": "Subscribe to Event Log live invalidation frames.",
+      "title": "Stream Event Log changes",
+    },
+  },
+  "description":
+    "Read-only Event Log API for Trellis event stream observability.",
+  "displayName": "Trellis Event Log",
+  "docs": {
+    "markdown":
+      "Provides read-only event, consumer-health, metrics, and live invalidation surfaces for Trellis events.",
+    "summary": "Event stream observability APIs.",
+  },
+  "errors": {
+    "NotFoundError": { "schema": { "schema": "NotFoundErrorData" } },
+    "UnexpectedError": {},
+    "ValidationError": {},
+  },
+  "feeds": {
+    "EventLog.Watch": {
+      "docs": {
+        "markdown":
+          "Streams ready and invalidation frames for Event Log clients.",
+        "summary": "Watch event changes.",
+      },
+      "event": { "schema": "EventLogWatchFrame" },
+      "input": { "schema": "EventLogWatchRequest" },
+      "version": "v1",
+    },
+  },
+  "format": "trellis.api.v1",
+  "id": "trellis.eventlog@v1",
+  "rpc": {
+    "EventLog.Consumers.Inspect": {
+      "errors": ["NotFoundError", "UnexpectedError", "ValidationError"],
+      "input": { "schema": "EventLogConsumersInspectRequest" },
+      "output": { "schema": "EventLogConsumersInspectResponse" },
+      "version": "v1",
+    },
+    "EventLog.Consumers.Query": {
+      "errors": ["UnexpectedError", "ValidationError"],
+      "input": { "schema": "EventLogConsumersQueryRequest" },
+      "output": { "schema": "EventLogConsumersQueryResponse" },
+      "version": "v1",
+    },
+    "EventLog.Inspect": {
+      "errors": ["NotFoundError", "UnexpectedError", "ValidationError"],
+      "input": { "schema": "EventLogInspectRequest" },
+      "output": { "schema": "EventLogInspectResponse" },
+      "version": "v1",
+    },
+    "EventLog.Metrics": {
+      "errors": ["UnexpectedError", "ValidationError"],
+      "input": { "schema": "EventLogMetricsRequest" },
+      "output": { "schema": "EventLogMetricsResponse" },
+      "version": "v1",
+    },
+    "EventLog.Query": {
+      "errors": ["UnexpectedError", "ValidationError"],
+      "input": { "schema": "EventLogQueryRequest" },
+      "output": { "schema": "EventLogQueryResponse" },
+      "version": "v1",
+    },
+  },
+  "schemas": {
+    "EventConsumerStatusRow": {
+      "properties": {
+        "ackPending": { "type": "integer" },
+        "ackWaitMs": { "type": "integer" },
+        "consumerName": { "type": "string" },
+        "contractId": { "type": "string" },
+        "deploymentId": { "type": "string" },
+        "filterSubjects": { "items": { "type": "string" }, "type": "array" },
+        "group": { "type": "string" },
+        "managedBy": {
+          "anyOf": [{ "const": "authority" }, { "const": "platform" }, {
+            "const": "external",
+          }],
+        },
+        "maxDeliver": { "type": "integer" },
+        "oldestPendingAt": { "type": "string" },
+        "oldestPendingEventId": { "type": "string" },
+        "pending": { "type": "integer" },
+        "redelivered": { "type": "integer" },
+        "status": {
+          "anyOf": [
+            { "const": "current" },
+            { "const": "processing" },
+            { "const": "behind" },
+            { "const": "saturated" },
+            { "const": "inactive" },
+            { "const": "failing" },
+            { "const": "missing" },
+            { "const": "orphaned" },
+          ],
+        },
+        "stream": { "type": "string" },
+        "waitingPulls": { "type": "integer" },
+      },
+      "required": [
+        "stream",
+        "consumerName",
+        "filterSubjects",
+        "status",
+        "pending",
+        "ackPending",
+        "waitingPulls",
+      ],
+      "type": "object",
+    },
+    "EventLogConsumersInspectRequest": {
+      "properties": {
+        "consumerName": { "type": "string" },
+        "stream": { "type": "string" },
+      },
+      "required": ["consumerName"],
+      "type": "object",
+    },
+    "EventLogConsumersInspectResponse": {
+      "additionalProperties": true,
+      "type": "object",
+    },
+    "EventLogConsumersQueryRequest": {
+      "properties": {
+        "contractId": { "type": "string" },
+        "deploymentId": { "type": "string" },
+        "limit": { "maximum": 500, "minimum": 1, "type": "integer" },
+        "offset": { "minimum": 0, "type": "integer" },
+        "ownerContractId": { "type": "string" },
+        "status": {
+          "items": {
+            "anyOf": [
+              { "const": "current" },
+              { "const": "processing" },
+              { "const": "behind" },
+              { "const": "saturated" },
+              { "const": "inactive" },
+              { "const": "failing" },
+              { "const": "missing" },
+              { "const": "orphaned" },
+            ],
+          },
+          "type": "array",
+        },
+        "subject": { "type": "string" },
+      },
+      "required": ["limit"],
+      "type": "object",
+    },
+    "EventLogConsumersQueryResponse": {
+      "properties": {
+        "consumers": {
+          "items": { "schema": "EventConsumerStatusRow" },
+          "type": "array",
+        },
+        "limit": { "type": "integer" },
+        "offset": { "type": "integer" },
+        "total": { "type": "integer" },
+      },
+      "required": ["consumers", "total", "offset", "limit"],
+      "type": "object",
+    },
+    "EventLogInspectRequest": {
+      "properties": {
+        "eventId": { "type": "string" },
+        "streamSequence": { "type": "integer" },
+      },
+      "type": "object",
+    },
+    "EventLogInspectResponse": {
+      "additionalProperties": true,
+      "type": "object",
+    },
+    "EventLogMetricsRequest": {
+      "properties": {
+        "window": {
+          "anyOf": [{ "const": "15m" }, { "const": "1h" }, { "const": "6h" }, {
+            "const": "24h",
+          }, { "const": "7d" }],
+        },
+      },
+      "type": "object",
+    },
+    "EventLogMetricsResponse": {
+      "properties": {
+        "buckets": {
+          "items": {
+            "properties": {
+              "byResolution": {
+                "properties": {
+                  "malformed": { "type": "integer" },
+                  "resolved": { "type": "integer" },
+                  "unresolved": { "type": "integer" },
+                },
+                "type": "object",
+              },
+              "byVerificationStatus": {
+                "properties": {
+                  "auth-unavailable": { "type": "integer" },
+                  "invalid-signature": { "type": "integer" },
+                  "missing-proof": { "type": "integer" },
+                  "missing-session": { "type": "integer" },
+                  "outside-session-window": { "type": "integer" },
+                  "subject-denied": { "type": "integer" },
+                  "verified": { "type": "integer" },
+                },
+                "type": "object",
+              },
+              "integrityExceptions": { "type": "integer" },
+              "payloadSizeBytes": { "type": "integer" },
+              "start": { "type": "string" },
+              "total": { "type": "integer" },
+            },
+            "required": [
+              "start",
+              "total",
+              "payloadSizeBytes",
+              "integrityExceptions",
+              "byResolution",
+              "byVerificationStatus",
+            ],
+            "type": "object",
+          },
+          "type": "array",
+        },
+        "summary": {
+          "properties": {
+            "byResolution": {
+              "properties": {
+                "malformed": { "type": "integer" },
+                "resolved": { "type": "integer" },
+                "unresolved": { "type": "integer" },
+              },
+              "type": "object",
+            },
+            "byVerificationStatus": {
+              "properties": {
+                "auth-unavailable": { "type": "integer" },
+                "invalid-signature": { "type": "integer" },
+                "missing-proof": { "type": "integer" },
+                "missing-session": { "type": "integer" },
+                "outside-session-window": { "type": "integer" },
+                "subject-denied": { "type": "integer" },
+                "verified": { "type": "integer" },
+              },
+              "type": "object",
+            },
+            "eventTypes": {
+              "items": {
+                "properties": {
+                  "count": { "type": "integer" },
+                  "ownerContractId": { "type": "string" },
+                  "ownerEventName": { "type": "string" },
+                },
+                "required": ["ownerContractId", "ownerEventName", "count"],
+                "type": "object",
+              },
+              "type": "array",
+            },
+            "integrityExceptions": { "type": "integer" },
+            "payloadSizeBytes": { "type": "integer" },
+            "total": { "type": "integer" },
+            "uniqueSubjects": { "type": "integer" },
+          },
+          "required": [
+            "total",
+            "uniqueSubjects",
+            "payloadSizeBytes",
+            "integrityExceptions",
+            "byResolution",
+            "byVerificationStatus",
+            "eventTypes",
+          ],
+          "type": "object",
+        },
+      },
+      "required": ["summary", "buckets"],
+      "type": "object",
+    },
+    "EventLogQueryRequest": {
+      "properties": {
+        "consumerDeploymentId": { "type": "string" },
+        "consumerName": { "type": "string" },
+        "excludeEventTypes": {
+          "items": {
+            "properties": {
+              "ownerContractId": { "type": "string" },
+              "ownerEventName": { "type": "string" },
+            },
+            "required": ["ownerContractId", "ownerEventName"],
+            "type": "object",
+          },
+          "type": "array",
+        },
+        "includeEventTypes": {
+          "items": {
+            "properties": {
+              "ownerContractId": { "type": "string" },
+              "ownerEventName": { "type": "string" },
+            },
+            "required": ["ownerContractId", "ownerEventName"],
+            "type": "object",
+          },
+          "type": "array",
+        },
+        "integrityExceptionOnly": { "type": "boolean" },
+        "limit": { "maximum": 500, "minimum": 1, "type": "integer" },
+        "offset": { "minimum": 0, "type": "integer" },
+        "ownerContractId": { "type": "string" },
+        "ownerEventName": { "type": "string" },
+        "publisherDeploymentId": { "type": "string" },
+        "publisherParticipantId": { "type": "string" },
+        "resolution": {
+          "items": {
+            "anyOf": [{ "const": "resolved" }, { "const": "unresolved" }, {
+              "const": "malformed",
+            }],
+          },
+          "type": "array",
+        },
+        "search": { "type": "string" },
+        "sort": { "additionalProperties": true, "type": "object" },
+        "subject": { "type": "string" },
+        "verificationStatus": {
+          "items": { "anyOf": [{ "const": "verified" }] },
+          "type": "array",
+        },
+        "window": {
+          "anyOf": [{ "const": "15m" }, { "const": "1h" }, { "const": "6h" }, {
+            "const": "24h",
+          }, { "const": "7d" }],
+        },
+      },
+      "required": ["limit"],
+      "type": "object",
+    },
+    "EventLogQueryResponse": {
+      "properties": {
+        "events": { "items": { "schema": "EventLogRow" }, "type": "array" },
+        "limit": { "type": "integer" },
+        "offset": { "type": "integer" },
+        "total": { "type": "integer" },
+      },
+      "required": ["events", "total", "offset", "limit"],
+      "type": "object",
+    },
+    "EventLogRow": {
+      "properties": {
+        "eventId": { "type": "string" },
+        "eventTime": { "type": "string" },
+        "headerCount": { "type": "integer" },
+        "ownerContractId": { "type": "string" },
+        "ownerEventName": { "type": "string" },
+        "payloadSizeBytes": { "type": "integer" },
+        "publisherDeploymentId": { "type": "string" },
+        "publisherInstanceId": { "type": "string" },
+        "publisherKind": {
+          "anyOf": [{ "const": "service" }, { "const": "device" }, {
+            "const": "user",
+          }],
+        },
+        "publisherParticipantDigest": { "type": "string" },
+        "publisherParticipantId": { "type": "string" },
+        "resolution": {
+          "anyOf": [{ "const": "resolved" }, { "const": "unresolved" }, {
+            "const": "malformed",
+          }],
+        },
+        "streamSequence": { "type": "integer" },
+        "subject": { "type": "string" },
+        "traceId": { "type": "string" },
+        "verificationStatus": { "anyOf": [{ "const": "verified" }] },
+      },
+      "required": [
+        "eventId",
+        "eventTime",
+        "streamSequence",
+        "subject",
+        "resolution",
+        "verificationStatus",
+        "payloadSizeBytes",
+        "headerCount",
+      ],
+      "type": "object",
+    },
+    "EventLogWatchFrame": { "additionalProperties": true, "type": "object" },
+    "EventLogWatchRequest": { "additionalProperties": true, "type": "object" },
+    "NotFoundErrorData": {
+      "additionalProperties": true,
+      "properties": {
+        "context": { "additionalProperties": true, "type": "object" },
+        "id": { "type": "string" },
+        "message": { "type": "string" },
+        "type": { "const": "NotFoundError" },
+      },
+      "required": ["type", "message", "id"],
+      "type": "object",
+    },
+  },
+  "version": "1.0.0",
+} as const;

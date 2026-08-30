@@ -10,14 +10,8 @@ mod release;
 
 #[derive(Debug, Clone, Eq, PartialEq, Subcommand)]
 enum XtaskCommand {
-    #[command(name = "prepare")]
-    Prepare {
-        /// Print prepare phase and subprocess timings.
-        #[arg(long)]
-        timings: bool,
-    },
-    #[command(name = "prepare-watch")]
-    PrepareWatch,
+    #[command(name = "install")]
+    Install,
     #[command(name = "protocol-wasm")]
     ProtocolWasm,
     #[command(name = "build", disable_help_flag = true)]
@@ -54,8 +48,7 @@ fn run() -> Result<()> {
         return Ok(());
     };
     match command {
-        XtaskCommand::Prepare { timings } => run_prepare(timings),
-        XtaskCommand::PrepareWatch => run_prepare_watch(),
+        XtaskCommand::Install => run_install(),
         XtaskCommand::ProtocolWasm => generate_protocol_wasm(),
         XtaskCommand::Build { args } => run_build(&args),
         XtaskCommand::Release { command } => release::run_release(&repo_root()?, command),
@@ -105,8 +98,37 @@ where
     Ok(Some(command))
 }
 
-fn run_prepare(timings: bool) -> Result<()> {
-    run_generate_prepare(false, timings)
+const TRELLIS_PROJECTS: &[&str] = &[
+    // ponytail: Trellis has a small fixed API DAG. Replace this list with dynamic
+    // graph discovery only if maintaining it becomes a real problem.
+    "rust/crates/eventlog-runtime",
+    "rust/crates/jobs-runtime",
+    "rust/crates/runtime",
+    "ts/packages/trellis",
+    "ts/apps/console",
+    "ts/portals/login",
+    "ts/packages/trellis-test",
+    "ts/packages/trellis-svelte",
+    "ts/integration",
+    "ts/browser",
+    "demos/ts/service",
+    "demos/ts/device",
+    "demos/app",
+    "demos/rust",
+];
+
+fn run_install() -> Result<()> {
+    let root = repo_root()?;
+    let runtime = tokio::runtime::Runtime::new().into_diagnostic()?;
+    for project in TRELLIS_PROJECTS {
+        runtime.block_on(trellis_cli::package::install(
+            trellis_cli::cli::OutputFormat::Text,
+            &trellis_cli::cli::ProjectRootArgs {
+                root: root.join(project),
+            },
+        ))?;
+    }
+    Ok(())
 }
 
 fn build_embedded_login_portal() -> Result<()> {
@@ -204,28 +226,8 @@ fn base64(bytes: &[u8]) -> String {
     encoded
 }
 
-fn run_prepare_watch() -> Result<()> {
-    run_generate_prepare(true, false)
-}
-
-fn run_generate_prepare(watch: bool, timings: bool) -> Result<()> {
-    trellis_generate::app::run_prepare(
-        &trellis_generate::cli::PrepareArgs {
-            watch,
-            changes: false,
-            prefix: "@trellis-sdk/".to_string(),
-            out: None,
-            targets: Vec::new(),
-            no_npm: !watch,
-            timings,
-            root: repo_root()?,
-        },
-        false,
-    )
-}
-
 fn run_build(args: &[String]) -> Result<()> {
-    run_prepare(false)?;
+    run_install()?;
     generate_protocol_wasm()?;
     build_embedded_login_portal()?;
     let workspace_root = repo_root()?.join("rust");
@@ -269,19 +271,11 @@ mod tests {
     use super::{parse_command, XtaskCommand};
 
     #[test]
-    fn parse_prepare_command() {
-        let command = parse_command(["prepare".to_string()].into_iter())
-            .expect("parse prepare")
-            .expect("prepare command");
-        assert_eq!(command, XtaskCommand::Prepare { timings: false });
-    }
-
-    #[test]
-    fn parse_prepare_timings_command() {
-        let command = parse_command(["prepare", "--timings"].into_iter().map(str::to_string))
-            .expect("parse prepare timings")
-            .expect("prepare command");
-        assert_eq!(command, XtaskCommand::Prepare { timings: true });
+    fn parse_install_command() {
+        let command = parse_command(["install".to_string()].into_iter())
+            .expect("parse install")
+            .expect("install command");
+        assert_eq!(command, XtaskCommand::Install);
     }
 
     #[test]
@@ -290,14 +284,6 @@ mod tests {
             .expect("parse protocol-wasm")
             .expect("protocol-wasm command");
         assert_eq!(command, XtaskCommand::ProtocolWasm);
-    }
-
-    #[test]
-    fn parse_prepare_watch_command() {
-        let command = parse_command(["prepare-watch".to_string()].into_iter())
-            .expect("parse prepare-watch")
-            .expect("prepare-watch command");
-        assert_eq!(command, XtaskCommand::PrepareWatch);
     }
 
     #[test]
@@ -375,9 +361,9 @@ mod tests {
     }
 
     #[test]
-    fn prepare_rejects_extra_args() {
-        let error = parse_command(["prepare", "--workspace"].into_iter().map(str::to_string))
-            .expect_err("prepare should reject extra args");
+    fn install_rejects_extra_args() {
+        let error = parse_command(["install", "--workspace"].into_iter().map(str::to_string))
+            .expect_err("install should reject extra args");
         assert!(error.to_string().contains("unexpected argument"));
     }
 
@@ -389,17 +375,6 @@ mod tests {
                 .map(str::to_string),
         )
         .expect_err("protocol-wasm should reject extra args");
-        assert!(error.to_string().contains("unexpected argument"));
-    }
-
-    #[test]
-    fn prepare_watch_rejects_extra_args() {
-        let error = parse_command(
-            ["prepare-watch", "--workspace"]
-                .into_iter()
-                .map(str::to_string),
-        )
-        .expect_err("prepare-watch should reject extra args");
         assert!(error.to_string().contains("unexpected argument"));
     }
 }

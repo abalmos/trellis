@@ -1,6 +1,6 @@
 <script lang="ts">
   import { isErr } from "@qlever-llc/result";
-  import type { AuthDeploymentsCreateInput } from "@qlever-llc/trellis/sdk/auth";
+  import type { AuthDeploymentsCreateInput } from "@trellis/apis/trellis.auth";
   import { resolve } from "$app/paths";
   import Notice from "$lib/components/Notice.svelte";
   import PageToolbar from "$lib/components/PageToolbar.svelte";

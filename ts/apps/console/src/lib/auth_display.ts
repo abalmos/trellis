@@ -1,7 +1,7 @@
 import type {
   AuthConnectionsListOutput,
   AuthSessionsListOutput,
-} from "@qlever-llc/trellis/sdk/auth";
+} from "@trellis/apis/trellis.auth";
 
 export type ParticipantKind = "app" | "agent" | "device" | "service";
 

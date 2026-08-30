@@ -70,7 +70,7 @@ import {
   AuthSessionsRevokeRequestSchema,
   AuthSessionsRevokeResponseSchema,
   AuthUserIdentitiesList,
-} from "@qlever-llc/trellis/sdk/auth";
+} from "@trellis/apis/trellis.auth";
 import {
   StateAdminDelete,
   StateAdminDeleteRequestSchema,
@@ -81,9 +81,9 @@ import {
   StateAdminList,
   StateAdminListRequestSchema,
   StateAdminListResponseSchema,
-} from "@qlever-llc/trellis/sdk/state";
-import { API_DIGEST as AUTH_API_DIGEST } from "@qlever-llc/trellis/sdk/auth/api";
-import { API_DIGEST as STATE_API_DIGEST } from "@qlever-llc/trellis/sdk/state/api";
+} from "@trellis/apis/trellis.state";
+import { API_DIGEST as AUTH_API_DIGEST } from "@trellis/apis/trellis.auth";
+import { API_DIGEST as STATE_API_DIGEST } from "@trellis/apis/trellis.state";
 import administrationParticipantSource from "../../../../../rust/crates/trellis/artifacts/trellis.admin.participant.json" with {
   type: "json",
 };

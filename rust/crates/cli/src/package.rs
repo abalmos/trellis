@@ -366,7 +366,7 @@ async fn install_root(
         ));
     }
     for locked in &lock.api {
-        trellis_generate::planning::validate_output_identity("API", &locked.id)?;
+        trellis_generation::planning::validate_output_identity("API", &locked.id)?;
         let dependency = manifest
             .apis
             .get(&locked.id)
@@ -395,20 +395,21 @@ async fn install_root(
         }
     }
 
-    let discovered = trellis_generate::discovery::discover_contracts(root)?;
-    let has_ts = discovered
-        .iter()
-        .any(|item| item.language == trellis_generate::discovery::SourceLanguage::TypeScript);
-    let has_rust = discovered
-        .iter()
-        .any(|item| item.language == trellis_generate::discovery::SourceLanguage::Rust);
-    if has_ts {
+    let discovered = trellis_generation::discovery::discover_contracts(root)?;
+    let has_ts = root.join("deno.json").is_file()
+        || root.join("deno.jsonc").is_file()
+        || discovered
+            .iter()
+            .any(|item| item.language == trellis_generation::discovery::SourceLanguage::TypeScript);
+    let has_rust = root.join("Cargo.toml").is_file()
+        || discovered
+            .iter()
+            .any(|item| item.language == trellis_generation::discovery::SourceLanguage::Rust);
+    if has_ts && !lock.api.is_empty() {
         let config = [root.join("deno.json"), root.join("deno.jsonc")]
             .into_iter()
             .find(|path| path.is_file())
-            .ok_or_else(|| {
-                miette!("TypeScript contract source requires deno.json or deno.jsonc")
-            })?;
+            .ok_or_else(|| miette!("TypeScript projects require deno.json or deno.jsonc"))?;
         let contents = fs::read_to_string(config).into_diagnostic()?;
         if !contents.contains(".trellis/generated/ts/trellis-apis") {
             return Err(miette!(
@@ -416,10 +417,10 @@ async fn install_root(
             ));
         }
     }
-    if has_rust {
+    if has_rust && !lock.api.is_empty() {
         let mut package_stems = BTreeMap::new();
         for api in &lock.api {
-            let stem = trellis_generate::artifacts::sdk_output_stem(&api.id);
+            let stem = trellis_generation::artifacts::sdk_output_stem(&api.id);
             if let Some(existing) = package_stems.insert(stem.clone(), &api.id) {
                 return Err(miette!(
                     "Rust SDK output '{stem}' collides between '{existing}' and '{}'",
@@ -430,7 +431,7 @@ async fn install_root(
         let manifest_path = root.join("Cargo.toml");
         let contents = fs::read_to_string(&manifest_path)
             .into_diagnostic()
-            .wrap_err("Rust contract source requires a root Cargo.toml")?;
+            .wrap_err("Rust projects require a root Cargo.toml")?;
         let cargo: toml::Value = toml::from_str(&contents).into_diagnostic()?;
         let dependency = cargo
             .get("dependencies")
@@ -450,15 +451,16 @@ async fn install_root(
             ));
         }
     }
-    let fingerprints = trellis_generate::artifacts::current_generator_fingerprints();
+    let fingerprints = trellis_generation::artifacts::current_generator_fingerprints();
     let marker = trellis_protocol::digest_json(&serde_json::json!({
         "lock": lock,
         "typescript": has_ts,
         "rust": has_rust,
+        "aggregateFormat": 1,
         "model": fingerprints.model,
         "tsCodegen": fingerprints.ts,
         "rustCodegen": fingerprints.rust,
-        "runtimeVersion": trellis_generate::artifacts::trellis_package_version(),
+        "runtimeVersion": trellis_generation::artifacts::trellis_package_version(),
     }))
     .map_err(|error| miette!(error.to_string()))?;
     let trellis_root = root.join(".trellis");
@@ -475,9 +477,9 @@ async fn install_root(
             let rust_out = has_rust.then(|| {
                 trellis_root
                     .join("generated/rust/packages")
-                    .join(trellis_generate::artifacts::sdk_output_stem(&api.id))
+                    .join(trellis_generation::artifacts::sdk_output_stem(&api.id))
             });
-            trellis_generate::artifacts::installed_api_is_fresh(
+            trellis_generation::artifacts::installed_api_is_fresh(
                 &api.id,
                 &api.version,
                 &api.api_digest,
@@ -499,13 +501,17 @@ async fn install_root(
                 .is_file()
                 && lock.api.iter().all(|api| {
                     let stem = api.id.split('@').next().unwrap_or(&api.id);
-                    trellis_root
-                        .join("generated/ts/trellis-apis")
-                        .join(format!("{stem}.ts"))
-                        .is_file()
+                    [format!("{stem}.ts"), format!("{stem}.api.ts")]
+                        .iter()
+                        .all(|file| {
+                            trellis_root
+                                .join("generated/ts/trellis-apis")
+                                .join(file)
+                                .is_file()
+                        })
                 })));
     if dependencies_fresh {
-        let generated = trellis_generate::commands::prepare::generate_project(root, &trellis_root)?;
+        let generated = trellis_generation::project::generate_project(root, &trellis_root)?;
         return Ok(PackageResult {
             installed_apis: lock.api.len(),
             changed_dependencies: 0,
@@ -533,7 +539,7 @@ async fn install_root(
             &marker,
         )
         .await?;
-        let generated = trellis_generate::commands::prepare::generate_project(root, &trellis_root)?;
+        let generated = trellis_generation::project::generate_project(root, &trellis_root)?;
         Ok(PackageResult {
             installed_apis: lock.api.len(),
             changed_dependencies,
@@ -583,7 +589,7 @@ async fn stage_dependencies(
     let mut modules = BTreeMap::new();
     for locked in &lock.api {
         let stem = locked.id.split('@').next().unwrap_or(&locked.id);
-        let package_stem = trellis_generate::artifacts::sdk_output_stem(&locked.id);
+        let package_stem = trellis_generation::artifacts::sdk_output_stem(&locked.id);
         let api_out = staged
             .join("apis")
             .join(&locked.id)
@@ -619,14 +625,17 @@ async fn stage_dependencies(
             fs::write(&source, pulled.bytes).into_diagnostic()?;
             source
         };
-        trellis_generate::artifacts::generate_installed_api(
+        trellis_generation::artifacts::generate_installed_api(
             &source,
             &api_out,
             ts_out.as_deref(),
             rust_out.as_deref(),
         )?;
         if has_rust {
-            let module = stem.rsplit('.').next().unwrap_or(stem).replace('-', "_");
+            let module = stem
+                .strip_prefix("trellis.")
+                .unwrap_or(stem)
+                .replace(['.', '-'], "_");
             if let Some(existing) = modules.insert(module.clone(), locked.id.clone()) {
                 return Err(miette!(
                     "Rust API module name '{module}' collides between {existing} and {}",
@@ -734,10 +743,10 @@ fn write_aggregate_crate(root: &Path, modules: &BTreeMap<String, String>) -> Res
     let dependencies = modules
         .values()
         .map(|id| {
-            let name = trellis_generate::artifacts::default_rust_crate_name_from_id(id);
+            let name = trellis_generation::artifacts::default_rust_crate_name_from_id(id);
             format!(
                 "{name} = {{ path = \"../packages/{}\" }}\n",
-                trellis_generate::artifacts::sdk_output_stem(id)
+                trellis_generation::artifacts::sdk_output_stem(id)
             )
         })
         .collect::<String>();
@@ -751,7 +760,7 @@ fn write_aggregate_crate(root: &Path, modules: &BTreeMap<String, String>) -> Res
     let modules = modules
         .iter()
         .map(|(module, id)| {
-            let crate_name = trellis_generate::artifacts::default_rust_crate_name_from_id(id);
+            let crate_name = trellis_generation::artifacts::default_rust_crate_name_from_id(id);
             format!(
                 "pub mod {module} {{\n    pub use {}::*;\n}}\n",
                 crate_name.replace('-', "_")
@@ -770,9 +779,21 @@ fn write_ts_aggregate(root: &Path, lock: &ProjectLock) -> Result<()> {
         let stem = api.id.split('@').next().unwrap_or(&api.id);
         let file = format!("{stem}.ts");
         exports.insert(format!("./{stem}"), serde_json::json!(format!("./{file}")));
+        let api_file = format!("{stem}.api.ts");
+        exports.insert(
+            format!("./{stem}/api"),
+            serde_json::json!(format!("./{api_file}")),
+        );
         fs::write(
             aggregate.join(&file),
-            format!("export * from \"../packages/{stem}/mod.ts\";\n"),
+            format!(
+                "export * from \"../packages/{stem}/mod.ts\";\nexport {{ API, API_DIGEST, API_ID }} from \"../packages/{stem}/api.ts\";\n"
+            ),
+        )
+        .into_diagnostic()?;
+        fs::write(
+            aggregate.join(api_file),
+            format!("export {{ API, API_DIGEST, API_ID }} from \"../packages/{stem}/api.ts\";\n"),
         )
         .into_diagnostic()?;
     }
@@ -991,6 +1012,30 @@ mod tests {
                 .version,
             "1.2.0"
         );
+
+        let drift = trellis_protocol::parse_api(&serde_json::json!({
+            "format": "trellis.api.v1",
+            "id": "acme.orders@v1",
+            "version": "1.2.0",
+            "displayName": "Changed Orders",
+            "description": "Orders API"
+        }))
+        .unwrap();
+        let error = check_publication(&registry, &drift).await.unwrap_err();
+        assert!(error
+            .to_string()
+            .contains("already exists with different content"));
+
+        let older = trellis_protocol::parse_api(&serde_json::json!({
+            "format": "trellis.api.v1",
+            "id": "acme.orders@v1",
+            "version": "1.1.5",
+            "displayName": "Orders",
+            "description": "Orders API"
+        }))
+        .unwrap();
+        let error = check_publication(&registry, &older).await.unwrap_err();
+        assert!(error.to_string().contains("must be newer than 1.2.0"));
 
         let candidate = trellis_protocol::parse_api(&serde_json::json!({
             "format": "trellis.api.v1",
@@ -1443,7 +1488,8 @@ mod tests {
   "imports": {{
     "@qlever-llc/trellis": "file://{0}/ts/packages/trellis/index.ts",
     "@qlever-llc/trellis/": "file://{0}/ts/packages/trellis/",
-    "@qlever-llc/trellis/contracts": "file://{0}/ts/packages/trellis/contracts.ts"
+    "@qlever-llc/trellis/contracts": "file://{0}/ts/packages/trellis/contracts.ts",
+    "@trellis/apis/acme.auth": "./.trellis/generated/ts/trellis-apis/acme.auth.ts"
   }}
 }}
 "#,
@@ -1516,6 +1562,13 @@ export default defineAppContract(() => ({
         let repaired = install_root(root.path(), &manifest, &lock).await.unwrap();
         assert!(repaired.changed_dependencies > 0);
         assert!(aggregate_export.is_file());
+        let api_export = root
+            .path()
+            .join(".trellis/generated/ts/trellis-apis/acme.auth.api.ts");
+        fs::remove_file(&api_export).unwrap();
+        let repaired = install_root(root.path(), &manifest, &lock).await.unwrap();
+        assert!(repaired.changed_dependencies > 0);
+        assert!(api_export.is_file());
         let warm = install_root(root.path(), &manifest, &lock).await.unwrap();
         assert_eq!(warm.changed_dependencies, 0);
         assert_eq!(warm.generated_projects, 0);
@@ -1549,6 +1602,16 @@ export default defineAppContract(() => ({
             .join(".trellis/apis/acme.auth@v1/1.0.1")
             .exists());
         assert_eq!(fs::read(participant_path).unwrap(), previous_participant);
+
+        fs::remove_file(root.path().join("contract.ts")).unwrap();
+        api["version"] = serde_json::json!("1.0.0");
+        fs::write(
+            root.path().join("auth.json"),
+            serde_json::to_vec_pretty(&api).unwrap(),
+        )
+        .unwrap();
+        install_root(root.path(), &manifest, &lock).await.unwrap();
+        assert!(aggregate_export.is_file());
     }
 
     #[tokio::test]
@@ -1664,7 +1727,7 @@ pub fn contract_artifacts() -> Result<ContractArtifacts, ContractsError> {
         .unwrap();
         assert!(own_sdk.contains(&format!(
             "trellis-rs = \"{}\"",
-            trellis_generate::artifacts::trellis_package_version()
+            trellis_generation::artifacts::trellis_package_version()
         )));
         let participant_facade = fs::read_to_string(
             root.path()
@@ -1673,7 +1736,7 @@ pub fn contract_artifacts() -> Result<ContractArtifacts, ContractsError> {
         .unwrap();
         assert!(participant_facade.contains(&format!(
             "trellis-rs = \"{}\"",
-            trellis_generate::artifacts::trellis_package_version()
+            trellis_generation::artifacts::trellis_package_version()
         )));
 
         let aggregate_lib = root
@@ -1686,5 +1749,9 @@ pub fn contract_artifacts() -> Result<ContractArtifacts, ContractsError> {
         let warm = install_root(root.path(), &manifest, &lock).await.unwrap();
         assert_eq!(warm.changed_dependencies, 0);
         assert_eq!(warm.generated_projects, 0);
+
+        fs::remove_file(root.path().join("contracts/consumer.rs")).unwrap();
+        install_root(root.path(), &manifest, &lock).await.unwrap();
+        assert!(aggregate_lib.is_file());
     }
 }

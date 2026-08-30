@@ -2,7 +2,7 @@
   import { goto, afterNavigate } from "$app/navigation";
   import { base, resolve } from "$app/paths";
   import { page } from "$app/state";
-  import type { AuthSessionsMeOutput } from "@qlever-llc/trellis/sdk/auth";
+  import type { AuthSessionsMeOutput } from "@trellis/apis/trellis.auth";
   import type { Snippet } from "svelte";
   import { onDestroy, onMount } from "svelte";
   import { auth } from "../auth";

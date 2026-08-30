@@ -2,18 +2,21 @@ use std::path::PathBuf;
 
 use clap::{Parser, Subcommand, ValueEnum};
 use clap_complete::Shell;
+#[cfg(feature = "runtime")]
 use trellis_runtime::RuntimeMode;
 
 mod auth;
 mod bootstrap;
 mod deploy;
 mod self_cmd;
+#[cfg(feature = "runtime")]
 mod server;
 
 pub use auth::*;
 pub use bootstrap::*;
 pub use deploy::*;
 pub use self_cmd::*;
+#[cfg(feature = "runtime")]
 pub use server::*;
 
 #[derive(Debug, Parser)]
@@ -71,8 +74,10 @@ pub enum TopLevelCommand {
     /// Manage offline authorization trust artifacts.
     Infra(InfraCommand),
     /// Validate runtime config, NATS, migrations, trust, and registries without mutation.
+    #[cfg(feature = "runtime")]
     Check(CheckArgs),
     /// Run one-time initialization workflows.
+    #[cfg(feature = "runtime")]
     Init(InitCommand),
     /// Generate or derive Trellis keys.
     Keys(KeysCommand),
@@ -83,6 +88,7 @@ pub enum TopLevelCommand {
     /// Generate shell completion scripts for Trellis.
     Completion { shell: Shell },
     /// Run the Trellis runtime with an auto-managed local NATS server.
+    #[cfg(feature = "runtime")]
     Server(ServerArgs),
 }
 
@@ -128,6 +134,7 @@ pub struct RmArgs {
     pub project: ProjectRootArgs,
 }
 
+#[cfg(feature = "runtime")]
 #[derive(Debug, clap::Args)]
 /// Read-only runtime preflight validation.
 pub struct CheckArgs {

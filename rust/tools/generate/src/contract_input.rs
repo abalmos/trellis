@@ -1338,21 +1338,6 @@ mod tests {
     }
 
     #[test]
-    fn removed_rust_artifact_test() {}
-
-    #[test]
-    fn removed_associated_rust_artifact_test() {}
-
-    #[test]
-    fn removed_requested_rust_artifact_test() {}
-
-    #[test]
-    fn removed_rust_failure_test() {}
-
-    #[test]
-    fn removed_static_rust_source_test() {}
-
-    #[test]
     fn finds_nearest_deno_config() {
         let temp = TempDir::new().unwrap();
         let root = temp.path().join("repo");

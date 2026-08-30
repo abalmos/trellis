@@ -9,7 +9,7 @@ mod models;
 mod protocol;
 mod session_store;
 
-pub use crate::sdk::auth::AuthClient;
+pub use crate::internal_sdk::auth::AuthClient;
 pub use crate::service::payload_hash_base64url;
 pub use browser_login::{
     administration_participant_digest, administration_participant_grants, contract_digest,

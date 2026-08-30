@@ -43,7 +43,7 @@ invariants those APIs must preserve.
 
 In TypeScript, the service-local runtime surface lives in `@qlever-llc/trellis`
 and the standard Trellis Jobs admin RPC contract lives in
-`@qlever-llc/trellis/sdk/jobs`:
+`@trellis/apis/trellis.jobs`:
 
 - service-local jobs are exposed on connected service runtimes as `service.jobs`
 - admin and operator jobs access uses the centralized `Jobs.*` RPC surface,

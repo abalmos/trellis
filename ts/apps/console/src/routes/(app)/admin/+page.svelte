@@ -5,7 +5,7 @@
     AuthDeploymentAuthorityPlansListOutput,
     AuthDeviceUserAuthoritiesReviewsListOutput,
     AuthServiceInstancesListOutput,
-  } from "@qlever-llc/trellis/sdk/auth";
+  } from "@trellis/apis/trellis.auth";
   import type { DeploymentAuthorityKind, DeploymentAuthorityPlan } from "@qlever-llc/trellis/auth";
   import { base, resolve } from "$app/paths";
   import { onMount } from "svelte";
@@ -23,7 +23,7 @@
   import { getTrellis } from "$lib/trellis";
   import type {
     JobsQueryOutput,
-  } from "@qlever-llc/trellis/sdk/jobs";
+  } from "@trellis/apis/trellis.jobs";
 
   type ServiceInstance = AuthServiceInstancesListOutput["entries"][number];
   type JobGroup = JobsQueryOutput["groups"][number];

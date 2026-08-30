@@ -27,8 +27,8 @@ export {
   HealthInfoSchema,
   HealthResponseSchema,
 } from "./health_schemas.ts";
-export type { HealthHeartbeatSample } from "../../sdk/_generated/health/types.ts";
-export { HealthHeartbeatSampleSchema } from "../../sdk/_generated/health/schemas.ts";
+export type { HealthHeartbeatSample } from "../../internal_sdk/generated/health/types.ts";
+export { HealthHeartbeatSampleSchema } from "../../internal_sdk/generated/health/schemas.ts";
 export {
   type FeedHandler,
   type HealthCheckHandler,

@@ -1,6 +1,6 @@
 <script lang="ts">
   import { isErr, type BaseError, type Result } from "@qlever-llc/result";
-  import type { AuthDeploymentAuthorityPlansListOutput } from "@qlever-llc/trellis/sdk/auth";
+  import type { AuthDeploymentAuthorityPlansListOutput } from "@trellis/apis/trellis.auth";
   import { base } from "$app/paths";
   import { onMount } from "svelte";
   import DataTable from "$lib/components/DataTable.svelte";

@@ -77,7 +77,7 @@ export type {
 export type {
   AuthDeviceUserAuthoritiesResolveOutput,
   AuthDeviceUserAuthoritiesResolveProgress,
-} from "../sdk/auth.ts";
+} from "../internal_sdk/generated/auth/mod.ts";
 // Context-bound proof helpers for local signing and signature verification.
 export {
   buildEventProofInput,

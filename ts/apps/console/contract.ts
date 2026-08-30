@@ -62,13 +62,13 @@ import {
   AuthUsersPasswordChange,
   AuthUsersPasswordResetCreate,
   AuthUsersUpdate,
-} from "@qlever-llc/trellis/sdk/auth";
+} from "@trellis/apis/trellis.auth";
 import {
   HealthInspect,
   HealthMetrics,
   HealthQuery,
   HealthWatch,
-} from "@qlever-llc/trellis/sdk/health";
+} from "@trellis/apis/trellis.health";
 import {
   JobsCancel,
   JobsDismissDLQ,
@@ -80,7 +80,7 @@ import {
   JobsReplayDLQ,
   JobsRetry,
   JobsWatch,
-} from "@qlever-llc/trellis/sdk/jobs";
+} from "@trellis/apis/trellis.jobs";
 import {
   EventLogConsumersInspect,
   EventLogConsumersQuery,
@@ -88,7 +88,7 @@ import {
   EventLogMetrics,
   EventLogQuery,
   EventLogWatch,
-} from "../../../generated/packages/jsr/eventlog/mod.ts";
+} from "@trellis/apis/trellis.eventlog";
 
 export const contract = defineAppContract(
   () => ({

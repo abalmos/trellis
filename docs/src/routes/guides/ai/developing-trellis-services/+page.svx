@@ -65,6 +65,5 @@ combined template remains available for mixed-language repositories.
 ## What to ask agents to verify
 
 Ask agents to run the service repo's own format, typecheck, lint, test, run, and
-migration commands. If contracts changed, ask them to run `deno task prepare` for
-TypeScript services or `cargo xtask prepare` for Rust services and verify
+migration commands. If contracts changed, ask them to run `trellis install` and verify
 generated artifacts are updated from the source contract.

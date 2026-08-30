@@ -4,7 +4,7 @@
     AuthCapabilitiesListOutput,
     AuthCapabilityGroupsListOutput,
     AuthCapabilityGroupsPutInput,
-  } from "@qlever-llc/trellis/sdk/auth";
+  } from "@trellis/apis/trellis.auth";
   import { goto } from "$app/navigation";
   import { resolve } from "$app/paths";
   import { onMount } from "svelte";

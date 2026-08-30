@@ -5,7 +5,7 @@ use serde_json::Value;
 use super::{AuthorizationStateError, ParticipantBindingRecord, ParticipantBindingState};
 
 fn state_api_value() -> Result<Value, AuthorizationStateError> {
-    let api: Value = serde_json::from_str(trellis_rs::sdk::state::API_JSON)
+    let api: Value = serde_json::from_str(trellis_rs::internal_sdk::state::API_JSON)
         .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
     trellis_protocol::lint_api_authoring(&api)
         .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
@@ -15,7 +15,7 @@ fn state_api_value() -> Result<Value, AuthorizationStateError> {
 pub(crate) fn administration_participant_binding(
     resolved_at: i64,
 ) -> Result<ParticipantBindingRecord, AuthorizationStateError> {
-    let api_value: Value = serde_json::from_str(trellis_rs::sdk::auth::API_JSON)
+    let api_value: Value = serde_json::from_str(trellis_rs::internal_sdk::auth::API_JSON)
         .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
     let api = trellis_protocol::parse_api(&api_value)
         .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
@@ -49,7 +49,7 @@ pub(crate) fn administration_participant_binding(
 pub(crate) fn auth_runtime_participant_binding(
     resolved_at: i64,
 ) -> Result<ParticipantBindingRecord, AuthorizationStateError> {
-    let api_value: Value = serde_json::from_str(trellis_rs::sdk::auth::API_JSON)
+    let api_value: Value = serde_json::from_str(trellis_rs::internal_sdk::auth::API_JSON)
         .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
     trellis_protocol::lint_api_authoring(&api_value)
         .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
@@ -64,11 +64,11 @@ pub(crate) fn auth_runtime_participant_binding(
     );
     let mut api_values = BTreeMap::from([(api.id().to_owned(), api_value)]);
     for (alias, api_json) in [
-        ("core", trellis_rs::sdk::core::API_JSON),
-        ("eventlog", trellis_rs::sdk::eventlog::API_JSON),
-        ("health", trellis_rs::sdk::health::API_JSON),
-        ("jobs", trellis_rs::sdk::jobs::API_JSON),
-        ("state", trellis_rs::sdk::state::API_JSON),
+        ("core", trellis_rs::internal_sdk::core::API_JSON),
+        ("eventlog", trellis_rs::internal_sdk::eventlog::API_JSON),
+        ("health", trellis_rs::internal_sdk::health::API_JSON),
+        ("jobs", trellis_rs::internal_sdk::jobs::API_JSON),
+        ("state", trellis_rs::internal_sdk::state::API_JSON),
     ] {
         let value: Value = serde_json::from_str(api_json)
             .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;

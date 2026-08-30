@@ -9,7 +9,7 @@ import { TrellisError } from "../errors/TrellisError.ts";
 import {
   API as TRELLIS_STATE_API,
   API_DIGEST as TRELLIS_STATE_API_DIGEST,
-} from "../sdk/state_api.ts";
+} from "../internal_sdk/generated/state/api.ts";
 import type {
   StateDeleteInput,
   StateDeleteResponse,

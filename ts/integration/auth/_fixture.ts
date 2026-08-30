@@ -6,8 +6,8 @@ import {
   Result,
 } from "@qlever-llc/trellis";
 import { TrellisService } from "@qlever-llc/trellis/service/deno";
-import type { AuthSessionsMeOutput } from "@qlever-llc/trellis/sdk/auth";
-import * as trellisAuth from "@qlever-llc/trellis/sdk/auth";
+import type { AuthSessionsMeOutput } from "@trellis/apis/trellis.auth";
+import * as trellisAuth from "@trellis/apis/trellis.auth";
 import { Type } from "typebox";
 import type { LiveTrellisRuntime } from "../_support/runtime.ts";
 import { integrationSlug } from "../_support/names.ts";

@@ -3,7 +3,7 @@
   import type {
     AuthCapabilityGroupsListOutput,
     AuthPortalsGrantOverridesListOutput,
-  } from "@qlever-llc/trellis/sdk/auth";
+  } from "@trellis/apis/trellis.auth";
   import { resolve } from "$app/paths";
   import { onMount } from "svelte";
   import { SvelteSet } from "svelte/reactivity";

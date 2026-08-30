@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { JobsMetricsOutput } from "@qlever-llc/trellis/sdk/jobs";
+  import type { JobsMetricsOutput } from "@trellis/apis/trellis.jobs";
   import { compactDuration } from "../format";
 
   type Props = {

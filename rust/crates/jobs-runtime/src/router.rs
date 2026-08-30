@@ -1,10 +1,10 @@
 //! Router construction for the Jobs admin service.
 
-use trellis_rs::sdk::jobs::rpc::{
+use trellis_rs::internal_sdk::jobs::rpc::{
     JobsCancelRpc, JobsDismissDLQRpc, JobsGetKeyRpc, JobsInspectRpc, JobsListDLQRpc,
     JobsListServicesRpc, JobsMetricsRpc, JobsQueryRpc, JobsReplayDLQRpc, JobsRetryRpc,
 };
-use trellis_rs::sdk::jobs::types::{
+use trellis_rs::internal_sdk::jobs::types::{
     JobsCancelRequest, JobsDismissDLQRequest, JobsGetKeyRequest, JobsInspectRequest,
     JobsListDLQRequest, JobsListServicesRequest, JobsMetricsRequest, JobsQueryRequest,
     JobsReplayDLQRequest, JobsRetryRequest,

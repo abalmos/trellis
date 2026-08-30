@@ -33,9 +33,8 @@ checklists.
   dead-letter handling. See `design/jobs/trellis-jobs.md`.
 - **Operations** - caller-visible asynchronous workflows with durable state and
   watch semantics. See `design/operations/trellis-operations.md`.
-- **CLI** - public `trellis` operator/runtime CLI plus a bootstrap-safe
-  `trellis-generate` companion used by repo-local prepare and generation
-  workflows. See `design/tooling/trellis-cli.md`.
+- **CLI** - public `trellis` operator/runtime and package-manager CLI. See
+  `design/tooling/trellis-cli.md`.
 - **Patterns** - top-level architecture boundaries and communication patterns.
   See `design/core/trellis-patterns.md`.
 
@@ -61,25 +60,19 @@ Current TypeScript runtime entrypoints:
 - `TrellisService.connect(...)` for services
 - `TrellisDevice.connect(...)` for activated devices
 
-For repository development workflows, prefer the repo-local prepare entrypoints:
+Install locked API dependencies and regenerate project-local artifacts with:
 
-- `cd js && deno task prepare`
-- `cd js && deno task prepare:watch`
-- `cargo xtask prepare`
-- `cargo xtask prepare-watch`
+- `cargo xtask install`
+- `cd ts && deno task install`
 - `cargo xtask build`
 - `cargo xtask release check-versions`
 - `cargo xtask release prepare --tag v0.9.0-rc.1`
 
-Normal operators only need `trellis`; repo generation flows stay behind those
-local tasks and wrappers.
-
-If you build or install Rust binaries from this repo directly, run
-`cargo xtask prepare` first so the generated Rust SDK crates under
-`generated/packages/cargo/` exist. `cargo xtask build` is the convenient
-Rust-side wrapper for `prepare` followed by the default Rust workspace build.
-Live client-library integration coverage is language-owned. Run these peer
-suites when you need that coverage:
+Each contract project owns `trellis.toml`, commits `trellis.lock`, and consumes
+its generated SDK through `@trellis/apis/<lineage>` or `trellis_apis::<module>`.
+`cargo xtask build` installs the fixed repository project DAG before building
+the Rust workspace. Live client-library integration coverage is language-owned.
+Run these peer suites when you need that coverage:
 
 ```sh
 deno task -c ts/deno.json test:integration
@@ -87,13 +80,7 @@ cargo test --manifest-path rust/Cargo.toml -p trellis-rs --test integration -- -
 ```
 
 Both suites conform to client cases in `integration/client-test-matrix.json`,
-the shared parity contract for supported client languages. Use
-`cargo xtask prepare-watch` during active contract development. Watch mode
-watches broadly, ignores file changes that are not TypeScript, JavaScript, or
-Rust source unless they are recognized project/discovery inputs, prepares only
-affected contract entries when safe, falls back to full prepare for project
-manifests and discovery-shape changes, and asks you to restart the watcher after
-generator/tooling changes.
+the shared parity contract for supported client languages.
 
 ## Design documents
 

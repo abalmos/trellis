@@ -14,7 +14,7 @@ import {
 import type {
   AuthConnectionsListOutput,
   AuthSessionsListOutput,
-} from "@qlever-llc/trellis/sdk/auth";
+} from "@trellis/apis/trellis.auth";
 import {
   assertEventCaptured,
   TrellisControlPlaneSqlite,

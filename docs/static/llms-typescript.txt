@@ -57,13 +57,9 @@ Rules:
   `expiresAt - serverNow` as a monotonic duration. A changed review id is an
   explicit expired/replaced review, not a review to follow silently. Resolve
   cancellation is unsupported.
-- `deno.json` should expose Trellis generation through `deno task prepare`
-- Prepare keeps a disposable, repository-namespaced resolution cache in the
-  platform user cache. Set `TRELLIS_PREPARE_CACHE` to isolate or relocate it.
-  For deterministic contract inputs outside the followed local import graph,
-  declare relative globs in `package.json` at `trellis.prepare.inputs` and
-  environment names at `trellis.prepare.env`. Undeclared time, randomness,
-  network, environment, and external-file inputs are unsupported.
+- `deno.json` should expose locked API installation through `trellis install`
+- Contract resolution must be deterministic from tracked source. Undeclared
+  time, randomness, network, environment, and external-file inputs are unsupported.
 - service-boundary integration tests can use
   `@qlever-llc/trellis-test/integration` and
   `@qlever-llc/trellis-test/integration/runner`: define
@@ -103,14 +99,14 @@ Rules:
   with the bundle's SQLite store paths rewritten to the state volume, and run
   `trellis server ... --nats-binary /usr/local/bin/nats-server
   --nats-state-dir /var/lib/trellis/nats`.
-- the `prepare` task value should call the Trellis generator, for example
-  `deno run -A @qlever-llc/trellis/generate prepare .`
+- commit `trellis.toml` and `trellis.lock`, then run `trellis install` to
+  materialize locked APIs and consumer-local SDKs
 - generated SDKs, manifests, and package outputs belong under the service repo's
   generated output locations; do not edit generated files by hand
 - public contract object schemas are open by default; use `Type.Object({ ... })`
   without `additionalProperties: false` unless a security-sensitive proof
   boundary or another documented requirement must reject unknown fields
-- after changing a contract, run `deno task prepare` before typing extracted
+- after changing a contract, run `trellis install` before typing extracted
   handlers so generated SDK aliases match the current surfaces
 - App and device contracts may declare schema-backed value or map State stores and
   use their generated `client.state.<store>` facades. State supports revisions,
@@ -643,4 +639,4 @@ JetStream durable consumers.
 
 Use the format, typecheck, lint, test, run, and migration commands configured by
 the service repository. If contract artifacts or generated SDKs changed, run
-`deno task prepare` and commit the generated outputs expected by that repo.
+`trellis install` and commit `trellis.lock`; `.trellis` output remains disposable.

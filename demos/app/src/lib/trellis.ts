@@ -17,7 +17,14 @@ export const trellisUrl = new URL(
 
 export { contract };
 
-export const trellisApp = createTrellisApp({ contract, trellisUrl });
+export const trellisApp = createTrellisApp({
+  contract,
+  participant: {
+    id: contract.CONTRACT_ID,
+    artifactDigest: contract.CONTRACT_DIGEST,
+  },
+  trellisUrl,
+});
 
 export function getTrellis(): TrellisDemoAppClient {
   return trellisApp.getTrellis();

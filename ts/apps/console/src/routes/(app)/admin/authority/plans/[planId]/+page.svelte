@@ -1,7 +1,7 @@
 <script lang="ts">
   import { isErr, type BaseError, type Result } from "@qlever-llc/result";
   import type { DeploymentAuthorityKind, DeploymentAuthorityPlan } from "@qlever-llc/trellis/auth";
-  import type { AuthDeploymentAuthorityPlansGetOutput } from "@qlever-llc/trellis/sdk/auth";
+  import type { AuthDeploymentAuthorityPlansGetOutput } from "@trellis/apis/trellis.auth";
   import { goto } from "$app/navigation";
   import { resolve } from "$app/paths";
   import { page } from "$app/state";

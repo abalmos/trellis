@@ -1,5 +1,5 @@
 import { defineAppContract } from "@qlever-llc/trellis/contracts";
-import { AuthDeviceUserAuthoritiesResolve } from "@qlever-llc/trellis/sdk/auth";
+import { AuthDeviceUserAuthoritiesResolve } from "@trellis/apis/trellis.auth";
 
 export const contract = defineAppContract(() => ({
   id: "trellis.portal.activation@v1",

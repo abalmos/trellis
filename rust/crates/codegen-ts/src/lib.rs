@@ -1106,7 +1106,12 @@ fn normalize_relative_path_string(path: String) -> String {
 }
 
 fn render_readme(opts: &GenerateTsSdkOpts, loaded: &LoadedApi) -> String {
-    let import_specifier = sdk_readme_import_specifier(&opts.package_name);
+    let lineage = loaded
+        .render_model
+        .id
+        .split_once('@')
+        .map_or(loaded.render_model.id.as_str(), |(lineage, _)| lineage);
+    let import_specifier = format!("@trellis/apis/{lineage}");
     let descriptors = descriptor_export_names(loaded);
     let imports = if descriptors.is_empty() {
         "// This package exports schemas and wire types only.".to_string()
@@ -1402,14 +1407,6 @@ fn key_to_pascal(value: &str) -> String {
         .map(to_pascal_case_token)
         .collect::<Vec<_>>()
         .join("")
-}
-
-fn sdk_readme_import_specifier(package_name: &str) -> String {
-    if let Some(trimmed) = package_name.strip_prefix("@qlever-llc/trellis-sdk-") {
-        format!("@qlever-llc/trellis/sdk/{trimmed}")
-    } else {
-        package_name.to_string()
-    }
 }
 
 fn to_pascal_case_token(value: &str) -> String {
@@ -1938,7 +1935,7 @@ mod tests {
     #[test]
     fn protocol_api_generation_uses_api_identity() {
         let manifest_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../../../generated/protocol/apis/trellis.auth@v1.json");
+            .join("../runtime/.trellis/generated/protocol/apis/trellis.auth@v1.json");
         let sources = collect_ts_sdk_sources(&GenerateTsSdkOpts {
             api_path: manifest_path,
             out_dir: unique_temp_dir("protocol-api"),
@@ -2618,7 +2615,7 @@ mod tests {
         let readme = render_readme(&opts, &loaded);
 
         assert!(readme.contains("import { defineAppContract } from \"@qlever-llc/trellis\";"));
-        assert!(readme.contains("from \"@qlever-llc/trellis/sdk/audit\";"));
+        assert!(readme.contains("from \"@trellis/apis/acme.audit\";"));
         assert!(readme.contains("displayName: \"Example App\""));
         assert!(readme.contains("description: \"User-facing app for the example deployment.\""));
         assert!(readme.contains("uses: ["));

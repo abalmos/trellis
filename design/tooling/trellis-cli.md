@@ -1,6 +1,6 @@
 ---
 title: Trellis CLI
-description: CLI design for the operator/runtime `trellis` CLI plus the repo-local `trellis-generate` prepare workflow.
+description: CLI design for the operator/runtime and package-manager `trellis` CLI.
 order: 10
 ---
 
@@ -35,11 +35,9 @@ repo-local build workflows.
 
 ## Design
 
-Trellis uses two tools with different audiences:
-
-- `trellis` is the runtime/operator CLI
-- `trellis-generate` is the bootstrap-safe developer/build companion used by
-  repo-local prepare workflows
+Trellis uses one public `trellis` CLI for runtime, operator, and package-manager
+workflows. Contract generation is an internal library invoked by
+`trellis install` after locked dependencies are staged.
 
 Canonical native `trellis.api.v1` and `trellis.participant.v1` JSON remains an
 exchange artifact, but it is generated output rather than a committed source
@@ -51,90 +49,40 @@ file.
 trellis <command> [subcommand] [options]
 ```
 
-The preferred developer interfaces are repo-local prepare tasks, not direct
-machine-global generator commands:
+Repository development uses the same package-manager boundary:
 
 ```text
-cd js && deno task prepare
-cd js && deno task prepare:watch
-cargo xtask prepare
-cargo xtask prepare-watch
+cargo xtask install
+cd ts && deno task install
 cargo xtask build
 ```
 
-Those tasks route to `trellis-generate`, which can run before the main `trellis`
-CLI is buildable from a clean checkout. `cargo xtask prepare` shells into the
-bootstrap generator from the Rust workspace. `deno task prepare` does the same
-for the TypeScript workspace.
-
-During active contract development, `prepare:watch` and
-`cargo xtask prepare-watch` keep the same prepare workflow running in the
-background. Watch mode observes the chosen project root broadly, filters events
-through `.gitignore`, and always ignores `.git/`, `.worktrees/`, and
-`generated/` so repository scans and generated artifact writes do not loop back
-into prepare. It also ignores file changes that are not TypeScript, JavaScript,
-or Rust source unless they are recognized project/discovery inputs. When a batch
-maps safely to known contract source entries, watch mode prepares only those
-affected entries while preserving the full prepare plan order. It falls back to
-full prepare for project native artifacts and discovery-shape changes. Generator
-or tooling changes require restarting the watcher because the already-running
-process is still using the old generator code. Change diagnostics are quiet by
-default; direct `trellis-generate` callers may add `--changes` with `--watch` to
-print the event paths plus the watch decision and reason.
-
-Rust contributors should run `cargo xtask prepare` before `cargo build` or
-`cargo install --path rust/crates/cli`, because the Rust workspace depends on
-generated SDK crates under `generated/packages/cargo/`. `cargo xtask build` is a
-convenience wrapper that runs `prepare` first and then invokes the default Rust
-workspace build. Live client-library integration is language-owned and is run
-outside `cargo xtask build`: use `deno task -c ts/deno.json test:integration`
-for the TypeScript suite and
+`cargo xtask install` runs the repository's fixed project DAG.
+`cargo xtask
+build` installs first and then invokes the default Rust workspace
+build. Live client-library integration is language-owned and is run outside
+`cargo xtask build`: use `deno task -c ts/deno.json test:integration` for the
+TypeScript suite and
 `cargo test --api-path rust/Cargo.toml -p trellis-rs --test integration -- --nocapture`
 for the Rust suite. Both suites are governed by the `kind: "client"` cases in
 `integration/client-test-matrix.json`; every supported client language must
 cover every client matrix case against a live Trellis runtime.
 
-`trellis-generate` still owns the explicit source-to-artifact interface for repo
-scripts, wrappers, and CI:
-
-```text
-trellis-generate
-trellis-generate prepare [--targets manifest,jsr,npm,cargo] [--no-npm] [--watch [--changes]] [path]
-trellis-generate discover <path>
-trellis-generate generate api (--source <file> | --api <file> | --image <ref>) --out <file>
-trellis-generate generate jsr (--source <file> | --api <file> | --image <ref>) --out <dir>
-trellis-generate generate npm (--source <file> | --api <file> | --image <ref>) --out <dir>
-trellis-generate generate cargo (--source <file> | --api <file> | --image <ref>) --out <dir>
-trellis-generate generate all (--source <file> | --api <file> | --image <ref>) --out-api <file> [--jsr-out <dir>] [--npm-out <dir>] [--cargo-out <dir>]
-trellis-generate self check [--prerelease]
-trellis-generate self update [--prerelease]
-```
-
-These commands:
+Installation:
 
 - resolve contract inputs from source modules, generated APIs, or OCI images
 - validate canonical native API artifacts against native `trellis.api.v1` and
   `trellis.participant.v1`
 - compute canonical JSON and digests
-- generate package-manager-specific SDK artifacts from the resolved contract
-  inputs
-- preserve the current JSR TypeScript generated surface where practical
-- generate npm JavaScript packages natively from generated TypeScript sources;
-  npm output does not require Deno or `dnt`
+- generate language-specific SDK artifacts inside the consuming project
 - generate service/app-owned Cargo SDK crates that use the public `trellis`
   facade and its internal generator/runtime support
 - use required contract `kind` metadata to decide discovery behavior: `service`
-  generates API, JSR, npm, and Cargo artifacts; `app` generates API, JSR, and
-  npm artifacts; `agent` and `device` contracts are verified, with Rust
+  generates API, TypeScript, and Cargo artifacts; `app` generates API and
+  TypeScript artifacts; `agent` and `device` contracts are verified, with Rust
   participant facades generated where applicable
-- when omitted, `prepare [path]` defaults to the current working directory
 - discovery uses configured package/workspace entries and explicit contract
   source inputs; it does not implicitly scan `src/lib` for contracts
-
-Normal docs should not teach `trellis generate` or
-`trellis contracts build/verify`. Those workflows belong to `trellis-generate`
-and are normally reached through repo-local wrappers instead of direct end-user
-invocation.
 
 The CLI may accept explicit package and crate naming flags when the default name
 inference is not enough for a repository.
@@ -486,34 +434,32 @@ The developer-facing CLI boundary is the contract source.
   `package.json`, or `Cargo.toml`
 - single-contract TypeScript/JavaScript projects may use a top-level
   `contract.ts` or `contract.js`, and that file default exports the contract
-  module that `trellis-generate` should load
+  module that installation loads
 - multi-contract TypeScript/JavaScript projects use `contracts/*.ts` or
   `contracts/*.js`, and those files default export the contract module that
-  `trellis-generate` should load
+  installation loads
 - Deno-configured TypeScript projects resolve source modules with Deno; Node
   package projects resolve TypeScript source modules with `tsx` and JavaScript
   source modules with Node
-- generated JSR packages target Deno/JSR consumers, while generated npm packages
-  target Node/npm consumers and are produced without requiring Deno
-- npm package generation uses the Node TypeScript compiler (`tsc`), resolved
-  from the project, `PATH`, or `TRELLIS_TSC_BIN`
+- generated TypeScript SDKs are private project-local installation output
 - Rust projects use `contracts/*.rs` source modules with native API and
   participant artifact functions; those modules build artifacts with Rust code
   or wrap checked-in native API JSON
 - every contract source must declare a required `kind`
 - the `trellis` runtime service may own multiple logical contracts such as
   `trellis.core@v1`, `trellis.auth@v1`, and `trellis.state@v1`
-- `trellis-generate` emits canonical native API artifacts into build output when
-  a repo needs a release artifact
-- app and service repos SHOULD wrap contract preparation into their normal
-  `dev`, `build`, and CI tasks rather than making end users run separate
-  manifest commands during routine browser-app development
+- installation emits canonical native API artifacts into project-local output
+- app and service repos SHOULD wrap `trellis install` into their normal `dev`,
+  `build`, and CI tasks rather than making end users run separate manifest
+  commands during routine browser-app development
 - operators may plan authority updates or authority migrations from generated
   native API artifacts or OCI images that embed `/trellis/api.json`
 - OCI images may override that default path with the `io.trellis.contract.path`
   label
 
-`generated/` contains derived native artifacts and SDKs only.
+`.trellis/` contains derived native artifacts and SDKs only. TypeScript
+consumers import `@trellis/apis/<lineage>` and Rust consumers import
+`trellis_apis::<module>`.
 
 ## Implementation
 
@@ -527,20 +473,18 @@ The Rust implementation uses:
 - Rust crates for operator flows, contract validation, packing, and code
   generation
 
-The CLI owns explicit operational command execution, while `trellis-generate`
-owns bootstrap-safe contract and SDK workflows. Repo-specific build workflows
-remain wrapper scripts or tasks around those explicit commands. Shared logic
-lives in the public `trellis` and `trellis-contracts` packages plus dedicated
-internal workspace crates:
+The CLI owns explicit operational and package-manager command execution.
+Repo-specific build workflows remain wrapper scripts or tasks around those
+explicit commands. Shared logic lives in the public `trellis` and
+`trellis-contracts` packages plus dedicated internal workspace crates:
 
 - `trellis`
 - `trellis-contracts`
 - `trellis-codegen-ts`
 - `trellis-codegen-rust`
-- Trellis-owned generated SDK modules exposed under
-  `trellis_rs::sdk::{auth, core, health, jobs, state}`
+- the internal `trellis-generation` library
 
-The current CLI implementation uses the Trellis-owned SDK modules plus local
+The current CLI implementation uses internal Trellis SDK modules plus local
 helper modules for command parsing, auth session storage, contract resolution,
 and self-update behavior.
 

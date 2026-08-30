@@ -39,6 +39,10 @@ and this project adheres to
 
 ### Changed
 
+- Replaced repository prepare/watch and producer-published generated SDK
+  workflows with project-local `trellis.toml`, committed `trellis.lock`,
+  lock-stable `trellis install`, consumer-local `@trellis/apis/*` and
+  `trellis_apis::*` SDKs, and canonical API-only OCI publication.
 - Replaced the obsolete TypeScript Trellis runtime image with the Rust
   `trellis-server` image and removed the withdrawn TypeScript runtime source and
   release path.
@@ -88,8 +92,7 @@ and this project adheres to
 
 ### Fixed
 
-- Included prepared protocol-WASM output in the JSR package and preserved the
-  `trellis-generate` executable in npm package metadata.
+- Included installed protocol-WASM output in the JSR package.
 - Made trust startup monotonic across configured files, SQLite, immutable NATS
   KV history, and the CAS-protected current pointer, including atomic
   removed-issuer context revocation and read-only `trellis check` reporting for
@@ -486,7 +489,7 @@ and this project adheres to
   `withSqlOutbox(...)`; direct `withSqlOutbox({ drizzle })` sugar is deferred
   and not exposed.
 - TypeScript extracted service handlers now use concrete handler aliases from
-  the generated SDK after running prepare/generation.
+  the generated SDK after running `trellis install`.
 - Removed handler dependency injection from Trellis runtime internals and
   generated service surfaces in favor of concrete generated handler aliases and
   runtime-owned handler context.

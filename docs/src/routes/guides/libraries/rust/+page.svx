@@ -14,8 +14,8 @@ the generated crate source and the Rustdoc links on the [API Reference](/api).
 
 ## Generated crates
 
-Prepare writes owner SDKs under `generated/packages/cargo/` and participant
-facades under `generated/packages/cargo-participants/`. Both are ordinary,
+Installation writes dependency SDKs under `.trellis/generated/rust/` and participant
+facades under `.trellis/generated/packages/cargo-participants/`. Both are ordinary,
 materialized Cargo crates with relative local dependencies. They do not run a
 Trellis generator from `build.rs`.
 

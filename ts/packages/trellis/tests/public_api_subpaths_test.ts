@@ -3,13 +3,13 @@ import { Type } from "typebox";
 import { getContractRuntime } from "../contract_support/contract_runtime.ts";
 
 import { defineServiceContract } from "@qlever-llc/trellis";
-import * as authSdk from "@qlever-llc/trellis/sdk/auth";
+import * as authSdk from "@trellis/apis/trellis.auth";
 import * as authSurface from "@qlever-llc/trellis/auth";
 import * as authBrowserSurface from "@qlever-llc/trellis/auth/browser";
-import * as healthSdk from "@qlever-llc/trellis/sdk/health";
+import * as healthSdk from "@trellis/apis/trellis.health";
 import * as contracts from "@qlever-llc/trellis/contracts";
-import * as coreSdk from "@qlever-llc/trellis/sdk/core";
-import * as stateSdk from "@qlever-llc/trellis/sdk/state";
+import * as coreSdk from "@trellis/apis/trellis.core";
+import * as stateSdk from "@trellis/apis/trellis.state";
 import * as deviceDeno from "@qlever-llc/trellis/device/deno";
 import * as serviceSurface from "@qlever-llc/trellis/service";
 import type { TrellisService as TrellisServiceType } from "@qlever-llc/trellis/service";

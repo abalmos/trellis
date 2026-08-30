@@ -12,7 +12,7 @@ import {
   SitesList,
   SitesRefresh,
   SitesRefreshed,
-} from "@trellis-sdk/trellis-demo-service";
+} from "@trellis/apis/trellis.demo-service";
 import { Type } from "typebox";
 
 const schemas = {

@@ -54,33 +54,13 @@ const config = {
         rootDir,
         "../../ts/packages/trellis-svelte/src/index.ts",
       ),
-      "@qlever-llc/trellis/sdk/auth": resolve(
-        rootDir,
-        "../../generated/packages/jsr/auth/mod.ts",
-      ),
-      "@qlever-llc/trellis/sdk/core": resolve(
-        rootDir,
-        "../../generated/packages/jsr/trellis-core/mod.ts",
-      ),
-      "@qlever-llc/trellis/sdk/health": resolve(
-        rootDir,
-        "../../generated/packages/jsr/health/mod.ts",
-      ),
-      "@qlever-llc/trellis/sdk/jobs": resolve(
-        rootDir,
-        "../../generated/packages/jsr/jobs/mod.ts",
-      ),
-      "@qlever-llc/trellis/sdk/state": resolve(
-        rootDir,
-        "../../generated/packages/jsr/state/mod.ts",
-      ),
       "@qlever-llc/trellis": resolve(
         rootDir,
         "../../ts/packages/trellis/index.ts",
       ),
-      "@trellis-sdk/trellis-demo-service": resolve(
+      "@trellis/apis/trellis.demo-service": resolve(
         rootDir,
-        "../ts/generated/packages/jsr/demo-service/mod.ts",
+        ".trellis/generated/ts/trellis-apis/trellis.demo-service.ts",
       ),
     },
   },

@@ -223,7 +223,16 @@
 
     try {
       const download = await trellis.evidenceDownload({ key }).orThrow();
-      const bytes = await trellis.transfer(download.transfer).bytes().orThrow();
+      const metadata = Object.fromEntries(
+        Object.entries(download.transfer.info.metadata).map(([name, value]) => {
+          if (typeof value !== "string") throw new Error(`Invalid transfer metadata '${name}'.`);
+          return [name, value];
+        }),
+      );
+      const bytes = await trellis.transfer({
+        ...download.transfer,
+        info: { ...download.transfer.info, metadata },
+      }).bytes().orThrow();
       if (!mounted || downloadRunIds.get(key) !== runId) return;
       const latest = gallery.find((item) => item.key === key);
       const contentType = latest?.contentType ?? "application/octet-stream";

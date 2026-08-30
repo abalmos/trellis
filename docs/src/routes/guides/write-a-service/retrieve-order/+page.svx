@@ -87,7 +87,7 @@ export const ordersService = defineServiceContract(
 );
 ```
 
-Run prepare/generation again so the generated SDK includes `OrdersGetHandler` and
+Run `trellis install` again so the generated SDK includes `OrdersGetHandler` and
 the generated `NotFoundError` data shape. Then add the typed read handler to
 `handlers/orders.ts`:
 
@@ -96,7 +96,7 @@ import { err, isErr, ok } from "@qlever-llc/trellis";
 import { NotFoundError } from "../errors.ts";
 import type {
   OrdersGetHandler,
-} from "../generated/packages/jsr/orders-service/mod.ts";
+} from "@trellis/apis/acme.orders";
 
 export const getOrderHandler: OrdersGetHandler = async ({
   input,
@@ -133,7 +133,7 @@ class:
 
 ```ts
 import { isErr } from "@qlever-llc/trellis";
-import { NotFoundError } from "../generated/packages/jsr/orders-service/mod.ts";
+import { NotFoundError } from "@trellis/apis/acme.orders";
 
 const result = await client.rpc.orders.get({ orderId: "ord_123" });
 const value = result.take();

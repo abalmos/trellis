@@ -13,7 +13,7 @@
     EventLogMetricsInput,
     EventLogMetricsOutput,
     EventLogQueryInput,
-  } from "../../../../../../../../generated/packages/jsr/eventlog/mod.ts";
+  } from "@trellis/apis/trellis.eventlog";
 
   type WindowValue = "15m" | "1h" | "6h" | "24h" | "7d";
   type EventResolution = "resolved" | "unresolved" | "malformed";

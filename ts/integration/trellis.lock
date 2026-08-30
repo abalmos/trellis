@@ -1,0 +1,38 @@
+format = 1
+manifest-digest = "6fx1ycOWTO2jPP84kJ6bUHI0el8B_D_FZY_l3MSDwHQ"
+
+[[api]]
+id = "trellis.auth@v1"
+version = "1.0.0"
+api-digest = "Fs_nA37wXgMpLRfB7IyYDhIEDUdSl3PdNp6ehnXcV1A"
+path = "../../rust/crates/runtime/.trellis/generated/protocol/apis/trellis.auth@v1.json"
+
+[[api]]
+id = "trellis.core@v1"
+version = "1.0.0"
+api-digest = "5hQQ8APSyxcdMSl6BgaNNjskL-B4sWTabNslL35hT_8"
+path = "../packages/trellis/.trellis/generated/protocol/apis/trellis.core@v1.json"
+
+[[api]]
+id = "trellis.eventlog@v1"
+version = "1.0.0"
+api-digest = "ldHKKyQCxcEYuuIRjwPa9CZMEKV8mNUyGkAtSh9MzZ8"
+path = "../../rust/crates/eventlog-runtime/.trellis/generated/protocol/apis/trellis.eventlog@v1.json"
+
+[[api]]
+id = "trellis.health@v1"
+version = "1.0.0"
+api-digest = "didAZZoUrnCyj4EF01tWRMkd2UlHrMvYnwWyGmBg5Uk"
+path = "../../rust/crates/runtime/.trellis/generated/protocol/apis/trellis.health@v1.json"
+
+[[api]]
+id = "trellis.jobs@v1"
+version = "1.0.0"
+api-digest = "qVQbpA0Lhmv3S4TcDfkvg4Pl5OvXCKEOrZUpt6Yq524"
+path = "../../rust/crates/jobs-runtime/.trellis/generated/protocol/apis/trellis.jobs@v1.json"
+
+[[api]]
+id = "trellis.state@v1"
+version = "1.0.0"
+api-digest = "qs1u5DVKbglPE25fTx77AadXTT-MDwSkmHVFJlCwE2A"
+path = "../../rust/crates/runtime/.trellis/generated/protocol/apis/trellis.state@v1.json"

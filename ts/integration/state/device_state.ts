@@ -7,7 +7,7 @@ import {
 import { deriveDeviceIdentity } from "@qlever-llc/trellis/auth";
 import { checkDeviceActivation } from "@qlever-llc/trellis/device/deno";
 import { ValidationError } from "@qlever-llc/trellis/errors";
-import { AuthDeviceUserAuthoritiesResolve } from "@qlever-llc/trellis/sdk/auth";
+import { AuthDeviceUserAuthoritiesResolve } from "@trellis/apis/trellis.auth";
 import { assertOperationCompleted } from "@qlever-llc/trellis-test";
 import { assert, assertEquals, assertInstanceOf } from "@std/assert";
 import { Type } from "typebox";

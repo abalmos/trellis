@@ -10,7 +10,7 @@ Sometimes an integration is useful but not required. Put those in `uses.optional
 {#snippet ts()}
 
 ```ts
-import { sdk as core } from "@qlever-llc/trellis/sdk/core";
+import * as core from "@trellis/apis/trellis.core";
 
 uses: {
   required: {

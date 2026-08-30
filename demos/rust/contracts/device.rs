@@ -3,6 +3,7 @@ use trellis_contracts::{
     state, ApiArtifact, ApiBuilder, ContractArtifacts, ContractBuilder, ContractKind,
     ContractStateKind, ContractsError,
 };
+use trellis_apis::state::api::API_JSON as STATE_API_JSON;
 
 #[path = "service.rs"]
 mod service;
@@ -69,9 +70,7 @@ pub fn api_artifact() -> Result<ApiArtifact, ContractsError> {
 /// Build the device's native API and participant artifacts.
 pub fn contract_artifacts() -> Result<ContractArtifacts, ContractsError> {
     let service_api = service::api_artifact()?.normalized_value()?;
-    let state_api: Value = serde_json::from_str(include_str!(
-        "../../../generated/protocol/apis/trellis.state@v1.json"
-    ))?;
+    let state_api: Value = serde_json::from_str(STATE_API_JSON)?;
     let api = api_artifact()?;
     let api_value = api.normalized_value()?;
     let base = ContractBuilder::from_api(

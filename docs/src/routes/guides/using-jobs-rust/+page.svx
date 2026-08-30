@@ -20,7 +20,7 @@ schemas are part of the generated Rust API:
 }
 ```
 
-Run `cargo xtask prepare`. The participant facade now contains a typed queue
+Run `cargo xtask install`. The participant facade now contains a typed queue
 registration method and a cloneable submission client.
 
 ## 2. Keep a submission client

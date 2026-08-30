@@ -2,22 +2,7 @@ import { buildDntPackage } from "../../../tools/package_build/build_dnt_package.
 
 const npmPackageJsonPath = new URL("../npm/package.json", import.meta.url);
 const npmDirUrl = new URL("../npm/", import.meta.url);
-const generatedSdkSourceUrl = new URL(
-  "../../../../generated/packages/jsr/",
-  import.meta.url,
-);
-const generatedSdkBuildUrl = new URL(
-  "../.build/generated-sdk/",
-  import.meta.url,
-);
-const sdkExportDirs: Record<string, string> = {
-  auth: "auth",
-  core: "trellis-core",
-  eventlog: "eventlog",
-  health: "health",
-  jobs: "jobs",
-  state: "state",
-};
+
 const moduleSpecifierPattern =
   /(?:import|export)\s+(?:[^"']*?\s+from\s+)?["']([^"']+)["']|import\(\s*["']([^"']+)["']\s*\)|require\(\s*["']([^"']+)["']\s*\)/g;
 
@@ -85,18 +70,6 @@ async function pathExists(path: string): Promise<boolean> {
   }
 }
 
-async function urlExists(url: URL): Promise<boolean> {
-  try {
-    await Deno.stat(url);
-    return true;
-  } catch (error) {
-    if (error instanceof Deno.errors.NotFound) {
-      return false;
-    }
-    throw error;
-  }
-}
-
 async function removeFileDntPolyfills(fileUrl: URL) {
   const original = await Deno.readTextFile(fileUrl);
   const updated = original
@@ -152,36 +125,9 @@ async function removeBrowserGraphDntPolyfills() {
   }
 }
 
-async function normalizeExportTargets(
-  _key: string,
-  value: unknown,
-): Promise<unknown> {
+async function normalizeExportTargets(value: unknown): Promise<unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return value;
-  }
-
-  if (_key.startsWith("./sdk/")) {
-    const sdkName = _key.slice("./sdk/".length);
-    if (sdkExportDirs[sdkName] === undefined) {
-      return {};
-    }
-
-    const importPath = `./esm/sdk/${sdkName}.js`;
-    const requirePath = `./script/sdk/${sdkName}.js`;
-    const nestedImportPath = `./esm/npm/src/sdk/${sdkName}.js`;
-    const nestedRequirePath = `./script/npm/src/sdk/${sdkName}.js`;
-    return {
-      ...(await pathExists(importPath)
-        ? { import: importPath }
-        : await pathExists(nestedImportPath)
-        ? { import: nestedImportPath }
-        : {}),
-      ...(await pathExists(requirePath)
-        ? { require: requirePath }
-        : await pathExists(nestedRequirePath)
-        ? { require: nestedRequirePath }
-        : {}),
-    };
   }
 
   const entries = await Promise.all(
@@ -224,36 +170,6 @@ async function* walkFiles(dir: URL): AsyncGenerator<URL> {
   }
 }
 
-async function copyDir(source: URL, target: URL) {
-  await Deno.mkdir(target, { recursive: true });
-  for await (const entry of Deno.readDir(source)) {
-    if (["node_modules", "npm", "scripts"].includes(entry.name)) {
-      continue;
-    }
-    const sourceUrl = new URL(entry.name, source);
-    const targetUrl = new URL(entry.name, target);
-    if (entry.isDirectory) {
-      await copyDir(
-        new URL(`${entry.name}/`, source),
-        new URL(`${entry.name}/`, target),
-      );
-      continue;
-    }
-    await Deno.copyFile(sourceUrl, targetUrl);
-  }
-}
-
-async function stageGeneratedSdks() {
-  await Deno.remove(generatedSdkBuildUrl, { recursive: true }).catch(
-    (error) => {
-      if (!(error instanceof Deno.errors.NotFound)) {
-        throw error;
-      }
-    },
-  );
-  await copyDir(generatedSdkSourceUrl, generatedSdkBuildUrl);
-}
-
 async function normalizeModuleSpecifiers() {
   const relativeTsSpecifierPattern = /(["'])(\.{1,2}\/[^"']+)\.ts\1/g;
 
@@ -270,222 +186,6 @@ async function normalizeModuleSpecifiers() {
 
     if (updated !== original) {
       await Deno.writeTextFile(fileUrl, updated);
-    }
-  }
-}
-
-async function stageCanonicalGeneratedSdkArtifacts() {
-  for (const format of ["esm", "script"]) {
-    const nestedSourceRoot = new URL(
-      `../npm/${format}/npm/src/.build/generated-sdk/`,
-      import.meta.url,
-    );
-    const packageSourceRoot = new URL(
-      `../npm/${format}/npm/src/sdk/_generated/`,
-      import.meta.url,
-    );
-    const directSourceRoot = new URL(
-      `../npm/${format}/sdk/_generated/`,
-      import.meta.url,
-    );
-    const targetRoot = new URL(
-      `../npm/${format}/generated-sdk/`,
-      import.meta.url,
-    );
-    await Deno.remove(targetRoot, { recursive: true }).catch((error) => {
-      if (!(error instanceof Deno.errors.NotFound)) {
-        throw error;
-      }
-    });
-    await Deno.mkdir(targetRoot, { recursive: true });
-
-    for (const [sdkName, sdkDir] of Object.entries(sdkExportDirs)) {
-      const nestedSource = new URL(`${sdkDir}/`, nestedSourceRoot);
-      const packageSource = new URL(`${sdkName}/`, packageSourceRoot);
-      const directSource = new URL(`${sdkName}/`, directSourceRoot);
-      const source = await urlExists(nestedSource)
-        ? nestedSource
-        : await urlExists(packageSource)
-        ? packageSource
-        : directSource;
-      if (!await urlExists(source)) {
-        throw new Error(
-          `missing generated SDK source for ${sdkName} in ${format} npm build`,
-        );
-      }
-      await copyDir(source, new URL(`${sdkDir}/`, targetRoot));
-    }
-
-    await Deno.remove(nestedSourceRoot, { recursive: true }).catch((error) => {
-      if (!(error instanceof Deno.errors.NotFound)) {
-        throw error;
-      }
-    });
-    await Deno.remove(packageSourceRoot, { recursive: true }).catch((error) => {
-      if (!(error instanceof Deno.errors.NotFound)) {
-        throw error;
-      }
-    });
-    await Deno.remove(directSourceRoot, { recursive: true }).catch((error) => {
-      if (!(error instanceof Deno.errors.NotFound)) {
-        throw error;
-      }
-    });
-  }
-}
-
-async function rewriteCanonicalGeneratedSdkSelfImports() {
-  for (const format of ["esm", "script"]) {
-    const generatedSdkDir = new URL(
-      `../npm/${format}/generated-sdk/`,
-      import.meta.url,
-    );
-
-    for await (const fileUrl of walkFiles(generatedSdkDir)) {
-      if (
-        !fileUrl.pathname.endsWith(".js") && !fileUrl.pathname.endsWith(".d.ts")
-      ) {
-        continue;
-      }
-
-      const original = await Deno.readTextFile(fileUrl);
-      let updated = original
-        .replaceAll("../../../errors/index.js", "../../errors/index.js")
-        .replaceAll(
-          "@qlever-llc/trellis/errors/index.js",
-          "../../errors/index.js",
-        )
-        .replaceAll("../../../contracts.js", "@qlever-llc/trellis/contracts")
-        .replaceAll("../../contracts.js", "@qlever-llc/trellis/contracts")
-        .replaceAll("../../../contract.js", "@qlever-llc/trellis")
-        .replaceAll("../../contract.js", "@qlever-llc/trellis")
-        .replaceAll("../../../index.js", "@qlever-llc/trellis")
-        .replaceAll("../../index.js", "@qlever-llc/trellis");
-      for (const [sdkName, sdkDir] of Object.entries(sdkExportDirs)) {
-        updated = updated
-          .replaceAll(
-            `../${sdkName}/mod.js`,
-            `@qlever-llc/trellis/sdk/${sdkName}`,
-          )
-          .replaceAll(
-            `../${sdkDir}/mod.js`,
-            `@qlever-llc/trellis/sdk/${sdkName}`,
-          )
-          .replaceAll(
-            `../../${sdkName}/mod.js`,
-            `@qlever-llc/trellis/sdk/${sdkName}`,
-          )
-          .replaceAll(
-            `../../${sdkDir}/mod.js`,
-            `@qlever-llc/trellis/sdk/${sdkName}`,
-          )
-          .replaceAll(
-            `../../${sdkName}.js`,
-            `@qlever-llc/trellis/sdk/${sdkName}`,
-          )
-          .replaceAll(
-            `../../../sdk/${sdkName}.js`,
-            `@qlever-llc/trellis/sdk/${sdkName}`,
-          )
-          .replaceAll(
-            `../../sdk/${sdkName}.js`,
-            `@qlever-llc/trellis/sdk/${sdkName}`,
-          );
-      }
-      if (updated !== original) {
-        await Deno.writeTextFile(fileUrl, updated);
-      }
-    }
-  }
-}
-
-async function removeSdkWrapperPolyfills() {
-  for (const sdkName of Object.keys(sdkExportDirs)) {
-    for (const format of ["esm", "script"]) {
-      for (const extension of ["js", "d.ts"]) {
-        for (
-          const fileUrl of [
-            new URL(
-              `../npm/${format}/sdk/${sdkName}.${extension}`,
-              import.meta.url,
-            ),
-            new URL(
-              `../npm/${format}/npm/src/sdk/${sdkName}.${extension}`,
-              import.meta.url,
-            ),
-          ]
-        ) {
-          await removeFileDntPolyfills(fileUrl).catch((error) => {
-            if (!(error instanceof Deno.errors.NotFound)) {
-              throw error;
-            }
-          });
-        }
-      }
-    }
-  }
-}
-
-async function rewriteSdkWrapperTargets() {
-  for (const [sdkName, sdkDir] of Object.entries(sdkExportDirs)) {
-    for (const format of ["esm", "script"]) {
-      for (const extension of ["js", "d.ts"]) {
-        for (
-          const [fileUrl, canonicalTarget] of [
-            [
-              new URL(
-                `../npm/${format}/sdk/${sdkName}.${extension}`,
-                import.meta.url,
-              ),
-              `../generated-sdk/${sdkDir}/mod.js`,
-            ],
-            [
-              new URL(
-                `../npm/${format}/npm/src/sdk/${sdkName}.${extension}`,
-                import.meta.url,
-              ),
-              `../../../generated-sdk/${sdkDir}/mod.js`,
-            ],
-          ] as const
-        ) {
-          const original = await Deno.readTextFile(fileUrl).catch((error) => {
-            if (error instanceof Deno.errors.NotFound) return undefined;
-            throw error;
-          });
-          if (original === undefined) {
-            continue;
-          }
-
-          const updated = original.replaceAll(
-            `../.build/generated-sdk/${sdkDir}/mod.js`,
-            canonicalTarget,
-          ).replaceAll(
-            `./_generated/${sdkName}/mod.js`,
-            canonicalTarget,
-          );
-          if (updated !== original) {
-            await Deno.writeTextFile(fileUrl, updated);
-          }
-        }
-      }
-    }
-    for (const format of ["esm", "script"]) {
-      for (const extension of ["js", "d.ts"]) {
-        const fileUrl = new URL(
-          `../npm/${format}/sdk/${sdkName}_api.${extension}`,
-          import.meta.url,
-        );
-        const original = await Deno.readTextFile(fileUrl).catch((error) => {
-          if (error instanceof Deno.errors.NotFound) return undefined;
-          throw error;
-        });
-        if (original === undefined) continue;
-        const updated = original.replaceAll(
-          `./_generated/${sdkName}/api.js`,
-          `../generated-sdk/${sdkDir}/api.js`,
-        );
-        if (updated !== original) await Deno.writeTextFile(fileUrl, updated);
-      }
     }
   }
 }
@@ -516,15 +216,13 @@ async function normalizePackageJsonExports() {
       const normalizedValue = normalizeExportValue(value);
       return [
         normalizedKey,
-        await normalizeExportTargets(normalizedKey, normalizedValue),
+        await normalizeExportTargets(normalizedValue),
       ];
     }),
   );
 
   packageJson.exports = Object.fromEntries(normalizedEntries);
-  packageJson.bin = {
-    "trellis-generate": "bin/trellis-generate.js",
-  };
+  delete packageJson.bin;
   delete packageJson.dependencies?.["drizzle-orm"];
   packageJson.peerDependenciesMeta = {
     ...(packageJson.peerDependenciesMeta ?? {}),
@@ -538,152 +236,6 @@ async function normalizePackageJsonExports() {
     JSON.stringify(packageJson, null, 2) + "\n",
   );
 }
-
-async function stageNodeGenerateBin() {
-  const binDir = new URL("../npm/bin/", import.meta.url);
-  const binPath = new URL("trellis-generate.js", binDir);
-  await Deno.mkdir(binDir, { recursive: true });
-  await Deno.writeTextFile(binPath, nodeGenerateBinSource());
-  await Deno.chmod(binPath, 0o755);
-}
-
-function nodeGenerateBinSource(): string {
-  return String.raw`#!/usr/bin/env node
-const { createHash } = require("node:crypto");
-const fs = require("node:fs");
-const https = require("node:https");
-const os = require("node:os");
-const path = require("node:path");
-const { spawnSync } = require("node:child_process");
-
-const REPO_OWNER = "qlever-llc";
-const REPO_NAME = "trellis";
-const BIN_NAME = "trellis-generate";
-const SUPPORTED_TARGETS = new Set([
-  "x86_64-unknown-linux-gnu",
-  "aarch64-unknown-linux-gnu",
-  "x86_64-apple-darwin",
-  "aarch64-apple-darwin",
-]);
-
-main().catch((error) => {
-  console.error(error);
-  process.exit(1);
-});
-
-async function main() {
-  const packageVersion = readPackageVersion();
-  const binary = (process.env.TRELLIS_GENERATE_BIN || "").trim() ||
-    await ensureCachedReleaseBinary(packageVersion);
-  verifyBinaryVersion(binary, packageVersion);
-  const status = spawnSync(binary, process.argv.slice(2), { stdio: "inherit" });
-  if (status.error) throw status.error;
-  process.exit(status.status ?? 1);
-}
-
-function readPackageVersion() {
-  const manifestPath = path.resolve(__dirname, "../package.json");
-  const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
-  if (typeof manifest.version !== "string" || !manifest.version.trim()) {
-    throw new Error("@qlever-llc/trellis package manifest does not declare a version");
-  }
-  return manifest.version.trim();
-}
-
-async function ensureCachedReleaseBinary(version) {
-  const target = releaseTarget();
-  const cacheDir = path.join(cacheRoot(), version, target);
-  const binary = path.join(cacheDir, BIN_NAME);
-  if (fs.existsSync(binary)) return binary;
-
-  fs.mkdirSync(cacheDir, { recursive: true });
-  const tag = "v" + version;
-  const archiveName = BIN_NAME + "-" + tag + "-" + target + ".tar.gz";
-  const checksumName = "checksum-" + tag + "-" + target + "-" + BIN_NAME + ".sha256";
-  const releaseBase = "https://github.com/" + REPO_OWNER + "/" + REPO_NAME + "/releases/download/" + tag;
-  const [archive, checksumText] = await Promise.all([
-    downloadBytes(releaseBase + "/" + archiveName),
-    downloadText(releaseBase + "/" + checksumName),
-  ]);
-  verifyChecksum(archive, checksumText, archiveName);
-
-  const archivePath = path.join(cacheDir, archiveName);
-  fs.writeFileSync(archivePath, archive);
-  const extract = spawnSync("tar", ["-xzf", archivePath, "-C", cacheDir], { stdio: "inherit" });
-  if (extract.error) throw extract.error;
-  if (extract.status !== 0) throw new Error("tar failed with exit code " + extract.status);
-  fs.chmodSync(binary, 0o755);
-  return binary;
-}
-
-function releaseTarget() {
-  const arch = os.arch() === "x64" ? "x86_64" : os.arch() === "arm64" ? "aarch64" : os.arch();
-  const platform = os.platform() === "darwin" ? "apple-darwin" : os.platform() === "linux" ? "unknown-linux-gnu" : undefined;
-  const target = platform ? arch + "-" + platform : undefined;
-  if (target && SUPPORTED_TARGETS.has(target)) return target;
-  throw new Error("no " + BIN_NAME + " release binary is available for " + os.platform() + " " + os.arch());
-}
-
-function cacheRoot() {
-  if ((process.env.TRELLIS_GENERATE_CACHE || "").trim()) return process.env.TRELLIS_GENERATE_CACHE.trim();
-  if ((process.env.XDG_CACHE_HOME || "").trim()) return path.join(process.env.XDG_CACHE_HOME.trim(), "trellis", BIN_NAME);
-  if ((process.env.LOCALAPPDATA || "").trim()) return path.join(process.env.LOCALAPPDATA.trim(), "trellis", BIN_NAME);
-  if ((process.env.HOME || "").trim()) return path.join(process.env.HOME.trim(), ".cache", "trellis", BIN_NAME);
-  throw new Error("HOME, LOCALAPPDATA, or TRELLIS_GENERATE_CACHE must be set to cache trellis-generate");
-}
-
-function downloadBytes(url) {
-  return new Promise((resolve, reject) => {
-    https.get(url, (response) => {
-      if (response.statusCode >= 300 && response.statusCode < 400 && response.headers.location) {
-        resolve(downloadBytes(response.headers.location));
-        return;
-      }
-      if (response.statusCode !== 200) {
-        reject(new Error("failed to download " + url + ": HTTP " + response.statusCode));
-        response.resume();
-        return;
-      }
-      const chunks = [];
-      response.on("data", (chunk) => chunks.push(chunk));
-      response.on("end", () => resolve(Buffer.concat(chunks)));
-    }).on("error", reject);
-  });
-}
-
-async function downloadText(url) {
-  return (await downloadBytes(url)).toString("utf8");
-}
-
-function verifyChecksum(bytes, checksumText, label) {
-  const expected = checksumText.trim().split(/\s+/)[0]?.toLowerCase();
-  if (!expected || !/^[0-9a-f]{64}$/.test(expected)) {
-    throw new Error("release checksum asset did not contain a SHA-256 digest");
-  }
-  const actual = createHash("sha256").update(bytes).digest("hex");
-  if (actual !== expected) {
-    throw new Error("checksum mismatch for " + label + ": expected " + expected + ", got " + actual);
-  }
-}
-
-function verifyBinaryVersion(binary, expectedVersion) {
-  const output = spawnSync(binary, ["--version"], { encoding: "utf8" });
-  if (output.error) throw output.error;
-  if (output.status !== 0) throw new Error("failed to run " + binary + " --version");
-  const text = (output.stdout || "").trim();
-  const actualVersion = text.split(/\s+/).find((part) => /^v?\d+\.\d+\.\d+/.test(part));
-  if (!actualVersion || normalizeVersion(actualVersion) !== normalizeVersion(expectedVersion)) {
-    throw new Error(binary + " is " + (text || "unknown version") + "; expected " + BIN_NAME + " " + expectedVersion);
-  }
-}
-
-function normalizeVersion(version) {
-  return version.trim().replace(/^v/, "").split("+")[0];
-}
-`;
-}
-
-await stageGeneratedSdks();
 
 await buildDntPackage({
   buildRoot: "../../..",
@@ -702,13 +254,6 @@ await buildDntPackage({
     "./ts/packages/trellis/contracts.ts",
     "./ts/packages/trellis/device.ts",
     "./ts/packages/trellis/device/deno.ts",
-    "./ts/packages/trellis/generate.ts",
-    "./ts/packages/trellis/sdk/auth.ts",
-    "./ts/packages/trellis/sdk/core.ts",
-    "./ts/packages/trellis/sdk/eventlog.ts",
-    "./ts/packages/trellis/sdk/health.ts",
-    "./ts/packages/trellis/sdk/jobs.ts",
-    "./ts/packages/trellis/sdk/state.ts",
     "./ts/packages/trellis/errors/index.ts",
     "./ts/packages/trellis/service/mod.ts",
     "./ts/packages/trellis/service/drizzle.ts",
@@ -788,11 +333,5 @@ for (const format of ["esm", "script"]) {
 }
 
 await normalizeModuleSpecifiers();
-await stageCanonicalGeneratedSdkArtifacts();
-await rewriteCanonicalGeneratedSdkSelfImports();
-await removeSdkWrapperPolyfills();
-await rewriteSdkWrapperTargets();
 await removeBrowserGraphDntPolyfills();
-await stageNodeGenerateBin();
 await normalizePackageJsonExports();
-await Deno.remove(generatedSdkBuildUrl, { recursive: true });

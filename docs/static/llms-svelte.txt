@@ -110,7 +110,7 @@ records, declare `Auth.Users.Resolve` and resolve explicit ids. Do not request
 
 ```ts
 import { defineAppContract } from "@qlever-llc/trellis";
-import { sdk as orders } from "#trellis-generated-sdk/orders";
+import * as orders from "@trellis/apis/acme.orders";
 
 const contract = defineAppContract(() => ({
   id: "acme.dashboard@v1",
@@ -152,4 +152,4 @@ packages, and Vite. Keep those resolver layers explicit:
 
 Use the format, typecheck, lint, test, run, and migration commands configured by
 the app repository. If contract artifacts or generated SDKs changed, run
-`deno task prepare` and commit the generated outputs expected by that repo.
+`trellis install` and commit `trellis.lock`; `.trellis` output remains disposable.

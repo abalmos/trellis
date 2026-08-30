@@ -1,7 +1,7 @@
 <script lang="ts">
   import { isErr } from "@qlever-llc/result";
   import { loadSessionKey } from "@qlever-llc/trellis/auth/browser";
-  import type { AuthSessionsRevokeInput } from "@qlever-llc/trellis/sdk/auth";
+  import type { AuthSessionsRevokeInput } from "@trellis/apis/trellis.auth";
   import { goto } from "$app/navigation";
   import { resolve } from "$app/paths";
   import { page } from "$app/state";

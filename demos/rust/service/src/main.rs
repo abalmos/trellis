@@ -2085,7 +2085,7 @@ fn download_transfer_to_response(grant: DownloadTransferGrant) -> EvidenceDownlo
             key: grant.info.key,
             size: grant.info.size as i64,
             updated_at: grant.info.updated_at,
-            digest: Some(grant.info.digest),
+            digest: grant.info.digest,
             content_type: grant.info.content_type,
             metadata: grant
                 .info

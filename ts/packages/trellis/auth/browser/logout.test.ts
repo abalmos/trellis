@@ -1,7 +1,7 @@
 import { AsyncResult } from "@qlever-llc/result";
 import { assert, assertEquals, assertRejects } from "@std/assert";
 
-import type { AuthSessionsLogoutOutput } from "../../sdk/auth.ts";
+import type { AuthSessionsLogoutOutput } from "../../internal_sdk/generated/auth/mod.ts";
 import { completeSessionLogout, logoutSession } from "./logout.ts";
 import {
   clearSessionKey,

@@ -26,12 +26,12 @@ If you are using Node.js instead, use `npm`:
 npm install @qlever-llc/trellis @sinclair/typebox
 ```
 
-Add a prepare task for generated SDKs and contract artifacts:
+Add an install task for generated SDKs and contract artifacts:
 
 ```json
 {
   "tasks": {
-    "prepare": "deno run -A @qlever-llc/trellis/generate prepare ."
+    "install": "trellis install"
   }
 }
 ```
@@ -67,8 +67,8 @@ ulid = "1.2"
 trellis-contracts = "0.10"
 trellis-rs = "0.10"
 
-# Add this after the first prepare run creates the generated SDK crate.
-trellis-sdk-orders-service = { path = "generated/packages/cargo/orders-service" }
+# Add this after the first `trellis install` creates the generated SDK crate.
+trellis-apis = { path = ".trellis/generated/rust/trellis-apis" }
 ```
 
 In the Trellis monorepo, these dependencies are workspace dependencies instead of published versions. Standalone services should use the published crate versions or a `[patch]` that points at a local Trellis checkout during development.

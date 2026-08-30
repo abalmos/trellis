@@ -16,7 +16,7 @@ use trellis_rs::auth::{
 use trellis_rs::client::OperationState as ClientOperationState;
 use trellis_rs::client::{EventDescriptor, MemoryAuthorizationContextStore, RpcDescriptor};
 use trellis_rs::generated::Caller;
-use trellis_rs::sdk::auth as auth_sdk;
+use trellis_rs::internal_sdk::auth as auth_sdk;
 use trellis_rs::service::{
     ConnectedServiceRuntime, ServiceEventListenOptions, ServiceEventListenerMode,
 };
@@ -463,8 +463,8 @@ async fn local_login_binds_approved_client_and_calls_authorized_rpc() {
     assert_runtime_case_registered("auth.local-login-binds-approved-client", "auth", "auth");
     let mut fixture = start_fixture(None, false).await;
     let auth_api = trellis_test::TrellisTestContract::from_native_api_json(
-        trellis_rs::sdk::auth::API_ID,
-        trellis_rs::sdk::auth::API_JSON,
+        trellis_rs::internal_sdk::auth::API_ID,
+        trellis_rs::internal_sdk::auth::API_JSON,
         trellis_rs::contracts::ContractKind::Service,
     )
     .expect("build Auth API reference");
@@ -484,7 +484,7 @@ async fn local_login_binds_approved_client_and_calls_authorized_rpc() {
             )
             .use_ref(
                 "auth",
-                trellis_rs::contracts::use_contract(trellis_rs::sdk::auth::API_ID)
+                trellis_rs::contracts::use_contract(trellis_rs::internal_sdk::auth::API_ID)
                     .with_rpc_call(["Auth.Sessions.Me"]),
             ),
             &[&fixture.service_contract, &auth_api],

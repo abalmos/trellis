@@ -4,7 +4,7 @@
     AuthDeviceUserAuthoritiesReviewsDecideInput,
     AuthDeviceUserAuthoritiesReviewsListOutput,
     AuthDevicesListOutput,
-  } from "@qlever-llc/trellis/sdk/auth";
+  } from "@trellis/apis/trellis.auth";
   import { page } from "$app/state";
   import { onMount } from "svelte";
   import ConfirmationModal from "$lib/components/ConfirmationModal.svelte";

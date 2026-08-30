@@ -13,8 +13,8 @@ close to out-of-tree development as possible while remaining in this repository.
 - `demos/rust`: the Rust Field Ops service and field-device TUI Cargo workspace.
 
 The TypeScript and Rust service/device contracts are authored in source code and
-are checked for canonical parity in the Rust generator tests. The shared browser
-app consumes the generated demo service SDK from `demos/ts/generated`.
+are checked for canonical parity in the Rust generation tests. The shared
+browser app installs the demo service API into its own `.trellis` directory.
 
 ## Browser App
 
@@ -23,7 +23,6 @@ participants. It consumes generated demo service SDKs and can be used with the
 TypeScript or Rust service/device implementations.
 
 ```sh
-deno task -c demos/app/deno.json prepare
 deno task -c demos/app/deno.json check
 deno task -c demos/app/deno.json dev
 ```
@@ -50,7 +49,7 @@ See `demos/ts/README.md` for the complete walkthrough.
 Rust demo tasks:
 
 ```sh
-cargo run --manifest-path rust/tools/generate/Cargo.toml -- prepare demos/rust
+cargo xtask install
 cargo test --manifest-path demos/rust/Cargo.toml --workspace
 cargo run --manifest-path demos/rust/Cargo.toml -p trellis-rust-demo-service
 cargo run --manifest-path demos/rust/Cargo.toml -p trellis-rust-demo-device

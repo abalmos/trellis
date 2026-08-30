@@ -21,7 +21,7 @@ use super::TrellisAuthError;
 #[cfg(feature = "test-support")]
 use crate::client::MemoryAuthorizationContextStore;
 use crate::client::SessionAuth;
-use crate::sdk::auth::AuthClient;
+use crate::internal_sdk::auth::AuthClient;
 
 pub(crate) const DETACHED_LOGIN_POLL_INTERVAL: Duration = Duration::from_secs(2);
 
@@ -46,11 +46,11 @@ fn administration_participant() -> Result<AdministrationParticipant, TrellisAuth
         "../../artifacts/trellis.admin.participant.json"
     ))?;
     let participant = parse_participant(&participant_value)?;
-    let api_value: Value = serde_json::from_str(crate::sdk::auth::api::API_JSON)?;
+    let api_value: Value = serde_json::from_str(crate::internal_sdk::auth::api::API_JSON)?;
     let api = parse_api(&api_value)?;
     let mut apis = BTreeMap::new();
     apis.insert(api.id().to_owned(), api.clone());
-    let state_api_value: Value = serde_json::from_str(crate::sdk::state::api::API_JSON)?;
+    let state_api_value: Value = serde_json::from_str(crate::internal_sdk::state::api::API_JSON)?;
     let state_api = parse_api(&state_api_value)?;
     apis.insert(state_api.id().to_owned(), state_api);
     let resolved = resolve_participant(&participant, &apis)?;

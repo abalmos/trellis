@@ -12,11 +12,11 @@ members = [
   "crates/protocol-wasm",
   "crates/codegen-ts",
   "crates/codegen-rust",
-  "crates/generate-runner",
   "crates/cli",
   "crates/runtime",
+  "tools/generate",
+  "xtask",
 ]
-exclude = ["tools/generate"]
 default-members = [
   "crates/trellis",
   "crates/local-bootstrap",
@@ -29,11 +29,16 @@ default-members = [
   "crates/protocol",
   "crates/codegen-ts",
   "crates/codegen-rust",
-  "crates/generate-runner",
   "crates/cli",
   "crates/runtime",
+  "tools/generate",
+  "xtask",
 ]
 resolver = "2"
+
+[patch.crates-io]
+trellis-contracts = { path = "crates/contracts" }
+trellis-rs = { path = "crates/trellis" }
 
 [workspace.package]
 version = "0.12.0"

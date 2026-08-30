@@ -28,24 +28,13 @@ git clone https://github.com/qlever-llc/trellis.git
 cd trellis
 ```
 
-Generate contract artifacts from a clean checkout:
+Install API dependencies and generate contract artifacts from a clean checkout:
 
 ```sh
-cd js
-deno task prepare
-cd ..
+cargo xtask install
 ```
 
-`deno task prepare` is bootstrap-safe because it runs through `trellis-generate`; you do not need a running Trellis instance to generate SDKs and manifests. Rust-first workflows can run the same repo-local generation step with `cargo xtask prepare`.
-
-During active contract work, run a watcher in a separate terminal:
-
-```sh
-cd js
-deno task prepare:watch
-```
-
-The Rust workspace exposes the same workflow as `cargo xtask prepare-watch`.
+Installation is bootstrap-safe; you do not need a running Trellis instance to generate SDKs and manifests.
 
 ## 3. Start the Trellis runtime
 
@@ -89,7 +78,7 @@ Open `http://localhost:5173` for Console UI development. Console cannot complete
 
 - **Runtime changes**: edit files under `rust/crates/runtime/`; rebuild and restart the `trellis server` process after changes.
 - **Console changes**: edit files under `ts/apps/console/`; Vite HMR applies changes in place.
-- **Contract changes**: run `cd js && deno task prepare`, or keep `cd js && deno task prepare:watch` running.
+- **Contract changes**: run `cargo xtask install`.
 - **CLI changes**: run `cargo build -p trellis-cli` in the `rust/` directory, then re-run `trellis ...` commands.
 - **Type checking**: run `deno task -c ts/deno.json check`.
 - **Tests**: run `deno task -c ts/deno.json test:contracts` or `deno task -c ts/deno.json test:auth`.

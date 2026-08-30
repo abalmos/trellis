@@ -11,7 +11,7 @@ the raw docs index:
 
 ```typescript
 import { defineAppContract, TrellisClient } from "@qlever-llc/trellis";
-import { sdk as auth } from "@qlever-llc/trellis/sdk/auth";
+import * as auth from "@trellis/apis/trellis.auth";
 
 const app = defineAppContract(() => ({
   id: "example.app@v1",

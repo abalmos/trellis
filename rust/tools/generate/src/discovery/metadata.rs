@@ -308,7 +308,7 @@ export default defineAppContract({ id: "trellis.app-participant@v1", apiId: "tre
             contracts.join("audit_app.ts"),
             concat!(
                 "import { defineAppContract } from '@qlever-llc/trellis/contracts';\n",
-                "import { auth } from '@qlever-llc/trellis/sdk/auth';\n",
+                "import { auth } from '@trellis/apis/trellis.auth';\n",
                 "export const auditApp = defineAppContract(() => ({\n",
                 "  id: \"trellis.audit-app-participant@v1\",\n",
                 "  apiId: \"trellis.audit-app@v1\",\n",

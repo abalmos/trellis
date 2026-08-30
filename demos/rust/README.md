@@ -5,7 +5,8 @@ from the TypeScript demo so they resemble out-of-tree Rust consumers.
 
 - `contracts/service.rs`: Rust-authored service contract manifest.
 - `contracts/device.rs`: Rust-authored device contract manifest.
-- `generated/packages/cargo/demo-service`: generated Rust demo service SDK.
+- `.trellis/generated/packages/cargo/demo-service`: generated Rust demo service
+  SDK.
 - `service`: Rust Field Ops service.
 - `device`: Rust field-device wizard CLI.
 
@@ -13,13 +14,13 @@ The Rust and TypeScript demo contracts are expected to produce the same
 canonical service/device manifests and digests. The parity test lives in
 `rust/tools/generate/tests/demo_contract_parity_test.rs`.
 
-## Prepare
+## Install
 
 From the repository root:
 
 ```sh
-cargo run --manifest-path rust/tools/generate/Cargo.toml --bin trellis-generate -- prepare demos/rust
-cargo test --manifest-path rust/tools/generate/Cargo.toml --test demo_contract_parity_test
+cargo xtask install
+cargo test --manifest-path rust/Cargo.toml -p trellis-generation --test demo_contract_parity_test
 cargo test --manifest-path demos/rust/Cargo.toml --workspace
 ```
 

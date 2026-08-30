@@ -1,5 +1,6 @@
 //! Trellis CLI library entrypoints and shared support code.
 
+#[cfg(feature = "runtime")]
 pub mod app;
 pub mod cli;
 pub mod oci;

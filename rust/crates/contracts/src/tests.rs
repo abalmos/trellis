@@ -251,7 +251,7 @@ fn representative_native_cases() -> Vec<(&'static str, ContractArtifacts)> {
     .referenced_api(
         "trellis.state@v1",
         serde_json::from_str(include_str!(
-            "../../../../generated/protocol/apis/trellis.state@v1.json"
+            "../../runtime/.trellis/generated/protocol/apis/trellis.state@v1.json"
         ))
         .unwrap(),
     )

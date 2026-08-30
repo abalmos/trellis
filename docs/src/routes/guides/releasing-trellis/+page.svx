@@ -92,7 +92,7 @@ cargo fmt --manifest-path rust/tools/generate/Cargo.toml --check
 cargo fmt --manifest-path rust/xtask/Cargo.toml --check
 ```
 
-When generated artifacts are affected, run the relevant prepare command first, then verify generated Rust formatting with:
+When generated artifacts are affected, run `cargo xtask install` first, then verify generated Rust formatting with:
 
 ```sh
 cargo fmt --manifest-path rust/Cargo.toml --all --check
@@ -123,7 +123,7 @@ The GitHub `Release` workflow runs the same Rust release tooling used locally:
 
 The normal release path is a `release/vX.Y.Z` or `release/vX.Y.Z-rc.1` branch marker. The workflow prepares the release workspace once, uploads it as an artifact, and reuses it for package checks, CLI binary builds, image verification, and publication. Formatting, lint/type checks, library tests, generated freshness, and live integration remain the responsibility of the normal `Check` workflow and are not rerun by Release. After the release gate passes, GitHub Actions creates an unsigned lightweight release tag on the marked commit and publishes from the already verified artifacts. If the gate fails, no release tag is created and the same version can be retried. Pull request runs verify release metadata and packages, but skip tag-dependent CLI and image jobs.
 
-The `Deploy Site to GitHub Pages` workflow is separate from release publishing. It builds the released and current guide/console sites, prefers a cached or published `trellis-generate` binary for speed, and falls back to building `trellis-generate` from source when the matching release asset is not available yet. This avoids races while a new release tag is still building its CLI assets.
+The `Deploy Site to GitHub Pages` workflow is separate from release publishing. It installs each worktree's locked APIs from source before building the released and current guide and Console sites.
 
 The JSR publish set is:
 
@@ -251,38 +251,38 @@ Keep the release commit limited to the release preparation listed below. If it
 changes product behavior, return that change to `rs`, obtain a new successful
 `Check`, and rebuild the release commit from that base.
 
-For focused package confidence before pushing the release marker, prepare once
+For focused package confidence before pushing the release marker, install once
 and run the same package-specific checks used by the Release workflow:
 
 ```sh
-cargo run --manifest-path xtask/Cargo.toml -- prepare
+cargo xtask install
 cargo run --manifest-path rust/xtask/Cargo.toml -- protocol-wasm
 cargo package --manifest-path rust/Cargo.toml --workspace --allow-dirty \
   --exclude trellis-local-bootstrap --exclude trellis-bootstrap \
   --exclude trellis-local-nats --exclude trellis-jobs-runtime \
   --exclude trellis-eventlog-runtime --exclude trellis-test \
   --exclude trellis-protocol-wasm --exclude trellis-codegen-ts \
-  --exclude trellis-codegen-rust --exclude trellis-generate-runner \
+  --exclude trellis-codegen-rust --exclude trellis-generation \
   --exclude trellis-cli --exclude trellis-runtime
-deno task -c ts/deno.json packages:build:npm:prepared
-deno task -c ts/deno.json test:prepared:packaging:built
+deno task -c ts/deno.json packages:build:npm:installed
+deno task -c ts/deno.json test:packaging:built
 bash scripts/release-ts-dry-run.sh
 ```
 
 Rust uses the current stable toolchain only. New workspace members must inherit
 `[lints] workspace = true`; the normal `Check` workflow enforces that policy.
 
-For focused local Deno loops after a single prepare, use the prepared partitions instead of rerunning generation before every slice:
+For focused local Deno loops after one repository install, use the prepared partitions instead of rerunning installation before every slice:
 
 ```sh
-deno task -c ts/deno.json prepare
-deno task -c ts/deno.json test:prepared:result
-deno task -c ts/deno.json test:prepared:trellis
-deno task -c ts/deno.json test:prepared:trellis-svelte
-deno task -c ts/deno.json test:prepared:trellis-test
-deno task -c ts/deno.json test:prepared:ui-tools
+cargo xtask install
+deno task -c ts/deno.json test:result
+deno task -c ts/deno.json test:trellis
+deno task -c ts/deno.json test:trellis-svelte
+deno task -c ts/deno.json test:trellis-test
+deno task -c ts/deno.json test:ui-tools
 deno task -c ts/deno.json packages:build:npm
-deno task -c ts/deno.json test:prepared:packaging:built
+deno task -c ts/deno.json test:packaging:built
 ```
 
 The prepared partitions are the non-integration Deno release-test set. Keep
@@ -290,11 +290,10 @@ TypeScript client-library integration coverage in `deno task -c ts/deno.json
 test:integration` so live integration tests (which run NATS as a managed
 binary) run only in the intended integration suite.
 
-Also run generated-artifact preparation when contracts, generated SDKs, runtime surfaces, or release packaging can be affected:
+Also run repository installation when contracts, generated SDKs, runtime surfaces, or release packaging can be affected:
 
 ```sh
-cargo run --manifest-path xtask/Cargo.toml -- prepare
-cargo run --manifest-path rust/xtask/Cargo.toml -- prepare
+cargo xtask install
 ```
 
 If the guide site changed, also run:
@@ -323,7 +322,7 @@ Make sure the release commit includes only the intended release preparation, typ
 
 - `CHANGELOG.md`
 - release-managed version bumps for a stable release
-- generated artifacts refreshed by `xtask prepare`, if applicable
+- generated artifacts refreshed by `cargo xtask install`, if applicable
 - docs, release tooling, or workflow fixes that must ship with the release
 
 Then commit the release preparation:

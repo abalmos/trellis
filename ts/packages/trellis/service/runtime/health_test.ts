@@ -2,7 +2,7 @@ import { assert, assertEquals } from "@std/assert";
 import Value from "typebox/value";
 import { createHealthHeartbeatSample, ServiceHealthRuntime } from "./health.ts";
 import { HealthResponseSchema } from "./health_schemas.ts";
-import { HealthHeartbeatSampleSchema } from "../../sdk/_generated/health/schemas.ts";
+import { HealthHeartbeatSampleSchema } from "../../internal_sdk/generated/health/schemas.ts";
 import { healthHeartbeatSubject } from "../../health_transport.ts";
 
 Deno.test("createHealthHeartbeatSample includes participant metadata", () => {

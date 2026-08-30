@@ -6,7 +6,7 @@ use qrcode::{render::unicode, QrCode};
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
 use trellis_rs::auth as authlib;
-use trellis_rs::sdk::auth::types as auth_types;
+use trellis_rs::internal_sdk::auth::types as auth_types;
 
 pub(crate) fn render_agent_login_instructions(login_url: &str) -> miette::Result<String> {
     let qr = QrCode::new(login_url.as_bytes()).into_diagnostic()?;

@@ -3,7 +3,7 @@ import {
   state,
   type TrellisConnectionStatus,
 } from "@qlever-llc/trellis";
-import { AuthSessionsMe } from "@qlever-llc/trellis/sdk/auth";
+import { AuthSessionsMe } from "@trellis/apis/trellis.auth";
 import { Type } from "typebox";
 import type { TrellisProviderProps } from "./components/TrellisProvider.types.ts";
 import {

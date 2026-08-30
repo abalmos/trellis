@@ -3,8 +3,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use futures_util::future::BoxFuture;
 use serde_json::{json, Value};
 use trellis_rs::client::SessionAuth;
-use trellis_rs::sdk::auth::operations::AuthDeviceUserAuthoritiesResolveOperation;
-use trellis_rs::sdk::auth::types::{
+use trellis_rs::internal_sdk::auth::operations::AuthDeviceUserAuthoritiesResolveOperation;
+use trellis_rs::internal_sdk::auth::types::{
     AuthDeviceUserAuthoritiesResolveInput, AuthDeviceUserAuthoritiesResolveOutput,
     AuthDeviceUserAuthoritiesResolveProgress,
 };

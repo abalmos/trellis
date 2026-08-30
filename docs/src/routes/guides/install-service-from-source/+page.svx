@@ -27,18 +27,18 @@ trellis whoami
 
 ## 2. Prepare local generated artifacts
 
-Before creating the deployment, run the repo-local prepare task for the service source tree so the local `contracts/` directory and generated artifacts are refreshed using `trellis-generate`.
+Before creating the deployment, run installation from the service source tree so locked APIs and generated artifacts are current.
 
 For Deno workspace repos:
 
 ```sh
-deno task prepare
+trellis install
 ```
 
 For Rust workspace repos:
 
 ```sh
-cargo xtask prepare
+trellis install
 ```
 
 ## 3. Create from source
@@ -133,7 +133,7 @@ Trellis derives service access from:
 ## Development loop
 
 1. update schemas and the `defineServiceContract(...)` module
-2. run the repo-local prepare task (`deno task prepare` or `cargo xtask prepare`)
+2. run `trellis install`
 3. run `trellis svc my-service apply --source /path/to/my-service`
 4. review and accept or reject any pending authority change in Console; `mutable-dev` migrations may already be accepted history
 5. restart the service after reconciliation has materialized required bindings

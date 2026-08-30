@@ -25,7 +25,7 @@ use auth::{
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine as _;
 use trellis_rs::client::SessionAuth;
-use trellis_rs::sdk::auth as trellis_sdk_auth;
+use trellis_rs::internal_sdk::auth as trellis_sdk_auth;
 use trellis_rs::service::Router;
 
 use crate::shutdown::StopHandle;

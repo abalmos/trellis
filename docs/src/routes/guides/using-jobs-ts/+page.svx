@@ -374,7 +374,7 @@ durable state and external side effects.
 ## Development loop
 
 1. Update job schemas and the contract's top-level `jobs` map
-2. Rebuild contract artifacts: `deno task prepare`
+2. Rebuild contract artifacts: `trellis install`
 3. Review and accept or reject the pending service authority change in Console if queues changed; use `trellis svc <service-id> authority plan list` and `authority plan show <PLAN_ID>` only for local or automation fallback
 4. Restart the service
 

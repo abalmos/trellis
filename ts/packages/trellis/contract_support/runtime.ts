@@ -156,8 +156,8 @@ export type OperationDesc<
   declaredErrorTypes?: readonly string[];
   transfer?: {
     direction: "send";
-    store: string;
-    key: `/${string}`;
+    store?: string;
+    key?: `/${string}`;
     contentType?: `/${string}`;
     metadata?: `/${string}`;
     expiresInMs?: number;

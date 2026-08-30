@@ -16,13 +16,13 @@ https://raw.githubusercontent.com/qlever-llc/trellis/main/docs/static/llms-full.
   remain stable under `trellis_apis::<module>` across release updates. Install
   verifies exact API ID, release, semantic digest, and remote OCI digest and never
   executes provider source.
-- Expose contract/artifact generation through `cargo xtask prepare`.
+- Expose repository contract/artifact installation through `cargo xtask install`.
 - Commit the generated SDKs, participant facades, manifests, and package outputs
   expected by the repository. Never edit generated files by hand.
 - Public contract object schemas are open by default. Omit
   `additionalProperties`; use `false` only for a documented proof/security
   boundary that must reject unknown fields.
-- Run prepare after contract/schema changes. Generated owner and participant
+- Run `trellis install` after contract/schema changes. Generated owner and participant
   Cargo crates are materialized source with relative local dependencies and no
   generator `build.rs`.
 
@@ -372,14 +372,8 @@ idempotent.
   workspace doctests exactly once, and verifies lint-policy participation for
   every workspace crate. Trellis supports the current stable Rust toolchain; no
   older compiler compatibility is promised.
-  Run `cargo xtask prepare` when generated artifacts change.
-  Run `cargo xtask prepare --timings` to diagnose generation performance from
-  phase and per-contract resolution times, subprocess counts, cache validation,
-  generation outcomes, and installed file/byte totals. Prepare's persistent
-  resolution cache is repository-namespaced, disposable, and stored in the user
-  cache directory unless `TRELLIS_PREPARE_CACHE` overrides it. `--force`
-  bypasses it. Contract resolution must be deterministic from tracked source;
-  declare exceptional inputs under `[package.metadata.trellis.prepare]` with
-  `inputs = ["relative/glob/**"]` and `env = ["VARIABLE_NAME"]`. Undeclared
-  time, randomness, network, environment, and external-file inputs are
-  unsupported.
+  Run `cargo xtask install` when contracts or dependencies change.
+   Measure `cargo xtask install` to diagnose installation performance; a warm run
+   reports `Installed 0 changes` for every unchanged project. Contract resolution must
+   be deterministic from tracked source; undeclared time, randomness, network,
+   environment, and external-file inputs are unsupported.

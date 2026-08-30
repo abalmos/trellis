@@ -2,7 +2,7 @@ import { AsyncResult, BaseError, isErr } from "@qlever-llc/result";
 import type {
   JobsMetricsInput,
   JobsMetricsOutput,
-} from "@qlever-llc/trellis/sdk/jobs";
+} from "@trellis/apis/trellis.jobs";
 
 export type JobsMetrics = JobsMetricsOutput;
 

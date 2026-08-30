@@ -13,7 +13,7 @@ use trellis_rs::jobs::types::{
 use trellis_rs::jobs::JobsRuntime;
 use trellis_rs::jobs::{is_terminal, job_event_subject, reduce_job_event};
 
-use trellis_rs::sdk::jobs::types::{
+use trellis_rs::internal_sdk::jobs::types::{
     JobsCancelRequest, JobsCancelResponse, JobsDismissDLQRequest, JobsDismissDLQResponse,
     JobsGetKeyRequest, JobsGetKeyResponse, JobsGetKeyResponseActiveItem,
     JobsGetKeyResponseQueuedItem, JobsInspectRequest, JobsInspectResponse,
@@ -1003,7 +1003,7 @@ fn parse_metrics_group_by(value: &str) -> Result<JobsWorkbenchGroupBy, JobsQuery
 }
 
 fn parse_workbench_sort(
-    sort: Option<&trellis_rs::sdk::jobs::types::JobsQueryRequestSort>,
+    sort: Option<&trellis_rs::internal_sdk::jobs::types::JobsQueryRequestSort>,
 ) -> Result<JobsWorkbenchSort, JobsQueryError> {
     let Some(sort) = sort else {
         return Ok(JobsWorkbenchSort::default());

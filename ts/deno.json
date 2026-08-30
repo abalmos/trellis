@@ -9,49 +9,47 @@
     "./portals/login"
   ],
   "tasks": {
-    "prepare": "deno run -A @qlever-llc/trellis/generate prepare ..",
-    "prepare:watch": "deno run -A @qlever-llc/trellis/generate prepare --watch ..",
+    "install": "cargo run --manifest-path ../rust/xtask/Cargo.toml -- install",
     "protocol:wasm": "cargo run --manifest-path ../rust/xtask/Cargo.toml -- protocol-wasm",
-    "prepare:runtime": "deno task prepare && deno task protocol:wasm && deno task -c portals/login/deno.json build:embedded",
+    "build:runtime": "deno task install && deno task protocol:wasm && deno task -c portals/login/deno.json build:embedded",
     "packages:build:npm": "deno task -c packages/result/deno.json build:npm && deno task -c packages/trellis/deno.json build:npm && deno task -c packages/trellis-svelte/deno.json build:npm",
-    "packages:build:npm:prepared": "deno task -c packages/result/deno.json build:npm && deno task -c packages/trellis/deno.json build:npm:prepared && deno task -c packages/trellis-svelte/deno.json build:npm",
+    "packages:build:npm:installed": "deno task -c packages/result/deno.json build:npm && deno task -c packages/trellis/deno.json build:npm:installed && deno task -c packages/trellis-svelte/deno.json build:npm",
     "smoke:npm": "deno run -A tools/package_build/npm_smoke.ts",
     "check:npm-release": "deno task build:npm && deno task smoke:npm",
-    "build:npm": "deno task prepare && deno task packages:build:npm",
-    "check": "deno task prepare && deno task protocol:wasm && deno check packages/trellis/index.ts packages/trellis-svelte/src/index.ts packages/trellis-svelte/src/context.svelte.ts packages/trellis-test/index.ts",
-    "check:integration": "deno task prepare && deno task protocol:wasm && deno check -c integration/deno.json integration/all_runner.ts integration/runner.ts integration/matrix_conformance_test.ts integration/_support/runtime.ts integration/authorization_registry/*.integration_test.ts integration/rpc/_fixture.ts integration/rpc/*.integration_test.ts integration/events/_fixture.ts integration/events/*.integration_test.ts integration/operations/_fixture.ts integration/operations/*.integration_test.ts integration/feeds/_fixture.ts integration/feeds/*.integration_test.ts integration/transfer/_fixture.ts integration/transfer/*.integration_test.ts integration/resources/_fixture.ts integration/resources/*.integration_test.ts integration/state/*.integration_test.ts",
+    "build:npm": "deno task install && deno task packages:build:npm",
+    "check": "deno task install && deno task protocol:wasm && deno check packages/trellis/index.ts packages/trellis-svelte/src/index.ts packages/trellis-svelte/src/context.svelte.ts packages/trellis-test/index.ts",
+    "check:integration": "deno task install && deno task protocol:wasm && deno check -c integration/deno.json integration/all_runner.ts integration/runner.ts integration/matrix_conformance_test.ts integration/_support/runtime.ts integration/authorization_registry/*.integration_test.ts integration/rpc/_fixture.ts integration/rpc/*.integration_test.ts integration/events/_fixture.ts integration/events/*.integration_test.ts integration/operations/_fixture.ts integration/operations/*.integration_test.ts integration/feeds/_fixture.ts integration/feeds/*.integration_test.ts integration/transfer/_fixture.ts integration/transfer/*.integration_test.ts integration/resources/_fixture.ts integration/resources/*.integration_test.ts integration/state/*.integration_test.ts",
     "fmt:integration": "deno fmt -c deno.json integration",
-    "test:client-integration": "deno task prepare:runtime && deno run -A -c integration/deno.json integration/runner.ts",
-    "test:integration": "deno task prepare:runtime && deno run -A -c integration/deno.json integration/all_runner.ts",
-    "test:contracts": "deno task prepare && deno task protocol:wasm && deno test -A packages/trellis/contract_support/protocol_test.ts packages/trellis/contract_support/protocol_artifacts_test.ts packages/trellis/contract_support/descriptors_test.ts",
-    "test:auth": "deno task prepare && deno task protocol:wasm && deno test -A packages/trellis/auth/conformance_test.ts packages/trellis/auth/session_auth_test.ts",
-    "test:prepared:result": "deno test -A packages/result",
-    "test:prepared:trellis": "deno test -A packages/trellis",
-    "test:prepared:trellis-svelte": "deno test -A packages/trellis-svelte",
-    "test:prepared:trellis-test": "deno test -A --ignore=packages/trellis-test/tests/fixtures/external-service-repo/integration packages/trellis-test",
-    "test:prepared:packages": {
+    "test:client-integration": "deno task build:runtime && deno run -A -c integration/deno.json integration/runner.ts",
+    "test:integration": "deno task build:runtime && deno run -A -c integration/deno.json integration/all_runner.ts",
+    "test:contracts": "deno task install && deno task protocol:wasm && deno test -A packages/trellis/contract_support/protocol_test.ts packages/trellis/contract_support/protocol_artifacts_test.ts packages/trellis/contract_support/descriptors_test.ts",
+    "test:auth": "deno task install && deno task protocol:wasm && deno test -A packages/trellis/auth/conformance_test.ts packages/trellis/auth/session_auth_test.ts",
+    "test:result": "deno test -A packages/result",
+    "test:trellis": "deno test -A packages/trellis",
+    "test:trellis-svelte": "deno test -A packages/trellis-svelte",
+    "test:trellis-test": "deno test -A --ignore=packages/trellis-test/tests/fixtures/external-service-repo/integration packages/trellis-test",
+    "test:packages": {
       "dependencies": [
-        "test:prepared:result",
-        "test:prepared:trellis",
-        "test:prepared:trellis-svelte",
-        "test:prepared:trellis-test"
+        "test:result",
+        "test:trellis",
+        "test:trellis-svelte",
+        "test:trellis-test"
       ]
     },
-    "test:prepared:ui-tools": "deno test -A --ignore=tools/package_build portals/login tools",
-    "test:prepared": {
+    "test:ui-tools": "deno test -A --ignore=tools/package_build portals/login tools",
+    "test": {
       "dependencies": [
-        "test:prepared:packages",
-        "test:prepared:ui-tools"
+        "test:packages",
+        "test:ui-tools"
       ]
     },
-    "test:browser": "deno task -c portals/login/deno.json build:static && deno test -A browser/*.browser_test.ts",
-    "test:browser:coverage": "TRELLIS_BROWSER_COVERAGE_SOURCEMAP=1 deno task -c portals/login/deno.json build:static && deno test -A browser/*.browser_test.ts && deno task coverage:browser",
+    "test:browser": "deno task -c portals/login/deno.json build:static && deno test -A -c browser/deno.json browser/*.browser_test.ts",
+    "test:browser:coverage": "TRELLIS_BROWSER_COVERAGE_SOURCEMAP=1 deno task -c portals/login/deno.json build:static && deno test -A -c browser/deno.json browser/*.browser_test.ts && deno task coverage:browser",
     "coverage:browser": "deno run -A tools/browser_v8_to_lcov.ts",
     "coverage:browser:merge": "deno run -A tools/browser_v8_to_lcov.ts --append-to ../coverage/live-integration/lcov.info",
-    "test:prepared:packaging": "deno task packages:build:npm:prepared && deno task test:prepared:packaging:built",
-    "test:prepared:packaging:built": "deno test -A packages/trellis/tests/npm_artifact_smoke_test.ts packages/trellis/tests/publishing_targets_test.ts tools/package_build",
-    "trellis": "bash ../scripts/trellis-cli.sh",
-    "trellis-generate": "deno run -A @qlever-llc/trellis/generate"
+    "test:packaging": "deno task packages:build:npm:installed && deno task test:packaging:built",
+    "test:packaging:built": "deno test -A packages/trellis/tests/npm_artifact_smoke_test.ts packages/trellis/tests/publishing_targets_test.ts tools/package_build",
+    "trellis": "bash ../scripts/trellis-cli.sh"
   },
   "imports": {
     "@libsql/client": "npm:@libsql/client@^0.15.15",
@@ -94,12 +92,12 @@
     "@tailwindcss/vite": "npm:@tailwindcss/vite@4.2.4",
     "@types/cookie": "npm:@types/cookie@^1.0.0",
     "@types/node": "npm:@types/node@25.6.0",
-    "@qlever-llc/trellis/sdk/eventlog": "./packages/trellis/sdk/eventlog.ts",
-    "#trellis-generated-sdk/auth": "./../generated/packages/jsr/auth/mod.ts",
-    "#trellis-generated-sdk/core": "./../generated/packages/jsr/trellis-core/mod.ts",
-    "#trellis-generated-sdk/health": "./../generated/packages/jsr/health/mod.ts",
-    "#trellis-generated-sdk/jobs": "./../generated/packages/jsr/jobs/mod.ts",
-    "#trellis-generated-sdk/state": "./../generated/packages/jsr/state/mod.ts",
+    "@trellis/apis/trellis.auth": "./apps/console/.trellis/generated/ts/trellis-apis/trellis.auth.ts",
+    "@trellis/apis/trellis.core": "./integration/.trellis/generated/ts/trellis-apis/trellis.core.ts",
+    "@trellis/apis/trellis.eventlog": "./apps/console/.trellis/generated/ts/trellis-apis/trellis.eventlog.ts",
+    "@trellis/apis/trellis.health": "./apps/console/.trellis/generated/ts/trellis-apis/trellis.health.ts",
+    "@trellis/apis/trellis.jobs": "./apps/console/.trellis/generated/ts/trellis-apis/trellis.jobs.ts",
+    "@trellis/apis/trellis.state": "./packages/trellis-test/.trellis/generated/ts/trellis-apis/trellis.state.ts",
     "acorn": "npm:acorn@^8.16.0",
     "clsx": "npm:clsx@2.1.1",
     "cookie": "npm:cookie@^1.1.1",

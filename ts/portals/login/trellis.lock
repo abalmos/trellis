@@ -1,0 +1,8 @@
+format = 1
+manifest-digest = "HhwdRVc5fNeK847IhjffWS3FKmSnbvw5XookV622WDs"
+
+[[api]]
+id = "trellis.auth@v1"
+version = "1.0.0"
+api-digest = "Fs_nA37wXgMpLRfB7IyYDhIEDUdSl3PdNp6ehnXcV1A"
+path = "../../../rust/crates/runtime/.trellis/generated/protocol/apis/trellis.auth@v1.json"

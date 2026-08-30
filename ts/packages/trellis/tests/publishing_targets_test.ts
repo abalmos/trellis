@@ -11,7 +11,9 @@ async function* walkPublishableSources(
   for await (const entry of Deno.readDir(dir)) {
     const url = new URL(`${entry.name}${entry.isDirectory ? "/" : ""}`, dir);
     if (entry.isDirectory) {
-      if ([".build", "npm", "scripts", "tests"].includes(entry.name)) {
+      if (
+        [".build", ".trellis", "npm", "scripts", "tests"].includes(entry.name)
+      ) {
         continue;
       }
       yield* walkPublishableSources(url);
@@ -44,16 +46,16 @@ Deno.test("workspace npm build task only builds the supported published packages
     "deno task -c packages/result/deno.json build:npm && deno task -c packages/trellis/deno.json build:npm && deno task -c packages/trellis-svelte/deno.json build:npm",
   );
   assertEquals(
-    config.tasks["packages:build:npm:prepared"],
-    "deno task -c packages/result/deno.json build:npm && deno task -c packages/trellis/deno.json build:npm:prepared && deno task -c packages/trellis-svelte/deno.json build:npm",
+    config.tasks["packages:build:npm:installed"],
+    "deno task -c packages/result/deno.json build:npm && deno task -c packages/trellis/deno.json build:npm:installed && deno task -c packages/trellis-svelte/deno.json build:npm",
   );
   assertEquals(
-    config.tasks["test:prepared:packaging"],
-    "deno task packages:build:npm:prepared && deno task test:prepared:packaging:built",
+    config.tasks["test:packaging"],
+    "deno task packages:build:npm:installed && deno task test:packaging:built",
   );
   assertEquals(
     config.tasks["build:npm"],
-    "deno task prepare && deno task packages:build:npm",
+    "deno task install && deno task packages:build:npm",
   );
 });
 
@@ -86,11 +88,11 @@ Deno.test("release workflows use generated package-manager targets", async () =>
 
   assertStringIncludes(
     releaseWorkflow,
-    "deno task -c ts/deno.json packages:build:npm:prepared",
+    "deno task -c ts/deno.json packages:build:npm:installed",
   );
   assertStringIncludes(
     releaseWorkflow,
-    "deno task -c ts/deno.json test:prepared:packaging:built",
+    "deno task -c ts/deno.json test:packaging:built",
   );
   assertStringIncludes(releaseWorkflow, "bash scripts/release-ts-dry-run.sh");
   assertStringIncludes(releaseWorkflow, "--exclude trellis-runtime");
@@ -100,16 +102,10 @@ Deno.test("release workflows use generated package-manager targets", async () =>
   );
   assertEquals(releaseWorkflow.includes("release lane"), false);
   assertEquals(releaseWorkflow.includes("integration/live_runner.ts"), false);
-  assertStringIncludes(
-    releaseWorkflow,
-    "cargo run --manifest-path rust/tools/generate/Cargo.toml -- prepare --no-npm .",
-  );
+  assertStringIncludes(releaseWorkflow, "cargo xtask install");
   const prepareRelease = releaseWorkflow.split("\n  prepare-release:")[1].split(
     "\n  package-rust:",
   )[0];
-  const generateReleaseSdk = prepareRelease.indexOf(
-    "- name: Generate release SDK artifacts",
-  );
   const buildEmbeddedPortal = prepareRelease.indexOf(
     "- name: Build embedded login portal",
   );
@@ -120,12 +116,8 @@ Deno.test("release workflows use generated package-manager targets", async () =>
     prepareRelease,
     "deno task -c ts/portals/login/deno.json build:embedded",
   );
-  assertEquals(generateReleaseSdk < buildEmbeddedPortal, true);
   assertEquals(buildEmbeddedPortal < uploadPreparedRelease, true);
-  assertStringIncludes(
-    releaseWorkflow,
-    `cp "rust/target/\${target}/release/trellis-generate"`,
-  );
+  assertEquals(releaseWorkflow.includes("trellis-generate"), false);
   assertStringIncludes(
     releaseWorkflow,
     "denoland/setup-deno@v2",
@@ -240,23 +232,13 @@ Deno.test("runtime image executes only the Rust server", async () => {
   assertEquals(containerfile.includes("ts/services/trellis"), false);
 });
 
-Deno.test("pages workflow cleans generator fallback temp dirs explicitly", async () => {
+Deno.test("pages workflow installs project APIs in each worktree", async () => {
   const source = await Deno.readTextFile(
     new URL("../../../../.github/workflows/pages.yml", import.meta.url),
   );
 
-  assertEquals(source.includes("trap cleanup_temp RETURN"), false);
-  assertStringIncludes(source, "cleanup_temp");
-  assertStringIncludes(source, "release_worktree_path");
-  assertStringIncludes(source, "release_worktree_created");
-  assertStringIncludes(
-    source,
-    "Published trellis-generate archive is not available",
-  );
-  assertStringIncludes(
-    source,
-    "Published trellis-generate checksum is not available",
-  );
+  assertStringIncludes(source, "cargo xtask install");
+  assertEquals(source.includes("trellis-generate"), false);
   assertStringIncludes(source, "Latest release tag worktree is missing docs");
   assertStringIncludes(
     source,
@@ -288,7 +270,7 @@ Deno.test("release workflow publishes only public Rust crates", async () => {
       "trellis-client",
       "trellis-codegen-rust",
       "trellis-codegen-ts",
-      "trellis-generate-runner",
+      "trellis-generation",
       "trellis-local-bootstrap",
       "trellis-sdk-auth",
       "trellis-sdk-core",
@@ -300,73 +282,13 @@ Deno.test("release workflow publishes only public Rust crates", async () => {
   }
 });
 
-Deno.test("trellis package exports the first-party SDK subpaths", async () => {
+Deno.test("trellis package does not export generated SDK subpaths", async () => {
   const source = await Deno.readTextFile(
     new URL("../deno.json", import.meta.url),
   );
 
-  assertStringIncludes(source, '"./sdk/auth": "./sdk/auth.ts"');
-  assertStringIncludes(source, '"./sdk/core": "./sdk/core.ts"');
-  assertStringIncludes(source, '"./sdk/health": "./sdk/health.ts"');
-  assertStringIncludes(source, '"./sdk/jobs": "./sdk/jobs.ts"');
-  assertStringIncludes(source, '"./sdk/state": "./sdk/state.ts"');
-});
-
-Deno.test("trellis generate wrapper reads package metadata from remote modules", async () => {
-  const packageRoot = new URL("../", import.meta.url);
-  const generateSource = await Deno.readTextFile(
-    new URL("generate.ts", packageRoot),
-  );
-  const packageManifest = await Deno.readTextFile(
-    new URL("deno.json", packageRoot),
-  );
-  const packageVersion = JSON.parse(packageManifest).version as string;
-  const tempDir = await Deno.makeTempDir();
-  const fakeGenerator = `${tempDir}/trellis-generate`;
-  await Deno.writeTextFile(
-    fakeGenerator,
-    `#!/bin/sh
-printf 'trellis-generate ${packageVersion}\n'
-`,
-  );
-  await Deno.chmod(fakeGenerator, 0o755);
-
-  const server = Deno.serve({
-    hostname: "127.0.0.1",
-    port: 0,
-    onListen: () => {},
-  }, (request) => {
-    const url = new URL(request.url);
-    if (url.pathname === "/generate.ts") {
-      return new Response(generateSource, {
-        headers: { "content-type": "application/typescript" },
-      });
-    }
-    if (url.pathname === "/deno.json") {
-      return new Response(packageManifest, {
-        headers: { "content-type": "application/json" },
-      });
-    }
-    return new Response("not found", { status: 404 });
-  });
-
-  try {
-    const output = await new Deno.Command(Deno.execPath(), {
-      args: [
-        "run",
-        "-A",
-        `http://127.0.0.1:${server.addr.port}/generate.ts`,
-        "--version",
-      ],
-      env: { TRELLIS_GENERATE_BIN: fakeGenerator },
-      stdout: "piped",
-      stderr: "piped",
-    }).output();
-
-    assertEquals(output.success, true, decoder.decode(output.stderr));
-  } finally {
-    await server.shutdown();
-    await Deno.remove(tempDir, { recursive: true });
+  for (const subpath of ["auth", "core", "health", "jobs", "state"]) {
+    assertEquals(source.includes(`"./sdk/${subpath}"`), false);
   }
 });
 

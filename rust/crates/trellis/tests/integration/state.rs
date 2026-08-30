@@ -13,7 +13,7 @@ use trellis_rs::client::{
     DeleteStateOptions, ExpectedPutRevision, ListStateOptions, MapStateStore, PutStateOptions,
     StateGetResult, StateValue, ValueStateStore,
 };
-use trellis_rs::sdk::state::types::{
+use trellis_rs::internal_sdk::state::types::{
     StateAdminDeleteRequest, StateAdminGetRequest, StateAdminGetResponse, StateAdminListRequest,
 };
 
@@ -70,18 +70,19 @@ fn state_contract(
             ContractKind::Service,
         ),
     };
-    let mut builder = ContractBuilder::authoring(id, id, display_name, description, kind).use_ref(
-        "state",
-        trellis_rs::contracts::use_contract("trellis.state@v1").with_rpc_call(
-            match fixture {
-                StateFixture::Other => ["State.Delete", "State.Get", "State.Put"].as_slice(),
-                StateFixture::Agent | StateFixture::Service => ["State.Get"].as_slice(),
-                _ => ["State.Delete", "State.Get", "State.List", "State.Put"].as_slice(),
-            }
-            .iter()
-            .copied(),
-        ),
-    );
+    let mut builder = ContractBuilder::authoring(id, id, "1.0.0", display_name, description, kind)
+        .use_ref(
+            "state",
+            trellis_rs::contracts::use_contract("trellis.state@v1").with_rpc_call(
+                match fixture {
+                    StateFixture::Other => ["State.Delete", "State.Get", "State.Put"].as_slice(),
+                    StateFixture::Agent | StateFixture::Service => ["State.Get"].as_slice(),
+                    _ => ["State.Delete", "State.Get", "State.List", "State.Put"].as_slice(),
+                }
+                .iter()
+                .copied(),
+            ),
+        );
     match fixture {
         StateFixture::Service => {}
         StateFixture::Agent => {
@@ -133,8 +134,8 @@ fn state_contract(
         }
     }
     let state_api = trellis_test::TrellisTestContract::from_native_api_json(
-        trellis_rs::sdk::state::API_ID,
-        trellis_rs::sdk::state::API_JSON,
+        trellis_rs::internal_sdk::state::API_ID,
+        trellis_rs::internal_sdk::state::API_JSON,
         ContractKind::Service,
     )?;
     trellis_test::TrellisTestContract::from_builder_with_referenced_contracts(
@@ -245,13 +246,13 @@ async fn connect_clean_client(
             .expect("list persisted State entries");
         for entry in entries.entries {
             let key = match entry {
-                trellis_rs::sdk::state::types::StateAdminListResponseEntriesItem::Variant1 {
+                trellis_rs::internal_sdk::state::types::StateAdminListResponseEntriesItem::Variant1 {
                     key,
                     ..
                 }
-                | trellis_rs::sdk::state::types::StateAdminListResponseEntriesItem::Variant2 {
+                | trellis_rs::internal_sdk::state::types::StateAdminListResponseEntriesItem::Variant2 {
                     entry:
-                        trellis_rs::sdk::state::types::StateAdminListResponseEntriesItemVariant2Entry {
+                        trellis_rs::internal_sdk::state::types::StateAdminListResponseEntriesItemVariant2Entry {
                             key,
                             ..
                         },
@@ -585,7 +586,7 @@ async fn state_value_and_map_conflict_shapes_live() {
     admin
         .revoke_session(
             &bootstrap_url,
-            &trellis_rs::sdk::auth::AuthSessionsRevokeRequest {
+            &trellis_rs::internal_sdk::auth::AuthSessionsRevokeRequest {
                 session_id: first_session.session_id().to_owned(),
                 expected_version: None,
                 reason: Some("integration test revocation".to_string()),

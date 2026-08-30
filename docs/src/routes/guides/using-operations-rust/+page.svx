@@ -32,7 +32,7 @@ cancellation, and `control` gates named post-start signals. If `observe` is
 absent it defaults to `call`; an explicit empty list permits any authenticated
 caller to observe.
 
-Run `cargo xtask prepare` after changing the contract.
+Run `cargo xtask install` after changing the contract.
 
 ## 2. Implement a provider
 

@@ -2,7 +2,7 @@ import { assertEquals } from "@std/assert";
 import { join } from "@std/path";
 import { parse } from "jsonc-parser";
 
-Deno.test("root package import does not require the trellis-sdk package", async () => {
+Deno.test("root package import does not require project-local API packages", async () => {
   const tempDir = await Deno.makeTempDir();
   try {
     const workspaceConfigUrl = new URL("../../../deno.json", import.meta.url);
@@ -36,7 +36,7 @@ Deno.test("root package import does not require the trellis-sdk package", async 
           ...trellisImports,
           "@qlever-llc/result": new URL("../../result/mod.ts", import.meta.url)
             .href,
-          "@qlever-llc/trellis/sdk/core":
+          "@trellis/apis/trellis.core":
             "./missing/generated/trellis-core/mod.ts",
         },
         nodeModulesDir: "auto",

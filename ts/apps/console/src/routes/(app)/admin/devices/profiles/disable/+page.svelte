@@ -3,7 +3,7 @@
   import type {
     AuthDeploymentsDisableInput,
     AuthDeploymentsListOutput,
-  } from "@qlever-llc/trellis/sdk/auth";
+  } from "@trellis/apis/trellis.auth";
   import { resolve } from "$app/paths";
   import { page } from "$app/state";
   import { onMount } from "svelte";

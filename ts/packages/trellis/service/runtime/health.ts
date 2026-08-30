@@ -10,7 +10,7 @@
 
 import type { JsonValue } from "../../contracts.ts";
 import { ulid } from "ulid";
-import type { HealthHeartbeatSample } from "../../sdk/health.ts";
+import type { HealthHeartbeatSample } from "../../internal_sdk/generated/health/mod.ts";
 
 type MaybePromise<T> = T | Promise<T>;
 

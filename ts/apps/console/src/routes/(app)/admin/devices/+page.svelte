@@ -8,7 +8,7 @@
     AuthDevicesListOutput,
     AuthDeviceUserAuthoritiesListOutput,
     AuthDeviceUserAuthoritiesReviewsListOutput,
-  } from "@qlever-llc/trellis/sdk/auth";
+  } from "@trellis/apis/trellis.auth";
   import { resolve } from "$app/paths";
   import { onMount } from "svelte";
   import DataTable from "$lib/components/DataTable.svelte";

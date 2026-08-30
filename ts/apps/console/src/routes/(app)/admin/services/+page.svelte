@@ -5,8 +5,8 @@
     AuthDeploymentAuthorityPlansListOutput,
     AuthDeploymentsListOutput,
     AuthServiceInstancesListOutput,
-  } from "@qlever-llc/trellis/sdk/auth";
-  import type { HealthQueryOutput } from "@qlever-llc/trellis/sdk/health";
+  } from "@trellis/apis/trellis.auth";
+  import type { HealthQueryOutput } from "@trellis/apis/trellis.health";
   import { resolve } from "$app/paths";
   import { onMount } from "svelte";
   import DataTable from "$lib/components/DataTable.svelte";

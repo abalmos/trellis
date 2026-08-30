@@ -10,7 +10,7 @@ import {
   type JobsQueryOutput,
   type JobsReplayDLQOutput,
   type JobsRetryOutput,
-} from "@qlever-llc/trellis/sdk/jobs";
+} from "@trellis/apis/trellis.jobs";
 
 export type JobInspection = JobsInspectOutput;
 

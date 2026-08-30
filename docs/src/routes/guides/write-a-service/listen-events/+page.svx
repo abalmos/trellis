@@ -12,7 +12,7 @@ Open `contracts/orders_service.ts` and update the contract builder output:
 {#snippet ts()}
 
 ```ts
-import { sdk as auth } from "@qlever-llc/trellis/sdk/auth";
+import * as auth from "@trellis/apis/trellis.auth";
 
 uses: {
   required: {

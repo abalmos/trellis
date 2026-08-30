@@ -9,17 +9,17 @@ Built with SvelteKit, Tailwind CSS v4 + DaisyUI, and
 
 1. Start NATS and the Trellis runtime service.
 2. Copy `.env.example` to `.env` if needed.
-3. `deno task prepare`
+3. `deno task install`
 4. `deno task dev`
 
 Expects the Trellis runtime at `http://localhost:3000` and NATS WebSocket at
 `ws://localhost:8080`.
 
-`prepare` refreshes generated Trellis contract artifacts. The local Trellis
-context binds `createTrellisApp` to the console contract and derives
-`TrellisConsoleClient` with `TrellisClientFor<typeof contract>`, so console
-pages call `getTrellis()` with explicit RPC, event, and state types without
-importing a generated `client.ts` facade.
+`trellis install` refreshes the locked contract artifacts and local SDK. The
+local Trellis context binds `createTrellisApp` to the console contract and
+derives `TrellisConsoleClient` with `TrellisClientFor<typeof contract>`, so
+console pages call `getTrellis()` with explicit RPC, event, and state types
+without importing a generated `client.ts` facade.
 
 The console is an app contract, not a control-plane extension. Its contract
 declares the exact Auth, Health, and Jobs surfaces it calls or subscribes to;

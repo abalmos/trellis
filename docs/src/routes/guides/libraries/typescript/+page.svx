@@ -22,7 +22,7 @@ Common packages are:
 - `@qlever-llc/trellis/auth/browser`: browser auth helpers for login and portal
   flows.
 - `@qlever-llc/trellis/device/deno`: Deno device activation helpers.
-- `@qlever-llc/trellis/sdk/*`: Trellis-owned generated SDK surfaces.
+- `@trellis/apis/*`: consumer-local generated SDK surfaces for locked APIs.
 - `@qlever-llc/trellis/telemetry`: OpenTelemetry helpers for tracing,
   propagation, initialization, and Trellis error metrics.
 - `@qlever-llc/trellis-test`: Deno-first integration test helpers for service
@@ -31,8 +31,7 @@ Common packages are:
   subpath for out-of-tree service-repo cases that can run with isolated runtimes
   or serially on one shared runtime.
 - `@qlever-llc/trellis-svelte`: Svelte and SvelteKit integration helpers.
-- generated SDK packages under `generated/packages/jsr/` and
-  `generated/packages/npm/` for contracts in your project.
+- consumer-local generated SDK modules under `.trellis/generated/ts/`.
 
 Generated SDKs include contract metadata, TypeScript schema-derived types,
 `use(...)` helpers for consumers, concrete handler aliases for extracted service
@@ -553,7 +552,7 @@ export const getOrder: OrdersGetHandler = async ({ input }) => {
 ```
 
 Inline handlers infer from the registration site. Extracted handlers should use
-the generated SDK aliases. After changing a contract, run prepare/generation
+the generated SDK aliases. After changing a contract, run `trellis install`
 before typing extracted handlers so the alias matches the current generated SDK.
 
 Feed handlers receive an `emit(...)` helper and an abort signal.
@@ -651,7 +650,7 @@ contextual participant-needs digest at runtime from the exact referenced APIs.
 
 ```ts
 import { defineAppContract } from "@qlever-llc/trellis";
-import { sdk as orders } from "#trellis-generated-sdk/orders";
+import * as orders from "@trellis/apis/acme.orders";
 
 const contract = defineAppContract(() => ({
   id: "acme.dashboard@v1",

@@ -9,7 +9,7 @@ import {
   deriveDeviceIdentity,
   waitForDeviceActivation,
 } from "@qlever-llc/trellis/auth";
-import * as trellisAuth from "@qlever-llc/trellis/sdk/auth";
+import * as trellisAuth from "@trellis/apis/trellis.auth";
 import { nativeProtocolPresentation } from "../../packages/trellis/contract_support/protocol_artifacts.ts";
 import { resolveNativeProtocolPresentation } from "../../packages/trellis/contract_support/protocol_resolution.ts";
 import type { LiveTrellisRuntime } from "../_support/runtime.ts";

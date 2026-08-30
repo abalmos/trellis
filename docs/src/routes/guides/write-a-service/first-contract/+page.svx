@@ -34,7 +34,7 @@ export default ordersService;
 This is a valid, if empty, contract. We will fill it in as we add capabilities. Export the contract object itself and let Trellis use that object for runtime bootstrap, API typing, and SDK generation.
 
 Inline handlers can infer their types from `service.handle...` registration. When
-you extract a handler into another module, run your prepare/generation task after
+you extract a handler into another module, run `trellis install` after
 the contract change and import the concrete handler alias from the generated SDK.
 
 {/snippet}
@@ -72,10 +72,10 @@ This is a valid, nearly empty service contract. `ContractBuilder::authoring` rec
 Prepare the generated artifacts once so the SDK crate exists:
 
 ```sh
-trellis-generate prepare .
+trellis install
 ```
 
-That creates a generated Rust SDK crate at `generated/packages/cargo/orders-service`. The Rust crate name derived from the package is `trellis_sdk_orders_service`, which later service code imports at compile time.
+That creates a project-local aggregate crate at `.trellis/generated/rust/trellis-apis`, imported as `trellis_apis`.
 
 {/snippet}
 </LanguageTabs>

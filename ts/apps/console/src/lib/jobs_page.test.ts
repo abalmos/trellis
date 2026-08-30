@@ -9,7 +9,7 @@ import type {
   JobsQueryOutput,
   JobsReplayDLQOutput,
   JobsRetryOutput,
-} from "@qlever-llc/trellis/sdk/jobs";
+} from "@trellis/apis/trellis.jobs";
 
 import {
   cancelJob,

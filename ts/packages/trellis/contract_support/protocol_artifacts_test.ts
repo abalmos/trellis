@@ -7,8 +7,8 @@ import {
 } from "@std/assert";
 import { Type } from "typebox";
 
-import { AuthCapabilitiesList } from "../sdk/_generated/auth/descriptors.ts";
-import { API_DIGEST as AUTH_API_DIGEST } from "../sdk/_generated/auth/api.ts";
+import { AuthCapabilitiesList } from "../internal_sdk/generated/auth/descriptors.ts";
+import { API_DIGEST as AUTH_API_DIGEST } from "../internal_sdk/generated/auth/api.ts";
 import {
   CONTRACT_EVENT_CONSUMERS_METADATA,
   defineAgentContract,

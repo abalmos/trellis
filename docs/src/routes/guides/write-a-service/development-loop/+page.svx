@@ -8,7 +8,7 @@ Once the service is real, the loop is simple:
 {#snippet ts()}
 
 1. Update schemas and the `defineServiceContract(...)` module
-2. Run `deno task prepare`, or keep `deno task prepare:watch` running
+2. Run `trellis install`
 3. Implement or update extracted handlers with generated SDK handler aliases
 4. Review and update deployment authority if the contract boundary changed
 5. Restart the service
@@ -17,7 +17,7 @@ Once the service is real, the loop is simple:
 {#snippet rust()}
 
 1. Update schemas and `contracts/service.rs`
-2. Run `trellis-generate prepare .`, or keep `trellis-generate prepare --watch --changes .` running
+2. Run `trellis install`
 3. Run `cargo fmt` and `cargo test` for the service crate
 4. Apply the service contract boundary with `trellis svc orders-service apply --source .`
 5. Review and update deployment authority if the contract boundary changed
@@ -26,7 +26,7 @@ Once the service is real, the loop is simple:
 {/snippet}
 </LanguageTabs>
 
-If only handler implementation changed, you usually do not need a contract prepare or authority change. If the public boundary changed, regenerate artifacts and update deployment authority.
+If only handler implementation changed, you usually do not need a contract install or authority change. If the public boundary changed, regenerate artifacts and update deployment authority.
 
 Public boundary changes include schemas, RPCs, events, operations, resources, state, dependencies, and capabilities.
 

@@ -1,7 +1,7 @@
 import { jetstream } from "@nats-io/jetstream";
 import type { NatsConnection } from "@nats-io/nats-core";
 import { base64urlEncode } from "./auth/utils.ts";
-import type { HealthHeartbeatSample } from "./sdk/_generated/health/types.ts";
+import type { HealthHeartbeatSample } from "./internal_sdk/generated/health/types.ts";
 
 const HEALTH_HEARTBEAT_SUBJECT_PREFIX = "health.v1.heartbeat";
 

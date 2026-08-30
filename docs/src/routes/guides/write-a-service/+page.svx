@@ -10,7 +10,7 @@ Each implementation section uses language selectors for TypeScript and Rust. The
 - Deno or Node.js for the TypeScript path
 - Rust stable for the Rust path
 - The `trellis` CLI installed
-- `trellis-generate` available for Rust contract artifact generation
+- `trellis` available for project API installation
 
 ## Tutorial path
 

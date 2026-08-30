@@ -22,7 +22,7 @@ use trellis_protocol::{
     SessionProofPolicy,
 };
 #[cfg(test)]
-use trellis_rs::sdk::auth as trellis_sdk_auth;
+use trellis_rs::internal_sdk::auth as trellis_sdk_auth;
 use trellis_rs::service::Router;
 use ulid::Ulid;
 
@@ -3635,7 +3635,7 @@ mod response_tests {
             }
         });
         serde_json::from_value::<
-            trellis_rs::sdk::auth::types::AuthDeploymentAuthorityAcceptUpdateResponse,
+            trellis_rs::internal_sdk::auth::types::AuthDeploymentAuthorityAcceptUpdateResponse,
         >(value)
         .unwrap();
     }

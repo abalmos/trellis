@@ -133,6 +133,11 @@ fn evidence_file_info_schema() -> Value {
 }
 
 fn evidence_download_grant_schema() -> Value {
+    let mut info = evidence_file_info_schema();
+    info["required"]
+        .as_array_mut()
+        .expect("evidence file info required fields")
+        .insert(3, json!("digest"));
     json!({
         "type": "object",
         "required": [
@@ -155,7 +160,7 @@ fn evidence_download_grant_schema() -> Value {
             "subject": non_empty_string_schema(),
             "expiresAt": non_empty_string_schema(),
             "chunkBytes": {"type": "integer", "minimum": 1},
-            "info": evidence_file_info_schema()
+            "info": info
         }
     })
 }

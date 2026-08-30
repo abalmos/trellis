@@ -74,7 +74,7 @@ and one contract module.
 For TypeScript service contract source files, use a top-level `contract.ts` for
 single-contract services and `contracts/*.ts` only when the service owns
 multiple contract modules. In either layout, the contract module should default
-export the `defineServiceContract(...)` result so prepare and generation can
+export the `defineServiceContract(...)` result so `trellis install` can
 resolve it directly.
 
 ### Lifecycle
@@ -355,7 +355,7 @@ Rules:
   validation rather than re-parsing the mounted payload just to recover types
 - inline TypeScript handlers can infer from `service.handle...` registration;
   extracted TypeScript service handler aliases should come from the generated
-  SDK package after prepare/generation, not from public generic runtime helpers
+  SDK package after `trellis install`, not from public generic runtime helpers
 - mounted RPC handlers may be synchronous when they do not need `await`
 - mounted RPC handlers may return declared local `TrellisError` subclasses
   directly when those errors are listed in the contract RPC `errors: [...]`

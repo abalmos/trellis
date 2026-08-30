@@ -3,8 +3,8 @@ import { Type } from "typebox";
 
 import { TrellisClient } from "../index.ts";
 import { defineAppContract, defineServiceContract } from "../contract.ts";
-import { JobsQuery } from "../sdk/jobs.ts";
-import { AuthSessionsMe } from "../sdk/auth.ts";
+import { AuthSessionsMe } from "../internal_sdk/generated/auth/mod.ts";
+import { JobsQuery } from "../internal_sdk/generated/jobs/mod.ts";
 
 const selectionContract = defineServiceContract(
   {

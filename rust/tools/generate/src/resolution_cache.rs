@@ -153,7 +153,6 @@ struct InputSnapshot {
     cacheable: bool,
     files: Vec<InputFileState>,
     directories: Vec<InputDirectoryState>,
-    declared_inputs: Vec<DeclaredInputState>,
     environment: BTreeMap<String, Option<String>>,
 }
 
@@ -173,20 +172,6 @@ struct InputDirectoryState {
     entries_digest: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct DeclaredInputState {
-    pattern: String,
-    matches: Vec<PathBuf>,
-}
-
-#[derive(Debug, Default, Deserialize)]
-struct PrepareInputConfig {
-    #[serde(default)]
-    inputs: Vec<String>,
-    #[serde(default)]
-    env: Vec<String>,
-}
-
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum CacheMissReason {
     Missing,
@@ -203,19 +188,19 @@ pub(crate) struct ResolutionCache {
 impl ResolutionCache {
     pub(crate) fn for_contract(contract: &DiscoveredContractSource) -> Self {
         let repository = repository_root(&contract.project_root);
-        let base = env::var_os("TRELLIS_PREPARE_CACHE")
+        let base = env::var_os("TRELLIS_CACHE")
             .map(PathBuf::from)
             .or_else(|| {
                 env::var_os("XDG_CACHE_HOME")
                     .map(PathBuf::from)
-                    .map(|path| path.join("trellis/prepare"))
+                    .map(|path| path.join("trellis/generation"))
             })
             .or_else(|| {
                 env::var_os("HOME")
                     .map(PathBuf::from)
-                    .map(|path| path.join(".cache/trellis/prepare"))
+                    .map(|path| path.join(".cache/trellis/generation"))
             })
-            .unwrap_or_else(|| repository.join("generated/.trellis-prepare-cache"));
+            .unwrap_or_else(|| repository.join(".trellis/cache"));
         let namespace = sha256_base64url(repository.to_string_lossy().as_ref());
         Self {
             entries: base.join("repositories").join(namespace).join("contracts"),
@@ -505,17 +490,7 @@ fn snapshot(contract: &DiscoveredContractSource) -> miette::Result<InputSnapshot
             &mut directories,
         )?,
     };
-    let config = prepare_input_config(contract)?;
-    let declared_inputs =
-        snapshot_declared_inputs(&contract.project_root, &config.inputs, &mut paths)?;
-    let mut environment: BTreeMap<String, Option<String>> = config
-        .env
-        .into_iter()
-        .map(|name| {
-            let value = env::var(&name).ok();
-            (name, value)
-        })
-        .collect();
+    let mut environment = BTreeMap::new();
     add_tool_inputs(contract, &mut paths, &mut environment);
     Ok(InputSnapshot {
         cacheable,
@@ -527,7 +502,6 @@ fn snapshot(contract: &DiscoveredContractSource) -> miette::Result<InputSnapshot
             .into_iter()
             .map(input_directory_state)
             .collect::<miette::Result<_>>()?,
-        declared_inputs,
         environment,
     })
 }
@@ -631,82 +605,6 @@ fn add_rust_include_inputs(paths: &mut BTreeSet<PathBuf>) -> miette::Result<bool
         }
     }
     Ok(cacheable)
-}
-
-fn prepare_input_config(contract: &DiscoveredContractSource) -> miette::Result<PrepareInputConfig> {
-    match contract.language {
-        SourceLanguage::Rust => {
-            let contents = fs::read_to_string(&contract.manifest_path).into_diagnostic()?;
-            let manifest: toml::Value = toml::from_str(&contents).into_diagnostic()?;
-            manifest
-                .get("package")
-                .and_then(|value| value.get("metadata"))
-                .and_then(|value| value.get("trellis"))
-                .and_then(|value| value.get("prepare"))
-                .cloned()
-                .map(toml::Value::try_into)
-                .transpose()
-                .into_diagnostic()
-                .map(Option::unwrap_or_default)
-        }
-        SourceLanguage::TypeScript => {
-            let Some(path) = contract
-                .source_path
-                .ancestors()
-                .map(|directory| directory.join("package.json"))
-                .find(|path| path.is_file())
-            else {
-                return Ok(PrepareInputConfig::default());
-            };
-            let value: serde_json::Value =
-                serde_json::from_slice(&fs::read(path).into_diagnostic()?).into_diagnostic()?;
-            value
-                .get("trellis")
-                .and_then(|value| value.get("prepare"))
-                .cloned()
-                .map(serde_json::from_value)
-                .transpose()
-                .into_diagnostic()
-                .map(Option::unwrap_or_default)
-        }
-        SourceLanguage::Protocol => Ok(PrepareInputConfig::default()),
-    }
-}
-
-fn snapshot_declared_inputs(
-    project_root: &Path,
-    patterns: &[String],
-    paths: &mut BTreeSet<PathBuf>,
-) -> miette::Result<Vec<DeclaredInputState>> {
-    patterns
-        .iter()
-        .map(|pattern| {
-            let pattern = if Path::new(pattern).is_absolute() {
-                pattern.clone()
-            } else {
-                format!(
-                    "{}/{}",
-                    glob::Pattern::escape(&project_root.to_string_lossy()),
-                    pattern
-                )
-            };
-            let matches = declared_matches(&pattern)?;
-            paths.extend(matches.iter().cloned());
-            Ok(DeclaredInputState { pattern, matches })
-        })
-        .collect()
-}
-
-fn declared_matches(pattern: &str) -> miette::Result<Vec<PathBuf>> {
-    let mut matches = glob::glob(pattern)
-        .into_diagnostic()?
-        .filter_map(Result::ok)
-        .map(|path| path.canonicalize().unwrap_or(path))
-        .filter(|path| path.is_file())
-        .collect::<Vec<_>>();
-    matches.sort();
-    matches.dedup();
-    Ok(matches)
 }
 
 fn add_ancestor_inputs(contract: &DiscoveredContractSource, paths: &mut BTreeSet<PathBuf>) {
@@ -883,7 +781,6 @@ fn is_known_external_typescript_specifier(specifier: &str) -> bool {
         || specifier.starts_with("node:")
         || specifier.starts_with("http://")
         || specifier.starts_with("https://")
-        || specifier.starts_with("@trellis-sdk/")
         || specifier.starts_with("@qlever-llc/trellis")
 }
 
@@ -915,7 +812,9 @@ fn resolve_local_typescript_specifier(
         })?;
     if relative.extension().is_some() {
         let relative = relative.canonicalize().unwrap_or(relative);
-        paths.insert(relative.clone());
+        if !is_generated_sdk_path(&relative) {
+            paths.insert(relative.clone());
+        }
         return Some(relative);
     }
     let mut candidates = ["ts", "tsx", "js", "jsx", "mts", "mjs", "cts", "cjs"]
@@ -931,11 +830,13 @@ fn resolve_local_typescript_specifier(
         .iter()
         .find(|candidate| candidate.is_file())
         .and_then(|candidate| candidate.canonicalize().ok());
-    paths.extend(
-        candidates
-            .into_iter()
-            .map(|candidate| candidate.canonicalize().unwrap_or(candidate)),
-    );
+    if !is_generated_sdk_path(&relative) {
+        paths.extend(
+            candidates
+                .into_iter()
+                .map(|candidate| candidate.canonicalize().unwrap_or(candidate)),
+        );
+    }
     resolved
 }
 
@@ -963,10 +864,7 @@ fn collect_files(
     for entry in fs::read_dir(root).into_diagnostic()? {
         let path = entry.into_diagnostic()?.path();
         if path.is_dir() {
-            if !matches!(
-                path.file_name().and_then(|name| name.to_str()),
-                Some(".git" | ".worktrees" | "generated" | "node_modules" | "target")
-            ) {
+            if !is_ignored_snapshot_directory(&path) {
                 collect_files(&path, paths, directories, include)?;
             }
         } else if include(&path) {
@@ -974,6 +872,17 @@ fn collect_files(
         }
     }
     Ok(())
+}
+
+fn is_ignored_snapshot_directory(path: &Path) -> bool {
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| {
+            matches!(
+                name,
+                ".git" | ".trellis" | ".worktrees" | "generated" | "node_modules" | "target"
+            ) || name.starts_with(".trellis-install-backup-")
+        })
 }
 
 fn input_file_state(path: PathBuf) -> miette::Result<InputFileState> {
@@ -1009,6 +918,7 @@ fn directory_entries_digest(path: &Path) -> miette::Result<String> {
     let mut entries = fs::read_dir(path)
         .into_diagnostic()?
         .filter_map(Result::ok)
+        .filter(|entry| !entry.path().is_dir() || !is_ignored_snapshot_directory(&entry.path()))
         .map(|entry| {
             let kind = entry
                 .file_type()
@@ -1048,11 +958,6 @@ fn snapshot_is_current(snapshot: &mut InputSnapshot) -> (bool, bool, usize, usiz
         .environment
         .iter()
         .any(|(name, value)| env::var(name).ok().as_ref() != value.as_ref())
-        || snapshot.declared_inputs.iter().any(|input| {
-            declared_matches(&input.pattern)
-                .map(|matches| matches != input.matches)
-                .unwrap_or(true)
-        })
     {
         return (false, false, 0, 0);
     }
@@ -1246,43 +1151,6 @@ mod tests {
     }
 
     #[test]
-    fn added_declared_input_invalidates_snapshot() {
-        let root = fixture();
-        fs::create_dir(root.path().join("schemas")).unwrap();
-        fs::write(root.path().join("schemas/one.json"), "{}\n").unwrap();
-        fs::write(
-            root.path().join("Cargo.toml"),
-            "[package]\nname = \"fixture\"\nversion = \"0.1.0\"\n\n[package.metadata.trellis.prepare]\ninputs = [\"schemas/*.json\"]\n",
-        )
-        .unwrap();
-        let contract = rust_contract(root.path());
-        let mut snapshot = snapshot(&contract).unwrap();
-        fs::write(root.path().join("schemas/two.json"), "{}\n").unwrap();
-
-        assert!(!snapshot_is_current(&mut snapshot).0);
-    }
-
-    #[test]
-    fn declared_environment_change_invalidates_snapshot() {
-        let root = fixture();
-        let variable = format!("TRELLIS_CACHE_TEST_{}", std::process::id());
-        fs::write(
-            root.path().join("Cargo.toml"),
-            format!(
-                "[package]\nname = \"fixture\"\nversion = \"0.1.0\"\n\n[package.metadata.trellis.prepare]\nenv = [\"{variable}\"]\n"
-            ),
-        )
-        .unwrap();
-        std::env::set_var(&variable, "one");
-        let contract = rust_contract(root.path());
-        let mut snapshot = snapshot(&contract).unwrap();
-        std::env::set_var(&variable, "two");
-
-        assert!(!snapshot_is_current(&mut snapshot).0);
-        std::env::remove_var(variable);
-    }
-
-    #[test]
     fn corrupt_cache_entry_is_a_miss() {
         let root = fixture();
         let contract = rust_contract(root.path());
@@ -1328,7 +1196,36 @@ mod tests {
     }
 
     #[test]
+    fn generated_sdk_replacement_does_not_invalidate_snapshot() {
+        let _env_lock = crate::contract_input::test_env_lock();
+        let root = tempfile::tempdir().unwrap();
+        let generated = root.path().join(".trellis/generated/ts/api.ts");
+        fs::create_dir_all(generated.parent().unwrap()).unwrap();
+        fs::write(
+            root.path().join("deno.json"),
+            "{\"imports\":{\"@trellis/apis/example\":\"./.trellis/generated/ts/api.ts\"}}\n",
+        )
+        .unwrap();
+        fs::write(
+            root.path().join("contract.ts"),
+            "import '@trellis/apis/example';\n",
+        )
+        .unwrap();
+        fs::write(&generated, "export const value = 1;\n").unwrap();
+        let mut snapshot = snapshot(&typescript_contract(root.path())).unwrap();
+        assert!(snapshot
+            .files
+            .iter()
+            .all(|state| !is_generated_sdk_path(&state.path)));
+        assert!(snapshot.directories.is_empty());
+        fs::remove_dir_all(root.path().join(".trellis")).unwrap();
+
+        assert!(snapshot_is_current(&mut snapshot).0);
+    }
+
+    #[test]
     fn computed_import_uses_conservative_project_snapshot() {
+        let _env_lock = crate::contract_input::test_env_lock();
         let root = tempfile::tempdir().unwrap();
         fs::write(root.path().join("deno.json"), "{}\n").unwrap();
         fs::write(
@@ -1338,6 +1235,13 @@ mod tests {
         .unwrap();
         fs::write(root.path().join("possible.ts"), "export const value = 1;\n").unwrap();
         let mut snapshot = snapshot(&typescript_contract(root.path())).unwrap();
+        fs::create_dir_all(root.path().join(".trellis/generated")).unwrap();
+        fs::write(
+            root.path().join(".trellis/generated/output.ts"),
+            "export const generated = true;\n",
+        )
+        .unwrap();
+        assert!(snapshot_is_current(&mut snapshot).0);
         fs::write(root.path().join("possible.ts"), "export const value = 2;\n").unwrap();
 
         assert!(!snapshot_is_current(&mut snapshot).0);

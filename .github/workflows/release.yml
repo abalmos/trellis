@@ -153,8 +153,8 @@ jobs:
       - name: Prepare release version
         run: time cargo run --manifest-path xtask/Cargo.toml -- release prepare --tag "${RELEASE_TAG}"
 
-      - name: Generate release SDK artifacts
-        run: time cargo run --manifest-path rust/tools/generate/Cargo.toml -- prepare --no-npm .
+      - name: Install release API dependencies
+        run: time cargo xtask install
 
       - name: Build protocol WASM
         run: time cargo run --manifest-path rust/xtask/Cargo.toml -- protocol-wasm
@@ -166,7 +166,6 @@ jobs:
             xtask -> target
             rust -> target
             rust/xtask -> target
-            rust/tools/generate -> target
 
       - name: Capture release outputs
         id: release
@@ -207,7 +206,6 @@ jobs:
             CHANGELOG.md
             art
             conformance
-            generated
             ts
             rust
             scripts
@@ -253,7 +251,6 @@ jobs:
             --exclude trellis-protocol-wasm \
             --exclude trellis-codegen-ts \
             --exclude trellis-codegen-rust \
-            --exclude trellis-generate-runner \
             --exclude trellis-cli \
             --exclude trellis-runtime
 
@@ -292,11 +289,11 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
 
-      - name: Build npm packages from prepared sources
-        run: deno task -c ts/deno.json packages:build:npm:prepared
+      - name: Build npm packages from installed sources
+        run: deno task -c ts/deno.json packages:build:npm:installed
 
       - name: Verify built package surfaces
-        run: deno task -c ts/deno.json test:prepared:packaging:built
+        run: deno task -c ts/deno.json test:packaging:built
 
       - name: Verify TypeScript publication
         run: bash scripts/release-ts-dry-run.sh
@@ -360,13 +357,6 @@ jobs:
             xtask -> target
             rust -> target
             rust/xtask -> target
-            rust/tools/generate -> target
-
-      - name: Refresh generated Rust SDK paths
-        shell: bash
-        run: |
-          set -euo pipefail
-          time cargo run --manifest-path rust/tools/generate/Cargo.toml -- -f prepare --no-npm .
 
       - name: Build release binaries
         shell: bash
@@ -377,10 +367,8 @@ jobs:
           set -euo pipefail
           if [ -n "${RELEASE_TAG}" ]; then
             time cargo build -p trellis-cli --release --target ${{ matrix.target }}
-            time cargo build --manifest-path tools/generate/Cargo.toml --release --target ${{ matrix.target }}
           else
             time cargo build -p trellis-cli --release --locked --target ${{ matrix.target }}
-            time cargo build --manifest-path tools/generate/Cargo.toml --release --locked --target ${{ matrix.target }}
           fi
         working-directory: rust
 
@@ -398,11 +386,6 @@ jobs:
           archive="trellis-${archive_version}-${target}.tar.gz"
           tar -C "$staging" -czf "dist/$archive" trellis
           shasum -a 256 "dist/$archive" > "dist/checksum-${archive_version}-${target}-trellis.sha256"
-
-          cp "rust/target/${target}/release/trellis-generate" "$staging/trellis-generate"
-          archive="trellis-generate-${archive_version}-${target}.tar.gz"
-          tar -C "$staging" -czf "dist/$archive" trellis-generate
-          shasum -a 256 "dist/$archive" > "dist/checksum-${archive_version}-${target}-trellis-generate.sha256"
 
       - name: Upload packaged CLI artifact
         uses: actions/upload-artifact@v4
@@ -768,7 +751,6 @@ jobs:
             xtask -> target
             rust -> target
             rust/xtask -> target
-            rust/tools/generate -> target
 
       - name: Authenticate with crates.io
         id: auth
@@ -873,6 +855,49 @@ jobs:
           echo "Skipped ${#skipped[@]} crate(s)"
           for item in "${skipped[@]}"; do
             echo "  skipped: $item"
+          done
+
+  publish-apis:
+    name: Publish canonical APIs
+    if: always() && needs.prepare-release.outputs.should-publish == 'true' && needs.release-gate.result == 'success' && needs.github-release.result == 'success'
+    needs:
+      - prepare-release
+      - release-gate
+      - github-release
+    runs-on: [self-hosted, Linux, X64]
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Download prepared release workspace
+        uses: actions/download-artifact@v4
+        with:
+          name: prepared-release
+          path: .
+
+      - name: Set up Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Authenticate with GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Publish APIs
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo build --manifest-path rust/Cargo.toml --locked --package trellis-cli
+          trellis="$GITHUB_WORKSPACE/rust/target/debug/trellis"
+          for project in \
+            rust/crates/eventlog-runtime \
+            rust/crates/jobs-runtime \
+            rust/crates/runtime \
+            ts/packages/trellis
+          do
+            (cd "$project" && "$trellis" publish)
           done
 
   publish-npm:

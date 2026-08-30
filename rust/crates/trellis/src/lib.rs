@@ -70,26 +70,8 @@ pub mod auth;
 #[doc(hidden)]
 pub mod jobs;
 
-/// Public facades for Trellis-owned generated contract SDKs.
-pub mod sdk {
-    /// Auth contract SDK surface.
-    pub mod auth;
-
-    /// Core contract SDK surface.
-    pub mod core;
-
-    /// Health contract SDK surface.
-    pub mod health;
-
-    /// Event Log contract SDK surface.
-    pub mod eventlog;
-
-    /// Jobs contract SDK surface.
-    pub mod jobs;
-
-    /// State contract SDK surface.
-    pub mod state;
-}
+#[doc(hidden)]
+pub mod internal_sdk;
 
 #[cfg(test)]
 mod tests {
@@ -123,7 +105,6 @@ mod tests {
             "codegen-rust/Cargo.toml",
             "codegen-ts/Cargo.toml",
             "bootstrap/Cargo.toml",
-            "generate-runner/Cargo.toml",
             "local-bootstrap/Cargo.toml",
             "protocol-wasm/Cargo.toml",
             "runtime/Cargo.toml",
@@ -154,7 +135,7 @@ mod tests {
         ] {
             assert!(
                 !manifest.contains(package),
-                "{package} must be embedded as trellis_rs::sdk, not a trellis dependency"
+                "{package} must remain an internal runtime projection, not a trellis dependency"
             );
         }
     }
@@ -174,26 +155,6 @@ mod tests {
             assert!(
                 !manifest.contains(package),
                 "{package} must be implemented as a trellis module, not a trellis dependency"
-            );
-        }
-    }
-
-    #[test]
-    fn trellis_owned_generated_sdk_packages_are_not_publishable_packages() {
-        let repo_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .ancestors()
-            .nth(3)
-            .expect("trellis crate should live under rust/crates/trellis");
-        for manifest in [
-            "generated/packages/cargo/auth/Cargo.toml",
-            "generated/packages/cargo/health/Cargo.toml",
-            "generated/packages/cargo/jobs/Cargo.toml",
-        ] {
-            let contents = fs::read_to_string(repo_root.join(manifest))
-                .expect("generated Trellis-owned SDK manifest should be readable");
-            assert!(
-                contents.contains("publish = false"),
-                "{manifest} must stay non-publishable"
             );
         }
     }

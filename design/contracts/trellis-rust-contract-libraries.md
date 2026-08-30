@@ -41,7 +41,7 @@ Generated service and device connection paths consume that exact evidence
 through `GeneratedServiceContract` rather than asking callers to repeat it.
 Generated device connection options also do not accept a session seed: each
 activation/bootstrap attempt owns a fresh key, and only a ready attempt carries
-its successful private seed into connection. Run `cargo xtask prepare` after
+its successful private seed into connection. Run `cargo xtask install` after
 source changes; generated files are not authoring inputs.
 
 ## Conformance

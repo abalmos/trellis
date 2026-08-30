@@ -18,9 +18,11 @@ use serde_json::json;
 use time::OffsetDateTime;
 use tokio::sync::broadcast;
 use trellis_rs::client::SessionAuth;
-use trellis_rs::sdk::health::feeds::HealthWatchFeedDescriptor;
-use trellis_rs::sdk::health::rpc::{HealthInspectRpc, HealthMetricsRpc, HealthQueryRpc};
-use trellis_rs::sdk::health::types::{HealthHeartbeatSample, HealthWatchEvent, HealthWatchInput};
+use trellis_rs::internal_sdk::health::feeds::HealthWatchFeedDescriptor;
+use trellis_rs::internal_sdk::health::rpc::{HealthInspectRpc, HealthMetricsRpc, HealthQueryRpc};
+use trellis_rs::internal_sdk::health::types::{
+    HealthHeartbeatSample, HealthWatchEvent, HealthWatchInput,
+};
 use trellis_rs::service::{
     internal::run_builtin_authenticated_router, DeclaredRpcError, Router, ServerError,
 };
@@ -622,7 +624,7 @@ fn decode_token(token: &str) -> Result<String, String> {
 fn current_revision(store: &HealthStore) -> Result<i64, RuntimeError> {
     let response = store
         .query(
-            &trellis_rs::sdk::health::types::HealthQueryRequest {
+            &trellis_rs::internal_sdk::health::types::HealthQueryRequest {
                 contract_ids: None,
                 deployment_ids: None,
                 limit: Some(1),

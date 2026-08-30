@@ -1,4 +1,4 @@
-import type { AuthCapabilitiesListOutput } from "@qlever-llc/trellis/sdk/auth";
+import type { AuthCapabilitiesListOutput } from "@trellis/apis/trellis.auth";
 import type {
   AuthDeploymentAuthorityGetResponse,
   DeploymentAuthority,

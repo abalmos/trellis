@@ -9,20 +9,35 @@ import * as features from "./features/index.ts";
 
 async function main(): Promise<void> {
   const {
-    args: [trellisUrl, sessionKeySeed],
+    args: [
+      trellisUrl,
+      seed,
+      deploymentId,
+      instanceId,
+      participantId,
+      participantArtifactDigest,
+      participantNeedsDigest,
+    ],
   } = await new Command()
     .name("demo-service")
-    .arguments("<trellisUrl:string> <sessionKeySeed:string>", [
-      "URL of Trellis instance to connect to",
-      "Trellis service root key",
-    ])
+    .arguments(
+      "<trellisUrl:string> <seed:string> <deploymentId:string> <instanceId:string> <participantId:string> <participantArtifactDigest:string> <participantNeedsDigest:string>",
+    )
     .parse(Deno.args);
 
   const service = await TrellisService.connect({
+    authorizationContextEphemeral: true,
     trellisUrl,
     contract,
     name: "field-ops-demo-service",
-    sessionKeySeed,
+    identity: {
+      seed,
+      deploymentId,
+      instanceId,
+      participantId,
+      participantArtifactDigest,
+      participantNeedsDigest,
+    },
   }).orThrow();
   const deps: FieldOpsDeps = {
     transferIssuer: service,
@@ -96,7 +111,7 @@ async function main(): Promise<void> {
 
       try {
         await service.onAuditRecorded(
-          (event) => {
+          ({ event }) => {
             return emit({
               name: deps.activityFeedEventNames.auditRecorded,
               event,
@@ -106,7 +121,7 @@ async function main(): Promise<void> {
           { mode: "ephemeral", replay: "new", signal: controller.signal },
         ).orThrow();
         await service.onReportsPublished(
-          (event) => {
+          ({ event }) => {
             return emit({
               name: deps.activityFeedEventNames.reportsPublished,
               event,
@@ -116,7 +131,7 @@ async function main(): Promise<void> {
           { mode: "ephemeral", replay: "new", signal: controller.signal },
         ).orThrow();
         await service.onEvidenceUploaded(
-          (event) => {
+          ({ event }) => {
             return emit({
               name: deps.activityFeedEventNames.evidenceUploaded,
               event,
@@ -126,7 +141,7 @@ async function main(): Promise<void> {
           { mode: "ephemeral", replay: "new", signal: controller.signal },
         ).orThrow();
         await service.onSitesRefreshed(
-          (event) => {
+          ({ event }) => {
             return emit({
               name: deps.activityFeedEventNames.sitesRefreshed,
               event,

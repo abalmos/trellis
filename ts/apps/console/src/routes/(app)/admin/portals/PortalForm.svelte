@@ -2,7 +2,7 @@
   import { isErr } from "@qlever-llc/result";
   import type {
     AuthCapabilitiesListOutput,
-  } from "@qlever-llc/trellis/sdk/auth";
+  } from "@trellis/apis/trellis.auth";
   import { resolve } from "$app/paths";
   import { goto } from "$app/navigation";
   import { onMount } from "svelte";

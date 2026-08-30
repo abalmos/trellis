@@ -2,7 +2,7 @@ import type { AsyncResult, BaseError } from "@qlever-llc/result";
 import type {
   AuthSessionsLogoutInput,
   AuthSessionsLogoutOutput,
-} from "../../sdk/auth.ts";
+} from "../../internal_sdk/generated/auth/mod.ts";
 import { clearSessionKey, type SessionKeyHandle } from "./session.ts";
 
 type LogoutLocation =

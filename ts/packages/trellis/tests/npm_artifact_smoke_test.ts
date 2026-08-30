@@ -14,7 +14,7 @@ const forbiddenBrowserArtifactPattern =
 const moduleSpecifierPattern =
   /(?:import|export)\s+(?:[^"']*?\s+from\s+)?["']([^"']+)["']|import\(\s*["']([^"']+)["']\s*\)|require\(\s*["']([^"']+)["']\s*\)/g;
 
-Deno.test("trellis npm CLI uses an npm-valid bin path", async () => {
+Deno.test("trellis npm package does not publish a generator CLI", async () => {
   try {
     await Deno.stat(new URL("../npm/package.json", import.meta.url));
   } catch (error) {
@@ -24,7 +24,7 @@ Deno.test("trellis npm CLI uses an npm-valid bin path", async () => {
   const packageJson = JSON.parse(
     await Deno.readTextFile(new URL("../npm/package.json", import.meta.url)),
   );
-  assertEquals(packageJson.bin["trellis-generate"], "bin/trellis-generate.js");
+  assertEquals(packageJson.bin, undefined);
 });
 
 async function* walkFiles(dir: string): AsyncGenerator<string> {
@@ -127,7 +127,7 @@ Deno.test("trellis npm artifact only depends on allowed published Trellis packag
   }
 });
 
-Deno.test("trellis npm SDK exports contain owner-only vocabulary", async () => {
+Deno.test("trellis npm package does not publish generated SDKs", async () => {
   const packageJsonUrl = new URL("../npm/package.json", import.meta.url);
   try {
     await Deno.stat(packageJsonUrl);
@@ -144,63 +144,19 @@ Deno.test("trellis npm SDK exports contain owner-only vocabulary", async () => {
     import: "./esm/index.js",
     require: "./script/index.js",
   });
-  assertEquals(packageJson.exports["./sdk/auth"], {
-    import: "./esm/sdk/auth.js",
-    require: "./script/sdk/auth.js",
-  });
-  assertEquals(packageJson.exports["./sdk/core"], {
-    import: "./esm/sdk/core.js",
-    require: "./script/sdk/core.js",
-  });
-  assertEquals(packageJson.exports["./sdk/eventlog"], {
-    import: "./esm/sdk/eventlog.js",
-    require: "./script/sdk/eventlog.js",
-  });
-  assertEquals(packageJson.exports["./sdk/health"], {
-    import: "./esm/sdk/health.js",
-    require: "./script/sdk/health.js",
-  });
-  assertEquals(packageJson.exports["./sdk/jobs"], {
-    import: "./esm/sdk/jobs.js",
-    require: "./script/sdk/jobs.js",
-  });
-  assertEquals(packageJson.exports["./sdk/state"], {
-    import: "./esm/sdk/state.js",
-    require: "./script/sdk/state.js",
-  });
+  assertEquals(
+    Object.keys(packageJson.exports).some((name) => name.startsWith("./sdk/")),
+    false,
+  );
   assertEquals(packageJson.exports["./service/drizzle"], {
     import: "./esm/service/drizzle.js",
     require: "./script/service/drizzle.js",
   });
 
-  for (
-    const sdkDir of [
-      "auth",
-      "trellis-core",
-      "eventlog",
-      "health",
-      "jobs",
-      "state",
-    ]
-  ) {
-    const generatedDir = `../npm/esm/generated-sdk/${sdkDir}/`;
-    const mod = await Deno.readTextFile(
-      new URL(`${generatedDir}mod.js`, import.meta.url),
-    );
-    assertEquals(mod.includes('export * from "./descriptors.js"'), true);
-    assertEquals(mod.includes('export * from "./types.js"'), true);
-    assertEquals(mod.includes('export * from "./schemas.js"'), true);
-    assertEquals(mod.includes("manifest"), false);
-    await Deno.stat(new URL(`${generatedDir}api.js`, import.meta.url));
-    await assertNotExists(new URL(`${generatedDir}client.js`, import.meta.url));
-    await assertNotExists(
-      new URL(`${generatedDir}contract.js`, import.meta.url),
-    );
-    await assertNotExists(
-      new URL(`${generatedDir}owned_api.js`, import.meta.url),
-    );
-  }
-
+  await assertNotExists(new URL("../npm/esm/generated-sdk", import.meta.url));
+  await assertNotExists(
+    new URL("../npm/script/generated-sdk", import.meta.url),
+  );
   await assertNotExists(
     new URL("../npm/esm/sdk/_generated", import.meta.url),
   );
@@ -259,7 +215,6 @@ Deno.test("trellis npm public export declarations hide raw NATS handles", async 
 
 Deno.test("trellis npm runtime transport falls back to npm native transport in Deno", async () => {
   const packageJsonUrl = new URL("../npm/package.json", import.meta.url);
-  const esmGenerate = new URL("../npm/esm/generate.js", import.meta.url);
   const esmRuntimeTransport = new URL(
     "../npm/esm/runtime_transport.js",
     import.meta.url,
@@ -278,12 +233,6 @@ Deno.test("trellis npm runtime transport falls back to npm native transport in D
 
   await Deno.stat(esmRuntimeTransport);
   await Deno.stat(scriptRuntimeTransport);
-  assertEquals(
-    (await Deno.readTextFile(esmGenerate)).includes("../package.json"),
-    true,
-    esmGenerate.pathname,
-  );
-
   for (const path of [esmRuntimeTransport, scriptRuntimeTransport]) {
     const source = await Deno.readTextFile(path);
     assertEquals(

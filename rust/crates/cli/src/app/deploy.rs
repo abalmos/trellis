@@ -13,7 +13,7 @@ use trellis_rs::generated::Caller;
 use crate::app::{connect_authenticated_cli_client, generate_session_keypair, json_value_label};
 use crate::cli::*;
 use crate::output;
-use trellis_generate::contract_input;
+use trellis_generation::contract_input;
 
 const DEVICE_NAME_METADATA_KEY: &str = "name";
 const DEVICE_SERIAL_METADATA_KEY: &str = "serialNumber";
@@ -97,13 +97,18 @@ async fn list_services(format: OutputFormat, args: &SvcListArgs) -> miette::Resu
     let deployments = authlib::AuthClient::new(&connected)
         .rpc()
         .auth()
-        .deployments_list(&trellis_rs::sdk::auth::types::AuthDeploymentsListRequest {
-            kind: Some(trellis_rs::sdk::auth::types::AuthDeploymentsListRequestKind::Service),
-            state: (!args.disabled)
-                .then_some(trellis_rs::sdk::auth::types::AuthDeploymentsListRequestState::Active),
-            cursor: None,
-            limit: Some(100),
-        })
+        .deployments_list(
+            &trellis_rs::internal_sdk::auth::types::AuthDeploymentsListRequest {
+                kind: Some(
+                    trellis_rs::internal_sdk::auth::types::AuthDeploymentsListRequestKind::Service,
+                ),
+                state: (!args.disabled).then_some(
+                    trellis_rs::internal_sdk::auth::types::AuthDeploymentsListRequestState::Active,
+                ),
+                cursor: None,
+                limit: Some(100),
+            },
+        )
         .await
         .into_diagnostic()?
         .entries;
@@ -123,13 +128,18 @@ async fn list_devices(format: OutputFormat, args: &DevListArgs) -> miette::Resul
     let deployments = authlib::AuthClient::new(&connected)
         .rpc()
         .auth()
-        .deployments_list(&trellis_rs::sdk::auth::types::AuthDeploymentsListRequest {
-            kind: Some(trellis_rs::sdk::auth::types::AuthDeploymentsListRequestKind::Device),
-            state: (!args.disabled)
-                .then_some(trellis_rs::sdk::auth::types::AuthDeploymentsListRequestState::Active),
-            cursor: None,
-            limit: Some(100),
-        })
+        .deployments_list(
+            &trellis_rs::internal_sdk::auth::types::AuthDeploymentsListRequest {
+                kind: Some(
+                    trellis_rs::internal_sdk::auth::types::AuthDeploymentsListRequestKind::Device,
+                ),
+                state: (!args.disabled).then_some(
+                    trellis_rs::internal_sdk::auth::types::AuthDeploymentsListRequestState::Active,
+                ),
+                cursor: None,
+                limit: Some(100),
+            },
+        )
         .await
         .into_diagnostic()?
         .entries;
@@ -166,8 +176,8 @@ async fn create_service(
         .rpc()
         .auth()
         .deployments_create(
-            &trellis_rs::sdk::auth::types::AuthDeploymentsCreateRequest {
-                kind: trellis_rs::sdk::auth::types::AuthDeploymentsCreateRequestKind::Service,
+            &trellis_rs::internal_sdk::auth::types::AuthDeploymentsCreateRequest {
+                kind: trellis_rs::internal_sdk::auth::types::AuthDeploymentsCreateRequestKind::Service,
                 display_name: id.to_owned(),
                 participant_id: None,
                 expires_at: None,
@@ -189,8 +199,9 @@ async fn create_device(format: OutputFormat, id: &str, args: &DevCreateArgs) -> 
         .rpc()
         .auth()
         .deployments_create(
-            &trellis_rs::sdk::auth::types::AuthDeploymentsCreateRequest {
-                kind: trellis_rs::sdk::auth::types::AuthDeploymentsCreateRequestKind::Device,
+            &trellis_rs::internal_sdk::auth::types::AuthDeploymentsCreateRequest {
+                kind:
+                    trellis_rs::internal_sdk::auth::types::AuthDeploymentsCreateRequestKind::Device,
                 display_name: id.to_owned(),
                 participant_id: None,
                 expires_at: None,
@@ -234,11 +245,11 @@ async fn apply_contract(
     let Value::Object(api_artifact) = resolved.api.value else {
         return Err(miette::miette!("API artifact must be an object"));
     };
-    let response = trellis_rs::sdk::auth::AuthClient::new(&connected)
+    let response = trellis_rs::internal_sdk::auth::AuthClient::new(&connected)
         .rpc()
         .auth()
         .deployment_authority_plan(
-            &trellis_rs::sdk::auth::types::AuthDeploymentAuthorityPlanRequest {
+            &trellis_rs::internal_sdk::auth::types::AuthDeploymentAuthorityPlanRequest {
                 deployment_id: deployment_id.to_string(),
                 participant_artifact: participant_artifact.into_iter().collect(),
                 referenced_api_artifacts: std::iter::once(api_artifact)
@@ -298,7 +309,7 @@ async fn toggle_deployment(
                 .rpc()
                 .auth()
                 .deployments_enable(
-                    &trellis_rs::sdk::auth::types::AuthDeploymentsEnableRequest {
+                    &trellis_rs::internal_sdk::auth::types::AuthDeploymentsEnableRequest {
                         deployment_id: id.to_owned(),
                         expected_version,
                         reason: None,
@@ -316,7 +327,7 @@ async fn toggle_deployment(
                 .rpc()
                 .auth()
                 .deployments_disable(
-                    &trellis_rs::sdk::auth::types::AuthDeploymentsDisableRequest {
+                    &trellis_rs::internal_sdk::auth::types::AuthDeploymentsDisableRequest {
                         deployment_id: id.to_owned(),
                         expected_version,
                         reason: None,
@@ -360,7 +371,7 @@ async fn remove_deployment(
         .rpc()
         .auth()
         .deployments_remove(
-            &trellis_rs::sdk::auth::types::AuthDeploymentsRemoveRequest {
+            &trellis_rs::internal_sdk::auth::types::AuthDeploymentsRemoveRequest {
                 deployment_id: id.to_owned(),
                 expected_version,
                 reason: None,
@@ -382,10 +393,10 @@ async fn service_instances(
         .rpc()
         .auth()
         .service_instances_list(
-            &trellis_rs::sdk::auth::types::AuthServiceInstancesListRequest {
+            &trellis_rs::internal_sdk::auth::types::AuthServiceInstancesListRequest {
                 deployment_id: Some(id.to_owned()),
                 state: (!args.disabled).then_some(
-                    trellis_rs::sdk::auth::types::AuthServiceInstancesListRequestState::Active,
+                    trellis_rs::internal_sdk::auth::types::AuthServiceInstancesListRequestState::Active,
                 ),
                 cursor: None,
                 limit: Some(100),
@@ -406,25 +417,27 @@ async fn device_instances(
     let instances = authlib::AuthClient::new(&connected)
         .rpc()
         .auth()
-        .devices_list(&trellis_rs::sdk::auth::types::AuthDevicesListRequest {
-            deployment_id: Some(id.to_owned()),
-            state: args.state.map(|state| match state {
-                DeviceInstanceState::Registered => {
-                    trellis_rs::sdk::auth::types::AuthDevicesListRequestState::Pending
-                }
-                DeviceInstanceState::Activated => {
-                    trellis_rs::sdk::auth::types::AuthDevicesListRequestState::Active
-                }
-                DeviceInstanceState::Disabled => {
-                    trellis_rs::sdk::auth::types::AuthDevicesListRequestState::Disabled
-                }
-                DeviceInstanceState::Revoked => {
-                    trellis_rs::sdk::auth::types::AuthDevicesListRequestState::Revoked
-                }
-            }),
-            cursor: None,
-            limit: Some(100),
-        })
+        .devices_list(
+            &trellis_rs::internal_sdk::auth::types::AuthDevicesListRequest {
+                deployment_id: Some(id.to_owned()),
+                state: args.state.map(|state| match state {
+                    DeviceInstanceState::Registered => {
+                        trellis_rs::internal_sdk::auth::types::AuthDevicesListRequestState::Pending
+                    }
+                    DeviceInstanceState::Activated => {
+                        trellis_rs::internal_sdk::auth::types::AuthDevicesListRequestState::Active
+                    }
+                    DeviceInstanceState::Disabled => {
+                        trellis_rs::internal_sdk::auth::types::AuthDevicesListRequestState::Disabled
+                    }
+                    DeviceInstanceState::Revoked => {
+                        trellis_rs::internal_sdk::auth::types::AuthDevicesListRequestState::Revoked
+                    }
+                }),
+                cursor: None,
+                limit: Some(100),
+            },
+        )
         .await
         .into_diagnostic()?
         .entries;
@@ -448,7 +461,7 @@ async fn provision_service(
         .rpc()
         .auth()
         .service_instances_provision(
-            &trellis_rs::sdk::auth::types::AuthServiceInstancesProvisionRequest {
+            &trellis_rs::internal_sdk::auth::types::AuthServiceInstancesProvisionRequest {
                 deployment_id: id.to_string(),
                 instance_id: Some(format!("inst_{}", &instance_key[..16])),
                 identity_public_key: instance_key,
@@ -475,13 +488,15 @@ async fn provision_device(
     let instance = authlib::AuthClient::new(&connected)
         .rpc()
         .auth()
-        .devices_provision(&trellis_rs::sdk::auth::types::AuthDevicesProvisionRequest {
-            deployment_id: id.to_owned(),
-            instance_id: None,
-            identity_public_key: Some(identity.public_identity_key),
-            participant_id: None,
-            idempotency_key: cli_idempotency_key(),
-        })
+        .devices_provision(
+            &trellis_rs::internal_sdk::auth::types::AuthDevicesProvisionRequest {
+                deployment_id: id.to_owned(),
+                instance_id: None,
+                identity_public_key: Some(identity.public_identity_key),
+                participant_id: None,
+                idempotency_key: cli_idempotency_key(),
+            },
+        )
         .await
         .into_diagnostic()?;
     print_device_provision_result(format, &instance, &root_secret)
@@ -498,14 +513,14 @@ async fn dev_activations(
             let activations = authlib::AuthClient::new(&connected)
                 .rpc()
                 .auth()
-                .devices_list(&trellis_rs::sdk::auth::types::AuthDevicesListRequest {
+                .devices_list(&trellis_rs::internal_sdk::auth::types::AuthDevicesListRequest {
                     deployment_id: Some(deployment_id.to_owned()),
                     state: args.state.map(|state| match state {
                         DeviceActivationState::Activated => {
-                            trellis_rs::sdk::auth::types::AuthDevicesListRequestState::Active
+                            trellis_rs::internal_sdk::auth::types::AuthDevicesListRequestState::Active
                         }
                         DeviceActivationState::Revoked => {
-                            trellis_rs::sdk::auth::types::AuthDevicesListRequestState::Revoked
+                            trellis_rs::internal_sdk::auth::types::AuthDevicesListRequestState::Revoked
                         }
                     }),
                     cursor: None,
@@ -529,12 +544,14 @@ async fn dev_activations(
             let devices = authlib::AuthClient::new(&connected)
                 .rpc()
                 .auth()
-                .devices_list(&trellis_rs::sdk::auth::types::AuthDevicesListRequest {
-                    deployment_id: Some(deployment_id.to_owned()),
-                    state: None,
-                    cursor: None,
-                    limit: Some(100),
-                })
+                .devices_list(
+                    &trellis_rs::internal_sdk::auth::types::AuthDevicesListRequest {
+                        deployment_id: Some(deployment_id.to_owned()),
+                        state: None,
+                        cursor: None,
+                        limit: Some(100),
+                    },
+                )
                 .await
                 .into_diagnostic()?
                 .entries;
@@ -545,12 +562,14 @@ async fn dev_activations(
             authlib::AuthClient::new(&connected)
                 .rpc()
                 .auth()
-                .devices_disable(&trellis_rs::sdk::auth::types::AuthDevicesDisableRequest {
-                    instance_id: args.instance_id.clone(),
-                    expected_version: device.version,
-                    reason: Some("device activation revoked by CLI".to_owned()),
-                    idempotency_key: cli_idempotency_key(),
-                })
+                .devices_disable(
+                    &trellis_rs::internal_sdk::auth::types::AuthDevicesDisableRequest {
+                        instance_id: args.instance_id.clone(),
+                        expected_version: device.version,
+                        reason: Some("device activation revoked by CLI".to_owned()),
+                        idempotency_key: cli_idempotency_key(),
+                    },
+                )
                 .await
                 .into_diagnostic()?;
             let success = true;
@@ -572,12 +591,12 @@ async fn dev_reviews(
                 .rpc()
                 .auth()
                 .device_user_authorities_reviews_list(
-                    &trellis_rs::sdk::auth::types::AuthDeviceUserAuthoritiesReviewsListRequest {
+                    &trellis_rs::internal_sdk::auth::types::AuthDeviceUserAuthoritiesReviewsListRequest {
                         deployment_id: Some(deployment_id.to_owned()),
                         state: args.state.map(|state| match state {
-                            DeviceReviewState::Pending => trellis_rs::sdk::auth::types::AuthDeviceUserAuthoritiesReviewsListRequestState::Pending,
-                            DeviceReviewState::Approved => trellis_rs::sdk::auth::types::AuthDeviceUserAuthoritiesReviewsListRequestState::Approved,
-                            DeviceReviewState::Rejected => trellis_rs::sdk::auth::types::AuthDeviceUserAuthoritiesReviewsListRequestState::Rejected,
+                            DeviceReviewState::Pending => trellis_rs::internal_sdk::auth::types::AuthDeviceUserAuthoritiesReviewsListRequestState::Pending,
+                            DeviceReviewState::Approved => trellis_rs::internal_sdk::auth::types::AuthDeviceUserAuthoritiesReviewsListRequestState::Approved,
+                            DeviceReviewState::Rejected => trellis_rs::internal_sdk::auth::types::AuthDeviceUserAuthoritiesReviewsListRequestState::Rejected,
                         }),
                         cursor: None,
                         limit: Some(100),
@@ -615,7 +634,7 @@ async fn review_decide(
         .rpc()
         .auth()
         .device_user_authorities_reviews_list(
-            &trellis_rs::sdk::auth::types::AuthDeviceUserAuthoritiesReviewsListRequest {
+            &trellis_rs::internal_sdk::auth::types::AuthDeviceUserAuthoritiesReviewsListRequest {
                 deployment_id: None,
                 state: None,
                 cursor: None,
@@ -632,11 +651,11 @@ async fn review_decide(
         .rpc()
         .auth()
         .device_user_authorities_reviews_decide(
-            &trellis_rs::sdk::auth::types::AuthDeviceUserAuthoritiesReviewsDecideRequest {
+            &trellis_rs::internal_sdk::auth::types::AuthDeviceUserAuthoritiesReviewsDecideRequest {
                 review_id: args.review_id.clone(),
                 decision: match decision {
-                    "approve" => trellis_rs::sdk::auth::types::AuthDeviceUserAuthoritiesReviewsDecideRequestDecision::Approve,
-                    _ => trellis_rs::sdk::auth::types::AuthDeviceUserAuthoritiesReviewsDecideRequestDecision::Reject,
+                    "approve" => trellis_rs::internal_sdk::auth::types::AuthDeviceUserAuthoritiesReviewsDecideRequestDecision::Approve,
+                    _ => trellis_rs::internal_sdk::auth::types::AuthDeviceUserAuthoritiesReviewsDecideRequestDecision::Reject,
                 },
                 expected_version: response.version,
                 reason: args.reason.clone(),
@@ -665,7 +684,7 @@ async fn deployment_authority(
     command: DeploymentAuthorityCommand,
 ) -> miette::Result<()> {
     let (_state, connected) = connect_authenticated_cli_client(format).await?;
-    let auth = trellis_rs::sdk::auth::AuthClient::new(&connected);
+    let auth = trellis_rs::internal_sdk::auth::AuthClient::new(&connected);
     match command {
         DeploymentAuthorityCommand::Show => {
             let authority_id = deployment_authority_id(&connected, deployment_id).await?;
@@ -673,7 +692,7 @@ async fn deployment_authority(
                 .rpc()
                 .auth()
                 .deployment_authority_get(
-                    &trellis_rs::sdk::auth::types::AuthDeploymentAuthorityGetRequest {
+                    &trellis_rs::internal_sdk::auth::types::AuthDeploymentAuthorityGetRequest {
                         authority_id,
                     },
                 )
@@ -690,7 +709,7 @@ async fn deployment_authority(
                 .rpc()
                 .auth()
                 .deployment_authority_accept_update(
-                    &trellis_rs::sdk::auth::types::AuthDeploymentAuthorityAcceptUpdateRequest {
+                    &trellis_rs::internal_sdk::auth::types::AuthDeploymentAuthorityAcceptUpdateRequest {
                         proposal_id: args.plan_id,
                         expected_base_authority_version: parse_optional_version(
                             args.expected_desired_version.as_deref(),
@@ -714,7 +733,7 @@ async fn deployment_authority(
                 .rpc()
                 .auth()
                 .deployment_authority_accept_migration(
-                    &trellis_rs::sdk::auth::types::AuthDeploymentAuthorityAcceptMigrationRequest {
+                    &trellis_rs::internal_sdk::auth::types::AuthDeploymentAuthorityAcceptMigrationRequest {
                         proposal_id: args.plan_id,
                         expected_base_authority_version: parse_optional_version(
                             args.expected_desired_version.as_deref(),
@@ -738,7 +757,7 @@ async fn deployment_authority(
                 .rpc()
                 .auth()
                 .deployment_authority_reject(
-                    &trellis_rs::sdk::auth::types::AuthDeploymentAuthorityRejectRequest {
+                    &trellis_rs::internal_sdk::auth::types::AuthDeploymentAuthorityRejectRequest {
                         proposal_id: args.plan_id,
                         reason: args.reason,
                         idempotency_key: cli_idempotency_key(),
@@ -755,7 +774,7 @@ async fn deployment_authority(
                 .rpc()
                 .auth()
                 .deployment_authority_reconcile(
-                    &trellis_rs::sdk::auth::types::AuthDeploymentAuthorityReconcileRequest {
+                    &trellis_rs::internal_sdk::auth::types::AuthDeploymentAuthorityReconcileRequest {
                         authority_id,
                         expected_version: parse_optional_version(args.desired_version.as_deref())?,
                         idempotency_key: cli_idempotency_key(),
@@ -787,18 +806,18 @@ async fn deployment_authority_plan(
                     "classification filtering was removed; filter proposals by state"
                 ));
             }
-            let response = trellis_rs::sdk::auth::AuthClient::new(connected)
+            let response = trellis_rs::internal_sdk::auth::AuthClient::new(connected)
                 .rpc()
                 .auth()
-                .deployment_authority_plans_list(&trellis_rs::sdk::auth::types::AuthDeploymentAuthorityPlansListRequest {
+                .deployment_authority_plans_list(&trellis_rs::internal_sdk::auth::types::AuthDeploymentAuthorityPlansListRequest {
                     deployment_id: Some(deployment_id.to_string()),
                     limit: Some(100),
                     cursor: None,
                     state: args.state.map(|state| match state {
-                        DeploymentAuthorityPlanState::Pending => trellis_rs::sdk::auth::types::AuthDeploymentAuthorityPlansListRequestState::Pending,
-                        DeploymentAuthorityPlanState::Accepted => trellis_rs::sdk::auth::types::AuthDeploymentAuthorityPlansListRequestState::Accepted,
-                        DeploymentAuthorityPlanState::Rejected => trellis_rs::sdk::auth::types::AuthDeploymentAuthorityPlansListRequestState::Rejected,
-                        DeploymentAuthorityPlanState::Expired => trellis_rs::sdk::auth::types::AuthDeploymentAuthorityPlansListRequestState::Expired,
+                        DeploymentAuthorityPlanState::Pending => trellis_rs::internal_sdk::auth::types::AuthDeploymentAuthorityPlansListRequestState::Pending,
+                        DeploymentAuthorityPlanState::Accepted => trellis_rs::internal_sdk::auth::types::AuthDeploymentAuthorityPlansListRequestState::Accepted,
+                        DeploymentAuthorityPlanState::Rejected => trellis_rs::internal_sdk::auth::types::AuthDeploymentAuthorityPlansListRequestState::Rejected,
+                        DeploymentAuthorityPlanState::Expired => trellis_rs::internal_sdk::auth::types::AuthDeploymentAuthorityPlansListRequestState::Expired,
                     }),
                 })
                 .await
@@ -807,11 +826,11 @@ async fn deployment_authority_plan(
             print_deployment_authority_plans_result(format, &response)
         }
         AuthorityPlanCommand::Show(args) => {
-            let response = trellis_rs::sdk::auth::AuthClient::new(connected)
+            let response = trellis_rs::internal_sdk::auth::AuthClient::new(connected)
                 .rpc()
                 .auth()
                 .deployment_authority_plans_get(
-                    &trellis_rs::sdk::auth::types::AuthDeploymentAuthorityPlansGetRequest {
+                    &trellis_rs::internal_sdk::auth::types::AuthDeploymentAuthorityPlansGetRequest {
                         proposal_id: args.plan_id,
                     },
                 )
@@ -1219,21 +1238,23 @@ async fn find_deployment(
 ) -> miette::Result<Value> {
     let kind = match kind {
         DeploymentKind::Service => {
-            trellis_rs::sdk::auth::types::AuthDeploymentsListRequestKind::Service
+            trellis_rs::internal_sdk::auth::types::AuthDeploymentsListRequestKind::Service
         }
         DeploymentKind::Device => {
-            trellis_rs::sdk::auth::types::AuthDeploymentsListRequestKind::Device
+            trellis_rs::internal_sdk::auth::types::AuthDeploymentsListRequestKind::Device
         }
     };
-    let entries = trellis_rs::sdk::auth::AuthClient::new(connected)
+    let entries = trellis_rs::internal_sdk::auth::AuthClient::new(connected)
         .rpc()
         .auth()
-        .deployments_list(&trellis_rs::sdk::auth::types::AuthDeploymentsListRequest {
-            kind: Some(kind),
-            state: None,
-            cursor: None,
-            limit: Some(100),
-        })
+        .deployments_list(
+            &trellis_rs::internal_sdk::auth::types::AuthDeploymentsListRequest {
+                kind: Some(kind),
+                state: None,
+                cursor: None,
+                limit: Some(100),
+            },
+        )
         .await
         .into_diagnostic()?
         .entries;
@@ -1251,11 +1272,11 @@ async fn deployment_authority_id(
     connected: &Caller,
     deployment_id: &str,
 ) -> miette::Result<String> {
-    let entries = trellis_rs::sdk::auth::AuthClient::new(connected)
+    let entries = trellis_rs::internal_sdk::auth::AuthClient::new(connected)
         .rpc()
         .auth()
         .deployment_authority_list(
-            &trellis_rs::sdk::auth::types::AuthDeploymentAuthorityListRequest {
+            &trellis_rs::internal_sdk::auth::types::AuthDeploymentAuthorityListRequest {
                 deployment_id: Some(deployment_id.to_owned()),
                 participant_id: None,
                 state: None,

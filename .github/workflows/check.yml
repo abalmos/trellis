@@ -36,8 +36,8 @@ jobs:
               ;;
           esac
 
-  prepare:
-    name: Prepare generated artifacts
+  install:
+    name: Install generated artifacts
     needs: configuration
     runs-on: [self-hosted, Linux, X64]
     timeout-minutes: 20
@@ -64,19 +64,17 @@ jobs:
         with:
           deno-version: ${{ env.DENO_VERSION }}
 
-      - name: Reset isolated preparation state
-        run: rm -rf rust/xtask/target rust/tools/generate/target
+      - name: Reset isolated installation state
+        run: rm -rf rust/target
 
-      - name: Cache preparation build
+      - name: Cache installation build
         uses: actions/cache@v4
         with:
-          path: |
-            rust/xtask/target
-            rust/tools/generate/target
-          key: cargo-${{ steps.rust.outputs.cachekey }}-${{ runner.os }}-${{ runner.arch }}-prepare-dev-locked-${{ hashFiles('rust/**/Cargo.toml', 'rust/**/Cargo.lock', '.cargo/config.toml', 'rust/.cargo/config.toml') }}
+          path: rust/target
+          key: cargo-${{ steps.rust.outputs.cachekey }}-${{ runner.os }}-${{ runner.arch }}-install-dev-locked-${{ hashFiles('rust/**/Cargo.toml', 'rust/**/Cargo.lock', '.cargo/config.toml', 'rust/.cargo/config.toml') }}
 
-      - name: Prepare generated artifacts
-        run: cargo run --manifest-path rust/xtask/Cargo.toml -- prepare
+      - name: Install generated artifacts
+        run: cargo xtask install
 
       - name: Inspect generated artifact drift
         id: current
@@ -89,22 +87,23 @@ jobs:
             git diff --stat
           fi
 
-      - name: Upload prepared artifacts
+      - name: Upload installed artifacts
         uses: actions/upload-artifact@v4
         with:
           name: check-generated
-          path: generated
+          path: "**/.trellis/**"
+          include-hidden-files: true
           retention-days: 1
 
   generated:
     name: Generated artifacts current
-    needs: prepare
+    needs: install
     runs-on: [self-hosted, Linux, X64]
     timeout-minutes: 5
     steps:
       - name: Require generated artifacts to be current
         env:
-          GENERATED_CURRENT: ${{ needs.prepare.outputs.current }}
+          GENERATED_CURRENT: ${{ needs.install.outputs.current }}
         run: test "$GENERATED_CURRENT" = true
 
   wasm:
@@ -124,9 +123,7 @@ jobs:
           targets: wasm32-unknown-unknown
 
       - name: Build protocol WASM
-        run: |
-          rm -rf generated
-          cargo run --manifest-path rust/xtask/Cargo.toml -- protocol-wasm
+        run: cargo run --manifest-path rust/xtask/Cargo.toml -- protocol-wasm
 
       - name: Upload protocol WASM
         uses: actions/upload-artifact@v4
@@ -137,7 +134,7 @@ jobs:
 
   portal:
     name: Embedded login portal
-    needs: [prepare, wasm]
+    needs: [install, wasm]
     runs-on: [self-hosted, Linux, X64]
     timeout-minutes: 20
     steps:
@@ -148,7 +145,6 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: check-generated
-          path: generated
 
       - name: Download protocol WASM
         uses: actions/download-artifact@v4
@@ -173,7 +169,7 @@ jobs:
 
   rust:
     name: Rust
-    needs: [prepare, portal]
+    needs: [install, portal]
     runs-on: [self-hosted, Linux, X64]
     timeout-minutes: 20
     steps:
@@ -184,7 +180,6 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: check-generated
-          path: generated
 
       - name: Download embedded portal
         uses: actions/download-artifact@v4
@@ -218,8 +213,6 @@ jobs:
       - name: Check formatting
         run: |
           cargo fmt --manifest-path rust/Cargo.toml --all --check
-          cargo fmt --manifest-path rust/tools/generate/Cargo.toml --check
-          cargo fmt --manifest-path rust/xtask/Cargo.toml --check
 
       - name: Lint production Rust
         run: cargo clippy --manifest-path rust/Cargo.toml --workspace --lib --bins -- -D warnings
@@ -229,16 +222,16 @@ jobs:
 
   rust-tooling:
     name: Rust tooling (${{ matrix.name }})
-    needs: prepare
+    needs: install
     runs-on: [self-hosted, Linux, X64]
     timeout-minutes: 10
     strategy:
       fail-fast: false
       matrix:
         include:
-          - name: generate
+          - name: generation
             workspace: rust/tools/generate
-          - name: prepare
+          - name: install
             workspace: rust/xtask
           - name: release
             workspace: xtask
@@ -250,7 +243,6 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: check-generated
-          path: generated
 
       - name: Expose installed Cargo binaries
         run: echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
@@ -263,7 +255,7 @@ jobs:
 
   typescript:
     name: TypeScript
-    needs: [prepare, wasm]
+    needs: [install, wasm]
     runs-on: [self-hosted, Linux, X64]
     timeout-minutes: 20
     steps:
@@ -274,7 +266,6 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: check-generated
-          path: generated
 
       - name: Download protocol WASM
         uses: actions/download-artifact@v4
@@ -299,7 +290,7 @@ jobs:
           ts/packages/trellis-test/index.ts
 
       - name: Test TypeScript packages
-        run: deno task -c ts/deno.json test:prepared
+        run: deno task -c ts/deno.json test
 
       - name: Check live runners
         run: >-
@@ -315,7 +306,7 @@ jobs:
 
   live-build:
     name: Build live executables
-    needs: [prepare, wasm, portal]
+    needs: [install, wasm, portal]
     runs-on: [self-hosted, Linux, X64]
     timeout-minutes: 20
     steps:
@@ -326,7 +317,6 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: check-generated
-          path: generated
 
       - name: Download embedded portal
         uses: actions/download-artifact@v4
@@ -437,7 +427,6 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: check-generated
-          path: generated
 
       - name: Download protocol WASM
         uses: actions/download-artifact@v4
@@ -472,7 +461,7 @@ jobs:
 
   external-smoke:
     name: External repository smoke
-    needs: [prepare, wasm, live-build]
+    needs: [install, wasm, live-build]
     runs-on: [self-hosted, Linux, X64]
     timeout-minutes: 20
     steps:
@@ -483,7 +472,6 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: check-generated
-          path: generated
 
       - name: Download protocol WASM
         uses: actions/download-artifact@v4

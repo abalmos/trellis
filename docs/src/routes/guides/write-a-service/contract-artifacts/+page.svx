@@ -10,9 +10,9 @@ Operators also need a contract artifact they can submit as a service deployment 
 
 ## Generated artifact layout
 
-`generated/` is disposable build output. It is ignored by git and recreated by repo-local prepare tasks that run `trellis-generate` behind the scenes.
+`.trellis/` is disposable project-local output. It is ignored by git and recreated by `trellis install`.
 
-For TypeScript contract sources, prepare resolves either a top-level `contract.ts` or `contract.js` for single-contract projects, or `contracts/*.ts` for multi-contract layouts, from the file's default export. Authors do not need to add named `CONTRACT` exports just for generation. For TypeScript authoring, schema and error registries belong in the first `define*Contract(...)` argument, while contract-owned capability metadata belongs in the returned contract body beside `id`, `apiId`, `displayName`, and `description`. `id` is the stable participant identity; `apiId` is the owned API identity. They must both be supplied even when their values are equal.
+For TypeScript contract sources, installation resolves either a top-level `contract.ts` or `contract.js` for single-contract projects, or `contracts/*.ts` for multi-contract layouts, from the file's default export. Authors do not need to add named `CONTRACT` exports just for generation. For TypeScript authoring, schema and error registries belong in the first `define*Contract(...)` argument, while contract-owned capability metadata belongs in the returned contract body beside `id`, `apiId`, `displayName`, and `description`. `id` is the stable participant identity; `apiId` is the owned API identity. They must both be supplied even when their values are equal.
 
 You can also add docs metadata to the contract or to owned surfaces when generated docs need more than the short `displayName` and `description` copy:
 
@@ -44,12 +44,9 @@ Docs-only edits still require artifact regeneration so manifests and generated d
 
 Outputs include:
 
-- normalized APIs under `generated/protocol/apis/` and participants under
-  `generated/protocol/participants/`
-- generated JSR TypeScript packages under `generated/packages/jsr/`
-- generated npm JavaScript packages under `generated/packages/npm/`
-- generated Cargo crates under `generated/packages/cargo/`
-- Rust build output under `generated/packages/cargo/*/target/`
+- normalized APIs and participants under `.trellis/generated/protocol/`
+- private TypeScript SDKs under `.trellis/generated/ts/`
+- private Rust SDKs under `.trellis/generated/rust/`
 
 Generated participant facades expose `CONTRACT_ID`, while generated API SDKs expose `API_ID`. Participant JSON and facade paths use the participant `id`; API JSON and SDK paths use `apiId`.
 
@@ -62,7 +59,7 @@ format = 1
 
 [apis."acme.orders@v1"]
 version = "^1.4"
-path = "../orders/generated/protocol/apis/acme.orders@v1.json"
+path = "../orders/.trellis/generated/protocol/apis/acme.orders@v1.json"
 ```
 
 For a published API, configure a registry prefix and dependency source:
@@ -82,7 +79,7 @@ registry = "qlever"
 Use the top-level package commands from the directory containing that file:
 
 ```sh
-trellis add ../orders/generated/protocol/apis/acme.orders@v1.json
+trellis add ../orders/.trellis/generated/protocol/apis/acme.orders@v1.json
 trellis add acme.orders@v1 --version '^1.4'
 trellis update
 trellis install
@@ -99,46 +96,15 @@ Producers configure the same registry prefix and run `trellis publish` after a l
 
 When a participant owns State or another implemented surface, authoring pins its owned API under `participant.implements.self` with the exact API digest. A participant may implement additional APIs under other aliases, but Trellis State resolves owned declarations only through `self`; a missing `self` is rejected rather than falling back to participant identity or store-name matching.
 
-JSR packages include `client.ts` facade types for consumers and concrete handler
-aliases for service implementations. Service contracts generate JSR, npm, and
-Cargo SDK packages; app contracts generate JSR and npm SDK packages so
-Svelte/browser code can import concrete client facade types. Device and agent
-contracts are verified, with Rust participant facades generated where applicable.
+Run `trellis install` in a service repository after contract or dependency changes.
+In this repository, `cargo xtask install` runs every project in dependency order,
+and `cargo xtask build` installs before building. A warm unchanged install checks
+the lock and generated fingerprints without evaluating contract source or
+rewriting output.
 
-Refresh the outputs with the repo workflow entrypoints:
-
-- `cd js && deno task prepare`
-- `cargo xtask prepare`
-- `cargo xtask build`
-
-`trellis` is the runtime/operator CLI. Normal users should not need machine-global generator setup to refresh these artifacts.
-
-The Rust workspace treats the generated SDK crates under `generated/packages/cargo/` as build inputs. Run `cargo xtask prepare` before `cargo build` or `cargo install` from this repository. When you just want the normal Rust build workflow, prefer `cargo xtask build`, which runs `prepare` first and then invokes `cargo build`.
-
-Use `cargo xtask prepare --timings` when diagnosing generation performance. The opt-in report includes top-level phase times, per-contract resolution times and language totals, subprocess counts by executable, generated/skipped contract and target counts, and installed file/byte totals. Resolution totals are nested within the planning and execution phases, so do not add them to the top-level phase total. Timings are intentionally unavailable in watch mode because each report describes one complete prepare invocation.
-
-Prepare keeps a disposable, repository-namespaced resolution cache under the platform user cache directory (`$XDG_CACHE_HOME/trellis/prepare` or `~/.cache/trellis/prepare`), falling back to `generated/.trellis-prepare-cache` when no user cache directory is available. Set `TRELLIS_PREPARE_CACHE` to move or isolate it. An unchanged prepare validates tracked source inputs and generated outputs without evaluating contract source; corrupt, incompatible, or stale entries fall back to normal resolution. `--force` bypasses both resolution and target caches. Delete the cache directory whenever you want to reclaim it; it is never a release input.
-
-Contract resolution must be deterministic from tracked source. Trellis follows local TypeScript imports, Rust modules and literal includes, manifests, lockfiles, tool binaries, and generated-SDK dependencies. Declare exceptional file and environment inputs that affect resolution but are not visible through those graphs:
-
-```toml
-[package.metadata.trellis.prepare]
-inputs = ["schemas/*.json"]
-env = ["CONTRACT_FEATURE"]
-```
-
-```json
-{
-  "trellis": {
-    "prepare": {
-      "inputs": ["schemas/*.json"],
-      "env": ["CONTRACT_FEATURE"]
-    }
-  }
-}
-```
-
-Input globs are relative to the package root. Undeclared time, randomness, network responses, environment variables, and files outside the project are unsupported resolution inputs. Pin remote and package dependencies; mutable remote identities cannot produce reliable cache hits.
+Contract resolution must be deterministic from tracked source. Pin package and
+API dependencies; time, randomness, network responses, and ambient environment
+variables are unsupported authoring inputs.
 
 <LanguageTabs>
 {#snippet ts()}
@@ -151,35 +117,21 @@ orders-service/
   schemas.ts
   main.ts
   dist/contracts/
-  generated/packages/
+  trellis.toml
+  trellis.lock
+  .trellis/
 ```
 
 Keep the source contract with the service, and generate artifacts from the project root:
 
 ```sh
-deno task prepare
+trellis install
 ```
-
-During active development, keep a watcher running in another terminal:
-
-```sh
-deno task prepare:watch
-```
-
-The watcher ignores unrelated files and generated output. If you change schemas, contracts, RPCs, operations, or events, it refreshes the affected contract entries when it can. If you change project discovery inputs or generator tooling, it may ask you to run a full prepare or restart the watcher.
-
-If a watch run behaves unexpectedly, ask Trellis why it made that decision:
-
-```sh
-trellis-generate prepare --watch --changes .
-```
-
-That prints the changed paths, the watch decision, and the reason.
 
 Regenerate these artifacts whenever the contract changes. For TypeScript services,
-run prepare before typing extracted handlers so aliases such as
+run install before typing extracted handlers so aliases such as
 `OrdersCreateHandler` match the current contract. If only handler
-implementation changed, you usually do not need a prepare run.
+implementation changed, you usually do not need an install run.
 
 {/snippet}
 {#snippet rust()}
@@ -187,28 +139,20 @@ implementation changed, you usually do not need a prepare run.
 Every Rust contract change should regenerate artifacts:
 
 ```sh
-trellis-generate prepare .
+trellis install
 ```
 
 This writes:
 
 ```text
-generated/
-  contracts/manifests/orders-service@v1.json
-  packages/cargo/orders-service/
-  packages/jsr/orders-service/
-  packages/npm/orders-service/
+.trellis/
+  generated/protocol/apis/orders-service@v1.json
+  generated/rust/trellis-apis/
 ```
 
 Other Rust services can depend on the generated Cargo package and use its typed descriptors, request/response structs, client helpers, service-runtime registration, event descriptors, and feed descriptors. Other language targets can use the generated TypeScript packages.
 
-For active contract editing, keep prepare running in watch mode:
-
-```sh
-trellis-generate prepare --watch --changes .
-```
-
-Rust code should treat source as authoritative for exact runtime APIs and Rustdoc as the public API reference. If a generated SDK helper or descriptor name differs from the examples here, prefer the generated item in `generated/packages/cargo/orders-service/src/`.
+Rust code should treat source as authoritative for exact runtime APIs and Rustdoc as the public API reference. If a generated SDK helper or descriptor name differs from the examples here, prefer the generated item under `.trellis/generated/rust/`.
 
 {/snippet}
 </LanguageTabs>

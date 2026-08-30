@@ -3,7 +3,7 @@
   import type {
     AuthDeploymentsListOutput,
     AuthDevicesProvisionInput,
-  } from "@qlever-llc/trellis/sdk/auth";
+  } from "@trellis/apis/trellis.auth";
   import { onMount } from "svelte";
   import EmptyState from "$lib/components/EmptyState.svelte";
   import LoadingState from "$lib/components/LoadingState.svelte";

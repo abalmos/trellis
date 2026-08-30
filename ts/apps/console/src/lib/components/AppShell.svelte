@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { AuthSessionsMeOutput } from "@qlever-llc/trellis/sdk/auth";
+  import type { AuthSessionsMeOutput } from "@trellis/apis/trellis.auth";
   import { afterNavigate } from "$app/navigation";
   import { base } from "$app/paths";
   import { page } from "$app/state";

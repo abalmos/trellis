@@ -10,14 +10,40 @@ const EVENT_WATCH_MS = 15_000;
 const LIST_PAGE = { limit: 50, offset: 0 };
 
 async function main(): Promise<void> {
-  const [trellisUrl, rootSecret] = Deno.args;
-  if (!trellisUrl || !rootSecret) {
-    console.error("Usage: deno task start <trellisUrl> <rootSecret>");
+  const [
+    trellisUrl,
+    rootSecret,
+    deploymentId,
+    instanceId,
+    principalId,
+    participantId,
+    participantArtifactDigest,
+    participantNeedsDigest,
+    provisioningSecret,
+  ] = Deno.args;
+  if (
+    !trellisUrl || !rootSecret || !deploymentId || !instanceId ||
+    !principalId || !participantId || !participantArtifactDigest ||
+    !participantNeedsDigest
+  ) {
+    console.error(
+      "Usage: deno task start <trellisUrl> <rootSecret> <deploymentId> <instanceId> <principalId> <participantId> <participantArtifactDigest> <participantNeedsDigest> [provisioningSecret]",
+    );
     Deno.exit(1);
   }
+  const identity = {
+    deploymentId,
+    instanceId,
+    principalId,
+    participantId,
+    participantArtifactDigest,
+    participantNeedsDigest,
+    provisioningSecret,
+  };
 
   const activation = await checkDeviceActivation({
     contract,
+    identity,
     trellisUrl,
     rootSecret,
   });
@@ -32,7 +58,9 @@ async function main(): Promise<void> {
   }
 
   const device = await TrellisDevice.connect({
+    authorizationContextEphemeral: true,
     contract,
+    identity,
     trellisUrl,
     rootSecret,
   }).orThrow();
@@ -91,7 +119,16 @@ type Device = Awaited<ReturnType<typeof connectForTypes>>;
 
 async function connectForTypes() {
   return await TrellisDevice.connect({
+    authorizationContextEphemeral: true,
     contract,
+    identity: {
+      deploymentId: "types-only",
+      instanceId: "types-only",
+      principalId: "types-only",
+      participantId: contract.CONTRACT_ID,
+      participantArtifactDigest: contract.CONTRACT_DIGEST,
+      participantNeedsDigest: "types-only",
+    },
     trellisUrl: "http://localhost:0",
     rootSecret: "types-only",
   }).orThrow();
@@ -406,7 +443,18 @@ async function listAndDownloadEvidence(device: Device): Promise<void> {
   const download = await device.evidenceDownload({
     key: selected.key,
   }).orThrow();
-  const downloaded = await device.transfer(download.transfer).bytes().orThrow();
+  const metadata = Object.fromEntries(
+    Object.entries(download.transfer.info.metadata).map(([name, value]) => {
+      if (typeof value !== "string") {
+        throw new Error(`Invalid transfer metadata '${name}'.`);
+      }
+      return [name, value];
+    }),
+  );
+  const downloaded = await device.transfer({
+    ...download.transfer,
+    info: { ...download.transfer.info, metadata },
+  }).bytes().orThrow();
   await Deno.writeFile(outputPath, downloaded);
   console.info(`Downloaded ${downloaded.byteLength} bytes to ${outputPath}`);
 }

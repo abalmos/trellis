@@ -2,9 +2,8 @@ FROM --platform=$BUILDPLATFORM docker.io/denoland/deno:2.8.2 AS build
 
 WORKDIR /app
 
-COPY js /app/js
+COPY ts /app/ts
 COPY art /app/art
-COPY generated/packages/jsr /app/generated/packages/jsr
 
 WORKDIR /app/ts/apps/console
 

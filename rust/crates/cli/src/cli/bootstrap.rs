@@ -2,6 +2,7 @@ use std::path::PathBuf;
 
 use clap::{Args, Subcommand};
 
+#[cfg(feature = "runtime")]
 #[derive(Debug, Args)]
 /// Generate Trellis runtime config and NATS bootstrap material.
 pub struct InitConfigArgs {
@@ -115,6 +116,7 @@ pub struct InfraTrustRotateIssuerArgs {
     pub manifest_lifetime_seconds: i64,
 }
 
+#[cfg(feature = "runtime")]
 #[derive(Debug, Args)]
 /// Run one-time initialization workflows.
 pub struct InitCommand {
@@ -122,6 +124,7 @@ pub struct InitCommand {
     pub command: InitSubcommand,
 }
 
+#[cfg(feature = "runtime")]
 #[derive(Debug, Subcommand)]
 /// Initialization operations.
 pub enum InitSubcommand {
@@ -131,6 +134,7 @@ pub enum InitSubcommand {
     Admin(InitAdminArgs),
 }
 
+#[cfg(feature = "runtime")]
 #[derive(Debug, Args)]
 /// Seed an initial admin account and linked identity in Trellis service storage.
 pub struct InitAdminArgs {

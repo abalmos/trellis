@@ -15,7 +15,7 @@ use trellis_protocol::{
     parse_api, AuthorizationPrincipalKind, ParticipantKind, ParticipantResourceKind,
     PermissionAction, PermissionAtom, PermissionTarget, StateKind,
 };
-use trellis_rs::sdk::state::rpc::{
+use trellis_rs::internal_sdk::state::rpc::{
     StateAdminDeleteRpc, StateAdminGetRpc, StateAdminListRpc, StateDeleteRpc, StateGetRpc,
     StateListRpc, StatePutRpc,
 };

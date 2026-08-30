@@ -67,7 +67,10 @@ export const EvidenceDownloadGrant = Type.Object({
   subject: Type.String({ minLength: 1 }),
   expiresAt: Type.String({ minLength: 1 }),
   chunkBytes: Type.Integer({ minimum: 1 }),
-  info: EvidenceFileInfo,
+  info: Type.Object({
+    ...EvidenceFileInfo.properties,
+    digest: Type.String({ minLength: 1 }),
+  }),
 });
 
 export const EvidenceDownloadResponse = Type.Object({

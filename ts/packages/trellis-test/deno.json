@@ -12,7 +12,8 @@
     "@qlever-llc/trellis": "jsr:@qlever-llc/trellis@^0.12.0",
     "@qlever-llc/trellis/auth": "jsr:@qlever-llc/trellis@^0.12.0/auth",
     "@qlever-llc/trellis/health": "jsr:@qlever-llc/trellis@^0.12.0/health",
-    "@qlever-llc/trellis/sdk/auth": "jsr:@qlever-llc/trellis@^0.12.0/sdk/auth",
+    "@trellis/apis/trellis.auth": "./.trellis/generated/ts/trellis-apis/trellis.auth.ts",
+    "@trellis/apis/trellis.state": "./.trellis/generated/ts/trellis-apis/trellis.state.ts",
     "@qlever-llc/trellis/telemetry": "jsr:@qlever-llc/trellis@^0.12.0/telemetry",
     "@qlever-llc/trellis/service/deno": "jsr:@qlever-llc/trellis@^0.12.0/service/deno",
     "@nats-io/jetstream": "npm:@nats-io/jetstream@^3.3.1",
@@ -26,6 +27,7 @@
   "publish": {
     "exclude": [
       "tests/**",
+      "!.trellis/generated/ts/**",
       "**/*_test.ts",
       "**/*.test.ts"
     ]

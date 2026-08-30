@@ -154,6 +154,6 @@ Rules:
   resolves aliases by prefix
 
 The Trellis repo's local frontend apps keep explicit `kit.alias` objects in each
-SvelteKit config. App workspaces that define their own local generated SDK
-package names should add those package names to their app-local aliases, for
-example `@trellis-sdk/trellis-demo-service` in the demo workspace.
+SvelteKit config. App workspaces should add each consumer-local aggregate SDK
+specifier they use, such as `@trellis/apis/trellis.demo-service`, to their
+app-local aliases.

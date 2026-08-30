@@ -270,8 +270,8 @@ commands.
   `package.json`. Single-contract services normally expose a top-level
   `contract.ts`; multi-contract services use `contracts/*.ts`. Contract source
   files should default-export the `define*Contract(...)` result.
-- Wrap TypeScript Trellis generation in `deno task prepare`.
-- In TypeScript services, run prepare/generation after contract changes before
+- Run `trellis install` after contract or dependency changes.
+- In TypeScript services, run `trellis install` after contract changes before
   typing extracted handlers. Import generated SDK aliases such as
   `OrdersCreateHandler` for extracted RPC/event/feed/operation/job
   handlers. Inline `service.handle...` handlers still infer at the registration
@@ -327,18 +327,11 @@ commands.
   the current desired authority version are actionable.
 - Deployment authority plans expose `breakingChanges` as structured per-target
   compatibility failures for operator UI.
-- Wrap Rust Trellis generation in `cargo xtask prepare`.
-- Diagnose Rust generation performance with `cargo xtask prepare --timings`; the
-  report includes phase and per-contract resolution times, subprocess counts,
-  cache hits/misses and input validation, generation outcomes, and installed
-  file/byte totals.
-- Prepare caches canonical contract resolution in the platform user cache,
-  repository-namespaced and disposable. Set `TRELLIS_PREPARE_CACHE` to isolate
-  or relocate it; `--force` bypasses it. Declare exceptional deterministic
-  resolution inputs with `trellis.prepare.inputs` globs and
-  `trellis.prepare.env` names in `package.json`, or
-  `[package.metadata.trellis.prepare]` in `Cargo.toml`. Undeclared time,
-  randomness, network, environment, and external-file inputs are unsupported.
+- Wrap repository Rust generation in `cargo xtask install`.
+- Measure installation performance around `cargo xtask install`; a warm run
+  reports `Installed 0 changes` for every unchanged project.
+- Contract resolution must be deterministic from tracked source. Undeclared
+  time, randomness, network, environment, and external-file inputs are unsupported.
 - Rust owner SDKs are vocabulary-only. Rust services, apps, agents, and devices
   connect only through their materialized generated participant facade. Do not
   import `trellis_rs::client` or `trellis_rs::generated` in application code.

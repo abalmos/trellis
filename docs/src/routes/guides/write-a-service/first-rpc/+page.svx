@@ -57,7 +57,7 @@ import * as schemas from "../schemas.ts";
 
 The top-level `capabilities` map defines what `orders.write` means for approval and admin UIs. The RPC-level `capabilities.call` field is the gate: only callers that have been granted the projected `orders.write` capability can invoke this RPC. Trellis enforces this on every request before your handler ever runs. There is no auth middleware to write.
 
-Run your TypeScript prepare/generation task after changing the contract so the
+Run `trellis install` after changing the contract so the
 generated SDK includes the new handler alias.
 
 Now implement the handler in `handlers/orders.ts`:
@@ -66,7 +66,7 @@ Now implement the handler in `handlers/orders.ts`:
 import { ok } from "@qlever-llc/trellis";
 import type {
   OrdersCreateHandler,
-} from "../generated/packages/jsr/orders-service/mod.ts";
+} from "@trellis/apis/acme.orders";
 
 const deps = {
   id: () => crypto.randomUUID(),
@@ -179,7 +179,7 @@ use trellis_contracts::{rpc, ContractCapabilityMetadata};
 )
 ```
 
-Run `trellis-generate prepare .` again. The generated SDK now includes request/response types and a typed `service.handle().rpc().orders().create(...)` provider helper on the connected service.
+Run `trellis install` again. The generated SDK now includes request/response types and a typed `service.handle().rpc().orders().create(...)` provider helper on the connected service.
 
 Create `src/handlers.rs`:
 

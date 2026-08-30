@@ -10,7 +10,8 @@ publish = false
 clap = { version = "4.6.0", features = ["derive"] }
 miette = { version = "7.6.0", features = ["fancy"] }
 serde_json = "1.0.149"
-trellis-generate = { path = "../rust/tools/generate" }
+tokio = { version = "1.51.1", features = ["rt-multi-thread"] }
+trellis-cli = { path = "../rust/crates/cli", default-features = false }
 wasm-bindgen-cli-support = "=0.2.125"
 
 [[bin]]

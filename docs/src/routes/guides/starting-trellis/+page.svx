@@ -12,7 +12,6 @@ By the end, you will have:
 
 - Git
 - [Deno](https://deno.com) v2+
-- a Rust toolchain, because local prepare tasks run the Rust generator
 - the `trellis` CLI installed (see [Install the Trellis CLI](/guides/install-trellis-cli))
 - network access on first run: the CLI downloads a pinned, checksum-verified
   nats-server binary and caches it under `TRELLIS_CACHE_DIR` (default

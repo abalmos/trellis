@@ -1,12 +1,17 @@
 [workspace]
 members = ["device", "service"]
 exclude = [
-  "generated/packages/cargo-participants/demo-device",
-  "generated/packages/cargo-participants/demo-service",
-  "generated/packages/cargo/demo-device",
-  "generated/packages/cargo/demo-service",
+  ".trellis/generated/packages/cargo-participants/demo-device",
+  ".trellis/generated/packages/cargo-participants/demo-service",
+  ".trellis/generated/packages/cargo/demo-device",
+  ".trellis/generated/packages/cargo/demo-service",
+  ".trellis/generated/rust/trellis-apis",
 ]
 resolver = "2"
+
+[patch.crates-io]
+trellis-contracts = { path = "../../rust/crates/contracts" }
+trellis-rs = { path = "../../rust/crates/trellis" }
 
 [workspace.package]
 version = "0.12.0"
@@ -28,6 +33,7 @@ tokio = { version = "1.51.1", features = ["macros", "rt-multi-thread", "signal",
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter", "fmt"] }
 trellis-rs = { path = "../../rust/crates/trellis" }
-trellis-participant-demo-device = { path = "generated/packages/cargo-participants/demo-device" }
-trellis-participant-demo-service = { path = "generated/packages/cargo-participants/demo-service" }
-trellis-sdk-demo-service = { path = "generated/packages/cargo/demo-service" }
+trellis-apis = { path = ".trellis/generated/rust/trellis-apis" }
+trellis-participant-demo-device = { path = ".trellis/generated/packages/cargo-participants/demo-device" }
+trellis-participant-demo-service = { path = ".trellis/generated/packages/cargo-participants/demo-service" }
+trellis-sdk-demo-service = { path = ".trellis/generated/packages/cargo/demo-service" }

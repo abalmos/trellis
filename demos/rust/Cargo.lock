@@ -2663,7 +2663,7 @@ dependencies = [
 
 [[package]]
 name = "trellis-sdk-demo-device"
-version = "1.0.0"
+version = "0.12.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -2673,7 +2673,7 @@ dependencies = [
 
 [[package]]
 name = "trellis-sdk-demo-service"
-version = "1.0.0"
+version = "0.12.0"
 dependencies = [
  "futures-util",
  "serde",
@@ -2684,7 +2684,7 @@ dependencies = [
 
 [[package]]
 name = "trellis-sdk-state"
-version = "0.12.0"
+version = "1.0.0"
 dependencies = [
  "serde",
  "serde_json",

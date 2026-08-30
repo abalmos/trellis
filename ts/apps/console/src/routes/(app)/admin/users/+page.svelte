@@ -1,6 +1,6 @@
 <script lang="ts">
   import { isErr } from "@qlever-llc/result";
-  import type { AuthUsersListOutput } from "@qlever-llc/trellis/sdk/auth";
+  import type { AuthUsersListOutput } from "@trellis/apis/trellis.auth";
   import { resolve } from "$app/paths";
   import { onMount } from "svelte";
   import ActionMenu from "$lib/components/ActionMenu.svelte";

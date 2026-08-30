@@ -290,28 +290,28 @@ export class TrellisTestAdminAutomation {
   }
 
   async provisionDevice(
-    input: import("@qlever-llc/trellis/sdk/auth").AuthDevicesProvisionInput,
+    input: import("@trellis/apis/trellis.auth").AuthDevicesProvisionInput,
   ): Promise<
-    import("@qlever-llc/trellis/sdk/auth").AuthDevicesProvisionOutput
+    import("@trellis/apis/trellis.auth").AuthDevicesProvisionOutput
   > {
     return await this.#rpc("authDevicesProvision", input);
   }
 
   async stateAdminGet(
-    input: import("@qlever-llc/trellis/sdk/state").StateAdminGetInput,
-  ): Promise<import("@qlever-llc/trellis/sdk/state").StateAdminGetOutput> {
+    input: import("@trellis/apis/trellis.state").StateAdminGetInput,
+  ): Promise<import("@trellis/apis/trellis.state").StateAdminGetOutput> {
     return await this.#rpc("stateAdminGet", input);
   }
 
   async stateAdminList(
-    input: import("@qlever-llc/trellis/sdk/state").StateAdminListInput,
-  ): Promise<import("@qlever-llc/trellis/sdk/state").StateAdminListOutput> {
+    input: import("@trellis/apis/trellis.state").StateAdminListInput,
+  ): Promise<import("@trellis/apis/trellis.state").StateAdminListOutput> {
     return await this.#rpc("stateAdminList", input);
   }
 
   async stateAdminDelete(
-    input: import("@qlever-llc/trellis/sdk/state").StateAdminDeleteInput,
-  ): Promise<import("@qlever-llc/trellis/sdk/state").StateAdminDeleteOutput> {
+    input: import("@trellis/apis/trellis.state").StateAdminDeleteInput,
+  ): Promise<import("@trellis/apis/trellis.state").StateAdminDeleteOutput> {
     return await this.#rpc("stateAdminDelete", input);
   }
 

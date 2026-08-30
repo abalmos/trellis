@@ -50,10 +50,7 @@ const config = {
     alias: {
       // Only needed when developing against a local Trellis checkout.
       "@qlever-llc/trellis": aliasPath("../trellis/ts/packages/trellis/index.ts"),
-      "@qlever-llc/trellis/sdk/auth": aliasPath("../trellis/ts/packages/trellis/sdk/auth.ts"),
-
-      // Needed for local generated SDKs that are not installed packages.
-      "@my-org/orders-service-sdk": aliasPath("generated/packages/jsr/orders-service/mod.ts"),
+      "@trellis/apis/trellis.auth": aliasPath(".trellis/generated/ts/trellis-apis/trellis.auth.ts"),
     },
   },
 };
@@ -110,26 +107,15 @@ A simple setup that ensures this:
 ```json
 {
   "tasks": {
-    "prepare": "deno task -c ../../deno.json prepare",
-    "prepare:watch": "deno task -c ../../deno.json prepare:watch",
-    "dev": "deno task prepare && vite dev",
-    "build": "deno task prepare && vite build",
-    "check": "deno task prepare && svelte-kit sync && svelte-check --tsconfig ./tsconfig.check.json"
+    "install": "trellis install",
+    "dev": "deno task install && vite dev",
+    "build": "deno task install && vite build",
+    "check": "deno task install && svelte-kit sync && svelte-check --tsconfig ./tsconfig.check.json"
   }
 }
 ```
 
-`prepare` regenerates contract artifacts and any generated service SDKs consumed by the app contract. Svelte app-local helpers derive the connected client type directly from the local app contract with `TrellisClientFor<typeof contract>`; do not import the app's own generated SDK just to type `getTrellis()`. Regenerate whenever the contract changes.
-
-For active app or service-contract editing, keep `deno task prepare:watch`
-running in a separate terminal. It watches broadly but only prepares affected
-contract entries when safe. It ignores file changes that are not TypeScript,
-JavaScript, or Rust source unless they are recognized project/discovery inputs,
-plus `.git/`, `.worktrees/`, generated artifacts, and paths covered by
-`.gitignore`. It falls back to full prepare for project manifests and
-discovery-shape changes, and asks you to restart the watcher after
-generator/tooling changes. Use `trellis-generate prepare --watch --changes .`
-only when you need to see the event paths plus the watch decision and reason.
+`install` regenerates contract artifacts and locked service SDKs consumed by the app contract. Svelte app-local helpers derive the connected client type directly from the local app contract with `TrellisClientFor<typeof contract>`; do not import the app's own generated SDK just to type `getTrellis()`. Reinstall whenever the contract or lock changes.
 
 ## 3. Create one app-local Trellis module
 
@@ -168,7 +154,7 @@ export { contract };
 
 For the common case where your browser app talks to one known Trellis server, resolve that fixed `trellisUrl` once and pass it into `createTrellisApp`. If users choose a Trellis instance at runtime, pass a resolver such as `trellisUrl: () => selectedUrl` and update the selected value before rendering `TrellisProvider`.
 
-The `MyAppClient` alias is contract-derived and local to the app. App code should not import through `generated/packages/jsr/.../client.ts` just to type `getTrellis()`.
+The `MyAppClient` alias is contract-derived and local to the app. App code should not import generated implementation paths just to type `getTrellis()`.
 
 ## 4. Build the login page
 

@@ -1,5 +1,5 @@
 use trellis_rs::client::FeedDescriptor;
-use trellis_rs::sdk::jobs::api as generated_contract;
+use trellis_rs::internal_sdk::jobs::api as generated_contract;
 #[path = "../contracts/trellis_jobs.rs"]
 mod jobs_contract_source;
 
@@ -26,7 +26,7 @@ fn generated_jobs_watch_subject_matches_canonical_feed_subject() {
 
     assert!(watch.get("subject").is_none());
     assert_eq!(
-        trellis_rs::sdk::jobs::feeds::JobsWatchFeedDescriptor::SUBJECT,
+        trellis_rs::internal_sdk::jobs::feeds::JobsWatchFeedDescriptor::SUBJECT,
         "feed.v1.Jobs.Watch"
     );
 }

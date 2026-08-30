@@ -27,26 +27,17 @@ secondary Trellis callout for the platform concept it exercises.
 3. If the browser app should use a non-default Trellis URL, set
    `PUBLIC_TRELLIS_URL` in `demos/app/.env`. The default is
    `http://localhost:3000`.
-4. Prepare generated contracts and SDKs once:
+4. Install locked APIs and generated contracts once:
 
 ```sh
-deno task -c demos/ts/deno.json prepare
+cargo xtask install
 ```
 
-During active contract or browser-app work, keep generated demo SDKs fresh with
-the watch task instead:
-
-```sh
-deno task -c demos/ts/deno.json prepare:watch
-```
-
-The TypeScript prepare step generates the service SDK used by both `demos/app`
-and `demos/ts/device`. Rerun prepare after changing
-`demos/ts/service/contract.ts` or `demos/ts/device/contract.ts`. Run the app's
-own prepare task after changing `demos/app/contract.ts`. Trellis computes
-approval identity from the normalized contract interface: editing display-only
-metadata such as `displayName` or `description` updates portal/catalog copy but
-does not force a new browser, CLI, or device approval digest.
+Each demo project owns its dependencies and generated SDKs. Rerun install after
+changing a contract or dependency. Trellis computes approval identity from the
+normalized contract interface: editing display-only metadata such as
+`displayName` or `description` updates portal/catalog copy but does not force a
+new browser, CLI, or device approval digest.
 
 The demo contracts use Trellis schema references (`ref.schema(...)`) at surface
 declaration sites and self-contained embedded TypeBox schemas in `src/schemas`.
@@ -110,12 +101,12 @@ reconnect without another approval step.
 
 ## Start The Browser App
 
-Start the Svelte Field Inspection Desk from its own Deno config after prepare
-has generated the app SDK. The app defaults to `http://localhost:3000` for its
-Trellis server and can be pointed at another server with `PUBLIC_TRELLIS_URL`.
-It keeps local Trellis package and generated SDK aliases explicitly in
-`demos/app/svelte.config.js`; `vite.config.js` should not duplicate those local
-package mappings.
+Start the Svelte Field Inspection Desk from its own Deno config after
+`cargo xtask install` has generated the app SDK. The app defaults to
+`http://localhost:3000` for its Trellis server and can be pointed at another
+server with `PUBLIC_TRELLIS_URL`. It keeps local Trellis package and generated
+SDK aliases explicitly in `demos/app/svelte.config.js`; `vite.config.js` should
+not duplicate those local package mappings.
 
 ```sh
 deno task -c demos/app/deno.json dev

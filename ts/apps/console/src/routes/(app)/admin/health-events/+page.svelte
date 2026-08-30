@@ -4,7 +4,7 @@
     HealthInspectOutput,
     HealthMetricsOutput,
     HealthQueryOutput,
-  } from "@qlever-llc/trellis/sdk/health";
+  } from "@trellis/apis/trellis.health";
   import { onMount } from "svelte";
   import DataTable from "$lib/components/DataTable.svelte";
   import EmptyState from "$lib/components/EmptyState.svelte";

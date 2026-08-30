@@ -7,7 +7,7 @@
     JobsMetricsOutput,
     JobsQueryInput,
     JobsQueryOutput,
-  } from "@qlever-llc/trellis/sdk/jobs";
+  } from "@trellis/apis/trellis.jobs";
   import EmptyState from "../../../../lib/components/EmptyState.svelte";
   import JobsHealthMatrix from "../../../../lib/components/JobsHealthMatrix.svelte";
   import JobsScopedCharts from "../../../../lib/components/JobsScopedCharts.svelte";

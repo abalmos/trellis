@@ -9,8 +9,8 @@ use serde_json::{json, Value};
 use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
 use trellis_rs::client::{verify_event_proof, PreparedTrellisEvent};
-use trellis_rs::sdk::health::client::HealthClient;
-use trellis_rs::sdk::health::types::{
+use trellis_rs::internal_sdk::health::client::HealthClient;
+use trellis_rs::internal_sdk::health::types::{
     HealthInspectRequest, HealthMetricsRequest, HealthQueryRequest, HealthQueryResponse,
     HealthWatchEvent, HealthWatchInput,
 };
@@ -186,8 +186,8 @@ async fn health_projection_lifecycle_and_recovery() {
     )
     .expect("build health service contract");
     let health_api = trellis_test::TrellisTestContract::from_native_api_json(
-        trellis_rs::sdk::health::API_ID,
-        trellis_rs::sdk::health::API_JSON,
+        trellis_rs::internal_sdk::health::API_ID,
+        trellis_rs::internal_sdk::health::API_JSON,
         trellis_rs::contracts::ContractKind::Service,
     )
     .expect("build Health API evidence");
@@ -203,7 +203,7 @@ async fn health_projection_lifecycle_and_recovery() {
             )
             .use_ref(
                 "health",
-                trellis_rs::contracts::use_contract(trellis_rs::sdk::health::API_ID)
+                trellis_rs::contracts::use_contract(trellis_rs::internal_sdk::health::API_ID)
                     .with_rpc_call(["Health.Query", "Health.Inspect", "Health.Metrics"])
                     .with_feed_subscribe(["Health.Watch"])
                     .with_event_subscribe(["Health.StatusChanged"]),
@@ -417,7 +417,7 @@ async fn wait_for_query(
     health: &HealthClient<'_>,
     contract_id: &str,
     expected: &str,
-    predicate: impl Fn(&trellis_rs::sdk::health::types::HealthQueryResponseEntriesItem) -> bool,
+    predicate: impl Fn(&trellis_rs::internal_sdk::health::types::HealthQueryResponseEntriesItem) -> bool,
 ) -> HealthQueryResponse {
     let deadline = tokio::time::Instant::now() + Duration::from_secs(60);
     loop {
