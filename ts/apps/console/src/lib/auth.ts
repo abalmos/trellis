@@ -1,7 +1,5 @@
 import { resolve } from "$app/paths";
 import {
-  bindFlow,
-  type BindResponse,
   clearSessionKey,
   completeSessionLogout,
   getOrCreateSessionKey,
@@ -17,9 +15,7 @@ import {
 } from "./config.ts";
 
 type AuthCallbackResult =
-  | BindResponse
   | { status: "approval_denied" }
-  | { status: "approval_required" }
   | { status: "error"; code?: string; message: string };
 
 /** Converts auth callback reason codes into console-facing messages. */
@@ -63,21 +59,7 @@ class ConsoleAuthState {
       };
     }
 
-    const flowId = url.searchParams.get("flowId");
-    if (!flowId) return null;
-
-    try {
-      return await bindFlow(
-        { authUrl: this.#requireAuthUrl() },
-        await this.init(),
-        flowId,
-      );
-    } catch (error) {
-      return {
-        status: "error",
-        message: error instanceof Error ? error.message : String(error),
-      };
-    }
+    return null;
   }
 
   async signIn(

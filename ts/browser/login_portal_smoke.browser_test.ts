@@ -395,6 +395,64 @@ Deno.test("browser.embedded-console starts same-origin login under production CS
   }
 });
 
+Deno.test("browser.embedded-console carries callback flow into provider", async () => {
+  let releaseBind: (() => void) | undefined;
+  const bindReleased = new Promise<void>((resolve) => releaseBind = resolve);
+  let authRequests = 0;
+  const server = Deno.serve(
+    { hostname: "127.0.0.1", port: 0, onListen() {} },
+    async (request) => {
+      const url = new URL(request.url);
+      if (url.pathname === "/auth/requests") {
+        authRequests += 1;
+      }
+      if (url.pathname === "/auth/flow/flow-1/bind") {
+        await bindReleased;
+        return new Response("test complete", { status: 500 });
+      }
+      const relativePath = url.pathname.startsWith("/console/")
+        ? url.pathname.slice("/console/".length)
+        : "index.html";
+      const candidate = resolve(consoleBuildDir, relativePath || "index.html");
+      const path =
+        isInside(consoleBuildDir, candidate) && await exists(candidate)
+          ? candidate
+          : join(consoleBuildDir, "index.html");
+      return new Response(await Deno.readFile(path), {
+        headers: { "content-type": contentType(path) },
+      });
+    },
+  );
+
+  try {
+    await withCoveredPage(
+      "browser.embedded-console carries callback flow into provider",
+      async ({ page }) => {
+        const bindRequest = page.waitForRequest((request) =>
+          new URL(request.url()).pathname === "/auth/flow/flow-1/bind"
+        );
+        await page.goto(
+          `http://127.0.0.1:${server.addr.port}/console/callback?flowId=flow-1&redirectTo=%2Fconsole%2Fprofile`,
+          { waitUntil: "domcontentloaded" },
+        );
+        const request = await bindRequest;
+        await page.waitForURL((url) => url.pathname === "/console/profile");
+
+        assertEquals(new URL(page.url()).searchParams.get("flowId"), "flow-1");
+        assertEquals(
+          typeof (await request.postDataJSON()).idempotencyKey,
+          "string",
+        );
+        assertEquals(authRequests, 0);
+        releaseBind?.();
+      },
+    );
+  } finally {
+    releaseBind?.();
+    await server.shutdown();
+  }
+});
+
 withLivePortalPage(
   "browser.login-portal live local login binds approved client",
   async ({ page, portalOrigin, runtime }) => {

@@ -20,7 +20,6 @@
 
   let status = $state("Completing sign-in…");
   let authError = $state<string | null>(null);
-  let missingCapabilities = $state<string[]>([]);
   let selectedAuthUrl = $state("");
   let showPendingCard = $state(false);
 
@@ -49,6 +48,12 @@
     }
   }
 
+  function authenticatedCallbackTarget(flowId: string): string {
+    const target = new URL(targetPath(), window.location.origin);
+    target.searchParams.set("flowId", flowId);
+    return `${target.pathname}${target.search}${target.hash}`;
+  }
+
   onMount(() => {
     if (!browser) return;
 
@@ -69,6 +74,11 @@
         if (selectedAuthUrl) {
           auth.setAuthUrl(selectedAuthUrl);
         }
+        const flowId = page.url.searchParams.get("flowId");
+        if (flowId) {
+          await goto(authenticatedCallbackTarget(flowId));
+          return;
+        }
         await auth.init();
         const result = await auth.handleCallback(window.location.href);
         cleanupCallbackUrl();
@@ -78,28 +88,8 @@
           return;
         }
 
-        if (result.status === "bound") {
-          await goto(targetPath());
-          return;
-        }
-
         if (result.status === "approval_denied") {
           window.location.href = loginUrl(formatConsoleAuthError("approval_denied"));
-          return;
-        }
-
-        if (result.status === "approval_required") {
-          await auth.resetSession();
-          window.location.href = loginUrl(
-            "App access still requires administrator approval.",
-          );
-          return;
-        }
-
-        if (result.status === "insufficient_capabilities") {
-          missingCapabilities = result.missingCapabilities;
-          authError = "An administrator needs to grant additional capabilities before you can continue.";
-          status = "Insufficient access";
           return;
         }
 
@@ -135,18 +125,6 @@
 
         {#if authError}
           <Notice variant="error" class="text-sm">{authError}</Notice>
-          {#if missingCapabilities.length}
-            <details class="collapse collapse-arrow rounded-box bg-base-200 text-left">
-              <summary class="collapse-title min-h-0 py-3 text-xs font-semibold uppercase text-base-content/50">
-                Technical details
-              </summary>
-              <ul class="collapse-content flex flex-col gap-1 text-xs text-base-content/55">
-                {#each missingCapabilities as capability (capability)}
-                  <li class="trellis-identifier break-all">{capability}</li>
-                {/each}
-              </ul>
-            </details>
-          {/if}
           <button
             class="btn btn-ghost btn-sm"
             type="button"
