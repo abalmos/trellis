@@ -459,6 +459,131 @@ async fn connect_device_activation_user(fixture: &mut Fixture, case_id: &str) ->
 }
 
 #[tokio::test]
+async fn concurrent_different_principals_claim_one_trusted_browser_flow() {
+    assert_runtime_case_registered(
+        "auth.concurrent-different-principal-browser-flow",
+        "auth",
+        "auth",
+    );
+    let mut fixture = start_fixture(None, false).await;
+    let auth_api = trellis_test::TrellisTestContract::from_native_api_json(
+        trellis_runtime_apis::auth::API_ID,
+        trellis_runtime_apis::auth::API_JSON,
+        trellis_rs::contracts::ContractKind::Service,
+    )
+    .expect("build Auth API reference");
+    let registration_contract =
+        trellis_test::TrellisTestContract::from_builder_with_referenced_contracts(
+            trellis_rs::contracts::ContractBuilder::authoring(
+                APPROVED_CLIENT_ID,
+                APPROVED_CLIENT_ID,
+                "1.0.0",
+                "Principal Claim Registration Client",
+                "Creates users before racing one trusted browser flow.",
+                trellis_rs::contracts::ContractKind::App,
+            )
+            .use_ref(
+                "auth",
+                trellis_rs::contracts::use_contract(trellis_runtime_apis::auth::API_ID)
+                    .with_rpc_call(["Auth.Sessions.Me"]),
+            )
+            .use_ref(
+                "service",
+                trellis_rs::contracts::use_contract(SERVICE_ID).with_rpc_call(["Value.Get"]),
+            ),
+            &[&fixture.service_contract, &auth_api],
+        )
+        .expect("build registration client contract");
+    for (username, password) in [
+        ("principal-claim-a", "principal-claim-a-password-123"),
+        ("principal-claim-b", "principal-claim-b-password-123"),
+    ] {
+        fixture
+            .admin
+            .register_local_browser_user(
+                &fixture.bootstrap_url,
+                &fixture.client_contract,
+                username,
+                password,
+            )
+            .await
+            .expect("register principal claim user");
+    }
+    fixture
+        .admin
+        .put_test_login_portal(
+            &fixture.bootstrap_url,
+            &fixture.runtime.integration_name("principal-claim-portal"),
+            registration_contract.id(),
+            vec!["local".to_owned()],
+        )
+        .await
+        .expect("create trusted principal claim portal");
+    fixture
+        .admin
+        .put_portal_grant_override(
+            &fixture.bootstrap_url,
+            &fixture.runtime.integration_name("principal-claim-portal"),
+            registration_contract.id(),
+            None,
+            vec![fixture.read_capability.clone()],
+        )
+        .await
+        .expect("configure trusted principal claim authority");
+
+    let flow_id = fixture
+        .admin
+        .start_browser_auth_flow(
+            &fixture.bootstrap_url,
+            &registration_contract,
+            &format!(
+                "{}/_trellis/test/principal-claim",
+                fixture.runtime.trellis_url()
+            ),
+        )
+        .await
+        .expect("start shared browser flow");
+    let (first, second) = tokio::join!(
+        fixture.admin.complete_local_browser_flow(
+            &flow_id,
+            "principal-claim-a",
+            "principal-claim-a-password-123",
+        ),
+        fixture.admin.complete_local_browser_flow(
+            &flow_id,
+            "principal-claim-b",
+            "principal-claim-b-password-123",
+        ),
+    );
+    assert_ne!(first.is_ok(), second.is_ok(), "exactly one principal wins");
+    let winning_username = if first.is_ok() {
+        "principal-claim-a"
+    } else {
+        "principal-claim-b"
+    };
+    let rows = fixture
+        .runtime
+        .control_plane_sqlite()
+        .query(
+            "SELECT c.normalized_username AS username, (SELECT count(*) FROM auth_identity_authorities a WHERE a.principal_id = c.principal_id AND a.participant_id = ?) AS authority_count, (SELECT count(*) FROM auth_portal_authority_bindings b WHERE b.principal_id = c.principal_id AND b.participant_id = ?) AS binding_count FROM auth_local_credentials c WHERE c.normalized_username IN (?, ?) ORDER BY c.normalized_username",
+            [
+                registration_contract.id(),
+                registration_contract.id(),
+                "principal-claim-a",
+                "principal-claim-b",
+            ],
+        )
+        .expect("query authority effects for competing principals");
+    assert_eq!(rows.len(), 2);
+    for row in rows {
+        let username = row["username"].as_str().expect("username");
+        let expected = i64::from(username == winning_username);
+        assert_eq!(row["authority_count"].as_i64(), Some(expected));
+        assert_eq!(row["binding_count"].as_i64(), Some(expected));
+    }
+}
+
+#[tokio::test]
 async fn local_login_binds_approved_client_and_calls_authorized_rpc() {
     assert_runtime_case_registered("auth.local-login-binds-approved-client", "auth", "auth");
     let mut fixture = start_fixture(None, false).await;

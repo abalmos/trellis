@@ -238,18 +238,29 @@ where
     E: AuthEphemeralRepository + Clone,
 {
     let cookie_name = oauth_cookie_name(&query.state);
+    let state_id = query.state.clone();
     let mut response = match oidc_callback_inner(&state, &provider_id, query, &headers).await {
         Ok(response) => response,
         Err(error) => error.into_response(),
     };
-    if let Ok(cookie) = oauth_cookie_header(
-        &cookie_name,
-        "",
-        &provider_id,
-        state.public_origin.starts_with("https://"),
-        0,
-    ) {
-        response.headers_mut().append(SET_COOKIE, cookie);
+    let clear_cookie = match state.ephemeral.get_oauth_state(&state_id).await {
+        Ok(Some(oauth)) => oauth_cookie_is_terminal(oauth.status),
+        Ok(None) => true,
+        Err(error) => {
+            tracing::error!(%error, %state_id, "failed to inspect OAuth state after callback");
+            false
+        }
+    };
+    if clear_cookie {
+        if let Ok(cookie) = oauth_cookie_header(
+            &cookie_name,
+            "",
+            &provider_id,
+            state.public_origin.starts_with("https://"),
+            0,
+        ) {
+            response.headers_mut().append(SET_COOKIE, cookie);
+        }
     }
     response
 }
@@ -276,11 +287,29 @@ where
         + 'static,
     E: AuthEphemeralRepository + Clone,
 {
-    let pending = state
+    let mut pending = state
         .ephemeral
         .get_oauth_state(&query.state)
         .await?
         .ok_or_else(|| HttpError::bad_request("oauth_state_invalid"))?;
+    if pending.expires_at < now_ms()?
+        && matches!(
+            pending.status,
+            AuthOAuthStatus::Pending | AuthOAuthStatus::Claimed | AuthOAuthStatus::ExchangeStarted
+        )
+    {
+        if pending.kind == AuthOAuthKind::Browser {
+            require_oauth_browser_binding(&query.state, &pending, headers)?;
+        }
+        let expected = pending.version;
+        pending.status = AuthOAuthStatus::Expired;
+        pending.version += 1;
+        state
+            .ephemeral
+            .replace_oauth_state(expected, pending)
+            .await?;
+        return Err(HttpError::gone("oauth_expired"));
+    }
     if pending.kind == AuthOAuthKind::Browser
         && matches!(
             pending.status,
@@ -294,6 +323,11 @@ where
             && pending.authenticated_principal_id.is_some()
         {
             return complete_browser_oauth(&state, pending, now_ms()?).await;
+        }
+        if pending.status == AuthOAuthStatus::ExchangeStarted {
+            let mut pending = pending;
+            mark_oauth_restart_required(&state.ephemeral, &mut pending).await?;
+            return Err(HttpError::conflict("oauth_restart_required"));
         }
         let flow = load_flow(&state.ephemeral, &pending.flow_id).await?;
         if pending.status == AuthOAuthStatus::Completed
@@ -786,9 +820,34 @@ async fn mark_oauth_restart_required(
         .map_err(Into::into)
 }
 
+fn oauth_cookie_is_terminal(status: AuthOAuthStatus) -> bool {
+    matches!(
+        status,
+        AuthOAuthStatus::Completed | AuthOAuthStatus::RestartRequired | AuthOAuthStatus::Expired
+    )
+}
+
 #[cfg(test)]
 mod role_tests {
     use super::*;
+
+    #[test]
+    fn browser_cookie_is_cleared_only_for_terminal_oauth_states() {
+        for status in [
+            AuthOAuthStatus::Pending,
+            AuthOAuthStatus::Claimed,
+            AuthOAuthStatus::ExchangeStarted,
+        ] {
+            assert!(!oauth_cookie_is_terminal(status));
+        }
+        for status in [
+            AuthOAuthStatus::Completed,
+            AuthOAuthStatus::RestartRequired,
+            AuthOAuthStatus::Expired,
+        ] {
+            assert!(oauth_cookie_is_terminal(status));
+        }
+    }
 
     fn token(claims: Value) -> String {
         format!(

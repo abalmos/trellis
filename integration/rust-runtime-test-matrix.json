@@ -1211,6 +1211,58 @@
       }
     },
     {
+      "id": "auth.concurrent-different-principal-browser-flow",
+      "fixture": "auth",
+      "title": "Concurrent principals cannot mutate one trusted browser flow",
+      "coverage": [
+        "app-identity-grant-approval",
+        "auth-protocol-matrix",
+        "distributed-coordination"
+      ],
+      "description": "Two authenticated principals concurrently complete one trusted-portal browser flow; the browser-flow CAS claims exactly one principal before durable authority mutation, and the loser receives no identity authority or portal binding.",
+      "scenario": {
+        "participants": [
+          {
+            "name": "principal-a",
+            "kind": "admin",
+            "contract": "trellis.auth@v1"
+          },
+          {
+            "name": "principal-b",
+            "kind": "admin",
+            "contract": "trellis.auth@v1"
+          },
+          {
+            "name": "client",
+            "kind": "app",
+            "contract": "trellis.integration.auth-client@v1"
+          }
+        ],
+        "given": [
+          "two registered local users and one trusted participant-scoped portal",
+          "one browser flow remains in choose_provider"
+        ],
+        "when": [
+          "both users concurrently complete local authentication for the same browser flow"
+        ],
+        "then": [
+          "exactly one principal claims the browser flow",
+          "only the winning principal receives identity authority and a portal binding",
+          "the losing principal receives no durable authority effect from the flow"
+        ]
+      },
+      "completion": {
+        "rust": "implemented"
+      },
+      "implementations": {
+        "rust": {
+          "module": "auth",
+          "function": "concurrent_different_principals_claim_one_trusted_browser_flow"
+        }
+      },
+      "classification": "shared"
+    },
+    {
       "id": "auth.local-login-binds-approved-client",
       "fixture": "auth",
       "title": "Local login binds an approved app client session",

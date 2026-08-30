@@ -390,21 +390,38 @@ where
         + 'static,
     E: AuthEphemeralRepository + Clone,
 {
-    if flow.state != AuthBrowserFlowState::ChooseProvider {
-        if flow.principal_id.as_deref() == Some(&principal_id)
-            && matches!(
-                flow.state,
-                AuthBrowserFlowState::ApprovalRequired
-                    | AuthBrowserFlowState::Approved
-                    | AuthBrowserFlowState::Consumed
-            )
+    if flow.state == AuthBrowserFlowState::ChooseProvider {
+        let expected = flow.version;
+        flow.state = AuthBrowserFlowState::Authenticated;
+        flow.principal_id = Some(principal_id.clone());
+        flow.version += 1;
+        match state
+            .ephemeral
+            .replace_browser_flow(expected, flow.clone())
+            .await
         {
-            return Ok(flow);
+            Ok(()) => {}
+            Err(AuthorizationStateError::StorageConflict) => {
+                flow = load_flow(&state.ephemeral, &flow.flow_id).await?;
+            }
+            Err(error) => return Err(error.into()),
         }
+    }
+    if flow.principal_id.as_deref() != Some(&principal_id) {
+        return Err(HttpError::conflict("flow_principal_conflict"));
+    }
+    if matches!(
+        flow.state,
+        AuthBrowserFlowState::ApprovalRequired
+            | AuthBrowserFlowState::Approved
+            | AuthBrowserFlowState::Consumed
+    ) {
+        return Ok(flow);
+    }
+    if flow.state != AuthBrowserFlowState::Authenticated {
         return Err(HttpError::conflict("flow_not_pending"));
     }
     let expected = flow.version;
-    flow.principal_id = Some(principal_id);
     let mut completed = if let Some(approved) =
         apply_trusted_portal_authority(state, flow.clone(), attributes, now).await?
     {

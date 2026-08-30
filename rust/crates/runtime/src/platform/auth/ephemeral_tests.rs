@@ -111,22 +111,34 @@ async fn repository_conformance(repository: impl AuthEphemeralRepository + Clone
         .create_browser_flow(directly_approved.clone())
         .await
         .unwrap();
-    directly_approved.state = AuthBrowserFlowState::Approved;
+    directly_approved.state = AuthBrowserFlowState::Authenticated;
     directly_approved.principal_id = Some("user-1".to_owned());
-    directly_approved.durable_result_digest = Some(DIGEST.to_owned());
-    directly_approved.completed_at = Some(200);
     directly_approved.version = 2;
     repository
-        .replace_browser_flow(1, directly_approved)
+        .replace_browser_flow(1, directly_approved.clone())
+        .await
+        .unwrap();
+    directly_approved.state = AuthBrowserFlowState::Approved;
+    directly_approved.durable_result_digest = Some(DIGEST.to_owned());
+    directly_approved.completed_at = Some(200);
+    directly_approved.version = 3;
+    repository
+        .replace_browser_flow(2, directly_approved)
         .await
         .unwrap();
 
     let mut approval_required = flow.clone();
-    approval_required.state = AuthBrowserFlowState::ApprovalRequired;
+    approval_required.state = AuthBrowserFlowState::Authenticated;
     approval_required.principal_id = Some("user-1".to_owned());
     approval_required.version = 2;
     repository
         .replace_browser_flow(1, approval_required.clone())
+        .await
+        .unwrap();
+    approval_required.state = AuthBrowserFlowState::ApprovalRequired;
+    approval_required.version = 3;
+    repository
+        .replace_browser_flow(2, approval_required.clone())
         .await
         .unwrap();
     assert_eq!(
@@ -161,17 +173,17 @@ async fn repository_conformance(repository: impl AuthEphemeralRepository + Clone
     ] {
         let mut changed = approval_required.clone();
         changed.consent = changed_consent;
-        changed.version = 3;
+        changed.version = 4;
         assert_eq!(
-            repository.replace_browser_flow(2, changed).await,
+            repository.replace_browser_flow(3, changed).await,
             Err(AuthorizationStateError::StorageConflict)
         );
     }
     let mut changed_transcript = approval_required;
     changed_transcript.request_id = "changed".to_owned();
-    changed_transcript.version = 3;
+    changed_transcript.version = 4;
     assert_eq!(
-        repository.replace_browser_flow(2, changed_transcript).await,
+        repository.replace_browser_flow(3, changed_transcript).await,
         Err(AuthorizationStateError::StorageConflict)
     );
     let mut skipped_state = flow.clone();

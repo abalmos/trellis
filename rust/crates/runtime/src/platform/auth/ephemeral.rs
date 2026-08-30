@@ -35,6 +35,7 @@ pub(crate) enum AuthBrowserFlowKind {
 #[serde(rename_all = "snake_case")]
 pub(crate) enum AuthBrowserFlowState {
     ChooseProvider,
+    Authenticated,
     ApprovalRequired,
     ApprovalDenied,
     Approved,
@@ -190,6 +191,7 @@ impl AuthBrowserFlow {
         let completed = self.completed_at.is_some();
         let valid = match self.state {
             AuthBrowserFlowState::ChooseProvider => !principal && !claim && !result && !completed,
+            AuthBrowserFlowState::Authenticated => principal && !claim && !result && !completed,
             AuthBrowserFlowState::ApprovalRequired => principal && !claim && !result && !completed,
             AuthBrowserFlowState::ApprovalDenied => principal && !claim && !result && completed,
             AuthBrowserFlowState::Approved => principal && !claim && result && completed,
@@ -652,6 +654,9 @@ fn valid_browser_transition(current: AuthBrowserFlowState, next: AuthBrowserFlow
         (current, next),
         (
             AuthBrowserFlowState::ChooseProvider,
+            AuthBrowserFlowState::Authenticated | AuthBrowserFlowState::Expired
+        ) | (
+            AuthBrowserFlowState::Authenticated,
             AuthBrowserFlowState::ApprovalRequired
                 | AuthBrowserFlowState::Approved
                 | AuthBrowserFlowState::Expired

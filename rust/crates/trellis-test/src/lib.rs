@@ -3046,6 +3046,28 @@ impl TrellisTestAdmin {
         perform_local_login(&self.trellis_url, flow_id, username, password).await
     }
 
+    /// Register a local user through a browser flow without binding its client session.
+    pub async fn register_local_browser_user(
+        &mut self,
+        bootstrap_url: &str,
+        contract: &TrellisTestContract,
+        username: &str,
+        password: &str,
+    ) -> Result<(), TrellisTestError> {
+        let flow_id = self
+            .start_browser_auth_flow(
+                bootstrap_url,
+                contract,
+                &format!(
+                    "{}/_trellis/test/register-user",
+                    trim_url(&self.trellis_url)
+                ),
+            )
+            .await?;
+        register_local_user(&self.trellis_url, &flow_id, username, password).await?;
+        Ok(())
+    }
+
     /// Set claims returned by the shared live-test OIDC provider.
     pub async fn set_test_oidc_claims(&self, claims: Value) -> Result<(), TrellisTestError> {
         let proxy = self.test_control_rpc.as_ref().ok_or_else(|| {

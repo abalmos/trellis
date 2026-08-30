@@ -418,7 +418,10 @@ where
     {
         return Err(HttpError::forbidden("local_login_disabled"));
     }
-    if flow.state != AuthBrowserFlowState::ChooseProvider {
+    if !matches!(
+        flow.state,
+        AuthBrowserFlowState::ChooseProvider | AuthBrowserFlowState::Authenticated
+    ) {
         return Err(HttpError::conflict("flow_not_pending"));
     }
     let now = now_ms()?;
@@ -478,7 +481,10 @@ where
     E: AuthEphemeralRepository + Clone,
 {
     let flow = load_flow(&state.ephemeral, &flow_id).await?;
-    if flow.state != AuthBrowserFlowState::ChooseProvider {
+    if !matches!(
+        flow.state,
+        AuthBrowserFlowState::ChooseProvider | AuthBrowserFlowState::Authenticated
+    ) {
         return Err(HttpError::conflict("flow_not_pending"));
     }
     let (portal, settings) = state
