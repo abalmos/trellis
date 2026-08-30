@@ -780,7 +780,6 @@ pub(crate) trait ProvisioningRepository: Send + Sync {
 #[async_trait]
 pub(crate) trait OutboxRepository: Send + Sync {
     /// Load one durable proof result by its authenticated request scope.
-    #[cfg(test)]
     async fn get_idempotency_result(
         &self,
         purpose: &str,

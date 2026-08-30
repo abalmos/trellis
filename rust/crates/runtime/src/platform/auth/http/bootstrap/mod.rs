@@ -23,7 +23,7 @@ fn device_activation_url(
 }
 
 #[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(super) struct ServiceBootstrapRequest {
     request_id: String,
     issued_at: i64,
@@ -41,7 +41,7 @@ pub(super) struct ServiceBootstrapRequest {
 }
 
 #[derive(Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(super) struct DeviceBootstrapRequest {
     request_id: String,
     issued_at: i64,
@@ -750,15 +750,11 @@ where
             )?,
             effective_authority_expires_at: issuance.effective_authority_expires_at,
         }),
-        nats: Some(NatsBootstrapResponse {
-            jwt: route.jwt,
-            jwt_expires_at: route.expires_at,
-            servers: if state.native_nats_servers.is_empty() {
-                state.websocket_nats_servers.clone()
-            } else {
-                state.native_nats_servers.clone()
-            },
-        }),
+        nats: Some(NatsBootstrapResponse::new(
+            route,
+            state.native_nats_servers.clone(),
+            state.websocket_nats_servers.clone(),
+        )),
         authorization_context: Some(authorization_context),
         activation,
         proposal: None,

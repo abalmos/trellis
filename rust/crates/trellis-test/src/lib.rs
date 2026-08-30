@@ -2968,7 +2968,19 @@ impl TrellisTestAdmin {
                 submit_portal_approval(&self.trellis_url, &flow_id).await?;
             }
         }
-        let bound = bind_flow(&self.trellis_url, &flow_id).await?;
+        let (bound, concurrent) = tokio::join!(
+            bind_flow(&self.trellis_url, &flow_id, &auth),
+            bind_flow(&self.trellis_url, &flow_id, &auth),
+        );
+        let bound = bound?;
+        let concurrent = concurrent?;
+        let replay = bind_flow(&self.trellis_url, &flow_id, &auth).await?;
+        if concurrent.session_id != bound.session_id || replay.session_id != bound.session_id {
+            return Err(TrellisTestError::UnexpectedResponse(format!(
+                "browser flow {flow_id} resolved multiple sessions: {}, {}, {}",
+                bound.session_id, concurrent.session_id, replay.session_id
+            )));
+        }
         let compiled_api = compiled.api_value()?;
         let compiled_participant_digest = compiled.participant_digest()?;
         self.api_artifacts.insert(
@@ -3880,7 +3892,7 @@ struct AuthStartResponse {
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct BindFlowResponse {
+struct CompletedFlowSession {
     session: BoundSessionRecord,
     nats: BoundNatsRecord,
     authorization_context: trellis_rs::client::AuthorizationContextBundle,
@@ -3897,7 +3909,19 @@ struct BoundSessionRecord {
 #[derive(Debug, Deserialize)]
 struct BoundNatsRecord {
     jwt: String,
-    servers: Vec<String>,
+    transports: BoundNatsTransports,
+}
+
+#[derive(Debug, Deserialize)]
+struct BoundNatsTransports {
+    native: Option<BoundNatsRoute>,
+    websocket: Option<BoundNatsRoute>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct BoundNatsRoute {
+    nats_servers: Vec<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -4120,45 +4144,78 @@ async fn submit_portal_approval(trellis_url: &str, flow_id: &str) -> Result<(), 
         .no_proxy()
         .build()?
         .get(&flow_url)
+        .header(reqwest::header::ORIGIN, trellis_url)
         .send()
         .await?;
     let flow: PortalFlowStatus = decode_http_json(&flow_url, response).await?;
-    let state: PortalFlowStatus = post_json_with_origin(
-        &format!("{}/auth/flow/{}/approval", trim_url(trellis_url), flow_id),
-        trellis_url,
-        &json!({
-            "approved": true,
-            "consentViewDigest": flow.consent_view_digest,
-            "selectedOptionalBundles": [],
-            "idempotencyKey": random_session_seed(),
-        }),
-    )
-    .await?;
-    if state.state == "approved" {
+    let url = format!("{}/auth/flow/{}/approval", trim_url(trellis_url), flow_id);
+    let request = json!({
+        "approved": true,
+        "consentViewDigest": flow.consent_view_digest,
+        "selectedOptionalBundles": [],
+    });
+    let (first, second) = tokio::join!(
+        post_json_with_origin::<PortalFlowStatus, _>(&url, trellis_url, &request),
+        post_json_with_origin::<PortalFlowStatus, _>(&url, trellis_url, &request),
+    );
+    let first = first?;
+    let second = second?;
+    if first.state == "approved" && second.state == "approved" {
         Ok(())
     } else {
         Err(TrellisTestError::UnexpectedFlowStatus {
             flow_id: flow_id.to_string(),
-            status: state.state,
+            status: format!("{},{}", first.state, second.state),
         })
     }
 }
 
-async fn bind_flow(trellis_url: &str, flow_id: &str) -> Result<BoundFlowSession, TrellisTestError> {
-    let response: BindFlowResponse = post_json_with_origin(
+async fn bind_flow(
+    trellis_url: &str,
+    flow_id: &str,
+    auth: &SessionAuth,
+) -> Result<BoundFlowSession, TrellisTestError> {
+    let request_id = ulid::Ulid::new().to_string();
+    let issued_at = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|error| TrellisTestError::UnexpectedResponse(error.to_string()))?
+        .as_millis() as i64;
+    let mut raw = json!({
+        "requestId": request_id,
+        "issuedAt": issued_at,
+        "proof": { "format": "trellis.session-proof.v1", "signature": "" },
+    });
+    let input = trellis_protocol::SessionProofInput::user_auth_bind(
+        trellis_protocol::UserAuthBindSessionProofInput {
+            request_id,
+            issued_at,
+            flow_id: flow_id.to_owned(),
+            session_public_key: auth.session_key.clone(),
+            request_digest: trellis_protocol::session_proof_request_digest(&raw)?,
+        },
+    )?;
+    raw["proof"] = serde_json::to_value(auth.sign_session_proof(&input)?)?;
+    let response: CompletedFlowSession = post_json_with_origin(
         &format!("{}/auth/flow/{}/bind", trim_url(trellis_url), flow_id),
         trellis_url,
-        &json!({ "idempotencyKey": random_session_seed() }),
+        &raw,
     )
     .await?;
-    if response.nats.servers.is_empty() {
+    let servers = response
+        .nats
+        .transports
+        .native
+        .or(response.nats.transports.websocket)
+        .map(|route| route.nats_servers)
+        .unwrap_or_default();
+    if servers.is_empty() {
         return Err(TrellisTestError::UnexpectedResponse(
-            "bound auth flow native transport has no NATS servers".to_string(),
+            "completed auth flow has no NATS transport endpoints".to_string(),
         ));
     }
     Ok(BoundFlowSession {
         trellis_url: trellis_url.to_owned(),
-        nats_servers: response.nats.servers.join(","),
+        nats_servers: servers.join(","),
         bootstrap_jwt: response.nats.jwt,
         session_id: response.session.session_id,
         inbox_prefix: response.session.inbox_prefix,

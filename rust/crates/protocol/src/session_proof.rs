@@ -23,6 +23,8 @@ const MAXIMUM_PROOF_WINDOW_MS: i64 = 5 * 60 * 1_000;
 pub enum SessionProofPurpose {
     /// Start a user app or agent browser-auth request.
     UserAuthRequest,
+    /// Claim an approved browser-auth flow with its enrolled session key.
+    UserAuthBind,
     /// Bootstrap a provisioned service instance.
     ServiceBootstrap,
     /// Bootstrap a provisioned or activated device.
@@ -35,6 +37,7 @@ impl SessionProofPurpose {
     fn as_str(self) -> &'static str {
         match self {
             Self::UserAuthRequest => "userAuthRequest",
+            Self::UserAuthBind => "userAuthBind",
             Self::ServiceBootstrap => "serviceBootstrap",
             Self::DeviceBootstrap => "deviceBootstrap",
             Self::AuthorizationContextRefresh => "authorizationContextRefresh",
@@ -77,6 +80,21 @@ pub struct UserAuthRequestSessionProofInput {
     /// Exact post-authentication redirect target.
     pub redirect_target: String,
     /// Digest of the complete request with its proof signature removed.
+    pub request_digest: String,
+}
+
+/// Owned fields for claiming an approved browser-auth flow.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct UserAuthBindSessionProofInput {
+    /// Caller-generated proof request identifier.
+    pub request_id: String,
+    /// Claimed Unix issue time in milliseconds.
+    pub issued_at: i64,
+    /// Immutable browser flow identifier.
+    pub flow_id: String,
+    /// Enrolled unpadded base64url Ed25519 session public key.
+    pub session_public_key: String,
+    /// Digest of the complete bind request with its proof signature removed.
     pub request_digest: String,
 }
 
@@ -208,6 +226,47 @@ impl SessionProofInput {
                 nkey: session_nkey,
                 public_key: key,
             }),
+        )
+    }
+
+    /// Build a proof input for claiming an approved browser-auth flow.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ProtocolError::SessionProof`] when a field is noncanonical,
+    /// unsafe, empty, or malformed.
+    pub fn user_auth_bind(input: UserAuthBindSessionProofInput) -> Result<Self, ProtocolError> {
+        let UserAuthBindSessionProofInput {
+            request_id,
+            issued_at,
+            flow_id,
+            session_public_key,
+            request_digest,
+        } = input;
+        if ulid::Ulid::from_string(&request_id)
+            .map(|parsed| parsed.to_string() != request_id)
+            .unwrap_or(true)
+        {
+            return Err(proof_error(
+                SessionProofErrorCode::InvalidFormat,
+                ["requestId"],
+                "browser bind request ID must be a canonical ULID",
+            ));
+        }
+        let key = decode_public_key(&session_public_key, &["sessionPublicKey"])?;
+        let signer_key_id = derived_key_id(&key);
+
+        Self::new(
+            SessionProofPurpose::UserAuthBind,
+            request_id,
+            issued_at,
+            signer_key_id,
+            vec![
+                text(&flow_id, &["flowId"])?,
+                key.as_bytes().to_vec(),
+                digest(&request_digest, &["requestDigest"])?,
+            ],
+            None,
         )
     }
 
@@ -949,6 +1008,48 @@ mod tests {
     use serde_json::json;
 
     const DIGEST: &str = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+
+    #[test]
+    fn user_auth_bind_proof_is_bound_to_the_flow() -> Result<(), ProtocolError> {
+        let signing_key = SigningKey::from_bytes(&[7; 32]);
+        let public_key = encode_base64url(signing_key.verifying_key().as_bytes());
+        let bind = |flow_id: &str| {
+            SessionProofInput::user_auth_bind(UserAuthBindSessionProofInput {
+                request_id: "01ARZ3NDEKTSV4RRFFQ69G5FAV".to_owned(),
+                issued_at: 1_000,
+                flow_id: flow_id.to_owned(),
+                session_public_key: public_key.clone(),
+                request_digest: DIGEST.to_owned(),
+            })
+        };
+        let proof = sign_session_proof(&bind("flow_1")?, &signing_key)?;
+        verify_session_proof(
+            &bind("flow_1")?,
+            &proof,
+            &public_key,
+            1_000,
+            SessionProofPolicy::default(),
+        )?;
+        assert!(verify_session_proof(
+            &bind("flow_2")?,
+            &proof,
+            &public_key,
+            1_000,
+            SessionProofPolicy::default(),
+        )
+        .is_err());
+        assert!(
+            SessionProofInput::user_auth_bind(UserAuthBindSessionProofInput {
+                request_id: "req_bind_1".to_owned(),
+                issued_at: 1_000,
+                flow_id: "flow_1".to_owned(),
+                session_public_key: public_key,
+                request_digest: DIGEST.to_owned(),
+            })
+            .is_err()
+        );
+        Ok(())
+    }
 
     #[test]
     fn authorization_context_refresh_requires_positive_manifest_floor() -> Result<(), ProtocolError>

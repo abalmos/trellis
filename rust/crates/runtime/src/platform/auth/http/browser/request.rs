@@ -1,8 +1,8 @@
 use super::super::*;
 
 #[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub(super) struct AuthStartRequest {
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(in crate::platform::auth::http) struct AuthStartRequest {
     request_id: String,
     issued_at: i64,
     session_public_key: String,
@@ -20,9 +20,8 @@ pub(super) struct AuthStartRequest {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct AuthStartResponse {
-    state: &'static str,
     flow_id: String,
-    portal_url: String,
+    login_url: String,
 }
 
 pub(crate) async fn start_auth<R, E>(
@@ -203,9 +202,8 @@ where
         Err(error) => return Err(error.into()),
     }
     Ok(Json(AuthStartResponse {
-        state: "flow",
         flow_id: flow_id.clone(),
-        portal_url: portal_url(&portal, &state.public_origin, &flow_id)?,
+        login_url: portal_url(&portal, &state.public_origin, &flow_id)?,
     }))
 }
 
@@ -396,4 +394,22 @@ async fn portal_file<R, E>(state: &AuthHttpState<R, E>, path: &str) -> Response 
         _ => "application/octet-stream",
     };
     ([(CONTENT_TYPE, content_type)], bytes).into_response()
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn start_response_has_one_final_shape() {
+        assert_eq!(
+            serde_json::to_value(super::AuthStartResponse {
+                flow_id: "flow_01".to_owned(),
+                login_url: "https://auth.example/login?flowId=flow_01".to_owned(),
+            })
+            .unwrap(),
+            serde_json::json!({
+                "flowId": "flow_01",
+                "loginUrl": "https://auth.example/login?flowId=flow_01",
+            })
+        );
+    }
 }

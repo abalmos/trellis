@@ -324,8 +324,8 @@ pub use session_proof::{
     parse_session_proof, session_proof_request_digest, session_proof_signing_digest,
     sign_session_proof, verify_session_proof, AuthorizationContextRefreshSessionProofInput,
     DeviceBootstrapSessionProofInput, ServiceBootstrapSessionProofInput, SessionProof,
-    SessionProofInput, SessionProofPolicy, SessionProofPurpose, UserAuthRequestSessionProofInput,
-    SESSION_PROOF_FORMAT_V1,
+    SessionProofInput, SessionProofPolicy, SessionProofPurpose, UserAuthBindSessionProofInput,
+    UserAuthRequestSessionProofInput, SESSION_PROOF_FORMAT_V1,
 };
 pub use subjects::{
     derive_event_subject, derive_event_wildcard_subject, derive_feed_subject,

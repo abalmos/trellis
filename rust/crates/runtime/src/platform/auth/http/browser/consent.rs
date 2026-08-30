@@ -4,13 +4,11 @@ use crate::platform::auth::policy::portal_allows_authenticated_provider;
 use crate::platform::auth::MaterializationState;
 
 #[derive(Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct ApprovalRequest {
     approved: bool,
     consent_view_digest: String,
-    #[serde(default)]
     pub(crate) selected_optional_bundles: Vec<String>,
-    idempotency_key: String,
 }
 
 pub(crate) async fn decide_approval<R, E>(
@@ -43,6 +41,31 @@ where
         .await?
         .ok_or_else(|| HttpError::gone("portal_unavailable"))?;
     require_selected_portal_origin(&headers, &portal, &state.public_origin)?;
+    let request_value =
+        serde_json::to_value(&request).map_err(|_| HttpError::bad_request("invalid_approval"))?;
+    let request_digest = trellis_protocol::digest_json(&request_value)
+        .map_err(|_| HttpError::bad_request("invalid_approval"))?;
+    if matches!(
+        flow.state,
+        AuthBrowserFlowState::Approved | AuthBrowserFlowState::Consumed
+    ) {
+        let signer_id = super::super::super::domain::validate_ed25519_public_key(
+            "sessionPublicKey",
+            &flow.session_public_key,
+        )?;
+        let recorded = state
+            .service
+            .repository()
+            .get_idempotency_result("browser.authority.accept", &signer_id, &flow_id)
+            .await?;
+        if !request.approved
+            || request.consent_view_digest != flow.consent.consent_view_digest
+            || recorded.as_ref().map(|record| &record.request_digest) != Some(&request_digest)
+        {
+            return Err(HttpError::conflict("approval_replay_mismatch"));
+        }
+        return Ok(Json(flow_response(flow)));
+    }
     if flow.state != AuthBrowserFlowState::ApprovalRequired {
         return Err(HttpError::conflict("flow_not_awaiting_approval"));
     }
@@ -84,10 +107,6 @@ where
     if requests_reserved && flow.participant_id != "trellis-platform-administration" {
         return Err(HttpError::forbidden("reserved_capability"));
     }
-    let request_value =
-        serde_json::to_value(&request).map_err(|_| HttpError::bad_request("invalid_approval"))?;
-    let request_digest = trellis_protocol::digest_json(&request_value)
-        .map_err(|_| HttpError::bad_request("invalid_approval"))?;
     let signer_id = super::super::super::domain::validate_ed25519_public_key(
         "sessionPublicKey",
         &flow.session_public_key,
@@ -117,7 +136,7 @@ where
                 &flow_id,
                 "browser.authority.propose",
                 &signer_id,
-                &request.idempotency_key,
+                &flow_id,
                 &request_digest,
                 now,
             )?,
@@ -125,7 +144,7 @@ where
                 &flow_id,
                 "browser.authority.accept",
                 &signer_id,
-                &request.idempotency_key,
+                &flow_id,
                 &request_digest,
                 now,
             )?,
@@ -190,10 +209,24 @@ where
     flow.durable_result_digest = Some(durable_result_digest);
     flow.completed_at = Some(now);
     flow.version += 1;
-    state
+    if let Err(error) = state
         .ephemeral
         .replace_browser_flow(expected, flow.clone())
-        .await?;
+        .await
+    {
+        if error != AuthorizationStateError::StorageConflict {
+            return Err(error.into());
+        }
+        let current = load_flow(&state.ephemeral, &flow.flow_id).await?;
+        if !matches!(
+            current.state,
+            AuthBrowserFlowState::Approved | AuthBrowserFlowState::Consumed
+        ) || current.durable_result_digest != flow.durable_result_digest
+        {
+            return Err(HttpError::conflict("approval_completion_conflict"));
+        }
+        flow = current;
+    }
     Ok(Json(flow_response(flow)))
 }
 
@@ -380,27 +413,28 @@ where
 }
 
 #[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct BindRequest {
-    idempotency_key: String,
+    request_id: String,
+    issued_at: i64,
+    proof: Value,
 }
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
-pub(crate) struct BindResponse {
+pub(crate) struct BrowserSessionBundle {
     server_now: i64,
     session: SessionRecord,
     nats: NatsBootstrapResponse,
     authorization_context: super::super::super::AuthorizationContextBundle,
-    redirect_target: Option<String>,
 }
 
 pub(crate) async fn bind_flow<R, E>(
     State(state): State<AuthHttpState<R, E>>,
     Path(flow_id): Path<String>,
     headers: HeaderMap,
-    Json(request): Json<BindRequest>,
-) -> Result<Json<BindResponse>, HttpError>
+    Json(raw): Json<Value>,
+) -> Result<Json<BrowserSessionBundle>, HttpError>
 where
     R: AccountRepository
         + AuthorityEvidenceRepository
@@ -417,13 +451,7 @@ where
         + 'static,
     E: AuthEphemeralRepository + Clone,
 {
-    let mut flow = load_flow(&state.ephemeral, &flow_id).await?;
-    state
-        .service
-        .repository()
-        .get_login_portal(&flow.portal_id)
-        .await?
-        .ok_or_else(|| HttpError::gone("portal_unavailable"))?;
+    let flow = load_flow(&state.ephemeral, &flow_id).await?;
     let redirect_target = flow
         .redirect_target
         .as_deref()
@@ -433,6 +461,83 @@ where
         flow.state,
         AuthBrowserFlowState::Approved | AuthBrowserFlowState::Consumed
     ) {
+        return Err(HttpError::conflict("flow_not_approved"));
+    }
+    let request_digest =
+        proof_request_digest(&raw).map_err(|_| HttpError::bad_request("invalid_bind_request"))?;
+    let request: BindRequest =
+        serde_json::from_value(raw).map_err(|_| HttpError::bad_request("invalid_bind_request"))?;
+    if ulid::Ulid::from_string(&request.request_id)
+        .map(|request_id| request_id.to_string() != request.request_id)
+        .unwrap_or(true)
+    {
+        return Err(HttpError::bad_request("invalid_bind_request_id"));
+    }
+    let input =
+        SessionProofInput::user_auth_bind(trellis_protocol::UserAuthBindSessionProofInput {
+            request_id: request.request_id,
+            issued_at: request.issued_at,
+            flow_id,
+            session_public_key: flow.session_public_key.clone(),
+            request_digest,
+        })
+        .map_err(|_| HttpError::unauthorized("invalid_proof"))?;
+    verify_session_proof(
+        &input,
+        &parse_session_proof(&request.proof)
+            .map_err(|_| HttpError::unauthorized("invalid_proof"))?,
+        &flow.session_public_key,
+        now_ms()?,
+        state.proof_policy,
+    )
+    .map_err(|_| HttpError::unauthorized("invalid_proof"))?;
+    let flow = complete_flow(&state, flow, now_ms()?).await?;
+    Ok(Json(session_bundle(&state, &flow).await?))
+}
+
+async fn complete_flow<R, E>(
+    state: &AuthHttpState<R, E>,
+    mut flow: AuthBrowserFlow,
+    now: i64,
+) -> Result<AuthBrowserFlow, HttpError>
+where
+    R: AccountRepository
+        + AuthorityEvidenceRepository
+        + AuthorityRepository
+        + ContextRepository
+        + DeploymentRepository
+        + OutboxRepository
+        + PortalRepository
+        + ProvisioningRepository
+        + SessionRepository
+        + Clone
+        + Send
+        + Sync
+        + 'static,
+    E: AuthEphemeralRepository + Clone,
+{
+    if flow.state == AuthBrowserFlowState::Consumed {
+        let session_id = flow
+            .claim_owner
+            .as_deref()
+            .ok_or_else(|| HttpError::internal("flow_session_missing"))?;
+        let session = state
+            .service
+            .repository()
+            .get_session(session_id)
+            .await?
+            .ok_or_else(|| HttpError::internal("flow_session_missing"))?;
+        if session.principal_id != flow.principal_id.as_deref().unwrap_or_default()
+            || session.participant_id != flow.participant_id
+            || session.participant_artifact_digest != flow.participant_artifact_digest
+            || session.participant_needs_digest != flow.participant_needs_digest
+            || session.session_public_key != flow.session_public_key
+        {
+            return Err(HttpError::internal("flow_session_mismatch"));
+        }
+        return Ok(flow);
+    }
+    if flow.state != AuthBrowserFlowState::Approved {
         return Err(HttpError::conflict("flow_not_approved"));
     }
     let binding = state
@@ -448,12 +553,11 @@ where
         .principal_id
         .clone()
         .ok_or_else(|| HttpError::conflict("flow_has_no_principal"))?;
-    let now = now_ms()?;
     let signer_id = super::super::super::domain::validate_ed25519_public_key(
         "sessionPublicKey",
         &flow.session_public_key,
     )?;
-    let digest = digest_parts(&[&flow_id, &request.idempotency_key]);
+    let digest = digest_parts(&["browser.session.complete", &flow.flow_id]);
     let outcome = state
         .service
         .create_session(CreateSessionInput {
@@ -469,10 +573,10 @@ where
             desired_authority: None,
             created_at: now,
             idempotency: idempotency(
-                &flow_id,
-                "browser.session.bind",
+                &flow.flow_id,
+                "browser.session.complete",
                 &signer_id,
-                &request.idempotency_key,
+                &flow.flow_id,
                 &digest,
                 now,
             )?,
@@ -494,17 +598,65 @@ where
                 .ok_or_else(|| HttpError::internal("session_missing"))?
         }
     };
-    if flow.state == AuthBrowserFlowState::Approved {
-        let expected = flow.version;
-        flow.state = AuthBrowserFlowState::Consumed;
-        flow.claim_owner = Some(session.session_id.clone());
-        flow.claimed_at = Some(now);
-        flow.version += 1;
-        state
-            .ephemeral
-            .replace_browser_flow(expected, flow.clone())
-            .await?;
+    let expected = flow.version;
+    flow.state = AuthBrowserFlowState::Consumed;
+    flow.claim_owner = Some(session.session_id.clone());
+    flow.claimed_at = Some(now);
+    flow.version += 1;
+    match state
+        .ephemeral
+        .replace_browser_flow(expected, flow.clone())
+        .await
+    {
+        Ok(()) => Ok(flow),
+        Err(AuthorizationStateError::StorageConflict) => {
+            let current = load_flow(&state.ephemeral, &flow.flow_id).await?;
+            if current.state == AuthBrowserFlowState::Consumed
+                && current.claim_owner.as_deref() == Some(session.session_id.as_str())
+            {
+                Ok(current)
+            } else {
+                Err(HttpError::conflict("flow_completion_conflict"))
+            }
+        }
+        Err(error) => Err(error.into()),
     }
+}
+
+async fn session_bundle<R, E>(
+    state: &AuthHttpState<R, E>,
+    flow: &AuthBrowserFlow,
+) -> Result<BrowserSessionBundle, HttpError>
+where
+    R: AccountRepository
+        + AuthorityEvidenceRepository
+        + AuthorityRepository
+        + ContextRepository
+        + DeploymentRepository
+        + OutboxRepository
+        + PortalRepository
+        + ProvisioningRepository
+        + SessionRepository
+        + Clone
+        + Send
+        + Sync
+        + 'static,
+    E: AuthEphemeralRepository + Clone,
+{
+    if flow.state != AuthBrowserFlowState::Consumed {
+        return Err(HttpError::conflict("flow_not_consumed"));
+    }
+    let now = now_ms()?;
+    let session = state
+        .service
+        .repository()
+        .get_session(
+            flow.claim_owner
+                .as_deref()
+                .ok_or_else(|| HttpError::internal("flow_session_missing"))?,
+        )
+        .await?
+        .ok_or_else(|| HttpError::internal("flow_session_missing"))?;
     let issuance = state
         .service
         .authorization()
@@ -528,22 +680,21 @@ where
         .issue(
             super::super::super::AuthorizationContextIssueRequest {
                 session_id: session.session_id.clone(),
-                request_id: request.idempotency_key,
-                request_digest: digest,
+                request_id: flow.flow_id.clone(),
+                request_digest: digest_parts(&["browser.session.bundle", &flow.flow_id]),
             },
             now / 1_000,
         )
         .await
         .map_err(map_issuance_error)?;
-    Ok(Json(BindResponse {
+    Ok(BrowserSessionBundle {
         server_now: now,
         session,
-        nats: NatsBootstrapResponse {
-            jwt: route.jwt,
-            jwt_expires_at: route.expires_at,
-            servers: state.websocket_nats_servers,
-        },
+        nats: NatsBootstrapResponse::new(
+            route,
+            state.native_nats_servers.clone(),
+            state.websocket_nats_servers.clone(),
+        ),
         authorization_context,
-        redirect_target: flow.redirect_target,
-    }))
+    })
 }

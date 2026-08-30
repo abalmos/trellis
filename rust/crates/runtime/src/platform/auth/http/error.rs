@@ -82,13 +82,42 @@ impl From<AuthorizationStateError> for HttpError {
         tracing::warn!(%error, "auth HTTP domain operation failed");
         match error {
             AuthorizationStateError::InvalidRecord(_) => Self::bad_request("invalid_request"),
-            AuthorizationStateError::PortalPolicyChanged
-            | AuthorizationStateError::StorageConflict => Self::conflict("conflict"),
-            AuthorizationStateError::PrincipalMissing
-            | AuthorizationStateError::SessionMissing
-            | AuthorizationStateError::AuthorityMissing => Self::not_found("not_found"),
-            error if error.is_expected_denial() => Self::forbidden("not_authorized"),
-            _ => Self::internal("internal_error"),
+            AuthorizationStateError::SessionMissing => Self::not_found("session_not_found"),
+            AuthorizationStateError::SessionExpired => Self::unauthorized("session_expired"),
+            AuthorizationStateError::SessionRevoked => Self::unauthorized("session_revoked"),
+            AuthorizationStateError::PrincipalMissing => Self::not_found("user_not_found"),
+            AuthorizationStateError::PrincipalInactive => Self::forbidden("user_inactive"),
+            AuthorizationStateError::IdentityMissing => Self::not_found("identity_not_found"),
+            AuthorizationStateError::ParticipantMissing => Self::not_found("participant_not_found"),
+            AuthorizationStateError::ParticipantDigestMismatch => {
+                Self::conflict("participant_changed")
+            }
+            AuthorizationStateError::NeedsDigestMismatch => Self::conflict("contract_changed"),
+            AuthorizationStateError::AuthorityMissing => Self::not_found("authority_not_found"),
+            AuthorizationStateError::AuthorityPending => Self::conflict("approval_required"),
+            AuthorizationStateError::AuthorityRejected => Self::forbidden("authority_rejected"),
+            AuthorizationStateError::AuthorityRevoked => Self::forbidden("authority_revoked"),
+            AuthorizationStateError::AuthorityExpired => Self::forbidden("authority_expired"),
+            AuthorizationStateError::DeploymentInactive => Self::forbidden("deployment_inactive"),
+            AuthorizationStateError::InstanceInactive => Self::forbidden("instance_inactive"),
+            AuthorizationStateError::DeviceInactive => Self::forbidden("device_inactive"),
+            AuthorizationStateError::ActivationMissing => Self::forbidden("activation_required"),
+            AuthorizationStateError::DelegationExpired => Self::forbidden("delegation_expired"),
+            AuthorizationStateError::RequiredDependencyUnavailable(_) => {
+                Self::unavailable("dependency_pending")
+            }
+            AuthorizationStateError::RequiredResourceUnavailable(_) => {
+                Self::unavailable("resource_pending")
+            }
+            AuthorizationStateError::AuthorityStale
+            | AuthorizationStateError::MaterializationStale
+            | AuthorizationStateError::ContextLifetimeUnavailable
+            | AuthorizationStateError::ContextSnapshotChanged => {
+                Self::unavailable("authorization_pending")
+            }
+            AuthorizationStateError::PortalPolicyChanged => Self::conflict("portal_policy_changed"),
+            AuthorizationStateError::StorageConflict => Self::conflict("storage_conflict"),
+            AuthorizationStateError::Storage(_) => Self::internal("internal_error"),
         }
     }
 }
@@ -101,7 +130,25 @@ pub(super) fn map_issuance_error(error: AuthorizationStateError) -> HttpError {
         | AuthorizationStateError::ContextSnapshotChanged => {
             HttpError::unavailable("authorization_pending")
         }
-        error if error.is_expected_denial() => HttpError::unauthorized("auth_required"),
+        AuthorizationStateError::SessionMissing => HttpError::unauthorized("session_not_found"),
+        AuthorizationStateError::SessionExpired => HttpError::unauthorized("session_expired"),
+        AuthorizationStateError::SessionRevoked => HttpError::unauthorized("session_revoked"),
+        AuthorizationStateError::PrincipalMissing => HttpError::unauthorized("user_not_found"),
+        AuthorizationStateError::PrincipalInactive => HttpError::unauthorized("user_inactive"),
+        AuthorizationStateError::AuthorityMissing => HttpError::unauthorized("authority_not_found"),
+        AuthorizationStateError::AuthorityPending => HttpError::unauthorized("approval_required"),
+        AuthorizationStateError::AuthorityRejected => HttpError::unauthorized("authority_rejected"),
+        AuthorizationStateError::AuthorityRevoked => HttpError::unauthorized("authority_revoked"),
+        AuthorizationStateError::AuthorityExpired => HttpError::unauthorized("authority_expired"),
+        AuthorizationStateError::DeploymentInactive => {
+            HttpError::unauthorized("deployment_inactive")
+        }
+        AuthorizationStateError::InstanceInactive => HttpError::unauthorized("instance_inactive"),
+        AuthorizationStateError::DeviceInactive => HttpError::unauthorized("device_inactive"),
+        AuthorizationStateError::ActivationMissing => {
+            HttpError::unauthorized("activation_required")
+        }
+        AuthorizationStateError::DelegationExpired => HttpError::unauthorized("delegation_expired"),
         error => error.into(),
     }
 }

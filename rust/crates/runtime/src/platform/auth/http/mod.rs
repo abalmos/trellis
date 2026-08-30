@@ -343,36 +343,48 @@ struct IssuedBootstrapJwt {
     expires_at: i64,
 }
 
-#[derive(Clone, Deserialize, Serialize)]
+#[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct NatsBootstrapResponse {
     jwt: String,
     jwt_expires_at: i64,
-    servers: Vec<String>,
+    transports: NatsTransports,
+}
+
+impl NatsBootstrapResponse {
+    fn new(
+        route: IssuedBootstrapJwt,
+        native_nats_servers: Vec<String>,
+        websocket_nats_servers: Vec<String>,
+    ) -> Self {
+        Self {
+            jwt: route.jwt,
+            jwt_expires_at: route.expires_at,
+            transports: NatsTransports {
+                native: (!native_nats_servers.is_empty()).then_some(NatsTransportRoute {
+                    nats_servers: native_nats_servers,
+                }),
+                websocket: (!websocket_nats_servers.is_empty()).then_some(NatsTransportRoute {
+                    nats_servers: websocket_nats_servers,
+                }),
+            },
+        }
+    }
 }
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
-pub(super) struct ContextRefreshNatsResponse {
-    pub(super) jwt: String,
-    pub(super) jwt_expires_at: i64,
-    pub(super) servers: Vec<String>,
-    pub(super) transports: ContextRefreshTransports,
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-pub(super) struct ContextRefreshTransports {
+struct NatsTransports {
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub(super) native: Option<ContextRefreshTransportRoute>,
+    native: Option<NatsTransportRoute>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub(super) websocket: Option<ContextRefreshTransportRoute>,
+    websocket: Option<NatsTransportRoute>,
 }
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
-pub(super) struct ContextRefreshTransportRoute {
-    pub(super) nats_servers: Vec<String>,
+struct NatsTransportRoute {
+    nats_servers: Vec<String>,
 }
 
 fn flow_response(flow: AuthBrowserFlow) -> BrowserFlowResponse {

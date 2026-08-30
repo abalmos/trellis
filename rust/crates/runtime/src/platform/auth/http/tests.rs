@@ -108,7 +108,7 @@ fn browser_approval_accepts_only_server_owned_optional_bundles() {
 }
 
 #[test]
-fn browser_approval_wire_ignores_caller_authored_machine_authority() {
+fn browser_approval_wire_rejects_caller_authored_machine_authority() {
     for atom in [
         permission(
             PermissionTarget::api_surface("unrelated.api@v1", ApiSurfaceKind::Rpc, "Admin")
@@ -131,17 +131,14 @@ fn browser_approval_wire_ignores_caller_authored_machine_authority() {
             PermissionAction::Write,
         ),
     ] {
-        assert_eq!(
+        assert!(
             serde_json::from_value::<ApprovalRequest>(serde_json::json!({
                 "approved": true,
                 "consentViewDigest": DIGEST,
                 "selectedOptionalBundles": [],
-                "idempotencyKey": "request-1",
                 "grantSet": GrantSet::new(vec![atom]),
             }))
-            .unwrap()
-            .selected_optional_bundles,
-            Vec::<String>::new(),
+            .is_err()
         );
     }
     assert!(
@@ -149,11 +146,70 @@ fn browser_approval_wire_ignores_caller_authored_machine_authority() {
             "approved": true,
             "consentViewDigest": DIGEST,
             "selectedOptionalBundles": [],
-            "idempotencyKey": "request-1",
             "capabilities": ["admin"],
+        }))
+        .is_err()
+    );
+}
+
+#[test]
+fn browser_approval_wire_rejects_retired_idempotency_key() {
+    assert!(
+        serde_json::from_value::<ApprovalRequest>(serde_json::json!({
+            "approved": true,
+            "consentViewDigest": DIGEST,
+            "selectedOptionalBundles": [],
         }))
         .is_ok()
     );
+    assert!(
+        serde_json::from_value::<ApprovalRequest>(serde_json::json!({
+            "approved": true,
+            "consentViewDigest": DIGEST,
+            "selectedOptionalBundles": [],
+            "idempotencyKey": "retired",
+        }))
+        .is_err()
+    );
+}
+
+#[test]
+fn browser_start_wire_rejects_retired_fields() {
+    let request = serde_json::json!({
+        "requestId": "req_1",
+        "issuedAt": 1,
+        "sessionPublicKey": "key",
+        "sessionNkey": "nkey",
+        "participantId": "app",
+        "participantArtifactDigest": DIGEST,
+        "participantNeedsDigest": DIGEST,
+        "participantArtifact": null,
+        "referencedApiArtifacts": [],
+        "redirectTarget": "https://app.example/complete",
+        "proof": {},
+    });
+    assert!(serde_json::from_value::<super::browser::AuthStartRequest>(request.clone()).is_ok());
+    let mut retired = request;
+    retired["sessionKey"] = serde_json::json!("retired");
+    assert!(serde_json::from_value::<super::browser::AuthStartRequest>(retired).is_err());
+}
+
+#[test]
+fn browser_bind_wire_accepts_only_the_session_proof_request() {
+    let request = serde_json::json!({
+        "requestId": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "issuedAt": 1,
+        "proof": {
+            "format": "trellis.session-proof.v1",
+            "signature": "proof",
+        },
+    });
+    assert!(serde_json::from_value::<super::browser::BindRequest>(request.clone()).is_ok());
+    for retired in ["idempotencyKey", "sessionKey", "sig"] {
+        let mut invalid = request.clone();
+        invalid[retired] = serde_json::json!("retired");
+        assert!(serde_json::from_value::<super::browser::BindRequest>(invalid).is_err());
+    }
 }
 
 #[tokio::test]
@@ -167,6 +223,32 @@ async fn http_errors_never_expose_internal_causes() {
     let encoded = String::from_utf8(body.to_vec()).unwrap();
     assert!(!encoded.contains(secret));
     assert!(encoded.contains("internal_error"));
+}
+
+#[tokio::test]
+async fn issuance_errors_have_stable_machine_codes() {
+    for (error, expected) in [
+        (AuthorizationStateError::SessionMissing, "session_not_found"),
+        (AuthorizationStateError::SessionExpired, "session_expired"),
+        (AuthorizationStateError::SessionRevoked, "session_revoked"),
+        (
+            AuthorizationStateError::AuthorityPending,
+            "approval_required",
+        ),
+        (
+            AuthorizationStateError::MaterializationStale,
+            "authorization_pending",
+        ),
+    ] {
+        let response = super::map_issuance_error(error).into_response();
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        assert_eq!(
+            serde_json::from_slice::<serde_json::Value>(&body).unwrap(),
+            serde_json::json!({ "error": { "code": expected } })
+        );
+    }
 }
 
 #[test]
@@ -371,16 +453,29 @@ fn bootstrap_jwt_is_session_keyed_and_deny_all() {
 
 #[test]
 fn refresh_transport_metadata_omits_unconfigured_native_transport() {
-    let value = serde_json::to_value(super::ContextRefreshTransports {
-        native: None,
-        websocket: Some(super::ContextRefreshTransportRoute {
-            nats_servers: vec!["ws://localhost:8080".to_owned()],
-        }),
-    })
+    let value = serde_json::to_value(super::NatsBootstrapResponse::new(
+        super::IssuedBootstrapJwt {
+            jwt: "jwt".to_owned(),
+            expires_at: 10,
+        },
+        Vec::new(),
+        vec!["ws://localhost:8080".to_owned()],
+    ))
     .unwrap();
-    assert!(value.get("native").is_none());
     assert_eq!(
-        value["websocket"]["natsServers"],
+        value,
+        serde_json::json!({
+            "jwt": "jwt",
+            "jwtExpiresAt": 10,
+            "transports": {
+                "websocket": { "natsServers": ["ws://localhost:8080"] },
+            },
+        })
+    );
+    assert!(value["transports"].get("native").is_none());
+    assert_eq!(
+        value["transports"]["websocket"]["natsServers"],
         serde_json::json!(["ws://localhost:8080"])
     );
+    assert!(value.get("servers").is_none());
 }

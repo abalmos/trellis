@@ -279,6 +279,11 @@ pub(super) async fn exercise_store(
         last_error: None,
     };
     let mut session_creation = test_session_creation(session.clone(), None, None);
+    session_creation.idempotency.scope_key = test_digest("browser-flow:flow_01");
+    session_creation.idempotency.purpose = "browser.session.complete".to_owned();
+    session_creation.idempotency.request_id = "flow_01".to_owned();
+    session_creation.idempotency.request_digest = test_digest("browser.session.complete:flow_01");
+    session_creation.idempotency.result = json!({ "sessionId": session.session_id });
     session_creation.actions.push(creation_action.clone());
     assert_eq!(
         store.create_session(session_creation.clone()).await?,
@@ -287,6 +292,29 @@ pub(super) async fn exercise_store(
     assert_eq!(
         store.create_session(session_creation.clone()).await?,
         IdempotentOutcome::Replayed(session_creation.idempotency.result.clone())
+    );
+    let competing_session = SessionRecord::from_new(NewSession {
+        session_id: "ses_02".to_owned(),
+        principal_id: principal.principal_id.clone(),
+        principal_kind: PrincipalKind::User,
+        participant_id: fixture.binding.participant_id.clone(),
+        participant_kind: ParticipantKind::App,
+        participant_artifact_digest: fixture.binding.artifact_digest.clone(),
+        participant_needs_digest: fixture.binding.needs_digest.clone(),
+        session_public_key: session_public_key(7),
+        inbox_prefix: "_INBOX.session-02".to_owned(),
+        created_at: NOW,
+        expires_at: None,
+    })?;
+    let mut competing_creation = session_creation.clone();
+    competing_creation.session = competing_session.clone();
+    assert_eq!(
+        store.create_session(competing_creation).await?,
+        IdempotentOutcome::Replayed(session_creation.idempotency.result.clone())
+    );
+    assert_eq!(
+        store.get_session(&competing_session.session_id).await?,
+        None
     );
     let mut mismatched_creation = session_creation;
     mismatched_creation.idempotency.request_digest = digest(98);

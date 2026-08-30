@@ -91,7 +91,7 @@ where
 }
 
 #[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct LocalLoginRequest {
     flow_id: String,
     username: String,
@@ -472,7 +472,7 @@ where
 }
 
 #[derive(Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct LocalRegistrationRequest {
     username: String,
     password: String,

@@ -19,7 +19,7 @@ use super::{
 };
 
 #[derive(Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(super) struct ContextRefreshRequest {
     request_id: String,
     issued_at: i64,
@@ -42,10 +42,8 @@ pub(super) struct RequiredNullableString(Option<String>);
 pub(super) struct ContextRefreshResponse {
     server_now: i64,
     session: super::super::SessionRecord,
-    nats: super::ContextRefreshNatsResponse,
+    nats: super::NatsBootstrapResponse,
     authorization_context: super::super::AuthorizationContextBundle,
-    bootstrap_jwt: String,
-    bootstrap_jwt_expires_at: i64,
 }
 
 pub(super) async fn refresh_context<R, E>(
@@ -198,29 +196,11 @@ where
     Ok(Json(ContextRefreshResponse {
         server_now: now,
         session,
-        nats: super::ContextRefreshNatsResponse {
-            jwt: route.jwt.clone(),
-            jwt_expires_at: route.expires_at,
-            servers: if state.native_nats_servers.is_empty() {
-                state.websocket_nats_servers.clone()
-            } else {
-                state.native_nats_servers.clone()
-            },
-            transports: super::ContextRefreshTransports {
-                native: (!state.native_nats_servers.is_empty()).then(|| {
-                    super::ContextRefreshTransportRoute {
-                        nats_servers: state.native_nats_servers.clone(),
-                    }
-                }),
-                websocket: (!state.websocket_nats_servers.is_empty()).then(|| {
-                    super::ContextRefreshTransportRoute {
-                        nats_servers: state.websocket_nats_servers.clone(),
-                    }
-                }),
-            },
-        },
+        nats: super::NatsBootstrapResponse::new(
+            route,
+            state.native_nats_servers.clone(),
+            state.websocket_nats_servers.clone(),
+        ),
         authorization_context,
-        bootstrap_jwt: route.jwt,
-        bootstrap_jwt_expires_at: route.expires_at,
     }))
 }
