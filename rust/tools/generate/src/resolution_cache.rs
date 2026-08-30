@@ -77,6 +77,10 @@ impl CachedContractResolution {
         &self.api_version
     }
 
+    pub(crate) fn owner_version(&self) -> Option<&str> {
+        self.owner_version.as_deref()
+    }
+
     pub(crate) fn generated_api_digest(&self) -> &str {
         &self.generated_api_digest
     }
@@ -87,10 +91,6 @@ impl CachedContractResolution {
 
     pub(crate) fn participant_id(&self) -> Option<&str> {
         self.participant_id.as_deref()
-    }
-
-    pub(crate) fn owner_version(&self) -> Option<&str> {
-        self.owner_version.as_deref()
     }
 
     pub(crate) fn projection_is_current(&self) -> bool {
@@ -437,8 +437,6 @@ fn resolution_fingerprint() -> &'static str {
 fn projection_fingerprint() -> &'static str {
     concat!(
         env!("TRELLIS_TS_CODEGEN_FINGERPRINT"),
-        ":",
-        env!("TRELLIS_NPM_PACKAGING_FINGERPRINT"),
         ":",
         env!("TRELLIS_RUST_CODEGEN_FINGERPRINT")
     )

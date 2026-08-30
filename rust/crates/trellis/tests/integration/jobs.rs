@@ -8,9 +8,6 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use time::{format_description::well_known::Rfc3339, Duration as TimeDuration, OffsetDateTime};
 use tokio::task::JoinHandle;
-use trellis_rs::internal_sdk::jobs::types::{
-    JobsListServicesRequest, JobsListServicesResponse, JobsQueryRequest,
-};
 use trellis_rs::jobs::keys::NatsKeyCoordinator;
 use trellis_rs::jobs::manager::{JobNotEnqueuedReason, JobSubmitOutcome};
 use trellis_rs::jobs::{
@@ -19,6 +16,9 @@ use trellis_rs::jobs::{
     WorkerActiveJob, WorkerHeartbeat, WorkerHostOptions,
 };
 use trellis_rs::service::ServerError;
+use trellis_runtime_apis::jobs::types::{
+    JobsListServicesRequest, JobsListServicesResponse, JobsQueryRequest,
+};
 
 use crate::support::assertions::assert_runtime_case_registered;
 
@@ -1347,28 +1347,28 @@ async fn jobs_terminal_local_job_edges_and_admin_rpcs() {
         .await
         .expect("connect mutating Jobs admin client");
     let admin_caller = crate::generated_caller(&admin_client);
-    let jobs_admin = trellis_rs::internal_sdk::jobs::JobsClient::new(admin_caller);
+    let jobs_admin = trellis_runtime_apis::jobs::JobsClient::new(admin_caller);
     let listed = wait_for_admin_job(
         &jobs_admin,
         &job_id,
-        trellis_rs::internal_sdk::jobs::types::JobsQueryResponseEntriesItemState::Completed,
+        trellis_runtime_apis::jobs::types::JobsQueryResponseEntriesItemState::Completed,
     )
     .await;
     assert_eq!(listed.id, job_id);
     let inspected = jobs_admin
         .rpc()
         .jobs()
-        .inspect(&trellis_rs::internal_sdk::jobs::types::JobsInspectRequest { id: job_id.clone() })
+        .inspect(&trellis_runtime_apis::jobs::types::JobsInspectRequest { id: job_id.clone() })
         .await
         .expect("inspect terminal job through generated Jobs RPC");
     assert_eq!(
         inspected.job.state,
-        trellis_rs::internal_sdk::jobs::types::JobsInspectResponseJobState::Completed
+        trellis_runtime_apis::jobs::types::JobsInspectResponseJobState::Completed
     );
     let cancelled = jobs_admin
         .rpc()
         .jobs()
-        .cancel(&trellis_rs::internal_sdk::jobs::types::JobsCancelRequest {
+        .cancel(&trellis_runtime_apis::jobs::types::JobsCancelRequest {
             id: job_id,
             reason: Some("terminal idempotency check".to_string()),
         })
@@ -1376,7 +1376,7 @@ async fn jobs_terminal_local_job_edges_and_admin_rpcs() {
         .expect("cancel terminal job through generated Jobs RPC");
     assert_eq!(
         cancelled.job.state,
-        trellis_rs::internal_sdk::jobs::types::JobsCancelResponseJobState::Completed
+        trellis_runtime_apis::jobs::types::JobsCancelResponseJobState::Completed
     );
 
     fixture.stop().await;
@@ -1408,7 +1408,7 @@ async fn jobs_failed_job_retries_then_dead() {
         .await
         .expect("connect live Rust jobs admin client");
     let jobs_admin =
-        trellis_rs::internal_sdk::jobs::JobsClient::new(crate::generated_caller(&admin_client));
+        trellis_runtime_apis::jobs::JobsClient::new(crate::generated_caller(&admin_client));
     let job = fixture
         .manager
         .create(
@@ -1503,7 +1503,7 @@ async fn jobs_admin_list_services_filters_stale_worker_heartbeats() {
         .await
         .expect("connect live Rust jobs admin client");
     let jobs_admin =
-        trellis_rs::internal_sdk::jobs::JobsClient::new(crate::generated_caller(&admin_client));
+        trellis_runtime_apis::jobs::JobsClient::new(crate::generated_caller(&admin_client));
     let nc = connect_trellis_nats(runtime.nats_url(), runtime.workdir()).await;
 
     let fresh_service = "jobs-fixture-service-rust-admin-a";
@@ -1711,7 +1711,7 @@ async fn connect_trellis_nats(nats_url: &str, workdir: &Path) -> async_nats::Cli
 }
 
 async fn wait_for_admin_services(
-    jobs_admin: &trellis_rs::internal_sdk::jobs::JobsClient<'_>,
+    jobs_admin: &trellis_runtime_apis::jobs::JobsClient<'_>,
     service: &str,
     instance_id: &str,
 ) -> JobsListServicesResponse {
@@ -1751,22 +1751,22 @@ async fn wait_for_admin_services(
 }
 
 async fn wait_for_admin_dlq_job(
-    jobs_admin: &trellis_rs::internal_sdk::jobs::JobsClient<'_>,
+    jobs_admin: &trellis_runtime_apis::jobs::JobsClient<'_>,
     job_id: &str,
-) -> trellis_rs::internal_sdk::jobs::types::JobsQueryResponseEntriesItem {
+) -> trellis_runtime_apis::jobs::types::JobsQueryResponseEntriesItem {
     wait_for_admin_job(
         jobs_admin,
         job_id,
-        trellis_rs::internal_sdk::jobs::types::JobsQueryResponseEntriesItemState::Dead,
+        trellis_runtime_apis::jobs::types::JobsQueryResponseEntriesItemState::Dead,
     )
     .await
 }
 
 async fn wait_for_admin_job(
-    jobs_admin: &trellis_rs::internal_sdk::jobs::JobsClient<'_>,
+    jobs_admin: &trellis_runtime_apis::jobs::JobsClient<'_>,
     job_id: &str,
-    state: trellis_rs::internal_sdk::jobs::types::JobsQueryResponseEntriesItemState,
-) -> trellis_rs::internal_sdk::jobs::types::JobsQueryResponseEntriesItem {
+    state: trellis_runtime_apis::jobs::types::JobsQueryResponseEntriesItemState,
+) -> trellis_runtime_apis::jobs::types::JobsQueryResponseEntriesItem {
     let deadline = tokio::time::Instant::now() + Duration::from_secs(60);
     loop {
         let page = match jobs_admin
@@ -1859,25 +1859,23 @@ fn jobs_admin_client_contract(
     )
     .use_ref(
         "jobs",
-        trellis_rs::contracts::use_contract(trellis_rs::internal_sdk::jobs::API_ID).with_rpc_call(
-            [
-                "Jobs.Cancel",
-                "Jobs.DismissDLQ",
-                "Jobs.GetKey",
-                "Jobs.Inspect",
-                "Jobs.ListDLQ",
-                "Jobs.ListServices",
-                "Jobs.Metrics",
-                "Jobs.Query",
-                "Jobs.ReplayDLQ",
-                "Jobs.Retry",
-            ],
-        ),
+        trellis_rs::contracts::use_contract(trellis_runtime_apis::jobs::API_ID).with_rpc_call([
+            "Jobs.Cancel",
+            "Jobs.DismissDLQ",
+            "Jobs.GetKey",
+            "Jobs.Inspect",
+            "Jobs.ListDLQ",
+            "Jobs.ListServices",
+            "Jobs.Metrics",
+            "Jobs.Query",
+            "Jobs.ReplayDLQ",
+            "Jobs.Retry",
+        ]),
     );
 
     let jobs_api = trellis_test::TrellisTestContract::from_native_api_json(
-        trellis_rs::internal_sdk::jobs::API_ID,
-        trellis_rs::internal_sdk::jobs::API_JSON,
+        trellis_runtime_apis::jobs::API_ID,
+        trellis_runtime_apis::jobs::API_JSON,
         trellis_rs::contracts::ContractKind::Service,
     )?;
     trellis_test::TrellisTestContract::from_builder_with_referenced_contracts(

@@ -402,7 +402,7 @@ async fn auth_post_commit_event_publish_uses_jetstream_puback() {
     admin
         .revoke_session(
             &bootstrap_url,
-            &trellis_rs::internal_sdk::auth::AuthSessionsRevokeRequest {
+            &trellis_runtime_apis::auth::AuthSessionsRevokeRequest {
                 session_id: target_session_id.clone(),
                 expected_version: None,
                 reason: Some("integration test revocation".to_string()),
@@ -569,7 +569,7 @@ async fn authorization_registry_provider_cache_is_nats_local_and_revocation_live
     admin
         .revoke_session(
             &bootstrap_url,
-            &trellis_rs::internal_sdk::auth::AuthSessionsRevokeRequest {
+            &trellis_runtime_apis::auth::AuthSessionsRevokeRequest {
                 session_id: client_reconnect.session_id().to_owned(),
                 expected_version: None,
                 reason: Some("integration test revocation".to_owned()),

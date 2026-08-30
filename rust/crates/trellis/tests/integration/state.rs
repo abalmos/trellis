@@ -13,7 +13,7 @@ use trellis_rs::client::{
     DeleteStateOptions, ExpectedPutRevision, ListStateOptions, MapStateStore, PutStateOptions,
     StateGetResult, StateValue, ValueStateStore,
 };
-use trellis_rs::internal_sdk::state::types::{
+use trellis_runtime_apis::state::types::{
     StateAdminDeleteRequest, StateAdminGetRequest, StateAdminGetResponse, StateAdminListRequest,
 };
 
@@ -134,8 +134,8 @@ fn state_contract(
         }
     }
     let state_api = trellis_test::TrellisTestContract::from_native_api_json(
-        trellis_rs::internal_sdk::state::API_ID,
-        trellis_rs::internal_sdk::state::API_JSON,
+        trellis_runtime_apis::state::API_ID,
+        trellis_runtime_apis::state::API_JSON,
         ContractKind::Service,
     )?;
     trellis_test::TrellisTestContract::from_builder_with_referenced_contracts(
@@ -246,13 +246,13 @@ async fn connect_clean_client(
             .expect("list persisted State entries");
         for entry in entries.entries {
             let key = match entry {
-                trellis_rs::internal_sdk::state::types::StateAdminListResponseEntriesItem::Variant1 {
+                trellis_runtime_apis::state::types::StateAdminListResponseEntriesItem::Variant1 {
                     key,
                     ..
                 }
-                | trellis_rs::internal_sdk::state::types::StateAdminListResponseEntriesItem::Variant2 {
+                | trellis_runtime_apis::state::types::StateAdminListResponseEntriesItem::Variant2 {
                     entry:
-                        trellis_rs::internal_sdk::state::types::StateAdminListResponseEntriesItemVariant2Entry {
+                        trellis_runtime_apis::state::types::StateAdminListResponseEntriesItemVariant2Entry {
                             key,
                             ..
                         },
@@ -586,7 +586,7 @@ async fn state_value_and_map_conflict_shapes_live() {
     admin
         .revoke_session(
             &bootstrap_url,
-            &trellis_rs::internal_sdk::auth::AuthSessionsRevokeRequest {
+            &trellis_runtime_apis::auth::AuthSessionsRevokeRequest {
                 session_id: first_session.session_id().to_owned(),
                 expected_version: None,
                 reason: Some("integration test revocation".to_string()),

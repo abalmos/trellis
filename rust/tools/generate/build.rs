@@ -12,9 +12,8 @@ fn main() {
     let manifest_dir = PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").expect("manifest dir"));
     let model_inputs = model_fingerprint_inputs(&manifest_dir);
     let ts_inputs = ts_fingerprint_inputs(&manifest_dir, &model_inputs);
-    let npm_inputs = npm_fingerprint_inputs(&manifest_dir, &ts_inputs);
     let rust_inputs = rust_fingerprint_inputs(&manifest_dir, &model_inputs);
-    let mut inputs = npm_inputs.clone();
+    let mut inputs = ts_inputs.clone();
     inputs.extend(rust_inputs.iter().cloned());
     inputs.sort();
     inputs.dedup();
@@ -28,10 +27,6 @@ fn main() {
     println!(
         "cargo:rustc-env=TRELLIS_TS_CODEGEN_FINGERPRINT={}",
         compute_fingerprint(&manifest_dir, &ts_inputs)
-    );
-    println!(
-        "cargo:rustc-env=TRELLIS_NPM_PACKAGING_FINGERPRINT={}",
-        compute_fingerprint(&manifest_dir, &npm_inputs)
     );
     println!(
         "cargo:rustc-env=TRELLIS_RUST_CODEGEN_FINGERPRINT={}",
@@ -109,13 +104,6 @@ fn ts_fingerprint_inputs(manifest_dir: &Path, model: &[PathBuf]) -> Vec<PathBuf>
         &manifest_dir.join("../../crates/codegen-ts/src"),
     ));
     paths.push(manifest_dir.join("src/artifacts.rs"));
-    normalize_paths(paths)
-}
-
-fn npm_fingerprint_inputs(manifest_dir: &Path, ts: &[PathBuf]) -> Vec<PathBuf> {
-    let mut paths = ts.to_vec();
-    paths.push(manifest_dir.join("../../../ts/deno.json"));
-    paths.push(manifest_dir.join("../../../ts/deno.lock"));
     normalize_paths(paths)
 }
 

@@ -1052,7 +1052,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn publish_ignores_stale_owned_api_output_after_source_removal() {
+    async fn publish_prunes_stale_owned_api_output_after_source_removal() {
         let root = tempfile::tempdir().unwrap();
         let manifest = ProjectManifest {
             format: 1,
@@ -1102,7 +1102,7 @@ mod tests {
         .await
         .unwrap_err();
         assert!(error.to_string().contains("no owned canonical APIs"));
-        assert!(stale.is_file());
+        assert!(!stale.exists());
     }
 
     #[test]
@@ -1576,6 +1576,15 @@ export default defineAppContract(() => ({
         let participant_path = root
             .path()
             .join(".trellis/generated/protocol/participants/acme.consumer@v1.json");
+        let owned_api_path = root
+            .path()
+            .join(".trellis/generated/protocol/apis/acme.consumer-api@v1.json");
+        let owned_sdk_path = root
+            .path()
+            .join(".trellis/generated/packages/jsr/acme-consumer-api");
+        assert!(owned_api_path.is_file());
+        assert!(participant_path.is_file());
+        assert!(owned_sdk_path.is_dir());
         let previous_participant = fs::read(&participant_path).unwrap();
         api["version"] = serde_json::json!("1.0.1");
         fs::write(
@@ -1601,7 +1610,7 @@ export default defineAppContract(() => ({
             .path()
             .join(".trellis/apis/acme.auth@v1/1.0.1")
             .exists());
-        assert_eq!(fs::read(participant_path).unwrap(), previous_participant);
+        assert_eq!(fs::read(&participant_path).unwrap(), previous_participant);
 
         fs::remove_file(root.path().join("contract.ts")).unwrap();
         api["version"] = serde_json::json!("1.0.0");
@@ -1612,6 +1621,9 @@ export default defineAppContract(() => ({
         .unwrap();
         install_root(root.path(), &manifest, &lock).await.unwrap();
         assert!(aggregate_export.is_file());
+        assert!(!owned_api_path.exists());
+        assert!(!participant_path.exists());
+        assert!(!owned_sdk_path.exists());
     }
 
     #[tokio::test]
@@ -1654,7 +1666,7 @@ export default defineAppContract(() => ({
         fs::write(
             root.path().join("Cargo.toml"),
             format!(
-                "[package]\nname = \"consumer\"\nversion = \"1.0.0\"\nedition = \"2021\"\n\n[dependencies]\nserde_json = \"1\"\ntrellis-contracts = {{ path = \"{}/rust/crates/contracts\" }}\ntrellis-apis = {{ path = \".trellis/generated/rust/trellis-apis\" }}\n",
+                "[package]\nname = \"consumer\"\nversion = \"0.4.0\"\nedition = \"2021\"\n\n[dependencies]\nserde_json = \"1\"\ntrellis-contracts = {{ path = \"{}/rust/crates/contracts\" }}\ntrellis-apis = {{ path = \".trellis/generated/rust/trellis-apis\" }}\n",
                 repo.display()
             ),
         )
@@ -1668,7 +1680,7 @@ pub fn api_artifact() -> Result<ApiArtifact, ContractsError> {
     ApiBuilder::new(serde_json::json!({
         "format": "trellis.api.v1",
         "id": "acme.consumer-api@v1",
-        "version": "1.0.0",
+        "version": "2.3.4",
         "displayName": "Consumer",
         "description": "Consumer fixture"
     })).build()
@@ -1676,7 +1688,7 @@ pub fn api_artifact() -> Result<ApiArtifact, ContractsError> {
 
 pub fn contract_artifacts() -> Result<ContractArtifacts, ContractsError> {
     let _ = std::any::TypeId::of::<AuthSessionsMeRpc>();
-    ContractBuilder::authoring("acme.consumer@v1", "acme.consumer-api@v1", "1.0.0", "Consumer", "Consumer fixture", ContractKind::App)
+    ContractBuilder::authoring("acme.consumer@v1", "acme.consumer-api@v1", "2.3.4", "Consumer", "Consumer fixture", ContractKind::App)
         .use_ref("jobs", use_contract(API_ID).with_rpc_call(["Auth.Sessions.Me"]))
         .referenced_api(API_ID, serde_json::from_str(API_JSON)?)
         .build()
@@ -1720,24 +1732,40 @@ pub fn contract_artifacts() -> Result<ContractArtifacts, ContractsError> {
             .path()
             .join(".trellis/generated/rust/trellis-apis/src/lib.rs")
             .is_file());
-        let own_sdk = fs::read_to_string(
-            root.path()
-                .join(".trellis/generated/packages/cargo/acme-consumer-api/Cargo.toml"),
-        )
-        .unwrap();
+        let own_sdk_path = root
+            .path()
+            .join(".trellis/generated/packages/cargo/acme-consumer-api/Cargo.toml");
+        let own_sdk = fs::read_to_string(&own_sdk_path).unwrap();
+        assert!(own_sdk.contains("version = \"2.3.4\""));
         assert!(own_sdk.contains(&format!(
             "trellis-rs = \"{}\"",
             trellis_generation::artifacts::trellis_package_version()
         )));
-        let participant_facade = fs::read_to_string(
-            root.path()
-                .join(".trellis/generated/packages/cargo-participants/acme-consumer/Cargo.toml"),
-        )
-        .unwrap();
+        let participant_facade_path = root
+            .path()
+            .join(".trellis/generated/packages/cargo-participants/acme-consumer/Cargo.toml");
+        let participant_facade = fs::read_to_string(&participant_facade_path).unwrap();
+        assert!(participant_facade.contains("version = \"0.4.0\""));
         assert!(participant_facade.contains(&format!(
             "trellis-rs = \"{}\"",
             trellis_generation::artifacts::trellis_package_version()
         )));
+
+        let cargo_manifest = root.path().join("Cargo.toml");
+        fs::write(
+            &cargo_manifest,
+            fs::read_to_string(&cargo_manifest).unwrap().replacen(
+                "version = \"0.4.0\"",
+                "version = \"0.5.0\"",
+                1,
+            ),
+        )
+        .unwrap();
+        install_root(root.path(), &manifest, &lock).await.unwrap();
+        assert_eq!(fs::read_to_string(&own_sdk_path).unwrap(), own_sdk);
+        let updated_participant_facade = fs::read_to_string(&participant_facade_path).unwrap();
+        assert!(updated_participant_facade.contains("version = \"0.5.0\""));
+        assert_ne!(updated_participant_facade, participant_facade);
 
         let aggregate_lib = root
             .path()

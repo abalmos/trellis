@@ -20,18 +20,19 @@ pub fn generate_project(root: &Path, output_root: &Path) -> miette::Result<AutoE
             PackageTarget::Cargo,
         ]),
     )?;
-    if plan.is_empty() {
-        return Ok(AutoExecutionSummary::default());
-    }
-    let runtime_version = crate::artifacts::trellis_package_version();
-    let summary = execute_auto_plan(
-        &plan,
-        None,
-        false,
-        false,
-        "@trellis-sdk/",
-        Some(&runtime_version),
-    )?;
+    let summary = if plan.is_empty() {
+        AutoExecutionSummary::default()
+    } else {
+        let runtime_version = crate::artifacts::trellis_package_version();
+        execute_auto_plan(
+            &plan,
+            None,
+            false,
+            false,
+            "@trellis-sdk/",
+            Some(&runtime_version),
+        )?
+    };
 
     for (directory, current) in [
         (
@@ -58,12 +59,7 @@ pub fn generate_project(root: &Path, output_root: &Path) -> miette::Result<AutoE
                 .filter_map(|entry| entry.jsr_out.clone())
                 .collect(),
         ),
-        (
-            output_root.join("generated/packages/npm"),
-            plan.iter()
-                .filter_map(|entry| entry.npm_out.clone())
-                .collect(),
-        ),
+        (output_root.join("generated/packages/npm"), BTreeSet::new()),
         (
             output_root.join("generated/packages/cargo"),
             plan.iter()

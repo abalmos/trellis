@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use rusqlite::params;
 use serde::{de::DeserializeOwned, Serialize};
-use trellis_rs::internal_sdk::health::types::{
+use trellis_runtime_apis::health::types::{
     HealthHeartbeatSampleChecksItem, HealthInspectRequest, HealthInspectResponse,
     HealthInspectResponseHistoryItem, HealthInspectResponseHistoryItemChecksItem,
     HealthInspectResponseInstancesItem, HealthInspectResponseInstancesItemLatestSample,

@@ -1,6 +1,7 @@
 [workspace]
 members = [
   "crates/trellis",
+  "crates/runtime-apis",
   "crates/local-bootstrap",
   "crates/bootstrap",
   "crates/local-nats",
@@ -19,6 +20,7 @@ members = [
 ]
 default-members = [
   "crates/trellis",
+  "crates/runtime-apis",
   "crates/local-bootstrap",
   "crates/bootstrap",
   "crates/local-nats",

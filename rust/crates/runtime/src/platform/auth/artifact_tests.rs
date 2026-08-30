@@ -15,12 +15,12 @@ const AUTH_POLICY_RPCS: [&str; 9] = [
 
 #[test]
 fn source_auth_artifacts_are_valid_and_digest_pinned() {
-    let api_value: Value = serde_json::from_str(trellis_rs::internal_sdk::auth::API_JSON)
-        .expect("parse auth API JSON");
+    let api_value: Value =
+        serde_json::from_str(trellis_runtime_apis::auth::API_JSON).expect("parse auth API JSON");
     let api = parse_api(&api_value).expect("validate auth API");
     assert_eq!(
         api.digest().expect("digest auth API"),
-        trellis_rs::internal_sdk::auth::API_DIGEST
+        trellis_runtime_apis::auth::API_DIGEST
     );
 
     let participant_value: Value =
@@ -35,7 +35,7 @@ fn source_auth_artifacts_are_valid_and_digest_pinned() {
     ))
     .expect("parse admin participant JSON");
     admin_value["uses"]["required"]["auth"]["apiDigest"] =
-        Value::String(trellis_rs::internal_sdk::auth::API_DIGEST.to_owned());
+        Value::String(trellis_runtime_apis::auth::API_DIGEST.to_owned());
     lint_participant_authoring(&admin_value).expect("lint admin participant");
     let admin = parse_participant(&admin_value).expect("validate admin participant");
     assert_eq!(admin.id(), "trellis-platform-administration");
@@ -44,9 +44,9 @@ fn source_auth_artifacts_are_valid_and_digest_pinned() {
         &std::collections::BTreeMap::from([
             (api.id().to_owned(), api),
             (
-                trellis_rs::internal_sdk::state::API_ID.to_owned(),
+                trellis_runtime_apis::state::API_ID.to_owned(),
                 parse_api(
-                    &serde_json::from_str(trellis_rs::internal_sdk::state::API_JSON)
+                    &serde_json::from_str(trellis_runtime_apis::state::API_JSON)
                         .expect("parse state API JSON"),
                 )
                 .expect("validate state API"),
@@ -228,26 +228,26 @@ fn accepted_builtin_machine_apis_are_preserved() {
         (
             "Jobs",
             include_str!("../../../../../../conformance/baselines/trellis-jobs-3ef0aa94.api.json"),
-            trellis_rs::internal_sdk::jobs::API_JSON,
+            trellis_runtime_apis::jobs::API_JSON,
         ),
         (
             "Health",
             include_str!(
                 "../../../../../../conformance/baselines/trellis-health-3ef0aa94.api.json"
             ),
-            trellis_rs::internal_sdk::health::API_JSON,
+            trellis_runtime_apis::health::API_JSON,
         ),
         (
             "Event Log",
             include_str!(
                 "../../../../../../conformance/baselines/trellis-eventlog-3ef0aa94.api.json"
             ),
-            trellis_rs::internal_sdk::eventlog::API_JSON,
+            trellis_runtime_apis::eventlog::API_JSON,
         ),
         (
             "State",
             include_str!("../../../../../../conformance/baselines/trellis-state-3ef0aa94.api.json"),
-            trellis_rs::internal_sdk::state::API_JSON,
+            trellis_runtime_apis::state::API_JSON,
         ),
     ] {
         assert_eq!(
@@ -263,7 +263,7 @@ fn accepted_core_machine_api_is_preserved_except_removed_catalog_surfaces() {
     let baseline = normalized_api(include_str!(
         "../../../../../../conformance/baselines/trellis-core-3ef0aa94.api.json"
     ));
-    let current = normalized_api(trellis_rs::internal_sdk::core::API_JSON);
+    let current = normalized_api(trellis_runtime_apis::core::API_JSON);
 
     assert_eq!(current, baseline);
     for rpc_name in ["Trellis.Catalog", "Trellis.Contract.Get"] {
@@ -281,12 +281,12 @@ fn central_trellis_participant_resolves_all_builtin_apis_with_exact_pins() {
             .expect("parse central Trellis participant JSON");
     let mut apis = std::collections::BTreeMap::new();
     for (alias, source) in [
-        ("auth", trellis_rs::internal_sdk::auth::API_JSON),
-        ("core", trellis_rs::internal_sdk::core::API_JSON),
-        ("jobs", trellis_rs::internal_sdk::jobs::API_JSON),
-        ("health", trellis_rs::internal_sdk::health::API_JSON),
-        ("eventlog", trellis_rs::internal_sdk::eventlog::API_JSON),
-        ("state", trellis_rs::internal_sdk::state::API_JSON),
+        ("auth", trellis_runtime_apis::auth::API_JSON),
+        ("core", trellis_runtime_apis::core::API_JSON),
+        ("jobs", trellis_runtime_apis::jobs::API_JSON),
+        ("health", trellis_runtime_apis::health::API_JSON),
+        ("eventlog", trellis_runtime_apis::eventlog::API_JSON),
+        ("state", trellis_runtime_apis::state::API_JSON),
     ] {
         let api = parse_api(&serde_json::from_str(source).expect("parse built-in API JSON"))
             .expect("validate built-in API");

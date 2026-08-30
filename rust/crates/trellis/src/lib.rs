@@ -70,8 +70,13 @@ pub mod auth;
 #[doc(hidden)]
 pub mod jobs;
 
-#[doc(hidden)]
-pub mod internal_sdk;
+#[allow(
+    clippy::enum_variant_names,
+    dead_code,
+    unused_imports,
+    reason = "generated private projections are consumed selectively"
+)]
+pub(crate) mod internal_sdk;
 
 #[cfg(test)]
 mod tests {
@@ -107,6 +112,7 @@ mod tests {
             "bootstrap/Cargo.toml",
             "local-bootstrap/Cargo.toml",
             "protocol-wasm/Cargo.toml",
+            "runtime-apis/Cargo.toml",
             "runtime/Cargo.toml",
             "eventlog-runtime/Cargo.toml",
             "jobs-runtime/Cargo.toml",

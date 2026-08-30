@@ -21,9 +21,9 @@ use trellis_protocol::{
     AuthorizationPrincipalKind, DeviceBootstrapSessionProofInput, SessionProofInput,
     SessionProofPolicy,
 };
-#[cfg(test)]
-use trellis_rs::internal_sdk::auth as trellis_sdk_auth;
 use trellis_rs::service::Router;
+#[cfg(test)]
+use trellis_runtime_apis::auth as trellis_sdk_auth;
 use ulid::Ulid;
 
 use super::{
@@ -3635,7 +3635,7 @@ mod response_tests {
             }
         });
         serde_json::from_value::<
-            trellis_rs::internal_sdk::auth::types::AuthDeploymentAuthorityAcceptUpdateResponse,
+            trellis_runtime_apis::auth::types::AuthDeploymentAuthorityAcceptUpdateResponse,
         >(value)
         .unwrap();
     }

@@ -1,13 +1,13 @@
 //! `Jobs.Watch` feed implementation.
 
 use futures_util::{stream, Stream, StreamExt};
-use trellis_rs::internal_sdk::jobs::feeds::JobsWatchFeedDescriptor;
-use trellis_rs::internal_sdk::jobs::types::{
-    JobsWatchEvent, JobsWatchEventQueryInvalidatedReason, JobsWatchInput, JobsWatchInputQuery,
-};
 use trellis_rs::jobs::types::{JobEvent, JobState, JobTriggerKind};
 use trellis_rs::jobs::{JobsRuntime, JobsRuntimeMessageStream};
 use trellis_rs::service::{Router, ServerError};
+use trellis_runtime_apis::jobs::feeds::JobsWatchFeedDescriptor;
+use trellis_runtime_apis::jobs::types::{
+    JobsWatchEvent, JobsWatchEventQueryInvalidatedReason, JobsWatchInput, JobsWatchInputQuery,
+};
 
 const JOBS_EVENTS_SUBJECT_WILDCARD: &str = "trellis.jobs.>";
 

@@ -5,7 +5,7 @@ use serde::{de::DeserializeOwned, Serialize};
 use thiserror::Error;
 use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
-use trellis_rs::internal_sdk::health::types::{
+use trellis_runtime_apis::health::types::{
     HealthHeartbeatSample, HealthStatusChangedEvent, HealthStatusChangedEventHeader,
     HealthStatusChangedEventParticipant,
 };
@@ -857,7 +857,7 @@ pub(super) fn rfc3339(timestamp_ns: i64) -> Result<String, HealthStoreError> {
 mod tests {
     use std::collections::BTreeMap;
 
-    use trellis_rs::internal_sdk::health::types::{
+    use trellis_runtime_apis::health::types::{
         HealthHeartbeatSampleChecksItem, HealthHeartbeatSampleParticipant,
         HealthHeartbeatSampleSample, HealthInspectRequest, HealthMetricsRequest,
         HealthQueryRequest,

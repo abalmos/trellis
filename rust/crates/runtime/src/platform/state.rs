@@ -15,13 +15,13 @@ use trellis_protocol::{
     parse_api, AuthorizationPrincipalKind, ParticipantKind, ParticipantResourceKind,
     PermissionAction, PermissionAtom, PermissionTarget, StateKind,
 };
-use trellis_rs::internal_sdk::state::rpc::{
-    StateAdminDeleteRpc, StateAdminGetRpc, StateAdminListRpc, StateDeleteRpc, StateGetRpc,
-    StateListRpc, StatePutRpc,
-};
 use trellis_rs::service::{
     internal::run_builtin_authenticated_router, DeclaredRpcError, RequestContext, Router,
     ServerError, ValidationIssue,
+};
+use trellis_runtime_apis::state::rpc::{
+    StateAdminDeleteRpc, StateAdminGetRpc, StateAdminListRpc, StateDeleteRpc, StateGetRpc,
+    StateListRpc, StatePutRpc,
 };
 
 use super::auth::verifier::RuntimeAuthVerifier;

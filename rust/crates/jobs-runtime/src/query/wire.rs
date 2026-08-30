@@ -1,6 +1,7 @@
 use serde::de::DeserializeOwned;
 use serde_json::Value;
-use trellis_rs::internal_sdk::jobs::types::{
+use trellis_rs::jobs::types::{Job, JobContext, JobErrorDetail, JobLogEntry, JobProgress};
+use trellis_runtime_apis::jobs::types::{
     JobsCancelResponseJob, JobsCancelResponseJobConcurrency, JobsCancelResponseJobErrorDetail,
     JobsCancelResponseJobLogsItem, JobsCancelResponseJobProgress, JobsCancelResponseJobQueuePolicy,
     JobsDismissDLQResponseJob, JobsDismissDLQResponseJobConcurrency,
@@ -18,7 +19,6 @@ use trellis_rs::internal_sdk::jobs::types::{
     JobsRetryResponseJobConcurrency, JobsRetryResponseJobErrorDetail, JobsRetryResponseJobLogsItem,
     JobsRetryResponseJobProgress, JobsRetryResponseJobQueuePolicy,
 };
-use trellis_rs::jobs::types::{Job, JobContext, JobErrorDetail, JobLogEntry, JobProgress};
 
 use crate::storage::JobProjectionMetadata;
 use crate::worker_presence::WorkerPresenceRecord;

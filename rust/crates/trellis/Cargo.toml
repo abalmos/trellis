@@ -39,6 +39,7 @@ ulid = "1.2.1"
 url = "2.5.8"
 
 [dev-dependencies]
+trellis-runtime-apis = { path = "../runtime-apis" }
 trellis-test = { path = "../trellis-test" }
 trellis-local-nats = { path = "../local-nats" }
 

@@ -6,7 +6,7 @@ use qrcode::{render::unicode, QrCode};
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
 use trellis_rs::auth as authlib;
-use trellis_rs::internal_sdk::auth::types as auth_types;
+use trellis_runtime_apis::auth::{types as auth_types, AuthClient};
 
 pub(crate) fn render_agent_login_instructions(login_url: &str) -> miette::Result<String> {
     let qr = QrCode::new(login_url.as_bytes()).into_diagnostic()?;
@@ -221,7 +221,7 @@ fn user_row(user: &Value, last_auth_by_user: &BTreeMap<String, String>) -> Vec<S
 
 async fn users_list_command(format: OutputFormat) -> miette::Result<()> {
     let (_state, connected) = connect_authenticated_cli_client(format).await?;
-    let auth_client = authlib::AuthClient::new(&connected);
+    let auth_client = AuthClient::new(&connected);
     let users = auth_client
         .rpc()
         .auth()
@@ -291,7 +291,7 @@ async fn users_list_command(format: OutputFormat) -> miette::Result<()> {
 
 async fn users_show_command(format: OutputFormat, args: &UserRefArgs) -> miette::Result<()> {
     let (_state, connected) = connect_authenticated_cli_client(format).await?;
-    let auth_client = authlib::AuthClient::new(&connected);
+    let auth_client = AuthClient::new(&connected);
     let user = auth_client
         .rpc()
         .auth()
@@ -320,7 +320,7 @@ async fn users_show_command(format: OutputFormat, args: &UserRefArgs) -> miette:
 
 async fn users_create_command(format: OutputFormat, args: &UserCreateArgs) -> miette::Result<()> {
     let (_state, connected) = connect_authenticated_cli_client(format).await?;
-    let auth_client = authlib::AuthClient::new(&connected);
+    let auth_client = AuthClient::new(&connected);
     let _username = trimmed_optional(&args.username)
         .ok_or_else(|| miette::miette!("--username is required to create a local user"))?;
     if !args.capabilities.is_empty() || !args.groups.is_empty() {
@@ -370,7 +370,7 @@ async fn users_create_command(format: OutputFormat, args: &UserCreateArgs) -> mi
 
 async fn users_edit_command(format: OutputFormat, args: &UserEditArgs) -> miette::Result<()> {
     let (_state, connected) = connect_authenticated_cli_client(format).await?;
-    let auth_client = authlib::AuthClient::new(&connected);
+    let auth_client = AuthClient::new(&connected);
     let current = auth_client
         .rpc()
         .auth()
@@ -518,7 +518,7 @@ async fn logout_command(format: OutputFormat) -> miette::Result<()> {
 pub(super) async fn current_user(
     connected: &trellis_rs::generated::Caller,
 ) -> Result<authlib::AuthenticatedUser, authlib::TrellisAuthError> {
-    let response = authlib::AuthClient::new(connected)
+    let response = AuthClient::new(connected)
         .rpc()
         .auth()
         .sessions_me()
@@ -535,7 +535,7 @@ pub(super) async fn current_user(
 async fn revoke_current_session(
     connected: &trellis_rs::generated::Caller,
 ) -> Result<(), authlib::TrellisAuthError> {
-    let auth = authlib::AuthClient::new(connected);
+    let auth = AuthClient::new(connected);
     let current = auth
         .rpc()
         .auth()
@@ -582,7 +582,7 @@ async fn identity_grants_list_command(
     args: &IdentityGrantsListArgs,
 ) -> miette::Result<()> {
     let (_state, connected) = connect_authenticated_cli_client(format).await?;
-    let auth_client = authlib::AuthClient::new(&connected);
+    let auth_client = AuthClient::new(&connected);
     let identity_grants = auth_client
         .rpc()
         .auth()
@@ -660,7 +660,7 @@ async fn identity_grants_revoke_command(
     args: &IdentityGrantsRevokeArgs,
 ) -> miette::Result<()> {
     let (_state, connected) = connect_authenticated_cli_client(format).await?;
-    let auth_client = authlib::AuthClient::new(&connected);
+    let auth_client = AuthClient::new(&connected);
     let authority = auth_client
         .rpc()
         .auth()

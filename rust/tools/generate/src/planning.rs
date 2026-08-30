@@ -40,7 +40,6 @@ pub struct AutoPlanEntry {
     pub action: AutoAction,
     pub out_api: Option<PathBuf>,
     pub jsr_out: Option<PathBuf>,
-    pub npm_out: Option<PathBuf>,
     pub cargo_out: Option<PathBuf>,
     pub cargo_participant_out: Option<PathBuf>,
     pub protocol_participant_out: Option<PathBuf>,
@@ -95,7 +94,7 @@ pub fn build_auto_plan_with_targets(
         } else {
             RuntimeSource::Registry
         };
-        let (out_api, jsr_out, npm_out, cargo_out, cargo_participant_out, protocol_participant_out) =
+        let (out_api, jsr_out, cargo_out, cargo_participant_out, protocol_participant_out) =
             match action {
                 AutoAction::Generate => {
                     let sdk_stem = sdk_output_stem(&contract_id);
@@ -145,7 +144,6 @@ pub fn build_auto_plan_with_targets(
                     } else {
                         None
                     };
-                    let npm_out = None;
                     let cargo_out = if targets.contains(&PackageTarget::Cargo) {
                         Some(output_root.join("generated/packages/cargo").join(&sdk_stem))
                     } else {
@@ -176,18 +174,16 @@ pub fn build_auto_plan_with_targets(
                     (
                         out_api,
                         jsr_out,
-                        npm_out,
                         cargo_out,
                         cargo_participant_out,
                         protocol_participant_out,
                     )
                 }
-                AutoAction::Verify => (None, None, None, None, None, None),
+                AutoAction::Verify => (None, None, None, None, None),
             };
         let action = if matches!(action, AutoAction::Generate)
             && out_api.is_none()
             && jsr_out.is_none()
-            && npm_out.is_none()
             && cargo_out.is_none()
             && cargo_participant_out.is_none()
             && protocol_participant_out.is_none()
@@ -207,7 +203,6 @@ pub fn build_auto_plan_with_targets(
             action,
             out_api,
             jsr_out,
-            npm_out,
             cargo_out,
             cargo_participant_out,
             protocol_participant_out,
@@ -220,7 +215,6 @@ pub fn build_auto_plan_with_targets(
         for path in [
             entry.out_api.as_ref(),
             entry.jsr_out.as_ref(),
-            entry.npm_out.as_ref(),
             entry.cargo_out.as_ref(),
             entry.cargo_participant_out.as_ref(),
             entry.protocol_participant_out.as_ref(),
@@ -523,6 +517,8 @@ pub fn execute_auto_plan(
     prefix: &str,
     runtime_version: Option<&str>,
 ) -> miette::Result<AutoExecutionSummary> {
+    let default_runtime_version = crate::artifacts::trellis_package_version();
+    let runtime_version = runtime_version.unwrap_or(&default_runtime_version);
     if show_title {
         output::print_section("Run");
     } else if let Some(title) = title {
@@ -558,23 +554,25 @@ pub fn execute_auto_plan(
             })
             .filter(|_| !force && matches!(entry.action, AutoAction::Generate))
         {
-            let artifact_version = cached.owner_version().ok_or_else(|| {
-                miette::miette!(
-                    "cannot generate contract artifacts from local discovery: no owning workspace version could be inferred from the contract input; use a source file or a manifest located under a versioned workspace"
-                )
-            })?;
             let package_name = ts_package_name_from_id(&entry.contract_id, prefix);
             let crate_name = default_rust_crate_name_from_id(&entry.contract_id);
             let out_api = entry
                 .out_api
                 .as_ref()
                 .ok_or_else(|| miette::miette!("missing manifest output for generated contract"))?;
+            let participant_version = if entry.cargo_participant_out.is_some() {
+                Some(cached.owner_version().ok_or_else(|| {
+                    miette::miette!("participant facade requires an owning workspace version")
+                })?)
+            } else {
+                None
+            };
             let output_plan = ContractOutputPlan {
-                artifact_version,
-                runtime_version: runtime_version.unwrap_or(artifact_version),
+                api_sdk_version: cached.api_version(),
+                participant_version,
+                runtime_version,
                 out_api,
                 ts_out: entry.jsr_out.as_deref(),
-                npm_out: entry.npm_out.as_deref(),
                 rust_out: entry.cargo_out.as_deref(),
                 package_name: &package_name,
                 crate_name: &crate_name,
@@ -593,7 +591,6 @@ pub fn execute_auto_plan(
                 &metadata,
                 out_api,
                 entry.jsr_out.as_deref(),
-                entry.npm_out.as_deref(),
                 entry.cargo_out.as_deref(),
             );
             let participant_fresh = freshness.participant
@@ -605,7 +602,6 @@ pub fn execute_auto_plan(
                 cached.emit_warnings();
                 crate::timings::target("api", true, false);
                 crate::timings::target("jsr", entry.jsr_out.is_some(), false);
-                crate::timings::target("npm", entry.npm_out.is_some(), false);
                 crate::timings::target("cargo", entry.cargo_out.is_some(), false);
                 crate::timings::target(
                     "participant-facade",
@@ -704,10 +700,14 @@ pub fn execute_auto_plan(
         current_api_digests.insert(entry.contract_id.clone(), resolved.api.digest.clone());
         match entry.action {
             AutoAction::Generate => {
-                let artifact_version = required_owner_version(
-                    resolved,
-                    "generate contract artifacts from local discovery",
-                )?;
+                let participant_version = if entry.cargo_participant_out.is_some() {
+                    Some(required_owner_version(
+                        resolved,
+                        "generate a participant facade from local discovery",
+                    )?)
+                } else {
+                    None
+                };
                 let package_name = ts_package_name_from_id(&resolved.api.render_model.id, prefix);
                 let crate_name = default_rust_crate_name_from_id(&resolved.api.render_model.id);
                 let out_api = entry.out_api.as_ref().ok_or_else(|| {
@@ -741,11 +741,11 @@ pub fn execute_auto_plan(
                     }
                 }
                 let output_plan = ContractOutputPlan {
-                    artifact_version: &artifact_version,
-                    runtime_version: runtime_version.unwrap_or(&artifact_version),
+                    api_sdk_version: resolved.api.api.version(),
+                    participant_version: participant_version.as_deref(),
+                    runtime_version,
                     out_api,
                     ts_out: entry.jsr_out.as_deref(),
-                    npm_out: entry.npm_out.as_deref(),
                     rust_out: entry.cargo_out.as_deref(),
                     package_name: &package_name,
                     crate_name: &crate_name,
@@ -765,7 +765,6 @@ pub fn execute_auto_plan(
                         &metadata,
                         out_api,
                         entry.jsr_out.as_deref(),
-                        entry.npm_out.as_deref(),
                         entry.cargo_out.as_deref(),
                     )
                 };
@@ -784,7 +783,6 @@ pub fn execute_auto_plan(
                 };
                 crate::timings::target("api", true, !freshness.api);
                 crate::timings::target("jsr", entry.jsr_out.is_some(), !freshness.jsr);
-                crate::timings::target("npm", entry.npm_out.is_some(), !freshness.npm);
                 crate::timings::target("cargo", entry.cargo_out.is_some(), !freshness.cargo);
                 crate::timings::target(
                     "participant-facade",
@@ -844,10 +842,14 @@ pub fn execute_auto_plan(
                                         .id
                                 )
                             ),
-                            crate_version: artifact_version.clone(),
+                            crate_version: participant_version.clone().ok_or_else(|| {
+                                miette::miette!(
+                                    "participant facade requires an owning workspace version"
+                                )
+                            })?,
                             runtime_deps: rust_runtime_deps(
                                 entry.runtime_source,
-                                runtime_version.unwrap_or(&artifact_version).to_owned(),
+                                runtime_version.to_owned(),
                                 entry.runtime_repo_root.clone(),
                             ),
                             owned_sdk_crate_name: Some(crate_name.clone()),
@@ -867,7 +869,6 @@ pub fn execute_auto_plan(
                 }
                 for (path, generated) in [
                     (entry.jsr_out.as_deref(), !freshness.jsr),
-                    (entry.npm_out.as_deref(), !freshness.npm),
                     (entry.cargo_out.as_deref(), !freshness.cargo),
                     (entry.cargo_participant_out.as_deref(), !participant_fresh),
                     (
@@ -1379,9 +1380,6 @@ fn print_auto_entry(entry: &AutoPlanEntry) {
     }
     if let Some(jsr_out) = &entry.jsr_out {
         output::print_detail("jsr package", jsr_out.display().to_string());
-    }
-    if let Some(npm_out) = &entry.npm_out {
-        output::print_detail("npm package", npm_out.display().to_string());
     }
     if let Some(cargo_out) = &entry.cargo_out {
         output::print_detail("cargo package", cargo_out.display().to_string());

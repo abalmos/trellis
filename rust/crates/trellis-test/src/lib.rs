@@ -34,7 +34,7 @@ use trellis_local_bootstrap::{
 };
 use trellis_rs::client::{SessionAuth, TrellisClientError, UserConnectOptions};
 use trellis_rs::generated::Caller;
-use trellis_rs::internal_sdk::auth::{self as auth_sdk, AuthClient as GeneratedAuthClient};
+use trellis_runtime_apis::auth::{self as auth_sdk, AuthClient as GeneratedAuthClient};
 
 const DEFAULT_STARTUP_TIMEOUT: Duration = Duration::from_secs(60);
 const DEFAULT_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(10);
@@ -1851,13 +1851,12 @@ impl TrellisTestAdmin {
     pub async fn state_admin_get(
         &mut self,
         bootstrap_url: &str,
-        request: &trellis_rs::internal_sdk::state::types::StateAdminGetRequest,
-    ) -> Result<trellis_rs::internal_sdk::state::types::StateAdminGetResponse, TrellisTestError>
-    {
+        request: &trellis_runtime_apis::state::types::StateAdminGetRequest,
+    ) -> Result<trellis_runtime_apis::state::types::StateAdminGetResponse, TrellisTestError> {
         if let Some(proxy) = &self.admin_rpc {
             proxy.call("stateAdminGet", request).await
         } else {
-            Ok(trellis_rs::internal_sdk::state::client::StateClient::new(
+            Ok(trellis_runtime_apis::state::client::StateClient::new(
                 self.connect_admin(bootstrap_url).await?,
             )
             .rpc()
@@ -1871,13 +1870,12 @@ impl TrellisTestAdmin {
     pub async fn state_admin_list(
         &mut self,
         bootstrap_url: &str,
-        request: &trellis_rs::internal_sdk::state::types::StateAdminListRequest,
-    ) -> Result<trellis_rs::internal_sdk::state::types::StateAdminListResponse, TrellisTestError>
-    {
+        request: &trellis_runtime_apis::state::types::StateAdminListRequest,
+    ) -> Result<trellis_runtime_apis::state::types::StateAdminListResponse, TrellisTestError> {
         if let Some(proxy) = &self.admin_rpc {
             proxy.call("stateAdminList", request).await
         } else {
-            Ok(trellis_rs::internal_sdk::state::client::StateClient::new(
+            Ok(trellis_runtime_apis::state::client::StateClient::new(
                 self.connect_admin(bootstrap_url).await?,
             )
             .rpc()
@@ -1891,13 +1889,13 @@ impl TrellisTestAdmin {
     pub async fn state_admin_delete(
         &mut self,
         bootstrap_url: &str,
-        request: &trellis_rs::internal_sdk::state::types::StateAdminDeleteRequest,
-    ) -> Result<trellis_rs::internal_sdk::state::types::StateAdminDeleteResponse, TrellisTestError>
+        request: &trellis_runtime_apis::state::types::StateAdminDeleteRequest,
+    ) -> Result<trellis_runtime_apis::state::types::StateAdminDeleteResponse, TrellisTestError>
     {
         if let Some(proxy) = &self.admin_rpc {
             proxy.call("stateAdminDelete", request).await
         } else {
-            Ok(trellis_rs::internal_sdk::state::client::StateClient::new(
+            Ok(trellis_runtime_apis::state::client::StateClient::new(
                 self.connect_admin(bootstrap_url).await?,
             )
             .rpc()
@@ -3633,13 +3631,13 @@ impl TrellisTestContract {
 
 fn builtin_api_artifacts() -> std::collections::BTreeMap<String, Value> {
     let mut apis = [(
-        trellis_rs::internal_sdk::auth::API_ID.to_owned(),
-        serde_json::from_str(trellis_rs::internal_sdk::auth::API_JSON)
+        trellis_runtime_apis::auth::API_ID.to_owned(),
+        serde_json::from_str(trellis_runtime_apis::auth::API_JSON)
             .expect("embedded Auth API artifact is valid JSON"),
     )]
     .into_iter()
     .collect();
-    ensure_builtin_api(trellis_rs::internal_sdk::state::API_ID, &mut apis)
+    ensure_builtin_api(trellis_runtime_apis::state::API_ID, &mut apis)
         .expect("embedded State API artifact parses");
     apis
 }
@@ -3743,11 +3741,11 @@ fn ensure_builtin_api(
         return Ok(());
     }
     let api_json = match api_id {
-        trellis_rs::internal_sdk::core::API_ID => trellis_rs::internal_sdk::core::API_JSON,
-        trellis_rs::internal_sdk::state::API_ID => trellis_rs::internal_sdk::state::API_JSON,
-        trellis_rs::internal_sdk::jobs::API_ID => trellis_rs::internal_sdk::jobs::API_JSON,
-        trellis_rs::internal_sdk::health::API_ID => trellis_rs::internal_sdk::health::API_JSON,
-        trellis_rs::internal_sdk::eventlog::API_ID => trellis_rs::internal_sdk::eventlog::API_JSON,
+        trellis_runtime_apis::core::API_ID => trellis_runtime_apis::core::API_JSON,
+        trellis_runtime_apis::state::API_ID => trellis_runtime_apis::state::API_JSON,
+        trellis_runtime_apis::jobs::API_ID => trellis_runtime_apis::jobs::API_JSON,
+        trellis_runtime_apis::health::API_ID => trellis_runtime_apis::health::API_JSON,
+        trellis_runtime_apis::eventlog::API_ID => trellis_runtime_apis::eventlog::API_JSON,
         _ => {
             return Err(TrellisTestError::UnexpectedResponse(format!(
                 "API artifact '{api_id}' has not been approved"
@@ -5709,10 +5707,10 @@ file.close();
     #[test]
     fn built_in_contracts_compile_to_protocol_apis() {
         let mut apis = super::builtin_api_artifacts();
-        super::ensure_builtin_api(trellis_rs::internal_sdk::core::API_ID, &mut apis).unwrap();
-        super::ensure_builtin_api(trellis_rs::internal_sdk::state::API_ID, &mut apis).unwrap();
-        assert!(apis.contains_key(trellis_rs::internal_sdk::core::API_ID));
-        assert!(apis.contains_key(trellis_rs::internal_sdk::state::API_ID));
+        super::ensure_builtin_api(trellis_runtime_apis::core::API_ID, &mut apis).unwrap();
+        super::ensure_builtin_api(trellis_runtime_apis::state::API_ID, &mut apis).unwrap();
+        assert!(apis.contains_key(trellis_runtime_apis::core::API_ID));
+        assert!(apis.contains_key(trellis_runtime_apis::state::API_ID));
     }
 
     #[test]
