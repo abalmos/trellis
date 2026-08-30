@@ -14,6 +14,7 @@ use super::super::authority::{
 use super::super::context::{
     revoke_sql_contexts, AuthorizationContextRevocationReason, AuthorizationContextSelector,
 };
+use super::super::transport::TransportProjection;
 use super::super::{
     AuthorityDecision, AuthorityDecisionOutcome, AuthorityDecisionRecord, AuthorityKind,
     AuthorityProposalRecord, AuthorityProposalState, AuthorizationStateError,
@@ -633,13 +634,19 @@ impl AuthorityRepository for SqliteAuthorizationStore {
     ) -> Result<(), AuthorizationStateError> {
         super::super::domain::require_protocol_timestamp("resolvedAt", binding.resolved_at)?;
         binding.resolve()?;
+        let projection = TransportProjection::from_binding(&binding)?;
+        let projection_json = serde_json::to_string(&projection)
+            .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
+        let projection_digest = projection.digest()?;
         self.run(move |connection| {
-            connection
+            let transaction = connection.transaction().map_err(sql_error)?;
+            transaction
                 .execute(
                     "INSERT INTO auth_participant_bindings (
                         participant_id, participant_kind, artifact_digest, needs_digest,
-                        participant_json, api_artifacts_json, resolved_at, state, error
-                     ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+                        participant_json, api_artifacts_json, resolved_at, state, error,
+                        transport_projection_digest
+                     ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
                      ON CONFLICT(participant_id, artifact_digest) DO UPDATE SET
                         participant_kind = excluded.participant_kind,
                         needs_digest = excluded.needs_digest,
@@ -647,20 +654,39 @@ impl AuthorityRepository for SqliteAuthorizationStore {
                         api_artifacts_json = excluded.api_artifacts_json,
                         resolved_at = excluded.resolved_at,
                         state = excluded.state,
-                        error = excluded.error",
+                        error = excluded.error,
+                        transport_projection_digest = excluded.transport_projection_digest",
                     params![
-                        binding.participant_id,
+                        &binding.participant_id,
                         encode_enum(binding.participant_kind)?,
-                        binding.artifact_digest,
-                        binding.needs_digest,
-                        binding.participant_json,
-                        binding.api_artifacts_json,
+                        &binding.artifact_digest,
+                        &binding.needs_digest,
+                        &binding.participant_json,
+                        &binding.api_artifacts_json,
                         binding.resolved_at,
                         encode_enum(binding.state)?,
-                        binding.error,
+                        &binding.error,
+                        &projection_digest,
                     ],
                 )
                 .map_err(map_write_error)?;
+            transaction
+                .execute(
+                    "INSERT INTO auth_participant_transport_projections (
+                        participant_id, artifact_digest, needs_digest, projection_json
+                     ) VALUES (?1, ?2, ?3, ?4)
+                     ON CONFLICT(participant_id, artifact_digest) DO UPDATE SET
+                        needs_digest = excluded.needs_digest,
+                        projection_json = excluded.projection_json",
+                    params![
+                        &binding.participant_id,
+                        &binding.artifact_digest,
+                        &binding.needs_digest,
+                        &projection_json,
+                    ],
+                )
+                .map_err(map_write_error)?;
+            transaction.commit().map_err(sql_error)?;
             Ok(())
         })
         .await

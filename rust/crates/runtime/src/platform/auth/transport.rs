@@ -2,9 +2,11 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use sha2::{Digest as _, Sha256};
 use trellis_protocol::{
-    parse_api, parse_participant, resolve_participant, ApiArtifact, ApiSurfaceKind,
+    canonicalize_json, parse_api, parse_participant, resolve_participant, ApiSurfaceKind,
     AuthorizationPrincipalKind, ParticipantResourceKind, PermissionAction,
     UnsignedAuthorizationContext,
 };
@@ -14,48 +16,198 @@ use super::{
     ResourceBindingEvidence, ResourceProviderIdentity,
 };
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub(crate) struct TransportPermissions {
     pub publish: Vec<String>,
     pub subscribe: Vec<String>,
 }
 
+impl TransportPermissions {
+    pub(crate) fn digest(&self) -> Result<String, AuthorizationStateError> {
+        transport_json_digest(self)
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct TransportProjection {
+    format: String,
+    participant_artifact_digest: String,
+    participant_needs_digest: String,
+    implemented_apis: BTreeMap<String, TransportImplementedApiProjection>,
+    apis: BTreeMap<String, TransportApiProjection>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TransportApiProjection {
+    rpc: BTreeMap<String, String>,
+    rpc_receives: BTreeSet<String>,
+    operations: BTreeMap<String, String>,
+    operation_sends: BTreeSet<String>,
+    events: BTreeMap<String, String>,
+    feeds: BTreeMap<String, String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TransportImplementedApiProjection {
+    rpc: BTreeMap<String, String>,
+    rpc_receives: BTreeSet<String>,
+    operations: BTreeMap<String, String>,
+    operation_sends: BTreeSet<String>,
+    feeds: BTreeMap<String, String>,
+}
+
+impl TransportProjection {
+    pub(crate) fn from_binding(
+        binding: &ParticipantBindingRecord,
+    ) -> Result<Self, AuthorizationStateError> {
+        let participant_value = serde_json::from_str(&binding.participant_json)
+            .map_err(|error| invalid_error(format!("participant JSON is invalid: {error}")))?;
+        let participant = parse_participant(&participant_value)
+            .map_err(|error| invalid_error(error.to_string()))?;
+        let api_values: BTreeMap<String, Value> = serde_json::from_str(&binding.api_artifacts_json)
+            .map_err(|error| invalid_error(format!("API artifact map is invalid: {error}")))?;
+        let apis = api_values
+            .into_iter()
+            .map(|(id, value)| {
+                let api = parse_api(&value).map_err(|error| invalid_error(error.to_string()))?;
+                if api.id() != id {
+                    return invalid("API artifact map key does not match artifact ID");
+                }
+                Ok((id, api))
+            })
+            .collect::<Result<BTreeMap<_, _>, _>>()?;
+        let resolved = resolve_participant(&participant, &apis)
+            .map_err(|error| invalid_error(error.to_string()))?;
+        if resolved.participant_digest() != binding.artifact_digest
+            || resolved
+                .needs()
+                .digest()
+                .map_err(|error| invalid_error(error.to_string()))?
+                != binding.needs_digest
+        {
+            return invalid("resolved participant identity does not match binding");
+        }
+        let implemented_apis = resolved
+            .implemented_apis()
+            .iter()
+            .map(|implementation| {
+                let provided = implementation.provided();
+                let value = apis
+                    .get(provided.api())
+                    .ok_or_else(|| invalid_error("implemented API artifact is missing"))?
+                    .normalized_value()
+                    .map_err(|error| invalid_error(error.to_string()))?;
+                Ok((
+                    provided.api().to_owned(),
+                    TransportImplementedApiProjection {
+                        rpc: provided.rpc().clone(),
+                        rpc_receives: provided
+                            .rpc()
+                            .keys()
+                            .filter(|name| {
+                                value["rpc"][name.as_str()]["transfer"]["direction"] == "receive"
+                            })
+                            .cloned()
+                            .collect(),
+                        operations: provided
+                            .operations()
+                            .iter()
+                            .map(|(name, operation)| (name.clone(), operation.subject().to_owned()))
+                            .collect(),
+                        operation_sends: provided
+                            .operations()
+                            .keys()
+                            .filter(|name| {
+                                value["operations"][name.as_str()]["transfer"]["direction"]
+                                    == "send"
+                            })
+                            .cloned()
+                            .collect(),
+                        feeds: provided.feeds().clone(),
+                    },
+                ))
+            })
+            .collect::<Result<_, AuthorizationStateError>>()?;
+        let apis = apis
+            .into_iter()
+            .map(|(id, api)| {
+                let subjects = api
+                    .derived_subjects()
+                    .map_err(|error| invalid_error(error.to_string()))?;
+                let value = api
+                    .normalized_value()
+                    .map_err(|error| invalid_error(error.to_string()))?;
+                Ok((
+                    id,
+                    TransportApiProjection {
+                        rpc: subjects.rpc,
+                        rpc_receives: value["rpc"]
+                            .as_object()
+                            .into_iter()
+                            .flatten()
+                            .filter(|(_, rpc)| rpc["transfer"]["direction"] == "receive")
+                            .map(|(name, _)| name.clone())
+                            .collect(),
+                        operations: subjects.operations,
+                        operation_sends: value["operations"]
+                            .as_object()
+                            .into_iter()
+                            .flatten()
+                            .filter(|(_, operation)| operation["transfer"]["direction"] == "send")
+                            .map(|(name, _)| name.clone())
+                            .collect(),
+                        events: subjects
+                            .events
+                            .into_iter()
+                            .map(|(name, subjects)| (name, subjects.wildcard))
+                            .collect(),
+                        feeds: subjects.feeds,
+                    },
+                ))
+            })
+            .collect::<Result<_, AuthorizationStateError>>()?;
+        Ok(Self {
+            format: "trellis.transport-projection.v1".to_owned(),
+            participant_artifact_digest: binding.artifact_digest.clone(),
+            participant_needs_digest: binding.needs_digest.clone(),
+            implemented_apis,
+            apis,
+        })
+    }
+
+    pub(crate) fn matches(&self, artifact_digest: &str, needs_digest: &str) -> bool {
+        self.format == "trellis.transport-projection.v1"
+            && self.participant_artifact_digest == artifact_digest
+            && self.participant_needs_digest == needs_digest
+    }
+
+    pub(crate) fn digest(&self) -> Result<String, AuthorizationStateError> {
+        transport_json_digest(self)
+    }
+}
+
+fn transport_json_digest(value: &impl Serialize) -> Result<String, AuthorizationStateError> {
+    let value = serde_json::to_value(value)
+        .map_err(|error| invalid_error(format!("transport projection is invalid: {error}")))?;
+    let canonical = canonicalize_json(&value)
+        .map_err(|error| invalid_error(format!("transport projection is invalid: {error}")))?;
+    Ok(URL_SAFE_NO_PAD.encode(Sha256::digest(canonical.as_bytes())))
+}
+
 pub(crate) fn compile_transport_permissions(
     context: &UnsignedAuthorizationContext,
-    binding: &ParticipantBindingRecord,
+    projection: &TransportProjection,
     resource_bindings: &[ResourceBindingEvidence],
     registry: &AuthorizationRegistryBinding,
 ) -> Result<TransportPermissions, AuthorizationStateError> {
-    if binding.participant_id != context.participant.id
-        || binding.artifact_digest != context.participant.artifact_digest
-        || binding.needs_digest != context.participant.needs_digest
+    if projection.participant_artifact_digest != context.participant.artifact_digest
+        || projection.participant_needs_digest != context.participant.needs_digest
     {
-        return invalid("issuable state does not match participant binding");
-    }
-    let participant_value: Value = serde_json::from_str(&binding.participant_json)
-        .map_err(|error| invalid_error(format!("participant JSON is invalid: {error}")))?;
-    let participant =
-        parse_participant(&participant_value).map_err(|error| invalid_error(error.to_string()))?;
-    let api_values: BTreeMap<String, Value> = serde_json::from_str(&binding.api_artifacts_json)
-        .map_err(|error| invalid_error(format!("API artifact map is invalid: {error}")))?;
-    let mut apis = BTreeMap::new();
-    for (api_id, value) in api_values {
-        let api = parse_api(&value).map_err(|error| invalid_error(error.to_string()))?;
-        if api.id() != api_id {
-            return invalid("API artifact map key does not match artifact ID");
-        }
-        apis.insert(api_id, api);
-    }
-    let resolved = resolve_participant(&participant, &apis)
-        .map_err(|error| invalid_error(error.to_string()))?;
-    if resolved.participant_digest() != context.participant.artifact_digest
-        || resolved
-            .needs()
-            .digest()
-            .map_err(|error| invalid_error(error.to_string()))?
-            != context.participant.needs_digest
-    {
-        return invalid("resolved participant identity does not match issuable state");
+        return invalid("issuable state does not match transport projection");
     }
 
     let mut publish = BTreeSet::new();
@@ -128,36 +280,26 @@ pub(crate) fn compile_transport_permissions(
         ));
     }
 
-    for implementation in resolved.implemented_apis() {
-        let provided = implementation.provided();
-        let api = apis
-            .get(provided.api())
-            .ok_or_else(|| invalid_error("implemented API artifact is missing".to_owned()))?;
-        let api_value = api
-            .normalized_value()
-            .map_err(|error| invalid_error(error.to_string()))?;
+    for api in projection.implemented_apis.values() {
         let session_prefix = &context.session_key[..16.min(context.session_key.len())];
-        subscribe.extend(provided.rpc().values().cloned());
-        for name in provided.rpc().keys() {
-            if api_value["rpc"][name]["transfer"]["direction"].as_str() == Some("receive") {
-                subscribe.insert(format!("transfer.v1.download.{session_prefix}.*"));
-            }
+        subscribe.extend(api.rpc.values().cloned());
+        if !api.rpc_receives.is_empty() {
+            subscribe.insert(format!("transfer.v1.download.{session_prefix}.*"));
         }
-        for operation in provided.operations().values() {
-            subscribe.insert(operation.subject().to_owned());
-            subscribe.insert(format!("{}.control", operation.subject()));
+        for subject in api.operations.values() {
+            subscribe.insert(subject.clone());
+            subscribe.insert(format!("{subject}.control"));
         }
-        for name in provided.operations().keys() {
-            if api_value["operations"][name]["transfer"]["direction"].as_str() == Some("send") {
-                subscribe.insert(format!("transfer.v1.upload.{session_prefix}.*"));
-            }
+        if !api.operation_sends.is_empty() {
+            subscribe.insert(format!("transfer.v1.upload.{session_prefix}.*"));
         }
-        subscribe.extend(provided.feeds().values().cloned());
+        subscribe.extend(api.feeds.values().cloned());
     }
 
     for atom in context.grant_set.permissions() {
         if let Some((api_id, surface, name)) = atom.target().as_api_surface() {
-            let api = apis
+            let api = projection
+                .apis
                 .get(api_id)
                 .ok_or_else(|| invalid_error(format!("grant references unknown API {api_id}")))?;
             compile_api_surface(
@@ -169,7 +311,11 @@ pub(crate) fn compile_transport_permissions(
                 &mut subscribe,
             )?;
         } else if let Some((api_id, operation, _signal)) = atom.target().as_operation_signal() {
-            let subject = api_subject(apis.get(api_id), ApiSurfaceKind::Operation, operation)?;
+            let subject = api_subject(
+                projection.apis.get(api_id),
+                ApiSurfaceKind::Operation,
+                operation,
+            )?;
             if atom.action() != PermissionAction::Control {
                 return invalid("operation signal grant must use control action");
             }
@@ -216,68 +362,63 @@ pub(crate) fn compile_test_transport_permissions(
         extensions: serde_json::Map::new(),
         critical: Vec::new(),
     };
-    compile_transport_permissions(&context, binding, &state.resource_bindings, registry)
+    compile_transport_permissions(
+        &context,
+        &TransportProjection::from_binding(binding)?,
+        &state.resource_bindings,
+        registry,
+    )
 }
 
 fn compile_api_surface(
-    api: &ApiArtifact,
+    api: &TransportApiProjection,
     surface: ApiSurfaceKind,
     name: &str,
     action: PermissionAction,
     publish: &mut BTreeSet<String>,
     subscribe: &mut BTreeSet<String>,
 ) -> Result<(), AuthorizationStateError> {
-    let subjects = api
-        .derived_subjects()
-        .map_err(|error| invalid_error(error.to_string()))?;
-    let api_value = api
-        .normalized_value()
-        .map_err(|error| invalid_error(error.to_string()))?;
     match (surface, action) {
         (ApiSurfaceKind::Rpc, PermissionAction::Call) => {
-            publish.insert(required_subject(subjects.rpc.get(name), "RPC", name)?);
-            if api_value["rpc"][name]["transfer"]["direction"].as_str() == Some("receive") {
+            publish.insert(required_subject(api.rpc.get(name), "RPC", name)?);
+            if api.rpc_receives.contains(name) {
                 publish.insert("transfer.v1.download.*.*".to_owned());
             }
         }
         (ApiSurfaceKind::Operation, PermissionAction::Invoke) => {
-            let subject = required_subject(subjects.operations.get(name), "operation", name)?;
+            let subject = required_subject(api.operations.get(name), "operation", name)?;
             publish.insert(subject.clone());
             publish.insert(format!("{subject}.control"));
-            if api_value["operations"][name]["transfer"]["direction"].as_str() == Some("send") {
+            if api.operation_sends.contains(name) {
                 publish.insert("transfer.v1.upload.*.*".to_owned());
             }
         }
         (ApiSurfaceKind::Operation, PermissionAction::Observe) => {
-            let subject = required_subject(subjects.operations.get(name), "operation", name)?;
+            let subject = required_subject(api.operations.get(name), "operation", name)?;
             publish.insert(format!("{subject}.control"));
         }
         (ApiSurfaceKind::Operation, PermissionAction::Cancel | PermissionAction::Control) => {
-            let subject = required_subject(subjects.operations.get(name), "operation", name)?;
+            let subject = required_subject(api.operations.get(name), "operation", name)?;
             publish.insert(format!("{subject}.control"));
         }
         (ApiSurfaceKind::Event, PermissionAction::Publish) => {
             publish.insert(
-                subjects
-                    .events
+                api.events
                     .get(name)
                     .ok_or_else(|| invalid_error(format!("unknown event {name}")))?
-                    .wildcard
                     .clone(),
             );
         }
         (ApiSurfaceKind::Event, PermissionAction::Subscribe) => {
             subscribe.insert(
-                subjects
-                    .events
+                api.events
                     .get(name)
                     .ok_or_else(|| invalid_error(format!("unknown event {name}")))?
-                    .wildcard
                     .clone(),
             );
         }
         (ApiSurfaceKind::Feed, PermissionAction::Subscribe) => {
-            publish.insert(required_subject(subjects.feeds.get(name), "feed", name)?);
+            publish.insert(required_subject(api.feeds.get(name), "feed", name)?);
         }
         (ApiSurfaceKind::State, PermissionAction::Read) => {
             publish.insert("rpc.v1.State.Get".to_owned());
@@ -295,18 +436,13 @@ fn compile_api_surface(
 }
 
 fn api_subject(
-    api: Option<&ApiArtifact>,
+    api: Option<&TransportApiProjection>,
     surface: ApiSurfaceKind,
     name: &str,
 ) -> Result<String, AuthorizationStateError> {
     let api = api.ok_or_else(|| invalid_error("grant references unknown API"))?;
-    let subjects = api
-        .derived_subjects()
-        .map_err(|error| invalid_error(error.to_string()))?;
     match surface {
-        ApiSurfaceKind::Operation => {
-            required_subject(subjects.operations.get(name), "operation", name)
-        }
+        ApiSurfaceKind::Operation => required_subject(api.operations.get(name), "operation", name),
         _ => invalid("unsupported subject lookup"),
     }
 }
@@ -460,7 +596,9 @@ fn invalid_error(message: impl Into<String>) -> AuthorizationStateError {
 
 #[cfg(test)]
 mod tests {
-    use super::compile_test_transport_permissions;
+    use super::{
+        compile_test_transport_permissions, compile_transport_permissions, TransportProjection,
+    };
     use crate::platform::auth::{
         AuthorityKind, IssuableAuthorizationState, ParticipantBindingRecord,
         ParticipantBindingState, ResourceBindingEvidence, ResourceBindingState,
@@ -471,7 +609,7 @@ mod tests {
         parse_api, parse_participant, resolve_participant, ApiSurfaceKind,
         AuthorizationAuthorityKind, AuthorizationAuthorityRef, AuthorizationParticipant,
         AuthorizationPrincipal, AuthorizationPrincipalKind, GrantSet, ParticipantResourceKind,
-        PermissionAction, PermissionAtom, PermissionTarget,
+        PermissionAction, PermissionAtom, PermissionTarget, UnsignedAuthorizationContext,
     };
 
     fn test_registry_binding() -> super::super::context::AuthorizationRegistryBinding {
@@ -554,6 +692,66 @@ mod tests {
         assert!(!permissions
             .subscribe
             .contains(&"feed.v1.Jobs.Watch".to_owned()));
+    }
+
+    #[test]
+    fn transport_projection_is_compact_digest_bound_and_round_trips() {
+        let (binding, state) = fixture();
+        let projection = TransportProjection::from_binding(&binding).expect("build projection");
+        let encoded = serde_json::to_string(&projection).expect("encode projection");
+        assert!(encoded.len() < binding.api_artifacts_json.len());
+        assert!(!encoded.contains("schema"));
+
+        let decoded: TransportProjection =
+            serde_json::from_str(&encoded).expect("decode projection");
+        assert!(decoded.matches(&binding.artifact_digest, &binding.needs_digest));
+        assert!(!decoded.matches(&binding.artifact_digest, "wrong-needs-digest"));
+
+        let context = UnsignedAuthorizationContext {
+            format: trellis_protocol::AUTHORIZATION_CONTEXT_FORMAT_V1.to_owned(),
+            authority: "test".to_owned(),
+            issuer_key_id: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA".to_owned(),
+            issuer_manifest_generation: 1,
+            session_id: state.session_id.clone(),
+            session_key: state.session_public_key.clone(),
+            principal: state.principal.clone(),
+            participant: state.participant.clone(),
+            authority_ref: state.authority_ref.clone(),
+            deployment_id: state.deployment_id.clone(),
+            instance_id: state.instance_id.clone(),
+            inbox_prefix: state.inbox_prefix.clone(),
+            issued_at: 1,
+            not_before: 1,
+            expires_at: 2,
+            grant_set: state.grant_set.clone(),
+            capabilities: state.capabilities.clone(),
+            extensions: serde_json::Map::new(),
+            critical: Vec::new(),
+        };
+        assert_eq!(
+            compile_transport_permissions(
+                &context,
+                &projection,
+                &state.resource_bindings,
+                &test_registry_binding(),
+            ),
+            compile_transport_permissions(
+                &context,
+                &decoded,
+                &state.resource_bindings,
+                &test_registry_binding(),
+            )
+        );
+    }
+
+    #[test]
+    fn builtin_administration_projection_omits_api_schemas() {
+        let binding = super::super::builtins::administration_participant_binding(1)
+            .expect("administration binding");
+        let projection = TransportProjection::from_binding(&binding).expect("build projection");
+        let encoded = serde_json::to_string(&projection).expect("encode projection");
+        assert!(encoded.len() * 5 < binding.api_artifacts_json.len());
+        assert!(!encoded.contains("schema"));
     }
 
     #[test]

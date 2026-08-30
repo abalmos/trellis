@@ -23,8 +23,9 @@ use super::super::{
         SqliteAuthorizationStore,
     },
     AuthorityKind, AuthorizationStateError, IdempotencyResultRecord, PostCommitActionKind,
-    PostCommitActionRecord,
+    PostCommitActionRecord, TransportPermissions,
 };
+use super::issuer::TRANSPORT_PERMISSIONS_DIGEST_EXTENSION;
 
 const MAXIMUM_SAFE_INTEGER: u64 = 9_007_199_254_740_991;
 
@@ -107,6 +108,7 @@ pub struct AuthorizationContextRecord {
     pub published_at: Option<i64>,
     pub revoked_at: Option<i64>,
     pub revocation_reason: Option<AuthorizationContextRevocationReason>,
+    pub transport_permissions_json: String,
     pub version: u64,
 }
 
@@ -278,6 +280,12 @@ impl AuthorizationContextRepository for SqliteAuthorizationStore {
                 )
                 .optional()
                 .map_err(sql_error)
+                .and_then(|context| {
+                    context.map_or(Ok(None), |context| {
+                        validate_transport_permissions(&context)?;
+                        Ok(Some(context))
+                    })
+                })
         })
         .await
     }
@@ -387,6 +395,8 @@ impl AuthorizationContextRepository for SqliteAuthorizationStore {
                     && context.issuer_key_id == commit.context.issuer_key_id
                     && context.issuer_manifest_generation
                         == commit.context.issuer_manifest_generation
+                    && context.transport_permissions_json
+                        == commit.context.transport_permissions_json
                     && context.refresh_at > commit.now
                     && context.expires_at - commit.now >= commit.minimum_remaining_seconds
             }) {
@@ -557,7 +567,8 @@ const CONTEXT_SELECT: &str = "SELECT
     context_digest, session_id, principal_id, authority_kind, authority_id,
     deployment_id, instance_id, issuer_key_id, issuer_manifest_generation,
     signed_context_json, issuance_snapshot_token, refresh_at, expires_at,
-    state, published_at, revoked_at, revocation_reason, version
+    state, published_at, revoked_at, revocation_reason, version,
+    transport_permissions_json
     FROM auth_authorization_contexts";
 
 fn load_sql_trust_state(
@@ -605,10 +616,11 @@ fn insert_sql_context(
                 context_digest, session_id, principal_id, authority_kind, authority_id,
                 deployment_id, instance_id, issuer_key_id, issuer_manifest_generation,
                 signed_context_json, issuance_snapshot_token, refresh_at, expires_at,
-                state, published_at, revoked_at, revocation_reason, version
+                state, published_at, revoked_at, revocation_reason, version,
+                transport_permissions_json
              ) VALUES (
                 ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14,
-                ?15, ?16, ?17, ?18
+                 ?15, ?16, ?17, ?18, ?19
              )",
             params![
                 context.context_digest,
@@ -629,6 +641,7 @@ fn insert_sql_context(
                 context.revoked_at,
                 context.revocation_reason.map(encode_enum).transpose()?,
                 to_sql_version(context.version)?,
+                context.transport_permissions_json,
             ],
         )
         .map_err(map_write_error)?;
@@ -662,6 +675,9 @@ fn query_sql_contexts(
         .map_err(sql_error)?
         .collect::<Result<Vec<_>, _>>()
         .map_err(sql_error)?;
+    for context in &contexts {
+        validate_transport_permissions(context)?;
+    }
     Ok(contexts)
 }
 
@@ -688,6 +704,7 @@ fn decode_sql_context(row: &Row<'_>) -> rusqlite::Result<AuthorizationContextRec
             .map(decode_enum)
             .transpose()?,
         version: from_sql_version(row.get(17)?)?,
+        transport_permissions_json: row.get(18)?,
     })
 }
 
@@ -905,6 +922,21 @@ fn validate_context_record(
         ));
     }
     let context = signed.unsigned;
+    let transport_permissions = parse_transport_permissions(record)?;
+    let transport_permissions_digest = context
+        .extensions
+        .get(TRANSPORT_PERMISSIONS_DIGEST_EXTENSION)
+        .and_then(Value::as_str)
+        .ok_or_else(|| {
+            AuthorizationStateError::InvalidRecord(
+                "signed context omits its transport permissions digest".to_owned(),
+            )
+        })?;
+    if transport_permissions.digest()? != transport_permissions_digest {
+        return Err(AuthorizationStateError::InvalidRecord(
+            "signed context transport permissions digest does not match".to_owned(),
+        ));
+    }
     if context.session_id != record.session_id
         || context.principal.id != record.principal_id
         || authority_kind(context.authority_ref.kind) != record.authority_kind
@@ -920,6 +952,22 @@ fn validate_context_record(
         ));
     }
     Ok(())
+}
+
+fn validate_transport_permissions(
+    record: &AuthorizationContextRecord,
+) -> Result<(), AuthorizationStateError> {
+    parse_transport_permissions(record).map(|_| ())
+}
+
+fn parse_transport_permissions(
+    record: &AuthorizationContextRecord,
+) -> Result<TransportPermissions, AuthorizationStateError> {
+    serde_json::from_str(&record.transport_permissions_json).map_err(|error| {
+        AuthorizationStateError::InvalidRecord(format!(
+            "invalid context transport permissions: {error}"
+        ))
+    })
 }
 
 fn context_action(
@@ -1197,6 +1245,41 @@ mod tests {
         Ok(())
     }
 
+    #[tokio::test]
+    async fn corrupted_context_transport_permissions_fail_closed(
+    ) -> Result<(), AuthorizationStateError> {
+        let repository = SqliteAuthorizationStore::open_in_memory()?;
+        let (context, snapshot_token) = seed_context(&repository).await?;
+        let context_digest = context.context_digest.clone();
+        commit_seed_context(
+            &repository,
+            context,
+            snapshot_token,
+            "req_corrupt_permissions",
+            20,
+        )
+        .await?;
+        let corrupted_context_digest = context_digest.clone();
+        repository
+            .run(move |connection| {
+                connection
+                    .execute(
+                        "UPDATE auth_authorization_contexts
+                         SET transport_permissions_json = '{'
+                         WHERE context_digest = ?1",
+                        [corrupted_context_digest],
+                    )
+                    .map_err(sql_error)?;
+                Ok(())
+            })
+            .await?;
+        assert!(matches!(
+            repository.get_context_by_digest(&context_digest).await,
+            Err(AuthorizationStateError::InvalidRecord(_))
+        ));
+        Ok(())
+    }
+
     async fn seed_context<R>(
         repository: &R,
     ) -> Result<(AuthorizationContextRecord, IssuanceSnapshotToken), AuthorizationStateError>
@@ -1370,6 +1453,15 @@ mod tests {
         let issuer_key = SigningKey::from_bytes(&[23; 32]);
         let issuer_key_id =
             URL_SAFE_NO_PAD.encode(Sha256::digest(issuer_key.verifying_key().as_bytes()));
+        let transport_permissions_json =
+            r#"{"publish":[],"subscribe":[],"responsePermission":false}"#.to_owned();
+        let transport_permissions: TransportPermissions =
+            serde_json::from_str(&transport_permissions_json).expect("test transport permissions");
+        let mut extensions = serde_json::Map::new();
+        extensions.insert(
+            "transportPermissionsDigest".to_owned(),
+            Value::String(transport_permissions.digest()?),
+        );
         let signed = sign_authorization_context(
             UnsignedAuthorizationContext {
                 format: AUTHORIZATION_CONTEXT_FORMAT_V1.to_owned(),
@@ -1401,7 +1493,7 @@ mod tests {
                 expires_at: NOW_SECONDS + 300,
                 grant_set: GrantSet::new(Vec::new()),
                 capabilities: Vec::new(),
-                extensions: serde_json::Map::new(),
+                extensions,
                 critical: Vec::new(),
             },
             &issuer_key,
@@ -1434,6 +1526,7 @@ mod tests {
                 published_at: None,
                 revoked_at: None,
                 revocation_reason: None,
+                transport_permissions_json,
                 version: 1,
             },
             token,

@@ -150,13 +150,17 @@ auth-callout payloads are not supported.
 
 ## Permission Derivation
 
+Participant acceptance validates the exact participant and API artifacts and
+materializes a compact transport projection bound to the participant artifact
+and needs digests. Authorization-context issuance combines that projection with
+the accepted grants, typed resource bindings, session inbox, and narrow built-in
+subjects, then stores the resulting exact transport permissions atomically with
+the context.
+
 The auth callout derives permissions from:
 
 - verified active signed authorization context
-- the exact `GrantSet` accepted for the bound participant
-- exact `trellis.api.v1` descriptors
-- typed materialized resource bindings
-- the session reply inbox and narrow built-in subjects
+- exact transport permissions persisted with that context
 
 Rules:
 
@@ -176,6 +180,8 @@ Rules:
 - operation streaming replies use `jwt.resp.max = OPERATION_RESPONSE_MAX`
 - `OPERATION_RESPONSE_MAX` MUST be greater than `1` and SHOULD default to
   `65535`
+- participant and API artifact JSON MUST NOT be parsed or schema-validated in
+  the auth-callout path
 
 ## Authorization Context And Local Request Authorization
 
@@ -291,8 +297,9 @@ own transactional idempotency.
 NATS authentication uses a minimal token containing only `format` and
 `contextDigest`. NATS verifies its ordinary nonce challenge. Auth Callout loads
 the active context, verifies it against the current manifest, requires the NATS
-NKey to encode the context session key, loads the exact participant binding and
-current physical resource bindings, and compiles transport permissions directly.
+NKey to encode the context session key, verifies the persisted permissions
+against the digest carried by the signed context, and issues those exact
+permissions without reopening participant or API artifacts.
 
 Providers establish `manifest.current` and `revocation.>` watches, verify the
 current manifest, consume the revocation watch's initial state, then become

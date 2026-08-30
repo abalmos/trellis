@@ -1,6 +1,7 @@
 use std::{cmp, sync::Arc};
 
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
+use rusqlite::OptionalExtension;
 use serde_json::{json, Map, Value};
 use sha2::{Digest as _, Sha256};
 use trellis_protocol::{
@@ -18,20 +19,17 @@ use super::{
 use crate::{
     config::AuthorizationConfig,
     platform::auth::{
-        authority::{
-            issuance_snapshot_token, AuthorityRepository, ContextRepository, IssuanceSnapshotToken,
-        },
+        authority::{issuance_snapshot_token, ContextRepository, IssuanceSnapshotToken},
         compile_transport_permissions,
-        sqlite::{
-            common::{encode_enum, sql_error},
-            contexts::decode_resource,
-        },
+        sqlite::common::{map_write_error, sql_error},
+        transport::TransportProjection,
         AuthorizationStateError, IdempotencyResultRecord, IdempotentOutcome,
-        SqliteAuthorizationStore, TransportPermissions,
+        ParticipantBindingRecord, SqliteAuthorizationStore, TransportPermissions,
     },
 };
 
 const SNAPSHOT_ATTEMPTS: usize = 3;
+pub(super) const TRANSPORT_PERMISSIONS_DIGEST_EXTENSION: &str = "transportPermissionsDigest";
 
 #[derive(Clone, Debug)]
 pub(crate) struct AuthorizationContextIssueRequest {
@@ -60,7 +58,6 @@ impl AuthorizationContextService {
         &self,
         context: &trellis_protocol::VerifiedAuthorizationContext,
     ) -> Result<TransportPermissions, AuthorizationStateError> {
-        let signed = &context.signed_context().unsigned;
         let durable = self
             .repository
             .get_context_by_digest(context.context_digest())
@@ -75,59 +72,116 @@ impl AuthorizationContextService {
                 "authorization context is not active in durable state".to_owned(),
             ));
         }
-        let binding = self
-            .repository
-            .get_participant_binding(&signed.participant.id, &signed.participant.artifact_digest)
-            .await?
+        let permissions: TransportPermissions =
+            serde_json::from_str(&durable.transport_permissions_json).map_err(|error| {
+                AuthorizationStateError::InvalidRecord(format!(
+                    "authorization context transport permissions are invalid: {error}"
+                ))
+            })?;
+        let expected_digest = context
+            .signed_context()
+            .unsigned
+            .extensions
+            .get(TRANSPORT_PERMISSIONS_DIGEST_EXTENSION)
+            .and_then(Value::as_str)
             .ok_or_else(|| {
                 AuthorizationStateError::InvalidRecord(
-                    "authorization participant binding is missing".to_owned(),
+                    "authorization context omits its transport permissions digest".to_owned(),
                 )
             })?;
-        let authority_kind = match signed.authority_ref.kind {
-            trellis_protocol::AuthorizationAuthorityKind::Identity => {
-                crate::platform::auth::AuthorityKind::Identity
-            }
-            trellis_protocol::AuthorizationAuthorityKind::Deployment => {
-                crate::platform::auth::AuthorityKind::Deployment
-            }
-        };
-        let authority_id = signed.authority_ref.id.clone();
-        let resources = self
+        if permissions.digest()? != expected_digest {
+            return Err(AuthorizationStateError::InvalidRecord(
+                "authorization context transport permissions digest does not match".to_owned(),
+            ));
+        }
+        Ok(permissions)
+    }
+
+    async fn transport_projection(
+        &self,
+        binding: &ParticipantBindingRecord,
+    ) -> Result<TransportProjection, AuthorizationStateError> {
+        let participant_id = binding.participant_id.clone();
+        let artifact_digest = binding.artifact_digest.clone();
+        let stored = self
             .repository
-            .run_read(move |connection| {
-                let mut statement = connection
-                    .prepare(
-                        "SELECT resource.resource_kind, resource.local_name, resource.binding_id,
-                                resource.owner_participant_id, resource.provider_identity,
-                                resource.state, resource.materialized_at, resource.error
-                         FROM auth_materialized_authorities AS authority
-                         JOIN auth_materialized_resource_bindings AS resource
-                           ON resource.materialization_id = authority.materialization_id
-                         WHERE authority.authority_kind = ?1
-                           AND authority.authority_id = ?2
-                           AND authority.state = 'available'
-                         ORDER BY resource.resource_kind, resource.local_name",
-                    )
-                    .map_err(sql_error)?;
-                let resources = statement
-                    .query_map(
-                        rusqlite::params![encode_enum(authority_kind)?, authority_id],
-                        decode_resource,
-                    )
-                    .map_err(sql_error)?
-                    .collect::<rusqlite::Result<Vec<_>>>()
-                    .map_err(sql_error)?;
-                Ok(resources)
+            .run_read({
+                let participant_id = participant_id.clone();
+                let artifact_digest = artifact_digest.clone();
+                move |connection| {
+                    connection
+                        .query_row(
+                            "SELECT projection.projection_json,
+                                    binding.transport_projection_digest
+                             FROM auth_participant_transport_projections AS projection
+                             JOIN auth_participant_bindings AS binding
+                               ON binding.participant_id = projection.participant_id
+                              AND binding.artifact_digest = projection.artifact_digest
+                             WHERE projection.participant_id = ?1
+                               AND projection.artifact_digest = ?2",
+                            rusqlite::params![participant_id, artifact_digest],
+                            |row| Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?)),
+                        )
+                        .optional()
+                        .map_err(sql_error)
+                }
             })
             .await?;
-        let permissions = compile_transport_permissions(
-            signed,
-            &binding,
-            &resources,
-            &AuthorizationRegistryBinding::from_config(&self.config),
-        )?;
-        Ok(permissions)
+        if let Some((stored, Some(stored_digest))) = stored {
+            if let Ok(projection) = serde_json::from_str::<TransportProjection>(&stored) {
+                if projection.matches(&binding.artifact_digest, &binding.needs_digest)
+                    && projection.digest()? == stored_digest
+                {
+                    return Ok(projection);
+                }
+            }
+        }
+
+        let binding = binding.clone();
+        let needs_digest = binding.needs_digest.clone();
+        let projection =
+            tokio::task::spawn_blocking(move || TransportProjection::from_binding(&binding))
+                .await
+                .map_err(|error| {
+                    AuthorizationStateError::Storage(format!(
+                        "transport projection task failed: {error}"
+                    ))
+                })??;
+        let projection_json = serde_json::to_string(&projection)
+            .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
+        let projection_digest = projection.digest()?;
+        self.repository
+            .run(move |connection| {
+                let transaction = connection.transaction().map_err(sql_error)?;
+                transaction
+                    .execute(
+                        "INSERT INTO auth_participant_transport_projections (
+                            participant_id, artifact_digest, needs_digest, projection_json
+                         ) VALUES (?1, ?2, ?3, ?4)
+                         ON CONFLICT(participant_id, artifact_digest) DO UPDATE SET
+                            needs_digest = excluded.needs_digest,
+                            projection_json = excluded.projection_json",
+                        rusqlite::params![
+                            &participant_id,
+                            &artifact_digest,
+                            &needs_digest,
+                            &projection_json,
+                        ],
+                    )
+                    .map_err(map_write_error)?;
+                transaction
+                    .execute(
+                        "UPDATE auth_participant_bindings
+                         SET transport_projection_digest = ?1
+                         WHERE participant_id = ?2 AND artifact_digest = ?3",
+                        rusqlite::params![&projection_digest, &participant_id, &artifact_digest],
+                    )
+                    .map_err(map_write_error)?;
+                transaction.commit().map_err(sql_error)?;
+                Ok(())
+            })
+            .await?;
+        Ok(projection)
     }
 
     pub(crate) fn manifest_generation(&self) -> u64 {
@@ -447,8 +501,25 @@ impl AuthorizationContextService {
             .repository
             .load_issuance_snapshot(&request.session_id)
             .await?;
+        let binding = snapshot
+            .participant
+            .as_ref()
+            .ok_or(AuthorizationStateError::ParticipantMissing)?;
+        let projection = self.transport_projection(binding).await?;
+        let resources = snapshot
+            .materialization
+            .as_ref()
+            .ok_or(AuthorizationStateError::MaterializationStale)?
+            .resources
+            .clone();
+        let authority_kind = snapshot
+            .authority
+            .as_ref()
+            .ok_or(AuthorizationStateError::AuthorityMissing)?
+            .target()
+            .kind;
         let snapshot_token = issuance_snapshot_token(&snapshot)?;
-        let authorization = super::super::issuance::resolve_snapshot(snapshot.clone(), now_millis)?;
+        let authorization = super::super::issuance::resolve_snapshot(snapshot, now_millis)?;
         let expires_at = context_expiry(&authorization, &self.trust, &self.config, now_seconds)?;
 
         if authorization.grant_set.permissions().len() > self.config.maximum_permissions
@@ -458,7 +529,7 @@ impl AuthorizationContextService {
                 "authorization context exceeds configured bounds".to_owned(),
             ));
         }
-        let unsigned = UnsignedAuthorizationContext {
+        let mut unsigned = UnsignedAuthorizationContext {
             format: AUTHORIZATION_CONTEXT_FORMAT_V1.to_owned(),
             authority: self.trust.root.authority().to_owned(),
             issuer_key_id: issuer_key_id(&self.trust.issuer_signing_key),
@@ -485,6 +556,18 @@ impl AuthorizationContextService {
             extensions: Map::new(),
             critical: Vec::new(),
         };
+        let transport_permissions = compile_transport_permissions(
+            &unsigned,
+            &projection,
+            &resources,
+            &AuthorizationRegistryBinding::from_config(&self.config),
+        )?;
+        unsigned.extensions.insert(
+            TRANSPORT_PERMISSIONS_DIGEST_EXTENSION.to_owned(),
+            Value::String(transport_permissions.digest()?),
+        );
+        let transport_permissions_json = serde_json::to_string(&transport_permissions)
+            .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
         let signed = sign_authorization_context(unsigned, &self.trust.issuer_signing_key)
             .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
         let signed_context_json = canonicalize_json(
@@ -517,12 +600,7 @@ impl AuthorizationContextService {
             context_digest: context_digest.clone(),
             session_id: authorization.session_id.clone(),
             principal_id: authorization.principal.id.clone(),
-            authority_kind: snapshot
-                .authority
-                .as_ref()
-                .ok_or(AuthorizationStateError::AuthorityMissing)?
-                .target()
-                .kind,
+            authority_kind,
             authority_id: authorization.authority_ref.id,
             deployment_id: authorization.deployment_id.clone(),
             instance_id: authorization.instance_id.clone(),
@@ -536,8 +614,10 @@ impl AuthorizationContextService {
             published_at: None,
             revoked_at: None,
             revocation_reason: None,
+            transport_permissions_json,
             version: 1,
         };
+        let expected_transport_permissions_json = context.transport_permissions_json.clone();
         let commit = AuthorizationContextCommit {
             expected_snapshot_token: snapshot_token.clone(),
             context,
@@ -572,6 +652,7 @@ impl AuthorizationContextService {
                     &snapshot_token,
                     self.trust.verified_manifest.generation(),
                     now_seconds,
+                    &expected_transport_permissions_json,
                 )?;
                 context
             }
@@ -621,12 +702,14 @@ fn require_reusable_context(
     snapshot_token: &IssuanceSnapshotToken,
     manifest_generation: u64,
     now_seconds: i64,
+    transport_permissions_json: &str,
 ) -> Result<(), AuthorizationStateError> {
     if context.state != AuthorizationContextState::Active
         || context.published_at.is_none()
         || context.expires_at <= now_seconds
         || context.issuer_manifest_generation != manifest_generation
         || context.issuance_snapshot_token != snapshot_token.0
+        || context.transport_permissions_json != transport_permissions_json
     {
         return Err(AuthorizationStateError::ContextSnapshotChanged);
     }

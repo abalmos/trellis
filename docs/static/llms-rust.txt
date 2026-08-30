@@ -38,6 +38,9 @@ https://raw.githubusercontent.com/qlever-llc/trellis/main/docs/static/llms-full.
   monotonic deadline from their difference. A changed review id is an explicit
   expired/replaced review. `Auth.DeviceUserAuthorities.Resolve` cancellation is
   unsupported.
+- The platform runtime serves its built-in login portal at `/login` and its
+  same-origin administration Console at `/console`; Rust services do not host or
+  proxy either browser application.
 - The participant facade embeds its canonical API and participant artifacts and
   their exact digests.
 - Service connect options carry the immutable provisioned identity binding.
@@ -116,7 +119,10 @@ https://raw.githubusercontent.com/qlever-llc/trellis/main/docs/static/llms-full.
 - `maximum_context_bytes` is the canonical complete signed-context JSON UTF-8
   byte limit, not the base64url token length.
 - NATS admission validates the signed context, NKey/session-key binding, and
-  current physical bindings. Target
+  exact transport permissions committed with the active context; it does not
+  parse participant or API artifacts during connection admission. The signed
+  context's `transportPermissionsDigest` extension binds those permissions.
+  Target
   providers then verify request/event proof v1 locally against the presented
   context, actual transport fields, exact generated permission atom,
   capabilities and revocation state. Provider

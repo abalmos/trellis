@@ -10,6 +10,97 @@ fn sqlite_config(path: PathBuf) -> SqliteStorageConfig {
     }
 }
 
+#[test]
+fn transport_projection_migration_invalidates_pre_projection_contexts(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let connection = rusqlite::Connection::open_in_memory()?;
+    connection.execute_batch(
+        r#"CREATE TABLE auth_participant_bindings (
+            participant_id TEXT NOT NULL,
+            artifact_digest TEXT NOT NULL,
+            PRIMARY KEY (participant_id, artifact_digest)
+         );
+         CREATE TABLE auth_authorization_contexts (
+            context_digest TEXT PRIMARY KEY,
+            state TEXT NOT NULL,
+            revoked_at INTEGER,
+            revocation_reason TEXT,
+            version INTEGER NOT NULL
+         );
+         CREATE TABLE auth_post_commit_actions (
+            action_id TEXT PRIMARY KEY,
+            kind TEXT NOT NULL,
+            payload_json TEXT NOT NULL,
+            created_at INTEGER NOT NULL,
+            attempts INTEGER NOT NULL,
+            next_attempt_at INTEGER NOT NULL,
+            claimed_until INTEGER,
+            last_error TEXT,
+            predecessor_action_id TEXT
+         );
+         CREATE TABLE auth_idempotency_results (purpose TEXT NOT NULL);
+         INSERT INTO auth_authorization_contexts
+            VALUES ('old-context', 'active', NULL, NULL, 1);
+         INSERT INTO auth_authorization_contexts
+            VALUES ('expired-context', 'expired', NULL, NULL, 1);
+         INSERT INTO auth_post_commit_actions VALUES (
+             'publish-action', 'context_publish',
+             '{"contextDigest":"old-context"}', 1, 0, 1, NULL, NULL, NULL
+         );
+         INSERT INTO auth_post_commit_actions VALUES (
+             'existing-revoke-action', 'context_revoke',
+             '{"contextDigest":"old-context"}', 1, 0, 1, NULL, NULL, NULL
+         );
+         INSERT INTO auth_idempotency_results VALUES ('authorizationContextIssue');
+         INSERT INTO auth_idempotency_results VALUES ('other');"#,
+    )?;
+    connection.execute_batch(include_str!(
+        "sqlite/platform/V1005__transport_authorization_projection.sql"
+    ))?;
+    assert_eq!(
+        connection.query_row(
+            "SELECT COUNT(*) FROM auth_authorization_contexts",
+            [],
+            |row| row.get::<_, usize>(0),
+        )?,
+        2
+    );
+    let (state, reason): (String, String) = connection.query_row(
+        "SELECT state, revocation_reason FROM auth_authorization_contexts
+         WHERE context_digest = 'old-context'",
+        [],
+        |row| Ok((row.get(0)?, row.get(1)?)),
+    )?;
+    assert_eq!(
+        (state.as_str(), reason.as_str()),
+        ("revoked", "context_replaced")
+    );
+    assert_eq!(
+        connection.query_row(
+            "SELECT COUNT(*) FROM auth_post_commit_actions WHERE kind = 'context_revoke'",
+            [],
+            |row| row.get::<_, usize>(0),
+        )?,
+        1
+    );
+    assert_eq!(
+        connection.query_row(
+            "SELECT COUNT(*) FROM auth_post_commit_actions
+             WHERE json_extract(payload_json, '$.contextDigest') = 'expired-context'",
+            [],
+            |row| row.get::<_, usize>(0),
+        )?,
+        0
+    );
+    assert_eq!(
+        connection.query_row("SELECT COUNT(*) FROM auth_idempotency_results", [], |row| {
+            row.get::<_, usize>(0)
+        },)?,
+        1
+    );
+    Ok(())
+}
+
 #[cfg(all(feature = "sqlite-storage", feature = "nats-leases"))]
 fn subsystem_config(path: PathBuf) -> crate::SubsystemConfig {
     crate::SubsystemConfig {
@@ -262,7 +353,7 @@ async fn sqlite_platform_store_upgrades_populated_accepted_m7_schema(
     store.migrate()?;
     store.migrate()?;
 
-    assert_migration_order(&path, &[1000, 1001, 1002, 1003, 1004])?;
+    assert_migration_order(&path, &[1000, 1001, 1002, 1003, 1004, 1005])?;
     let connection = rusqlite::Connection::open(&path)?;
     connection.pragma_update(None, "foreign_keys", true)?;
     let foreign_key_errors = connection
@@ -440,7 +531,7 @@ fn sqlite_platform_store_upgrades_accepted_m8_and_preserves_post_commit_actions(
     store.migrate()?;
     store.migrate()?;
 
-    assert_migration_order(&path, &[1000, 1001, 1002, 1003, 1004])?;
+    assert_migration_order(&path, &[1000, 1001, 1002, 1003, 1004, 1005])?;
     let connection = Connection::open(&path)?;
     connection.pragma_update(None, "foreign_keys", true)?;
     let actions = connection
@@ -570,7 +661,7 @@ fn runtime_stores_all_mode_migrates_all_selected_subsystems(
     assert_marker(&jobs_path, "trellis_jobs_projection_store_marker")?;
     assert_marker(&health_path, "trellis_health_projection_store_marker")?;
     assert_marker(&eventlog_path, "trellis_eventlog_store_marker")?;
-    assert_migration_order(&platform_path, &[1000, 1001, 1002, 1003, 1004])?;
+    assert_migration_order(&platform_path, &[1000, 1001, 1002, 1003, 1004, 1005])?;
     assert_migration_order(&jobs_path, &[2000])?;
     assert_migration_order(&health_path, &[3000, 3001])?;
     assert_migration_order(&eventlog_path, &[4000])?;
