@@ -62,8 +62,8 @@
   `deno fmt -c ts/deno.json <changed files>`. For Rust files, run
   `cargo fmt --manifest-path rust/Cargo.toml --package <crate>` when the crate
   is known, or `rustfmt --edition 2021 <changed .rs files>` for narrow
-  file-scoped edits. If generated artifacts are affected, run `cargo xtask install` first and
-  then verify generated Rust formatting with
+  file-scoped edits. If generated artifacts are affected, run
+  `cargo xtask install` first and then verify generated Rust formatting with
   `cargo fmt --manifest-path rust/Cargo.toml --all --check`. Do not bulk-format
   unrelated drift unless the user asks for that cleanup; report it separately.
 - When changes affect contracts, generated SDKs, or runtime surfaces that depend
@@ -100,7 +100,7 @@
   when Trellis features, service-author workflows, public TypeScript APIs,
   public Rust APIs, generated SDK behavior, contract authoring, runtime
   surfaces, operations, jobs, resources, state, files, events, or
-  prepare/tooling workflows change. These files are user-facing guidance for
+  install/tooling workflows change. These files are user-facing guidance for
   service repos that consume Trellis; do not include Trellis-repo-only
   instructions unless the same command or rule is also the intended service-repo
   pattern.

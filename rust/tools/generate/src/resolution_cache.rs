@@ -120,7 +120,7 @@ impl CachedContractResolution {
     pub(crate) fn references_match(&self, current: &BTreeMap<String, String>) -> bool {
         self.referenced_api_digests
             .iter()
-            .all(|(id, digest)| current.get(id).is_none_or(|current| current == digest))
+            .all(|(id, digest)| current.get(id) == Some(digest))
             && self
                 .local_dependency_digests
                 .iter()
@@ -878,7 +878,7 @@ fn is_ignored_snapshot_directory(path: &Path) -> bool {
         .is_some_and(|name| {
             matches!(
                 name,
-                ".git" | ".trellis" | ".worktrees" | "generated" | "node_modules" | "target"
+                ".git" | ".trellis" | ".worktrees" | "node_modules" | "target"
             ) || name.starts_with(".trellis-install-backup-")
         })
 }

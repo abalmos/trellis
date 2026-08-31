@@ -19,6 +19,7 @@ env:
   CARGO_TERM_COLOR: always
   RUSTUP_INIT_SKIP_PATH_CHECK: "yes"
   TRELLIS_TEST_HOST_JOBS: ${{ vars.TRELLIS_TEST_HOST_JOBS }}
+  TRELLIS_CACHE: ${{ runner.temp }}/trellis-cache
 
 jobs:
   configuration:
@@ -74,7 +75,7 @@ jobs:
           key: cargo-${{ steps.rust.outputs.cachekey }}-${{ runner.os }}-${{ runner.arch }}-install-dev-locked-${{ hashFiles('rust/**/Cargo.toml', 'rust/**/Cargo.lock', '.cargo/config.toml', 'rust/.cargo/config.toml') }}
 
       - name: Install generated artifacts
-        run: cargo xtask install
+        run: rm -rf "$TRELLIS_CACHE" && cargo xtask install
 
       - name: Inspect generated artifact drift
         id: current

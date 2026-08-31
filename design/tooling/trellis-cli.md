@@ -63,7 +63,7 @@ build` installs first and then invokes the default Rust workspace
 build. Live client-library integration is language-owned and is run outside
 `cargo xtask build`: use `deno task -c ts/deno.json test:integration` for the
 TypeScript suite and
-`cargo test --api-path rust/Cargo.toml -p trellis-rs --test integration -- --nocapture`
+`cargo test --manifest-path rust/Cargo.toml -p trellis-rs --test integration -- --nocapture`
 for the Rust suite. Both suites are governed by the `kind: "client"` cases in
 `integration/client-test-matrix.json`; every supported client language must
 cover every client matrix case against a live Trellis runtime.

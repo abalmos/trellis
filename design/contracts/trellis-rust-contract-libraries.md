@@ -31,8 +31,8 @@ are the sole contract-evidence source for bootstrap.
 
 Canonical outputs are:
 
-- `generated/protocol/apis/<api-id>.json`
-- `generated/protocol/participants/<participant-id>.json`
+- `.trellis/generated/protocol/apis/<api-id>.json`
+- `.trellis/generated/protocol/participants/<participant-id>.json`
 
 Generated API crates expose native API constants. Generated participant facades
 expose `CONTRACT_ID`, `CONTRACT_DIGEST`, participant JSON,

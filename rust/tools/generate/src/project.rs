@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -9,7 +10,11 @@ use crate::model::PackageTarget;
 use crate::planning::{build_auto_plan_with_targets, execute_auto_plan, AutoExecutionSummary};
 
 /// Generate one project's local API, SDK, participant, and facade artifacts.
-pub fn generate_project(root: &Path, output_root: &Path) -> miette::Result<AutoExecutionSummary> {
+pub fn generate_project(
+    root: &Path,
+    output_root: &Path,
+    locked_api_digests: BTreeMap<String, String>,
+) -> miette::Result<AutoExecutionSummary> {
     let discovered = discover_contracts(root)?;
     let plan = build_auto_plan_with_targets(
         discovered,
@@ -19,6 +24,7 @@ pub fn generate_project(root: &Path, output_root: &Path) -> miette::Result<AutoE
             PackageTarget::TypeScript,
             PackageTarget::Cargo,
         ]),
+        &locked_api_digests,
     )?;
     let summary = if plan.is_empty() {
         AutoExecutionSummary::default()
@@ -26,6 +32,7 @@ pub fn generate_project(root: &Path, output_root: &Path) -> miette::Result<AutoE
         let runtime_version = crate::artifacts::trellis_package_version();
         execute_auto_plan(
             &plan,
+            locked_api_digests,
             None,
             false,
             false,

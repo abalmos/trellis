@@ -53,16 +53,32 @@ pub(crate) fn validate_api_id_at(
     error: ValidationErrorFactory,
 ) -> Result<(), ProtocolError> {
     validate_protocol_identifier(path, value, error)?;
+    if value.len() > 128 {
+        return Err(error(
+            path.to_owned(),
+            "must be at most 128 bytes".to_owned(),
+        ));
+    }
     let Some((lineage, major)) = value.rsplit_once("@v") else {
         return Err(error(
             path.to_owned(),
             "must end in one '@vN' major suffix".to_owned(),
         ));
     };
-    if lineage.is_empty() || lineage.contains("@v") {
+    if lineage.is_empty()
+        || !lineage.as_bytes().iter().all(|byte| {
+            byte.is_ascii_lowercase() || byte.is_ascii_digit() || matches!(byte, b'.' | b'_' | b'-')
+        })
+        || !lineage.as_bytes()[0].is_ascii_lowercase() && !lineage.as_bytes()[0].is_ascii_digit()
+        || !lineage.as_bytes()[lineage.len() - 1].is_ascii_lowercase()
+            && !lineage.as_bytes()[lineage.len() - 1].is_ascii_digit()
+        || lineage.as_bytes().windows(2).any(|pair| {
+            matches!(pair[0], b'.' | b'_' | b'-') && matches!(pair[1], b'.' | b'_' | b'-')
+        })
+    {
         return Err(error(
             path.to_owned(),
-            "must contain one non-empty lineage before '@vN'".to_owned(),
+            "must use lowercase alphanumeric lineage tokens separated by '.', '_', or '-' before '@vN'".to_owned(),
         ));
     }
     validate_positive_decimal(path, major, error)

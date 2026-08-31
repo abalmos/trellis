@@ -68,8 +68,8 @@ runtime descriptors.
 
 Canonical generated JSON lives at:
 
-- `generated/protocol/apis/<api-id>.json`
-- `generated/protocol/participants/<participant-id>.json`
+- `.trellis/generated/protocol/apis/<api-id>.json`
+- `.trellis/generated/protocol/participants/<participant-id>.json`
 
 Generated API modules expose API identity and native API evidence. Generated
 participant/service modules expose participant identity, native participant

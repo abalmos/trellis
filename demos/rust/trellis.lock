@@ -1,5 +1,11 @@
 format = 1
-manifest-digest = "y9aLjBOMXOnie-URwptz5FNLeDJgua_tZ_IABc10jGU"
+manifest-digest = "zbWKG0T8HMeiFcANuzftO2dqHNC4kQkgtmbrGgyXGcY"
+
+[[api]]
+id = "trellis.demo-service@v1"
+version = "1.0.0"
+api-digest = "1zqVxOWHVsaouHgDqzT1HciDo0L5UMNneWwVjhdJomk"
+path = "../ts/service/.trellis/generated/protocol/apis/trellis.demo-service@v1.json"
 
 [[api]]
 id = "trellis.state@v1"

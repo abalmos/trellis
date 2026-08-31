@@ -221,12 +221,15 @@ pub fn write_lock(path: &Path, lock: &ProjectLock) -> Result<()> {
 pub fn write_manifest_and_lock(
     manifest_path: &Path,
     manifest: &ProjectManifest,
+    manifest_source: Option<&[u8]>,
     lock_path: &Path,
     lock: &ProjectLock,
 ) -> Result<()> {
     manifest.validate()?;
     lock.validate()?;
-    let manifest_bytes = toml::to_string(manifest).into_diagnostic()?.into_bytes();
+    let manifest_bytes = manifest_source
+        .map(ToOwned::to_owned)
+        .unwrap_or(toml::to_string(manifest).into_diagnostic()?.into_bytes());
     let mut sorted_lock = lock.clone();
     sorted_lock
         .api

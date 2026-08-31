@@ -297,7 +297,7 @@
     },
     {
       "format": "trellis.api.v1",
-      "id": "𐀀@v1",
+      "id": "a-order@v1",
       "version": "1.0.0",
       "displayName": "Supplementary API",
       "description": "Unicode ordering API.",
@@ -312,7 +312,7 @@
     },
     {
       "format": "trellis.api.v1",
-      "id": "@v1",
+      "id": "z-order@v1",
       "version": "1.0.0",
       "displayName": "Private Use API",
       "description": "Unicode ordering API.",
@@ -1453,12 +1453,12 @@
         "uses": {
           "required": {
             "private": {
-              "api": "@v1",
+              "api": "z-order@v1",
               "apiDigest": "$actual",
               "rpc": { "call": [".Get"] }
             },
             "supplementary": {
-              "api": "𐀀@v1",
+              "api": "a-order@v1",
               "apiDigest": "$actual",
               "rpc": { "call": ["𐀀.Get"] }
             }
@@ -1466,7 +1466,7 @@
         }
       },
       "valid": true,
-      "requiredApiOrder": ["𐀀@v1", "@v1"],
+      "requiredApiOrder": ["a-order@v1", "z-order@v1"],
       "expectedNeeds": {
         "format": "trellis.participant-needs.v1",
         "participant": { "id": "unicode-order-app", "kind": "app" },
@@ -1474,12 +1474,12 @@
         "required": {
           "apis": [
             {
-              "api": "𐀀@v1",
-              "apiDigest": "FZzvezRRo5bRslptCKIoQP6NKwwjpqikSvpqsgbuEYA"
+              "api": "a-order@v1",
+              "apiDigest": "-JtVjPL9GOBfFfuF896yldUbxeEmMfswv21rhsO79wo"
             },
             {
-              "api": "@v1",
-              "apiDigest": "Yh1_g5QD18XEh1M7nqidK_yt_6HYvk5WeIwXP_GEaQM"
+              "api": "z-order@v1",
+              "apiDigest": "DC02y2lj_maeNzrwDecyRyFqfq1HvpDolLF8jC23vzE"
             }
           ],
           "grantSet": {
@@ -1488,7 +1488,7 @@
               {
                 "target": {
                   "kind": "apiSurface",
-                  "api": "𐀀@v1",
+                  "api": "a-order@v1",
                   "surface": "rpc",
                   "name": "𐀀.Get"
                 },
@@ -1497,7 +1497,7 @@
               {
                 "target": {
                   "kind": "apiSurface",
-                  "api": "@v1",
+                  "api": "z-order@v1",
                   "surface": "rpc",
                   "name": ".Get"
                 },
@@ -1513,7 +1513,7 @@
           "resources": {}
         }
       },
-      "expectedNeedsDigest": "ixCDhsuwCZaXI-8WKch_JSTfRL-6tCNDjX7jNLTt5PM"
+      "expectedNeedsDigest": "3TtURNkzsOQC45I5TBaAVt_uNEzJy3MkV8QTif0PW5w"
     },
     {
       "name": "unicode-provider-order",

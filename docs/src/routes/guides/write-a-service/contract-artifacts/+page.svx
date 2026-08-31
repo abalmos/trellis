@@ -150,7 +150,9 @@ This writes:
   generated/rust/trellis-apis/
 ```
 
-Other Rust services can depend on the generated Cargo package and use its typed descriptors, request/response structs, client helpers, service-runtime registration, event descriptors, and feed descriptors. Other language targets can use the generated TypeScript packages.
+Each consumer declares the API in its own `trellis.toml`, commits its exact
+`trellis.lock`, and generates only its local Rust or TypeScript SDK projection
+with `trellis install`.
 
 Rust code should treat source as authoritative for exact runtime APIs and Rustdoc as the public API reference. If a generated SDK helper or descriptor name differs from the examples here, prefer the generated item under `.trellis/generated/rust/`.
 

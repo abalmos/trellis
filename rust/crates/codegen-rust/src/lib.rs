@@ -247,7 +247,7 @@ fn generate_rust_sdk_into(opts: &GenerateRustSdkOpts) -> Result<(), CodegenRustE
     let mut cargo_toml = render_cargo_toml(
         opts,
         !loaded.render_model.feeds.is_empty() || !loaded.render_model.events.is_empty(),
-        is_trellis_owned_sdk_contract(&loaded.render_model.id),
+        true,
     )?;
     cargo_toml.push_str(&format!(
         "\n[package.metadata.trellis]\napi-id = {}\napi-digest = {}\napi-artifact = \"api.json\"\n",
@@ -313,17 +313,6 @@ fn generate_rust_sdk_into(opts: &GenerateRustSdkOpts) -> Result<(), CodegenRustE
     )?;
 
     Ok(())
-}
-
-fn is_trellis_owned_sdk_contract(contract_id: &str) -> bool {
-    matches!(
-        contract_id,
-        "trellis.auth@v1"
-            | "trellis.core@v1"
-            | "trellis.health@v1"
-            | "trellis.jobs@v1"
-            | "trellis.state@v1"
-    )
 }
 
 /// Validate the minimal generated Rust SDK manifest invariants used by freshness checks.

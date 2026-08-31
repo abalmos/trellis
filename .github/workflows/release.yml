@@ -42,6 +42,7 @@ env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
   NODE_VERSION: 24
   REGISTRY: ghcr.io
+  TRELLIS_CACHE: ${{ runner.temp }}/trellis-cache
 
 jobs:
   resolve-release:
@@ -154,7 +155,7 @@ jobs:
         run: time cargo run --manifest-path xtask/Cargo.toml -- release prepare --tag "${RELEASE_TAG}"
 
       - name: Install release API dependencies
-        run: time cargo xtask install
+        run: rm -rf "$TRELLIS_CACHE" && time cargo xtask install
 
       - name: Build protocol WASM
         run: time cargo run --manifest-path rust/xtask/Cargo.toml -- protocol-wasm
@@ -622,6 +623,7 @@ jobs:
     needs:
       - prepare-release
       - release-gate
+      - publish-apis
     runs-on: [self-hosted, Linux, X64]
     permissions:
       contents: write
@@ -671,11 +673,12 @@ jobs:
 
   github-release:
     name: Publish GitHub release
-    if: always() && needs.prepare-release.outputs.should-publish == 'true' && needs.release-gate.result == 'success' && (needs.prepare-release.outputs.should-create-tag != 'true' || needs.create-release-tag.result == 'success')
+    if: always() && needs.prepare-release.outputs.should-publish == 'true' && needs.release-gate.result == 'success' && needs.publish-apis.result == 'success' && (needs.prepare-release.outputs.should-create-tag != 'true' || needs.create-release-tag.result == 'success')
     needs:
       - prepare-release
       - release-gate
       - create-release-tag
+      - publish-apis
     runs-on: [self-hosted, Linux, X64]
     permissions:
       contents: write
@@ -708,11 +711,10 @@ jobs:
 
   publish-crates:
     name: Publish Rust crates
-    if: always() && needs.prepare-release.outputs.should-publish == 'true' && needs.release-gate.result == 'success' && needs.github-release.result == 'success'
+    if: always() && needs.prepare-release.outputs.should-publish == 'true' && needs.release-gate.result == 'success'
     needs:
       - prepare-release
       - release-gate
-      - github-release
     runs-on: [self-hosted, Linux, X64]
     permissions:
       contents: read
@@ -886,6 +888,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          rm -rf "$TRELLIS_CACHE"
           cargo build --manifest-path rust/Cargo.toml --locked --package trellis-cli
           trellis="$GITHUB_WORKSPACE/rust/target/debug/trellis"
           for project in \

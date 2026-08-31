@@ -202,6 +202,7 @@ fn deno_json(opts: &GenerateTsSdkOpts) -> Result<serde_json::Map<String, Value>,
         "version".to_string(),
         Value::String(opts.package_version.clone()),
     );
+    root.insert("publish".to_string(), Value::Bool(false));
     root.insert(
         "exports".to_string(),
         serde_json::json!({

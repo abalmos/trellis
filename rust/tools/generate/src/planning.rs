@@ -59,13 +59,14 @@ pub fn build_auto_plan(
     discovered: Vec<DiscoveredContractSource>,
     shared_output_root: Option<&Path>,
 ) -> miette::Result<Vec<AutoPlanEntry>> {
-    build_auto_plan_with_targets(discovered, shared_output_root, None)
+    build_auto_plan_with_targets(discovered, shared_output_root, None, &BTreeMap::new())
 }
 
 pub fn build_auto_plan_with_targets(
     discovered: Vec<DiscoveredContractSource>,
     shared_output_root: Option<&Path>,
     requested_targets: Option<&[PackageTarget]>,
+    locked_api_digests: &BTreeMap<String, String>,
 ) -> miette::Result<Vec<AutoPlanEntry>> {
     let mut plan = Vec::new();
     for contract in discovered {
@@ -79,7 +80,7 @@ pub fn build_auto_plan_with_targets(
                 None,
             )
         } else {
-            let (resolved, contract_kind) = resolve_and_cache(&contract, &[], &BTreeMap::new())?;
+            let (resolved, contract_kind) = resolve_and_cache(&contract, &[], locked_api_digests)?;
             let contract_id = resolved.api.render_model.id.clone();
             (contract_id, contract_kind, Some(Arc::new(resolved)))
         };
@@ -289,6 +290,15 @@ fn resolve_and_cache(
     current_api_digests: &BTreeMap<String, String>,
 ) -> miette::Result<(contract_input::ResolvedNativeInput, ContractKind)> {
     let resolved = evaluate_discovered_contract(contract)?;
+    for referenced in &resolved.referenced_apis {
+        let id = &referenced.render_model.id;
+        let digest = &referenced.digest;
+        miette::ensure!(
+            current_api_digests.get(id) == Some(digest),
+            "referenced API '{id}' with digest '{digest}' is absent from trellis.lock or differs from its locked digest ({:?})",
+            current_api_digests.get(id)
+        );
+    }
     let contract_kind = discover_contract_kind(contract, &resolved)?;
     let mut dependencies: Vec<String> = resolved
         .referenced_apis
@@ -511,6 +521,7 @@ fn manifest_declares_workspace(path: &Path) -> bool {
 
 pub fn execute_auto_plan(
     plan: &[AutoPlanEntry],
+    locked_api_digests: BTreeMap<String, String>,
     title: Option<&str>,
     show_title: bool,
     force: bool,
@@ -533,8 +544,7 @@ pub fn execute_auto_plan(
             .collect(),
         ..AutoExecutionSummary::default()
     };
-    let mut cargo_metadata = BTreeMap::new();
-    let mut current_api_digests = BTreeMap::new();
+    let mut current_api_digests = locked_api_digests;
     let mut participant_outputs = plan
         .iter()
         .filter_map(|entry| {
@@ -813,12 +823,7 @@ pub fn execute_auto_plan(
                         .participant_path
                         .as_deref()
                         .unwrap_or(&resolved.api.path);
-                    let mappings = participant_alias_mappings(
-                        entry,
-                        plan,
-                        participant_source,
-                        &mut cargo_metadata,
-                    )?;
+                    let mappings = participant_alias_mappings(entry, plan, participant_source)?;
                     write_participant_facade_outputs(
                         protocol_participant_out.as_deref().ok_or_else(|| {
                             miette::miette!("missing protocol participant output")
@@ -1089,7 +1094,6 @@ fn participant_alias_mappings(
     entry: &AutoPlanEntry,
     plan: &[AutoPlanEntry],
     source_path: &Path,
-    cargo_metadata: &mut BTreeMap<PathBuf, Value>,
 ) -> miette::Result<Vec<trellis_codegen_rust::ParticipantAliasMapping>> {
     let local_manifest = source_path;
     let loaded = trellis_contracts::load_participant_source(local_manifest).into_diagnostic()?;
@@ -1125,25 +1129,13 @@ fn participant_alias_mappings(
             continue;
         }
 
-        if let Some(mapping) = built_in_rust_alias_mapping(entry, alias, &use_ref.api) {
-            mappings.push(mapping);
-            continue;
-        }
-
         if let Some(mapping) = installed_rust_alias_mapping(entry, alias, &use_ref.api)? {
             mappings.push(mapping);
             continue;
         }
 
-        if let Some(mapping) =
-            external_rust_alias_mapping(entry, alias, &use_ref.api, cargo_metadata)?
-        {
-            mappings.push(mapping);
-            continue;
-        }
-
         return Err(miette::miette!(
-            "Rust participant alias '{}' requires an explicit SDK mapping for contract '{}'",
+            "Rust participant alias '{}' requires contract '{}' in trellis.lock",
             alias,
             use_ref.api
         ));
@@ -1190,172 +1182,6 @@ fn installed_rust_alias_mapping(
         crate_path: Some(crate_path),
         cargo_dependency: None,
     }))
-}
-
-fn external_rust_alias_mapping(
-    entry: &AutoPlanEntry,
-    alias: &str,
-    contract_id: &str,
-    cargo_metadata: &mut BTreeMap<PathBuf, Value>,
-) -> miette::Result<Option<trellis_codegen_rust::ParticipantAliasMapping>> {
-    let Some(cargo_manifest) = nearest_cargo_manifest(&entry.discovered.source_path) else {
-        return Ok(None);
-    };
-    let contents = fs::read_to_string(&cargo_manifest).into_diagnostic()?;
-    let mut manifest = contents.parse::<toml::Table>().into_diagnostic()?;
-    let Some(dependency_key) = manifest
-        .get("package")
-        .and_then(toml::Value::as_table)
-        .and_then(|package| package.get("metadata"))
-        .and_then(toml::Value::as_table)
-        .and_then(|metadata| metadata.get("trellis"))
-        .and_then(toml::Value::as_table)
-        .and_then(|trellis| trellis.get("sdk-mappings"))
-        .and_then(toml::Value::as_table)
-        .and_then(|mappings| mappings.get(alias))
-        .and_then(toml::Value::as_str)
-    else {
-        return Ok(None);
-    };
-    let dependency_key = dependency_key.to_string();
-    let dependency = manifest
-        .get_mut("dependencies")
-        .and_then(toml::Value::as_table_mut)
-        .and_then(|dependencies| dependencies.get_mut(&dependency_key))
-        .ok_or_else(|| {
-            miette::miette!(
-                "Rust SDK mapping '{}' names missing Cargo dependency '{}'",
-                alias,
-                dependency_key
-            )
-        })?;
-
-    let package_name = dependency
-        .as_table()
-        .and_then(|table| table.get("package"))
-        .and_then(toml::Value::as_str)
-        .unwrap_or(&dependency_key)
-        .to_string();
-    if let Some(path) = dependency
-        .as_table_mut()
-        .and_then(|table| table.get_mut("path"))
-        .and_then(|path| path.as_str().map(ToOwned::to_owned))
-    {
-        let package_root = cargo_manifest.parent().unwrap_or(Path::new(".")).join(path);
-        let package_root = fs::canonicalize(&package_root).unwrap_or(package_root);
-        if let Some(table) = dependency.as_table_mut() {
-            table.insert(
-                "path".to_string(),
-                toml::Value::String(package_root.display().to_string()),
-            );
-        }
-    }
-    let dependency_spec = dependency.to_string();
-
-    if !cargo_metadata.contains_key(&cargo_manifest) {
-        let output = crate::timings::command("cargo")
-            .args([
-                "metadata",
-                "--format-version",
-                "1",
-                "--manifest-path",
-                cargo_manifest.to_string_lossy().as_ref(),
-            ])
-            .output()
-            .into_diagnostic()?;
-        if !output.status.success() {
-            return Err(miette::miette!(
-                "cargo metadata failed while resolving Rust SDK mapping '{}': {}",
-                alias,
-                String::from_utf8_lossy(&output.stderr).trim()
-            ));
-        }
-        cargo_metadata.insert(
-            cargo_manifest.clone(),
-            serde_json::from_slice(&output.stdout).into_diagnostic()?,
-        );
-    }
-    let metadata = &cargo_metadata[&cargo_manifest];
-    let package = metadata
-        .get("packages")
-        .and_then(serde_json::Value::as_array)
-        .and_then(|packages| {
-            packages.iter().find(|package| {
-                package.get("name").and_then(serde_json::Value::as_str)
-                    == Some(package_name.as_str())
-                    && package
-                        .pointer("/metadata/trellis/api-id")
-                        .and_then(serde_json::Value::as_str)
-                        == Some(contract_id)
-            })
-        })
-        .ok_or_else(|| {
-            miette::miette!(
-                "Cargo dependency '{}' does not expose Trellis SDK metadata for contract '{}'",
-                dependency_key,
-                contract_id
-            )
-        })?;
-    let package_manifest = PathBuf::from(
-        package
-            .get("manifest_path")
-            .and_then(serde_json::Value::as_str)
-            .ok_or_else(|| miette::miette!("resolved SDK package is missing manifest_path"))?,
-    );
-    let api_authoring_source = package
-        .pointer("/metadata/trellis/api-artifact")
-        .and_then(serde_json::Value::as_str)
-        .unwrap_or("api.json");
-    let manifest_path = package_manifest
-        .parent()
-        .unwrap_or(Path::new("."))
-        .join(api_authoring_source);
-
-    Ok(Some(trellis_codegen_rust::ParticipantAliasMapping {
-        alias: alias.to_string(),
-        crate_name: dependency_key,
-        api_path: manifest_path,
-        crate_path: None,
-        cargo_dependency: Some(dependency_spec),
-    }))
-}
-
-fn nearest_cargo_manifest(source_path: &Path) -> Option<PathBuf> {
-    source_path
-        .parent()
-        .into_iter()
-        .flat_map(Path::ancestors)
-        .map(|directory| directory.join("Cargo.toml"))
-        .find(|manifest| manifest.exists())
-}
-
-fn built_in_rust_alias_mapping(
-    entry: &AutoPlanEntry,
-    alias: &str,
-    contract_id: &str,
-) -> Option<trellis_codegen_rust::ParticipantAliasMapping> {
-    if !contract_id.starts_with("trellis.") {
-        return None;
-    }
-
-    let repo_root = entry.runtime_repo_root.as_ref()?;
-    let sdk_root = repo_root
-        .join("generated/packages/cargo")
-        .join(sdk_output_stem(contract_id));
-    let manifest_path = repo_root
-        .join("generated/protocol/apis")
-        .join(format!("{contract_id}.json"));
-    if !sdk_root.join("Cargo.toml").exists() || !manifest_path.exists() {
-        return None;
-    }
-
-    Some(trellis_codegen_rust::ParticipantAliasMapping {
-        alias: alias.to_string(),
-        crate_name: default_rust_crate_name_from_id(contract_id),
-        api_path: manifest_path,
-        crate_path: Some(sdk_root),
-        cargo_dependency: None,
-    })
 }
 
 pub fn contract_kind_label(kind: &ContractKind) -> &'static str {

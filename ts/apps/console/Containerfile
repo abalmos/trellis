@@ -1,4 +1,4 @@
-FROM --platform=$BUILDPLATFORM docker.io/denoland/deno:2.8.2 AS build
+FROM --platform=$BUILDPLATFORM docker.io/denoland/deno:2.9.4 AS build
 
 WORKDIR /app
 

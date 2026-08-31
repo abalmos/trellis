@@ -1,9 +1,8 @@
-FROM docker.io/denoland/deno:2.8.3 AS portal
+FROM docker.io/denoland/deno:2.9.4 AS portal
 
 WORKDIR /src
 
-COPY js /src/js
-COPY generated /src/generated
+COPY ts /src/ts
 COPY art /src/art
 
 RUN mkdir -p /src/rust/crates/runtime/generated \
@@ -15,9 +14,8 @@ FROM docker.io/library/rust:bookworm AS build
 WORKDIR /src
 
 COPY rust /src/rust
-COPY generated /src/generated
 COPY conformance /src/conformance
-COPY js /src/js
+COPY ts /src/ts
 COPY --from=portal /src/rust/crates/runtime/generated/portal /src/rust/crates/runtime/generated/portal
 
 RUN cargo build --locked --manifest-path rust/Cargo.toml --release \

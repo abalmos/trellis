@@ -506,7 +506,7 @@ pub fn generated_artifacts_are_fresh(
                 && existing.has_jsr_package
                 && existing.ts_codegen_fingerprint == expected.ts_codegen_fingerprint
                 && ts_key_outputs_exist(ts_out)
-                && embedded_trellis_owned_ts_sdk_key_outputs_exist(expected, out_api)),
+                && embedded_trellis_owned_ts_sdk_outputs_match(expected, out_api, ts_out)),
         cargo: rust_out.is_none()
             || (api
                 && existing.has_cargo_package
@@ -550,9 +550,10 @@ fn ts_key_outputs_exist(ts_out: Option<&Path>) -> bool {
         && ts_out.join("api.ts").exists()
 }
 
-fn embedded_trellis_owned_ts_sdk_key_outputs_exist(
+fn embedded_trellis_owned_ts_sdk_outputs_match(
     expected: &GeneratedArtifactsMetadata,
     out_api: &Path,
+    _ts_out: Option<&Path>,
 ) -> bool {
     if !matches!(expected.runtime_source, RuntimeSource::Local) {
         return true;
@@ -564,7 +565,14 @@ fn embedded_trellis_owned_ts_sdk_key_outputs_exist(
     let embedded_dir = repo_root
         .join("ts/packages/trellis/internal_sdk/generated")
         .join(module);
-    embedded_dir.join("mod.ts").exists() && embedded_dir.join("descriptors.ts").exists()
+    fs::read_to_string(embedded_dir.join(".trellis-source.digest"))
+        .ok()
+        .is_some_and(|digest| {
+            embedded_sdk_source_digest(&embedded_dir, "ts", "")
+                .ok()
+                .as_deref()
+                == Some(digest.as_str())
+        })
 }
 
 fn rust_key_outputs_exist(
@@ -583,7 +591,7 @@ fn rust_key_outputs_exist(
     };
     cargo_toml.exists()
         && rust_out.join("src").join(source).exists()
-        && embedded_trellis_owned_rust_sdk_key_outputs_exist(expected, out_api)
+        && embedded_trellis_owned_rust_sdk_outputs_match(expected, out_api, Some(rust_out))
         && rust_sdk_cargo_manifest_is_valid(
             &cargo_toml,
             &expected.crate_name,
@@ -591,9 +599,10 @@ fn rust_key_outputs_exist(
         )
 }
 
-fn embedded_trellis_owned_rust_sdk_key_outputs_exist(
+fn embedded_trellis_owned_rust_sdk_outputs_match(
     expected: &GeneratedArtifactsMetadata,
     out_api: &Path,
+    _rust_out: Option<&Path>,
 ) -> bool {
     if !matches!(expected.runtime_source, RuntimeSource::Local) {
         return true;
@@ -605,12 +614,14 @@ fn embedded_trellis_owned_rust_sdk_key_outputs_exist(
     let embedded_dir = repo_root
         .join("rust/crates/trellis/src/internal_sdk/generated")
         .join(module);
-    let source = if manifest_is_api(out_api) {
-        "api.rs"
-    } else {
-        "contract.rs"
-    };
-    embedded_dir.join("mod.rs").exists() && embedded_dir.join(source).exists()
+    fs::read_to_string(embedded_dir.join(".trellis-source.digest"))
+        .ok()
+        .is_some_and(|digest| {
+            embedded_sdk_source_digest(&embedded_dir, "rs", "")
+                .ok()
+                .as_deref()
+                == Some(digest.as_str())
+        })
 }
 
 fn manifest_is_api(path: &Path) -> bool {
@@ -646,11 +657,7 @@ pub fn copy_embedded_trellis_owned_rust_sdk(
     let dest_dir = repo_root
         .join("rust/crates/trellis/src/internal_sdk/generated")
         .join(module);
-    let source_digest = embedded_sdk_source_digest(&src_dir, "rs", "rust-v1")?;
     let digest_path = dest_dir.join(".trellis-source.digest");
-    if fs::read_to_string(&digest_path).ok().as_deref() == Some(&source_digest) {
-        return Ok(());
-    }
     fs::create_dir_all(&dest_dir).into_diagnostic()?;
     let mut expected = BTreeSet::new();
     let mut changed = false;
@@ -691,7 +698,10 @@ pub fn copy_embedded_trellis_owned_rust_sdk(
     if changed {
         format_rust_files(&dest_dir)?;
     }
-    write_if_changed(&digest_path, &source_digest)?;
+    write_if_changed(
+        &digest_path,
+        &embedded_sdk_source_digest(&dest_dir, "rs", "")?,
+    )?;
     Ok(())
 }
 
@@ -713,11 +723,7 @@ fn copy_embedded_trellis_owned_ts_sdk(
     let dest_dir = repo_root
         .join("ts/packages/trellis/internal_sdk/generated")
         .join(module);
-    let source_digest = embedded_sdk_source_digest(ts_out, "ts", "typescript-v1")?;
     let digest_path = dest_dir.join(".trellis-source.digest");
-    if fs::read_to_string(&digest_path).ok().as_deref() == Some(&source_digest) {
-        return Ok(());
-    }
     fs::create_dir_all(&dest_dir).into_diagnostic()?;
     let mut expected = BTreeSet::new();
     let mut changed = false;
@@ -752,7 +758,10 @@ fn copy_embedded_trellis_owned_ts_sdk(
     if changed {
         format_generated_typescript_artifacts(&dest_dir, Some(repo_root))?;
     }
-    write_if_changed(&digest_path, &source_digest)?;
+    write_if_changed(
+        &digest_path,
+        &embedded_sdk_source_digest(&dest_dir, "ts", "")?,
+    )?;
     Ok(())
 }
 
@@ -986,10 +995,10 @@ mod tests {
     use crate::model::RuntimeSource;
 
     use super::{
-        format_rust_files, generated_artifacts_are_fresh, rewrite_embedded_rust_sdk_source,
-        rewrite_embedded_trellis_owned_ts_sdk_source, rewrite_local_generated_ts_sdk_imports,
-        trellis_package_version, ts_package_name_from_id, write_generated_artifacts_metadata,
-        GeneratedArtifactsMetadata,
+        copy_embedded_trellis_owned_rust_sdk, format_rust_files, generated_artifacts_are_fresh,
+        rewrite_embedded_rust_sdk_source, rewrite_embedded_trellis_owned_ts_sdk_source,
+        rewrite_local_generated_ts_sdk_imports, trellis_package_version, ts_package_name_from_id,
+        write_generated_artifacts_metadata, GeneratedArtifactsMetadata,
     };
 
     #[test]
@@ -1111,5 +1120,41 @@ mod tests {
             formatted,
             "use crate::service::OperationFailureLike;\npub fn client() -> crate::client::Result<()> {\n    todo!()\n}\n"
         );
+    }
+
+    #[test]
+    fn embedded_rust_sdk_copy_repairs_non_key_files_and_removes_stale_files() {
+        let temp = tempfile::tempdir().expect("create tempdir");
+        let source = temp.path().join("sdk/src");
+        fs::create_dir_all(&source).expect("create source");
+        fs::write(source.join("lib.rs"), "pub mod types;\n").expect("write root");
+        fs::write(source.join("types.rs"), "pub struct Job;\n").expect("write types");
+
+        copy_embedded_trellis_owned_rust_sdk(
+            "trellis.jobs@v1",
+            &temp.path().join("sdk"),
+            RuntimeSource::Local,
+            Some(temp.path()),
+        )
+        .expect("copy SDK");
+        let dest = temp
+            .path()
+            .join("rust/crates/trellis/src/internal_sdk/generated/jobs");
+        fs::write(dest.join("types.rs"), "corrupt\n").expect("corrupt non-key file");
+        fs::write(dest.join("stale.rs"), "stale\n").expect("write stale file");
+
+        copy_embedded_trellis_owned_rust_sdk(
+            "trellis.jobs@v1",
+            &temp.path().join("sdk"),
+            RuntimeSource::Local,
+            Some(temp.path()),
+        )
+        .expect("repair SDK");
+
+        assert_eq!(
+            fs::read_to_string(dest.join("types.rs")).unwrap(),
+            "pub struct Job;\n"
+        );
+        assert!(!dest.join("stale.rs").exists());
     }
 }

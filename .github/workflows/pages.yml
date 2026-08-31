@@ -1,5 +1,8 @@
 name: Deploy Site to GitHub Pages
 
+env:
+  TRELLIS_CACHE: ${{ runner.temp }}/trellis-cache
+
 on:
   push:
     branches: [main]
@@ -80,7 +83,7 @@ jobs:
 
           install_apis() {
             local repo_root="$1"
-            (cd "${repo_root}" && cargo xtask install)
+            (cd "${repo_root}" && rm -rf "$TRELLIS_CACHE" && cargo xtask install)
           }
 
           build_docs() {

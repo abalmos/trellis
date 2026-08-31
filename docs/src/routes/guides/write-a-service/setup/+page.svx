@@ -30,6 +30,7 @@ Add an install task for generated SDKs and contract artifacts:
 
 ```json
 {
+  "links": [".trellis/generated/ts/trellis-apis"],
   "tasks": {
     "install": "trellis install"
   }
@@ -67,7 +68,6 @@ ulid = "1.2"
 trellis-contracts = "0.10"
 trellis-rs = "0.10"
 
-# Add this after the first `trellis install` creates the generated SDK crate.
 trellis-apis = { path = ".trellis/generated/rust/trellis-apis" }
 ```
 

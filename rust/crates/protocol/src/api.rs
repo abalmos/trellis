@@ -255,8 +255,14 @@ impl ApiArtifact {
             ));
         }
         validate_api_id("/id", &wire.id, api_error)?;
-        semver::Version::parse(&wire.version)
+        let version = semver::Version::parse(&wire.version)
             .map_err(|error| api_error("/version", format!("must be Semantic Version: {error}")))?;
+        if !version.build.is_empty() || wire.version.len() > 128 {
+            return Err(api_error(
+                "/version",
+                "must be at most 128 bytes and must not contain build metadata",
+            ));
+        }
         validate_nonempty_text("/displayName", &wire.display_name, api_error)?;
         validate_nonempty_text("/description", &wire.description, api_error)?;
         if let Some(docs) = &wire.docs {
@@ -1133,6 +1139,20 @@ mod tests {
             .compatible
         );
         assert_api_error(&release("banana"), "/version");
+        assert_api_error(&release("1.4.2+build.7"), "/version");
+
+        for id in [
+            "Acme.Orders@v1",
+            "acme/orders@v1",
+            "acme orders@v1",
+            "acme@orders@v1",
+            "acme..orders@v1",
+            "🔥.orders@v1",
+        ] {
+            let mut invalid = release("1.4.2");
+            invalid["id"] = json!(id);
+            assert_api_error(&invalid, "/id");
+        }
     }
 
     #[test]

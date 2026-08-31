@@ -93,4 +93,5 @@ time = { version = "0.3.46", features = ["formatting"] }
 url = "2.5.8"
 self_update = { version = "0.44.0", default-features = false, features = ["archive-tar", "archive-zip", "compression-flate2", "compression-zip-deflate", "rustls", "ureq"] }
 toml = "1.1.2"
+toml_edit = { version = "0.23.7", features = ["serde"] }
 trellis-protocol = { path = "crates/protocol", version = "0.12.0" }

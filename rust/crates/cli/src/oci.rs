@@ -255,6 +255,15 @@ fn validate_manifest(manifest: &OciImageManifest) -> Result<()> {
 }
 
 fn validate_api(pulled: &PulledApi, id: &str, version: &str, digest: Option<&str>) -> Result<()> {
+    if pulled.bytes
+        != pulled
+            .api
+            .canonical_json()
+            .map_err(|error| miette!(error.to_string()))?
+            .as_bytes()
+    {
+        return Err(miette!("remote API layer is not canonical Trellis JSON"));
+    }
     if pulled.api.id() != id {
         return Err(miette!("remote '{id}' contains API '{}'", pulled.api.id()));
     }
@@ -424,6 +433,29 @@ mod tests {
     use registry_testkit::{RegistryConfig as TestRegistryConfig, RegistryServer};
 
     use super::*;
+
+    #[test]
+    fn rejects_noncanonical_api_layer_bytes() {
+        let value = serde_json::json!({
+            "format": "trellis.api.v1",
+            "id": "acme.orders@v1",
+            "version": "1.4.2",
+            "displayName": "Orders",
+            "description": "Orders API"
+        });
+        let api = trellis_protocol::parse_api(&value).unwrap();
+        let pulled = PulledApi {
+            api,
+            bytes: serde_json::to_vec_pretty(&value).unwrap(),
+            manifest_bytes: Vec::new(),
+            manifest_digest: "sha256:test".into(),
+        };
+
+        assert!(validate_api(&pulled, "acme.orders@v1", "1.4.2", None)
+            .unwrap_err()
+            .to_string()
+            .contains("not canonical"));
+    }
 
     #[tokio::test]
     async fn publishes_pulls_and_repairs_exact_cached_api_artifacts() {

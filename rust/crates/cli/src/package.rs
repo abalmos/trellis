@@ -74,6 +74,7 @@ pub async fn add(format: OutputFormat, args: &AddArgs) -> Result<()> {
             registry,
         },
     );
+    let edited_manifest = edit_manifest_api(&previous_manifest, &id, manifest.apis.get(&id))?;
     let lock = resolve_lock(&root, &manifest).await?;
     let result = commit_and_install(
         &root,
@@ -81,6 +82,7 @@ pub async fn add(format: OutputFormat, args: &AddArgs) -> Result<()> {
         &lock,
         &previous_manifest,
         previous_lock.as_deref(),
+        Some(&edited_manifest),
     )
     .await?;
     print_result(format, &result, Some(format!("Added {id} {requirement}")))
@@ -94,6 +96,7 @@ pub async fn remove(format: OutputFormat, args: &RmArgs) -> Result<()> {
     if manifest.apis.remove(&args.api_id).is_none() {
         return Err(miette!("API '{}' is not in trellis.toml", args.api_id));
     }
+    let edited_manifest = edit_manifest_api(&previous_manifest, &args.api_id, None)?;
     let lock = resolve_lock(&root, &manifest).await?;
     let result = commit_and_install(
         &root,
@@ -101,6 +104,7 @@ pub async fn remove(format: OutputFormat, args: &RmArgs) -> Result<()> {
         &lock,
         &previous_manifest,
         previous_lock.as_deref(),
+        Some(&edited_manifest),
     )
     .await?;
     print_result(format, &result, Some(format!("Removed {}", args.api_id)))
@@ -251,10 +255,11 @@ async fn commit_and_install(
     lock: &ProjectLock,
     previous_manifest: &[u8],
     previous_lock: Option<&[u8]>,
+    manifest_bytes: Option<&[u8]>,
 ) -> Result<PackageResult> {
     let manifest_path = root.join("trellis.toml");
     let lock_path = root.join("trellis.lock");
-    write_manifest_and_lock(&manifest_path, manifest, &lock_path, lock)?;
+    write_manifest_and_lock(&manifest_path, manifest, manifest_bytes, &lock_path, lock)?;
     match install_root(root, manifest, lock).await {
         Ok(result) => Ok(result),
         Err(error) => {
@@ -262,6 +267,36 @@ async fn commit_and_install(
             Err(error)
         }
     }
+}
+
+fn edit_manifest_api(
+    previous: &[u8],
+    id: &str,
+    dependency: Option<&ApiDependency>,
+) -> Result<Vec<u8>> {
+    let source = std::str::from_utf8(previous).into_diagnostic()?;
+    let mut document = source.parse::<toml_edit::DocumentMut>().into_diagnostic()?;
+    let apis = document
+        .get_mut("apis")
+        .and_then(toml_edit::Item::as_table_mut)
+        .ok_or_else(|| miette!("trellis.toml must contain an [apis] table"))?;
+    match dependency {
+        Some(dependency) => {
+            apis.insert(
+                id,
+                toml_edit::ser::to_document(dependency)
+                    .into_diagnostic()?
+                    .into_item(),
+            );
+        }
+        None => {
+            apis.remove(id);
+        }
+    }
+    let bytes = document.to_string().into_bytes();
+    let parsed: ProjectManifest = toml::from_slice(&bytes).into_diagnostic()?;
+    parsed.validate()?;
+    Ok(bytes)
 }
 
 fn resolve_path_api(
@@ -511,7 +546,14 @@ async fn install_root(
                         })
                 })));
     if dependencies_fresh {
-        let generated = trellis_generation::project::generate_project(root, &trellis_root)?;
+        let generated = trellis_generation::project::generate_project(
+            root,
+            &trellis_root,
+            lock.api
+                .iter()
+                .map(|api| (api.id.clone(), api.api_digest.clone()))
+                .collect(),
+        )?;
         return Ok(PackageResult {
             installed_apis: lock.api.len(),
             changed_dependencies: 0,
@@ -539,7 +581,14 @@ async fn install_root(
             &marker,
         )
         .await?;
-        let generated = trellis_generation::project::generate_project(root, &trellis_root)?;
+        let generated = trellis_generation::project::generate_project(
+            root,
+            &trellis_root,
+            lock.api
+                .iter()
+                .map(|api| (api.id.clone(), api.api_digest.clone()))
+                .collect(),
+        )?;
         Ok(PackageResult {
             installed_apis: lock.api.len(),
             changed_dependencies,
@@ -1260,14 +1309,9 @@ mod tests {
     #[tokio::test]
     async fn add_update_and_remove_share_the_locked_installer() {
         let root = tempfile::tempdir().unwrap();
-        crate::project::write_manifest(
-            &root.path().join("trellis.toml"),
-            &ProjectManifest {
-                format: 1,
-                default_registry: None,
-                registries: BTreeMap::new(),
-                apis: BTreeMap::new(),
-            },
+        fs::write(
+            root.path().join("trellis.toml"),
+            "# project dependencies\nformat = 1\n\n[apis]\n# keep this explanation\n",
         )
         .unwrap();
         let api_path = root.path().join("auth.json");
@@ -1295,6 +1339,9 @@ mod tests {
         .unwrap();
         let manifest = crate::project::read_manifest(&root.path().join("trellis.toml")).unwrap();
         assert_eq!(manifest.apis["acme.auth@v1"].version, "^1.4.2");
+        assert!(fs::read_to_string(root.path().join("trellis.toml"))
+            .unwrap()
+            .contains("# keep this explanation"));
         let initial_lock = crate::project::read_lock(&root.path().join("trellis.lock")).unwrap();
         assert_eq!(initial_lock.api[0].version, "1.4.2");
 
@@ -1346,6 +1393,9 @@ mod tests {
                 .apis
                 .is_empty()
         );
+        assert!(fs::read_to_string(root.path().join("trellis.toml"))
+            .unwrap()
+            .contains("# keep this explanation"));
         assert!(crate::project::read_lock(&root.path().join("trellis.lock"))
             .unwrap()
             .api
