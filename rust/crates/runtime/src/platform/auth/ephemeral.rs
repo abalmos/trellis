@@ -648,13 +648,7 @@ fn validate_oauth_replacement(
                 || current.authenticated_roles != replacement.authenticated_roles)
         || current.authenticated_principal_id.is_none()
             && replacement.authenticated_principal_id.is_some()
-            && !matches!(
-                (current.status, replacement.status),
-                (
-                    AuthOAuthStatus::ExchangeStarted,
-                    AuthOAuthStatus::ExchangeStarted
-                )
-            )
+            && replacement.status != AuthOAuthStatus::ExchangeStarted
         || !valid_oauth_transition(current.status, replacement.status)
     {
         return Err(AuthorizationStateError::StorageConflict);
