@@ -1504,27 +1504,23 @@ fn render_user_participant_connect_rs(mappings: &[ValidatedParticipantAlias]) ->
 
 use std::sync::Arc;
 
-use trellis_rs::generated::{AuthorizationContextBundle, AuthorizationContextStore, Caller, TrellisClientError, UserAuthorizationContext, UserConnectOptions, UserSessionCredentials};
+use trellis_rs::generated::{AuthorizationContextStore, AuthorizationInstallation, Caller, TrellisClientError, UserAuthorizationContext, UserConnectOptions, UserSessionCredentials};
 
 use crate::Client;
 
 /// User-authenticated participant connection options.
 pub struct ConnectOptions<'a> {
     trellis_url: &'a str,
-    servers: &'a str,
-    bootstrap_jwt: &'a str,
-    session_id: &'a str,
-    inbox_prefix: &'a str,
     session_key_seed_base64url: &'a str,
-    authorization_context: AuthorizationContextBundle,
+    initial: AuthorizationInstallation,
     timeout_ms: u64,
     authorization_context_store: Arc<dyn AuthorizationContextStore>,
 }
 
 impl<'a> ConnectOptions<'a> {
     /// Create user-authenticated connection options.
-    pub fn new(trellis_url: &'a str, servers: &'a str, bootstrap_jwt: &'a str, session_id: &'a str, inbox_prefix: &'a str, session_key_seed_base64url: &'a str, authorization_context: AuthorizationContextBundle, timeout_ms: u64, authorization_context_store: Arc<dyn AuthorizationContextStore>) -> Self {
-        Self { trellis_url, servers, bootstrap_jwt, session_id, inbox_prefix, session_key_seed_base64url, authorization_context, timeout_ms, authorization_context_store }
+    pub fn new(trellis_url: &'a str, session_key_seed_base64url: &'a str, initial: AuthorizationInstallation, timeout_ms: u64, authorization_context_store: Arc<dyn AuthorizationContextStore>) -> Self {
+        Self { trellis_url, session_key_seed_base64url, initial, timeout_ms, authorization_context_store }
     }
 }
 
@@ -1541,17 +1537,12 @@ pub async fn connect(opts: ConnectOptions<'_>) -> Result<ConnectedClient, Trelli
     Ok(ConnectedClient {
         inner: Caller::connect_user(UserConnectOptions::new(
             opts.trellis_url,
-            opts.servers,
-            opts.inbox_prefix,
             opts.timeout_ms,
             UserSessionCredentials {
-                bootstrap_jwt: opts.bootstrap_jwt,
-                session_id: opts.session_id,
                 session_key_seed_base64url: opts.session_key_seed_base64url,
-                participant_digest: crate::contract::CONTRACT_DIGEST,
             },
             UserAuthorizationContext {
-                bundle: opts.authorization_context,
+                initial: Some(opts.initial),
                 binding: format!("installation:{}", opts.trellis_url),
                 store: opts.authorization_context_store,
             },
