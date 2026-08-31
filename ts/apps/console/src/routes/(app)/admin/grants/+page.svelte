@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { ulid } from "ulid";
   import { isErr } from "@qlever-llc/result";
   import type {
     AuthCapabilityGroupsListOutput,
@@ -110,7 +111,7 @@
         portalId: policy.portalId,
         participantId: policy.participantId,
         expectedVersion: policy.version,
-        idempotencyKey: crypto.randomUUID(),
+        idempotencyKey: ulid(),
       }).take();
       if (isErr(response)) throw new Error(errorMessage(response));
       saved = "Portal grant policy removed.";

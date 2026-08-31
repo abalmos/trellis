@@ -3886,6 +3886,41 @@
       "isolationReason": "rotates the runtime's authoritative NATS endpoint while preserving its durable auth state"
     },
     {
+      "id": "health.service-heartbeat-uses-replaced-native-connection",
+      "fixture": "health",
+      "title": "Service heartbeat uses the replaced native connection",
+      "coverage": [
+        "auth",
+        "authorization-context",
+        "health-heartbeat-transport",
+        "native-client"
+      ],
+      "description": "A Rust service refresh replaces endpoint A with endpoint B, and its existing heartbeat task publishes through the replacement connection after endpoint A is retired.",
+      "scenario": {
+        "participants": [],
+        "given": [
+          "a Rust service connected and publishing health heartbeats through endpoint A"
+        ],
+        "when": [
+          "authorization refresh installs endpoint B and endpoint A is retired"
+        ],
+        "then": [
+          "the existing heartbeat task publishes through endpoint B without retaining endpoint A"
+        ]
+      },
+      "completion": {
+        "rust": "implemented"
+      },
+      "implementations": {
+        "rust": {
+          "module": "health",
+          "function": "service_heartbeat_uses_replaced_native_connection"
+        }
+      },
+      "classification": "isolated-process",
+      "isolationReason": "rotates the runtime's authoritative NATS endpoint while preserving the connected service runtime"
+    },
+    {
       "id": "auth.portal-reconciliation-a-b-a-converges",
       "fixture": "auth",
       "title": "Portal reconciliation distinguishes A to B to A transitions",

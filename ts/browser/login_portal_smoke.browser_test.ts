@@ -343,10 +343,10 @@ withLivePortalPage(
         name: "Browser Login Portal User",
         email: `${liveLocalLoginUsername}@example.test`,
         image: null,
-        idempotencyKey: crypto.randomUUID(),
+        idempotencyKey: ulid(),
       }).orThrow();
       const reset = await admin.authUsersPasswordResetCreate({
-        idempotencyKey: crypto.randomUUID(),
+        idempotencyKey: ulid(),
         returnTarget: null,
         userId: user.user.userId,
       }).orThrow();
@@ -361,7 +361,7 @@ withLivePortalPage(
         displayName: "Browser Login Portal",
         entryUrl: `${portalOrigin}/_trellis/portal/users/login`,
         expectedVersion: null,
-        idempotencyKey: crypto.randomUUID(),
+        idempotencyKey: ulid(),
         loginSettings: {
           federatedRegistration: false,
           localLogin: true,
@@ -372,7 +372,7 @@ withLivePortalPage(
       await admin.authPortalsRoutesPut({
         deploymentId: null,
         expectedVersion: null,
-        idempotencyKey: crypto.randomUUID(),
+        idempotencyKey: ulid(),
         portalId: liveLocalLoginPortalId,
         participantId: liveLocalLoginFixture.clientContract.CONTRACT_ID,
         origin: portalOrigin,
@@ -447,6 +447,73 @@ withLivePortalPage(
       await service.stop();
     }
   },
+);
+
+withLivePortalPage(
+  "browser.login-portal browser transport uses rotated websocket endpoint",
+  async ({ runtime }) => {
+    const service = await liveLocalLoginFixture.setupService(runtime);
+    const { clientAuth } = await liveLocalLoginFixture.setupClientRegistration(
+      runtime,
+    );
+    const rotate = runtime.rotateWebsocketProxy;
+    assert(rotate !== undefined, "expected rotatable WebSocket fixture");
+    const [retiredUrl] = await rotate.call(runtime);
+    const retired = new URL(retiredUrl);
+    await assertRejects(() =>
+      Deno.connect({
+        hostname: retired.hostname,
+        port: Number(retired.port),
+      })
+    );
+
+    const previousWindow = Object.getOwnPropertyDescriptor(
+      globalThis,
+      "window",
+    );
+    const previousDocument = Object.getOwnPropertyDescriptor(
+      globalThis,
+      "document",
+    );
+    Object.defineProperty(globalThis, "window", {
+      configurable: true,
+      value: globalThis,
+    });
+    Object.defineProperty(globalThis, "document", {
+      configurable: true,
+      value: {},
+    });
+    let client:
+      | CallerRuntime<typeof liveLocalLoginFixture.clientContract>
+      | undefined;
+    try {
+      client = await TrellisClient.connect({
+        trellisUrl: runtime.trellisUrl,
+        name: liveLocalLoginFixture.clientName,
+        contract: liveLocalLoginFixture.clientContract,
+        participant: {
+          id: liveLocalLoginFixture.clientContract.CONTRACT_ID,
+          artifactDigest: liveLocalLoginFixture.clientContract.CONTRACT_DIGEST,
+        },
+        auth: clientAuth.auth,
+        onAuthRequired: clientAuth.onAuthRequired,
+      }).orThrow();
+      const ping = await client.authLoginPing({
+        message: liveLocalLoginFixture.pingMessage,
+      }).orThrow();
+      assertEquals(ping.accepted, true);
+    } finally {
+      if (previousWindow === undefined) {
+        Reflect.deleteProperty(globalThis, "window");
+      } else Object.defineProperty(globalThis, "window", previousWindow);
+      if (previousDocument === undefined) {
+        Reflect.deleteProperty(globalThis, "document");
+      } else Object.defineProperty(globalThis, "document", previousDocument);
+      await client?.connection.close();
+      await service.stop();
+    }
+  },
+  { rotatableWebsocketProxy: true },
 );
 
 withLivePortalPage(
@@ -668,7 +735,7 @@ withLivePortalPage(
       await admin.authUsersUpdate({
         email: user.user.email,
         expectedVersion: user.user.version,
-        idempotencyKey: crypto.randomUUID(),
+        idempotencyKey: ulid(),
         image: user.user.image,
         name: user.user.name,
         state: "disabled",
@@ -909,7 +976,7 @@ withLivePortalPage(
         capabilityGroupKeys: [],
         roleMappings: [],
         expectedVersion: null,
-        idempotencyKey: crypto.randomUUID(),
+        idempotencyKey: ulid(),
       }).orThrow();
       await client.connection.close();
       client = undefined;
@@ -1152,7 +1219,7 @@ withLivePortalPage(
         capabilityGroupKeys: [],
         roleMappings: [],
         expectedVersion: policy.version,
-        idempotencyKey: crypto.randomUUID(),
+        idempotencyKey: ulid(),
       }).orThrow();
       await Promise.all([
         waitForPingAuthority(client, fixture.pingMessage, false, "first"),
@@ -1197,7 +1264,7 @@ withLivePortalPage(
         capabilityGroupKeys: [],
         roleMappings: [],
         expectedVersion: reduced.policy.version,
-        idempotencyKey: crypto.randomUUID(),
+        idempotencyKey: ulid(),
       }).orThrow();
       client = await connectRetainedSessionEventually(trustedContextStore);
       await waitForPingAuthority(client, fixture.pingMessage, true, "fresh");
@@ -1241,7 +1308,7 @@ withLivePortalPage(
         displayName: portal.displayName,
         entryUrl: portal.entryUrl,
         expectedVersion: portal.version,
-        idempotencyKey: crypto.randomUUID(),
+        idempotencyKey: ulid(),
         loginSettings: portal.loginSettings,
       }).orThrow();
       const sqlite = new TrellisControlPlaneSqlite(
@@ -1278,7 +1345,7 @@ withLivePortalPage(
         displayName: portal.displayName,
         entryUrl: portal.entryUrl,
         expectedVersion: disabledPortal.portal.version,
-        idempotencyKey: crypto.randomUUID(),
+        idempotencyKey: ulid(),
         loginSettings: portal.loginSettings,
       }).orThrow();
       await assertRejects(
@@ -1401,7 +1468,7 @@ Deno.test("browser.login-portal live OIDC role mapping", async () => {
             displayName: "OIDC Role Portal",
             entryUrl: `${portalOrigin}/_trellis/portal/users/login`,
             expectedVersion: null,
-            idempotencyKey: crypto.randomUUID(),
+            idempotencyKey: ulid(),
             loginSettings: {
               federatedRegistration: true,
               localLogin: false,
@@ -1412,7 +1479,7 @@ Deno.test("browser.login-portal live OIDC role mapping", async () => {
           await admin.authPortalsRoutesPut({
             deploymentId: null,
             expectedVersion: null,
-            idempotencyKey: crypto.randomUUID(),
+            idempotencyKey: ulid(),
             portalId: liveOidcRolePortalId,
             participantId: fixture.clientContract.CONTRACT_ID,
             origin: new URL(runtime.trellisUrl).origin,
@@ -1448,7 +1515,7 @@ Deno.test("browser.login-portal live OIDC role mapping", async () => {
                 }),
               ),
               expectedVersion: current?.version ?? null,
-              idempotencyKey: crypto.randomUUID(),
+              idempotencyKey: ulid(),
             }).orThrow();
           };
           const connect = async (loginPage = page) => {
@@ -1523,7 +1590,7 @@ Deno.test("browser.login-portal live OIDC role mapping", async () => {
             capabilities: [fixture.pingCapability],
             includedGroups: [],
             expectedVersion: null,
-            idempotencyKey: crypto.randomUUID(),
+            idempotencyKey: ulid(),
           }).orThrow();
           await admin.authCapabilityGroupsPut({
             groupKey: "oidc-parent",
@@ -1532,7 +1599,7 @@ Deno.test("browser.login-portal live OIDC role mapping", async () => {
             capabilities: [],
             includedGroups: ["oidc-leaf"],
             expectedVersion: null,
-            idempotencyKey: crypto.randomUUID(),
+            idempotencyKey: ulid(),
           }).orThrow();
           await putPolicy(["group", "same-authority"], true);
           oidc.setClaims({ roles: ["group"] });
@@ -1576,7 +1643,7 @@ Deno.test("browser.login-portal live OIDC role mapping", async () => {
           });
           const link = await linkedUser.authUsersIdentityLinkCreate({
             allowedProviders: ["local"],
-            idempotencyKey: crypto.randomUUID(),
+            idempotencyKey: ulid(),
             returnTarget: null,
           }).orThrow();
           const flowId = accountFlowToken(link.flow.completionUrl);
@@ -1699,7 +1766,7 @@ withLivePortalPage(
         portalId: liveAccountPasswordPortalId,
       });
       const reset = await admin.authUsersPasswordResetCreate({
-        idempotencyKey: crypto.randomUUID(),
+        idempotencyKey: ulid(),
         returnTarget: null,
         userId: user.user.userId,
       }).orThrow();
@@ -1789,7 +1856,7 @@ withLivePortalPage(
         portalId: liveAccountPasswordTooShortPortalId,
       });
       const reset = await admin.authUsersPasswordResetCreate({
-        idempotencyKey: crypto.randomUUID(),
+        idempotencyKey: ulid(),
         returnTarget: null,
         userId: user.user.userId,
       }).orThrow();
@@ -1868,7 +1935,7 @@ withLivePortalPage(
         name: "Browser Missing Account Flow User",
         email: `${liveMissingAccountFlowUsername}@example.test`,
         image: null,
-        idempotencyKey: crypto.randomUUID(),
+        idempotencyKey: ulid(),
       }).orThrow();
       const before = await admin.authUserIdentitiesList({ limit: 100 })
         .orThrow();
@@ -1921,7 +1988,7 @@ withLivePortalPage(
         name: "Browser Reused Account Flow User",
       });
       const reset = await admin.authUsersPasswordResetCreate({
-        idempotencyKey: crypto.randomUUID(),
+        idempotencyKey: ulid(),
         returnTarget: null,
         userId: user.user.userId,
       }).orThrow();
@@ -2191,7 +2258,7 @@ withLivePortalPage(
         reviewId: review.reviewId,
         decision: "reject",
         expectedVersion: review.version,
-        idempotencyKey: crypto.randomUUID(),
+        idempotencyKey: ulid(),
         reason: rejectionReason,
       }).orThrow();
       assertEquals(decided.review.state, "rejected");
@@ -2265,6 +2332,7 @@ function withLivePortalPage(
     portalOrigin: string;
     runtime: LiveTrellisRuntime;
   }) => Promise<void>,
+  runtimeOptions: { rotatableWebsocketProxy?: boolean } = {},
 ): void {
   Deno.test(name, async () => {
     let trellisUrl: string | undefined;
@@ -2285,7 +2353,7 @@ function withLivePortalPage(
             await fn({ page, portalOrigin, runtime });
           });
         },
-        { webOrigins: [portalOrigin] },
+        { ...runtimeOptions, webOrigins: [portalOrigin] },
       );
     } finally {
       await server.shutdown();
@@ -2391,10 +2459,10 @@ async function createLocalPasswordUser(args: {
     name: args.name,
     email: `${args.username}@example.test`,
     image: null,
-    idempotencyKey: crypto.randomUUID(),
+    idempotencyKey: ulid(),
   }).orThrow();
   const reset = await args.admin.authUsersPasswordResetCreate({
-    idempotencyKey: crypto.randomUUID(),
+    idempotencyKey: ulid(),
     returnTarget: null,
     userId: user.user.userId,
   }).orThrow();
@@ -2470,10 +2538,10 @@ async function setupLocalLoginPortalUser(args: {
     name: args.name,
     email: `${args.username}@example.test`,
     image: null,
-    idempotencyKey: crypto.randomUUID(),
+    idempotencyKey: ulid(),
   }).orThrow();
   const reset = await args.admin.authUsersPasswordResetCreate({
-    idempotencyKey: crypto.randomUUID(),
+    idempotencyKey: ulid(),
     returnTarget: null,
     userId: user.user.userId,
   }).orThrow();
@@ -2498,10 +2566,10 @@ async function setupDeviceActivationPortalUser(args: {
     name: args.name,
     email: `${args.username}@example.test`,
     image: null,
-    idempotencyKey: crypto.randomUUID(),
+    idempotencyKey: ulid(),
   }).orThrow();
   const reset = await args.admin.authUsersPasswordResetCreate({
-    idempotencyKey: crypto.randomUUID(),
+    idempotencyKey: ulid(),
     returnTarget: null,
     userId: user.user.userId,
   }).orThrow();
@@ -2516,7 +2584,7 @@ async function setupDeviceActivationPortalUser(args: {
     displayName: "Browser Device Activation Portal",
     entryUrl: `${args.portalOrigin}/_trellis/portal/users/login`,
     expectedVersion: null,
-    idempotencyKey: crypto.randomUUID(),
+    idempotencyKey: ulid(),
     loginSettings: {
       federatedRegistration: false,
       localLogin: true,
@@ -2527,7 +2595,7 @@ async function setupDeviceActivationPortalUser(args: {
   await args.admin.authPortalsRoutesPut({
     deploymentId: null,
     expectedVersion: null,
-    idempotencyKey: crypto.randomUUID(),
+    idempotencyKey: ulid(),
     portalId: args.portalId,
     participantId: deviceActivationPortalContractId,
     origin: args.portalOrigin,
@@ -2550,7 +2618,7 @@ async function configureLocalLoginPortal(args: {
     displayName: "Browser Login Portal",
     entryUrl: `${args.portalOrigin}/_trellis/portal/users/login`,
     expectedVersion: null,
-    idempotencyKey: crypto.randomUUID(),
+    idempotencyKey: ulid(),
     loginSettings: {
       federatedRegistration: false,
       localLogin: true,
@@ -2561,7 +2629,7 @@ async function configureLocalLoginPortal(args: {
   await args.admin.authPortalsRoutesPut({
     deploymentId: null,
     expectedVersion: null,
-    idempotencyKey: crypto.randomUUID(),
+    idempotencyKey: ulid(),
     portalId: args.portalId,
     participantId: args.fixture.clientContract.CONTRACT_ID,
     origin: args.routeOrigin ?? args.portalOrigin,

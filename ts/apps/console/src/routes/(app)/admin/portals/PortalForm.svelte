@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { ulid } from "ulid";
   import { isErr } from "@qlever-llc/result";
   import type {
     AuthCapabilitiesListOutput,
@@ -330,7 +331,7 @@
           entryUrl: trimmedEntryUrl || null,
           disabled,
           expectedVersion: portal?.version ?? null,
-          idempotencyKey: crypto.randomUUID(),
+          idempotencyKey: ulid(),
           loginSettings: {
             localLogin: true,
             localRegistration: localRegistrationEnabled,
@@ -347,7 +348,7 @@
       const settingsResponse = await trellis.authPortalsLoginSettingsUpdate({
         portalId: target,
         expectedVersion: portal?.version ?? 0,
-        idempotencyKey: crypto.randomUUID(),
+        idempotencyKey: ulid(),
         settings: {
           localLogin: true,
           localRegistration: localRegistrationEnabled,
@@ -403,7 +404,7 @@
         priority: existingRoute?.priority ?? routePriority({ ...existingRoute, ...selector, disabled: routeDisabled } as Route),
         routeId: existingRoute?.routeKey ?? null,
         expectedVersion: existingRoute?.version ?? null,
-        idempotencyKey: crypto.randomUUID(),
+        idempotencyKey: ulid(),
       }).take();
       if (isErr(response)) {
         error = errorMessage(response);
@@ -413,7 +414,7 @@
         const removeResponse = await trellis.authPortalsRoutesRemove({
           routeId: existingRoute.routeKey,
           expectedVersion: existingRoute.version,
-          idempotencyKey: crypto.randomUUID(),
+          idempotencyKey: ulid(),
         }).take();
         if (isErr(removeResponse)) {
           error = errorMessage(removeResponse);
@@ -438,7 +439,7 @@
       const response = await trellis.authPortalsRoutesRemove({
         routeId: route.routeKey,
         expectedVersion: route.version,
-        idempotencyKey: crypto.randomUUID(),
+        idempotencyKey: ulid(),
       }).take();
       if (isErr(response)) {
         error = errorMessage(response);

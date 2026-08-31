@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { ulid } from "ulid";
   import { isErr } from "@qlever-llc/result";
   import { resolve } from "$app/paths";
   import Notice from "$lib/components/Notice.svelte";
@@ -31,7 +32,7 @@
       const response = await trellis.authDeploymentsCreate({
         displayName: nextDeploymentId,
         expiresAt: null,
-        idempotencyKey: crypto.randomUUID(),
+        idempotencyKey: ulid(),
         kind: "service",
         participantId: null,
         portalId: null,

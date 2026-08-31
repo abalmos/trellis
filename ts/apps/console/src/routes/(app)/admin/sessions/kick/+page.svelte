@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { ulid } from "ulid";
   import { isErr } from "@qlever-llc/result";
   import type { AuthConnectionsKickInput } from "@trellis/apis/trellis.auth";
   import { resolve } from "$app/paths";
@@ -51,7 +52,7 @@
     try {
       const response = await trellis.authConnectionsKick({
         connectionId: selectedConnection.connectionId,
-        idempotencyKey: crypto.randomUUID(),
+        idempotencyKey: ulid(),
         reason: null,
       } satisfies AuthConnectionsKickInput).take();
       if (isErr(response)) { error = errorMessage(response); return; }

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { ulid } from "ulid";
   import { isErr } from "@qlever-llc/result";
   import type {
     AuthDevicesDisableInput,
@@ -60,7 +61,7 @@
     try {
       const response = await trellis.authDevicesDisable({
         expectedVersion: selectedInstance.version,
-        idempotencyKey: crypto.randomUUID(),
+        idempotencyKey: ulid(),
         instanceId: selectedInstance.instanceId,
         reason: null,
       } satisfies AuthDevicesDisableInput,

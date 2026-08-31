@@ -11,6 +11,7 @@ import { AuthDeviceUserAuthoritiesResolve } from "@trellis/apis/trellis.auth";
 import { assertOperationCompleted } from "@qlever-llc/trellis-test";
 import { assert, assertEquals, assertInstanceOf } from "@std/assert";
 import { Type } from "typebox";
+import { ulid } from "ulid";
 
 import type { LiveTrellisRuntime } from "../_support/runtime.ts";
 
@@ -66,7 +67,7 @@ export async function exerciseDeviceState(runtime: LiveTrellisRuntime) {
     const identity = await deriveDeviceIdentity(rootSecret);
     const provisioned = await runtime.devices.provision({
       deploymentId: approval.deploymentId,
-      idempotencyKey: crypto.randomUUID(),
+      idempotencyKey: ulid(),
       identityPublicKey: null,
       instanceId: null,
       participantId: approval.participantId,

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { ulid } from "ulid";
   import { isErr, type BaseError, type Result } from "@qlever-llc/result";
   import type { DeploymentAuthorityKind, DeploymentAuthorityPlan } from "@qlever-llc/trellis/auth";
   import type { AuthDeploymentAuthorityPlansGetOutput } from "@trellis/apis/trellis.auth";
@@ -806,7 +807,7 @@
       () => trellis.authDeploymentAuthorityAcceptUpdate({
         proposalId: currentPlan.planId,
         expectedBaseAuthorityVersion: null,
-        idempotencyKey: crypto.randomUUID(),
+        idempotencyKey: ulid(),
         reason: null,
       }).take(),
       "Contract applied.",
@@ -820,7 +821,7 @@
       () => trellis.authDeploymentAuthorityAcceptMigration({
         proposalId: currentPlan.planId,
         expectedBaseAuthorityVersion: null,
-        idempotencyKey: crypto.randomUUID(),
+        idempotencyKey: ulid(),
         reason: `Reviewed migration of ${currentPlan.proposal.contractId}.`,
       }).take(),
       "Migration applied.",
@@ -833,7 +834,7 @@
     const trimmedDetails = rejectDetails.trim();
     const reason = trimmedDetails.length > 0 ? `${rejectReason.trim()}: ${trimmedDetails}` : rejectReason.trim();
     await runDecision(
-      () => trellis.authDeploymentAuthorityReject({ proposalId: currentPlan.planId, idempotencyKey: crypto.randomUUID(), reason }).take(),
+      () => trellis.authDeploymentAuthorityReject({ proposalId: currentPlan.planId, idempotencyKey: ulid(), reason }).take(),
       "Contract rejected.",
     );
   }

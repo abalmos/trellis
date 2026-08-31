@@ -1534,6 +1534,7 @@ impl ConnectedClient {
 
 /// Connect this participant with a user-authenticated session.
 pub async fn connect(opts: ConnectOptions<'_>) -> Result<ConnectedClient, TrellisClientError> {
+    let origin = trellis_rs::client::canonical_trellis_origin(opts.trellis_url)?;
     Ok(ConnectedClient {
         inner: Caller::connect_user(UserConnectOptions::new(
             opts.trellis_url,
@@ -1543,7 +1544,12 @@ pub async fn connect(opts: ConnectOptions<'_>) -> Result<ConnectedClient, Trelli
             },
             UserAuthorizationContext {
                 initial: Some(opts.initial),
-                binding: format!("installation:{}", opts.trellis_url),
+                binding: format!(
+                    "installation:{}:{}:{}",
+                    origin,
+                    crate::contract::CONTRACT_ID,
+                    crate::contract::CONTRACT_DIGEST,
+                ),
                 store: opts.authorization_context_store,
             },
         )).await?,
@@ -5821,6 +5827,11 @@ where
                 assert!(connect.contains("options.into_connect_options(session)?"));
                 assert!(!connect.contains("opts.participant_needs_digest"));
                 assert!(!connect.contains("session_key_seed_base64url"));
+            } else if matches!(kind, "app" | "agent") {
+                assert!(connect.contains("\"installation:{}:{}:{}\""));
+                assert!(connect.contains("crate::contract::CONTRACT_ID"));
+                assert!(connect.contains("crate::contract::CONTRACT_DIGEST"));
+                assert!(connect.contains("canonical_trellis_origin(opts.trellis_url)"));
             }
 
             cargo_check(&facade.join("Cargo.toml"));

@@ -1,3 +1,5 @@
+import { generateSessionSeed } from "../control_plane_config.ts";
+
 /** Mutable claims exposed by the live OIDC test provider. */
 export type TestOidcClaims = Record<string, unknown>;
 
@@ -57,7 +59,7 @@ export async function startTestOidcProvider(
         if (!redirectUri || !state || !nonce) {
           return new Response(null, { status: 400 });
         }
-        const code = crypto.randomUUID();
+        const code = generateSessionSeed();
         codes.set(code, {
           nonce,
           claims: scopedClaims.get(new URL(redirectUri).origin) ?? claims,
@@ -92,7 +94,7 @@ export async function startTestOidcProvider(
           },
         );
         return Response.json({
-          access_token: crypto.randomUUID(),
+          access_token: generateSessionSeed(),
           token_type: "Bearer",
           expires_in: 300,
           id_token: idToken,

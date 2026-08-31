@@ -1062,7 +1062,7 @@ async fn publish_health_heartbeat(
 }
 
 fn spawn_health_heartbeat_task(
-    nats: async_nats::Client,
+    native: Arc<RwLock<NativeConnection>>,
     timeout_ms: u64,
     config: HealthHeartbeatConfig,
 ) -> JoinHandle<()> {
@@ -1072,6 +1072,11 @@ fn spawn_health_heartbeat_task(
         interval.tick().await;
         loop {
             interval.tick().await;
+            let nats = native
+                .read()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .nats
+                .clone();
             if let Err(error) = publish_health_heartbeat(&nats, timeout_ms, &config).await {
                 tracing::warn!(%error, "failed to publish health heartbeat");
             }
@@ -1431,15 +1436,14 @@ async fn connect_bootstrapped_service(
     {
         tracing::warn!(%error, "failed to publish initial health heartbeat");
     }
-    let health_heartbeat_task = Some(spawn_health_heartbeat_task(
-        nats.clone(),
-        timeout_ms,
-        health_heartbeat_config,
-    ));
-
     let auth = Arc::new(auth);
     let runtime = authorization_contexts.runtime_binding()?;
     let native = Arc::new(RwLock::new(NativeConnection::new(nats, runtime, provider)));
+    let health_heartbeat_task = Some(spawn_health_heartbeat_task(
+        native.clone(),
+        timeout_ms,
+        health_heartbeat_config,
+    ));
     let authorization_context_refresh_task = Some(spawn_authorization_context_refresh_task(
         authorization_contexts.clone(),
         auth.clone(),
@@ -1780,7 +1784,7 @@ impl TrellisClient {
             tracing::warn!(%error, "failed to publish initial health heartbeat");
         }
         connected.health_heartbeat_task = Some(spawn_health_heartbeat_task(
-            connected.nats(),
+            connected.native.clone(),
             opts.timeout_ms,
             health_heartbeat_config,
         ));

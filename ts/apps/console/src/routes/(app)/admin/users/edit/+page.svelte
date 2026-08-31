@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { ulid } from "ulid";
   import { isErr } from "@qlever-llc/result";
   import type {
     AuthCapabilitiesListOutput,
@@ -246,7 +247,7 @@
         userId: targetUser.userId,
         email: targetUser.email,
         expectedVersion: targetUser.version,
-        idempotencyKey: crypto.randomUUID(),
+        idempotencyKey: ulid(),
         image: targetUser.image,
         name: targetUser.name,
         state: active ? "active" : "disabled",

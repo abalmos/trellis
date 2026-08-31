@@ -10,6 +10,8 @@ mod refresh;
 mod registry;
 mod types;
 
+pub use bootstrap_http::canonical_trellis_origin;
+
 pub use core::{
     AuthorizationVerificationCore, AuthorizationVerificationError, EventVerificationInput,
     RequestVerificationInput, VerifiedAuthorizationEvent, VerifiedAuthorizationRequest,

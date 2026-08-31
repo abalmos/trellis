@@ -5,6 +5,7 @@ import {
   assertThrows,
 } from "@std/assert";
 import { isAbsolute, join, relative } from "@std/path";
+import { ulid } from "ulid";
 import {
   assertRegisteredTestsCompiled,
   assertRustExecutionInventory,
@@ -113,7 +114,7 @@ Deno.test("prebuilt-only live artifacts fail on a dirty tree", async () => {
     "TRELLIS_TEST_ALLOW_DIRTY_PREBUILT",
   ] as const;
   const previous = new Map(names.map((name) => [name, Deno.env.get(name)]));
-  const dirtyMarker = `.trellis-test-dirty-${crypto.randomUUID()}`;
+  const dirtyMarker = `.trellis-test-dirty-${ulid()}`;
   const markerPath = join(Deno.cwd(), dirtyMarker);
   await Deno.writeTextFile(markerPath, "dirty");
   try {

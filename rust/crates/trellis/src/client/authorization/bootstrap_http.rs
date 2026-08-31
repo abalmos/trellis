@@ -3,6 +3,19 @@ use trellis_protocol::{parse_authorization_context, SignedAuthorizationContext};
 
 use super::super::TrellisClientError;
 
+/// Returns the canonical origin used to scope persisted client authorization state.
+pub fn canonical_trellis_origin(trellis_url: &str) -> Result<String, TrellisClientError> {
+    let url = reqwest::Url::parse(trellis_url)
+        .map_err(|error| TrellisClientError::Bootstrap(format!("invalid Trellis URL: {error}")))?;
+    let origin = url.origin().ascii_serialization();
+    if origin == "null" {
+        return Err(TrellisClientError::Bootstrap(
+            "Trellis URL must have an HTTP(S) origin".into(),
+        ));
+    }
+    Ok(origin)
+}
+
 /// Pre-NATS HTTP credential and context recovery client.
 ///
 /// This client performs HTTP only for credential or context recovery.

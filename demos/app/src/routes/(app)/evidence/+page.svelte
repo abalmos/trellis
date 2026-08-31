@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { ulid } from "ulid";
   import { onDestroy, onMount } from "svelte";
   import { resolve } from "$app/paths";
   import { page } from "$app/state";
@@ -148,7 +149,7 @@
     const runId = ++uploadRunId;
 
     try {
-      const evidenceId = crypto.randomUUID();
+      const evidenceId = ulid();
       const fileName = safeFileName(file.name);
       const key = `evidence/${evidenceId}-${fileName}`;
       const bytes = new Uint8Array(await file.arrayBuffer());

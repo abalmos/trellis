@@ -6,6 +6,7 @@ import {
   PeriodicExportingMetricReader,
 } from "npm:@opentelemetry/sdk-metrics@^2.7.0";
 import { assertEquals, assertExists } from "@std/assert";
+import { ulid } from "ulid";
 
 const exporter = new InMemoryMetricExporter(AggregationTemporality.CUMULATIVE);
 const reader = new PeriodicExportingMetricReader({
@@ -50,7 +51,7 @@ function collectHistogramDataPoints(): HistogramPoint[] {
 Deno.test("Records histogram value and unit", async () => {
   exporter.reset();
   const { recordTrellisDuration } = await import(
-    `../telemetry/metrics.ts?record=${crypto.randomUUID()}`
+    `../telemetry/metrics.ts?record=${ulid()}`
   );
 
   recordTrellisDuration("trellis.connect.duration", 150, {
@@ -73,7 +74,7 @@ Deno.test("Records histogram value and unit", async () => {
 Deno.test("Ignores negative duration", async () => {
   exporter.reset();
   const { recordTrellisDuration } = await import(
-    `../telemetry/metrics.ts?neg=${crypto.randomUUID()}`
+    `../telemetry/metrics.ts?neg=${ulid()}`
   );
 
   recordTrellisDuration("trellis.connect.duration", -100, {
@@ -93,7 +94,7 @@ Deno.test("Ignores negative duration", async () => {
 Deno.test("Ignores NaN duration", async () => {
   exporter.reset();
   const { recordTrellisDuration } = await import(
-    `../telemetry/metrics.ts?nan=${crypto.randomUUID()}`
+    `../telemetry/metrics.ts?nan=${ulid()}`
   );
 
   recordTrellisDuration("trellis.connect.duration", NaN, {
@@ -113,7 +114,7 @@ Deno.test("Ignores NaN duration", async () => {
 Deno.test("Ignores infinite duration", async () => {
   exporter.reset();
   const { recordTrellisDuration } = await import(
-    `../telemetry/metrics.ts?inf=${crypto.randomUUID()}`
+    `../telemetry/metrics.ts?inf=${ulid()}`
   );
 
   recordTrellisDuration("trellis.connect.duration", Infinity, {
@@ -133,7 +134,7 @@ Deno.test("Ignores infinite duration", async () => {
 Deno.test("Sanitizes attributes — drops bad values, keeps good ones", async () => {
   exporter.reset();
   const { recordTrellisDuration } = await import(
-    `../telemetry/metrics.ts?sanitize=${crypto.randomUUID()}`
+    `../telemetry/metrics.ts?sanitize=${ulid()}`
   );
 
   recordTrellisDuration("trellis.auth.callout.duration", 100, {
@@ -158,7 +159,7 @@ Deno.test("Sanitizes attributes — drops bad values, keeps good ones", async ()
 Deno.test("Sanitizes attributes — drops high-cardinality values", async () => {
   exporter.reset();
   const { recordTrellisDuration } = await import(
-    `../telemetry/metrics.ts?highcard=${crypto.randomUUID()}`
+    `../telemetry/metrics.ts?highcard=${ulid()}`
   );
 
   recordTrellisDuration("trellis.auth.callout.duration", 100, {
@@ -181,7 +182,7 @@ Deno.test("Sanitizes attributes — drops high-cardinality values", async () => 
 Deno.test("Maps camelCase to OTel dot-separated names", async () => {
   exporter.reset();
   const { recordTrellisDuration } = await import(
-    `../telemetry/metrics.ts?camel=${crypto.randomUUID()}`
+    `../telemetry/metrics.ts?camel=${ulid()}`
   );
 
   recordTrellisDuration("trellis.auth.flow.duration", 100, {
@@ -209,7 +210,7 @@ Deno.test("Maps camelCase to OTel dot-separated names", async () => {
 Deno.test("Caches histogram instrument per metric name", async () => {
   exporter.reset();
   const { recordTrellisDuration } = await import(
-    `../telemetry/metrics.ts?cache=${crypto.randomUUID()}`
+    `../telemetry/metrics.ts?cache=${ulid()}`
   );
 
   recordTrellisDuration("trellis.connect.duration", 100, {
@@ -248,7 +249,7 @@ Deno.test("No-op without meter provider does not throw", async () => {
   metrics.setGlobalMeterProvider(new MeterProvider());
 
   const { recordTrellisDuration } = await import(
-    `../telemetry/metrics.ts?noop=${crypto.randomUUID()}`
+    `../telemetry/metrics.ts?noop=${ulid()}`
   );
 
   recordTrellisDuration("trellis.connect.duration", 100);

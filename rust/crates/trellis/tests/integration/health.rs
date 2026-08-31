@@ -167,6 +167,83 @@ impl Drop for HealthRuntimeProcess {
 }
 
 #[tokio::test]
+async fn service_heartbeat_uses_replaced_native_connection() {
+    assert_runtime_case_registered(
+        "health.service-heartbeat-uses-replaced-native-connection",
+        "health",
+        "health",
+    );
+    let mut options = trellis_test::TrellisTestRuntimeOptions::repo_platform();
+    options.rotatable_nats_proxy = true;
+    let mut runtime = trellis_test::TrellisTestRuntime::start(options)
+        .await
+        .expect("start rotatable Trellis test runtime");
+    let bootstrap_url = runtime
+        .wait_for_bootstrap_url(Duration::from_secs(10))
+        .await
+        .expect("observe first admin bootstrap URL");
+    let service_contract = trellis_test::TrellisTestContract::from_native_api_json(
+        "trellis.integration.health-service@v1",
+        SERVICE_API_SOURCE_JSON,
+        trellis_rs::contracts::ContractKind::Service,
+    )
+    .expect("build health service contract");
+    let service_key = runtime
+        .admin()
+        .provision_service_instance(&bootstrap_url, &service_contract, Some(SERVICE_NAME), None)
+        .await
+        .expect("provision health service");
+    let service_runtime = trellis_test::connect_service_runtime::<HealthFixtureContract>(
+        runtime.trellis_url(),
+        &service_key,
+    )
+    .await
+    .expect("connect Rust health service");
+
+    let ((retired_url, replacement_url), _) = runtime
+        .rotate_nats_proxy()
+        .await
+        .expect("rotate advertised NATS endpoints");
+    let observer = ConnectOptions::new()
+        .credentials_file(runtime.workdir().join("nats/creds/trellis-auth.creds"))
+        .await
+        .expect("load Trellis NATS creds")
+        .connect(&replacement_url)
+        .await
+        .expect("connect heartbeat observer through endpoint B");
+    let mut heartbeats = observer
+        .subscribe("health.v1.heartbeat.>".to_string())
+        .await
+        .expect("subscribe through endpoint B");
+    observer
+        .flush()
+        .await
+        .expect("flush heartbeat subscription");
+    service_runtime
+        .caller()
+        .integration_test_refresh_authorization_context()
+        .await
+        .expect("replace service connection with endpoint B");
+
+    let heartbeat = tokio::time::timeout(Duration::from_secs(45), heartbeats.next())
+        .await
+        .expect("receive heartbeat after endpoint replacement")
+        .expect("heartbeat transport remains open");
+    let sample: Value =
+        serde_json::from_slice(&heartbeat.payload).expect("decode post-rotation heartbeat");
+    assert_eq!(
+        sample["participant"]["contractId"],
+        service_key.participant_id
+    );
+    assert!(
+        tokio::net::TcpStream::connect(retired_url.trim_start_matches("nats://"))
+            .await
+            .is_err(),
+        "retired endpoint A remained usable"
+    );
+}
+
+#[tokio::test]
 async fn health_projection_lifecycle_and_recovery() {
     assert_runtime_case_registered(CASE_ID, "health", "health");
     let runtime = trellis_test::TrellisTestRuntime::start(

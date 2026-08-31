@@ -18,11 +18,11 @@ mod subject;
 mod transfer;
 
 pub use auth::SessionAuth;
-pub use authorization::AuthorizationProviderCache;
 #[cfg(any(test, feature = "runtime-internals"))]
 pub use authorization::AuthorizationRegistryBinding;
 #[cfg(feature = "test-support")]
 pub use authorization::IntegrationTestAuthorizationIoCounters;
+pub use authorization::{canonical_trellis_origin, AuthorizationProviderCache};
 pub use authorization::{
     AuthorizationClientState, AuthorizationClientTrustState, AuthorizationContextBundle,
     AuthorizationContextCache, AuthorizationContextStore, AuthorizationInstallation,

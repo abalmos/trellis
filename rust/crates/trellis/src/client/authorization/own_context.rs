@@ -88,6 +88,11 @@ impl AuthorizationContextCache {
                 "authorization context storage belongs to another identity".into(),
             ));
         }
+        self.clock_offset_ms
+            .store(state.server_clock_offset_ms, Ordering::Relaxed);
+        let now_unix_seconds = now_unix_seconds
+            .checked_add(state.server_clock_offset_ms.div_euclid(1_000))
+            .ok_or_else(|| TrellisClientError::Bootstrap("context time overflow".into()))?;
         if let Some(bundle) = state.context.as_ref() {
             let context = persisted_signed_context(bundle)?;
             if context.unsigned.issuer_manifest_generation < state.trust.minimum_manifest_generation
@@ -110,8 +115,6 @@ impl AuthorizationContextCache {
                 server_clock_offset_ms: state.server_clock_offset_ms,
             },
             (None, None) => {
-                self.clock_offset_ms
-                    .store(state.server_clock_offset_ms, Ordering::Relaxed);
                 self.state
                     .write()
                     .map_err(|_| {
@@ -668,6 +671,11 @@ mod tests {
         let chain = &vectors["completeChain"];
         let store = Arc::new(MemoryAuthorizationContextStore::default());
         let mut state = test_state(7, chain["manifestDigest"].as_str().unwrap());
+        state.trust.root_key_id = chain["rootKeyId"].as_str().unwrap().into();
+        state.trust.root_digest = chain["rootDigest"].as_str().unwrap().into();
+        state.runtime.participant_id = "documents-web".into();
+        state.runtime.participant_digest = "BAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQ".into();
+        state.runtime.needs_digest = "BQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQU".into();
         state.context = Some(AuthorizationContextBundle {
             context: serde_json::from_str(chain["contextCanonicalJson"].as_str().unwrap()).unwrap(),
             trust: AuthorizationTrustBundle {
@@ -694,12 +702,37 @@ mod tests {
             bootstrap_jwt_expires_at: 2_000,
         });
         store.commit(state).unwrap();
+        let other_participant = AuthorizationContextCache::new(
+            "https://trellis.test",
+            "app:other-participant:other-digest",
+            store.clone(),
+        )
+        .unwrap();
+        assert!(matches!(
+            other_participant.restore(1_100).await,
+            Err(TrellisClientError::Bootstrap(message))
+                if message == "authorization context storage belongs to another identity"
+        ));
         let cache = AuthorizationContextCache::new(
             "https://trellis.test",
             "service:dep:instance",
             store.clone(),
         )
         .unwrap();
+        assert!(cache.restore(1_100).await.unwrap());
+
+        for (offset_ms, local_now) in [(1_000_000, 100), (-1_000_000, 2_100)] {
+            let mut durable = store.load().unwrap().unwrap();
+            durable.server_clock_offset_ms = offset_ms;
+            store.commit(durable).unwrap();
+            let restarted = AuthorizationContextCache::new(
+                "https://trellis.test",
+                "service:dep:instance",
+                store.clone(),
+            )
+            .unwrap();
+            assert!(restarted.restore(local_now).await.unwrap());
+        }
 
         assert!(cache.advance_manifest_floor(8, "manifest-8").await.unwrap());
         assert!(!cache.restore(1_100).await.unwrap());

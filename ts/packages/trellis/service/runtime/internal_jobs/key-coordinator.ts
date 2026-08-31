@@ -1,5 +1,6 @@
 import { type KV, type KvEntry, Kvm } from "@nats-io/kv";
 import type { NatsConnection } from "@nats-io/nats-core";
+import { ulid } from "ulid";
 
 import type { JobContext, JobEvent, JobState } from "./types.ts";
 
@@ -834,7 +835,7 @@ export function createNatsJobKeyCoordinator(
         payload: request.payload,
         template: request.policy.key,
       });
-      const slotToken = crypto.randomUUID();
+      const slotToken = ulid();
       return await updateState(
         () => openKv(request.service),
         derived,

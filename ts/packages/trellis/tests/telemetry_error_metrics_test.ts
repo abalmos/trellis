@@ -9,6 +9,7 @@ import { assertEquals, assertExists } from "@std/assert";
 import { AsyncResult, err } from "@qlever-llc/result";
 import type { NatsConnection } from "@nats-io/nats-core";
 import { Type } from "typebox";
+import { ulid } from "ulid";
 import { AuthError, UnexpectedError } from "../errors/index.ts";
 import type { PreparedOutboxRecord } from "../service/outbox_inbox.ts";
 
@@ -23,7 +24,7 @@ Deno.test("recordTrellisError emits sanitized low-cardinality attributes", async
   exporter.reset();
   const { buildTrellisErrorMetricAttributes, recordTrellisError } =
     await import(
-      `../telemetry/metrics.ts?sanitize=${crypto.randomUUID()}`
+      `../telemetry/metrics.ts?sanitize=${ulid()}`
     );
   const error = new SerializableRemoteMetricError();
 
@@ -108,7 +109,7 @@ Deno.test("recordTrellisError emits sanitized low-cardinality attributes", async
 
 Deno.test("RPC client template failures record trellis error metric", async () => {
   exporter.reset();
-  const { Trellis } = await import(`../session.ts?rpc=${crypto.randomUUID()}`);
+  const { Trellis } = await import(`../session.ts?rpc=${ulid()}`);
   const api = {
     rpc: {
       "Test.Echo": {
@@ -152,7 +153,7 @@ Deno.test("RPC client template failures record trellis error metric", async () =
 
 Deno.test("Feed client template failures record trellis error metric", async () => {
   exporter.reset();
-  const { Trellis } = await import(`../session.ts?feed=${crypto.randomUUID()}`);
+  const { Trellis } = await import(`../session.ts?feed=${ulid()}`);
   const api = {
     rpc: {},
     events: {},
@@ -198,7 +199,7 @@ Deno.test("Feed client template failures record trellis error metric", async () 
 Deno.test("dispatchOutbox records failed publish hook", async () => {
   exporter.reset();
   const { dispatchOutbox, MemoryOutboxRepository } = await import(
-    `../service/outbox_inbox.ts?outbox=${crypto.randomUUID()}`
+    `../service/outbox_inbox.ts?outbox=${ulid()}`
   );
   const repository = new MemoryOutboxRepository();
   await repository.enqueue(prepared("evt_failed"));

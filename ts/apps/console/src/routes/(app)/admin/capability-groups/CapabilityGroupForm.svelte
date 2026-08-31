@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { ulid } from "ulid";
   import { isErr } from "@qlever-llc/result";
   import type {
     AuthCapabilitiesListOutput,
@@ -253,7 +254,7 @@
         capabilities: uniqueSorted(catalogedSelectedCapabilities),
         includedGroups: uniqueSorted(selectedIncludedGroups.filter((key) => key !== groupKey)),
         expectedVersion: selectedGroup?.version ?? null,
-        idempotencyKey: crypto.randomUUID(),
+        idempotencyKey: ulid(),
       } satisfies AuthCapabilityGroupsPutInput;
       const response = await trellis.authCapabilityGroupsPut(input).take();
       if (isErr(response)) {

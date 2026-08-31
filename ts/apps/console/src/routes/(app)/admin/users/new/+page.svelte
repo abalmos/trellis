@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { ulid } from "ulid";
   import { isErr } from "@qlever-llc/result";
   import type {
     AuthCapabilitiesListOutput,
@@ -117,7 +118,7 @@
   function buildCreateInput(_username: string): AuthUsersCreateInput {
     const input: AuthUsersCreateInput = {
       email: null,
-      idempotencyKey: crypto.randomUUID(),
+      idempotencyKey: ulid(),
       image: null,
       name: null,
     };
@@ -164,7 +165,7 @@
       if (isErr(createResponse)) { error = errorMessage(createResponse); return; }
 
       const setupResponse = await trellis.authUsersPasswordResetCreate({
-        idempotencyKey: crypto.randomUUID(),
+        idempotencyKey: ulid(),
         returnTarget: null,
         userId: createResponse.user.userId,
       }).take();

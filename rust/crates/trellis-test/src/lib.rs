@@ -582,11 +582,13 @@ pub struct TrellisTestRuntime {
     _port_reservation: Option<TrellisTestPortReservation>,
     nats: Option<NatsContainer>,
     nats_proxy: Option<NatsTcpProxy>,
+    nats_websocket_proxy: Option<NatsTcpProxy>,
     trellis: Option<TrellisProcess>,
     trellis_url: String,
     nats_url: String,
     nats_upstream_url: String,
     nats_websocket_url: String,
+    nats_websocket_upstream_url: String,
     manifest: LocalTrellisBootstrapManifest,
     admin_password: String,
     default_deployment: String,
@@ -1150,11 +1152,13 @@ impl TrellisTestRuntime {
                     _port_reservation: None,
                     nats: None,
                     nats_proxy: None,
+                    nats_websocket_proxy: None,
                     trellis: None,
                     trellis_url: shared.trellis_url.clone(),
                     nats_url: shared.nats_url.clone(),
                     nats_upstream_url: shared.nats_url.clone(),
                     nats_websocket_url: shared.websocket_url.clone(),
+                    nats_websocket_upstream_url: shared.websocket_url.clone(),
                     manifest,
                     admin_password: shared.admin_password.clone(),
                     default_deployment: format!("{}-deployment", assignment.namespace),
@@ -1176,6 +1180,7 @@ impl TrellisTestRuntime {
 
         let mut nats = None;
         let mut nats_proxy = None;
+        let mut nats_websocket_proxy = None;
         let mut trellis = None;
         let started = async {
             let started_nats = if shared_runtime.is_some() {
@@ -1188,10 +1193,14 @@ impl TrellisTestRuntime {
                 bootstrap_options.nats_websocket_url = started_nats.websocket_url();
             }
             let nats_upstream_url = bootstrap_options.nats_server_url.clone();
+            let nats_websocket_upstream_url = bootstrap_options.nats_websocket_url.clone();
             if options.rotatable_nats_proxy {
                 let proxy = NatsTcpProxy::start(&nats_upstream_url).await?;
                 bootstrap_options.nats_server_url = proxy.url.clone();
                 nats_proxy = Some(proxy);
+                let websocket_proxy = NatsTcpProxy::start(&nats_websocket_upstream_url).await?;
+                bootstrap_options.nats_websocket_url = websocket_proxy.url.clone();
+                nats_websocket_proxy = Some(websocket_proxy);
             }
             rewrite_trellis_config(workdir.path(), &manifest, &bootstrap_options, &options)?;
             ensure_shared_streams(
@@ -1215,23 +1224,30 @@ impl TrellisTestRuntime {
             let nats_websocket_url = bootstrap_options.nats_websocket_url.clone();
             nats = started_nats;
             trellis = Some(started_trellis);
-            Ok::<_, TrellisTestError>((nats_url, nats_websocket_url, nats_upstream_url))
+            Ok::<_, TrellisTestError>((
+                nats_url,
+                nats_websocket_url,
+                nats_upstream_url,
+                nats_websocket_upstream_url,
+            ))
         }
         .await;
 
-        let (nats_url, nats_websocket_url, nats_upstream_url) = match started {
-            Ok(urls) => urls,
-            Err(error) => {
-                let cleanup = cleanup_started(&mut trellis, &mut nats, options.shutdown_timeout);
-                if let Err(cleanup_error) = cleanup {
-                    return Err(TrellisTestError::StartupCleanupFailed {
-                        startup: Box::new(error),
-                        cleanup: Box::new(cleanup_error),
-                    });
+        let (nats_url, nats_websocket_url, nats_upstream_url, nats_websocket_upstream_url) =
+            match started {
+                Ok(urls) => urls,
+                Err(error) => {
+                    let cleanup =
+                        cleanup_started(&mut trellis, &mut nats, options.shutdown_timeout);
+                    if let Err(cleanup_error) = cleanup {
+                        return Err(TrellisTestError::StartupCleanupFailed {
+                            startup: Box::new(error),
+                            cleanup: Box::new(cleanup_error),
+                        });
+                    }
+                    return Err(error);
                 }
-                return Err(error);
-            }
-        };
+            };
 
         let control_plane_path = control_plane_sqlite_path(workdir.path());
         Ok(Self {
@@ -1239,11 +1255,13 @@ impl TrellisTestRuntime {
             _port_reservation: Some(port_reservation),
             nats,
             nats_proxy,
+            nats_websocket_proxy,
             trellis,
             trellis_url,
             nats_url,
             nats_upstream_url,
             nats_websocket_url,
+            nats_websocket_upstream_url,
             manifest,
             admin_password: options
                 .admin_password
@@ -1623,10 +1641,11 @@ impl TrellisTestRuntime {
         Ok(())
     }
 
-    /// Restart the control plane with a new authoritative native NATS endpoint.
-    pub async fn restart_control_plane_with_nats_url(
+    /// Restart the control plane with new authoritative native and browser NATS endpoints.
+    pub async fn restart_control_plane_with_nats_urls(
         &mut self,
         nats_url: &str,
+        nats_websocket_url: &str,
     ) -> Result<(), TrellisTestError> {
         let config_path = self
             .workdir
@@ -1637,24 +1656,36 @@ impl TrellisTestRuntime {
         config["nats"]["servers"] = toml::Value::String(nats_url.to_owned());
         config["client"]["nats_servers"] =
             toml::Value::Array(vec![toml::Value::String(nats_url.to_owned())]);
+        config["client"]["ws_nats_servers"] =
+            toml::Value::Array(vec![toml::Value::String(nats_websocket_url.to_owned())]);
         fs::write(
             &config_path,
             toml::to_string_pretty(&config)
                 .map_err(|error| TrellisTestError::UnexpectedResponse(error.to_string()))?,
         )?;
         self.nats_url = nats_url.to_owned();
+        self.nats_websocket_url = nats_websocket_url.to_owned();
         self.restart_control_plane().await
     }
 
-    /// Rotate the advertised NATS TCP proxy and retire the previous endpoint.
-    pub async fn rotate_nats_proxy(&mut self) -> Result<(String, String), TrellisTestError> {
+    /// Rotate the advertised NATS proxies and retire the previous endpoints.
+    pub async fn rotate_nats_proxy(
+        &mut self,
+    ) -> Result<((String, String), (String, String)), TrellisTestError> {
         let replacement = NatsTcpProxy::start(&self.nats_upstream_url).await?;
+        let websocket_replacement = NatsTcpProxy::start(&self.nats_websocket_upstream_url).await?;
         let previous_url = self.nats_url.clone();
         let replacement_url = replacement.url.clone();
-        self.restart_control_plane_with_nats_url(&replacement_url)
+        let previous_websocket_url = self.nats_websocket_url.clone();
+        let replacement_websocket_url = websocket_replacement.url.clone();
+        self.restart_control_plane_with_nats_urls(&replacement_url, &replacement_websocket_url)
             .await?;
         self.nats_proxy = Some(replacement);
-        Ok((previous_url, replacement_url))
+        self.nats_websocket_proxy = Some(websocket_replacement);
+        Ok((
+            (previous_url, replacement_url),
+            (previous_websocket_url, replacement_websocket_url),
+        ))
     }
 
     /// Stop only the Trellis control-plane process, preserving workdir state and NATS.
@@ -4524,10 +4555,10 @@ struct NatsTcpProxy {
 
 impl NatsTcpProxy {
     async fn start(upstream_url: &str) -> Result<Self, TrellisTestError> {
-        let upstream = upstream_url
-            .strip_prefix("nats://")
-            .unwrap_or(upstream_url)
-            .to_owned();
+        let (scheme, upstream) = upstream_url
+            .split_once("://")
+            .unwrap_or(("nats", upstream_url));
+        let upstream = upstream.to_owned();
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
         let address = listener.local_addr()?;
         let (stop, mut stopped) = tokio::sync::watch::channel(());
@@ -4553,7 +4584,7 @@ impl NatsTcpProxy {
             }
         });
         Ok(Self {
-            url: format!("nats://{address}"),
+            url: format!("{scheme}://{address}"),
             stop,
             task,
         })

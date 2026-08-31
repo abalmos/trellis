@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { ulid } from "ulid";
   import { isErr } from "@qlever-llc/result";
   import { loadSessionKey } from "@qlever-llc/trellis/auth/browser";
   import type { AuthSessionsRevokeInput } from "@trellis/apis/trellis.auth";
@@ -56,7 +57,7 @@
     try {
       const response = await trellis.authSessionsRevoke({
         expectedVersion: selectedSession.version,
-        idempotencyKey: crypto.randomUUID(),
+        idempotencyKey: ulid(),
         reason: null,
         sessionId: selectedSession.sessionId,
       } satisfies AuthSessionsRevokeInput).take();

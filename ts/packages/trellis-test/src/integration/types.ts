@@ -117,6 +117,8 @@ export type TrellisIntegrationRuntime = {
   ): Promise<NatsMessageObserver>;
   /** Restarts only the Trellis control-plane process when the runtime supports it. */
   restartControlPlane?(): Promise<void>;
+  /** Rotates the browser WebSocket endpoint when the runtime supports it. */
+  rotateWebsocketProxy?(): Promise<[string, string]>;
   /** Stops runtime-owned resources when this runtime owns cleanup. */
   stop?(): Promise<void>;
 };

@@ -3546,7 +3546,7 @@ async fn native_refresh_persists_and_reconnects_with_rotated_endpoint() {
         .expect("initial durable authorization state exists");
     let initial_servers = initial.runtime.transports.native.nats_servers;
 
-    let (retired_url, replacement_url) = fixture
+    let ((retired_url, replacement_url), _) = fixture
         .runtime
         .rotate_nats_proxy()
         .await

@@ -3,6 +3,7 @@ import {
   type NativeProtocolPresentation,
   nativeProtocolPresentation,
 } from "@qlever-llc/trellis/contracts";
+import { ulid } from "ulid";
 
 import { generateSessionSeed } from "../control_plane_config.ts";
 import type {
@@ -62,7 +63,7 @@ export async function createDeployment(
     const created = await context.rpc("authDeploymentsCreate", {
       displayName: deployment,
       expiresAt: null,
-      idempotencyKey: crypto.randomUUID(),
+      idempotencyKey: ulid(),
       kind: args.kind ?? "service",
       participantId: null,
       portalId: null,
@@ -112,7 +113,7 @@ export async function approveContract(
   const planned = await context.rpc("authDeploymentAuthorityPlan", {
     deploymentId,
     expiresAt: null,
-    idempotencyKey: crypto.randomUUID(),
+    idempotencyKey: ulid(),
     participantArtifact: artifacts.participant,
     referencedApiArtifacts: [artifacts.api, ...referencedApis.values()],
   });
@@ -161,14 +162,14 @@ export async function approveContract(
   if (classification !== "migration") {
     await context.rpc("authDeploymentAuthorityAcceptUpdate", {
       expectedBaseAuthorityVersion: planned.proposal.baseAuthorityVersion,
-      idempotencyKey: crypto.randomUUID(),
+      idempotencyKey: ulid(),
       proposalId: planned.proposal.proposalId,
       reason: null,
     });
   } else {
     await context.rpc("authDeploymentAuthorityAcceptMigration", {
       expectedBaseAuthorityVersion: planned.proposal.baseAuthorityVersion,
-      idempotencyKey: crypto.randomUUID(),
+      idempotencyKey: ulid(),
       proposalId: planned.proposal.proposalId,
       reason:
         "Approved by TrellisTestRuntime for an isolated integration test.",
@@ -237,7 +238,7 @@ export async function reconcile(
   await context.rpc("authDeploymentAuthorityReconcile", {
     authorityId,
     expectedVersion: null,
-    idempotencyKey: crypto.randomUUID(),
+    idempotencyKey: ulid(),
   });
   recordTrellisDuration(
     "trellis.admin.workflow.duration",
@@ -316,7 +317,7 @@ export async function provisionServiceInstance(
   }
   const provisioned = await context.rpc("authServiceInstancesProvision", {
     deploymentId,
-    idempotencyKey: crypto.randomUUID(),
+    idempotencyKey: ulid(),
     identityPublicKey: auth.sessionKey,
     instanceId: null,
     participantId: approved.participantId,
@@ -398,7 +399,7 @@ export async function rejectAuthorityPlan(
   return await context.rpc("authDeploymentAuthorityReject", {
     proposalId: args.planId,
     reason: args.reason ?? null,
-    idempotencyKey: crypto.randomUUID(),
+    idempotencyKey: ulid(),
   });
 }
 
@@ -411,7 +412,7 @@ export async function acceptAuthorityUpdate(
     proposalId: args.planId,
     expectedBaseAuthorityVersion: args.expectedDesiredVersion ?? null,
     reason: null,
-    idempotencyKey: crypto.randomUUID(),
+    idempotencyKey: ulid(),
   });
 }
 
@@ -428,7 +429,7 @@ export async function acceptAuthorityMigration(
     proposalId: args.planId,
     expectedBaseAuthorityVersion: args.expectedDesiredVersion ?? null,
     reason: args.acknowledgement,
-    idempotencyKey: crypto.randomUUID(),
+    idempotencyKey: ulid(),
   });
 }
 
@@ -446,7 +447,7 @@ export async function provisionServiceInstanceOnly(
   }
   await context.rpc("authServiceInstancesProvision", {
     deploymentId,
-    idempotencyKey: crypto.randomUUID(),
+    idempotencyKey: ulid(),
     identityPublicKey: auth.sessionKey,
     instanceId: null,
     participantId: null,

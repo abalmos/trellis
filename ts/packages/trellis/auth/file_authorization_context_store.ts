@@ -1,3 +1,5 @@
+import { ulid } from "ulid";
+
 import type {
   AuthorizationClientState,
   AuthorizationContextStore,
@@ -103,7 +105,7 @@ export class FileAuthorizationContextStore
       this.path.lastIndexOf("\\"),
     );
     if (separator > 0) await fs.mkdir(this.path.slice(0, separator));
-    const temporary = `${this.path}.${crypto.randomUUID()}.tmp`;
+    const temporary = `${this.path}.${ulid()}.tmp`;
     await fs.writeTextFile(temporary, JSON.stringify(state, null, 2));
     await fs.chmod(temporary);
     await fs.rename(temporary, this.path);

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { ulid } from "ulid";
   import { isErr } from "@qlever-llc/result";
   import type { AuthSessionsMeOutput, AuthUserIdentitiesListOutput } from "@trellis/apis/trellis.auth";
   import { resolve } from "$app/paths";
@@ -105,7 +106,7 @@
     try {
       const response = await trellis.authUsersIdentityLinkCreate({
         allowedProviders: [],
-        idempotencyKey: crypto.randomUUID(),
+        idempotencyKey: ulid(),
         returnTarget: currentReturnTarget(),
       }).take();
       if (isErr(response)) {
@@ -138,7 +139,7 @@
 
       const response = await trellis.authUsersPasswordChange({
         currentPassword,
-        idempotencyKey: crypto.randomUUID(),
+        idempotencyKey: ulid(),
         newPassword,
       }).take();
       if (isErr(response)) {

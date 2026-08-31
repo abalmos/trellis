@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { ulid } from "ulid";
   import { isErr } from "@qlever-llc/result";
   import type { AuthDeploymentsCreateInput } from "@trellis/apis/trellis.auth";
   import { resolve } from "$app/paths";
@@ -25,7 +26,7 @@
       const input: AuthDeploymentsCreateInput = {
         displayName: deploymentId.trim(),
         expiresAt: null,
-        idempotencyKey: crypto.randomUUID(),
+        idempotencyKey: ulid(),
         kind: "device",
         participantId: null,
         portalId: null,

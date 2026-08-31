@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { ulid } from "ulid";
   import { isErr } from "@qlever-llc/result";
   import type {
     AuthDeviceUserAuthoritiesListOutput,
@@ -65,7 +66,7 @@
       const response = await trellis.authDeviceUserAuthoritiesRevoke({
         deploymentId: selectedActivation.device.deploymentId,
         devicePrincipalId: selectedActivation.device.principalId,
-        idempotencyKey: crypto.randomUUID(),
+        idempotencyKey: ulid(),
         reason: null,
       } satisfies AuthDeviceUserAuthoritiesRevokeInput,
       ).take();

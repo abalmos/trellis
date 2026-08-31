@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { ulid } from "ulid";
   import { isErr } from "@qlever-llc/result";
   import type {
     AuthDeploymentsDisableInput,
@@ -62,7 +63,7 @@
       const response = await trellis.authDeploymentsDisable({
         deploymentId: selectedDeployment.deploymentId,
         expectedVersion: selectedDeployment.version,
-        idempotencyKey: crypto.randomUUID(),
+        idempotencyKey: ulid(),
         reason: null,
       } satisfies AuthDeploymentsDisableInput,
       ).take();

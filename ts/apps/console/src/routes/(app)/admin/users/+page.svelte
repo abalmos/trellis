@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { ulid } from "ulid";
   import { isErr } from "@qlever-llc/result";
   import type { AuthUsersListOutput } from "@trellis/apis/trellis.auth";
   import { resolve } from "$app/paths";
@@ -116,7 +117,7 @@
     resetPendingUserId = user.userId;
     try {
       const response = await trellis.authUsersPasswordResetCreate({
-        idempotencyKey: crypto.randomUUID(),
+        idempotencyKey: ulid(),
         returnTarget: null,
         userId: user.userId,
       }).take();

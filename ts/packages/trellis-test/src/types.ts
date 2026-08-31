@@ -94,6 +94,8 @@ export type TrellisTestRuntimeStartOptions = {
   oauthProviders?: Record<string, TrellisControlPlaneOAuthProvider>;
   /** Additional exact browser origins allowed by the test runtime. */
   webOrigins?: readonly string[];
+  /** Route the advertised browser WebSocket endpoint through a replaceable TCP proxy. */
+  rotatableWebsocketProxy?: boolean;
   timeouts?: {
     startupMs?: number;
     reconciliationMs?: number;

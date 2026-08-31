@@ -1,10 +1,12 @@
 import { TransportError } from "@qlever-llc/trellis/errors";
 import { dirname, join } from "@std/path";
+import { ulid } from "ulid";
 
 import {
   removeStaleMarkedDirectories,
   writeTrellisTestOwnerMarker,
 } from "../cleanup.ts";
+import { generateSessionSeed } from "../control_plane_config.ts";
 import { NatsTestContainer } from "../nats_container.ts";
 import { TrellisTestRuntime } from "../runtime.ts";
 import { readTrellisTestMetrics, TRELLIS_TEST_METRICS_ENV } from "./metrics.ts";
@@ -54,10 +56,10 @@ export async function startTrellisIntegrationSharedRuntimeHost(args: {
     markerName: WORKDIR_OWNER_MARKER,
   });
 
-  const runId = integrationSlug(crypto.randomUUID()).slice(0, 12);
+  const runId = integrationSlug(ulid()).slice(0, 12);
   const hostDeployment = `it-${runId}-host`;
-  const adminPassword = `trellis-test-${crypto.randomUUID()}`;
-  const adminRpcToken = crypto.randomUUID();
+  const adminPassword = `trellis-test-${generateSessionSeed()}`;
+  const adminRpcToken = generateSessionSeed();
   const assignments: Record<string, TrellisIntegrationRuntimeAssignment> = {};
   const tenantIds = [SHARED_TENANT];
   for (const [index, assignment] of args.assignments.entries()) {

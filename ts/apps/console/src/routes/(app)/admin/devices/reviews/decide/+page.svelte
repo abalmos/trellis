@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { ulid } from "ulid";
   import { isErr } from "@qlever-llc/result";
   import type {
     AuthDeviceUserAuthoritiesReviewsDecideInput,
@@ -88,7 +89,7 @@
           reviewId: selectedReview.reviewId,
           decision,
           expectedVersion: selectedReview.version,
-          idempotencyKey: crypto.randomUUID(),
+          idempotencyKey: ulid(),
           reason: decision === "reject" && reason.trim() ? reason.trim() : null,
         } satisfies AuthDeviceUserAuthoritiesReviewsDecideInput,
       ).take();

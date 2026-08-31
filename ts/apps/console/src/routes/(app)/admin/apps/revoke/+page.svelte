@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { ulid } from "ulid";
   import { isErr } from "@qlever-llc/result";
   import type { AuthIdentityAuthorityListOutput } from "@trellis/apis/trellis.auth";
   import { resolve } from "$app/paths";
@@ -53,7 +54,7 @@
       const response = await trellis.authIdentityAuthorityRevoke({
         authorityId: selectedGrant.authorityId,
         expectedVersion: selectedGrant.version,
-        idempotencyKey: crypto.randomUUID(),
+        idempotencyKey: ulid(),
         reason: null,
       }).take();
       if (isErr(response)) { error = errorMessage(response); return; }

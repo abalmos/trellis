@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { ulid } from "ulid";
   import { isErr } from "@qlever-llc/result";
   import type {
     AuthCapabilitiesListOutput,
@@ -97,7 +98,7 @@
   }
 
   function addRoleMapping(): void {
-    roleMappings.push({ id: crypto.randomUUID(), providerId: providerOptions[0] ?? "", role: "", directCapabilities: "", capabilityGroupKeys: "" });
+    roleMappings.push({ id: ulid(), providerId: providerOptions[0] ?? "", role: "", directCapabilities: "", capabilityGroupKeys: "" });
   }
 
   function applyPolicy(policy: Policy): void {
@@ -107,7 +108,7 @@
     directCapabilities = [...policy.directCapabilities];
     capabilityGroupKeys = [...policy.capabilityGroupKeys];
     roleMappings = policy.roleMappings.map((mapping) => ({
-      id: crypto.randomUUID(), providerId: mapping.providerId, role: mapping.role,
+      id: ulid(), providerId: mapping.providerId, role: mapping.role,
       directCapabilities: mapping.directCapabilities.join(", "),
       capabilityGroupKeys: mapping.capabilityGroupKeys.join(", "),
     }));
@@ -161,7 +162,7 @@
       const input = {
         portalId, participantId: participantId.trim(), directCapabilities: directCapabilities.toSorted(),
         capabilityGroupKeys: capabilityGroupKeys.toSorted(), roleMappings: mappings,
-        expectedVersion: existing?.version ?? null, idempotencyKey: crypto.randomUUID(),
+        expectedVersion: existing?.version ?? null, idempotencyKey: ulid(),
       } satisfies AuthPortalsGrantOverridesPutInput;
       const response = await trellis.authPortalsGrantOverridesPut(input).take();
       if (isErr(response)) throw new Error(errorMessage(response));

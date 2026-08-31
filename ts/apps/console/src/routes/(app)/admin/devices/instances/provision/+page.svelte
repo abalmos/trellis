@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { ulid } from "ulid";
   import { isErr } from "@qlever-llc/result";
   import type {
     AuthDeploymentsListOutput,
@@ -54,7 +55,7 @@
     try {
       const response = await trellis.authDevicesProvision({
         deploymentId: provisionDeploymentId,
-        idempotencyKey: crypto.randomUUID(),
+        idempotencyKey: ulid(),
         instanceId: instanceId.trim() || null,
         identityPublicKey: identityPublicKey.trim() || null,
         participantId: null,

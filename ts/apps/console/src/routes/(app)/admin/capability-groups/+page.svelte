@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { ulid } from "ulid";
   import { isErr } from "@qlever-llc/result";
   import type { AuthCapabilityGroupsListOutput } from "@trellis/apis/trellis.auth";
   import { resolve } from "$app/paths";
@@ -67,7 +68,7 @@
       const response = await trellis.authCapabilityGroupsDelete({
         groupKey: group.groupKey,
         expectedVersion: group.version,
-        idempotencyKey: crypto.randomUUID(),
+        idempotencyKey: ulid(),
       }).take();
       if (isErr(response)) {
         error = errorMessage(response);

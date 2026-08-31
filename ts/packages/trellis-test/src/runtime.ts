@@ -81,6 +81,79 @@ type RuntimeTimeouts = {
 const WORKDIR_PREFIX = "trellis-test-";
 const WORKDIR_OWNER_MARKER = ".trellis-test-owner";
 
+class TcpProxy {
+  readonly url: string;
+  readonly #listener: Deno.TcpListener;
+  readonly #target: Deno.ConnectOptions;
+  readonly #connections = new Set<Deno.Conn>();
+
+  private constructor(listener: Deno.TcpListener, target: Deno.ConnectOptions) {
+    this.#listener = listener;
+    this.#target = target;
+    this.url = `ws://127.0.0.1:${listener.addr.port}`;
+    this.#accept();
+  }
+
+  static start(targetUrl: string): TcpProxy {
+    const target = new URL(targetUrl);
+    return new TcpProxy(
+      Deno.listen({ hostname: "127.0.0.1", port: 0 }),
+      {
+        transport: "tcp",
+        hostname: target.hostname,
+        port: Number(target.port),
+      },
+    );
+  }
+
+  async #accept(): Promise<void> {
+    try {
+      for await (const client of this.#listener) {
+        this.#connections.add(client);
+        void this.#forward(client);
+      }
+    } catch (error) {
+      if (!(error instanceof Deno.errors.BadResource)) throw error;
+    }
+  }
+
+  async #forward(client: Deno.Conn): Promise<void> {
+    try {
+      const upstream = await Deno.connect(this.#target);
+      this.#connections.add(upstream);
+      await Promise.allSettled([
+        client.readable.pipeTo(upstream.writable),
+        upstream.readable.pipeTo(client.writable),
+      ]);
+      this.#connections.delete(upstream);
+      try {
+        upstream.close();
+      } catch {
+        // The stream may already have closed the connection.
+      }
+    } finally {
+      this.#connections.delete(client);
+      try {
+        client.close();
+      } catch {
+        // The stream may already have closed the connection.
+      }
+    }
+  }
+
+  stop(): void {
+    this.#listener.close();
+    for (const connection of this.#connections) {
+      try {
+        connection.close();
+      } catch {
+        // The peer may have closed first.
+      }
+    }
+    this.#connections.clear();
+  }
+}
+
 /** Runs an isolated Trellis control plane and NATS server for integration tests. */
 export class TrellisTestRuntime implements AsyncDisposable {
   readonly trellisUrl: string;
@@ -157,6 +230,8 @@ export class TrellisTestRuntime implements AsyncDisposable {
   #nats: NatsTestContainer;
   #admin: TrellisTestAdminAutomation;
   #configPath: string | undefined;
+  #config: ReturnType<typeof buildControlPlaneConfig> | undefined;
+  #websocketProxy: TcpProxy | undefined;
   #trellisOptions: TrellisTestRuntimeStartOptions["trellis"] | undefined;
   #keepWorkdir: boolean;
   #ownsWorkdir: boolean;
@@ -173,6 +248,8 @@ export class TrellisTestRuntime implements AsyncDisposable {
     keepWorkdir: boolean;
     timeouts: RuntimeTimeouts;
     configPath?: string;
+    config?: ReturnType<typeof buildControlPlaneConfig>;
+    websocketProxy?: TcpProxy;
     controlPlaneSqlitePath?: string;
     trellisOptions?: TrellisTestRuntimeStartOptions["trellis"];
     nats: NatsTestContainer;
@@ -190,6 +267,8 @@ export class TrellisTestRuntime implements AsyncDisposable {
     this.#nats = args.nats;
     this.#controlPlane = args.controlPlane;
     this.#configPath = args.configPath;
+    this.#config = args.config;
+    this.#websocketProxy = args.websocketProxy;
     this.#trellisOptions = args.trellisOptions;
     this.#admin = args.admin;
     if (args.controlPlaneSqlitePath !== undefined) {
@@ -262,6 +341,7 @@ export class TrellisTestRuntime implements AsyncDisposable {
     let nats: NatsTestContainer | undefined;
     let controlPlane: TrellisProcessHandle | undefined;
     let portLease: ReservedPort | undefined;
+    let websocketProxy: TcpProxy | undefined;
     try {
       const timeouts = {
         startupMs: options.timeouts?.startupMs ?? 30_000,
@@ -328,6 +408,9 @@ export class TrellisTestRuntime implements AsyncDisposable {
         : await NatsTestContainer.start(workdir, {
           startupMs: timeouts.startupMs,
         });
+      if (options.rotatableWebsocketProxy) {
+        websocketProxy = TcpProxy.start(nats.websocketUrl);
+      }
       let config: ReturnType<typeof buildControlPlaneConfig>;
       let configPath: string;
       let startedControlPlane: TrellisProcessHandle;
@@ -338,7 +421,7 @@ export class TrellisTestRuntime implements AsyncDisposable {
         config = buildControlPlaneConfig({
           workdir,
           natsUrl: nats.natsUrl,
-          websocketUrl: nats.websocketUrl,
+          websocketUrl: websocketProxy?.url ?? nats.websocketUrl,
           manifest: sharedManifest ?? nats.manifest,
           port,
           oauthProviders: options.oauthProviders,
@@ -386,6 +469,8 @@ export class TrellisTestRuntime implements AsyncDisposable {
         keepWorkdir: options.keepWorkdir ?? false,
         timeouts,
         configPath,
+        config,
+        websocketProxy,
         controlPlaneSqlitePath: `${config.storage.dbPath}.platform`,
         trellisOptions: options.trellis,
         nats,
@@ -395,6 +480,7 @@ export class TrellisTestRuntime implements AsyncDisposable {
     } catch (error) {
       portLease?.release();
       await controlPlane?.stop().catch(() => undefined);
+      websocketProxy?.stop();
       await nats?.stop().catch(() => undefined);
       if (!options.keepWorkdir) {
         await Deno.remove(workdir, { recursive: true }).catch(() => undefined);
@@ -721,6 +807,34 @@ export class TrellisTestRuntime implements AsyncDisposable {
     });
   }
 
+  /** Replaces the browser WebSocket endpoint and retires the prior listener. */
+  async rotateWebsocketProxy(): Promise<[string, string]> {
+    if (
+      this.#websocketProxy === undefined || this.#config === undefined ||
+      this.#configPath === undefined
+    ) {
+      throw new Error("Runtime was not started with rotatableWebsocketProxy");
+    }
+    const retired = this.#websocketProxy;
+    const replacement = TcpProxy.start(this.#nats.websocketUrl);
+    this.#config.client.natsServers = [replacement.url];
+    this.#config.web.allowInsecureOrigins = [
+      ...this.#config.web.allowInsecureOrigins.filter((origin) =>
+        origin !== retired.url
+      ),
+      replacement.url,
+    ];
+    await writeTrellisConfig({
+      workdir: this.workdir,
+      config: this.#config,
+      configPath: this.#configPath,
+    });
+    await this.restartControlPlane();
+    this.#websocketProxy = replacement;
+    retired.stop();
+    return [retired.url, replacement.url];
+  }
+
   /** Returns a service-owned SQLite path under this runtime workdir. */
   async tempSqlitePath(name = "test.sqlite"): Promise<string> {
     const dir = join(this.workdir, "sqlite");
@@ -762,6 +876,7 @@ export class TrellisTestRuntime implements AsyncDisposable {
     } catch (error) {
       failures.push(error);
     }
+    this.#websocketProxy?.stop();
     try {
       await this.#nats.stop();
     } catch (error) {

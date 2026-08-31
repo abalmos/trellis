@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { ulid } from "ulid";
   import { isErr } from "@qlever-llc/result";
   import { resolve } from "$app/paths";
   import { onMount } from "svelte";
@@ -71,7 +72,7 @@
       const response = await trellis.authPortalsRemove({
         portalId: portal.portalId,
         expectedVersion: portal.version,
-        idempotencyKey: crypto.randomUUID(),
+        idempotencyKey: ulid(),
       }).take();
       if (isErr(response)) {
         error = errorMessage(response);

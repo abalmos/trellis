@@ -14,6 +14,7 @@
  */
 import { dirname, join } from "@std/path";
 import { gunzipSync, unzipSync } from "fflate";
+import { ulid } from "ulid";
 import natsBinaries from "../../../../conformance/nats-binaries.json" with {
   type: "json",
 };
@@ -347,7 +348,7 @@ async function ensureBinary(
   }
   const tempPath = join(
     cacheDir,
-    `${asset.fileName}.${crypto.randomUUID()}.tmp`,
+    `${asset.fileName}.${ulid()}.tmp`,
   );
   await Deno.writeFile(tempPath, freshBinary);
   try {
@@ -379,7 +380,7 @@ async function downloadArchive(
   await verifySha256(archive, asset.sha256);
   const tempPath = join(
     dirname(archivePath),
-    `${asset.fileName}.archive.${crypto.randomUUID()}.tmp`,
+    `${asset.fileName}.archive.${ulid()}.tmp`,
   );
   await Deno.writeFile(tempPath, archive);
   try {

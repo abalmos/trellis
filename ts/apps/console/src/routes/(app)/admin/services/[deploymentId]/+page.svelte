@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { ulid } from "ulid";
   import { isErr, type BaseError, type Result } from "@qlever-llc/result";
   import type { DeploymentAuthority, DeploymentAuthorityMaterialization, DeploymentAuthorityPlan } from "@qlever-llc/trellis/auth";
   import type {
@@ -154,7 +155,7 @@
       if (isErr(current)) { error = errorMessage(current); return; }
       const accepted = current.entries.find((entry) => entry.deploymentId === authority.deploymentId);
       if (!accepted) { error = "Deployment authority not found."; return; }
-      const response = await trellis.authDeploymentAuthorityReconcile({ authorityId: accepted.authorityId, expectedVersion: accepted.version, idempotencyKey: crypto.randomUUID() }).take();
+      const response = await trellis.authDeploymentAuthorityReconcile({ authorityId: accepted.authorityId, expectedVersion: accepted.version, idempotencyKey: ulid() }).take();
       if (isErr(response)) { error = errorMessage(response); return; }
       detail = {
         authority,
