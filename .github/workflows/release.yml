@@ -710,10 +710,10 @@ jobs:
 
   publish-crates:
     name: Publish Rust crates
-    if: always() && needs.prepare-release.outputs.should-publish == 'true' && needs.release-gate.result == 'success'
+    if: always() && needs.prepare-release.outputs.should-publish == 'true' && needs.github-release.result == 'success'
     needs:
       - prepare-release
-      - release-gate
+      - github-release
     runs-on: [self-hosted, Linux, X64]
     permissions:
       contents: read
@@ -852,11 +852,10 @@ jobs:
 
   publish-apis:
     name: Publish canonical APIs
-    if: always() && needs.prepare-release.outputs.should-publish == 'true' && needs.release-gate.result == 'success' && needs.github-release.result == 'success'
+    if: always() && needs.prepare-release.outputs.should-publish == 'true' && needs.release-gate.result == 'success'
     needs:
       - prepare-release
       - release-gate
-      - github-release
     runs-on: [self-hosted, Linux, X64]
     permissions:
       contents: read

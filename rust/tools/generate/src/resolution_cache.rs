@@ -839,17 +839,13 @@ fn resolve_local_typescript_specifier(
 }
 
 fn is_generated_sdk_path(path: &Path) -> bool {
-    let mut components = path
+    let components = path
         .components()
-        .filter_map(|component| component.as_os_str().to_str());
-    while let Some(component) = components.next() {
-        if component == "generated"
-            || (component == "sdk" && components.next() == Some("_generated"))
-        {
-            return true;
-        }
-    }
-    false
+        .filter_map(|component| component.as_os_str().to_str())
+        .collect::<Vec<_>>();
+    components
+        .windows(2)
+        .any(|components| components == [".trellis", "generated"])
 }
 
 fn collect_files(
@@ -1189,6 +1185,24 @@ mod tests {
             "export const value = 2;\n",
         )
         .unwrap();
+
+        assert!(!snapshot_is_current(&mut snapshot).0);
+    }
+
+    #[test]
+    fn typescript_generated_source_directory_changes_invalidate_snapshot() {
+        let root = tempfile::tempdir().unwrap();
+        let generated = root.path().join("src/generated");
+        fs::create_dir_all(&generated).unwrap();
+        fs::write(
+            root.path().join("contract.ts"),
+            "import './src/generated/schema.ts';\n",
+        )
+        .unwrap();
+        let schema = generated.join("schema.ts");
+        fs::write(&schema, "export const value = 1;\n").unwrap();
+        let mut snapshot = snapshot(&typescript_contract(root.path())).unwrap();
+        fs::write(&schema, "export const value = 2;\n").unwrap();
 
         assert!(!snapshot_is_current(&mut snapshot).0);
     }
