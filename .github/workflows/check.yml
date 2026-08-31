@@ -41,8 +41,6 @@ jobs:
     needs: configuration
     runs-on: [self-hosted, Linux, X64]
     timeout-minutes: 20
-    env:
-      TRELLIS_CACHE: ${{ runner.temp }}/trellis-cache
     outputs:
       current: ${{ steps.current.outputs.current }}
     steps:
@@ -76,7 +74,7 @@ jobs:
           key: cargo-${{ steps.rust.outputs.cachekey }}-${{ runner.os }}-${{ runner.arch }}-install-dev-locked-${{ hashFiles('rust/**/Cargo.toml', 'rust/**/Cargo.lock', '.cargo/config.toml', 'rust/.cargo/config.toml') }}
 
       - name: Install generated artifacts
-        run: rm -rf "$TRELLIS_CACHE" && cargo xtask install
+        run: rm -rf "$RUNNER_TEMP/trellis-cache" && TRELLIS_CACHE="$RUNNER_TEMP/trellis-cache" cargo xtask install
 
       - name: Inspect generated artifact drift
         id: current

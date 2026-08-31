@@ -20,8 +20,6 @@ concurrency:
 jobs:
   build:
     runs-on: [self-hosted, Linux, X64]
-    env:
-      TRELLIS_CACHE: ${{ runner.temp }}/trellis-cache
     steps:
       - uses: actions/checkout@v4
         with:
@@ -82,7 +80,7 @@ jobs:
 
           install_apis() {
             local repo_root="$1"
-            (cd "${repo_root}" && rm -rf "$TRELLIS_CACHE" && cargo xtask install)
+            (cd "${repo_root}" && rm -rf "$RUNNER_TEMP/trellis-cache" && TRELLIS_CACHE="$RUNNER_TEMP/trellis-cache" cargo xtask install)
           }
 
           build_docs() {

@@ -115,8 +115,6 @@ jobs:
     name: Prepare release workspace
     needs: resolve-release
     runs-on: [self-hosted, Linux, X64]
-    env:
-      TRELLIS_CACHE: ${{ runner.temp }}/trellis-cache
     outputs:
       release-tag: ${{ steps.release.outputs.tag }}
       release-version: ${{ steps.release.outputs.version }}
@@ -156,7 +154,7 @@ jobs:
         run: time cargo run --manifest-path xtask/Cargo.toml -- release prepare --tag "${RELEASE_TAG}"
 
       - name: Install release API dependencies
-        run: rm -rf "$TRELLIS_CACHE" && time cargo xtask install
+        run: rm -rf "$RUNNER_TEMP/trellis-cache" && TRELLIS_CACHE="$RUNNER_TEMP/trellis-cache" time cargo xtask install
 
       - name: Build protocol WASM
         run: time cargo run --manifest-path rust/xtask/Cargo.toml -- protocol-wasm
@@ -860,8 +858,6 @@ jobs:
       - release-gate
       - github-release
     runs-on: [self-hosted, Linux, X64]
-    env:
-      TRELLIS_CACHE: ${{ runner.temp }}/trellis-cache
     permissions:
       contents: read
       packages: write
@@ -891,7 +887,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          rm -rf "$TRELLIS_CACHE"
+          rm -rf "$RUNNER_TEMP/trellis-cache"
+          export TRELLIS_CACHE="$RUNNER_TEMP/trellis-cache"
           cargo build --manifest-path rust/Cargo.toml --locked --package trellis-cli
           trellis="$GITHUB_WORKSPACE/rust/target/debug/trellis"
           for project in \
