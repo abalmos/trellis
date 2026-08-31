@@ -14,7 +14,10 @@ use trellis_rs::auth::{
     wait_for_device_activation, DeviceActivationOptions, DeviceActivationStatus,
 };
 use trellis_rs::client::OperationState as ClientOperationState;
-use trellis_rs::client::{EventDescriptor, MemoryAuthorizationContextStore, RpcDescriptor};
+use trellis_rs::client::{
+    AuthorizationContextStore as _, EventDescriptor, FileAuthorizationContextStore,
+    MemoryAuthorizationContextStore, RpcDescriptor,
+};
 use trellis_rs::generated::Caller;
 use trellis_rs::service::{
     ConnectedServiceRuntime, ServiceEventListenOptions, ServiceEventListenerMode,
@@ -818,6 +821,93 @@ async fn sessions_logout_revokes_session_and_cleans_connections() {
     );
     drop(client);
     wait_for_reconnect_denied(&reconnect).await;
+}
+
+#[tokio::test]
+async fn cli_logout_then_login_replaces_persisted_session_and_retains_trust_floor() {
+    assert_runtime_case_registered(
+        "auth.cli-logout-new-login-retains-trust-floor",
+        "auth",
+        "auth",
+    );
+    let config = std::env::temp_dir().join(format!("trellis-cli-auth-{}", ulid::Ulid::new()));
+    std::fs::create_dir_all(&config).expect("create isolated CLI config");
+    std::env::set_var("XDG_CONFIG_HOME", &config);
+    let store = Arc::new(FileAuthorizationContextStore::new(
+        config.join("trellis/authorization-context.json"),
+    ));
+    let mut fixture = start_fixture(None, false).await;
+    let username = "cli-logout-login-user";
+    let password = "cli-logout-login-password-123";
+    let (first_client, first_reconnect) = fixture
+        .admin
+        .connect_new_trusted_local_user_reconnectable(
+            &fixture.bootstrap_url,
+            &fixture.client_contract,
+            &fixture.portal_id,
+            username,
+            password,
+            vec![fixture.read_capability.clone()],
+        )
+        .await
+        .expect("complete first CLI-style login");
+    store
+        .commit(
+            first_reconnect
+                .authorization_state()
+                .expect("load first authorization state")
+                .expect("first authorization state"),
+        )
+        .expect("persist first authorization state");
+    call_value(&first_client, "session-a")
+        .await
+        .expect("call through session A");
+    let first_session_id = first_reconnect.session_id().to_owned();
+
+    let _ = auth_sdk::AuthClient::new(&first_client)
+        .rpc()
+        .auth()
+        .sessions_logout()
+        .await;
+    trellis_rs::auth::clear_admin_session().expect("clear CLI session");
+    let retained = store
+        .load()
+        .expect("load retained trust")
+        .expect("retained trust state");
+    assert!(retained.context.is_none());
+    assert!(retained.routing.is_none());
+    wait_for_reconnect_denied(&first_reconnect).await;
+    drop(first_client);
+
+    let (second_bootstrap_client, second_reconnect) = fixture
+        .admin
+        .connect_local_user_for_portal_reconnectable(
+            &fixture.bootstrap_url,
+            &fixture.client_contract,
+            username,
+            password,
+        )
+        .await
+        .expect("complete second login");
+    drop(second_bootstrap_client);
+    assert_ne!(second_reconnect.session_id(), first_session_id);
+    let second_client = second_reconnect
+        .connect_bound_with_store(store.clone())
+        .await
+        .expect("connect session B through retained file store");
+    call_value(&second_client, "session-b")
+        .await
+        .expect("call through session B");
+    let replaced = store
+        .load()
+        .expect("load replaced session")
+        .expect("replaced authorization state");
+    assert_eq!(replaced.runtime.session_id, second_reconnect.session_id());
+    assert_eq!(replaced.trust.root_key_id, retained.trust.root_key_id);
+    assert_eq!(replaced.trust.root_digest, retained.trust.root_digest);
+    assert!(
+        replaced.trust.minimum_manifest_generation >= retained.trust.minimum_manifest_generation
+    );
 }
 
 #[tokio::test]

@@ -3613,6 +3613,14 @@ impl TrellisTestClientReconnect {
         .await
     }
 
+    /// Reconnect the bound session through a caller-supplied durable authorization store.
+    pub async fn connect_bound_with_store(
+        &self,
+        store: Arc<dyn trellis_rs::client::AuthorizationContextStore>,
+    ) -> Result<Caller, TrellisTestError> {
+        connect_bound_user(&self.bound, &self.session_seed, store, true).await
+    }
+
     /// Attempt one raw NATS admission with captured routing material and no context refresh.
     pub async fn connect_captured_admission(
         &self,
@@ -4358,14 +4366,19 @@ async fn bind_flow(
 async fn connect_bound_user(
     bound: &BoundFlowSession,
     session_seed: &str,
-    authorization_context_store: Arc<trellis_rs::client::MemoryAuthorizationContextStore>,
+    authorization_context_store: Arc<dyn trellis_rs::client::AuthorizationContextStore>,
     refresh_before_connect: bool,
 ) -> Result<Caller, TrellisTestError> {
     let _ = bound.expires_at;
-    let initial =
-        trellis_rs::client::AuthorizationContextStore::load(authorization_context_store.as_ref())?
-            .is_none()
-            .then(|| bound.installation.clone());
+    let initial = match trellis_rs::client::AuthorizationContextStore::load(
+        authorization_context_store.as_ref(),
+    )? {
+        None => Some(bound.installation.clone()),
+        Some(state) if state.context.is_none() && state.routing.is_none() => {
+            Some(bound.installation.clone())
+        }
+        Some(_) => None,
+    };
     let options = UserConnectOptions::new(
         &bound.trellis_url,
         DEFAULT_ADMIN_RPC_TIMEOUT_MS,

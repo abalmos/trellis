@@ -1429,6 +1429,47 @@
       }
     },
     {
+      "id": "auth.cli-logout-new-login-retains-trust-floor",
+      "fixture": "auth",
+      "title": "CLI logout permits a new persisted session without resetting trust",
+      "coverage": [
+        "auth-protocol-matrix",
+        "cross-runtime-rpc"
+      ],
+      "description": "A native client persists session A through the CLI file store, logs out and clears its context, proves A cannot reconnect, then logs in as session B through the same retained trust floor and completes an authenticated RPC.",
+      "scenario": {
+        "participants": [
+          {
+            "name": "client",
+            "kind": "app",
+            "contract": "trellis.integration.auth-local-login-client@v1"
+          }
+        ],
+        "given": [
+          "session A and its authorization state are persisted in the real CLI file store"
+        ],
+        "when": [
+          "the client logs out, clears the CLI session, and logs in again as session B"
+        ],
+        "then": [
+          "session A cannot reconnect",
+          "session B completes an authenticated RPC through the same file store",
+          "the pinned trust root and manifest floor are retained"
+        ]
+      },
+      "completion": {
+        "rust": "implemented"
+      },
+      "classification": "isolated-process",
+      "isolationReason": "mutates XDG_CONFIG_HOME to exercise the real CLI authorization-context path",
+      "implementations": {
+        "rust": {
+          "module": "auth",
+          "function": "cli_logout_then_login_replaces_persisted_session_and_retains_trust_floor"
+        }
+      }
+    },
+    {
       "id": "auth.sessions-list-and-connections-list-report-participant-metadata",
       "fixture": "auth",
       "title": "Auth list RPCs report participant metadata",

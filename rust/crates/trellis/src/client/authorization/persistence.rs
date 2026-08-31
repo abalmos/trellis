@@ -218,7 +218,8 @@ pub(crate) fn validate_client_state_transition(
             "authorization trust root changed".into(),
         ));
     }
-    if current.runtime.session_id != next.runtime.session_id
+    if (current.runtime.session_id != next.runtime.session_id
+        && (current.context.is_some() || current.routing.is_some()))
         || current.runtime.participant_id != next.runtime.participant_id
         || current.runtime.participant_digest != next.runtime.participant_digest
         || current.runtime.needs_digest != next.runtime.needs_digest
@@ -311,5 +312,26 @@ mod tests {
         rebound.binding = "device:other".into();
         assert!(reopened.commit(rebound).is_err());
         reopened.reset_trust().expect("remove test store");
+    }
+
+    #[test]
+    fn file_store_accepts_new_session_after_context_clear_without_resetting_trust() {
+        let path = std::env::temp_dir().join(format!(
+            "trellis-authorization-context-{}.json",
+            ulid::Ulid::new()
+        ));
+        let store = FileAuthorizationContextStore::new(&path);
+        let first = test_state(8, "manifest-8");
+        store.commit(first.clone()).expect("commit first session");
+        store.clear_context().expect("clear first session context");
+
+        let mut second = first;
+        second.runtime.session_id = "session-2".into();
+        store.commit(second).expect("commit replacement session");
+        let persisted = store.load().expect("load replacement").expect("state");
+        assert_eq!(persisted.runtime.session_id, "session-2");
+        assert_eq!(persisted.trust.root_digest, "root-digest");
+        assert_eq!(persisted.trust.minimum_manifest_generation, 8);
+        store.reset_trust().expect("remove test store");
     }
 }

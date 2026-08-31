@@ -7,6 +7,7 @@ use serde_json::{json, Value};
 use std::collections::BTreeMap;
 use trellis_rs::auth as authlib;
 use trellis_runtime_apis::auth::{types as auth_types, AuthClient};
+use ulid::Ulid;
 
 pub(crate) fn render_agent_login_instructions(login_url: &str) -> miette::Result<String> {
     let qr = QrCode::new(login_url.as_bytes()).into_diagnostic()?;
@@ -102,11 +103,7 @@ fn trimmed_optional(value: &Option<String>) -> Option<String> {
 }
 
 fn cli_idempotency_key() -> String {
-    let nanos = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_nanos();
-    format!("cli_{nanos:x}")
+    Ulid::new().to_string()
 }
 
 fn identity_labels(identities: &[Value]) -> String {

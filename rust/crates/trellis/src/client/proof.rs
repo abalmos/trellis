@@ -1,4 +1,3 @@
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
@@ -7,8 +6,6 @@ use ed25519_dalek::{Signature, Verifier as _, VerifyingKey};
 use sha2::{Digest, Sha256};
 
 use crate::client::TrellisClientError;
-
-static REQUEST_COUNTER: AtomicU64 = AtomicU64::new(1);
 
 #[doc = concat!("Trellis API operation `", stringify!(sha256), "`.")]
 pub fn sha256(bytes: &[u8]) -> [u8; 32] {
@@ -38,12 +35,7 @@ pub fn now_iat_seconds() -> u64 {
 
 #[doc = concat!("Trellis API operation `", stringify!(new_request_id), "`.")]
 pub fn new_request_id() -> String {
-    let nanos = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_nanos();
-    let sequence = REQUEST_COUNTER.fetch_add(1, Ordering::Relaxed);
-    format!("req_{nanos:x}_{sequence:x}")
+    ulid::Ulid::new().to_string()
 }
 
 /// Verify a context-bound v1 event proof against the raw published values.

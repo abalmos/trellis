@@ -1216,11 +1216,7 @@ fn build_device_metadata(
 }
 
 fn cli_idempotency_key() -> String {
-    let nanos = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_nanos();
-    format!("cli_{nanos:x}")
+    ulid::Ulid::new().to_string()
 }
 
 fn parse_optional_version(value: Option<&str>) -> miette::Result<Option<i64>> {

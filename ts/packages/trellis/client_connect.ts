@@ -304,13 +304,15 @@ function selectClientRuntimeTransportServers(
     if (transports.websocket?.natsServers?.length) {
       return transports.websocket.natsServers;
     }
-  } else {
-    if (transports.native?.natsServers?.length) {
-      return transports.native.natsServers;
-    }
+    throw new Error(
+      "Browser authorization runtime has no WebSocket NATS endpoints",
+    );
+  }
+  if (transports.native?.natsServers?.length) {
+    return transports.native.natsServers;
   }
 
-  throw new Error("No supported NATS transport endpoints available");
+  throw new Error("Authorization runtime has no native NATS endpoints");
 }
 
 const defaultDeps: ClientConnectDeps = {
@@ -1158,7 +1160,14 @@ export async function connectClientWithDeps<
     sessionId: runtimeState.sessionId,
     auth: identity.auth,
     cache: authorizationContexts,
-    onRefresh: () => nc.reconnect(),
+    onRefresh: () => {
+      nc.setServers(
+        selectClientRuntimeTransportServers(
+          authorizationContexts.runtimeBinding().transports,
+        ),
+      );
+      return nc.reconnect();
+    },
     onTerminalFailure: async () => {
       if (!nc.isClosed()) await nc.drain();
     },
