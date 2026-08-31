@@ -42,7 +42,6 @@ env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
   NODE_VERSION: 24
   REGISTRY: ghcr.io
-  TRELLIS_CACHE: ${{ runner.temp }}/trellis-cache
 
 jobs:
   resolve-release:
@@ -116,6 +115,8 @@ jobs:
     name: Prepare release workspace
     needs: resolve-release
     runs-on: [self-hosted, Linux, X64]
+    env:
+      TRELLIS_CACHE: ${{ runner.temp }}/trellis-cache
     outputs:
       release-tag: ${{ steps.release.outputs.tag }}
       release-version: ${{ steps.release.outputs.version }}
@@ -859,6 +860,8 @@ jobs:
       - release-gate
       - github-release
     runs-on: [self-hosted, Linux, X64]
+    env:
+      TRELLIS_CACHE: ${{ runner.temp }}/trellis-cache
     permissions:
       contents: read
       packages: write

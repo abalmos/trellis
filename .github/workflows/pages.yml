@@ -1,8 +1,5 @@
 name: Deploy Site to GitHub Pages
 
-env:
-  TRELLIS_CACHE: ${{ runner.temp }}/trellis-cache
-
 on:
   push:
     branches: [main]
@@ -23,6 +20,8 @@ concurrency:
 jobs:
   build:
     runs-on: [self-hosted, Linux, X64]
+    env:
+      TRELLIS_CACHE: ${{ runner.temp }}/trellis-cache
     steps:
       - uses: actions/checkout@v4
         with:
