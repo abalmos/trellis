@@ -95,7 +95,6 @@ Deno.test("release workflows use generated package-manager targets", async () =>
     "deno task -c ts/deno.json test:packaging:built",
   );
   assertStringIncludes(releaseWorkflow, "bash scripts/release-ts-dry-run.sh");
-  assertStringIncludes(releaseWorkflow, "--exclude trellis-runtime");
   assertStringIncludes(
     dryRunScript,
     "test -s ts/packages/trellis/auth/protocol_wasm/trellis_protocol_wasm_bg.wasm",

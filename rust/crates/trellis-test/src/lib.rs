@@ -4210,12 +4210,22 @@ async fn bind_flow(
         },
     )?;
     raw["proof"] = serde_json::to_value(auth.sign_session_proof(&input)?)?;
-    let response: CompletedFlowSession = post_json_with_origin(
-        &format!("{}/auth/flow/{}/bind", trim_url(trellis_url), flow_id),
-        trellis_url,
-        &raw,
-    )
-    .await?;
+    let bind_url = format!("{}/auth/flow/{}/bind", trim_url(trellis_url), flow_id);
+    let response = loop {
+        match post_json_with_origin::<CompletedFlowSession, _>(&bind_url, trellis_url, &raw).await {
+            Err(TrellisTestError::HttpStatus {
+                status: 503, body, ..
+            }) if serde_json::from_str::<serde_json::Value>(&body)
+                .ok()
+                .and_then(|value| value.pointer("/error/code")?.as_str().map(str::to_owned))
+                .as_deref()
+                == Some("authorization_pending") =>
+            {
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
+            result => break result?,
+        }
+    };
     let servers = response
         .nats
         .transports

@@ -4811,7 +4811,10 @@ mod tests {
             .arg("--quiet")
             .env(
                 "CARGO_TARGET_DIR",
-                PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target"),
+                manifest_path
+                    .parent()
+                    .expect("generated crate root")
+                    .join("target"),
             )
             .output()
             .expect("run cargo check");

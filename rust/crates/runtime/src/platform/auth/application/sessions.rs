@@ -94,6 +94,10 @@ where
                 session.session_id.clone_from(&previous.session_id);
                 session.inbox_prefix.clone_from(&previous.inbox_prefix);
                 session.created_at = previous.created_at;
+                session.last_seen_at = session
+                    .last_seen_at
+                    .max(previous.last_seen_at)
+                    .max(previous.created_at);
                 session.version = previous.version.checked_add(1).ok_or_else(|| {
                     AuthorizationStateError::Storage("session version overflow".to_owned())
                 })?;
@@ -143,7 +147,7 @@ where
         if let Some(binding) = &runtime_binding {
             super::super::authority::validate_session_runtime_binding(binding)?;
         }
-        input.idempotency.result = json!({ "sessionId": session_id });
+        input.idempotency.result = json!({ "sessionId": &session.session_id });
         let outcome = self
             .repository
             .create_session(SessionCreation {
