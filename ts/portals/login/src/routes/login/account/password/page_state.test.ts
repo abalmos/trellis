@@ -27,6 +27,27 @@ Deno.test("password adapts reset copy", () => {
   assertEquals(passwordFlowAction("password_reset"), "Reset password");
   assertEquals(passwordFlowTitle("other"), "Set local credentials");
   assertEquals(passwordFlowAction("other"), "Save credentials");
+  assertEquals(
+    passwordFlowTitle("first_admin"),
+    "Create the first administrator",
+  );
+  assertEquals(passwordFlowAction("first_admin"), "Create administrator");
+});
+
+Deno.test("password recognizes first-admin flows", () => {
+  const state = parseAccountFlowState({
+    status: "pending",
+    flowId: "flow-1",
+    kind: "first_admin",
+    allowedProviders: null,
+    expiresAt: 4_102_444_800_000,
+  });
+
+  assertEquals(state.status, "active");
+  if (state.status === "active") {
+    assertEquals(isExpectedPasswordFlow(state), true);
+    assertEquals(hasLocalProvider(state), false);
+  }
 });
 
 Deno.test("password recognizes reset flows", () => {
