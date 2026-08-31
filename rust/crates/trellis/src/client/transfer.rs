@@ -335,10 +335,11 @@ where
             .inbox(reply)
             .headers(headers)
             .payload(Bytes::copy_from_slice(chunk));
+        let nats = client.nats();
         let response = {
             let request = tokio::time::timeout(
                 Duration::from_millis(client.timeout_ms()),
-                client.nats().send_request(grant.subject.clone(), request),
+                nats.send_request(grant.subject.clone(), request),
             );
             tokio::pin!(request);
             if let Some(cancellation) = cancellation {
@@ -561,7 +562,8 @@ where
             .inbox(reply)
             .headers(headers)
             .payload(Bytes::new());
-        let response = client.nats().send_request(grant.subject.clone(), request);
+        let nats = client.nats();
+        let response = nats.send_request(grant.subject.clone(), request);
         let message = if let Some(cancellation) = cancellation {
             tokio::select! {
                 biased;

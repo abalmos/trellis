@@ -74,6 +74,26 @@ impl Caller {
         self.client.integration_test_authorization_context_digest()
     }
 
+    /// Refresh and return the installed native runtime binding for live tests.
+    #[cfg(feature = "test-support")]
+    #[doc(hidden)]
+    pub async fn integration_test_refresh_authorization_context(
+        &self,
+    ) -> Result<crate::client::AuthorizationRuntimeBinding, crate::client::TrellisClientError> {
+        self.client
+            .integration_test_refresh_authorization_context()
+            .await
+    }
+
+    /// Close the installed native connection for persisted reconnect tests.
+    #[cfg(feature = "test-support")]
+    #[doc(hidden)]
+    pub async fn integration_test_close_native_connection(
+        &self,
+    ) -> Result<(), crate::client::TrellisClientError> {
+        self.client.integration_test_close_native_connection().await
+    }
+
     /// Connect a user-authenticated generated participant.
     #[doc(hidden)]
     pub async fn connect_user(

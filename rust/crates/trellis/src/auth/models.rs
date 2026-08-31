@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 use super::AuthenticatedUser;
-use crate::client::{AuthorizationContextBundle, SessionAuth};
+use crate::client::{AuthorizationContextBundle, AuthorizationInstallation, SessionAuth};
 
 /// Persisted admin session details for the CLI.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -10,60 +10,38 @@ pub struct AdminSessionState {
     /// Base URL for the Trellis deployment.
     #[doc = concat!("The `", stringify!(trellis_url), "` value.")]
     pub trellis_url: String,
-    /// Comma-separated runtime server list returned by Trellis.
-    pub nats_servers: String,
     /// Session-key seed used to sign subsequent Trellis requests.
     #[doc = concat!("The `", stringify!(session_seed), "` value.")]
     pub session_seed: String,
-    /// Public session key derived from `session_seed`.
-    #[doc = concat!("The `", stringify!(session_key), "` value.")]
-    pub session_key: String,
-    /// Exact administration participant artifact digest.
-    #[doc = concat!("The `", stringify!(participant_digest), "` value.")]
-    pub participant_digest: String,
-    /// Durable Trellis session identifier.
-    #[doc = concat!("The `", stringify!(session_id), "` value.")]
-    pub session_id: String,
-    /// NATS reply-inbox prefix authorized for this session.
-    #[doc = concat!("The `", stringify!(inbox_prefix), "` value.")]
-    pub inbox_prefix: String,
-    /// Deny-all Auth-account JWT used to enter NATS Auth Callout.
-    #[doc = concat!("The `", stringify!(bootstrap_jwt), "` value.")]
-    pub bootstrap_jwt: String,
-    /// Signed authorization context and minimal trust metadata for reconnect and refresh.
-    pub authorization_context: AuthorizationContextBundle,
     /// Session expiry in Unix milliseconds, when bounded.
     #[doc = concat!("The `", stringify!(expires_at), "` value.")]
     pub expires_at: Option<i64>,
+}
+
+impl AdminSessionState {
+    /// Derive the public session key from the persisted private seed.
+    pub fn session_key(&self) -> Result<String, crate::client::TrellisClientError> {
+        Ok(crate::client::SessionAuth::from_seed_base64url(&self.session_seed)?.session_key)
+    }
 }
 
 /// A successfully bound user session.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[doc = concat!("Public Trellis data type `", stringify!(BoundSession), "`.")]
 pub struct BoundSession {
-    /// Inbox prefix authorized for the bound session.
-    #[serde(rename = "inboxPrefix")]
-    #[doc = concat!("The `", stringify!(inbox_prefix), "` value.")]
-    pub inbox_prefix: String,
-    /// Durable Trellis session identifier.
-    #[doc = concat!("The `", stringify!(session_id), "` value.")]
-    pub session_id: String,
     /// Session expiry in Unix milliseconds, when bounded.
     #[doc = concat!("The `", stringify!(expires_at), "` value.")]
     pub expires_at: Option<i64>,
-    /// Comma-separated native transport endpoints for the session.
-    pub nats_servers: String,
-    /// Deny-all Auth-account JWT used to enter NATS Auth Callout.
-    #[doc = concat!("The `", stringify!(bootstrap_jwt), "` value.")]
-    pub bootstrap_jwt: String,
-    /// Signed authorization context and minimal trust metadata.
-    pub authorization_context: AuthorizationContextBundle,
+    /// Complete initial runtime/authorization installation.
+    pub installation: AuthorizationInstallation,
 }
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 #[doc = concat!("Public Trellis data type `", stringify!(BindResponseBound), "`.")]
 pub struct BindResponseBound {
+    /// Server time in Unix milliseconds.
+    pub server_now: i64,
     #[doc = concat!("The `", stringify!(session), "` value.")]
     pub session: BoundSessionRecord,
     #[doc = concat!("The `", stringify!(nats), "` value.")]
@@ -85,10 +63,13 @@ pub struct BoundSessionRecord {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
 #[doc = concat!("Public Trellis data type `", stringify!(BoundNatsRecord), "`.")]
 pub struct BoundNatsRecord {
     #[doc = concat!("The `", stringify!(jwt), "` value.")]
     pub jwt: String,
+    /// JWT expiry as Unix seconds.
+    pub jwt_expires_at: i64,
     /// Typed native and WebSocket transport endpoints.
     pub transports: BoundNatsTransports,
 }

@@ -13,8 +13,12 @@ use super::super::TrellisClientError;
 use super::bootstrap_http::{persisted_signed_context, BootstrapHttp};
 use super::types::{
     AuthorizationClientState, AuthorizationClientTrustState, AuthorizationContextBundle,
-    AuthorizationContextStore, AuthorizationRoutingMaterial, AuthorizationSessionBinding,
+    AuthorizationContextStore, AuthorizationInstallation, AuthorizationRuntimeBinding,
     CachedAuthorizationState, CurrentContext, AUTHORIZATION_CLIENT_STATE_FORMAT_,
+};
+#[cfg(test)]
+use super::types::{
+    AuthorizationNativeTransport, AuthorizationRoutingMaterial, AuthorizationRuntimeTransports,
 };
 
 /// Verified process-local own authorization context used by reconnect callbacks.
@@ -94,19 +98,26 @@ impl AuthorizationContextCache {
                     .map_err(|_| {
                         TrellisClientError::Bootstrap("context cache lock poisoned".into())
                     })?
-                    .session = Some(state.session);
+                    .runtime = Some(state.runtime);
                 return Ok(false);
             }
         }
-        let (bundle, routing) = match (state.context, state.routing) {
-            (Some(bundle), Some(routing)) => (bundle, routing),
+        let installation = match (state.context, state.routing) {
+            (Some(context), Some(routing)) => AuthorizationInstallation {
+                context,
+                routing,
+                runtime: state.runtime,
+                server_clock_offset_ms: state.server_clock_offset_ms,
+            },
             (None, None) => {
+                self.clock_offset_ms
+                    .store(state.server_clock_offset_ms, Ordering::Relaxed);
                 self.state
                     .write()
                     .map_err(|_| {
                         TrellisClientError::Bootstrap("context cache lock poisoned".into())
                     })?
-                    .session = Some(state.session);
+                    .runtime = Some(state.runtime);
                 return Ok(false);
             }
             _ => {
@@ -115,26 +126,24 @@ impl AuthorizationContextCache {
                 ));
             }
         };
-        self.install_recoverable_locked(bundle, routing, now_unix_seconds)
+        self.install_recoverable_locked(installation, now_unix_seconds)
     }
 
     pub(crate) async fn install_recoverable(
         &self,
-        bundle: AuthorizationContextBundle,
-        routing: AuthorizationRoutingMaterial,
+        installation: AuthorizationInstallation,
         now_unix_seconds: i64,
     ) -> Result<bool, TrellisClientError> {
         let _update = self.lock_update()?;
-        self.install_recoverable_locked(bundle, routing, now_unix_seconds)
+        self.install_recoverable_locked(installation, now_unix_seconds)
     }
 
     fn install_recoverable_locked(
         &self,
-        bundle: AuthorizationContextBundle,
-        routing: AuthorizationRoutingMaterial,
+        installation: AuthorizationInstallation,
         now_unix_seconds: i64,
     ) -> Result<bool, TrellisClientError> {
-        let signed = persisted_signed_context(&bundle)?;
+        let signed = persisted_signed_context(&installation.context)?;
         let verification_now = if signed.unsigned.expires_at <= now_unix_seconds {
             signed
                 .unsigned
@@ -144,9 +153,9 @@ impl AuthorizationContextCache {
         } else {
             now_unix_seconds
         };
-        self.install_locked(bundle, routing.clone(), verification_now)?;
-        if signed.unsigned.expires_at <= now_unix_seconds
-            || routing.bootstrap_jwt_expires_at <= now_unix_seconds
+        let routing_expires_at = installation.routing.bootstrap_jwt_expires_at;
+        self.install_locked(installation, verification_now)?;
+        if signed.unsigned.expires_at <= now_unix_seconds || routing_expires_at <= now_unix_seconds
         {
             self.clear_locked()?;
             return Ok(false);
@@ -157,20 +166,24 @@ impl AuthorizationContextCache {
     /// Fetch and verify the complete trust chain before replacing the current context.
     pub async fn install(
         &self,
-        bundle: AuthorizationContextBundle,
-        routing: AuthorizationRoutingMaterial,
+        installation: AuthorizationInstallation,
         now_unix_seconds: i64,
     ) -> Result<(), TrellisClientError> {
         let _update = self.lock_update()?;
-        self.install_locked(bundle, routing, now_unix_seconds)
+        self.install_locked(installation, now_unix_seconds)
     }
 
     fn install_locked(
         &self,
-        bundle: AuthorizationContextBundle,
-        routing: AuthorizationRoutingMaterial,
+        installation: AuthorizationInstallation,
         now_unix_seconds: i64,
     ) -> Result<(), TrellisClientError> {
+        let AuthorizationInstallation {
+            context: bundle,
+            routing,
+            runtime,
+            server_clock_offset_ms,
+        } = installation;
         let durable = self.store.load()?;
         if durable
             .as_ref()
@@ -228,6 +241,23 @@ impl AuthorizationContextCache {
                 "authorization routing material is expired or empty".into(),
             ));
         }
+        if runtime.session_id != context.session_id
+            || runtime.participant_id != context.participant.id
+            || runtime.participant_digest != context.participant.artifact_digest
+            || runtime.needs_digest != context.participant.needs_digest
+            || runtime.inbox_prefix.trim().is_empty()
+            || runtime.transports.native.nats_servers.is_empty()
+            || runtime
+                .transports
+                .native
+                .nats_servers
+                .iter()
+                .any(|server| server.trim().is_empty())
+        {
+            return Err(TrellisClientError::Bootstrap(
+                "authorization runtime binding mismatch or empty native transport".into(),
+            ));
+        }
         let session_id = context.session_id.clone();
         let participant_artifact_digest = context.participant.artifact_digest.clone();
         let participant_needs_digest = context.participant.needs_digest.clone();
@@ -250,18 +280,14 @@ impl AuthorizationContextCache {
             minimum_manifest_generation: verified_manifest.generation(),
             manifest_digest_at_minimum_generation: manifest_digest,
         };
-        let session = AuthorizationSessionBinding {
-            session_id: context.session_id.clone(),
-            participant_digest: context.participant.artifact_digest.clone(),
-            needs_digest: context.participant.needs_digest.clone(),
-        };
         let next = AuthorizationClientState {
             format: AUTHORIZATION_CLIENT_STATE_FORMAT_.into(),
             binding: self.binding.clone(),
             trust,
-            session: session.clone(),
+            runtime: runtime.clone(),
             context: Some(bundle.clone()),
             routing: Some(routing.clone()),
+            server_clock_offset_ms,
         };
         let persisted = self.store.commit(next.clone())?;
         if persisted != next {
@@ -286,9 +312,11 @@ impl AuthorizationContextCache {
             .map_err(|_| TrellisClientError::Bootstrap("context cache lock poisoned".into()))? =
             CachedAuthorizationState {
                 current: Some(current),
-                session: Some(session),
+                runtime: Some(runtime),
                 routing: Some(routing),
             };
+        self.clock_offset_ms
+            .store(server_clock_offset_ms, Ordering::Relaxed);
         Ok(())
     }
 
@@ -355,7 +383,7 @@ impl AuthorizationContextCache {
     pub async fn refresh(
         &self,
         auth: &super::super::SessionAuth,
-    ) -> Result<(), TrellisClientError> {
+    ) -> Result<bool, TrellisClientError> {
         super::refresh::refresh(self, auth).await
     }
 
@@ -452,6 +480,20 @@ impl AuthorizationContextCache {
             })
     }
 
+    pub(crate) fn runtime_binding(
+        &self,
+    ) -> Result<AuthorizationRuntimeBinding, TrellisClientError> {
+        self.state
+            .read()
+            .map_err(|_| TrellisClientError::Bootstrap("context cache lock poisoned".into()))?
+            .runtime
+            .clone()
+            .ok_or_else(|| {
+                TrellisClientError::Bootstrap("authorization runtime unavailable".into())
+            })
+    }
+
+    #[cfg(test)]
     pub(crate) fn set_server_clock_offset_ms(&self, offset_ms: i64) {
         self.clock_offset_ms.store(offset_ms, Ordering::Relaxed);
     }
@@ -585,10 +627,17 @@ pub(crate) fn inject_verified_for_test(
         expires_at,
         refresh_at,
     };
-    let session_binding = AuthorizationSessionBinding {
+    let runtime = AuthorizationRuntimeBinding {
         session_id: session_id.clone(),
+        participant_id: context.participant.id.clone(),
         participant_digest: participant_digest.clone(),
         needs_digest: needs_digest.clone(),
+        inbox_prefix: "_INBOX.test".into(),
+        transports: AuthorizationRuntimeTransports {
+            native: AuthorizationNativeTransport {
+                nats_servers: vec!["nats://localhost:4222".into()],
+            },
+        },
     };
     *cache
         .state
@@ -596,7 +645,7 @@ pub(crate) fn inject_verified_for_test(
         .map_err(|_| TrellisClientError::Bootstrap("context cache lock poisoned".into()))? =
         CachedAuthorizationState {
             current: Some(current),
-            session: Some(session_binding),
+            runtime: Some(runtime),
             routing: None,
         };
     Ok(())
@@ -664,8 +713,8 @@ mod tests {
         assert!(durable.context.is_none());
         assert!(durable.routing.is_none());
         assert_eq!(
-            cache.state_snapshot().unwrap().session,
-            Some(durable.session)
+            cache.state_snapshot().unwrap().runtime,
+            Some(durable.runtime)
         );
     }
 }

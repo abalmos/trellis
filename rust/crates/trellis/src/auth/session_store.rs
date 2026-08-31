@@ -56,6 +56,17 @@ pub fn load_admin_session() -> Result<AdminSessionState, TrellisAuthError> {
     Ok(serde_json::from_str(&state)?)
 }
 
+/// Return whether the durable administration binding matches the current participant.
+pub fn admin_session_matches_participant(
+    participant_digest: &str,
+) -> Result<bool, TrellisAuthError> {
+    Ok(
+        FileAuthorizationContextStore::new(admin_authorization_context_state_path())
+            .load()?
+            .is_some_and(|state| state.runtime.participant_digest == participant_digest),
+    )
+}
+
 /// Remove the stored admin session and related local credential files.
 #[doc = concat!("Trellis API operation `", stringify!(clear_admin_session), "`.")]
 pub fn clear_admin_session() -> Result<bool, TrellisAuthError> {

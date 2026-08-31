@@ -26,7 +26,8 @@ pub(crate) use refresh::spawn_authorization_context_refresh_task;
 pub use types::AuthorizationRegistryBinding;
 pub use types::{
     AuthorizationClientState, AuthorizationClientTrustState, AuthorizationContextBundle,
-    AuthorizationContextStore, AuthorizationRoutingMaterial, AuthorizationSessionBinding,
+    AuthorizationContextStore, AuthorizationInstallation, AuthorizationNativeTransport,
+    AuthorizationRoutingMaterial, AuthorizationRuntimeBinding, AuthorizationRuntimeTransports,
     AuthorizationTrustBundle, AuthorizationTrustPolicy,
 };
 

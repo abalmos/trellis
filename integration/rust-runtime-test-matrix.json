@@ -3851,6 +3851,41 @@
       "classification": "shared"
     },
     {
+      "id": "auth.native-refresh-persists-and-reconnects-with-rotated-endpoint",
+      "fixture": "auth",
+      "title": "Native refresh persists and reconnects with rotated endpoint",
+      "coverage": [
+        "auth",
+        "authorization-context",
+        "native-client",
+        "restart"
+      ],
+      "description": "A native user refresh atomically installs a replacement endpoint, persists it, retires the old endpoint, and reconnects successfully from durable state.",
+      "scenario": {
+        "participants": [],
+        "given": [
+          "a native user authenticated through endpoint A"
+        ],
+        "when": [
+          "the runtime restarts with endpoint B authoritative and endpoint A unavailable"
+        ],
+        "then": [
+          "refresh replaces the live connection, persists endpoint B, and a later reconnect authenticates through endpoint B"
+        ]
+      },
+      "completion": {
+        "rust": "implemented"
+      },
+      "implementations": {
+        "rust": {
+          "module": "auth",
+          "function": "native_refresh_persists_and_reconnects_with_rotated_endpoint"
+        }
+      },
+      "classification": "isolated-process",
+      "isolationReason": "rotates the runtime's authoritative NATS endpoint while preserving its durable auth state"
+    },
+    {
       "id": "auth.portal-reconciliation-a-b-a-converges",
       "fixture": "auth",
       "title": "Portal reconciliation distinguishes A to B to A transitions",

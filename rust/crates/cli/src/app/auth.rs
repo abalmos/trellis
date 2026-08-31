@@ -464,7 +464,7 @@ async fn login_command(format: OutputFormat, args: &LoginArgs) -> miette::Result
 
     if output::is_json(format) {
         let mut response = authenticated_user_json(&me);
-        response["sessionKey"] = Value::String(state.session_key);
+        response["sessionKey"] = Value::String(state.session_key().into_diagnostic()?);
         response["expiresAt"] = state.expires_at.map(Value::from).unwrap_or(Value::Null);
         output::print_json(&response)?;
     } else {
@@ -472,7 +472,10 @@ async fn login_command(format: OutputFormat, args: &LoginArgs) -> miette::Result
         output::print_info(&format!("userId={}", me.user_id));
         output::print_info(&format!("identity={}", me.principal_id));
         output::print_info(&format!("name={}", me.name.as_deref().unwrap_or("")));
-        output::print_info(&format!("sessionKey={}", state.session_key));
+        output::print_info(&format!(
+            "sessionKey={}",
+            state.session_key().into_diagnostic()?
+        ));
         output::print_info(&format!("expiresAt={:?}", state.expires_at));
     }
 
@@ -562,7 +565,7 @@ async fn status_command(format: OutputFormat) -> miette::Result<()> {
     if output::is_json(format) {
         let mut response = authenticated_user_json(&me);
         response["loggedIn"] = Value::Bool(true);
-        response["sessionKey"] = Value::String(state.session_key);
+        response["sessionKey"] = Value::String(state.session_key().into_diagnostic()?);
         response["expiresAt"] = state.expires_at.map(Value::from).unwrap_or(Value::Null);
         output::print_json(&response)?;
     } else {
@@ -570,7 +573,10 @@ async fn status_command(format: OutputFormat) -> miette::Result<()> {
         output::print_info(&format!("userId={}", me.user_id));
         output::print_info(&format!("identity={}", me.principal_id));
         output::print_info(&format!("name={}", me.name.as_deref().unwrap_or("")));
-        output::print_info(&format!("sessionKey={}", state.session_key));
+        output::print_info(&format!(
+            "sessionKey={}",
+            state.session_key().into_diagnostic()?
+        ));
         output::print_info(&format!("expiresAt={:?}", state.expires_at));
     }
 

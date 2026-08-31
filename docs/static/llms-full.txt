@@ -339,6 +339,10 @@ Rules:
   declare `Auth.Users.Resolve` to render minimal display labels. It is not a
   directory; do not request `Auth.Users.List` or denormalize user profile tables
   just to show labels.
+- Rust native refresh atomically persists the complete server-issued session,
+  JWT, authorization context, clock metadata, inbox prefix, and typed native
+  transports. Restored clients use that binding rather than bootstrap routing,
+  and replace an active NATS connection when endpoints change.
 - Rust service repos should expose repository installation as `cargo xtask install`.
   Owner SDKs are vocabulary-only; services, apps, agents, and devices connect
   only through their materialized generated participant facade.

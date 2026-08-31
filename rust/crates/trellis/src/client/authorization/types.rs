@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 /// Client authorization state wire format.
-pub(crate) const AUTHORIZATION_CLIENT_STATE_FORMAT_: &str = "trellis.authorization-client-state.v1";
+pub(crate) const AUTHORIZATION_CLIENT_STATE_FORMAT_: &str = "trellis.authorization-client-state.v2";
 
 /// Client-side verification limits distributed with the pinned trust root.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
@@ -87,16 +87,52 @@ pub struct AuthorizationRoutingMaterial {
     pub bootstrap_jwt_expires_at: i64,
 }
 
-/// Stable session evidence retained when a short-lived context expires.
+/// Native transport endpoints installed with one authorization context.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
-pub struct AuthorizationSessionBinding {
+pub struct AuthorizationNativeTransport {
+    /// Current native NATS endpoints.
+    pub nats_servers: Vec<String>,
+}
+
+/// Typed transports installed with one authorization context.
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct AuthorizationRuntimeTransports {
+    /// Native transport required by Rust runtimes.
+    pub native: AuthorizationNativeTransport,
+}
+
+/// Complete proof-bound runtime/session metadata retained across refresh and restart.
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct AuthorizationRuntimeBinding {
     /// Stable session identifier.
     pub session_id: String,
+    /// Stable participant identifier.
+    pub participant_id: String,
     /// Exact participant artifact digest expected during recovery.
     pub participant_digest: String,
     /// Exact participant needs digest expected during recovery.
     pub needs_digest: String,
+    /// Current NATS reply-inbox prefix.
+    pub inbox_prefix: String,
+    /// Current typed runtime transports.
+    pub transports: AuthorizationRuntimeTransports,
+}
+
+/// One complete authorization/runtime installation committed atomically.
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct AuthorizationInstallation {
+    /// Signed authorization context and trust evidence.
+    pub context: AuthorizationContextBundle,
+    /// Route JWT paired with the context.
+    pub routing: AuthorizationRoutingMaterial,
+    /// Proof-bound session and runtime connection metadata.
+    pub runtime: AuthorizationRuntimeBinding,
+    /// Server-clock correction in milliseconds.
+    pub server_clock_offset_ms: i64,
 }
 
 /// Complete installation-scoped authorization trust rollback floor.
@@ -127,12 +163,14 @@ pub struct AuthorizationClientState {
     pub binding: String,
     /// Durable installation trust floor.
     pub trust: AuthorizationClientTrustState,
-    /// Stable proof-bound session evidence retained across context expiry.
-    pub session: AuthorizationSessionBinding,
+    /// Proof-bound session and runtime metadata retained across context expiry.
+    pub runtime: AuthorizationRuntimeBinding,
     /// Current signed context, or `None` after session clearing.
     pub context: Option<AuthorizationContextBundle>,
     /// Route JWT paired atomically with the current context.
     pub routing: Option<AuthorizationRoutingMaterial>,
+    /// Server-clock correction paired atomically with the current installation.
+    pub server_clock_offset_ms: i64,
 }
 
 /// Narrow persistence port for one client installation's trust floor and context.
@@ -171,6 +209,6 @@ pub(crate) struct CurrentContext {
 #[derive(Clone, Debug, Default)]
 pub(crate) struct CachedAuthorizationState {
     pub(crate) current: Option<CurrentContext>,
-    pub(crate) session: Option<AuthorizationSessionBinding>,
+    pub(crate) runtime: Option<AuthorizationRuntimeBinding>,
     pub(crate) routing: Option<AuthorizationRoutingMaterial>,
 }

@@ -187,9 +187,19 @@ pub(crate) fn validate_client_state_transition(
     if next.format != AUTHORIZATION_CLIENT_STATE_FORMAT_
         || next.trust.format != "trellis.authorization-client-trust.v1"
         || next.binding.trim().is_empty()
-        || next.session.session_id.trim().is_empty()
-        || next.session.participant_digest.trim().is_empty()
-        || next.session.needs_digest.trim().is_empty()
+        || next.runtime.session_id.trim().is_empty()
+        || next.runtime.participant_id.trim().is_empty()
+        || next.runtime.participant_digest.trim().is_empty()
+        || next.runtime.needs_digest.trim().is_empty()
+        || next.runtime.inbox_prefix.trim().is_empty()
+        || next.runtime.transports.native.nats_servers.is_empty()
+        || next
+            .runtime
+            .transports
+            .native
+            .nats_servers
+            .iter()
+            .any(|server| server.trim().is_empty())
         || next.context.is_some() != next.routing.is_some()
     {
         return Err(TrellisClientError::Bootstrap(
@@ -206,6 +216,15 @@ pub(crate) fn validate_client_state_transition(
     {
         return Err(TrellisClientError::Bootstrap(
             "authorization trust root changed".into(),
+        ));
+    }
+    if current.runtime.session_id != next.runtime.session_id
+        || current.runtime.participant_id != next.runtime.participant_id
+        || current.runtime.participant_digest != next.runtime.participant_digest
+        || current.runtime.needs_digest != next.runtime.needs_digest
+    {
+        return Err(TrellisClientError::Bootstrap(
+            "authorization runtime session binding changed".into(),
         ));
     }
     if next.trust.minimum_manifest_generation < current.trust.minimum_manifest_generation {
@@ -237,13 +256,21 @@ pub(crate) fn test_state(generation: u64, manifest_digest: &str) -> Authorizatio
             minimum_manifest_generation: generation,
             manifest_digest_at_minimum_generation: manifest_digest.into(),
         },
-        session: super::types::AuthorizationSessionBinding {
+        runtime: super::types::AuthorizationRuntimeBinding {
             session_id: "ses_test".into(),
+            participant_id: "participant".into(),
             participant_digest: "participant".into(),
             needs_digest: "needs".into(),
+            inbox_prefix: "_INBOX.test".into(),
+            transports: super::types::AuthorizationRuntimeTransports {
+                native: super::types::AuthorizationNativeTransport {
+                    nats_servers: vec!["nats://localhost:4222".into()],
+                },
+            },
         },
         context: None,
         routing: None,
+        server_clock_offset_ms: 0,
     }
 }
 

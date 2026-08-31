@@ -535,6 +535,8 @@ pub struct TrellisTestRuntimeOptions {
     pub nats_user_jwt_ttl_ms: Option<u64>,
     /// Whether an isolated process should use the shared standards-based test OIDC provider.
     pub use_shared_test_oidc_provider: bool,
+    /// Advertise NATS through a rotatable real TCP proxy for reconnect tests.
+    pub rotatable_nats_proxy: bool,
 }
 
 impl TrellisTestRuntimeOptions {
@@ -554,6 +556,7 @@ impl TrellisTestRuntimeOptions {
             oauth_providers: Map::new(),
             nats_user_jwt_ttl_ms: None,
             use_shared_test_oidc_provider: false,
+            rotatable_nats_proxy: false,
         }
     }
 
@@ -578,9 +581,11 @@ pub struct TrellisTestRuntime {
     workdir: IntegrationWorkdir,
     _port_reservation: Option<TrellisTestPortReservation>,
     nats: Option<NatsContainer>,
+    nats_proxy: Option<NatsTcpProxy>,
     trellis: Option<TrellisProcess>,
     trellis_url: String,
     nats_url: String,
+    nats_upstream_url: String,
     nats_websocket_url: String,
     manifest: LocalTrellisBootstrapManifest,
     admin_password: String,
@@ -1144,9 +1149,11 @@ impl TrellisTestRuntime {
                     workdir,
                     _port_reservation: None,
                     nats: None,
+                    nats_proxy: None,
                     trellis: None,
                     trellis_url: shared.trellis_url.clone(),
                     nats_url: shared.nats_url.clone(),
+                    nats_upstream_url: shared.nats_url.clone(),
                     nats_websocket_url: shared.websocket_url.clone(),
                     manifest,
                     admin_password: shared.admin_password.clone(),
@@ -1168,6 +1175,7 @@ impl TrellisTestRuntime {
         }
 
         let mut nats = None;
+        let mut nats_proxy = None;
         let mut trellis = None;
         let started = async {
             let started_nats = if shared_runtime.is_some() {
@@ -1178,6 +1186,12 @@ impl TrellisTestRuntime {
             if let Some(started_nats) = &started_nats {
                 bootstrap_options.nats_server_url = started_nats.nats_url();
                 bootstrap_options.nats_websocket_url = started_nats.websocket_url();
+            }
+            let nats_upstream_url = bootstrap_options.nats_server_url.clone();
+            if options.rotatable_nats_proxy {
+                let proxy = NatsTcpProxy::start(&nats_upstream_url).await?;
+                bootstrap_options.nats_server_url = proxy.url.clone();
+                nats_proxy = Some(proxy);
             }
             rewrite_trellis_config(workdir.path(), &manifest, &bootstrap_options, &options)?;
             ensure_shared_streams(
@@ -1201,11 +1215,11 @@ impl TrellisTestRuntime {
             let nats_websocket_url = bootstrap_options.nats_websocket_url.clone();
             nats = started_nats;
             trellis = Some(started_trellis);
-            Ok::<_, TrellisTestError>((nats_url, nats_websocket_url))
+            Ok::<_, TrellisTestError>((nats_url, nats_websocket_url, nats_upstream_url))
         }
         .await;
 
-        let (nats_url, nats_websocket_url) = match started {
+        let (nats_url, nats_websocket_url, nats_upstream_url) = match started {
             Ok(urls) => urls,
             Err(error) => {
                 let cleanup = cleanup_started(&mut trellis, &mut nats, options.shutdown_timeout);
@@ -1224,9 +1238,11 @@ impl TrellisTestRuntime {
             workdir,
             _port_reservation: Some(port_reservation),
             nats,
+            nats_proxy,
             trellis,
             trellis_url,
             nats_url,
+            nats_upstream_url,
             nats_websocket_url,
             manifest,
             admin_password: options
@@ -1607,6 +1623,40 @@ impl TrellisTestRuntime {
         Ok(())
     }
 
+    /// Restart the control plane with a new authoritative native NATS endpoint.
+    pub async fn restart_control_plane_with_nats_url(
+        &mut self,
+        nats_url: &str,
+    ) -> Result<(), TrellisTestError> {
+        let config_path = self
+            .workdir
+            .path()
+            .join(&self.manifest.paths.trellis_config);
+        let mut config: toml::Value = toml::from_str(&fs::read_to_string(&config_path)?)
+            .map_err(|error| TrellisTestError::UnexpectedResponse(error.to_string()))?;
+        config["nats"]["servers"] = toml::Value::String(nats_url.to_owned());
+        config["client"]["nats_servers"] =
+            toml::Value::Array(vec![toml::Value::String(nats_url.to_owned())]);
+        fs::write(
+            &config_path,
+            toml::to_string_pretty(&config)
+                .map_err(|error| TrellisTestError::UnexpectedResponse(error.to_string()))?,
+        )?;
+        self.nats_url = nats_url.to_owned();
+        self.restart_control_plane().await
+    }
+
+    /// Rotate the advertised NATS TCP proxy and retire the previous endpoint.
+    pub async fn rotate_nats_proxy(&mut self) -> Result<(String, String), TrellisTestError> {
+        let replacement = NatsTcpProxy::start(&self.nats_upstream_url).await?;
+        let previous_url = self.nats_url.clone();
+        let replacement_url = replacement.url.clone();
+        self.restart_control_plane_with_nats_url(&replacement_url)
+            .await?;
+        self.nats_proxy = Some(replacement);
+        Ok((previous_url, replacement_url))
+    }
+
     /// Stop only the Trellis control-plane process, preserving workdir state and NATS.
     pub fn stop_control_plane(&mut self) -> Result<(), TrellisTestError> {
         let Some(mut trellis) = self.trellis.take() else {
@@ -1816,26 +1866,22 @@ impl TrellisTestAdmin {
             )
             .await?;
             submit_portal_approval(&self.trellis_url, &flow_id).await?;
-            let outcome = challenge.complete_ephemeral(&self.trellis_url).await?;
+            let store = Arc::new(trellis_rs::client::MemoryAuthorizationContextStore::default());
+            let outcome = challenge
+                .complete_with_context_store(&self.trellis_url, store.clone())
+                .await?;
             let state = outcome.state;
             self.client = Some(
                 Caller::connect_user(UserConnectOptions::new(
                     &state.trellis_url,
-                    &state.nats_servers,
-                    &state.inbox_prefix,
                     DEFAULT_ADMIN_RPC_TIMEOUT_MS,
                     trellis_rs::client::UserSessionCredentials {
-                        bootstrap_jwt: &state.bootstrap_jwt,
-                        session_id: &state.session_id,
                         session_key_seed_base64url: &state.session_seed,
-                        participant_digest: &state.participant_digest,
                     },
                     trellis_rs::client::UserAuthorizationContext {
-                        bundle: state.authorization_context,
+                        initial: None,
                         binding: format!("test-admin:{}", state.trellis_url),
-                        store: Arc::new(
-                            trellis_rs::client::MemoryAuthorizationContextStore::default(),
-                        ),
+                        store,
                     },
                 ))
                 .await?,
@@ -2975,14 +3021,17 @@ impl TrellisTestAdmin {
         let bound = bound?;
         let concurrent = concurrent?;
         let replay = bind_flow(&self.trellis_url, &flow_id, &auth).await?;
-        if concurrent.session_id != bound.session_id || replay.session_id != bound.session_id {
+        if concurrent.installation.runtime.session_id != bound.installation.runtime.session_id
+            || replay.installation.runtime.session_id != bound.installation.runtime.session_id
+        {
             return Err(TrellisTestError::UnexpectedResponse(format!(
                 "browser flow {flow_id} resolved multiple sessions: {}, {}, {}",
-                bound.session_id, concurrent.session_id, replay.session_id
+                bound.installation.runtime.session_id,
+                concurrent.installation.runtime.session_id,
+                replay.installation.runtime.session_id
             )));
         }
         let compiled_api = compiled.api_value()?;
-        let compiled_participant_digest = compiled.participant_digest()?;
         self.api_artifacts.insert(
             compiled_api["id"]
                 .as_str()
@@ -2994,7 +3043,6 @@ impl TrellisTestAdmin {
         let reconnect = TrellisTestClientReconnect {
             bound: bound.clone(),
             session_seed,
-            participant_digest: compiled_participant_digest,
             authorization_context_store: Arc::new(
                 trellis_rs::client::MemoryAuthorizationContextStore::default(),
             ),
@@ -3002,7 +3050,6 @@ impl TrellisTestAdmin {
         let client = connect_bound_user(
             &bound,
             &reconnect.session_seed,
-            &reconnect.participant_digest,
             reconnect.authorization_context_store.clone(),
             false,
         )
@@ -3506,14 +3553,22 @@ enum LocalUserAuth {
 pub struct TrellisTestClientReconnect {
     bound: BoundFlowSession,
     session_seed: String,
-    participant_digest: String,
     authorization_context_store: Arc<trellis_rs::client::MemoryAuthorizationContextStore>,
 }
 
 impl TrellisTestClientReconnect {
     /// Return the bound session ID for typed admin assertions.
     pub fn session_id(&self) -> &str {
-        &self.bound.session_id
+        &self.bound.installation.runtime.session_id
+    }
+
+    /// Load the exact durable authorization state used by reconnect.
+    pub fn authorization_state(
+        &self,
+    ) -> Result<Option<trellis_rs::client::AuthorizationClientState>, TrellisTestError> {
+        Ok(trellis_rs::client::AuthorizationContextStore::load(
+            self.authorization_context_store.as_ref(),
+        )?)
     }
 
     /// Reconnect the already-bound session without starting or completing a fresh auth flow.
@@ -3521,7 +3576,6 @@ impl TrellisTestClientReconnect {
         connect_bound_user(
             &self.bound,
             &self.session_seed,
-            &self.participant_digest,
             self.authorization_context_store.clone(),
             true,
         )
@@ -3535,17 +3589,12 @@ impl TrellisTestClientReconnect {
     ) -> Result<async_nats::Client, TrellisTestError> {
         let options = UserConnectOptions::new(
             &self.bound.trellis_url,
-            &self.bound.nats_servers,
-            &self.bound.inbox_prefix,
             DEFAULT_ADMIN_RPC_TIMEOUT_MS,
             trellis_rs::client::UserSessionCredentials {
-                bootstrap_jwt: &self.bound.bootstrap_jwt,
-                session_id: &self.bound.session_id,
                 session_key_seed_base64url: &self.session_seed,
-                participant_digest: &self.participant_digest,
             },
             trellis_rs::client::UserAuthorizationContext {
-                bundle: self.bound.authorization_context.clone(),
+                initial: Some(self.bound.installation.clone()),
                 binding: format!("test-captured-admission:{}", self.bound.trellis_url),
                 store: Arc::new(trellis_rs::client::MemoryAuthorizationContextStore::default()),
             },
@@ -3915,6 +3964,7 @@ struct AuthStartResponse {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct CompletedFlowSession {
+    server_now: i64,
     session: BoundSessionRecord,
     nats: BoundNatsRecord,
     authorization_context: trellis_rs::client::AuthorizationContextBundle,
@@ -3931,13 +3981,14 @@ struct BoundSessionRecord {
 #[derive(Debug, Deserialize)]
 struct BoundNatsRecord {
     jwt: String,
+    #[serde(rename = "jwtExpiresAt")]
+    jwt_expires_at: i64,
     transports: BoundNatsTransports,
 }
 
 #[derive(Debug, Deserialize)]
 struct BoundNatsTransports {
     native: Option<BoundNatsRoute>,
-    websocket: Option<BoundNatsRoute>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -3949,12 +4000,8 @@ struct BoundNatsRoute {
 #[derive(Clone, Debug)]
 struct BoundFlowSession {
     trellis_url: String,
-    nats_servers: String,
-    bootstrap_jwt: String,
-    session_id: String,
-    inbox_prefix: String,
     expires_at: Option<i64>,
-    authorization_context: trellis_rs::client::AuthorizationContextBundle,
+    installation: trellis_rs::client::AuthorizationInstallation,
 }
 
 #[derive(Debug)]
@@ -4226,11 +4273,14 @@ async fn bind_flow(
             result => break result?,
         }
     };
+    let response_received_at = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|error| TrellisTestError::UnexpectedResponse(error.to_string()))?
+        .as_millis() as i64;
     let servers = response
         .nats
         .transports
         .native
-        .or(response.nats.transports.websocket)
         .map(|route| route.nats_servers)
         .unwrap_or_default();
     if servers.is_empty() {
@@ -4238,50 +4288,61 @@ async fn bind_flow(
             "completed auth flow has no NATS transport endpoints".to_string(),
         ));
     }
+    let context =
+        trellis_protocol::parse_authorization_context(&response.authorization_context.context)?;
     Ok(BoundFlowSession {
         trellis_url: trellis_url.to_owned(),
-        nats_servers: servers.join(","),
-        bootstrap_jwt: response.nats.jwt,
-        session_id: response.session.session_id,
-        inbox_prefix: response.session.inbox_prefix,
         expires_at: response.session.expires_at,
-        authorization_context: response.authorization_context,
+        installation: trellis_rs::client::AuthorizationInstallation {
+            context: response.authorization_context,
+            routing: trellis_rs::client::AuthorizationRoutingMaterial {
+                bootstrap_jwt: response.nats.jwt,
+                bootstrap_jwt_expires_at: response.nats.jwt_expires_at,
+            },
+            runtime: trellis_rs::client::AuthorizationRuntimeBinding {
+                session_id: response.session.session_id,
+                participant_id: context.unsigned.participant.id.clone(),
+                participant_digest: context.unsigned.participant.artifact_digest.clone(),
+                needs_digest: context.unsigned.participant.needs_digest.clone(),
+                inbox_prefix: response.session.inbox_prefix,
+                transports: trellis_rs::client::AuthorizationRuntimeTransports {
+                    native: trellis_rs::client::AuthorizationNativeTransport {
+                        nats_servers: servers,
+                    },
+                },
+            },
+            server_clock_offset_ms: response.server_now
+                - issued_at
+                    .checked_add(response_received_at)
+                    .and_then(|sum| sum.checked_div(2))
+                    .ok_or_else(|| {
+                        TrellisTestError::UnexpectedResponse(
+                            "browser bind clock midpoint overflow".into(),
+                        )
+                    })?,
+        },
     })
 }
 
 async fn connect_bound_user(
     bound: &BoundFlowSession,
     session_seed: &str,
-    participant_digest: &str,
     authorization_context_store: Arc<trellis_rs::client::MemoryAuthorizationContextStore>,
     refresh_before_connect: bool,
 ) -> Result<Caller, TrellisTestError> {
     let _ = bound.expires_at;
-    let current =
-        trellis_rs::client::AuthorizationContextStore::load(authorization_context_store.as_ref())?;
-    let bootstrap_jwt = current
-        .as_ref()
-        .and_then(|state| state.routing.as_ref())
-        .map_or_else(
-            || bound.bootstrap_jwt.clone(),
-            |routing| routing.bootstrap_jwt.clone(),
-        );
-    let authorization_context = current
-        .and_then(|state| state.context)
-        .unwrap_or_else(|| bound.authorization_context.clone());
+    let initial =
+        trellis_rs::client::AuthorizationContextStore::load(authorization_context_store.as_ref())?
+            .is_none()
+            .then(|| bound.installation.clone());
     let options = UserConnectOptions::new(
         &bound.trellis_url,
-        &bound.nats_servers,
-        &bound.inbox_prefix,
         DEFAULT_ADMIN_RPC_TIMEOUT_MS,
         trellis_rs::client::UserSessionCredentials {
-            bootstrap_jwt: &bootstrap_jwt,
-            session_id: &bound.session_id,
             session_key_seed_base64url: session_seed,
-            participant_digest,
         },
         trellis_rs::client::UserAuthorizationContext {
-            bundle: authorization_context,
+            initial,
             binding: format!("test-admin:{}", bound.trellis_url),
             store: authorization_context_store,
         },
@@ -4452,6 +4513,58 @@ struct NatsContainer {
     nats_port: u16,
     websocket_port: u16,
     stopped: bool,
+}
+
+#[derive(Debug)]
+struct NatsTcpProxy {
+    url: String,
+    stop: tokio::sync::watch::Sender<()>,
+    task: JoinHandle<()>,
+}
+
+impl NatsTcpProxy {
+    async fn start(upstream_url: &str) -> Result<Self, TrellisTestError> {
+        let upstream = upstream_url
+            .strip_prefix("nats://")
+            .unwrap_or(upstream_url)
+            .to_owned();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+        let address = listener.local_addr()?;
+        let (stop, mut stopped) = tokio::sync::watch::channel(());
+        let task = tokio::spawn(async move {
+            loop {
+                tokio::select! {
+                    _ = stopped.changed() => break,
+                    accepted = listener.accept() => {
+                        let Ok((mut downstream, _)) = accepted else { break };
+                        let upstream = upstream.clone();
+                        let mut connection_stopped = stopped.clone();
+                        tokio::spawn(async move {
+                            let Ok(mut upstream) = tokio::net::TcpStream::connect(upstream).await else {
+                                return;
+                            };
+                            tokio::select! {
+                                _ = tokio::io::copy_bidirectional(&mut downstream, &mut upstream) => {}
+                                _ = connection_stopped.changed() => {}
+                            }
+                        });
+                    }
+                }
+            }
+        });
+        Ok(Self {
+            url: format!("nats://{address}"),
+            stop,
+            task,
+        })
+    }
+}
+
+impl Drop for NatsTcpProxy {
+    fn drop(&mut self) {
+        let _ = self.stop.send(());
+        self.task.abort();
+    }
 }
 
 impl NatsContainer {

@@ -25,8 +25,9 @@ pub use authorization::AuthorizationRegistryBinding;
 pub use authorization::IntegrationTestAuthorizationIoCounters;
 pub use authorization::{
     AuthorizationClientState, AuthorizationClientTrustState, AuthorizationContextBundle,
-    AuthorizationContextCache, AuthorizationContextStore, AuthorizationRoutingMaterial,
-    AuthorizationSessionBinding, AuthorizationTrustBundle, AuthorizationTrustPolicy,
+    AuthorizationContextCache, AuthorizationContextStore, AuthorizationInstallation,
+    AuthorizationNativeTransport, AuthorizationRoutingMaterial, AuthorizationRuntimeBinding,
+    AuthorizationRuntimeTransports, AuthorizationTrustBundle, AuthorizationTrustPolicy,
     AuthorizationVerificationCore, AuthorizationVerificationError, EventVerificationInput,
     FileAuthorizationContextStore, MemoryAuthorizationContextStore, RequestVerificationInput,
     VerifiedAuthorizationEvent, VerifiedAuthorizationRequest, VerifiedCaller,

@@ -8,11 +8,12 @@ use reqwest::Client as HttpClient;
 use serde::Deserialize;
 use serde_json::{json, Value};
 use trellis_protocol::{
-    parse_api, parse_participant, resolve_participant, session_proof_request_digest,
-    SessionProofInput, UserAuthBindSessionProofInput, UserAuthRequestSessionProofInput,
+    parse_api, parse_authorization_context, parse_participant, resolve_participant,
+    session_proof_request_digest, SessionProofInput, UserAuthBindSessionProofInput,
+    UserAuthRequestSessionProofInput,
 };
 
-use super::client::{connect_admin_client_async, connect_admin_client_with_context_store_async};
+use super::client::connect_admin_client_with_context_store_async;
 use super::models::{
     AdminLoginOutcome, AdminReauthOutcome, AdminSessionState, AgentLoginChallenge,
     BindResponseBound, BoundSession, StartAgentLoginOpts,
@@ -20,19 +21,13 @@ use super::models::{
 use super::TrellisAuthError;
 #[cfg(feature = "test-support")]
 use crate::client::MemoryAuthorizationContextStore;
-use crate::client::SessionAuth;
+use crate::client::{
+    AuthorizationInstallation, AuthorizationNativeTransport, AuthorizationRoutingMaterial,
+    AuthorizationRuntimeBinding, AuthorizationRuntimeTransports, SessionAuth,
+};
 use crate::internal_sdk::auth::AuthClient;
 
 pub(crate) const DETACHED_LOGIN_POLL_INTERVAL: Duration = Duration::from_secs(2);
-
-fn join_native_servers(servers: &[String]) -> Result<String, TrellisAuthError> {
-    if servers.is_empty() {
-        return Err(TrellisAuthError::UnexpectedBindStatus(
-            "missing_native_transport".to_string(),
-        ));
-    }
-    Ok(servers.join(","))
-}
 
 struct AdministrationParticipant {
     id: String,
@@ -267,26 +262,45 @@ async fn bind_session(
         return Err(TrellisAuthError::BindHttpFailure(status.as_u16(), text));
     }
 
+    let response_received_at = now_ms()?;
     let BindResponseBound {
+        server_now,
         session,
         nats,
         authorization_context,
     } = serde_json::from_str(&text)?;
+    let context = parse_authorization_context(&authorization_context.context)?;
+    let native = nats.transports.native.ok_or_else(|| {
+        TrellisAuthError::UnexpectedBindStatus("missing_native_transport".to_owned())
+    })?;
     Ok(BoundSession {
-        inbox_prefix: session.inbox_prefix,
-        session_id: session.session_id,
         expires_at: session.expires_at,
-        nats_servers: join_native_servers(
-            &nats
-                .transports
-                .native
-                .ok_or_else(|| {
-                    TrellisAuthError::UnexpectedBindStatus("missing_native_transport".to_owned())
-                })?
-                .nats_servers,
-        )?,
-        bootstrap_jwt: nats.jwt,
-        authorization_context,
+        installation: AuthorizationInstallation {
+            context: authorization_context,
+            routing: AuthorizationRoutingMaterial {
+                bootstrap_jwt: nats.jwt,
+                bootstrap_jwt_expires_at: nats.jwt_expires_at,
+            },
+            runtime: AuthorizationRuntimeBinding {
+                session_id: session.session_id,
+                participant_id: context.unsigned.participant.id.clone(),
+                participant_digest: context.unsigned.participant.artifact_digest.clone(),
+                needs_digest: context.unsigned.participant.needs_digest.clone(),
+                inbox_prefix: session.inbox_prefix,
+                transports: AuthorizationRuntimeTransports {
+                    native: AuthorizationNativeTransport {
+                        nats_servers: native.nats_servers,
+                    },
+                },
+            },
+            server_clock_offset_ms: server_now
+                - issued_at
+                    .checked_add(response_received_at)
+                    .and_then(|sum| sum.checked_div(2))
+                    .ok_or_else(|| {
+                        TrellisAuthError::UnexpectedBindStatus("server_clock_overflow".to_owned())
+                    })?,
+        },
     })
 }
 
@@ -319,6 +333,17 @@ impl AgentLoginChallenge {
         .await
     }
 
+    /// Complete login with caller-owned authorization storage for live tests.
+    #[cfg(feature = "test-support")]
+    #[doc(hidden)]
+    pub async fn complete_with_context_store(
+        self,
+        trellis_url: &str,
+        store: std::sync::Arc<dyn crate::client::AuthorizationContextStore>,
+    ) -> Result<AdminLoginOutcome, TrellisAuthError> {
+        self.complete_with_client(trellis_url, Some(store)).await
+    }
+
     async fn complete_with_client(
         self,
         trellis_url: &str,
@@ -328,7 +353,7 @@ impl AgentLoginChallenge {
             flow_id,
             login_url: _,
             session_seed,
-            participant_digest,
+            participant_digest: _,
             auth,
         } = self;
         let flow_id = poll_agent_flow_until_ready(
@@ -339,17 +364,11 @@ impl AgentLoginChallenge {
         )
         .await?;
         let bound = bind_session(trellis_url, &flow_id, &auth).await?;
+        let expires_at = bound.expires_at;
         let state = AdminSessionState {
             trellis_url: trellis_url.to_string(),
-            nats_servers: bound.nats_servers.clone(),
             session_seed,
-            session_key: auth.session_key.clone(),
-            participant_digest,
-            session_id: bound.session_id,
-            inbox_prefix: bound.inbox_prefix,
-            bootstrap_jwt: bound.bootstrap_jwt,
-            authorization_context: bound.authorization_context,
-            expires_at: bound.expires_at,
+            expires_at,
         };
 
         let client = if let Some(store) = store {
@@ -357,10 +376,20 @@ impl AgentLoginChallenge {
                 &state,
                 format!("test-admin:{}", state.trellis_url),
                 store,
+                Some(bound.installation),
             )
             .await?
         } else {
-            connect_admin_client_async(&state).await?
+            let store = std::sync::Arc::new(crate::client::FileAuthorizationContextStore::new(
+                super::session_store::admin_authorization_context_state_path(),
+            ));
+            connect_admin_client_with_context_store_async(
+                &state,
+                format!("installation:{}", state.trellis_url),
+                store,
+                Some(bound.installation),
+            )
+            .await?
         };
         let auth_client = AuthClient::new(&client);
         let response = auth_client

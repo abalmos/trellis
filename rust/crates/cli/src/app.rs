@@ -128,7 +128,7 @@ pub(crate) async fn connect_authenticated_cli_client(
 ) -> miette::Result<(authlib::AdminSessionState, Caller)> {
     let mut state = authlib::load_admin_session().into_diagnostic()?;
     let participant_digest = authlib::administration_participant_digest().into_diagnostic()?;
-    if state.participant_digest != participant_digest {
+    if !authlib::admin_session_matches_participant(&participant_digest).into_diagnostic()? {
         if !output::is_json(format) {
             output::print_info(
                 "Saved administration participant changed; starting agent reauthentication",
@@ -319,34 +319,7 @@ mod tests {
     fn test_admin_session_state() -> AdminSessionState {
         AdminSessionState {
             trellis_url: "http://localhost:3000".to_string(),
-            nats_servers: "localhost".to_string(),
             session_seed: "seed".to_string(),
-            session_key: "key".to_string(),
-            participant_digest: "digest".to_string(),
-            session_id: "ses_test".to_string(),
-            inbox_prefix: "_INBOX.ses_test".to_string(),
-            bootstrap_jwt: "jwt".to_string(),
-            authorization_context: serde_json::from_value(serde_json::json!({
-                "context": {},
-                "trust": {
-                    "root": {},
-                    "manifest": {},
-                    "authorizationRegistry": {
-                        "trustBucket": "trellis_authorization_trust",
-                        "contextBucket": "trellis_authorization_contexts"
-                    },
-                    "policy": {
-                        "allowedClockSkewSeconds": 30,
-                        "maximumContextLifetimeSeconds": 300,
-                        "maximumContextBytes": 16384,
-                        "maximumPermissions": 16,
-                        "maximumCapabilities": 16,
-                        "refreshLeadSeconds": 60,
-                        "refreshJitterSeconds": 15
-                    }
-                }
-            }))
-            .expect("context fixture"),
             expires_at: Some(1_767_225_600_000),
         }
     }

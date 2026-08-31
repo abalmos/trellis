@@ -30,4 +30,6 @@ pub use models::{
     DeviceIdentity, StartAgentLoginOpts,
 };
 pub use protocol::AuthenticatedUser;
-pub use session_store::{clear_admin_session, load_admin_session, save_admin_session};
+pub use session_store::{
+    admin_session_matches_participant, clear_admin_session, load_admin_session, save_admin_session,
+};
