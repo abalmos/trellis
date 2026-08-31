@@ -11,28 +11,28 @@ Deno.test("buildDeviceActivationCallbackPath adds explicit activation callback m
   assertEquals(
     buildDeviceActivationCallbackPath(
       new URL(
-        "https://auth.example.com/_trellis/portal/devices/activate?flowId=device-flow#confirm",
+        "https://auth.example.com/login/device?flowId=device-flow#confirm",
       ),
       "callback-token",
     ),
-    "/_trellis/portal/devices/activate?portalCallback=callback-token&deviceFlowId=device-flow#confirm",
+    "/login/device?portalCallback=callback-token&deviceFlowId=device-flow#confirm",
   );
 });
 
 Deno.test("buildDeviceActivationConnectAuthUrlState keeps redirectTo but strips callback binding state", () => {
   const state = buildDeviceActivationConnectAuthUrlState(
     new URL(
-      "https://auth.example.com/_trellis/portal/devices/activate?flowId=device-flow&portalCallback=callback-token&deviceFlowId=device-flow&authError=approval_denied#confirm",
+      "https://auth.example.com/login/device?flowId=device-flow&portalCallback=callback-token&deviceFlowId=device-flow&authError=approval_denied#confirm",
     ),
   );
 
   assertEquals(
     state.currentUrl.toString(),
-    "https://auth.example.com/_trellis/portal/devices/activate#confirm",
+    "https://auth.example.com/login/device#confirm",
   );
   assertEquals(
     state.redirectTo,
-    "https://auth.example.com/_trellis/portal/devices/activate?flowId=device-flow#confirm",
+    "https://auth.example.com/login/device?flowId=device-flow#confirm",
   );
 });
 
@@ -40,11 +40,11 @@ Deno.test("cleanupDeviceActivationCallbackUrl preserves the activation flow id",
   assertEquals(
     cleanupDeviceActivationCallbackUrl(
       new URL(
-        "https://auth.example.com/_trellis/portal/devices/activate?portalCallback=callback-token&deviceFlowId=device-flow&authError=approval_denied#confirm",
+        "https://auth.example.com/login/device?portalCallback=callback-token&deviceFlowId=device-flow&authError=approval_denied#confirm",
       ),
       "device-flow",
     ),
-    "/_trellis/portal/devices/activate?flowId=device-flow#confirm",
+    "/login/device?flowId=device-flow#confirm",
   );
 });
 
@@ -52,7 +52,7 @@ Deno.test("resolveDeviceActivationUrlState restores flowId from callback URL fal
   assertEquals(
     resolveDeviceActivationUrlState(
       new URL(
-        "https://auth.example.com/_trellis/portal/devices/activate?portalCallback=callback-token&deviceFlowId=device-flow&flowId=auth-flow",
+        "https://auth.example.com/login/device?portalCallback=callback-token&deviceFlowId=device-flow&flowId=auth-flow",
       ),
       null,
     ),
@@ -64,7 +64,7 @@ Deno.test("resolveDeviceActivationUrlState restores flowId from callback state",
   assertEquals(
     resolveDeviceActivationUrlState(
       new URL(
-        "https://auth.example.com/_trellis/portal/devices/activate?portalCallback=callback-token&flowId=auth-flow",
+        "https://auth.example.com/login/device?portalCallback=callback-token&flowId=auth-flow",
       ),
       { flowId: "device-flow", callbackToken: "callback-token" },
     ),

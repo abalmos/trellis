@@ -39,6 +39,8 @@ Rules:
   restart recovery, and portal assets. Connected control uses generated
   APIs over NATS; do not add HTTP context, revocation, logout, or client-bootstrap
   calls.
+- Built-in browser routes are `/login/*` with `/assets/login/*` and `/console/*`
+  with `/console/assets/*`; auth APIs remain under `/auth/*`.
 - Browser bootstrap verifies and stores the signed authorization context before
   NATS opens. The origin-scoped IndexedDB record atomically retains the complete
   root/manifest rollback floor and context across tabs; session clearing retains

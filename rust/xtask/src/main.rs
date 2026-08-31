@@ -131,20 +131,20 @@ fn run_install() -> Result<()> {
     Ok(())
 }
 
-fn build_embedded_login_portal() -> Result<()> {
+fn build_embedded_browser_apps() -> Result<()> {
     let root = repo_root()?;
     let status = Command::new("deno")
         .current_dir(root)
-        .args(["task", "-c", "ts/portals/login/deno.json", "build:embedded"])
+        .args(["task", "-c", "ts/deno.json", "browser:embedded"])
         .status()
         .into_diagnostic()
-        .wrap_err("failed to build embedded login portal")?;
+        .wrap_err("failed to build embedded browser applications")?;
 
     if status.success() {
         Ok(())
     } else {
         Err(miette::miette!(
-            "embedded login portal build failed with {status}"
+            "embedded browser application build failed with {status}"
         ))
     }
 }
@@ -229,7 +229,7 @@ fn base64(bytes: &[u8]) -> String {
 fn run_build(args: &[String]) -> Result<()> {
     run_install()?;
     generate_protocol_wasm()?;
-    build_embedded_login_portal()?;
+    build_embedded_browser_apps()?;
     let workspace_root = repo_root()?.join("rust");
     let mut spec = Command::new("cargo");
     spec.current_dir(&workspace_root).arg("build");

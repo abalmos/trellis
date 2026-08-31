@@ -117,24 +117,22 @@
   }
 
   function visibleFlowError(): string | null {
-    return visiblePortalFlowError(flow.error, flow.errorClassification);
+    return visiblePortalFlowError(flow.error);
   }
 
   function setFlowError(message: string): void {
     flow.error = message;
-    flow.errorClassification = null;
   }
 
   function clearFlowError(): void {
     flow.error = null;
-    flow.errorClassification = null;
   }
 
   async function loadFlow(): Promise<void> {
     const state = await flow.load();
     if (
       !state &&
-      shouldShowPortalExpiredState(flow.error, flow.errorClassification)
+      shouldShowPortalExpiredState(flow.error)
     ) {
       clearFlowError();
       flow.state = { status: "expired" };

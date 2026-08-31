@@ -87,7 +87,7 @@ pub fn generate_session_keypair() -> (String, String) {
 
 #[doc = concat!("Trellis API operation `", stringify!(detached_login_redirect_to), "`.")]
 pub fn detached_login_redirect_to() -> Result<String, TrellisAuthError> {
-    Ok("/_trellis/portal/users/login".to_string())
+    Ok("/login".to_string())
 }
 
 async fn start_auth_request(

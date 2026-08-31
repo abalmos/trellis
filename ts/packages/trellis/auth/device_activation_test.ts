@@ -94,8 +94,7 @@ function activationPendingBody(): Record<string, unknown> {
     activation: {
       state: "pending",
       reviewId: "dar_123",
-      activationUrl:
-        "https://trellis.example.com/_trellis/portal/devices/activate?flowId=dar_123",
+      activationUrl: "https://trellis.example.com/login/device?flowId=dar_123",
       expiresAt: serverNow + 1_000,
       retryAfterMs: 5,
     },

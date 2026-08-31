@@ -9,7 +9,7 @@ Deno.test("adminBootstrapFlowId reads a non-empty flow id", () => {
   assertEquals(
     adminBootstrapFlowId(
       new URL(
-        "https://auth.example.com/_trellis/portal/admin/bootstrap?flowId=flow-1",
+        "https://auth.example.com/login/admin/bootstrap?flowId=flow-1",
       ),
     ),
     "flow-1",
@@ -19,14 +19,14 @@ Deno.test("adminBootstrapFlowId reads a non-empty flow id", () => {
 Deno.test("adminBootstrapFlowId treats missing and blank values as absent", () => {
   assertEquals(
     adminBootstrapFlowId(
-      new URL("https://auth.example.com/_trellis/portal/admin/bootstrap"),
+      new URL("https://auth.example.com/login/admin/bootstrap"),
     ),
     null,
   );
   assertEquals(
     adminBootstrapFlowId(
       new URL(
-        "https://auth.example.com/_trellis/portal/admin/bootstrap?flowId=%20",
+        "https://auth.example.com/login/admin/bootstrap?flowId=%20",
       ),
     ),
     null,

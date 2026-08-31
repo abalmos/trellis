@@ -216,7 +216,7 @@ Deno.test("DeviceActivationController shows sign-in-required before auth", async
     },
     getUrl() {
       return new URL(
-        "https://auth.example.com/_trellis/portal/devices/activate?flowId=device-flow",
+        "https://auth.example.com/login/device?flowId=device-flow",
       );
     },
     sessionStorage: createStorage(),
@@ -249,7 +249,7 @@ Deno.test("DeviceActivationController preserves flowId through sign-in callback 
     },
     getUrl() {
       return new URL(
-        "https://auth.example.com/_trellis/portal/devices/activate?flowId=device-flow#confirm",
+        "https://auth.example.com/login/device?flowId=device-flow#confirm",
       );
     },
     sessionStorage: storage,
@@ -263,7 +263,7 @@ Deno.test("DeviceActivationController preserves flowId through sign-in callback 
 
   assertEquals(
     redirectTo,
-    "/_trellis/portal/devices/activate?portalCallback=callback-token&deviceFlowId=device-flow#confirm",
+    "/login/device?portalCallback=callback-token&deviceFlowId=device-flow#confirm",
   );
   assertEquals(storage.getItem("portal.activate.flowId"), "device-flow");
   assertEquals(
@@ -299,7 +299,7 @@ Deno.test("DeviceActivationController restores callback flow and maps activation
     },
     getUrl() {
       return new URL(
-        "https://auth.example.com/_trellis/portal/devices/activate?portalCallback=callback-token&deviceFlowId=device-flow&flowId=auth-flow&authError=ignored#confirm",
+        "https://auth.example.com/login/device?portalCallback=callback-token&deviceFlowId=device-flow&flowId=auth-flow&authError=ignored#confirm",
       );
     },
     replaceUrl(url) {
@@ -311,17 +311,17 @@ Deno.test("DeviceActivationController restores callback flow and maps activation
   await controller.load();
   assertEquals(controller.view, { mode: "ready", flowId: "device-flow" });
   assertEquals(replacedUrls, [
-    "/_trellis/portal/devices/activate?flowId=device-flow#confirm",
+    "/login/device?flowId=device-flow#confirm",
   ]);
   assertEquals(storage.getItem("portal.activate.flowId"), null);
   assertEquals(storage.getItem("portal.activate.callbackToken"), null);
   assertEquals(
     authUrlStates[0]?.currentUrl.toString(),
-    "https://auth.example.com/_trellis/portal/devices/activate#confirm",
+    "https://auth.example.com/login/device#confirm",
   );
   assertEquals(
     authUrlStates[0]?.redirectTo,
-    "https://auth.example.com/_trellis/portal/devices/activate?flowId=device-flow#confirm",
+    "https://auth.example.com/login/device?flowId=device-flow#confirm",
   );
 
   controller.confirmationCode = "HMHF9MKZ";
@@ -357,7 +357,7 @@ Deno.test("DeviceActivationController restores callback flow from URL fallback",
     },
     getUrl() {
       return new URL(
-        "https://auth.example.com/_trellis/portal/devices/activate?portalCallback=callback-token&deviceFlowId=device-flow&flowId=auth-flow#confirm",
+        "https://auth.example.com/login/device?portalCallback=callback-token&deviceFlowId=device-flow&flowId=auth-flow#confirm",
       );
     },
     replaceUrl(url) {
@@ -371,7 +371,7 @@ Deno.test("DeviceActivationController restores callback flow from URL fallback",
   assertEquals(callbackUrl, "called");
   assertEquals(controller.view, { mode: "ready", flowId: "device-flow" });
   assertEquals(replacedUrls, [
-    "/_trellis/portal/devices/activate?flowId=device-flow#confirm",
+    "/login/device?flowId=device-flow#confirm",
   ]);
 });
 
@@ -404,7 +404,7 @@ Deno.test("DeviceActivationController shows pending review from operation progre
     },
     getUrl() {
       return new URL(
-        "https://auth.example.com/_trellis/portal/devices/activate?flowId=device-flow",
+        "https://auth.example.com/login/device?flowId=device-flow",
       );
     },
     sessionStorage: createStorage(),

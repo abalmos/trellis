@@ -14,9 +14,9 @@ use url::Url;
 
 use super::bootstrap::{device_bootstrap, service_bootstrap};
 use super::browser::{
-    bind_flow, complete_first_admin, decide_approval, get_account_flow, get_flow, local_login,
-    oidc_callback, portal_asset, portal_index, portal_page, register_local,
-    start_account_flow_oidc, start_auth, start_oidc,
+    bind_flow, complete_first_admin, console_index, console_page, decide_approval,
+    get_account_flow, get_flow, local_login, oidc_callback, portal_asset, portal_index,
+    portal_page, register_local, start_account_flow_oidc, start_auth, start_oidc,
 };
 use super::security::{canonical_origin, security_headers};
 use super::well_known::refresh_context;
@@ -54,6 +54,8 @@ enum RouteHandler {
     PortalIndex,
     PortalPage,
     PortalAsset,
+    ConsoleIndex,
+    ConsolePage,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -136,18 +138,28 @@ const ROUTES: &[RouteDefinition] = &[
     },
     RouteDefinition {
         method: RouteMethod::Get,
-        path: "/_trellis/portal",
+        path: "/login",
         handler: RouteHandler::PortalIndex,
     },
     RouteDefinition {
         method: RouteMethod::Get,
-        path: "/_trellis/portal/*path",
+        path: "/login/*path",
         handler: RouteHandler::PortalPage,
     },
     RouteDefinition {
         method: RouteMethod::Get,
-        path: "/_trellis/assets/*path",
+        path: "/assets/login/*path",
         handler: RouteHandler::PortalAsset,
+    },
+    RouteDefinition {
+        method: RouteMethod::Get,
+        path: "/console",
+        handler: RouteHandler::ConsoleIndex,
+    },
+    RouteDefinition {
+        method: RouteMethod::Get,
+        path: "/console/*path",
+        handler: RouteHandler::ConsolePage,
     },
 ];
 
@@ -222,6 +234,12 @@ where
         }
         (RouteMethod::Get, RouteHandler::PortalAsset) => {
             routes.route(route.path, get(portal_asset::<R, E>))
+        }
+        (RouteMethod::Get, RouteHandler::ConsoleIndex) => {
+            routes.route(route.path, get(console_index::<R, E>))
+        }
+        (RouteMethod::Get, RouteHandler::ConsolePage) => {
+            routes.route(route.path, get(console_page::<R, E>))
         }
         _ => unreachable!("auth route inventory method and handler disagree"),
     }

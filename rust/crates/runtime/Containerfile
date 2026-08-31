@@ -1,4 +1,4 @@
-FROM docker.io/denoland/deno:2.9.4 AS portal
+FROM docker.io/denoland/deno:2.9.4 AS browser-apps
 
 WORKDIR /src
 
@@ -7,7 +7,7 @@ COPY art /src/art
 
 RUN mkdir -p /src/rust/crates/runtime/generated \
     && deno install --config ts/deno.json --lock ts/deno.lock --frozen \
-    && deno task --config ts/portals/login/deno.json build:embedded
+    && deno task --config ts/deno.json browser:embedded
 
 FROM docker.io/library/rust:bookworm AS build
 
@@ -16,7 +16,7 @@ WORKDIR /src
 COPY rust /src/rust
 COPY conformance /src/conformance
 COPY ts /src/ts
-COPY --from=portal /src/rust/crates/runtime/generated/portal /src/rust/crates/runtime/generated/portal
+COPY --from=browser-apps /src/rust/crates/runtime/generated /src/rust/crates/runtime/generated
 
 RUN cargo build --locked --manifest-path rust/Cargo.toml --release \
     --package trellis-runtime --bin trellis-server \

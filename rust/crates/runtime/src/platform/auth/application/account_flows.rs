@@ -656,7 +656,7 @@ where
         };
         let created = stored.token_hash == token_hash;
         let bootstrap_url = if created {
-            bootstrap_url.set_path("/_trellis/portal/account/password");
+            bootstrap_url.set_path("/login/account/password");
             bootstrap_url.set_query(None);
             bootstrap_url
                 .query_pairs_mut()

@@ -14,6 +14,8 @@
   "tasks": {
     "dev": "deno task -c ../../deno.json install && deno task -c ../../deno.json protocol:wasm && deno run -A vite dev",
     "build": "deno task -c ../../deno.json install && deno task -c ../../deno.json protocol:wasm && deno run -A vite build",
+    "build:static:prebuilt": "deno run -A --lock=../../deno.lock --frozen @sveltejs/kit sync && deno run -A --lock=../../deno.lock --frozen vite build",
+    "build:embedded": "deno run -A scripts/build_embedded.ts",
     "preview": "deno run -A vite preview",
     "check": "deno task -c ../../deno.json install && deno task -c ../../deno.json protocol:wasm && deno run -A @sveltejs/kit sync && deno run -A svelte-check --tsconfig ./tsconfig.check.json"
   },

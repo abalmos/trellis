@@ -37,6 +37,8 @@ https://raw.githubusercontent.com/qlever-llc/trellis/main/docs/static/llms-full.
   proof-bound restart recovery, and portal assets. Connected control,
   including auth control, uses generated RPC, operation, and event APIs over
   NATS; there is no HTTP context, revocation, logout, or client-bootstrap API.
+- Built-in browser routes are `/login/*` with `/assets/login/*` and `/console/*`
+  with `/console/assets/*`; auth APIs remain under `/auth/*`.
   Pending devices retry `/bootstrap/device`; there is no separate wait or
   connect-info endpoint. Use `DeviceActivationOptions`,
   `check_device_activation`, and `wait_for_device_activation`, then hand the

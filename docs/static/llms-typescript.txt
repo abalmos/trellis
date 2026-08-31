@@ -125,6 +125,8 @@ Rules:
   proof-bound restart recovery, and portal assets. Connected control,
   including auth control, uses generated APIs over NATS; do not add HTTP
   context, revocation, logout, or client-bootstrap calls.
+- Built-in browser routes are `/login/*` with `/assets/login/*` and `/console/*`
+  with `/console/assets/*`; auth APIs remain under `/auth/*`.
 - `TrellisService.connect(...)`, `TrellisClient.connect(...)`, and device helpers
   own session bootstrap and reconnect. They use an immutable provisioned identity
   or browser session key, a session-bound deny-all JWT, the standard NATS nonce

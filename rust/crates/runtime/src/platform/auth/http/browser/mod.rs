@@ -16,5 +16,6 @@ pub(super) use oidc::{oidc_callback, start_account_flow_oidc, start_oidc};
 #[cfg(test)]
 pub(super) use request::AuthStartRequest;
 pub(super) use request::{
-    portal_asset, portal_index, portal_page, select_device_portal, start_auth,
+    console_index, console_page, portal_asset, portal_index, portal_page, select_device_portal,
+    start_auth,
 };

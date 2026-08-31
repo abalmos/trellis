@@ -4,7 +4,8 @@ use super::browser::ApprovalRequest;
 use super::{
     canonical_origin, first_admin_token_hash, oauth_cookie_header, oauth_cookie_name,
     oidc_portal_policy_digest, project_service_resource_bindings, require_oauth_browser_binding,
-    select_browser_authority, validate_redirect, NatsBootstrapIssuer, EMBEDDED_PORTAL_ASSETS,
+    select_browser_authority, validate_redirect, NatsBootstrapIssuer, EMBEDDED_CONSOLE_ASSETS,
+    EMBEDDED_PORTAL_ASSETS,
 };
 use crate::platform::auth::AuthorizationStateError;
 use crate::platform::auth::{
@@ -402,13 +403,28 @@ fn oauth_portal_policy_digest_tracks_policy_not_wording() {
 }
 
 #[test]
-fn embedded_portal_contains_fallback_and_assets() {
+fn embedded_browser_apps_contain_fallbacks_and_assets() {
+    let portal = EMBEDDED_PORTAL_ASSETS
+        .iter()
+        .find_map(|(path, bytes)| (*path == "200.html").then_some(*bytes))
+        .expect("embedded login fallback");
+    let portal = std::str::from_utf8(portal).expect("login fallback UTF-8");
+    assert!(!portal.contains("<script>"));
+    assert!(portal.contains("/assets/login/bootstrap.js"));
+    assert!(portal.contains("/assets/login/trellis-logo.svg"));
     assert!(EMBEDDED_PORTAL_ASSETS
         .iter()
-        .any(|(path, bytes)| *path == "200.html" && !bytes.is_empty()));
-    assert!(EMBEDDED_PORTAL_ASSETS
+        .any(|(path, bytes)| path.starts_with("assets/login/") && !bytes.is_empty()));
+    let console = EMBEDDED_CONSOLE_ASSETS
         .iter()
-        .any(|(path, bytes)| path.starts_with("_trellis/assets/") && !bytes.is_empty()));
+        .find_map(|(path, bytes)| (*path == "index.html").then_some(*bytes))
+        .expect("embedded Console fallback");
+    let console = std::str::from_utf8(console).expect("Console fallback UTF-8");
+    assert!(!console.contains("<script>"));
+    assert!(console.contains("/console/assets/bootstrap.js"));
+    assert!(EMBEDDED_CONSOLE_ASSETS
+        .iter()
+        .any(|(path, bytes)| path.starts_with("assets/") && !bytes.is_empty()));
 }
 
 #[test]

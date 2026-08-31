@@ -1541,7 +1541,7 @@ async fn account_flow_oauth_callback_handles_errors_mismatch_and_link() {
     assert_eq!(status, 307, "successful callback body: {body}");
     assert!(location
         .as_deref()
-        .is_some_and(|value| value.contains("/_trellis/portal/account/complete")));
+        .is_some_and(|value| value.contains("/login/account/complete")));
     assert!(user_auth
         .user_identities_list(&auth_sdk::AuthUserIdentitiesListRequest {
             cursor: None,

@@ -5816,11 +5816,11 @@ file.close();
 
     #[test]
     fn parse_bootstrap_url_accepts_json_log_line() {
-        let log = r#"{"bootstrapUrl":"http://127.0.0.1:3000/_trellis/portal/admin/bootstrap?flowId=abc"}"#;
+        let log = r#"{"bootstrapUrl":"http://127.0.0.1:3000/login/admin/bootstrap?flowId=abc"}"#;
 
         assert_eq!(
             parse_trellis_bootstrap_url(log).unwrap(),
-            "http://127.0.0.1:3000/_trellis/portal/admin/bootstrap?flowId=abc"
+            "http://127.0.0.1:3000/login/admin/bootstrap?flowId=abc"
         );
     }
 
@@ -5906,13 +5906,11 @@ file.close();
     #[test]
     fn flow_id_from_url_requires_flow_id_query_parameter() {
         assert_eq!(
-            flow_id_from_url(
-                "http://127.0.0.1:3000/_trellis/portal/admin/bootstrap?flowId=flow_123"
-            )
-            .unwrap(),
+            flow_id_from_url("http://127.0.0.1:3000/login/admin/bootstrap?flowId=flow_123")
+                .unwrap(),
             "flow_123"
         );
-        assert!(flow_id_from_url("http://127.0.0.1:3000/_trellis/portal/admin/bootstrap").is_err());
+        assert!(flow_id_from_url("http://127.0.0.1:3000/login/admin/bootstrap").is_err());
     }
 
     #[test]

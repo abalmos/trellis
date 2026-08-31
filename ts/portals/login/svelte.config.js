@@ -15,7 +15,7 @@ const svelteKitDir = env("TRELLIS_LOGIN_PORTAL_SVELTE_KIT_DIR") ??
 const config = {
   preprocess: vitePreprocess(),
   kit: {
-    appDir: "_trellis/assets",
+    appDir: "assets/login",
     version: { name: env("TRELLIS_LOGIN_PORTAL_VERSION") ?? "embedded" },
     outDir: svelteKitDir,
     adapter: adapter({

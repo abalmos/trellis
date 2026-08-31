@@ -6,9 +6,9 @@ contract kind.
 
 The app has two distinct roles:
 
-- `/_trellis/portal/users/login` renders Trellis-owned browser auth flow state.
-  Approval actions use the shared portal helpers and submit the auth endpoint's
-  canonical `approved: boolean` request body.
+- `/login` renders Trellis-owned browser auth flow state. Approval actions use
+  the shared portal helpers and submit the auth endpoint's canonical
+  `approved: boolean` request body.
 - Provider choice and OAuth/OIDC redirect handling stay server-owned. The portal
   renders provider options from `GET /auth/flow/:flowId`; it does not carry
   provider secrets, redirect-base config, or auth runtime dependency wiring.
@@ -19,22 +19,21 @@ The app has two distinct roles:
   browser apps. When the redirect target resolves back to the current portal
   page, the portal stays on its completion screen so the user can return to the
   terminal instead of looping back through browser navigation.
-- Account flows under `/_trellis/portal/account/*` complete identity-link and
-  local password setup/reset links created by Trellis admin or self-service
-  RPCs.
-- Admin flows under `/_trellis/portal/admin/*` handle first-admin bootstrap
-  without requiring a separate custom portal contract.
+- Account flows under `/login/account/*` complete identity-link and local
+  password setup/reset links created by Trellis admin or self-service RPCs.
+- Admin flows under `/login/admin/*` handle first-admin bootstrap without
+  requiring a separate custom portal contract.
 - Local username/password sign-in is available when the portal flow state
   exposes local credentials as an enabled provider; provider choice and
   credential verification remain server-owned.
-- `/_trellis/portal/devices/activate` resumes a preserved `flowId` after sign-in
-  and starts the `Auth.DeviceUserAuthorities.Resolve` operation over the Trellis
-  runtime. Review-required deployments continue watching that same operation;
-  the admin review decision completes it with the activated or rejected terminal
-  result. There is no portal-side review polling fallback: the Trellis service
-  records pending-review progress and defers terminal completion durably until
-  the review RPC decides the operation.
-- SvelteKit runtime assets are served under `/_trellis/assets/*` to keep the
+- `/login/device` resumes a preserved `flowId` after sign-in and starts the
+  `Auth.DeviceUserAuthorities.Resolve` operation over the Trellis runtime.
+  Review-required deployments continue watching that same operation; the admin
+  review decision completes it with the activated or rejected terminal result.
+  There is no portal-side review polling fallback: the Trellis service records
+  pending-review progress and defers terminal completion durably until the
+  review RPC decides the operation.
+- SvelteKit runtime assets are served under `/assets/login/*` to keep the
   built-in portal's asset namespace inside the Trellis-owned prefix.
 
 ## Local dev
@@ -66,7 +65,7 @@ PUBLIC_TRELLIS_URL=http://localhost:3000 deno task build
 ```
 
 NATS WebSocket still defaults to `ws://localhost:8080`. NATS is required for
-`/_trellis/portal/devices/activate` because that route starts and watches the
+`/login/device` because that route starts and watches the
 `Auth.DeviceUserAuthorities.Resolve` operation over the Trellis runtime. Device
 activation and ready session evidence both use proof-bound
 `POST /bootstrap/device` requests; there is no separate connect-info route.

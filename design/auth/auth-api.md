@@ -55,8 +55,12 @@ Pending devices retry `/bootstrap/device` using the returned delay. Trust
 material is returned in bootstrap/refresh responses; there is no public trust
 lookup endpoint.
 
-The built-in portal is served under `/_trellis/portal` and `/_trellis/assets/*`.
-The retired device connect-info preflight route does not exist;
+The built-in login portal is served under `/login/*`, and the built-in Console
+is served under `/console/*`. Their static assets use `/assets/login/*` and
+`/console/assets/*`. The embedded Console is bound to its serving Trellis origin
+and starts the same-origin login flow automatically. Separately hosted Console
+deployments remain supported through explicit runtime origin configuration and
+CORS policy. The retired device connect-info preflight route does not exist;
 `POST /bootstrap/device` is the shared initial and reconnect boundary.
 
 There is no HTTP client bootstrap or authorization-registry route, or logout

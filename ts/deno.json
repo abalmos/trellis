@@ -12,7 +12,8 @@
   "tasks": {
     "install": "cargo run --manifest-path ../rust/xtask/Cargo.toml -- install",
     "protocol:wasm": "cargo run --manifest-path ../rust/xtask/Cargo.toml -- protocol-wasm",
-    "build:runtime": "deno task install && deno task protocol:wasm && deno task -c portals/login/deno.json build:embedded",
+    "browser:embedded": "deno task -c portals/login/deno.json build:embedded && deno task -c apps/console/deno.json build:embedded",
+    "build:runtime": "deno task install && deno task protocol:wasm && deno task browser:embedded",
     "packages:build:npm": "deno task -c packages/result/deno.json build:npm && deno task -c packages/trellis/deno.json build:npm && deno task -c packages/trellis-svelte/deno.json build:npm",
     "packages:build:npm:installed": "deno task -c packages/result/deno.json build:npm && deno task -c packages/trellis/deno.json build:npm:installed && deno task -c packages/trellis-svelte/deno.json build:npm",
     "smoke:npm": "deno run -A tools/package_build/npm_smoke.ts",
@@ -44,8 +45,9 @@
         "test:ui-tools"
       ]
     },
-    "test:browser": "deno task -c portals/login/deno.json build:static && deno test -A -c browser/deno.json browser/*.browser_test.ts",
-    "test:browser:coverage": "TRELLIS_BROWSER_COVERAGE_SOURCEMAP=1 deno task -c portals/login/deno.json build:static && deno test -A -c browser/deno.json browser/*.browser_test.ts && deno task coverage:browser",
+    "test:browser": "deno task browser:embedded && deno test -A -c browser/deno.json browser/*.browser_test.ts",
+    "test:browser:embedded": "deno task browser:embedded && deno test -A -c browser/deno.json browser/login_portal_smoke.browser_test.ts --filter 'embedded-console starts same-origin login'",
+    "test:browser:coverage": "TRELLIS_BROWSER_COVERAGE_SOURCEMAP=1 deno task browser:embedded && deno test -A -c browser/deno.json browser/*.browser_test.ts && deno task coverage:browser",
     "coverage:browser": "deno run -A tools/browser_v8_to_lcov.ts",
     "coverage:browser:merge": "deno run -A tools/browser_v8_to_lcov.ts --append-to ../coverage/live-integration/lcov.info",
     "test:packaging": "deno task packages:build:npm:installed && deno task test:packaging:built",

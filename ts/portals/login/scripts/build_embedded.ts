@@ -15,6 +15,29 @@ const build = new Deno.Command(Deno.execPath(), {
 const status = await build.spawn().status;
 if (!status.success) Deno.exit(status.code);
 
+const buildDir = join(portalDir, "build");
+const fallbackPath = join(buildDir, "200.html");
+let fallback = await Deno.readTextFile(fallbackPath);
+const inlineScripts = [...fallback.matchAll(/<script>([\s\S]*?)<\/script>/g)];
+if (inlineScripts.length !== 1) {
+  throw new Error(
+    `expected SvelteKit bootstrap script, found ${inlineScripts.length}`,
+  );
+}
+await Deno.writeTextFile(
+  join(buildDir, "assets/login/bootstrap.js"),
+  inlineScripts[0][1],
+);
+fallback = fallback.replace(
+  inlineScripts[0][0],
+  '<script src="/assets/login/bootstrap.js"></script>',
+);
+await Deno.writeTextFile(fallbackPath, fallback);
+await Deno.copyFile(
+  join(buildDir, "trellis-logo.svg"),
+  join(buildDir, "assets/login/trellis-logo.svg"),
+);
+
 await Deno.remove(destination, { recursive: true }).catch((error) => {
   if (!(error instanceof Deno.errors.NotFound)) throw error;
 });
@@ -29,4 +52,4 @@ async function copyDirectory(source: string, target: string): Promise<void> {
   }
 }
 
-await copyDirectory(join(portalDir, "build"), destination);
+await copyDirectory(buildDir, destination);

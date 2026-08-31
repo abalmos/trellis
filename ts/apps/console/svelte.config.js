@@ -5,14 +5,17 @@ import { vitePreprocess } from "@sveltejs/vite-plugin-svelte";
 
 const rootDir = dirname(fileURLToPath(import.meta.url));
 const basePath = process.env.SITE_BASE_PATH ?? "";
+const buildDir = process.env.TRELLIS_CONSOLE_BUILD_DIR ?? "build";
 
 /** @type {import('@sveltejs/kit').Config} */
 const config = {
   preprocess: vitePreprocess(),
   kit: {
+    appDir: "assets",
+    version: { name: process.env.TRELLIS_CONSOLE_VERSION ?? "standalone" },
     adapter: adapter({
-      pages: "build",
-      assets: "build",
+      pages: buildDir,
+      assets: buildDir,
       fallback: "index.html",
     }),
     paths: {

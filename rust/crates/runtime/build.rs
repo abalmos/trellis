@@ -15,9 +15,7 @@ fn collect_files(directory: &Path, files: &mut Vec<PathBuf>) {
     }
 }
 
-fn main() {
-    let root = PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").expect("manifest directory"))
-        .join("generated/portal");
+fn generate_index(root: &Path, output_name: &str) {
     println!("cargo:rerun-if-changed={}", root.display());
     let mut files = Vec::new();
     collect_files(&root, &mut files);
@@ -27,17 +25,24 @@ fn main() {
         .map(|path| {
             let relative = path
                 .strip_prefix(&root)
-                .expect("portal path below root")
+                .expect("embedded application path below root")
                 .to_string_lossy()
                 .replace('\\', "/");
             format!(
                 "({relative:?}, include_bytes!({path:?}).as_slice()),",
-                path = path.canonicalize().expect("canonical portal path")
+                path = path.canonicalize().expect("canonical application path")
             )
         })
         .collect::<Vec<_>>()
         .join("\n");
-    let output = PathBuf::from(env::var_os("OUT_DIR").expect("build output directory"))
-        .join("portal_assets.rs");
-    fs::write(output, format!("&[{entries}]\n")).expect("write embedded portal index");
+    let output =
+        PathBuf::from(env::var_os("OUT_DIR").expect("build output directory")).join(output_name);
+    fs::write(output, format!("&[{entries}]\n")).expect("write embedded application index");
+}
+
+fn main() {
+    let generated = PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").expect("manifest directory"))
+        .join("generated");
+    generate_index(&generated.join("portal"), "portal_assets.rs");
+    generate_index(&generated.join("console"), "console_assets.rs");
 }

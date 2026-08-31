@@ -271,12 +271,7 @@ fn portal_url(
     flow_id: &str,
 ) -> Result<String, HttpError> {
     let entry = portal.entry_url.as_deref().map_or_else(
-        || {
-            format!(
-                "{}/_trellis/portal/auth",
-                public_origin.trim_end_matches('/')
-            )
-        },
+        || format!("{}/login", public_origin.trim_end_matches('/')),
         ToOwned::to_owned,
     );
     let mut url = Url::parse(&entry).map_err(|_| HttpError::internal("portal_entry_invalid"))?;
@@ -324,9 +319,15 @@ where
         + 'static,
     E: AuthEphemeralRepository + Clone,
 {
-    let direct = format!("_trellis/portal/{path}");
+    if !embedded_path_is_safe(&path) {
+        return StatusCode::NOT_FOUND.into_response();
+    }
+    let direct = format!("login/{path}");
     let response = portal_file(&state, &direct).await;
-    if response.status() == StatusCode::NOT_FOUND {
+    if response.status() == StatusCode::NOT_FOUND
+        && !path.starts_with("assets/")
+        && (path.contains('/') || !path.contains('.'))
+    {
         portal_file(&state, "200.html").await
     } else {
         response
@@ -353,14 +354,69 @@ where
         + 'static,
     E: AuthEphemeralRepository + Clone,
 {
-    portal_file(&state, &format!("_trellis/assets/{path}")).await
+    portal_file(&state, &format!("assets/login/{path}")).await
+}
+
+pub(crate) async fn console_index<R, E>(State(_state): State<AuthHttpState<R, E>>) -> Response
+where
+    R: AccountRepository
+        + AuthorityEvidenceRepository
+        + AuthorityRepository
+        + ContextRepository
+        + DeploymentRepository
+        + OutboxRepository
+        + PortalRepository
+        + ProvisioningRepository
+        + SessionRepository
+        + Clone
+        + Send
+        + Sync
+        + 'static,
+    E: AuthEphemeralRepository + Clone,
+{
+    console_file("")
+}
+
+pub(crate) async fn console_page<R, E>(
+    State(_state): State<AuthHttpState<R, E>>,
+    Path(path): Path<String>,
+) -> Response
+where
+    R: AccountRepository
+        + AuthorityEvidenceRepository
+        + AuthorityRepository
+        + ContextRepository
+        + DeploymentRepository
+        + OutboxRepository
+        + PortalRepository
+        + ProvisioningRepository
+        + SessionRepository
+        + Clone
+        + Send
+        + Sync
+        + 'static,
+    E: AuthEphemeralRepository + Clone,
+{
+    console_file(&path)
+}
+
+fn console_file(path: &str) -> Response {
+    if !embedded_path_is_safe(path) {
+        return StatusCode::NOT_FOUND.into_response();
+    }
+    let response = embedded_file(EMBEDDED_CONSOLE_ASSETS, path);
+    if response.status() == StatusCode::NOT_FOUND
+        && !path.starts_with("assets/")
+        && (path.contains('/') || !path.contains('.'))
+    {
+        embedded_file(EMBEDDED_CONSOLE_ASSETS, "index.html")
+    } else {
+        response
+    }
 }
 
 async fn portal_file<R, E>(state: &AuthHttpState<R, E>, path: &str) -> Response {
-    if std::path::Path::new(path)
-        .components()
-        .any(|component| !matches!(component, Component::Normal(_)))
-    {
+    if !embedded_path_is_safe(path) {
         return StatusCode::NOT_FOUND.into_response();
     }
     let bytes = if let Some(directory) = &state.portal_override_dir {
@@ -370,13 +426,34 @@ async fn portal_file<R, E>(state: &AuthHttpState<R, E>, path: &str) -> Response 
             Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
         }
     } else {
-        EMBEDDED_PORTAL_ASSETS
-            .iter()
-            .find_map(|(asset_path, bytes)| (*asset_path == path).then(|| bytes.to_vec()))
+        return embedded_file(EMBEDDED_PORTAL_ASSETS, path);
     };
     let Some(bytes) = bytes else {
         return StatusCode::NOT_FOUND.into_response();
     };
+    embedded_response(path, bytes)
+}
+
+fn embedded_file(assets: &[(&str, &[u8])], path: &str) -> Response {
+    if !embedded_path_is_safe(path) {
+        return StatusCode::NOT_FOUND.into_response();
+    }
+    let Some(bytes) = assets
+        .iter()
+        .find_map(|(asset_path, bytes)| (*asset_path == path).then(|| bytes.to_vec()))
+    else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+    embedded_response(path, bytes)
+}
+
+fn embedded_path_is_safe(path: &str) -> bool {
+    std::path::Path::new(path)
+        .components()
+        .all(|component| matches!(component, Component::Normal(_)))
+}
+
+fn embedded_response(path: &str, bytes: Vec<u8>) -> Response {
     let content_type = match path.rsplit_once('.').map(|(_, extension)| extension) {
         Some("css") => "text/css; charset=utf-8",
         Some("html") => "text/html; charset=utf-8",
@@ -387,6 +464,8 @@ async fn portal_file<R, E>(state: &AuthHttpState<R, E>, path: &str) -> Response 
         Some("svg") => "image/svg+xml",
         Some("txt") => "text/plain; charset=utf-8",
         Some("webp") => "image/webp",
+        Some("wasm") => "application/wasm",
+        Some("woff2") => "font/woff2",
         _ => "application/octet-stream",
     };
     ([(CONTENT_TYPE, content_type)], bytes).into_response()

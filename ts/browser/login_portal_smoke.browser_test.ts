@@ -53,6 +53,7 @@ import { startTestOidcProvider } from "../packages/trellis-test/src/integration/
 import { createAuth } from "../packages/trellis/auth/session_auth.ts";
 
 const buildDir = resolve("portals/login/build");
+const consoleBuildDir = resolve("apps/console/build-embedded");
 const coverageDir = resolve("coverage/browser");
 const liveLocalLoginCaseId = "browser.login-portal-live-local-login";
 const liveLocalLoginFixture = createAuthLocalLoginFixture(
@@ -284,27 +285,27 @@ Deno.test("browser.login-portal static routes render browser-only states", async
         for (
           const route of [
             {
-              pathname: "/_trellis/portal/users/login",
+              pathname: "/login",
               text: "Session expired",
             },
             {
-              pathname: "/_trellis/portal/admin/bootstrap",
+              pathname: "/login/admin/bootstrap",
               text: "Missing bootstrap flow id.",
             },
             {
-              pathname: "/_trellis/portal/admin/invite",
+              pathname: "/login/admin/invite",
               text: "Missing invitation flow id.",
             },
             {
-              pathname: "/_trellis/portal/account/link",
+              pathname: "/login/account/link",
               text: "Missing account-link flow id.",
             },
             {
-              pathname: "/_trellis/portal/account/password",
+              pathname: "/login/account/password",
               text: "Missing password flow id.",
             },
             {
-              pathname: "/_trellis/portal/devices/activate",
+              pathname: "/login/device",
               text: "Missing flow id.",
             },
           ] as const
@@ -322,6 +323,46 @@ Deno.test("browser.login-portal static routes render browser-only states", async
     );
   } finally {
     await server?.shutdown();
+  }
+});
+
+Deno.test("browser.embedded-console starts same-origin login", async () => {
+  const server = Deno.serve(
+    { hostname: "127.0.0.1", port: 0, onListen() {} },
+    async (request) => {
+      const url = new URL(request.url);
+      const relativePath = url.pathname.startsWith("/console/")
+        ? url.pathname.slice("/console/".length)
+        : "index.html";
+      const candidate = resolve(consoleBuildDir, relativePath || "index.html");
+      const path =
+        isInside(consoleBuildDir, candidate) && await exists(candidate)
+          ? candidate
+          : join(consoleBuildDir, "index.html");
+      return new Response(await Deno.readFile(path), {
+        headers: { "content-type": contentType(path) },
+      });
+    },
+  );
+
+  try {
+    const origin = `http://127.0.0.1:${server.addr.port}`;
+    await withCoveredPage(
+      "browser.embedded-console starts same-origin login",
+      async ({ page }) => {
+        await page.goto(`${origin}/console/login`, {
+          waitUntil: "domcontentloaded",
+        });
+        assertEquals(
+          await page.evaluate(() =>
+            globalThis.__TRELLIS_RUNTIME_CONFIG__?.authUrl
+          ),
+          origin,
+        );
+      },
+    );
+  } finally {
+    await server.shutdown();
   }
 });
 
@@ -359,7 +400,7 @@ withLivePortalPage(
         disabled: false,
         portalId: liveLocalLoginPortalId,
         displayName: "Browser Login Portal",
-        entryUrl: `${portalOrigin}/_trellis/portal/users/login`,
+        entryUrl: `${portalOrigin}/login`,
         expectedVersion: null,
         idempotencyKey: ulid(),
         loginSettings: {
@@ -1442,7 +1483,7 @@ Deno.test("browser.login-portal live OIDC role mapping", async () => {
             disabled: false,
             portalId: liveOidcRolePortalId,
             displayName: "OIDC Role Portal",
-            entryUrl: `${portalOrigin}/_trellis/portal/users/login`,
+            entryUrl: `${portalOrigin}/login`,
             expectedVersion: null,
             idempotencyKey: ulid(),
             loginSettings: {
@@ -1626,7 +1667,7 @@ Deno.test("browser.login-portal live OIDC role mapping", async () => {
           const linkResponse = await page.goto(
             accountFlowPortalUrl(
               portalOrigin,
-              "/_trellis/portal/account/link",
+              "/login/account/link",
               flowId,
             ),
             { waitUntil: "networkidle" },
@@ -1750,7 +1791,7 @@ withLivePortalPage(
 
       const resetUrl = accountFlowPortalUrl(
         portalOrigin,
-        "/_trellis/portal/account/password",
+        "/login/account/password",
         resetToken,
       );
       const response = await page.goto(
@@ -1852,7 +1893,7 @@ withLivePortalPage(
       const response = await page.goto(
         accountFlowPortalUrl(
           portalOrigin,
-          "/_trellis/portal/account/password",
+          "/login/account/password",
           resetToken,
         ),
         { waitUntil: "networkidle" },
@@ -1922,7 +1963,7 @@ withLivePortalPage(
       const response = await page.goto(
         accountFlowPortalUrl(
           portalOrigin,
-          "/_trellis/portal/account/password",
+          "/login/account/password",
           `missing-flow-${integrationSlug(liveMissingAccountFlowCaseId)}`,
         ),
         { waitUntil: "networkidle" },
@@ -1971,7 +2012,7 @@ withLivePortalPage(
       const resetToken = accountFlowToken(reset.flow.completionUrl);
       const url = accountFlowPortalUrl(
         portalOrigin,
-        "/_trellis/portal/account/password",
+        "/login/account/password",
         resetToken,
       );
 
@@ -2292,7 +2333,7 @@ withLivePortalPage(
   "browser.login-portal live invalid device activation shows error",
   async ({ page, portalOrigin }) => {
     const response = await page.goto(
-      new URL("/_trellis/portal/devices/activate", portalOrigin).toString(),
+      new URL("/login/device", portalOrigin).toString(),
       { waitUntil: "networkidle" },
     );
     assertEquals(response?.status(), 200);
@@ -2472,7 +2513,7 @@ function deviceActivationPortalUrl(
   portalOrigin: string,
   flowId: string,
 ): string {
-  const url = new URL("/_trellis/portal/devices/activate", portalOrigin);
+  const url = new URL("/login/device", portalOrigin);
   url.searchParams.set("flowId", flowId);
   return url.toString();
 }
@@ -2558,7 +2599,7 @@ async function setupDeviceActivationPortalUser(args: {
     disabled: false,
     portalId: args.portalId,
     displayName: "Browser Device Activation Portal",
-    entryUrl: `${args.portalOrigin}/_trellis/portal/users/login`,
+    entryUrl: `${args.portalOrigin}/login`,
     expectedVersion: null,
     idempotencyKey: ulid(),
     loginSettings: {
@@ -2592,7 +2633,7 @@ async function configureLocalLoginPortal(args: {
     disabled: false,
     portalId: args.portalId,
     displayName: "Browser Login Portal",
-    entryUrl: `${args.portalOrigin}/_trellis/portal/users/login`,
+    entryUrl: `${args.portalOrigin}/login`,
     expectedVersion: null,
     idempotencyKey: ulid(),
     loginSettings: {

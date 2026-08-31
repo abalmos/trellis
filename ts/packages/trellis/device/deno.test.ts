@@ -42,7 +42,7 @@ Deno.test("checkDeviceActivation persists provisioned activation state", async (
         activation: {
           reviewId: "review_123",
           activationUrl:
-            "https://trellis.example.com/_trellis/portal/devices/activate?flowId=review_123",
+            "https://trellis.example.com/login/device?flowId=review_123",
         },
       }));
     }) as typeof fetch;
