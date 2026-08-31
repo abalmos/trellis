@@ -1934,8 +1934,8 @@ mod tests {
 
     #[test]
     fn protocol_api_generation_uses_api_identity() {
-        let manifest_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../runtime/.trellis/generated/protocol/apis/trellis.auth@v1.json");
+        let manifest_path =
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../runtime/trellis.api.json");
         let sources = collect_ts_sdk_sources(&GenerateTsSdkOpts {
             api_path: manifest_path,
             out_dir: unique_temp_dir("protocol-api"),
