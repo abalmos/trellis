@@ -4262,7 +4262,7 @@ async fn start_auth_request(
     compiled: &trellis_rs::contracts::ContractArtifacts,
     referenced_api_artifacts: Vec<Value>,
 ) -> Result<AuthStartResponse, TrellisTestError> {
-    let request_id = format!("req_{}", random_session_seed());
+    let request_id = ulid::Ulid::new().to_string();
     let issued_at = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_err(|error| TrellisTestError::UnexpectedResponse(error.to_string()))?
