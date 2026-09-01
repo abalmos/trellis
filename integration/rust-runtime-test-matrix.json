@@ -489,6 +489,54 @@
       }
     },
     {
+      "id": "jobs.service-endpoint-rotation-preserves-rpc-and-worker-subscriptions",
+      "fixture": "jobs",
+      "title": "Native service endpoint rotation preserves one client and existing workloads",
+      "coverage": [
+        "native-endpoint-rotation",
+        "jobs-service-local-parity",
+        "authorization-registry"
+      ],
+      "description": "An already-running Rust service updates the server pool on its one async-nats client and reconnects without replacing its RPC router, worker subscriptions, heartbeat task, or authorization provider watches.",
+      "scenario": {
+        "participants": [
+          {
+            "name": "client",
+            "kind": "app",
+            "contract": "trellis.integration.jobs-client@v1"
+          },
+          {
+            "name": "service",
+            "kind": "service",
+            "contract": "trellis.integration.jobs-service@v1"
+          }
+        ],
+        "given": [
+          "the service RPC router and private-job workers are running through endpoint A",
+          "the service authorization provider watches are ready"
+        ],
+        "when": [
+          "Trellis advertises endpoint B and endpoint A becomes unavailable",
+          "the service refreshes authorization and updates the existing client server pool before forcing reconnect"
+        ],
+        "then": [
+          "the async-nats client lifecycle identity is unchanged",
+          "provider watches become ready again",
+          "the existing RPC router creates a job consumed by the existing worker"
+        ]
+      },
+      "completion": {
+        "rust": "implemented"
+      },
+      "classification": "shared",
+      "implementations": {
+        "rust": {
+          "module": "jobs",
+          "function": "service_endpoint_rotation_preserves_rpc_and_worker_subscriptions"
+        }
+      }
+    },
+    {
       "id": "jobs.live-updates-are-typed-and-stop-at-terminal-state",
       "fixture": "jobs",
       "title": "Typed private-job updates stream live and stop at terminal state",
@@ -3892,16 +3940,16 @@
       "classification": "shared"
     },
     {
-      "id": "auth.native-refresh-persists-and-reconnects-with-rotated-endpoint",
+      "id": "auth.native-offline-restart-refreshes-before-connect",
       "fixture": "auth",
-      "title": "Native refresh persists and reconnects with rotated endpoint",
+      "title": "Native offline restart refreshes before connecting",
       "coverage": [
         "auth",
         "authorization-context",
         "native-client",
         "restart"
       ],
-      "description": "A native user refresh atomically installs a replacement endpoint, persists it, retires the old endpoint, and reconnects successfully from durable state.",
+      "description": "A native user persisted with endpoint A refreshes over HTTP before its first restart connection and authenticates through authoritative endpoint B after A is unavailable.",
       "scenario": {
         "participants": [],
         "given": [
@@ -3911,7 +3959,7 @@
           "the runtime restarts with endpoint B authoritative and endpoint A unavailable"
         ],
         "then": [
-          "refresh replaces the live connection, persists endpoint B, and a later reconnect authenticates through endpoint B"
+          "HTTP refresh persists endpoint B before the first NATS connection and the restarted client authenticates without re-enrollment"
         ]
       },
       "completion": {
@@ -3920,14 +3968,14 @@
       "implementations": {
         "rust": {
           "module": "auth",
-          "function": "native_refresh_persists_and_reconnects_with_rotated_endpoint"
+          "function": "native_offline_restart_refreshes_before_connect"
         }
       },
       "classification": "isolated-process",
       "isolationReason": "rotates the runtime's authoritative NATS endpoint while preserving its durable auth state"
     },
     {
-      "id": "health.service-heartbeat-uses-replaced-native-connection",
+      "id": "health.service-heartbeat-uses-refreshed-native-connection",
       "fixture": "health",
       "title": "Service heartbeat uses the replaced native connection",
       "coverage": [
@@ -3955,7 +4003,7 @@
       "implementations": {
         "rust": {
           "module": "health",
-          "function": "service_heartbeat_uses_replaced_native_connection"
+          "function": "service_heartbeat_uses_refreshed_native_connection"
         }
       },
       "classification": "isolated-process",

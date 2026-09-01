@@ -7,8 +7,15 @@ import {
 const DB_NAME = "trellis-auth";
 const DB_VERSION = 2;
 const STORE_NAME = "keys";
-const KEY_ID = "trellis-session-key";
-const TRUST_ID = "trellis-authorization-trust";
+const INSTALLATION_ID = "trellis-browser-installation";
+
+type BrowserInstallationRecord = {
+  readonly id: string;
+  readonly seed?: Uint8Array;
+  readonly authorization?: AuthorizationClientState;
+};
+
+const temporaryInstallations = new Map<string, BrowserInstallationRecord>();
 
 function openDB(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
@@ -26,134 +33,85 @@ function openDB(): Promise<IDBDatabase> {
   });
 }
 
-export type StoredKeyPair = {
-  id: string;
-  privateKey: CryptoKey;
-  publicKey: CryptoKey;
-  publicKeyRaw: Uint8Array;
-  seed: Uint8Array;
-  sessionId?: string;
-  createdAt: number;
-  persistence?: "remembered";
-  expiresAt?: number;
-};
-
-export type StoredKeyPairOptions = {
-  expiresAt?: number;
-};
-
-export async function storeKeyPair(
-  keyPair: CryptoKeyPair,
-  publicKeyRaw: Uint8Array,
-  seed: Uint8Array,
-  options: StoredKeyPairOptions = {},
-  id = KEY_ID,
-): Promise<void> {
-  const db = await openDB();
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction(STORE_NAME, "readwrite");
-    const store = tx.objectStore(STORE_NAME);
-
-    const record: StoredKeyPair = {
-      id,
-      privateKey: keyPair.privateKey,
-      publicKey: keyPair.publicKey,
-      publicKeyRaw,
-      seed,
-      createdAt: Date.now(),
-      persistence: "remembered",
-      ...(options.expiresAt === undefined
-        ? {}
-        : { expiresAt: options.expiresAt }),
-    };
-
-    const request = store.put(record);
-    request.onerror = () => reject(request.error);
-    request.onsuccess = () => resolve();
-
-    tx.oncomplete = () => db.close();
-  });
+/** Canonical opaque identity for one participant installation at one Trellis origin. */
+export function browserInstallationScope(
+  trellisUrl: string,
+  participantId: string,
+  participantArtifactDigest: string,
+): string {
+  return JSON.stringify([
+    "trellis.browser-installation.v1",
+    new URL(trellisUrl).origin,
+    participantId,
+    participantArtifactDigest,
+  ]);
 }
 
-export async function loadKeyPair(id = KEY_ID): Promise<StoredKeyPair | null> {
-  const db = await openDB();
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction(STORE_NAME, "readwrite");
-    const store = tx.objectStore(STORE_NAME);
-
-    const request = store.get(id);
-    request.onerror = () => reject(request.error);
-    request.onsuccess = () => {
-      const result = request.result as StoredKeyPair | undefined;
-      if (result !== undefined && !(result.seed instanceof Uint8Array)) {
-        store.delete(id);
-        resolve(null);
-        return;
-      }
-      if (result?.expiresAt !== undefined && result.expiresAt <= Date.now()) {
-        store.delete(id);
-        resolve(null);
-        return;
-      }
-      resolve(result ?? null);
-    };
-
-    tx.oncomplete = () => db.close();
-  });
-}
-
-/** Associates the durable session ID returned after browser binding. */
-export async function storeSessionId(
-  sessionId: string,
-  id = KEY_ID,
-): Promise<void> {
-  const db = await openDB();
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction(STORE_NAME, "readwrite");
-    const store = tx.objectStore(STORE_NAME);
-    const request = store.get(id);
-    request.onerror = () => reject(request.error);
-    request.onsuccess = () => {
-      const record = request.result as StoredKeyPair | undefined;
-      if (!record) {
-        reject(new Error("session key is unavailable"));
-        return;
-      }
-      store.put({ ...record, sessionId });
-    };
-    tx.oncomplete = () => {
-      db.close();
-      resolve();
-    };
-    tx.onerror = () => reject(tx.error);
-  });
-}
-
-/** Scope-keyed atomic IndexedDB authorization context store. */
+/** One participant-scoped browser credential, session, runtime, and trust installation. */
 export class BrowserAuthorizationContextStore
   implements AuthorizationContextStore {
   readonly #id: string;
+  readonly #temporary: boolean;
 
-  constructor(scope: string) {
-    this.#id = `${TRUST_ID}:${scope}`;
+  constructor(
+    scope: string,
+    persistence: "remembered" | "temporary" = "remembered",
+  ) {
+    if (!scope.trim() || scope.length > 4_096) {
+      throw new Error("browser installation scope is invalid");
+    }
+    this.#id = `${INSTALLATION_ID}:${scope}`;
+    this.#temporary = persistence === "temporary";
+  }
+
+  async getOrCreateSessionSeed(): Promise<Uint8Array> {
+    if (this.#temporary) {
+      const current = temporaryInstallations.get(this.#id);
+      if (current?.seed) return current.seed.slice();
+      const seed = crypto.getRandomValues(new Uint8Array(32));
+      temporaryInstallations.set(this.#id, { ...current, id: this.#id, seed });
+      return seed.slice();
+    }
+    const db = await openDB();
+    return await new Promise((resolve, reject) => {
+      let seed: Uint8Array;
+      const tx = db.transaction(STORE_NAME, "readwrite");
+      const store = tx.objectStore(STORE_NAME);
+      const request = store.get(this.#id);
+      request.onerror = () => reject(request.error);
+      request.onsuccess = () => {
+        const current = request.result as BrowserInstallationRecord | undefined;
+        seed = current?.seed instanceof Uint8Array
+          ? current.seed
+          : crypto.getRandomValues(new Uint8Array(32));
+        if (!current?.seed) store.put({ ...current, id: this.#id, seed });
+      };
+      tx.oncomplete = () => {
+        db.close();
+        resolve(seed.slice());
+      };
+      tx.onerror = () => reject(tx.error);
+    });
+  }
+
+  async sessionId(): Promise<string | undefined> {
+    return (await this.load())?.session?.sessionId;
   }
 
   async load(): Promise<AuthorizationClientState | undefined> {
+    if (this.#temporary) {
+      const state = temporaryInstallations.get(this.#id)?.authorization;
+      return state ? structuredClone(state) : undefined;
+    }
     const db = await openDB();
     return await new Promise((resolve, reject) => {
       const tx = db.transaction(STORE_NAME, "readonly");
       const request = tx.objectStore(STORE_NAME).get(this.#id);
       request.onerror = () => reject(request.error);
       request.onsuccess = () => {
-        const record = request.result as
-          | (AuthorizationClientState & { id: string })
-          | undefined;
-        if (!record) {
-          resolve(undefined);
-          return;
-        }
-        const { id: _, ...state } = record;
-        resolve(structuredClone(state));
+        const state = (request.result as BrowserInstallationRecord | undefined)
+          ?.authorization;
+        resolve(state ? structuredClone(state) : undefined);
       };
       tx.oncomplete = () => db.close();
     });
@@ -163,6 +121,16 @@ export class BrowserAuthorizationContextStore
     state: AuthorizationClientState,
   ): Promise<AuthorizationClientState> {
     validateAuthorizationClientStateTransition(undefined, state);
+    if (this.#temporary) {
+      const current = temporaryInstallations.get(this.#id);
+      validateAuthorizationClientStateTransition(current?.authorization, state);
+      temporaryInstallations.set(this.#id, {
+        ...current,
+        id: this.#id,
+        authorization: structuredClone(state),
+      });
+      return structuredClone(state);
+    }
     const db = await openDB();
     return await new Promise((resolve, reject) => {
       const tx = db.transaction(STORE_NAME, "readwrite");
@@ -170,20 +138,24 @@ export class BrowserAuthorizationContextStore
       const request = store.get(this.#id);
       request.onerror = () => reject(request.error);
       request.onsuccess = () => {
-        const current = request.result as
-          | (AuthorizationClientState & { id: string })
-          | undefined;
-        if (current) {
-          const { id: _, ...currentState } = current;
+        const current = request.result as BrowserInstallationRecord | undefined;
+        if (current?.authorization) {
           try {
-            validateAuthorizationClientStateTransition(currentState, state);
+            validateAuthorizationClientStateTransition(
+              current.authorization,
+              state,
+            );
           } catch (error) {
             tx.abort();
             reject(error);
             return;
           }
         }
-        store.put({ id: this.#id, ...structuredClone(state) });
+        store.put({
+          ...current,
+          id: this.#id,
+          authorization: structuredClone(state),
+        });
       };
       tx.oncomplete = () => {
         db.close();
@@ -197,6 +169,30 @@ export class BrowserAuthorizationContextStore
     expectedContextDigest?: string | null,
     expectedBootstrapJwt?: string | null,
   ): Promise<boolean> {
+    if (this.#temporary) {
+      const current = temporaryInstallations.get(this.#id);
+      const state = current?.authorization;
+      if (
+        (expectedContextDigest !== undefined &&
+          (state?.contextDigest ?? null) !== expectedContextDigest) ||
+        (expectedBootstrapJwt !== undefined &&
+          (state?.routing?.bootstrapJwt ?? null) !== expectedBootstrapJwt)
+      ) return false;
+      if (state) {
+        temporaryInstallations.set(this.#id, {
+          ...current,
+          id: this.#id,
+          authorization: {
+            ...state,
+            context: null,
+            contextDigest: null,
+            contextExpiresAt: null,
+            routing: null,
+          },
+        });
+      }
+      return true;
+    }
     const db = await openDB();
     return await new Promise((resolve, reject) => {
       let cleared = false;
@@ -205,25 +201,26 @@ export class BrowserAuthorizationContextStore
       const request = store.get(this.#id);
       request.onerror = () => reject(request.error);
       request.onsuccess = () => {
-        const current = request.result as
-          | (AuthorizationClientState & { id: string })
-          | undefined;
+        const current = request.result as BrowserInstallationRecord | undefined;
+        const state = current?.authorization;
         if (
           (expectedContextDigest !== undefined &&
-            (current?.contextDigest ?? null) !==
+            (state?.contextDigest ?? null) !==
               expectedContextDigest) ||
           (expectedBootstrapJwt !== undefined &&
-            (current?.routing?.bootstrapJwt ?? null) !== expectedBootstrapJwt)
+            (state?.routing?.bootstrapJwt ?? null) !== expectedBootstrapJwt)
         ) return;
         cleared = true;
-        if (current) {
+        if (state) {
           store.put({
             ...current,
-            context: null,
-            contextDigest: null,
-            contextExpiresAt: null,
-            routing: null,
-            serverClockOffsetMs: 0,
+            authorization: {
+              ...state,
+              context: null,
+              contextDigest: null,
+              contextExpiresAt: null,
+              routing: null,
+            },
           });
         }
       };
@@ -236,6 +233,10 @@ export class BrowserAuthorizationContextStore
   }
 
   async resetTrust(): Promise<void> {
+    if (this.#temporary) {
+      temporaryInstallations.delete(this.#id);
+      return;
+    }
     const db = await openDB();
     await new Promise<void>((resolve, reject) => {
       const tx = db.transaction(STORE_NAME, "readwrite");
@@ -247,23 +248,70 @@ export class BrowserAuthorizationContextStore
       tx.onerror = () => reject(tx.error);
     });
   }
-}
 
-export async function deleteKeyPair(id = KEY_ID): Promise<void> {
-  const db = await openDB();
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction(STORE_NAME, "readwrite");
-    const store = tx.objectStore(STORE_NAME);
-
-    const request = store.delete(id);
-    request.onerror = () => reject(request.error);
-    request.onsuccess = () => resolve();
-
-    tx.oncomplete = () => db.close();
-  });
-}
-
-export async function hasKeyPair(id = KEY_ID): Promise<boolean> {
-  const keyPair = await loadKeyPair(id);
-  return keyPair !== null;
+  async endSession(expectedSessionId?: string): Promise<boolean> {
+    if (this.#temporary) {
+      const current = temporaryInstallations.get(this.#id);
+      if (
+        expectedSessionId &&
+        current?.authorization?.session?.sessionId !== expectedSessionId
+      ) return false;
+      temporaryInstallations.set(this.#id, {
+        id: this.#id,
+        ...(current?.authorization
+          ? {
+            authorization: {
+              ...current.authorization,
+              session: null,
+              context: null,
+              contextDigest: null,
+              contextExpiresAt: null,
+              routing: null,
+              runtime: undefined,
+            },
+          }
+          : {}),
+      });
+      return true;
+    }
+    const db = await openDB();
+    return await new Promise<boolean>((resolve, reject) => {
+      let cleared = true;
+      const tx = db.transaction(STORE_NAME, "readwrite");
+      const store = tx.objectStore(STORE_NAME);
+      const request = store.get(this.#id);
+      request.onerror = () => reject(request.error);
+      request.onsuccess = () => {
+        const current = request.result as BrowserInstallationRecord | undefined;
+        if (
+          expectedSessionId &&
+          current?.authorization?.session?.sessionId !== expectedSessionId
+        ) {
+          cleared = false;
+          return;
+        }
+        store.put({
+          id: this.#id,
+          ...(current?.authorization
+            ? {
+              authorization: {
+                ...current.authorization,
+                session: null,
+                context: null,
+                contextDigest: null,
+                contextExpiresAt: null,
+                routing: null,
+                runtime: undefined,
+              },
+            }
+            : {}),
+        });
+      };
+      tx.oncomplete = () => {
+        db.close();
+        resolve(cleared);
+      };
+      tx.onerror = () => reject(tx.error);
+    });
+  }
 }

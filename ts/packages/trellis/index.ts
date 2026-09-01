@@ -1,14 +1,5 @@
-export {
-  clearSessionKey,
-  createAuth,
-  generateSessionKey,
-  getOrCreateSessionKey,
-  getPublicSessionKey,
-  hasSessionKey,
-  loadSessionKey,
-  signBytes,
-} from "./auth.ts";
-export type { NatsConnectOptions, SessionKeyHandle } from "./auth.ts";
+export { createAuth } from "./auth.ts";
+export type { NatsConnectOptions } from "./auth.ts";
 export {
   canonicalizeJson,
   digestJson,
@@ -80,6 +71,7 @@ export type {
   ClientAuthContinuation,
   ClientAuthOptions,
   ClientAuthRequiredContext,
+  ConnectedTrellisClient,
   TrellisClientConnectArgs,
 } from "./client_connect.ts";
 export { ClientAuthHandledError, TrellisClient } from "./client_connect.ts";

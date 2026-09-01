@@ -462,10 +462,11 @@ async fn authorization_registry_provider_cache_is_nats_local_and_revocation_live
         "rpc",
     );
 
-    let runtime =
-        trellis_test::TrellisTestRuntime::start(trellis_test::TrellisTestRuntimeOptions::default())
-            .await
-            .expect("start live Trellis test runtime");
+    let mut options = trellis_test::TrellisTestRuntimeOptions::default();
+    options.rotatable_nats_proxy = true;
+    let mut runtime = trellis_test::TrellisTestRuntime::start(options)
+        .await
+        .expect("start live Trellis test runtime");
     let bootstrap_url = runtime
         .wait_for_bootstrap_url(Duration::from_secs(10))
         .await
@@ -492,6 +493,8 @@ async fn authorization_registry_provider_cache_is_nats_local_and_revocation_live
     });
     let provider = service.integration_test_authorization_provider();
     let service_nats = service.integration_test_nats();
+    let service_lifecycle = service_nats.statistics();
+    let service_caller = service.caller().clone();
     let before = provider.integration_test_io_counters();
     let service_task = AbortOnDrop::new(tokio::spawn(async move { service.run().await }));
     let (client, client_reconnect) = admin
@@ -524,10 +527,22 @@ async fn authorization_registry_provider_cache_is_nats_local_and_revocation_live
     assert_eq!(second.id, "registry-hit");
     assert_eq!(provider.integration_test_io_counters(), first_io);
 
-    service_nats
-        .force_reconnect()
+    let ((retired_url, _), _) = runtime
+        .stage_nats_proxy_rotation()
         .await
-        .expect("force service NATS reconnect");
+        .expect("rotate provider-cache NATS endpoint");
+    service_caller
+        .integration_test_refresh_authorization_context()
+        .await
+        .expect("refresh service through endpoint B");
+    client
+        .refresh_authorization_context()
+        .await
+        .expect("refresh caller through endpoint B");
+    assert!(Arc::ptr_eq(
+        &service_lifecycle,
+        &service_caller.integration_test_nats().statistics()
+    ));
     // Reconnect recreates watches and their initial state before readiness returns.
     let deadline = Instant::now() + Duration::from_secs(15);
     loop {
@@ -578,6 +593,13 @@ async fn authorization_registry_provider_cache_is_nats_local_and_revocation_live
         )
         .await
         .expect("revoke caller session through Auth admin RPC");
+    runtime.retire_staged_nats_proxies();
+    assert!(
+        tokio::net::TcpStream::connect(retired_url.trim_start_matches("nats://"))
+            .await
+            .is_err(),
+        "retired endpoint A remained usable"
+    );
 
     let deadline = Instant::now() + Duration::from_secs(5);
     loop {

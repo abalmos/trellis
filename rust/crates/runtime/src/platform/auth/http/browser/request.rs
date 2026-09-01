@@ -149,14 +149,7 @@ where
         return Err(HttpError::bad_request("participant_binding_mismatch"));
     }
     let consent = browser_consent(&binding)?;
-    let flow_id = format!(
-        "flow_{}",
-        digest_parts(&[
-            "user_auth_request",
-            input.signer_key_id(),
-            input.request_id(),
-        ])
-    );
+    let flow_id = request.request_id.clone();
     let flow = AuthBrowserFlow {
         format: BROWSER_FLOW_FORMAT.to_owned(),
         flow_id: flow_id.clone(),
@@ -173,6 +166,9 @@ where
         portal_id: portal.portal_id.clone(),
         redirect_target: Some(request.redirect_target),
         principal_id: None,
+        authenticated_provider_id: None,
+        authenticated_roles: Vec::new(),
+        portal_binding_digest: None,
         claim_owner: None,
         claimed_at: None,
         durable_result_digest: None,
@@ -265,7 +261,7 @@ pub(crate) async fn select_device_portal(
         .ok_or_else(|| HttpError::internal("builtin_portal_unavailable"))
 }
 
-fn portal_url(
+pub(super) fn portal_url(
     portal: &LoginPortalRecord,
     public_origin: &str,
     flow_id: &str,

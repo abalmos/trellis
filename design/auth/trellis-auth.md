@@ -66,7 +66,9 @@ discovery, PKCE, nonce and `at_hash` validation, and CAS claim-before-exchange.
 Each state is bound to a state-specific `HttpOnly`, `SameSite=Lax` browser
 cookie and exact portal-policy revision. Callback verifies browser possession
 and current provider/registration policy before claim or exchange. Identity-link
-flows never register a new account.
+flows never register a new account. Browser login additionally claims one
+portal-generated verifier digest with the authenticated principal; portal detail
+and consent require the raw verifier plus the exact registered portal origin.
 
 ### Services
 
@@ -186,11 +188,13 @@ Every client durably pins the complete rollback floor: root key id, canonical
 root digest, minimum manifest generation, and canonical native API artifact
 digest at that generation. Same-generation manifest equivocation and root
 replacement fail closed. Clearing or replacing a session/context retains that
-floor; root reset is a separate explicit operation. Browser clients commit the
-floor and current context atomically in deployment-origin-scoped IndexedDB. Rust
-and TypeScript service, device, CLI, and non-browser clients require an explicit
-durable store; memory stores are opt-in for tests and deliberately ephemeral
-processes only.
+floor; root reset is a separate explicit operation. Browser clients commit one
+participant-scoped installation atomically in IndexedDB under the canonical
+Trellis-origin, participant-id, and participant-artifact-digest tuple. The
+installation owns its seed, session, runtime, context, routing, clock, and
+trust. Rust and TypeScript service, device, CLI, and non-browser clients require
+an explicit durable store; memory stores are opt-in for tests and deliberately
+ephemeral processes only.
 
 Manifest generation is exact. The mutable `manifest.current` pointer names one
 immutable generation-addressed manifest and its digest. A context names the
@@ -313,8 +317,9 @@ flow-specific origin checks. HTTP serves browser/account flows, initial
 service/device bootstrap, proof-bound context recovery, and portal assets. It
 does not serve connected control, trust lookup, or provider authorization
 evidence. Pending devices retry `/bootstrap/device`; there is no separate wait
-endpoint. See [auth-api.md](./auth-api.md) for the boundary; use
-`rust/crates/runtime/trellis.api.json` for exact current schemas.
+endpoint. See [auth-api.md](./auth-api.md) for the boundary. The runtime
+artifact owns generated Auth RPC/operation/event schemas; Rust route DTOs own
+HTTP shapes.
 
 After connection, Auth RPC, operations, and events exact-match the generated
 descriptor table and use the same local context-bound verifier as every other

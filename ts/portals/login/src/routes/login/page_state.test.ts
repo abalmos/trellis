@@ -93,19 +93,14 @@ Deno.test("missing portal flow id maps to expired state without raw error", () =
 
 Deno.test("recoverable shared expired-flow classification maps to expired portal state", () => {
   assertEquals(
-    shouldShowPortalExpiredState("Trellis sign-in did not complete.", {
-      kind: "recoverable_expired_flow",
-      recoverable: true,
-      reason: "flow_expired",
-    }),
+    shouldShowPortalExpiredState(
+      "Trellis sign-in did not complete.",
+      "flow_expired",
+    ),
     true,
   );
   assertEquals(
-    visiblePortalFlowError("Trellis sign-in did not complete.", {
-      kind: "recoverable_expired_flow",
-      recoverable: true,
-      reason: "flow_expired",
-    }),
+    visiblePortalFlowError("Trellis sign-in did not complete.", "flow_expired"),
     null,
   );
 });
@@ -148,7 +143,12 @@ Deno.test("submitLocalLogin posts expected URL and payload", async () => {
 
   await submitLocalLogin(
     "https://auth.example.com/base",
-    { flowId: "flow-1", username: "ada", password: "secret" },
+    {
+      flowId: "flow-1",
+      username: "ada",
+      password: "secret",
+      portalBindingDigest: "digest",
+    },
     (input, init) => {
       capturedUrl = input.toString();
       capturedInit = init;
@@ -163,14 +163,24 @@ Deno.test("submitLocalLogin posts expected URL and payload", async () => {
   assertEquals(capturedInit?.headers, { "content-type": "application/json" });
   assertEquals(
     capturedInit?.body,
-    JSON.stringify({ flowId: "flow-1", username: "ada", password: "secret" }),
+    JSON.stringify({
+      flowId: "flow-1",
+      username: "ada",
+      password: "secret",
+      portalBindingDigest: "digest",
+    }),
   );
 });
 
 Deno.test("submitLocalLogin accepts trusted portal approval", async () => {
   const result = await submitLocalLogin(
     "https://auth.example.com",
-    { flowId: "flow-1", username: "ada", password: "secret" },
+    {
+      flowId: "flow-1",
+      username: "ada",
+      password: "secret",
+      portalBindingDigest: "digest",
+    },
     () =>
       Promise.resolve(Response.json({ state: "approved", flowId: "flow-1" })),
   );
@@ -181,7 +191,12 @@ Deno.test("submitLocalLogin accepts trusted portal approval", async () => {
 Deno.test("submitLocalLogin accepts manual approval requirement", async () => {
   const result = await submitLocalLogin(
     "https://auth.example.com",
-    { flowId: "flow-1", username: "ada", password: "secret" },
+    {
+      flowId: "flow-1",
+      username: "ada",
+      password: "secret",
+      portalBindingDigest: "digest",
+    },
     () =>
       Promise.resolve(
         Response.json({ state: "approval_required", flowId: "flow-1" }),
@@ -265,6 +280,7 @@ Deno.test("submitLocalRegistration posts expected URL and payload", async () => 
       password: "secret",
       name: "Ada Lovelace",
       email: "ada@example.com",
+      portalBindingDigest: "digest",
     },
     (input, init) => {
       capturedUrl = input.toString();
@@ -286,6 +302,7 @@ Deno.test("submitLocalRegistration posts expected URL and payload", async () => 
       password: "secret",
       name: "Ada Lovelace",
       email: "ada@example.com",
+      portalBindingDigest: "digest",
     }),
   );
 });
@@ -301,10 +318,13 @@ Deno.test("submitLocalRegistration throws formatted response errors", async () =
           password: "secret",
           name: "Ada Lovelace",
           email: "ada@example.com",
+          portalBindingDigest: "digest",
         },
         () =>
           Promise.resolve(
-            Response.json({ error: "username_taken" }, { status: 409 }),
+            Response.json({ error: { code: "username_taken" } }, {
+              status: 409,
+            }),
           ),
       ),
     Error,

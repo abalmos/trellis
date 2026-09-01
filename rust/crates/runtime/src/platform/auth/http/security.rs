@@ -14,6 +14,7 @@ use sha2::{Digest as _, Sha256};
 use subtle::ConstantTimeEq;
 use url::Url;
 
+use super::super::ephemeral::AuthBrowserFlow;
 use super::super::ephemeral::AuthOAuthState;
 use super::super::{LoginPortalRecord, LoginSettingsRecord};
 use super::{digest_parts, HttpError};
@@ -37,6 +38,45 @@ pub(super) fn content_security_policy(
             .collect::<String>()
     ))
     .expect("URL origins produce a valid CSP header"))
+}
+
+pub(super) const PORTAL_BINDING_HEADER: HeaderName =
+    HeaderName::from_static("trellis-portal-binding");
+
+pub(super) fn validate_portal_binding_digest(value: &str) -> Result<(), HttpError> {
+    let decoded = URL_SAFE_NO_PAD
+        .decode(value)
+        .map_err(|_| HttpError::bad_request("portal_binding_digest_invalid"))?;
+    if decoded.len() != 32 {
+        return Err(HttpError::bad_request("portal_binding_digest_invalid"));
+    }
+    Ok(())
+}
+
+pub(super) fn require_portal_binding(
+    flow: &AuthBrowserFlow,
+    headers: &HeaderMap,
+) -> Result<(), HttpError> {
+    let binding = headers
+        .get(&PORTAL_BINDING_HEADER)
+        .and_then(|value| value.to_str().ok())
+        .ok_or_else(|| HttpError::forbidden("portal_binding_invalid"))?;
+    let binding = URL_SAFE_NO_PAD
+        .decode(binding)
+        .map_err(|_| HttpError::forbidden("portal_binding_invalid"))?;
+    if binding.len() != 32 {
+        return Err(HttpError::forbidden("portal_binding_invalid"));
+    }
+    let actual = URL_SAFE_NO_PAD.encode(Sha256::digest(binding));
+    let expected = flow
+        .portal_binding_digest
+        .as_deref()
+        .ok_or_else(|| HttpError::forbidden("portal_binding_invalid"))?;
+    if bool::from(actual.as_bytes().ct_eq(expected.as_bytes())) {
+        Ok(())
+    } else {
+        Err(HttpError::forbidden("portal_binding_invalid"))
+    }
 }
 
 pub(super) fn validate_redirect(

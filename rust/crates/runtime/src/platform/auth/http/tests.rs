@@ -220,6 +220,7 @@ fn browser_account_bodies_reject_unknown_and_retired_fields() {
         "password": "password",
         "name": null,
         "email": null,
+        "portalBindingDigest": DIGEST,
     });
     assert!(
         serde_json::from_value::<super::browser::LocalRegistrationRequest>(registration.clone())
@@ -322,6 +323,7 @@ fn oauth_cookie_binds_one_browser_and_uses_callback_security_policy() {
         nonce: "nonce".to_owned(),
         redirect_uri: "https://auth.example/auth/callback/provider".to_owned(),
         browser_binding_digest: URL_SAFE_NO_PAD.encode(Sha256::digest(secret.as_bytes())),
+        portal_binding_digest: Some(DIGEST.to_owned()),
         portal_id: Some("builtin".to_owned()),
         portal_policy_digest: Some(super::digest_parts(&["policy"])),
         claim_owner: None,

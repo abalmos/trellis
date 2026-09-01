@@ -1,7 +1,7 @@
 use serde_json::Value;
 use trellis_protocol::{parse_authorization_context, SignedAuthorizationContext};
 
-use super::super::TrellisClientError;
+use super::super::{decode_trellis_http_error, TrellisClientError};
 
 /// Returns the canonical origin used to scope persisted client authorization state.
 pub fn canonical_trellis_origin(trellis_url: &str) -> Result<String, TrellisClientError> {
@@ -54,11 +54,11 @@ impl BootstrapHttp {
             .send()
             .await
             .map_err(|error| TrellisClientError::Bootstrap(error.to_string()))?;
-        let status = response.status();
-        if !status.is_success() {
+        if !response.status().is_success() {
+            let error = decode_trellis_http_error(response).await;
             return Err(TrellisClientError::BootstrapHttp {
-                status: status.as_u16(),
-                body: response.text().await.unwrap_or_default(),
+                status: error.status,
+                code: error.code,
             });
         }
         response

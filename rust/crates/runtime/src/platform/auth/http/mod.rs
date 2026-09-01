@@ -46,8 +46,8 @@ use error::{map_issuance_error, HttpError};
 pub(crate) use router::router;
 use security::{
     canonical_origin, oauth_cookie_header, oauth_cookie_name, oidc_portal_policy_digest,
-    require_oauth_browser_binding, require_portal_origin, require_selected_portal_origin,
-    validate_redirect,
+    require_oauth_browser_binding, require_portal_binding, require_portal_origin,
+    require_selected_portal_origin, validate_portal_binding_digest, validate_redirect,
 };
 
 const EMBEDDED_PORTAL_ASSETS: &[(&str, &[u8])] =
@@ -397,8 +397,6 @@ fn flow_response(flow: AuthBrowserFlow) -> BrowserFlowResponse {
         registration_enabled: false,
         federated_registration_enabled: false,
         consent_view: flow.consent.consent_view,
-        consent_view_digest: flow.consent.consent_view_digest,
-        user: None,
         redirect_target: flow.redirect_target,
     }
 }

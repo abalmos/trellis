@@ -22,8 +22,9 @@ use super::TrellisAuthError;
 #[cfg(feature = "test-support")]
 use crate::client::MemoryAuthorizationContextStore;
 use crate::client::{
-    AuthorizationInstallation, AuthorizationNativeTransport, AuthorizationRoutingMaterial,
-    AuthorizationRuntimeBinding, AuthorizationRuntimeTransports, SessionAuth,
+    decode_trellis_http_error, AuthorizationInstallation, AuthorizationNativeTransport,
+    AuthorizationRoutingMaterial, AuthorizationRuntimeBinding, AuthorizationRuntimeTransports,
+    SessionAuth,
 };
 use crate::internal_sdk::auth::AuthClient;
 
@@ -143,27 +144,47 @@ async fn start_auth_request(
         .json(&request)
         .send()
         .await?;
-    let status = response.status();
-    let text = response.text().await?;
-    if !status.is_success() {
+    if !response.status().is_success() {
+        let error = decode_trellis_http_error(response).await;
         return Err(TrellisAuthError::AuthRequestHttpFailure(
-            status.as_u16(),
-            text,
+            error.status,
+            error.code,
         ));
     }
-    Ok(serde_json::from_str::<AuthStartResponse>(&text)?)
+    Ok(response.json::<AuthStartResponse>().await?)
 }
 
 #[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct AuthStartResponse {
     flow_id: String,
     login_url: String,
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum AgentFlowState {
+    ChooseProvider,
+    Authenticated,
+    ApprovalRequired,
+    ApprovalDenied,
+    Approved,
+    Consumed,
+    Expired,
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct AgentFlowStatusResponse {
-    state: String,
+    flow_id: String,
+    state: AgentFlowState,
+    expires_at: i64,
+    providers: Vec<String>,
+    registration_enabled: bool,
+    federated_registration_enabled: bool,
+    consent_view: Value,
+    redirect_target: Option<String>,
 }
 
 async fn fetch_agent_flow_status(
@@ -179,15 +200,14 @@ async fn fetch_agent_flow_status(
         ))
         .send()
         .await?;
-    let status = response.status();
-    let text = response.text().await?;
-    if !status.is_success() {
+    if !response.status().is_success() {
+        let error = decode_trellis_http_error(response).await;
         return Err(TrellisAuthError::AuthRequestHttpFailure(
-            status.as_u16(),
-            text,
+            error.status,
+            error.code,
         ));
     }
-    Ok(serde_json::from_str::<AgentFlowStatusResponse>(&text)?)
+    Ok(response.json::<AgentFlowStatusResponse>().await?)
 }
 
 #[doc = concat!("Asynchronous Trellis API operation `", stringify!(poll_agent_flow_until_ready), "`.")]
@@ -199,22 +219,19 @@ pub async fn poll_agent_flow_until_ready(
 ) -> Result<String, TrellisAuthError> {
     let deadline = tokio::time::Instant::now() + timeout_after;
     loop {
-        match fetch_agent_flow_status(trellis_url, flow_id)
-            .await?
-            .state
-            .as_str()
-        {
-            "approved" | "consumed" => return Ok(flow_id.to_string()),
-            "choose_provider" | "approval_required" => {}
-            "approval_denied" => {
+        match fetch_agent_flow_status(trellis_url, flow_id).await?.state {
+            AgentFlowState::Approved | AgentFlowState::Consumed => return Ok(flow_id.to_string()),
+            AgentFlowState::ChooseProvider
+            | AgentFlowState::Authenticated
+            | AgentFlowState::ApprovalRequired => {}
+            AgentFlowState::ApprovalDenied => {
                 return Err(TrellisAuthError::AuthFlowFailed(
                     "approval_denied".to_string(),
                 ));
             }
-            "expired" => {
+            AgentFlowState::Expired => {
                 return Err(TrellisAuthError::AuthFlowFailed("expired".to_string()));
             }
-            state => return Err(TrellisAuthError::AuthFlowFailed(state.to_owned())),
         }
 
         if tokio::time::Instant::now() >= deadline {
@@ -256,10 +273,9 @@ async fn bind_session(
         .json(&request)
         .send()
         .await?;
-    let status = response.status();
-    let text = response.text().await?;
-    if !status.is_success() {
-        return Err(TrellisAuthError::BindHttpFailure(status.as_u16(), text));
+    if !response.status().is_success() {
+        let error = decode_trellis_http_error(response).await;
+        return Err(TrellisAuthError::BindHttpFailure(error.status, error.code));
     }
 
     let response_received_at = now_ms()?;
@@ -268,7 +284,7 @@ async fn bind_session(
         session,
         nats,
         authorization_context,
-    } = serde_json::from_str(&text)?;
+    } = response.json().await?;
     let context = parse_authorization_context(&authorization_context.context)?;
     let native = nats.transports.native.ok_or_else(|| {
         TrellisAuthError::UnexpectedBindStatus("missing_native_transport".to_owned())

@@ -3603,9 +3603,9 @@ async fn same_session_connections_are_kicked() {
 }
 
 #[tokio::test]
-async fn native_refresh_persists_and_reconnects_with_rotated_endpoint() {
+async fn native_offline_restart_refreshes_before_connect() {
     assert_runtime_case_registered(
-        "auth.native-refresh-persists-and-reconnects-with-rotated-endpoint",
+        "auth.native-offline-restart-refreshes-before-connect",
         "auth",
         "auth",
     );
@@ -3636,6 +3636,12 @@ async fn native_refresh_persists_and_reconnects_with_rotated_endpoint() {
         .expect("initial durable authorization state exists");
     let initial_servers = initial.runtime.transports.native.nats_servers;
 
+    client
+        .integration_test_close_native_connection()
+        .await
+        .expect("stop native client on endpoint A");
+    drop(client);
+
     let ((retired_url, replacement_url), _) = fixture
         .runtime
         .rotate_nats_proxy()
@@ -3652,39 +3658,22 @@ async fn native_refresh_persists_and_reconnects_with_rotated_endpoint() {
         tokio::time::sleep(Duration::from_millis(25)).await;
     }
 
-    let refreshed = client
-        .integration_test_refresh_authorization_context()
-        .await
-        .expect("refresh and replace native connection");
-    assert_eq!(
-        refreshed.transports.native.nats_servers,
-        vec![replacement_url.clone()]
-    );
-    let durable = reconnect
-        .authorization_state()
-        .expect("load refreshed durable authorization state")
-        .expect("refreshed durable authorization state exists");
-    assert_eq!(durable.runtime, refreshed);
-    auth_sdk::AuthClient::new(&client)
-        .rpc()
-        .auth()
-        .sessions_me()
-        .await
-        .expect("authenticate through installed endpoint B");
-
-    client
-        .integration_test_close_native_connection()
-        .await
-        .expect("close refreshed native connection");
-    drop(client);
     let reconnected = reconnect
         .connect_bound_only()
         .await
-        .expect("reconnect from refreshed durable state");
+        .expect("refresh over HTTP before reconnecting to endpoint B");
+    let durable = reconnect
+        .authorization_state()
+        .expect("load restart-refreshed durable authorization state")
+        .expect("restart-refreshed durable authorization state exists");
+    assert_eq!(
+        durable.runtime.transports.native.nats_servers,
+        vec![replacement_url]
+    );
     auth_sdk::AuthClient::new(&reconnected)
         .rpc()
         .auth()
         .sessions_me()
         .await
-        .expect("authenticate after persisted endpoint-B reconnect");
+        .expect("authenticate after offline endpoint-B restart");
 }

@@ -7,8 +7,8 @@ pub(super) use consent::{bind_flow, decide_approval};
 #[cfg(test)]
 pub(super) use consent::{ApprovalRequest, BindRequest};
 pub(super) use local::{
-    complete_admin_account, get_account_flow, get_flow, local_login, register_local,
-    BrowserFlowResponse,
+    complete_admin_account, get_account_flow, get_flow, get_portal_flow, local_login,
+    register_local, BrowserFlowResponse,
 };
 #[cfg(test)]
 pub(super) use local::{AdminAccountRequest, LocalRegistrationRequest};

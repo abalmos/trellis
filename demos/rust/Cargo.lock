@@ -124,6 +124,42 @@ dependencies = [
 ]
 
 [[package]]
+name = "async-nats"
+version = "0.50.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d83a251fa1a4c9d0fe6e816b7acd60549e473e08d14f27a1d992c2675abff05f"
+dependencies = [
+ "base64",
+ "bytes",
+ "futures-util",
+ "memchr",
+ "nkeys",
+ "nuid",
+ "pin-project",
+ "portable-atomic",
+ "rand 0.10.1",
+ "regex",
+ "ring",
+ "rustls-native-certs",
+ "rustls-pki-types",
+ "rustls-webpki",
+ "serde",
+ "serde_json",
+ "serde_nanos",
+ "serde_repr",
+ "thiserror 2.0.18",
+ "time",
+ "tokio",
+ "tokio-rustls",
+ "tokio-stream",
+ "tokio-util",
+ "tokio-websockets",
+ "tracing",
+ "tryhard",
+ "url",
+]
+
+[[package]]
 name = "async-trait"
 version = "0.1.89"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2597,7 +2633,7 @@ dependencies = [
 name = "trellis-rs"
 version = "0.12.0"
 dependencies = [
- "async-nats",
+ "async-nats 0.50.0",
  "base64",
  "bytes",
  "ed25519-dalek",
@@ -2645,7 +2681,7 @@ name = "trellis-rust-demo-service"
 version = "0.0.0"
 dependencies = [
  "anyhow",
- "async-nats",
+ "async-nats 0.47.0",
  "base64",
  "bytes",
  "clap",

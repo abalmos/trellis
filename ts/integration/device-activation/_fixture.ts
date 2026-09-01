@@ -5,6 +5,7 @@ import {
   defineDeviceContract,
 } from "@qlever-llc/trellis";
 import {
+  base64urlEncode,
   deriveDeviceConfirmationCode,
   deriveDeviceIdentity,
   waitForDeviceActivation,
@@ -296,7 +297,7 @@ export function createDeviceActivationFixture(caseId: string) {
     const presentation = await resolveNativeProtocolPresentation(
       deviceContract,
     );
-    const nonce = ulid();
+    const nonce = base64urlEncode(crypto.getRandomValues(new Uint8Array(32)));
     const confirmationCode = await deriveDeviceConfirmationCode({
       activationKey: identity.activationKey,
       publicIdentityKey: identity.publicIdentityKey,

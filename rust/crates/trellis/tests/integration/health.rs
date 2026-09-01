@@ -167,9 +167,9 @@ impl Drop for HealthRuntimeProcess {
 }
 
 #[tokio::test]
-async fn service_heartbeat_uses_replaced_native_connection() {
+async fn service_heartbeat_uses_refreshed_native_connection() {
     assert_runtime_case_registered(
-        "health.service-heartbeat-uses-replaced-native-connection",
+        "health.service-heartbeat-uses-refreshed-native-connection",
         "health",
         "health",
     );
@@ -223,11 +223,11 @@ async fn service_heartbeat_uses_replaced_native_connection() {
         .caller()
         .integration_test_refresh_authorization_context()
         .await
-        .expect("replace service connection with endpoint B");
+        .expect("refresh service connection with endpoint B");
 
     let heartbeat = tokio::time::timeout(Duration::from_secs(45), heartbeats.next())
         .await
-        .expect("receive heartbeat after endpoint replacement")
+        .expect("receive heartbeat after endpoint refresh")
         .expect("heartbeat transport remains open");
     let sample: Value =
         serde_json::from_slice(&heartbeat.payload).expect("decode post-rotation heartbeat");

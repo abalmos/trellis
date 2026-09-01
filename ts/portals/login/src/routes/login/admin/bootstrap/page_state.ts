@@ -1,3 +1,5 @@
+import { decodeTrellisHttpError } from "@qlever-llc/trellis/auth/browser";
+
 import {
   accountFlowProviderLoginUrl,
   type AccountFlowState,
@@ -15,6 +17,7 @@ export type AdminBootstrapInput = {
   name: string;
   email: string;
   browserFlowId?: string;
+  portalBindingDigest?: string;
 };
 
 /** Successful admin bootstrap completion response. */
@@ -28,7 +31,7 @@ export type AdminBootstrapSuccess = {
 export type BootstrapErrorDetails = {
   status: number;
   error: string | null;
-  message: string | null;
+  message?: string | null;
 };
 
 /** Minimal fetch-compatible function used by the completion helper. */
@@ -76,22 +79,6 @@ function successBody(value: unknown): AdminBootstrapSuccess | null {
     ...(typeof value.browserFlowId === "string"
       ? { browserFlowId: value.browserFlowId }
       : {}),
-  };
-}
-
-function responseErrorBody(
-  value: unknown,
-): Omit<BootstrapErrorDetails, "status"> {
-  if (!isRecord(value)) return { error: null, message: null };
-  if (typeof value.error === "string") {
-    return { error: value.error, message: null };
-  }
-  if (!isRecord(value.error)) return { error: null, message: null };
-  return {
-    error: typeof value.error.code === "string" ? value.error.code : null,
-    message: typeof value.error.message === "string"
-      ? value.error.message
-      : null,
   };
 }
 
@@ -146,26 +133,25 @@ export async function completeAdminBootstrap(
   if (name) payload.name = name;
   if (email) payload.email = email;
   if (input.browserFlowId) payload.browserFlowId = input.browserFlowId;
+  if (input.portalBindingDigest) {
+    payload.portalBindingDigest = input.portalBindingDigest;
+  }
 
   const response = await fetcher(url, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(payload),
   });
-  const body = await parseJson(response);
-
-  if (response.ok) {
-    const success = successBody(body);
-    if (success) return success;
+  if (!response.ok) {
+    const error = await decodeTrellisHttpError(response);
     throw new Error(
-      "Bootstrap completed but the server returned an unexpected response.",
+      formatAdminBootstrapError({ status: error.status, error: error.code }),
     );
   }
 
+  const success = successBody(await parseJson(response));
+  if (success) return success;
   throw new Error(
-    formatAdminBootstrapError({
-      status: response.status,
-      ...responseErrorBody(body),
-    }),
+    "Bootstrap completed but the server returned an unexpected response.",
   );
 }

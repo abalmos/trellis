@@ -15,6 +15,7 @@ import {
   type AuthorizationContextBundle,
   AuthorizationContextBundleSchema,
 } from "../../auth/authorization_context.ts";
+import { decodeTrellisHttpError } from "../../auth/http_error.ts";
 import { ContractResourceBindingsSchema } from "../../contracts.ts";
 import type { RuntimeApi } from "../../contract_support/runtime.ts";
 import { resolveNativeProtocolPresentation } from "../../contract_support/protocol_resolution.ts";
@@ -225,7 +226,7 @@ const ServiceBootstrapFailureSchema = Type.Object({
   reason: Type.String({ minLength: 1 }),
   message: Type.Optional(Type.String({ minLength: 1 })),
   serverNow: Type.Optional(Type.Integer()),
-}, { additionalProperties: true });
+}, { additionalProperties: false });
 
 async function fetchServiceBootstrapInfoOnce(args: {
   bootstrapUrl: URL;
@@ -237,7 +238,6 @@ async function fetchServiceBootstrapInfoOnce(args: {
   identity: TrellisServiceConnectOpts["identity"];
 }): Promise<{
   response: Response;
-  responseText: string;
   payload: unknown;
   requestStartedAtMs: number;
   responseReceivedAtMs: number;
@@ -301,16 +301,15 @@ async function fetchServiceBootstrapInfoOnce(args: {
   }
   const responseReceivedAtMs = Date.now();
 
-  const responseText = await response.text();
+  if (!response.ok) throw await decodeTrellisHttpError(response);
   let payload: unknown;
   try {
-    payload = JSON.parse(responseText);
+    payload = await response.json();
   } catch {
     payload = undefined;
   }
   return {
     response,
-    responseText,
     payload,
     requestStartedAtMs,
     responseReceivedAtMs,
@@ -476,30 +475,10 @@ export async function fetchServiceBootstrapInfo(args: {
       continue;
     }
 
-    if (!settled.response.ok) {
-      const detail = settled.responseText.trim();
-      throw new TransportError({
-        code: "trellis.bootstrap.failed",
-        message: detail.length > 0
-          ? `Service bootstrap failed with HTTP ${settled.response.status}: ${detail}`
-          : `Service bootstrap failed with HTTP ${settled.response.status}`,
-        hint:
-          "Retry the connection. If it keeps failing, check Trellis bootstrap availability.",
-        context: {
-          trellisUrl: args.trellisUrl,
-          contractId: args.contractId,
-          contractDigest: args.contractDigest,
-          status: settled.response.status,
-        },
-      });
-    }
-
     if (settled.payload === undefined) {
       throw new TransportError({
         code: "trellis.bootstrap.invalid_response",
-        message: `Service bootstrap returned invalid JSON: ${
-          settled.responseText.trim() || "<empty body>"
-        }`,
+        message: "Service bootstrap returned invalid JSON.",
         hint:
           "Retry the connection. If it keeps happening, check the Trellis deployment.",
         context: {

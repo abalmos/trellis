@@ -15,6 +15,7 @@ use qrcode::{render::unicode, QrCode};
 use serde_json::Value;
 use tracing_subscriber::EnvFilter;
 use trellis_rs::auth as authlib;
+use trellis_rs::client::AuthErrorPayload;
 use trellis_rs::generated::{Caller, TrellisClientError};
 
 mod auth;
@@ -176,40 +177,37 @@ fn rejected_admin_session_error_report(
 }
 
 fn is_rejected_admin_session_error(error: &authlib::TrellisAuthError) -> bool {
-    match error {
-        authlib::TrellisAuthError::TrellisClient(
-            TrellisClientError::NatsConnect(message) | TrellisClientError::NatsRequest(message),
+    admin_session_error_code(error).is_some_and(|code| {
+        matches!(
+            code.as_str(),
+            "session_not_found"
+                | "session_expired"
+                | "session_revoked"
+                | "authority_rejected"
+                | "authority_revoked"
+                | "authority_expired"
         )
-        | authlib::TrellisAuthError::AuthRequestHttpFailure(_, message)
-        | authlib::TrellisAuthError::BindHttpFailure(_, message) => {
-            is_rejected_admin_session_message(message)
-        }
-        authlib::TrellisAuthError::TrellisClient(TrellisClientError::RpcError(payload)) => {
-            is_rejected_admin_session_message(payload.raw())
-        }
-        _ => false,
-    }
-}
-
-fn is_rejected_admin_session_message(message: &str) -> bool {
-    let message = message.to_ascii_lowercase();
-    message.contains("revoked")
-        || message.contains("rejected")
-        || message.contains("session_not_found")
+    })
 }
 
 fn is_admin_session_authorization_violation_error(error: &authlib::TrellisAuthError) -> bool {
+    admin_session_error_code(error).as_deref() == Some("authorization_violation")
+}
+
+fn admin_session_error_code(error: &authlib::TrellisAuthError) -> Option<String> {
     match error {
-        authlib::TrellisAuthError::TrellisClient(
-            TrellisClientError::NatsConnect(message) | TrellisClientError::NatsRequest(message),
-        ) => message
-            .to_ascii_lowercase()
-            .contains("authorization violation"),
-        authlib::TrellisAuthError::TrellisClient(TrellisClientError::RpcError(payload)) => payload
-            .raw()
-            .to_ascii_lowercase()
-            .contains("authorization violation"),
-        _ => false,
+        authlib::TrellisAuthError::AuthRequestHttpFailure(_, code)
+        | authlib::TrellisAuthError::BindHttpFailure(_, code)
+        | authlib::TrellisAuthError::TrellisClient(TrellisClientError::BootstrapHttp {
+            code,
+            ..
+        }) => Some(code.clone()),
+        authlib::TrellisAuthError::TrellisClient(TrellisClientError::RpcError(payload)) => {
+            serde_json::from_slice::<AuthErrorPayload>(payload.raw().as_bytes())
+                .ok()
+                .map(|payload| payload.reason)
+        }
+        _ => None,
     }
 }
 
@@ -361,39 +359,6 @@ mod tests {
     }
 
     #[test]
-    fn treats_revoked_session_message_as_rejected_session() {
-        let error = TrellisAuthError::TrellisClient(TrellisClientError::NatsConnect(
-            "Session revoked by server".to_string(),
-        ));
-
-        assert!(is_rejected_admin_session_error(&error));
-    }
-
-    #[test]
-    fn treats_session_not_found_message_as_rejected_session() {
-        let error = TrellisAuthError::TrellisClient(TrellisClientError::RpcError(
-            RpcErrorPayload::from_message("session_not_found"),
-        ));
-
-        assert!(is_rejected_admin_session_error(&error));
-    }
-
-    #[test]
-    fn treats_auth_request_http_rejection_as_rejected_session() {
-        let error =
-            TrellisAuthError::AuthRequestHttpFailure(401, "session rejected by server".to_string());
-
-        assert!(is_rejected_admin_session_error(&error));
-    }
-
-    #[test]
-    fn treats_bind_http_revocation_as_rejected_session() {
-        let error = TrellisAuthError::BindHttpFailure(403, "session revoked".to_string());
-
-        assert!(is_rejected_admin_session_error(&error));
-    }
-
-    #[test]
     fn rejected_session_report_clears_local_session_and_requires_explicit_login() {
         let _guard = config_env_lock().lock().expect("lock config env");
         let test_dir = unique_test_dir("rejected-session-report");
@@ -438,8 +403,7 @@ mod tests {
         let report = map_admin_session_error(error);
 
         assert!(admin_session_path(&test_dir).exists());
-        assert!(report.to_string().contains("run `trellis auth login`"));
-        assert!(report.to_string().contains("reauthenticate"));
+        assert!(report.to_string().contains("authorization violation"));
 
         unsafe {
             env::remove_var("XDG_CONFIG_HOME");
@@ -459,9 +423,7 @@ mod tests {
         save_admin_session(&test_admin_session_state()).expect("save admin session");
         assert!(admin_session_path(&test_dir).exists());
 
-        let error = TrellisAuthError::TrellisClient(TrellisClientError::NatsRequest(
-            "Authorization Violation: session revoked".to_string(),
-        ));
+        let error = TrellisAuthError::BindHttpFailure(401, "session_revoked".to_string());
         let report = map_admin_session_result::<()>(Err(error))
             .expect_err("rejected-session result should map to report");
 
@@ -505,9 +467,7 @@ mod tests {
     fn explicit_session_not_found_rejected_session_clears_local_session() {
         assert_rejected_session_error_clears_local_session(
             "session-not-found-rejected-session",
-            TrellisAuthError::TrellisClient(TrellisClientError::RpcError(
-                RpcErrorPayload::from_message("session_not_found"),
-            )),
+            TrellisAuthError::AuthRequestHttpFailure(401, "session_not_found".to_string()),
         );
     }
 
@@ -515,9 +475,7 @@ mod tests {
     fn explicit_revoked_rejected_session_clears_local_session() {
         assert_rejected_session_error_clears_local_session(
             "revoked-rejected-session",
-            TrellisAuthError::TrellisClient(TrellisClientError::NatsRequest(
-                "session revoked".to_string(),
-            )),
+            TrellisAuthError::BindHttpFailure(401, "session_revoked".to_string()),
         );
     }
 
@@ -525,7 +483,7 @@ mod tests {
     fn explicit_rejected_session_clears_local_session() {
         assert_rejected_session_error_clears_local_session(
             "rejected-rejected-session",
-            TrellisAuthError::AuthRequestHttpFailure(401, "session rejected".to_string()),
+            TrellisAuthError::AuthRequestHttpFailure(403, "authority_rejected".to_string()),
         );
     }
 }

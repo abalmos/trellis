@@ -31,29 +31,6 @@ function isoString(value: string | number | Date): string {
     : value;
 }
 
-function errorContext(error: unknown): Record<string, unknown> | null {
-  if (typeof error !== "object" || error === null) {
-    return null;
-  }
-
-  if ("getContext" in error) {
-    const getContext = Reflect.get(error, "getContext");
-    if (typeof getContext === "function") {
-      const context = Reflect.apply(getContext, error, []);
-      return typeof context === "object" && context !== null
-        ? context as Record<string, unknown>
-        : null;
-    }
-  }
-
-  if (!("context" in error)) return null;
-
-  const context = Reflect.get(error, "context");
-  return typeof context === "object" && context !== null
-    ? context as Record<string, unknown>
-    : null;
-}
-
 function errorReason(error: unknown): string | undefined {
   if (typeof error !== "object" || error === null || !("reason" in error)) {
     return undefined;
@@ -122,26 +99,16 @@ export function mapDeviceActivationFailure(
   flowId: string,
   error: unknown,
 ): DeviceActivationView | null {
-  const context = errorContext(error);
-  const authReason = errorReason(error);
-  const reason = typeof context?.reason === "string"
-    ? context.reason
-    : authReason;
+  const reason = errorReason(error);
 
-  if (
-    reason === "device_flow_not_found" ||
-    authReason === "device_activation_flow_not_found"
-  ) {
+  if (reason === "device_activation_flow_not_found") {
     return createInvalidDeviceActivationView(
       "This activation link is no longer valid.",
       flowId,
     );
   }
 
-  if (
-    reason === "device_flow_expired" ||
-    authReason === "device_activation_flow_expired"
-  ) {
+  if (reason === "device_activation_flow_expired") {
     return {
       mode: "expired",
       flowId,
@@ -150,26 +117,21 @@ export function mapDeviceActivationFailure(
     };
   }
 
-  if (
-    reason === "unknown_device" || authReason === "unknown_device"
-  ) {
+  if (reason === "unknown_device") {
     return createInvalidDeviceActivationView(
       "This activation link no longer matches a known device.",
       flowId,
     );
   }
 
-  if (
-    reason === "device_deployment_not_found" ||
-    authReason === "device_deployment_not_found"
-  ) {
+  if (reason === "device_deployment_not_found") {
     return createInvalidDeviceActivationView(
       "This device deployment is no longer available.",
       flowId,
     );
   }
 
-  if (authReason === "invalid_request") {
+  if (reason === "invalid_request") {
     return createInvalidDeviceActivationView(
       "Trellis rejected this activation request. Start again from the device.",
       flowId,

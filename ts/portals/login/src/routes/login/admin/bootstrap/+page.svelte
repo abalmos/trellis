@@ -1,6 +1,7 @@
 <script lang="ts">
   import { browser } from "$app/environment";
   import { onMount } from "svelte";
+  import { getOrCreatePortalBinding } from "@qlever-llc/trellis/auth/browser";
   import PortalBrand from "$lib/components/PortalBrand.svelte";
   import { trellisUrl } from "$lib/config";
   import {
@@ -21,6 +22,7 @@
   let email = $state("");
   let flowId = $state<string | null>(null);
   let browserFlowId = $state<string | null>(null);
+  let portalBindingDigest = $state<string | null>(null);
   let flowState = $state.raw<AccountFlowState | null>(null);
   let loading = $state(true);
   let error = $state<string | null>(null);
@@ -99,6 +101,7 @@
         name,
         email,
         ...(browserFlowId ? { browserFlowId } : {}),
+        ...(portalBindingDigest ? { portalBindingDigest } : {}),
       });
       if (completion.browserFlowId) {
         window.location.replace(
@@ -112,8 +115,13 @@
     }
   }
 
-  onMount(() => {
+  onMount(async () => {
     browserFlowId = new URL(window.location.href).searchParams.get("browserFlowId");
+    if (browserFlowId) {
+      portalBindingDigest = (
+        await getOrCreatePortalBinding(browserFlowId, sessionStorage)
+      ).digest;
+    }
     void loadFlow();
   });
 </script>

@@ -5,7 +5,7 @@
   import type { AuthSessionsMeOutput } from "@trellis/apis/trellis.auth";
   import type { Snippet } from "svelte";
   import { onDestroy, onMount } from "svelte";
-  import { signOut as logout } from "../auth";
+  import { buildConsoleLoginUrl } from "../auth";
   import {
     getVisibleNavSections,
     isAdmin,
@@ -59,7 +59,11 @@
   }
 
   async function signOut(): Promise<void> {
-    await logout();
+    try {
+      await trellis.logout();
+    } finally {
+      window.location.href = buildConsoleLoginUrl({ redirectTo: "/profile" });
+    }
   }
 
   afterNavigate(({ to }) => {

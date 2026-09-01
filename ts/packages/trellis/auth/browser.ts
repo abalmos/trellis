@@ -5,13 +5,11 @@
  */
 
 export {
-  completeSessionLogout,
-  type CompleteSessionLogoutArgs,
-  logoutSession,
-} from "./browser/logout.ts";
-export {
   type ApprovalDecision,
+  createPortalBinding,
   fetchPortalFlowState,
+  getOrCreatePortalBinding,
+  type PortalBinding,
   portalFlowIdFromUrl,
   type PortalFlowState,
   type PortalFlowState as BrowserPortalFlowState,
@@ -19,25 +17,7 @@ export {
   portalRedirectLocation,
   submitPortalApproval,
 } from "./browser/portal.ts";
-export {
-  clearSessionKey,
-  createRpcProof,
-  generateSessionKey,
-  getOrCreateSessionKey,
-  getPublicSessionKey,
-  hasSessionKey,
-  loadSessionKey,
-  type SessionKeyHandle,
-  type SessionKeyOptions,
-  type SessionKeyPersistenceMode,
-  setSessionId,
-  signBytes,
-} from "./browser/session.ts";
-export {
-  BrowserAuthorizationContextStore,
-  deleteKeyPair,
-  hasKeyPair,
-} from "./browser/storage.ts";
+export { BrowserAuthorizationContextStore } from "./browser/storage.ts";
 export {
   classifyBrowserAuthError,
   isRecoverableBrowserAuthError,
@@ -46,6 +26,7 @@ export type {
   BrowserAuthRecoveryClassification,
   BrowserAuthRecoveryKind,
 } from "./browser_recovery.ts";
+export { decodeTrellisHttpError, TrellisHttpError } from "./http_error.ts";
 export {
   base64urlDecode,
   base64urlEncode,

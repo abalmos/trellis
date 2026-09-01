@@ -58,6 +58,9 @@ Rules:
   wrappers. Browser bundles require `nats.transports.websocket`; service and Deno
   device runtimes require `nats.transports.native`. Refresh installs the complete
   returned session, JWT, transport, clock, and authorization-context bundle.
+  Browser state is one participant-scoped IndexedDB installation containing one
+  seed, session/runtime state, and retained trust floor; do not persist a second
+  key or session record.
 - Device activation wait repeats `/bootstrap/device` with a fresh proof over the
   same target session identity and uses
   `expiresAt - serverNow` as a monotonic duration. A changed review id is an
@@ -300,7 +303,8 @@ cancel control and waits for its acknowledgement; a caller may already have
 consumed a valid prefix. Grants restrict frames to 1 byte through 1 MiB and
 completed transfers require independent size and SHA-256 verification.
 
-For browser app sign-out, use the connected generated Auth API over NATS. Do not
+For browser app sign-out, call `logout()` on the connected client. It owns the
+generated Auth operation, exact installation transition, and connection drain. Do not
 add an HTTP logout, context, revocation, or client-bootstrap call, and do not
 hard-code IdP endpoints or arbitrary return URLs.
 

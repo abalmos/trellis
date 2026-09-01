@@ -316,7 +316,9 @@ Rules:
 ```
 
 Device activation browser `flowId` values are ULIDs. Review ids use `dar_`
-followed by a ULID.
+followed by a ULID. Activation challenge nonces are 32-byte CSPRNG values
+encoded as base64url; they are secrets, not request or entity identifiers, and
+are never ULIDs.
 
 `DeviceActivationRecord` is the final auth decision for that instance once
 activation is granted. It also keeps the activating user identity when the

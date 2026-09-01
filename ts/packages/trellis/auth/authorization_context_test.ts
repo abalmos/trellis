@@ -14,9 +14,11 @@ import vectors from "../../../../conformance/authorization-context/vectors.json"
 import {
   type AuthorizationContextBundle,
   AuthorizationContextCache,
+  AuthorizationContextRefreshError,
   AuthorizationProviderCache,
   type AuthorizationProviderEvent,
   type AuthorizationProviderRequest,
+  type AuthorizationRuntimeBinding,
   MemoryAuthorizationContextStore,
   refreshAuthorizationContext,
   startAuthorizationContextRefresh,
@@ -542,9 +544,68 @@ Deno.test("authorization cache rejects tampered embedded trust chain", async () 
   }
 });
 
+Deno.test("authorization cache rejects each mismatched runtime binding field", async () => {
+  const policy = vectors.defaults.policy;
+  const signed = contextBundle().context as {
+    sessionId: string;
+    participant: { id: string; artifactDigest: string; needsDigest: string };
+    inboxPrefix: string;
+  };
+  const valid: AuthorizationRuntimeBinding = {
+    sessionId: signed.sessionId,
+    participantId: signed.participant.id,
+    participantArtifactDigest: signed.participant.artifactDigest,
+    participantNeedsDigest: signed.participant.needsDigest,
+    inboxPrefix: signed.inboxPrefix,
+    transports: { websocket: { natsServers: ["wss://trellis.test/nats"] } },
+  };
+  for (
+    const mutate of [
+      (runtime: AuthorizationRuntimeBinding) => runtime.sessionId = "ses_other",
+      (runtime: AuthorizationRuntimeBinding) =>
+        runtime.participantId = "participant-other",
+      (runtime: AuthorizationRuntimeBinding) =>
+        runtime.participantArtifactDigest = "artifact-other",
+      (runtime: AuthorizationRuntimeBinding) =>
+        runtime.participantNeedsDigest = "needs-other",
+      (runtime: AuthorizationRuntimeBinding) =>
+        runtime.inboxPrefix = "_INBOX.other",
+      (runtime: AuthorizationRuntimeBinding) =>
+        runtime.transports = { websocket: { natsServers: [] } },
+    ]
+  ) {
+    const runtime = structuredClone(valid);
+    mutate(runtime);
+    const cache = new AuthorizationContextCache(
+      "https://trellis.test",
+      "installation:test",
+      new MemoryAuthorizationContextStore(),
+      () => {
+        throw new Error("runtime mismatch reached fetch");
+      },
+    );
+    await assertRejects(
+      () =>
+        cache.install(
+          contextBundle(),
+          { bootstrapJwt: "route", bootstrapJwtExpiresAt: 2_000 },
+          policy.nowUnixSeconds,
+          undefined,
+          runtime,
+        ),
+      Error,
+      "authorization runtime binding does not match signed context",
+    );
+  }
+});
+
 Deno.test("context refresh renews routing material and supports null recovery", async () => {
   const policy = vectors.defaults.policy;
   const bundle = contextBundle();
+  const signed = bundle.context as {
+    participant: { id: string; artifactDigest: string; needsDigest: string };
+    inboxPrefix: string;
+  };
   const cache = new AuthorizationContextCache(
     "https://trellis.test",
     "installation:refresh",
@@ -576,10 +637,21 @@ Deno.test("context refresh renews routing material and supports null recovery", 
       authorizationContext: bundle,
       session: {
         sessionId: "ses_test",
-        participantId: "documents-web",
-        participantArtifactDigest: "A".repeat(43),
-        participantNeedsDigest: "B".repeat(43),
-        inboxPrefix: "_INBOX.test",
+        principalId: "usr_test",
+        principalKind: "user",
+        participantId: signed.participant.id,
+        participantKind: "app",
+        participantArtifactDigest: signed.participant.artifactDigest,
+        participantNeedsDigest: signed.participant.needsDigest,
+        sessionPublicKey: auth.sessionKey,
+        sessionKeyId: "session-key-test",
+        inboxPrefix: signed.inboxPrefix,
+        state: "active",
+        createdAt: 1_000_000,
+        lastSeenAt: 1_100_000,
+        expiresAt: null,
+        revokedAt: null,
+        version: 1,
       },
       nats: {
         jwt: `route-${route}`,
@@ -609,6 +681,22 @@ Deno.test("context refresh renews routing material and supports null recovery", 
   });
   assertEquals(cache.routingJwt(), "route-2");
   assertEquals(currentDigests, [vectors.completeChain.contextDigest, null]);
+});
+
+Deno.test("context refresh terminality uses exact machine codes", () => {
+  assert(new AuthorizationContextRefreshError(401, "user_inactive").terminal);
+  assert(
+    new AuthorizationContextRefreshError(409, "context_refresh_mismatch")
+      .terminal,
+  );
+  assert(
+    !new AuthorizationContextRefreshError(503, "authorization_pending")
+      .terminal,
+  );
+  assert(
+    !new AuthorizationContextRefreshError(401, "session_revoked later")
+      .terminal,
+  );
 });
 
 Deno.test("refresh wake is retained before registration and coalesced while running", async () => {
@@ -754,6 +842,7 @@ Deno.test("expired context restores as recovery evidence without clearing trust"
   const chain = vectors.completeChain;
   const policy = vectors.defaults.policy;
   const bundle = contextBundle();
+  const signedContext = JSON.parse(chain.contextCanonicalJson);
   const store = new MemoryAuthorizationContextStore();
   await store.commit({
     format: "trellis.authorization-client-state.v1",
@@ -767,9 +856,9 @@ Deno.test("expired context restores as recovery evidence without clearing trust"
       manifestDigestAtMinimumGeneration: chain.manifestDigest,
     },
     session: {
-      sessionId: "untrusted-placeholder",
-      participantDigest: "untrusted-placeholder",
-      needsDigest: "untrusted-placeholder",
+      sessionId: signedContext.sessionId,
+      participantDigest: signedContext.participant.artifactDigest,
+      needsDigest: signedContext.participant.needsDigest,
     },
     context: bundle,
     contextDigest: chain.contextDigest,

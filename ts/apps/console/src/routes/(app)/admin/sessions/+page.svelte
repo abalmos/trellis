@@ -1,6 +1,5 @@
 <script lang="ts">
   import { isErr } from "@qlever-llc/result";
-  import { loadSessionKey } from "@qlever-llc/trellis/auth/browser";
   import { resolve } from "$app/paths";
   import { onMount } from "svelte";
   import {
@@ -30,7 +29,7 @@
 
   let sessions = $state<SessionRecord[]>([]);
   let sessionFilterUser = $state("");
-  let currentSessionKey = $state<string | null>(null);
+  let currentSessionId = $state<string | null>(null);
 
   let connections = $state<ConnectionRecord[]>([]);
   let connFilterUser = $state("");
@@ -40,7 +39,7 @@
     loading = true;
     error = null;
     try {
-      currentSessionKey = (await loadSessionKey())?.sessionKey ?? null;
+      currentSessionId = (await trellis.authSessionsMe({}).orThrow()).session.sessionId;
       const response = await trellis.authSessionsList({
         principalId: sessionFilterUser.trim() || undefined,
         limit: 500,
@@ -77,7 +76,7 @@
   }
 
   function isCurrentSession(session: SessionRecord): boolean {
-    return !!currentSessionKey && session.sessionKeyId === currentSessionKey;
+    return session.sessionId === currentSessionId;
   }
 
   onMount(() => { void loadSessions(); });

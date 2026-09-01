@@ -1,18 +1,5 @@
 import { resolve } from "$app/paths";
-import {
-  clearSessionKey,
-  completeSessionLogout,
-  getOrCreateSessionKey,
-} from "@qlever-llc/trellis/auth/browser";
-import contract from "../../contract.ts";
 import { APP_CONFIG, buildAppLoginUrl } from "./config.ts";
-
-function storageScope(): string {
-  if (!APP_CONFIG.authUrl) throw new Error("Trellis URL is not configured.");
-  return `${
-    new URL(APP_CONFIG.authUrl).origin
-  }:${contract.CONTRACT_ID}:${contract.CONTRACT_DIGEST}`;
-}
 
 /** Converts auth callback reason codes into console-facing messages. */
 export function formatConsoleAuthError(error: string): string {
@@ -24,19 +11,6 @@ export function formatConsoleAuthError(error: string): string {
     default:
       return error;
   }
-}
-
-/** Logs out the current Console browser session. */
-export async function signOut(): Promise<never> {
-  return await completeSessionLogout({
-    handle: await getOrCreateSessionKey({ storageScope: storageScope() }),
-    returnTo: buildConsoleLoginUrl({ redirectTo: "/profile" }),
-  });
-}
-
-/** Clears the Console browser session before restarting authentication. */
-export async function resetSession(): Promise<void> {
-  await clearSessionKey({ storageScope: storageScope() });
 }
 
 function toUrl(location: URL | Location): URL {

@@ -10,9 +10,59 @@ pub(crate) struct BrowserFlowResponse {
     pub(crate) registration_enabled: bool,
     pub(crate) federated_registration_enabled: bool,
     pub(crate) consent_view: Value,
-    pub(crate) consent_view_digest: String,
-    pub(crate) user: Option<BrowserFlowUser>,
     pub(crate) redirect_target: Option<String>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct PortalFlowResponse {
+    #[serde(flatten)]
+    flow: BrowserFlowResponse,
+    consent_view_digest: String,
+    user: BrowserFlowUser,
+}
+
+pub(super) async fn portal_flow_response<R, E>(
+    state: &AuthHttpState<R, E>,
+    flow: AuthBrowserFlow,
+) -> Result<PortalFlowResponse, HttpError>
+where
+    R: AccountRepository
+        + AuthorityEvidenceRepository
+        + AuthorityRepository
+        + ContextRepository
+        + DeploymentRepository
+        + OutboxRepository
+        + PortalRepository
+        + ProvisioningRepository
+        + SessionRepository
+        + Clone
+        + Send
+        + Sync
+        + 'static,
+    E: AuthEphemeralRepository + Clone,
+{
+    let principal_id = flow
+        .principal_id
+        .as_deref()
+        .ok_or_else(|| HttpError::conflict("flow_not_authenticated"))?;
+    let profile = state
+        .service
+        .repository()
+        .get_user_profile(principal_id)
+        .await?
+        .ok_or_else(|| HttpError::internal("flow_principal_missing"))?;
+    Ok(PortalFlowResponse {
+        consent_view_digest: flow.consent.consent_view_digest.clone(),
+        user: BrowserFlowUser {
+            origin: "trellis",
+            id: profile.principal_id,
+            name: profile.display_name,
+            email: profile.email,
+            image: profile.image_url,
+        },
+        flow: flow_response(flow),
+    })
 }
 
 #[derive(Serialize)]
@@ -64,30 +114,46 @@ where
         })
         .cloned()
         .collect();
-    let user = if let Some(principal_id) = &flow.principal_id {
-        state
-            .service
-            .repository()
-            .get_user_profile(principal_id)
-            .await?
-            .map(|profile| BrowserFlowUser {
-                origin: "trellis",
-                id: profile.principal_id,
-                name: profile.display_name,
-                email: profile.email,
-                image: profile.image_url,
-            })
-    } else {
-        None
-    };
     let mut response = flow_response(flow);
     response.flow_id = flow_id;
     response.providers = providers;
     response.registration_enabled =
         portal.local_registration_enabled && settings.local_login_enabled;
     response.federated_registration_enabled = settings.federated_registration_enabled;
-    response.user = user;
     Ok(Json(response))
+}
+
+pub(crate) async fn get_portal_flow<R, E>(
+    State(state): State<AuthHttpState<R, E>>,
+    Path(flow_id): Path<String>,
+    headers: HeaderMap,
+) -> Result<Json<PortalFlowResponse>, HttpError>
+where
+    R: AccountRepository
+        + AuthorityEvidenceRepository
+        + AuthorityRepository
+        + ContextRepository
+        + DeploymentRepository
+        + OutboxRepository
+        + PortalRepository
+        + ProvisioningRepository
+        + SessionRepository
+        + Clone
+        + Send
+        + Sync
+        + 'static,
+    E: AuthEphemeralRepository + Clone,
+{
+    let flow = load_flow(&state.ephemeral, &flow_id).await?;
+    let (portal, _) = state
+        .service
+        .repository()
+        .get_login_portal(&flow.portal_id)
+        .await?
+        .ok_or_else(|| HttpError::gone("portal_unavailable"))?;
+    require_selected_portal_origin(&headers, &portal, &state.public_origin)?;
+    require_portal_binding(&flow, &headers)?;
+    Ok(Json(portal_flow_response(&state, flow).await?))
 }
 
 #[derive(Deserialize)]
@@ -96,6 +162,7 @@ pub(crate) struct LocalLoginRequest {
     flow_id: String,
     username: String,
     password: String,
+    portal_binding_digest: String,
 }
 
 #[derive(Serialize)]
@@ -219,6 +286,7 @@ pub(crate) struct AdminAccountRequest {
     name: Option<String>,
     email: Option<String>,
     browser_flow_id: Option<String>,
+    portal_binding_digest: Option<String>,
 }
 
 pub(crate) async fn complete_admin_account<R, E>(
@@ -388,6 +456,11 @@ where
     let grant_set = binding.resolve()?.proposal().required().grant_set().clone();
     let browser_flow_id = request.browser_flow_id.clone();
     let browser_flow = if let Some(browser_flow_id) = browser_flow_id.as_deref() {
+        let portal_binding_digest = request
+            .portal_binding_digest
+            .as_deref()
+            .ok_or_else(|| HttpError::bad_request("portal_binding_digest_required"))?;
+        validate_portal_binding_digest(portal_binding_digest)?;
         let browser_flow = load_flow(&state.ephemeral, browser_flow_id).await?;
         let (portal, _) = state
             .service
@@ -445,6 +518,9 @@ where
                 provider_id: "local".to_owned(),
                 roles: Vec::new(),
             },
+            request
+                .portal_binding_digest
+                .ok_or_else(|| HttpError::bad_request("portal_binding_digest_required"))?,
             now,
         )
         .await?;
@@ -514,6 +590,7 @@ where
         LocalAuthentication::Authenticated { principal, .. } => principal,
         LocalAuthentication::Denied => return Err(HttpError::unauthorized("invalid_credentials")),
     };
+    validate_portal_binding_digest(&request.portal_binding_digest)?;
     let completed = super::consent::complete_authenticated_flow(
         &state,
         flow,
@@ -522,6 +599,7 @@ where
             provider_id: "local".to_owned(),
             roles: Vec::new(),
         },
+        request.portal_binding_digest,
         now,
     )
     .await?;
@@ -537,6 +615,7 @@ pub(crate) struct LocalRegistrationRequest {
     password: String,
     name: Option<String>,
     email: Option<String>,
+    portal_binding_digest: String,
 }
 
 pub(crate) async fn register_local<R, E>(
@@ -587,6 +666,7 @@ where
         return Err(HttpError::forbidden("local_registration_disabled"));
     }
     let now = now_ms()?;
+    validate_portal_binding_digest(&request.portal_binding_digest)?;
     let request_digest = trellis_protocol::digest_json(
         &serde_json::to_value(&request)
             .map_err(|_| HttpError::bad_request("invalid_registration"))?,
@@ -627,6 +707,7 @@ where
             provider_id: "local".to_owned(),
             roles: Vec::new(),
         },
+        request.portal_binding_digest,
         now,
     )
     .await?;

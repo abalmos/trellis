@@ -4,6 +4,7 @@ POST /bootstrap/service
 POST /bootstrap/device
 POST /auth/context/refresh
 GET /auth/flow/:flow_id
+POST /auth/flow/:flow_id/portal
 POST /auth/login/local
 POST /auth/flow/:flow_id/register/local
 GET /auth/account-flow/:flow_token

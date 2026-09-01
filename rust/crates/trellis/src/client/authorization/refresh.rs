@@ -13,6 +13,31 @@ use super::types::{
     AuthorizationRoutingMaterial, AuthorizationRuntimeBinding, AuthorizationRuntimeTransports,
 };
 
+fn is_terminal_refresh_error(code: &str) -> bool {
+    matches!(
+        code,
+        "session_not_found"
+            | "session_expired"
+            | "session_revoked"
+            | "user_not_found"
+            | "user_inactive"
+            | "participant_not_found"
+            | "participant_changed"
+            | "contract_changed"
+            | "authority_not_found"
+            | "authority_rejected"
+            | "authority_revoked"
+            | "authority_expired"
+            | "deployment_inactive"
+            | "instance_inactive"
+            | "device_inactive"
+            | "activation_required"
+            | "delegation_expired"
+            | "context_refresh_mismatch"
+            | "invalid_proof"
+    )
+}
+
 /// Proof-bound refresh request through the credential/context recovery endpoint.
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -202,8 +227,7 @@ pub(crate) async fn refresh(
 pub(crate) fn spawn_authorization_context_refresh_task(
     contexts: Arc<AuthorizationContextCache>,
     auth: Arc<SessionAuth>,
-    native: Arc<std::sync::RwLock<super::super::connection::NativeConnection>>,
-    timeout_ms: u64,
+    nats: async_nats::Client,
 ) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
         loop {
@@ -221,39 +245,54 @@ pub(crate) fn spawn_authorization_context_refresh_task(
             if requested_digest.is_some_and(|digest| contexts.context_digest().ok() != digest) {
                 continue;
             }
+            let previous = match contexts.runtime_binding() {
+                Ok(runtime) => runtime,
+                Err(error) => {
+                    tracing::warn!(%error, "authorization context refresh stopped");
+                    return;
+                }
+            };
+            let previous_context_digest = match contexts.context_digest() {
+                Ok(context) => context,
+                Err(error) => {
+                    tracing::warn!(%error, "authorization context refresh stopped");
+                    return;
+                }
+            };
             match refresh(&contexts, &auth).await {
                 Ok(_) => {
-                    while super::super::connection::native_runtime_differs(&native, &contexts)
-                        .unwrap_or(true)
-                    {
-                        match super::super::connection::replace_native_connection(
-                            &native,
-                            contexts.clone(),
-                            auth.clone(),
-                            timeout_ms,
-                        )
-                        .await
-                        {
-                            Ok(()) => break,
-                            Err(error) => {
-                                tracing::warn!(%error, "native connection replacement will retry");
-                                tokio::time::sleep(std::time::Duration::from_secs(5)).await;
-                            }
+                    let refreshed = match contexts.runtime_binding() {
+                        Ok(runtime) => runtime,
+                        Err(error) => {
+                            tracing::warn!(%error, "refreshed native runtime is invalid");
+                            continue;
                         }
+                    };
+                    let credentials_changed = match contexts.context_digest() {
+                        Ok(context) => previous_context_digest != context,
+                        Err(error) => {
+                            tracing::warn!(%error, "refreshed authorization context is invalid");
+                            continue;
+                        }
+                    };
+                    if let Err(error) = super::super::connection::apply_native_runtime_refresh(
+                        &nats,
+                        &previous,
+                        &refreshed,
+                        credentials_changed,
+                    )
+                    .await
+                    {
+                        tracing::warn!(%error, "native connection refresh will retry");
                     }
                 }
-                Err(TrellisClientError::BootstrapHttp { status, .. })
-                    if matches!(status, 401 | 403 | 409) =>
+                Err(TrellisClientError::BootstrapHttp { status, code })
+                    if is_terminal_refresh_error(&code) =>
                 {
                     tracing::warn!(status, "authorization context refresh rejected");
                     if let Err(error) = contexts.clear() {
                         tracing::warn!(%error, "failed to clear rejected authorization context");
                     }
-                    let nats = native
-                        .read()
-                        .unwrap_or_else(std::sync::PoisonError::into_inner)
-                        .nats
-                        .clone();
                     let _ = nats.drain().await;
                     return;
                 }
@@ -264,4 +303,18 @@ pub(crate) fn spawn_authorization_context_refresh_task(
             }
         }
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_terminal_refresh_error;
+
+    #[test]
+    fn refresh_terminality_uses_exact_machine_codes() {
+        assert!(is_terminal_refresh_error("session_revoked"));
+        assert!(is_terminal_refresh_error("user_inactive"));
+        assert!(is_terminal_refresh_error("context_refresh_mismatch"));
+        assert!(!is_terminal_refresh_error("authorization_pending"));
+        assert!(!is_terminal_refresh_error("session_revoked later"));
+    }
 }

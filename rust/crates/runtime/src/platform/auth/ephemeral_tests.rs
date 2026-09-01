@@ -59,6 +59,9 @@ fn browser_flow() -> AuthBrowserFlow {
         portal_id: "builtin".to_owned(),
         redirect_target: Some("https://app.example/callback".to_owned()),
         principal_id: None,
+        authenticated_provider_id: None,
+        authenticated_roles: Vec::new(),
+        portal_binding_digest: None,
         claim_owner: None,
         claimed_at: None,
         durable_result_digest: None,
@@ -81,6 +84,7 @@ fn oauth_state() -> AuthOAuthState {
         nonce: "nonce".to_owned(),
         redirect_uri: "https://auth.example/callback".to_owned(),
         browser_binding_digest: DIGEST.to_owned(),
+        portal_binding_digest: Some(DIGEST.to_owned()),
         portal_id: Some("builtin".to_owned()),
         portal_policy_digest: Some(DIGEST.to_owned()),
         claim_owner: None,
@@ -113,6 +117,8 @@ async fn repository_conformance(repository: impl AuthEphemeralRepository + Clone
         .unwrap();
     directly_approved.state = AuthBrowserFlowState::Authenticated;
     directly_approved.principal_id = Some("user-1".to_owned());
+    directly_approved.authenticated_provider_id = Some("local".to_owned());
+    directly_approved.portal_binding_digest = Some(DIGEST.to_owned());
     directly_approved.version = 2;
     repository
         .replace_browser_flow(1, directly_approved.clone())
@@ -130,6 +136,8 @@ async fn repository_conformance(repository: impl AuthEphemeralRepository + Clone
     let mut approval_required = flow.clone();
     approval_required.state = AuthBrowserFlowState::Authenticated;
     approval_required.principal_id = Some("user-1".to_owned());
+    approval_required.authenticated_provider_id = Some("local".to_owned());
+    approval_required.portal_binding_digest = Some(DIGEST.to_owned());
     approval_required.version = 2;
     repository
         .replace_browser_flow(1, approval_required.clone())
@@ -194,6 +202,8 @@ async fn repository_conformance(repository: impl AuthEphemeralRepository + Clone
         .unwrap();
     skipped_state.state = AuthBrowserFlowState::ApprovalDenied;
     skipped_state.principal_id = Some("user-1".to_owned());
+    skipped_state.authenticated_provider_id = Some("local".to_owned());
+    skipped_state.portal_binding_digest = Some(DIGEST.to_owned());
     skipped_state.completed_at = Some(200);
     skipped_state.version = 2;
     assert_eq!(

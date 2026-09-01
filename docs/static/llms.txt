@@ -46,8 +46,9 @@ commands.
 - Browser apps use `TrellisClient.connect(...)` for restore, proof-bound auth
   request and bind, complete bundle installation, WebSocket connection, refresh,
   and reconnect. Browser start returns only `{ flowId, loginUrl }`; bind is
-  durably idempotent by `flowId`. Refresh replaces session, JWT, typed transport,
-  server-clock, and authorization-context state as one coherent bundle.
+  durably idempotent by `flowId`. One participant-scoped installation owns the
+  seed, session/runtime bundle, and trust floor. Refresh replaces session, JWT,
+  typed transport, server-clock, and authorization-context state coherently.
 - Ordinary context expiry still permits delayed historical event verification;
   explicit context revocation invalidates every RPC and event proof from that
   context, including proofs created before revocation.
@@ -353,7 +354,8 @@ commands.
 - Browser apps should let Trellis helpers own auth redirects and treat plain
   callbacks after expired login as auth-restart opportunities, not errors.
 - Browser apps use Trellis browser helpers for initial auth redirects and portal
-  flows. Once connected, sign-out and other auth control use generated Auth APIs
+  flows. Once connected, sign-out uses the connected client's `logout()` lifecycle
+  operation and other auth control uses generated Auth APIs
   over NATS; do not add HTTP logout, context, revocation, or client-bootstrap
   calls, hard-code IdP logout endpoints, or invent arbitrary return URLs.
 - Record the local contract path, generation command, format command, typecheck

@@ -18,6 +18,10 @@ import {
   waitForDeviceActivation,
 } from "@qlever-llc/trellis/auth";
 import {
+  createPortalBinding,
+  decodeTrellisHttpError,
+} from "@qlever-llc/trellis/auth/browser";
+import {
   assert,
   assertEquals,
   assertNotEquals,
@@ -40,6 +44,11 @@ import { chromium } from "playwright";
 import { ulid } from "ulid";
 
 import { integrationSlug } from "../integration/_support/names.ts";
+import {
+  clientA as defaultBrowserClientA,
+  clientB as defaultBrowserClientB,
+  clientC as defaultBrowserClientC,
+} from "./default_client_fixture/contract.ts";
 import {
   type LiveTrellisRuntime,
   withTrellisRuntime,
@@ -118,6 +127,19 @@ const liveDeniedConsentUsername = `browser-login-portal-user-${
 }`;
 const liveDeniedConsentPassword =
   `trellis-integration-${liveDeniedConsentCaseId}-password-2026`;
+const livePortalBindingCaseId =
+  "browser.login-portal-live-trusted-portal-binding";
+const livePortalBindingFixture = createAuthLocalLoginFixture(
+  livePortalBindingCaseId,
+);
+const livePortalBindingPortalId = `browser-login-portal-${
+  integrationSlug(livePortalBindingCaseId)
+}`;
+const livePortalBindingUsername = `browser-login-portal-user-${
+  integrationSlug(livePortalBindingCaseId)
+}`;
+const livePortalBindingPassword =
+  `trellis-integration-${livePortalBindingCaseId}-password-2026`;
 const liveInsufficientCapabilitiesCaseId =
   "browser.login-portal-live-insufficient-capabilities";
 const liveInsufficientCapabilitiesFixture = createAuthLocalLoginFixture(
@@ -488,6 +510,459 @@ withLivePortalPage(
       await client?.connection.close();
       await admin.connection.close().catch(() => undefined);
       await service.stop();
+    }
+  },
+);
+
+withLivePortalPage(
+  "browser.login-portal forged portal origin cannot read or decide authenticated flow",
+  async ({ page, portalOrigin, runtime }) => {
+    const fixture = livePortalBindingFixture;
+    const requesterOrigin = portalOrigin.replace("127.0.0.1", "localhost");
+    const service = await fixture.setupService(runtime);
+    const admin = await fixture.setupSessionAdmin(runtime);
+    const { clientAuth } = await fixture.setupClientRegistration(runtime);
+    let client: CallerRuntime<typeof fixture.clientContract> | undefined;
+
+    try {
+      await setupLocalLoginPortalUser({
+        admin,
+        runtime,
+        fixture,
+        portalOrigin,
+        routeOrigin: requesterOrigin,
+        portalId: livePortalBindingPortalId,
+        username: livePortalBindingUsername,
+        password: livePortalBindingPassword,
+        name: "Trusted Portal Binding User",
+      });
+
+      client = await TrellisClient.connect({
+        trellisUrl: runtime.trellisUrl,
+        name: fixture.clientName,
+        contract: fixture.clientContract,
+        participant: {
+          id: fixture.clientContract.CONTRACT_ID,
+          artifactDigest: fixture.clientContract.CONTRACT_DIGEST,
+        },
+        auth: {
+          ...clientAuth.auth,
+          redirectTo: `${requesterOrigin}/callback`,
+        },
+        onAuthRequired: async (ctx) => {
+          const flowId = flowIdFromUrl(ctx.loginUrl);
+          await page.goto(portalPageUrl(ctx.loginUrl, portalOrigin), {
+            waitUntil: "networkidle",
+          });
+          await page.getByLabel("Username").fill(livePortalBindingUsername);
+          await page.getByLabel("Password").fill(livePortalBindingPassword);
+          await page.getByRole("button", { name: "Sign in" }).last().click();
+          try {
+            await page.getByRole("button", { name: "Approve" }).waitFor();
+          } catch (error) {
+            throw new Error(
+              `Expected approval at ${page.url()}. Browser body:\n${await page
+                .locator("body")
+                .innerText()}`,
+              { cause: error },
+            );
+          }
+
+          const publicState = await fetchJson(
+            `${runtime.trellisUrl}/auth/flow/${encodeURIComponent(flowId)}`,
+          );
+          assertEquals(publicState.state, "approval_required");
+          assert(!("user" in publicState));
+          assert(!("consentViewDigest" in publicState));
+
+          const genuineBinding = await page.evaluate((flowId) => {
+            const binding = sessionStorage.getItem(
+              `trellis.portal-binding.v1:${flowId}`,
+            );
+            if (!binding) throw new Error("missing portal binding");
+            return binding;
+          }, flowId);
+          const portalDetail = await fetchJson(
+            `${runtime.trellisUrl}/auth/flow/${
+              encodeURIComponent(flowId)
+            }/portal`,
+            {
+              method: "POST",
+              headers: {
+                origin: portalOrigin,
+                "trellis-portal-binding": genuineBinding,
+              },
+            },
+          );
+          assert(isRecord(portalDetail.user));
+          assertEquals(typeof portalDetail.consentViewDigest, "string");
+
+          const attackerBinding = await createPortalBinding();
+          const deniedDetail = await fetch(
+            `${runtime.trellisUrl}/auth/flow/${
+              encodeURIComponent(flowId)
+            }/portal`,
+            {
+              method: "POST",
+              headers: {
+                origin: portalOrigin,
+                "trellis-portal-binding": attackerBinding.secret,
+              },
+            },
+          );
+          assertEquals(deniedDetail.status, 403);
+          assertEquals(
+            (await decodeTrellisHttpError(deniedDetail)).code,
+            "portal_binding_invalid",
+          );
+
+          const deniedApproval = await fetch(
+            `${runtime.trellisUrl}/auth/flow/${
+              encodeURIComponent(flowId)
+            }/approval`,
+            {
+              method: "POST",
+              headers: {
+                "content-type": "application/json",
+                origin: portalOrigin,
+                "trellis-portal-binding": attackerBinding.secret,
+              },
+              body: JSON.stringify({
+                approved: true,
+                consentViewDigest: portalDetail.consentViewDigest,
+                selectedOptionalBundles: [],
+              }),
+            },
+          );
+          assertEquals(deniedApproval.status, 403);
+          assertEquals(
+            (await decodeTrellisHttpError(deniedApproval)).code,
+            "portal_binding_invalid",
+          );
+
+          const competingLogin = await fetch(
+            `${runtime.trellisUrl}/auth/login/local`,
+            {
+              method: "POST",
+              headers: {
+                "content-type": "application/json",
+                origin: portalOrigin,
+              },
+              body: JSON.stringify({
+                flowId,
+                username: livePortalBindingUsername,
+                password: livePortalBindingPassword,
+                portalBindingDigest: attackerBinding.digest,
+              }),
+            },
+          );
+          assertEquals(competingLogin.status, 409);
+
+          await page.getByRole("button", { name: "Approve" }).click();
+          await page.waitForURL(`${requesterOrigin}/callback**`);
+          return { status: "bound", flowId };
+        },
+      }).orThrow();
+
+      assertEquals(
+        await client.authLoginPing({ message: fixture.pingMessage }).orThrow(),
+        { message: fixture.pingMessage, accepted: true },
+      );
+    } finally {
+      await client?.connection.close();
+      await admin.connection.close().catch(() => undefined);
+      await service.stop();
+    }
+  },
+  { requesterOriginAlias: true },
+);
+
+withLivePortalPage(
+  "browser.default-installation login reload participant isolation and remembered logout",
+  async ({ page, portalOrigin, runtime }) => {
+    const build = await new Deno.Command(Deno.execPath(), {
+      args: ["run", "-A", "vite", "build", "browser/default_client_fixture"],
+      cwd: resolve("."),
+      stdout: "piped",
+      stderr: "piped",
+    }).output();
+    if (!build.success) throw new Error(new TextDecoder().decode(build.stderr));
+
+    const fixtureRoot = resolve("browser/default_client_fixture/dist");
+    defaultClientFixtureRoot = fixtureRoot;
+    const appOrigin = portalOrigin;
+    const admin = await livePortalBindingFixture.setupSessionAdmin(runtime);
+    const username = `default-browser-${
+      integrationSlug("default-browser-installation")
+    }`;
+    const password = "trellis-default-browser-installation-password-2026";
+
+    const installationRecords = () =>
+      page.evaluate(async () => {
+        const db = await new Promise<IDBDatabase>((resolve, reject) => {
+          const request = indexedDB.open("trellis-auth");
+          request.onerror = () => reject(request.error);
+          request.onsuccess = () => resolve(request.result);
+        });
+        const records = await new Promise<unknown[]>((resolve, reject) => {
+          const request = db.transaction("keys").objectStore("keys").getAll();
+          request.onerror = () => reject(request.error);
+          request.onsuccess = () =>
+            resolve(request.result.map((record) => ({
+              ...record,
+              ...(record.seed ? { seed: Array.from(record.seed) } : {}),
+            })));
+        });
+        db.close();
+        return records;
+      });
+    const authenticate = async (participant: "a" | "b") => {
+      await page.goto(
+        `${appOrigin}/__default-client/?participant=${participant}`,
+      );
+      try {
+        await page.waitForURL(`${portalOrigin}/**`);
+      } catch (error) {
+        throw new Error(
+          `default browser fixture did not redirect from ${page.url()}: ${await page
+            .locator("body").innerText()}`,
+          { cause: error },
+        );
+      }
+      await page.getByLabel("Username").fill(username);
+      await page.getByLabel("Password").fill(password);
+      await page.getByRole("button", { name: "Sign in" }).last().click();
+      await page.getByRole("button", { name: "Approve" }).click();
+      try {
+        await page.waitForURL(
+          `${appOrigin}/__default-client/?participant=${participant}`,
+        );
+        await page.getByText("connected", { exact: true }).waitFor();
+      } catch (error) {
+        throw new Error(
+          `default browser fixture failed at ${page.url()}: ${await page
+            .locator("body").innerText()}\n${
+            JSON.stringify(await installationRecords())
+          }`,
+          { cause: error },
+        );
+      }
+    };
+
+    try {
+      for (
+        const [name, contract] of [
+          ["default-browser-a", defaultBrowserClientA],
+          ["default-browser-b", defaultBrowserClientB],
+          ["default-browser-c", defaultBrowserClientC],
+        ] as const
+      ) {
+        await runtime.registerClient({ name, contract });
+      }
+      const user = await createLocalPasswordUser({
+        admin,
+        runtime,
+        username,
+        password,
+        name: "Default Browser User",
+      });
+      await admin.authPortalsPut({
+        disabled: false,
+        portalId: "default-browser-installation",
+        displayName: "Default Browser Installation",
+        entryUrl: `${portalOrigin}/_trellis/portal/users/login`,
+        expectedVersion: null,
+        idempotencyKey: ulid(),
+        loginSettings: {
+          federatedRegistration: false,
+          localLogin: true,
+          localRegistration: false,
+          providers: ["local"],
+        },
+      }).orThrow();
+      for (
+        const contract of [
+          defaultBrowserClientA,
+          defaultBrowserClientB,
+          defaultBrowserClientC,
+        ]
+      ) {
+        await admin.authPortalsRoutesPut({
+          deploymentId: null,
+          expectedVersion: null,
+          idempotencyKey: ulid(),
+          portalId: "default-browser-installation",
+          participantId: contract.CONTRACT_ID,
+          origin: appOrigin,
+          priority: 0,
+          routeId: null,
+        }).orThrow();
+      }
+
+      await authenticate("a");
+      assertEquals(new URL(page.url()).searchParams.has("flowId"), false);
+      const [installationA] = await installationRecords() as Array<{
+        seed: string;
+        authorization: {
+          session: { sessionId: string };
+          trust: unknown;
+        };
+      }>;
+      assert(installationA.authorization.session.sessionId);
+      const trustA = installationA.authorization.trust;
+      await page.reload();
+      await page.waitForFunction(() => {
+        const status = document.querySelector("#status")?.textContent ?? "";
+        return status === "connected" || status.startsWith("error:");
+      });
+      assertEquals(await page.locator("#status").textContent(), "connected");
+
+      await authenticate("b");
+      assertEquals((await installationRecords()).length, 2);
+
+      await page.goto(`${appOrigin}/__default-client/?participant=a`);
+      await page.getByText("connected", { exact: true }).waitFor();
+      await page.evaluate(async () => {
+        const fixture = Reflect.get(globalThis, "authFixture") as {
+          logout(): Promise<void>;
+        };
+        await fixture.logout();
+      });
+      await page.getByText("logged-out", { exact: true }).waitFor();
+      const afterLogout = (await installationRecords() as Array<{
+        seed?: string;
+        authorization?: { session?: unknown; trust?: unknown };
+      }>).find((record) => record.seed === undefined);
+      assert(afterLogout?.authorization?.trust);
+      assertEquals(afterLogout.authorization.session, null);
+      const sessions = await admin.authSessionsList({ limit: 100 }).orThrow();
+      const oldSession = sessions.entries.find((entry) =>
+        entry.sessionId === installationA.authorization.session.sessionId
+      );
+      assertEquals(oldSession?.state, "revoked");
+
+      await authenticate("a");
+      const activeRecords = await installationRecords() as Array<{
+        seed: string;
+        authorization: {
+          session: { sessionId: string };
+          trust: unknown;
+        };
+      }>;
+      const replacement = activeRecords.find((record) =>
+        record.authorization.session.sessionId !==
+          installationA.authorization.session.sessionId &&
+        record.seed !== installationA.seed
+      );
+      assert(replacement);
+      assertEquals(replacement.authorization.trust, trustA);
+      assertEquals(
+        await page.evaluate(() =>
+          Reflect.get(Reflect.get(globalThis, "authFixture"), "me").user.userId
+        ),
+        user.user.userId,
+      );
+
+      await page.goto(
+        `${appOrigin}/__default-client/?participant=c&manual=1`,
+      );
+      try {
+        await page.getByText("auth-required", { exact: true }).waitFor();
+      } catch (error) {
+        throw new Error(
+          `manual browser fixture failed at ${page.url()}: ${await page.locator(
+            "body",
+          ).innerText()}`,
+          { cause: error },
+        );
+      }
+      const loginUrl = await page.evaluate(() =>
+        Reflect.get(
+          Reflect.get(globalThis, "authFixture"),
+          "loginUrl",
+        ) as string
+      );
+      const crashFlowId = new URL(loginUrl).searchParams.get("flowId");
+      assert(crashFlowId);
+      const crashRecords = await installationRecords() as Array<{
+        id: string;
+        seed?: number[];
+        authorization?: { session?: { sessionId: string } };
+      }>;
+      const pendingC = crashRecords.find((record) =>
+        String(record.id).includes(defaultBrowserClientC.CONTRACT_ID)
+      );
+      assert(pendingC?.seed);
+      assertEquals(pendingC.seed.length, 32);
+
+      await page.goto(loginUrl);
+      await page.getByLabel("Username").fill(username);
+      await page.getByLabel("Password").fill(password);
+      await page.getByRole("button", { name: "Sign in" }).last().click();
+      await page.getByRole("button", { name: "Approve" }).waitFor();
+      const callbackMatcher = (url: URL) =>
+        url.pathname.startsWith("/__default-client") &&
+        url.searchParams.has("flowId");
+      await page.route(callbackMatcher, (route) =>
+        route.fulfill({
+          contentType: "text/html",
+          body: "<!doctype html><p>crashed before install</p>",
+        }));
+      await page.getByRole("button", { name: "Approve" }).click();
+      await page.getByText("crashed before install", { exact: true }).waitFor();
+      const callbackUrl = page.url();
+
+      let replayClient;
+      try {
+        replayClient = await TrellisClient.connect({
+          trellisUrl: runtime.trellisUrl,
+          contract: defaultBrowserClientC,
+          participant: {
+            id: defaultBrowserClientC.CONTRACT_ID,
+            artifactDigest: defaultBrowserClientC.CONTRACT_DIGEST,
+          },
+          auth: {
+            mode: "session_key",
+            sessionKeySeed: base64urlEncode(new Uint8Array(pendingC.seed)),
+            redirectTo: callbackUrl,
+            currentUrl: callbackUrl,
+            flowId: crashFlowId,
+            authorizationContextStore: new MemoryAuthorizationContextStore(),
+          },
+        }).orThrow();
+      } catch (error) {
+        throw new Error(
+          JSON.stringify(
+            typeof error === "object" && error !== null &&
+              typeof Reflect.get(error, "toSerializable") === "function"
+              ? Reflect.apply(Reflect.get(error, "toSerializable"), error, [])
+              : error,
+          ),
+          { cause: error },
+        );
+      }
+      const replayMe = await replayClient.authSessionsMe({}).orThrow();
+
+      await page.unroute(callbackMatcher);
+      await page.reload();
+      await page.getByText("connected", { exact: true }).waitFor();
+      const installedC = (await installationRecords() as Array<{
+        id: string;
+        authorization?: { session?: { sessionId: string } };
+      }>).find((record) =>
+        String(record.id).includes(defaultBrowserClientC.CONTRACT_ID)
+      );
+      assert(installedC?.authorization?.session);
+      assertEquals(
+        installedC.authorization.session.sessionId,
+        replayMe.session.sessionId,
+      );
+    } finally {
+      await admin.connection.close().catch(() => undefined);
+      defaultClientFixtureRoot = undefined;
+      await Deno.remove(fixtureRoot, { recursive: true }).catch(() =>
+        undefined
+      );
     }
   },
 );
@@ -2344,6 +2819,8 @@ withLivePortalPage(
   },
 );
 
+let defaultClientFixtureRoot: string | undefined;
+
 function withLivePortalPage(
   name: string,
   fn: (args: {
@@ -2351,7 +2828,10 @@ function withLivePortalPage(
     portalOrigin: string;
     runtime: LiveTrellisRuntime;
   }) => Promise<void>,
-  runtimeOptions: { rotatableWebsocketProxy?: boolean } = {},
+  runtimeOptions: {
+    rotatableWebsocketProxy?: boolean;
+    requesterOriginAlias?: boolean;
+  } = {},
 ): void {
   Deno.test(name, async () => {
     let trellisUrl: string | undefined;
@@ -2372,7 +2852,15 @@ function withLivePortalPage(
             await fn({ page, portalOrigin, runtime });
           });
         },
-        { ...runtimeOptions, webOrigins: [portalOrigin] },
+        {
+          rotatableWebsocketProxy: runtimeOptions.rotatableWebsocketProxy,
+          webOrigins: [
+            portalOrigin,
+            ...(runtimeOptions.requesterOriginAlias
+              ? [portalOrigin.replace("127.0.0.1", "localhost")]
+              : []),
+          ],
+        },
       );
     } finally {
       await server.shutdown();
@@ -2419,12 +2907,34 @@ async function serveStatic(
   runtimeUrl?: string,
 ): Promise<Response> {
   const url = new URL(request.url);
+  if (
+    defaultClientFixtureRoot &&
+    url.pathname.startsWith("/__default-client/")
+  ) {
+    if (url.pathname === "/__default-client/config.json") {
+      return Response.json({ trellisUrl: url.origin });
+    }
+    const relativePath = url.pathname.slice("/__default-client".length);
+    const candidate = resolve(
+      defaultClientFixtureRoot,
+      relativePath === "/" ? "index.html" : `.${normalize(relativePath)}`,
+    );
+    const path = isInside(defaultClientFixtureRoot, candidate) &&
+        await exists(candidate)
+      ? candidate
+      : join(defaultClientFixtureRoot, "index.html");
+    return new Response(await Deno.readFile(path), {
+      headers: { "content-type": contentType(path) },
+    });
+  }
   if (runtimeUrl && shouldProxyToRuntime(url.pathname)) {
+    const headers = new Headers(request.headers);
+    if (!headers.has("origin")) headers.set("origin", url.origin);
     const response = await fetch(
       new URL(url.pathname + url.search, runtimeUrl),
       {
         method: request.method,
-        headers: request.headers,
+        headers,
         body: request.body === null ? undefined : await request.arrayBuffer(),
       },
     );
@@ -2453,11 +2963,7 @@ async function serveStatic(
 }
 
 function shouldProxyToRuntime(pathname: string): boolean {
-  return pathname === "/auth/login/local" ||
-    pathname === "/auth/requests" ||
-    pathname.startsWith("/auth/account-flow/") ||
-    pathname.startsWith("/auth/flow/") ||
-    pathname.startsWith("/auth/login/");
+  return pathname.startsWith("/auth/") || pathname === "/bootstrap/client";
 }
 
 async function createLocalPasswordUser(args: {
@@ -2548,6 +3054,7 @@ async function setupLocalLoginPortalUser(args: {
   runtime: LiveTrellisRuntime;
   fixture: AuthLocalLoginFixture;
   portalOrigin: string;
+  routeOrigin?: string;
   portalId: string;
   username: string;
   password: string;
@@ -2773,6 +3280,7 @@ async function completeLocalLoginByFetch(args: {
   username: string;
   password: string;
 }): Promise<void> {
+  const binding = await createPortalBinding();
   const loginResponse = await fetch(`${args.trellisUrl}/auth/login/local`, {
     method: "POST",
     headers: { "content-type": "application/json", origin: args.origin },
@@ -2780,6 +3288,7 @@ async function completeLocalLoginByFetch(args: {
       flowId: args.flowId,
       username: args.username,
       password: args.password,
+      portalBindingDigest: binding.digest,
     }),
   });
   const loginBody = await loginResponse.text();
@@ -2790,17 +3299,30 @@ async function completeLocalLoginByFetch(args: {
     { headers: { origin: args.origin } },
   );
   if (state.state === "approval_required") {
-    assertEquals(typeof state.consentViewDigest, "string");
+    const detail = await fetchJson(
+      `${args.trellisUrl}/auth/flow/${encodeURIComponent(args.flowId)}/portal`,
+      {
+        headers: {
+          origin: args.origin,
+          "trellis-portal-binding": binding.secret,
+        },
+      },
+    );
+    assertEquals(typeof detail.consentViewDigest, "string");
     const approved = await fetchJson(
       `${args.trellisUrl}/auth/flow/${
         encodeURIComponent(args.flowId)
       }/approval`,
       {
         method: "POST",
-        headers: { "content-type": "application/json", origin: args.origin },
+        headers: {
+          "content-type": "application/json",
+          origin: args.origin,
+          "trellis-portal-binding": binding.secret,
+        },
         body: JSON.stringify({
           approved: true,
-          consentViewDigest: state.consentViewDigest,
+          consentViewDigest: detail.consentViewDigest,
           selectedOptionalBundles: [],
         }),
       },

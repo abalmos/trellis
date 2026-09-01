@@ -8,6 +8,8 @@ import {
   submitPortalApproval,
 } from "./portal.ts";
 
+const binding = { secret: "portal-secret", digest: "portal-digest" };
+
 Deno.test("portalFlowIdFromUrl reads flowId from URL", () => {
   assertEquals(
     portalFlowIdFromUrl(
@@ -29,8 +31,9 @@ Deno.test("portalProviderLoginUrl keeps flowId on provider links", () => {
       { authUrl: "https://auth.example.com/" },
       "google",
       "flow-1",
+      binding,
     ),
-    "https://auth.example.com/auth/login/google?flowId=flow-1",
+    "https://auth.example.com/auth/login/google?flowId=flow-1&portalBindingDigest=portal-digest",
   );
 });
 
@@ -80,7 +83,6 @@ Deno.test("fetchPortalFlowState returns auth-owned portal state directly", async
         providers: ["github", "auth0"],
         registrationEnabled: false,
         federatedRegistrationEnabled: false,
-        consentViewDigest: "consent-digest",
         consentView: {
           participant: {
             id: "trellis.portal-app@v1",
@@ -94,9 +96,13 @@ Deno.test("fetchPortalFlowState returns auth-owned portal state directly", async
       }));
     }) as typeof fetch;
 
-    const flow = await fetchPortalFlowState({
-      authUrl: "https://auth.example.com",
-    }, "flow-1");
+    const flow = await fetchPortalFlowState(
+      {
+        authUrl: "https://auth.example.com",
+      },
+      "flow-1",
+      binding,
+    );
     assertEquals(flow.status, "choose_provider");
     if (flow.status === "choose_provider") {
       assertEquals(flow.providers.length, 2);
@@ -111,16 +117,19 @@ Deno.test("fetchPortalFlowState throws on non-success responses", async () => {
   const originalFetch = globalThis.fetch;
   try {
     globalThis.fetch = (async () =>
-      new Response("missing", { status: 404 })) as typeof fetch;
+      Response.json({ error: { code: "flow_not_found" } }, {
+        status: 404,
+      })) as typeof fetch;
 
     await assertRejects(
       () =>
         fetchPortalFlowState(
           { authUrl: "https://auth.example.com" },
           "missing",
+          binding,
         ),
       Error,
-      "Failed to load portal flow (404)",
+      "Trellis HTTP 404: flow_not_found",
     );
   } finally {
     globalThis.fetch = originalFetch;
@@ -133,15 +142,15 @@ Deno.test("submitPortalApproval posts decision and parses next state", async () 
     let call = 0;
     globalThis.fetch = (async (input, init) => {
       call += 1;
-      if (call !== 2) {
+      if (call <= 2) {
         return new Response(JSON.stringify({
           flowId: "flow-1",
           expiresAt: 2_000_000_000_000,
-          state: call === 1 ? "approval_required" : "approved",
+          state: "approval_required",
           providers: ["local"],
           registrationEnabled: false,
           federatedRegistrationEnabled: false,
-          consentViewDigest: "consent-digest",
+          ...(call === 2 ? { consentViewDigest: "consent-digest" } : {}),
           consentView: {
             participant: {
               id: "trellis.console@v1",
@@ -152,11 +161,15 @@ Deno.test("submitPortalApproval posts decision and parses next state", async () 
             required: { permissions: [], capabilities: [] },
             optionalBundles: [],
           },
-          user: {
-            origin: "trellis",
-            id: "usr-1",
-            name: "Admin",
-          },
+          ...(call === 2
+            ? {
+              user: {
+                origin: "trellis",
+                id: "usr-1",
+                name: "Admin",
+              },
+            }
+            : {}),
           redirectTarget:
             "https://app.example.com/callback?portalCallback=token",
         }));
@@ -166,19 +179,43 @@ Deno.test("submitPortalApproval posts decision and parses next state", async () 
         "https://auth.example.com/auth/flow/flow-1/approval",
       );
       assertEquals(init?.method, "POST");
-      assertEquals(init?.headers, { "content-type": "application/json" });
+      assertEquals(init?.headers, {
+        "content-type": "application/json",
+        "trellis-portal-binding": binding.secret,
+      });
       const body = JSON.parse(String(init?.body));
       assertEquals(body.approved, true);
       assertEquals(body.consentViewDigest, "consent-digest");
       assertEquals(body.selectedOptionalBundles, []);
       assertEquals(body.idempotencyKey, undefined);
 
-      return new Response(JSON.stringify({ state: "approved" }));
+      return new Response(JSON.stringify({
+        flowId: "flow-1",
+        expiresAt: 2_000_000_000_000,
+        state: "approved",
+        providers: [],
+        registrationEnabled: false,
+        federatedRegistrationEnabled: false,
+        consentViewDigest: "consent-digest",
+        consentView: {
+          participant: {
+            id: "trellis.console@v1",
+            digest: "digest",
+            displayName: "Trellis Console",
+            description: "Admin console",
+          },
+          required: { permissions: [], capabilities: [] },
+          optionalBundles: [],
+        },
+        user: { origin: "trellis", id: "usr-1", name: "Admin" },
+        redirectTarget: "https://app.example.com/callback?portalCallback=token",
+      }));
     }) as typeof fetch;
 
     const state = await submitPortalApproval(
       { authUrl: "https://auth.example.com/" },
       "flow-1",
+      binding,
       "approved",
     );
     assertEquals(state, {

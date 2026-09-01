@@ -5,6 +5,7 @@ import type { BaseError } from "@qlever-llc/result";
 import type { AsyncResult } from "@qlever-llc/result";
 import type { OperationRef } from "../operations.ts";
 
+import { decodeTrellisHttpError } from "./http_error.ts";
 import {
   importEd25519PrivateKeyFromSeedBase64url,
   publicKeyBase64urlFromPrivateKey,
@@ -209,25 +210,6 @@ async function sleep(ms: number, signal?: AbortSignal): Promise<void> {
   });
 }
 
-async function responseErrorDetail(response: Response): Promise<string | null> {
-  const text = await response.text();
-  if (!text) return null;
-
-  try {
-    const parsed = JSON.parse(text) as Record<string, unknown>;
-    if (typeof parsed.reason === "string" && parsed.reason.length > 0) {
-      return parsed.reason;
-    }
-    if (typeof parsed.message === "string" && parsed.message.length > 0) {
-      return parsed.message;
-    }
-  } catch {
-    // Fall through to raw text below.
-  }
-
-  return text;
-}
-
 export async function deriveDeviceIdentity(
   deviceRootSecret: Uint8Array,
 ): Promise<DeviceIdentity> {
@@ -371,7 +353,8 @@ export async function waitForDeviceActivation(args: {
   bundle: Record<string, unknown>;
 }> {
   const pollIntervalMs = args.pollIntervalMs ?? DEFAULT_WAIT_POLL_INTERVAL_MS;
-  const nonce = args.nonce ?? ulid();
+  const nonce = args.nonce ??
+    base64urlEncode(crypto.getRandomValues(new Uint8Array(32)));
   const identitySeed = normalizeSecretBytes(args.identitySeed, "identitySeed");
   const sessionIdentity = await createAuth({
     sessionKeySeed: base64urlEncode(
@@ -453,12 +436,7 @@ export async function waitForDeviceActivation(args: {
       continue;
     }
     if (!response.ok) {
-      const detail = await responseErrorDetail(response);
-      throw new Error(
-        detail
-          ? `device activation bootstrap failed: ${response.status} ${detail}`
-          : `device activation bootstrap failed: ${response.status}`,
-      );
+      throw await decodeTrellisHttpError(response);
     }
     const body: unknown = await response.json();
     if (typeof body !== "object" || body === null) {

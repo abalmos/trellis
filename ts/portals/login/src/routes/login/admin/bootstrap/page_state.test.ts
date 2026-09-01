@@ -17,6 +17,7 @@ Deno.test("administrator completion carries the Console browser flow", async () 
       name: "Admin",
       email: "",
       browserFlowId: "flow_console",
+      portalBindingDigest: "binding_digest",
     },
     async (_input, init) => {
       submitted = JSON.parse(String(init?.body));
@@ -38,6 +39,7 @@ Deno.test("administrator completion carries the Console browser flow", async () 
     password: "secret-password",
     name: "Admin",
     browserFlowId: "flow_console",
+    portalBindingDigest: "binding_digest",
   });
 });
 

@@ -45,7 +45,7 @@ impl<'a, C> DeviceActivationOptions<'a, C> {
     /// Create activation options for an exact provisioned device and participant.
     pub fn new(connect: DeviceConnectOptions<'a, C>, activation_key_base64url: &'a str) -> Self {
         Self {
-            nonce: format!("{}:{}", connect.public_identity_key(), ulid::Ulid::new()),
+            nonce: URL_SAFE_NO_PAD.encode(rand::random::<[u8; 32]>()),
             connect,
             activation_key_base64url,
         }

@@ -1,8 +1,4 @@
-import {
-  getOrCreateSessionKey,
-  type SessionKeyHandle,
-  TrellisClient,
-} from "@qlever-llc/trellis";
+import { TrellisClient } from "@qlever-llc/trellis";
 import {
   createDeviceActivationController,
   type DeviceActivationAuth,
@@ -11,9 +7,7 @@ import {
 import { contract } from "../../contract.ts";
 import { trellisUrl } from "./config.ts";
 
-type PortalAuthState = Omit<DeviceActivationAuth, "init"> & {
-  init(): Promise<SessionKeyHandle>;
-};
+type PortalAuthState = DeviceActivationAuth;
 
 const participant = {
   id: contract.CONTRACT_ID,
@@ -23,15 +17,8 @@ const participant = {
 function createPortalAuthState(
   onCallback: (flowId: string) => void,
 ): PortalAuthState {
-  let handle: SessionKeyHandle | null = null;
-
-  async function init(): Promise<SessionKeyHandle> {
-    handle ??= await getOrCreateSessionKey();
-    return handle;
-  }
-
   return {
-    init,
+    async init() {},
     async handleCallback(callbackUrl) {
       const flowId = new URL(callbackUrl).searchParams.get("flowId");
       if (!flowId) return null;
@@ -48,7 +35,7 @@ function createPortalAuthState(
         trellisUrl,
         contract,
         participant,
-        auth: { handle: await init(), redirectTo, context: options?.context },
+        auth: { redirectTo, context: options?.context },
         onAuthRequired: ({ loginUrl }) => {
           window.location.href = loginUrl;
           throw new Error("Browser authentication redirect started");
@@ -73,7 +60,6 @@ export function createPortalDeviceActivationController() {
       const trellis = await TrellisClient.connect({
         trellisUrl,
         auth: {
-          handle: await authState.init(),
           currentUrl: authUrlState.currentUrl,
           redirectTo: authUrlState.redirectTo,
           flowId: callbackFlowId,

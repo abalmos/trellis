@@ -5,7 +5,7 @@
   import { setSelectedTrellisUrl, trellisApp } from "$lib/trellis-context.svelte";
   import AuthenticatedApp from "../../lib/components/AuthenticatedApp.svelte";
   import AdminAccountRedirect from "../../lib/components/AdminAccountRedirect.svelte";
-  import { buildConsoleLoginUrl, resetSession } from "../../lib/auth";
+  import { buildConsoleLoginUrl } from "../../lib/auth";
   import {
     buildAdminAccountLoginUrl,
     consumeAdminAccountToken,
@@ -112,10 +112,9 @@
 
   let recovering = $state(false);
 
-  async function recoverAuth(): Promise<void> {
+  function recoverAuth(): void {
     if (recovering) return;
     recovering = true;
-    await resetSession();
     window.location.href = buildConsoleLoginUrl({
       redirectTo: currentPath(),
       location: window.location,

@@ -88,7 +88,17 @@ export function validateAuthorizationClientStateTransition(
   ) {
     throw new Error("authorization context and routing state are not atomic");
   }
-  if (next.runtime && next.runtime.sessionId !== next.session.sessionId) {
+  if (
+    next.session === null &&
+    (next.context !== null || next.routing !== null ||
+      next.runtime !== undefined)
+  ) {
+    throw new Error("authorization sessionless state retains runtime material");
+  }
+  if (
+    next.runtime &&
+    (!next.session || next.runtime.sessionId !== next.session.sessionId)
+  ) {
     throw new Error("authorization runtime binding session mismatch");
   }
   if (!current) return;
@@ -113,6 +123,14 @@ export function validateAuthorizationClientStateTransition(
       current.trust.manifestDigestAtMinimumGeneration
   ) {
     throw new Error("authorization issuer manifest equivocated");
+  }
+  if (
+    current.session &&
+    (!next.session || current.session.sessionId !== next.session.sessionId)
+  ) {
+    throw new Error(
+      "active authorization session must be ended before replacement",
+    );
   }
 }
 

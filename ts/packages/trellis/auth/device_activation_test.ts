@@ -197,7 +197,7 @@ Deno.test("device activation wait rejects non-success bootstrap responses", asyn
       Promise.resolve(
         new Response(
           JSON.stringify({
-            reason: "contract_digest_not_allowed",
+            error: { code: "contract_digest_not_allowed" },
           }),
           {
             status: 403,
@@ -213,7 +213,7 @@ Deno.test("device activation wait rejects non-success bootstrap responses", asyn
           pollIntervalMs: 0,
         }),
       Error,
-      "device activation bootstrap failed: 403 contract_digest_not_allowed",
+      "Trellis HTTP 403: contract_digest_not_allowed",
     );
   } finally {
     globalThis.fetch = originalFetch;

@@ -1150,6 +1150,10 @@ export const PortalFlowStateSchema = Type.Union([
     registration: Type.Optional(FlowRegistrationAvailabilitySchema),
   }),
   Type.Object({
+    status: Type.Literal("processing"),
+    flowId: Type.String({ minLength: 1 }),
+  }),
+  Type.Object({
     status: Type.Literal("approval_required"),
     flowId: Type.String({ minLength: 1 }),
     consentViewDigest: DigestSchema,

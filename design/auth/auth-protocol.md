@@ -426,44 +426,54 @@ parallel authority storage model.
 
 The portal-owned browser login UX uses `flowId` as the browser-visible
 identifier. The flow is proof-bound to the initiating session key and exact
-participant; there is no second portal-authored authority token.
-Trellis-generated account ids use `usr_` plus a ULID, and auth-owned review ids
-use their semantic prefix plus a ULID. Trellis ships a built-in portal served by
-the Trellis HTTP server from static assets. Login portal records and route
-selectors are global auth-owned routing config; the built-in login portal record
-is visible, non-removable, and non-replaceable. Device deployments may carry
-deployment-owned portal-route metadata for device flows. Neither form is
-standalone portal authority. Device activation uses the same browser-visible
-`flowId` concept with `kind: "device_activation"` flow records rather than a
-separate public identifier. Portals are web apps, not service-authenticated
-principals; if a portal later continues as a Trellis app after login, it does so
-under a normal user session.
+participant; there is no second portal-authored authority token. `flowId` is the
+canonical ULID from the signed start request, so `start.requestId == flowId`.
+The selected portal's registered `entryUrl` origin is the trusted portal
+principal; a requester route origin only selects a portal and does not
+authenticate it. Trellis-generated account ids use `usr_` plus a ULID, and
+auth-owned review ids use their semantic prefix plus a ULID. Trellis ships a
+built-in portal served by the Trellis HTTP server from static assets. Login
+portal records and route selectors are global auth-owned routing config; the
+built-in login portal record is visible, non-removable, and non-replaceable.
+Device deployments may carry deployment-owned portal-route metadata for device
+flows. Neither form is standalone portal authority. Device activation uses the
+same browser-visible `flowId` concept with `kind: "device_activation"` flow
+records rather than a separate public identifier. Portals are web apps, not
+service-authenticated principals; if a portal later continues as a Trellis app
+after login, it does so under a normal user session.
 
 Flow summary:
 
 1. `POST /auth/requests` validates the signed login-init request and exact
    participant/API presentation, derives one server-owned required/optional
-   consent proposal, and creates a Trellis-owned browser flow plus a short
-   `flowId`-based `loginUrl` when current authority cannot bind immediately.
-2. `GET /auth/login/:provider` requires `flowId` and stores the provider choice
-   in the same browser flow. The provider must be allowed by the selected login
-   portal policy. If the referenced login flow is expired but still carries an
-   app `redirectTo`, auth redirects to that app URL without adding an auth error
-   so the app can restart its current auth request.
-3. OIDC start creates PKCE/nonce state bound to a state-specific `HttpOnly`,
-   `SameSite=Lax` browser cookie and the exact portal-policy digest. Callback
-   verifies browser possession and current provider/registration policy before
-   CAS claim and exchange. Identity-link flows never self-register.
-4. `GET /auth/flow/:flowId` returns the current state, exact consent view and
-   digest, effective providers, registration policy, authenticated profile, and
-   validated redirect target. For a known expired browser flow, the expired
-   state may include `returnLocation` so portals can return to the originating
-   app without showing a transient expiration screen; missing flows do not
-   receive an invented return URL.
-5. `POST /auth/flow/:flowId/approval` accepts only the current consent-view
-   digest, selected server-issued optional bundle ids, and decision. The server
-   re-resolves the participant and rejects stale wording, unknown bundles,
-   caller-authored grants/capabilities, and reserved authority.
+   consent proposal, and creates the Trellis-owned browser flow keyed by that
+   request's canonical ULID when current authority cannot bind immediately.
+2. The portal browser creates one 32-byte CSPRNG verifier, stores it in
+   portal-origin `sessionStorage` under `flowId`, and supplies only its SHA-256
+   digest to local authentication or OIDC start. `GET /auth/login/:provider`
+   requires `flowId` and stores the provider choice in the same browser flow.
+   The provider must be allowed by the selected login portal policy. If the
+   referenced login flow is expired but still carries an app `redirectTo`, auth
+   redirects to that app URL without adding an auth error so the app can restart
+   its current auth request.
+3. OIDC start creates PKCE/nonce state bound to the portal verifier digest, a
+   state-specific `HttpOnly`, `SameSite=Lax` browser cookie and the exact
+   portal-policy digest. Callback verifies browser possession and current
+   provider/registration policy before CAS claim and exchange. Identity-link
+   flows never self-register.
+4. `GET /auth/flow/:flowId` is the app-visible projection: lifecycle state,
+   expiry, non-user-specific presentation, and validated redirect state only. It
+   never exposes the authenticated principal or consent digest. For a known
+   expired browser flow, the expired state may include `returnLocation` so
+   portals can return to the originating app without showing a transient
+   expiration screen; missing flows do not receive an invented return URL.
+5. Bodyless `POST /auth/flow/:flowId/portal` returns authenticated profile and
+   consent detail only when the request has the selected portal origin and raw
+   verifier in `Trellis-Portal-Binding`. Approval and denial require the same
+   checks. `POST /auth/flow/:flowId/approval` accepts only the current
+   consent-view digest, selected server-issued optional bundle ids, and
+   decision. The server re-resolves the participant and rejects stale wording,
+   unknown bundles, caller-authored grants/capabilities, and reserved authority.
 6. `POST /auth/flow/:flowId/bind` completes the browser bind from
    `{ requestId, issuedAt, proof: { format: "trellis.session-proof.v1", signature } }`.
    The transcript is bound to the immutable `flowId` and the session key
@@ -491,12 +501,13 @@ Runtime storage responsibilities:
 | ----------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------- |
 | SQL                           | Users, credentials, sessions, principals, desired and materialized authority, proposals/decisions, deployments, instances, devices, delegations, portals/routes, provisioning records, idempotency results, post-commit actions, and hashed account-management flows | Durable, with explicit expiries                         |
 | `trellis_auth_oauth` KV       | PKCE/nonce state, browser-binding digest, portal-policy digest, CAS claim/result, and terminal unknown-outcome state                                                                                                                                                 | 15 min                                                  |
-| `trellis_auth_browser` KV     | Proof-bound browser flow and exact server-owned consent proposal keyed by `flowId`                                                                                                                                                                                   | Browser-flow TTL                                        |
+| `trellis_auth_browser` KV     | Proof-bound browser flow, claimed portal-verifier digest, minimal resumable provider result, and exact server-owned consent proposal keyed by `flowId`                                                                                                               | Browser-flow TTL                                        |
 | `trellis_auth_connections` KV | Active physical-connection presence keyed by exact connection id                                                                                                                                                                                                     | Resolved maximum user-JWT lifetime + 60 s cleanup grace |
 
-Ephemeral browser-binding and account-flow bearer secrets are stored by digest,
-not raw value. OAuth state ids are public correlation ids; the separate cookie
-secret supplies browser possession.
+Portal verifiers and account-flow bearer secrets are stored by digest, not raw
+value. OAuth state ids are public correlation ids; the separate OAuth cookie
+secret supplies callback-CSRF continuity and does not authorize portal detail or
+consent.
 
 Browser flows are keyed by raw `flowId` because the flow identifier is
 browser-visible and used to fetch auth-owned portal state. Device activation

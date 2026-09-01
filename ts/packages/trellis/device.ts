@@ -6,6 +6,8 @@ import {
   UnexpectedError,
 } from "@qlever-llc/result";
 import { ulid } from "ulid";
+import { decodeTrellisHttpError } from "./auth/http_error.ts";
+import { ContractResourceBindingsSchema } from "./contracts.ts";
 import {
   CONTRACT_STATE_METADATA,
   type ContractStateMetadata,
@@ -234,11 +236,32 @@ const DeviceBootstrapReadySchema = Type.Object({
   serverNow: Type.Integer(),
   session: Type.Object({
     sessionId: Type.String({ minLength: 1 }),
-    inboxPrefix: Type.String({ minLength: 1 }),
-  }, { additionalProperties: true }),
-  authorization: Type.Object({
+    principalId: Type.String({ minLength: 1 }),
+    principalKind: Type.Literal("device"),
+    participantId: Type.String({ minLength: 1 }),
+    participantKind: Type.Literal("device"),
     participantArtifactDigest: Type.String({ minLength: 1 }),
-  }, { additionalProperties: true }),
+    participantNeedsDigest: Type.String({ minLength: 1 }),
+    sessionPublicKey: Type.String({ minLength: 1 }),
+    sessionKeyId: Type.String({ minLength: 1 }),
+    inboxPrefix: Type.String({ minLength: 1 }),
+    state: Type.Literal("active"),
+    createdAt: Type.Integer(),
+    lastSeenAt: Type.Integer(),
+    expiresAt: Type.Union([Type.Integer(), Type.Null()]),
+    revokedAt: Type.Union([Type.Integer(), Type.Null()]),
+    version: Type.Integer({ minimum: 1 }),
+  }, { additionalProperties: false }),
+  authorization: Type.Object({
+    participantId: Type.String({ minLength: 1 }),
+    participantArtifactDigest: Type.String({ minLength: 1 }),
+    participantNeedsDigest: Type.String({ minLength: 1 }),
+    participantJson: Type.String({ minLength: 1 }),
+    effectiveGrants: Type.Unknown(),
+    resourceBindings: Type.Array(Type.Unknown()),
+    resourceRuntime: ContractResourceBindingsSchema,
+    effectiveAuthorityExpiresAt: Type.Union([Type.Integer(), Type.Null()]),
+  }, { additionalProperties: false }),
   nats: Type.Object({
     jwt: Type.String({ minLength: 1 }),
     jwtExpiresAt: Type.Integer({ minimum: 1 }),
@@ -252,16 +275,26 @@ const DeviceBootstrapReadySchema = Type.Object({
     }, { additionalProperties: false }),
   }, { additionalProperties: false }),
   authorizationContext: AuthorizationContextBundleSchema,
-});
+  activation: Type.Null(),
+  proposal: Type.Null(),
+}, { additionalProperties: false });
 
 const DeviceBootstrapActivationRequiredSchema = Type.Object({
   state: Type.Literal("activation_pending"),
   serverNow: Type.Integer(),
   activation: Type.Object({
+    state: Type.Literal("pending"),
     reviewId: Type.String({ minLength: 1 }),
     activationUrl: Type.String({ minLength: 1 }),
-  }, { additionalProperties: true }),
-});
+    expiresAt: Type.Integer(),
+    retryAfterMs: Type.Integer({ minimum: 1 }),
+  }, { additionalProperties: false }),
+  session: Type.Null(),
+  authorization: Type.Null(),
+  nats: Type.Null(),
+  authorizationContext: Type.Null(),
+  proposal: Type.Null(),
+}, { additionalProperties: false });
 
 const DeviceBootstrapNotReadySchema = Type.Object({
   state: Type.Union([
@@ -274,7 +307,20 @@ const DeviceBootstrapNotReadySchema = Type.Object({
     Type.Literal("activation_rejected"),
   ]),
   serverNow: Type.Integer(),
-});
+  session: Type.Null(),
+  authorization: Type.Null(),
+  nats: Type.Null(),
+  authorizationContext: Type.Null(),
+  activation: Type.Null(),
+  proposal: Type.Union([
+    Type.Object({
+      proposalId: Type.String({ minLength: 1 }),
+      proposalKind: Type.String({ minLength: 1 }),
+      proposalDigest: Type.String({ minLength: 1 }),
+    }, { additionalProperties: false }),
+    Type.Null(),
+  ]),
+}, { additionalProperties: false });
 
 type DeviceBootstrapReady = {
   status: "ready";
@@ -557,169 +603,141 @@ async function fetchDeviceBootstrap(args: {
       crypto.getRandomValues(new Uint8Array(32)),
     ),
   });
-  for (let attempt = 0; attempt < 2; attempt += 1) {
-    const requestStartedAtMs = args.now();
-    const issuedAt = Math.trunc(
-      requestStartedAtMs + args.offsetState.serverClockOffsetMs,
+  const requestStartedAtMs = args.now();
+  const issuedAt = Math.trunc(
+    requestStartedAtMs + args.offsetState.serverClockOffsetMs,
+  );
+  const requestId = ulid();
+  const identityAuth = await createAuth({
+    sessionKeySeed: base64urlEncode(args.deviceIdentity.identitySeed),
+  });
+  const deviceIdentityKeyId = base64urlEncode(
+    await sha256(base64urlDecode(identityAuth.sessionKey)),
+  );
+  const activationNonce = args.activationNonce ??
+    base64urlEncode(crypto.getRandomValues(new Uint8Array(32)));
+  const challengeDigest = base64urlEncode(
+    await sha256(utf8(activationNonce)),
+  );
+  if (
+    args.provisioned.participantId !== args.contract.CONTRACT_ID ||
+    args.provisioned.participantArtifactDigest !==
+      args.contract.CONTRACT_DIGEST ||
+    args.provisioned.participantNeedsDigest !==
+      presentation.participantNeedsDigest
+  ) {
+    throw new Error(
+      "Device participant identity does not match its contract",
     );
-    const requestId = ulid();
-    const identityAuth = await createAuth({
-      sessionKeySeed: base64urlEncode(args.deviceIdentity.identitySeed),
-    });
-    const deviceIdentityKeyId = base64urlEncode(
-      await sha256(base64urlDecode(identityAuth.sessionKey)),
-    );
-    const activationNonce = args.activationNonce ??
-      `${args.provisioned.principalId}:${requestId}`;
-    const challengeDigest = base64urlEncode(
-      await sha256(utf8(activationNonce)),
-    );
-    if (
-      args.provisioned.participantId !== args.contract.CONTRACT_ID ||
-      args.provisioned.participantArtifactDigest !==
-        args.contract.CONTRACT_DIGEST ||
-      args.provisioned.participantNeedsDigest !==
-        presentation.participantNeedsDigest
-    ) {
-      throw new Error(
-        "Device participant identity does not match its contract",
-      );
-    }
-    const unsigned = {
-      requestId,
-      issuedAt,
-      deploymentId: args.provisioned.deploymentId,
-      instanceId: args.provisioned.instanceId,
-      deviceIdentityKeyId,
-      principalId: args.provisioned.principalId,
-      identityPublicKey: identityAuth.sessionKey,
-      provisioningSecret: args.provisioned.provisioningSecret ?? null,
-      expectedSecretVersion: args.provisioned.expectedSecretVersion ?? null,
-      newSessionPublicKey: sessionAuth.sessionKey,
-      newSessionNkey: sessionAuth.sessionNkey,
-      participantId: args.provisioned.participantId,
-      participantArtifactDigest: args.contract.CONTRACT_DIGEST,
-      participantNeedsDigest: presentation.participantNeedsDigest,
-      participantArtifact: presentation.participant,
-      referencedApiArtifacts: [
-        presentation.api,
-        ...presentation.referencedApis,
-      ],
-      challengeDigest,
-      confirmationCode: await deriveDeviceConfirmationCode({
-        activationKey: args.deviceIdentity.activationKey,
-        publicIdentityKey: args.deviceIdentity.publicIdentityKey,
-        nonce: activationNonce,
-      }),
-      proof: { format: SESSION_PROOF_FORMAT_V1, signature: "" },
-    };
-    const requestDigest = await sessionProofRequestDigest(unsigned);
-    const response = await fetch(
-      new URL("/bootstrap/device", args.trellisUrl),
-      {
-        method: "POST",
-        signal: args.signal,
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          ...unsigned,
-          proof: await identityAuth.signSessionProof({
-            purpose: "deviceBootstrap",
-            requestId,
-            issuedAt,
-            deploymentId: args.provisioned.deploymentId,
-            instanceId: args.provisioned.instanceId,
-            deviceIdentityKeyId,
-            newSessionPublicKey: sessionAuth.sessionKey,
-            newSessionNkey: sessionAuth.sessionNkey,
-            participantId: args.provisioned.participantId,
-            participantDigest: args.provisioned.participantArtifactDigest,
-            challengeDigest,
-            requestDigest,
-          }),
-        }),
-      },
-    );
-    const responseReceivedAtMs = args.now();
-    const payload = await readJsonResponse(response, {
-      code: "trellis.bootstrap.invalid_response",
-      message: "Trellis returned an invalid device bootstrap response.",
-      hint: "Retry the connection or complete device activation.",
-      context: { trellisUrl: args.trellisUrl },
-    });
-    if (!response.ok) {
-      if (
-        attempt === 0 && response.status === 401 &&
-        payload && typeof payload === "object" &&
-        typeof (payload as { serverNow?: unknown }).serverNow === "number"
-      ) {
-        args.offsetState.serverClockOffsetMs = estimateMidpointClockOffsetMs({
-          requestStartedAtMs,
-          responseReceivedAtMs,
-          serverNowSeconds: (payload as { serverNow: number }).serverNow /
-            1_000,
-        });
-        continue;
-      }
-      throw createTransportError({
-        code: "trellis.bootstrap.failed",
-        message: "Trellis could not prepare the device session.",
-        hint: "Retry the connection or complete device activation.",
-        context: { status: response.status, trellisUrl: args.trellisUrl },
-      });
-    }
-    if (Value.Check(DeviceBootstrapReadySchema, payload)) {
-      const ready = payload as StaticDecode<typeof DeviceBootstrapReadySchema>;
-      args.offsetState.serverClockOffsetMs = estimateMidpointClockOffsetMs({
-        requestStartedAtMs,
-        responseReceivedAtMs,
-        serverNowSeconds: ready.serverNow / 1_000,
-      });
-      sessionAuth.setServerClockOffsetMs(
-        args.offsetState.serverClockOffsetMs + args.now() - Date.now(),
-      );
-      return {
-        status: "ready",
-        sessionAuth,
-        connectInfo: {
-          sessionId: ready.session.sessionId,
-          instanceId: args.provisioned.instanceId,
+  }
+  const unsigned = {
+    requestId,
+    issuedAt,
+    deploymentId: args.provisioned.deploymentId,
+    instanceId: args.provisioned.instanceId,
+    deviceIdentityKeyId,
+    principalId: args.provisioned.principalId,
+    identityPublicKey: identityAuth.sessionKey,
+    provisioningSecret: args.provisioned.provisioningSecret ?? null,
+    expectedSecretVersion: args.provisioned.expectedSecretVersion ?? null,
+    newSessionPublicKey: sessionAuth.sessionKey,
+    newSessionNkey: sessionAuth.sessionNkey,
+    participantId: args.provisioned.participantId,
+    participantArtifactDigest: args.contract.CONTRACT_DIGEST,
+    participantNeedsDigest: presentation.participantNeedsDigest,
+    participantArtifact: presentation.participant,
+    referencedApiArtifacts: [
+      presentation.api,
+      ...presentation.referencedApis,
+    ],
+    challengeDigest,
+    confirmationCode: await deriveDeviceConfirmationCode({
+      activationKey: args.deviceIdentity.activationKey,
+      publicIdentityKey: args.deviceIdentity.publicIdentityKey,
+      nonce: activationNonce,
+    }),
+    proof: { format: SESSION_PROOF_FORMAT_V1, signature: "" },
+  };
+  const requestDigest = await sessionProofRequestDigest(unsigned);
+  const response = await fetch(
+    new URL("/bootstrap/device", args.trellisUrl),
+    {
+      method: "POST",
+      signal: args.signal,
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        ...unsigned,
+        proof: await identityAuth.signSessionProof({
+          purpose: "deviceBootstrap",
+          requestId,
+          issuedAt,
           deploymentId: args.provisioned.deploymentId,
+          instanceId: args.provisioned.instanceId,
+          deviceIdentityKeyId,
+          newSessionPublicKey: sessionAuth.sessionKey,
+          newSessionNkey: sessionAuth.sessionNkey,
           participantId: args.provisioned.participantId,
-          participantDigest: ready.authorization.participantArtifactDigest,
-          transports: ready.nats.transports,
-          transport: {
-            jwt: ready.nats.jwt,
-            jwtExpiresAt: ready.nats.jwtExpiresAt,
-            inboxPrefix: ready.session.inboxPrefix,
-          },
-          authorizationContext: ready.authorizationContext,
-        },
-      };
-    }
-    if (Value.Check(DeviceBootstrapActivationRequiredSchema, payload)) {
-      const pending = payload as StaticDecode<
-        typeof DeviceBootstrapActivationRequiredSchema
-      >;
-      return {
-        status: "activation_required",
-        reviewId: pending.activation.reviewId,
-        activationUrl: pending.activation.activationUrl,
-      };
-    }
-    if (Value.Check(DeviceBootstrapNotReadySchema, payload)) {
-      return { status: "not_ready", reason: payload.state };
-    }
-    throw createTransportError({
-      code: "trellis.bootstrap.invalid_response",
-      message: "Trellis returned an invalid device bootstrap response.",
-      hint: "Retry the connection or complete device activation.",
-      context: { trellisUrl: args.trellisUrl },
+          participantDigest: args.provisioned.participantArtifactDigest,
+          challengeDigest,
+          requestDigest,
+        }),
+      }),
+    },
+  );
+  const responseReceivedAtMs = args.now();
+  if (!response.ok) throw await decodeTrellisHttpError(response);
+  const payload = await readJsonResponse(response, {
+    code: "trellis.bootstrap.invalid_response",
+    message: "Trellis returned an invalid device bootstrap response.",
+    hint: "Retry the connection or complete device activation.",
+    context: { trellisUrl: args.trellisUrl },
+  });
+  if (Value.Check(DeviceBootstrapReadySchema, payload)) {
+    const ready = payload as StaticDecode<typeof DeviceBootstrapReadySchema>;
+    args.offsetState.serverClockOffsetMs = estimateMidpointClockOffsetMs({
+      requestStartedAtMs,
+      responseReceivedAtMs,
+      serverNowSeconds: ready.serverNow / 1_000,
     });
+    sessionAuth.setServerClockOffsetMs(
+      args.offsetState.serverClockOffsetMs + args.now() - Date.now(),
+    );
+    return {
+      status: "ready",
+      sessionAuth,
+      connectInfo: {
+        sessionId: ready.session.sessionId,
+        instanceId: args.provisioned.instanceId,
+        deploymentId: args.provisioned.deploymentId,
+        participantId: args.provisioned.participantId,
+        participantDigest: ready.authorization.participantArtifactDigest,
+        transports: ready.nats.transports,
+        transport: {
+          jwt: ready.nats.jwt,
+          jwtExpiresAt: ready.nats.jwtExpiresAt,
+          inboxPrefix: ready.session.inboxPrefix,
+        },
+        authorizationContext: ready.authorizationContext,
+      },
+    };
+  }
+  if (Value.Check(DeviceBootstrapActivationRequiredSchema, payload)) {
+    const pending = payload as StaticDecode<
+      typeof DeviceBootstrapActivationRequiredSchema
+    >;
+    return {
+      status: "activation_required",
+      reviewId: pending.activation.reviewId,
+      activationUrl: pending.activation.activationUrl,
+    };
+  }
+  if (Value.Check(DeviceBootstrapNotReadySchema, payload)) {
+    return { status: "not_ready", reason: payload.state };
   }
   throw createTransportError({
-    code: "trellis.bootstrap.time_sync_failed",
-    message: "Trellis could not confirm the device time window.",
-    hint: "Check the device clock and retry.",
+    code: "trellis.bootstrap.invalid_response",
+    message: "Trellis returned an invalid device bootstrap response.",
+    hint: "Retry the connection or complete device activation.",
     context: { trellisUrl: args.trellisUrl },
   });
 }
@@ -740,7 +758,7 @@ export async function startDeviceActivationWithDeps<
 > {
   const rootSecret = normalizeRootSecret(args.rootSecret);
   const identity = await deriveDeviceIdentity(rootSecret);
-  const nonce = ulid();
+  const nonce = base64urlEncode(crypto.getRandomValues(new Uint8Array(32)));
   const activation = await fetchDeviceBootstrap({
     trellisUrl: args.trellisUrl,
     deviceIdentity: identity,

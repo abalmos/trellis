@@ -89,7 +89,12 @@ export type VerifiedAuthorizationContext = {
   refreshAt: number;
   context: Record<string, unknown> & {
     sessionId: string;
-    participant: { artifactDigest: string; needsDigest: string };
+    participant: {
+      id: string;
+      artifactDigest: string;
+      needsDigest: string;
+    };
+    inboxPrefix: string;
     issuedAt: number;
     notBefore: number;
     expiresAt: number;
@@ -121,7 +126,7 @@ export type AuthorizationClientState = {
   format: "trellis.authorization-client-state.v1";
   binding: string;
   trust: AuthorizationTrustState;
-  session: AuthorizationSessionBinding;
+  session: AuthorizationSessionBinding | null;
   context: AuthorizationContextBundle | null;
   contextDigest: string | null;
   contextExpiresAt: number | null;
@@ -161,11 +166,35 @@ export const AuthorizationContextRefreshResponseSchema = Type.Object({
   authorizationContext: AuthorizationContextBundleSchema,
   session: Type.Object({
     sessionId: Type.String({ minLength: 1 }),
+    principalId: Type.String({ minLength: 1 }),
+    principalKind: Type.Union([
+      Type.Literal("user"),
+      Type.Literal("service"),
+      Type.Literal("device"),
+    ]),
     participantId: Type.String({ minLength: 1 }),
+    participantKind: Type.Union([
+      Type.Literal("service"),
+      Type.Literal("app"),
+      Type.Literal("device"),
+      Type.Literal("agent"),
+    ]),
     participantArtifactDigest: Type.String({ minLength: 1 }),
     participantNeedsDigest: Type.String({ minLength: 1 }),
+    sessionPublicKey: Type.String({ minLength: 1 }),
+    sessionKeyId: Type.String({ minLength: 1 }),
     inboxPrefix: Type.String({ minLength: 1 }),
-  }, { additionalProperties: true }),
+    state: Type.Union([
+      Type.Literal("active"),
+      Type.Literal("expired"),
+      Type.Literal("revoked"),
+    ]),
+    createdAt: Type.Integer({ minimum: 0 }),
+    lastSeenAt: Type.Integer({ minimum: 0 }),
+    expiresAt: Type.Union([Type.Integer({ minimum: 0 }), Type.Null()]),
+    revokedAt: Type.Union([Type.Integer({ minimum: 0 }), Type.Null()]),
+    version: Type.Integer({ minimum: 1 }),
+  }, { additionalProperties: false }),
   nats: Type.Object({
     jwt: Type.String({ minLength: 1 }),
     jwtExpiresAt: Type.Integer({ minimum: 1 }),
@@ -174,13 +203,13 @@ export const AuthorizationContextRefreshResponseSchema = Type.Object({
         natsServers: Type.Array(Type.String({ minLength: 1 }), {
           minItems: 1,
         }),
-      }, { additionalProperties: true })),
+      }, { additionalProperties: false })),
       websocket: Type.Optional(Type.Object({
         natsServers: Type.Array(Type.String({ minLength: 1 }), {
           minItems: 1,
         }),
-      }, { additionalProperties: true })),
-    }, { additionalProperties: true }),
+      }, { additionalProperties: false })),
+    }, { additionalProperties: false }),
   }, { additionalProperties: false }),
 }, { additionalProperties: false });
 

@@ -304,14 +304,12 @@ try {
     join(projectDir, "index.ts"),
     `import { Result } from "@qlever-llc/result";
 import { ValidationError } from "@qlever-llc/trellis";
-import { completeSessionLogout } from "@qlever-llc/trellis/auth/browser";
 import { createTrellisApp, TrellisProvider, type TrellisProviderProps } from "@qlever-llc/trellis-svelte";
 
 type ProviderProps = TrellisProviderProps;
 
 void Result;
 void ValidationError;
-void completeSessionLogout;
 void createTrellisApp;
 void TrellisProvider;
 

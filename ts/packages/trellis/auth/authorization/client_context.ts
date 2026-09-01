@@ -67,8 +67,11 @@ export class AuthorizationContextCache {
     ) {
       throw new Error("persisted context and routing material are not atomic");
     }
-    this.#session = structuredClone(state.session);
-    this.#runtime = state.runtime ? structuredClone(state.runtime) : undefined;
+    this.#session = state.session ? structuredClone(state.session) : undefined;
+    this.#runtime = state.session && state.runtime
+      ? structuredClone(state.runtime)
+      : undefined;
+    if (!state.session) return false;
     if (!state.context || !state.routing) return false;
     const persistedContext = state.context.context;
     if (
@@ -173,6 +176,23 @@ export class AuthorizationContextCache {
       policy: verificationPolicy,
     });
     const nextRuntime = runtime ?? durable?.runtime ?? this.#runtime;
+    if (
+      nextRuntime &&
+      (nextRuntime.sessionId !== verified.context.sessionId ||
+        nextRuntime.participantId !== verified.context.participant.id ||
+        nextRuntime.participantArtifactDigest !==
+          verified.context.participant.artifactDigest ||
+        nextRuntime.participantNeedsDigest !==
+          verified.context.participant.needsDigest ||
+        nextRuntime.inboxPrefix !== verified.context.inboxPrefix ||
+        !Object.values(nextRuntime.transports).some((transport) =>
+          transport.natsServers.length > 0
+        ))
+    ) {
+      throw new Error(
+        "authorization runtime binding does not match signed context",
+      );
+    }
     const next: AuthorizationClientState = {
       format: CLIENT_STATE_FORMAT,
       binding: this.binding,
@@ -214,6 +234,9 @@ export class AuthorizationContextCache {
     }
     this.#bundle = structuredClone(bundle);
     this.#verified = verified;
+    if (!next.session) {
+      throw new Error("authorization context installation lost its session");
+    }
     this.#session = structuredClone(next.session);
     this.#runtime = next.runtime ? structuredClone(next.runtime) : undefined;
     this.#routing = structuredClone(routing);
@@ -480,9 +503,11 @@ export async function verifyAuthorizationContext(args: {
         Type.Object({
           sessionId: Type.String({ minLength: 1 }),
           participant: Type.Object({
+            id: Type.String({ minLength: 1 }),
             artifactDigest: Type.String({ minLength: 1 }),
             needsDigest: Type.String({ minLength: 1 }),
           }),
+          inboxPrefix: Type.String({ minLength: 1 }),
           issuedAt: Type.Integer(),
           notBefore: Type.Integer({ minimum: 0 }),
           expiresAt: Type.Integer({ minimum: 1 }),

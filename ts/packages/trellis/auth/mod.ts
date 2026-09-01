@@ -27,19 +27,6 @@ export {
   type VerifiedAuthorizationContext,
 } from "./authorization_context.ts";
 export {
-  clearSessionKey,
-  generateSessionKey,
-  getOrCreateSessionKey,
-  getPublicSessionKey,
-  hasSessionKey,
-  loadSessionKey,
-  type SessionKeyHandle,
-  type SessionKeyOptions,
-  type SessionKeyPersistenceMode,
-  setSessionId,
-  signBytes,
-} from "./browser.ts";
-export {
   type BrowserAuthRecoveryClassification,
   type BrowserAuthRecoveryKind,
   classifyBrowserAuthError,

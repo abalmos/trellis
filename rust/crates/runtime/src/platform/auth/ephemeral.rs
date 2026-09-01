@@ -125,6 +125,9 @@ pub(crate) struct AuthBrowserFlow {
     pub portal_id: String,
     pub redirect_target: Option<String>,
     pub principal_id: Option<String>,
+    pub authenticated_provider_id: Option<String>,
+    pub authenticated_roles: Vec<String>,
+    pub portal_binding_digest: Option<String>,
     pub claim_owner: Option<String>,
     pub claimed_at: Option<i64>,
     pub durable_result_digest: Option<String>,
@@ -158,6 +161,16 @@ impl AuthBrowserFlow {
         require_nonempty("portalId", &self.portal_id)?;
         validate_optional_text("redirectTarget", self.redirect_target.as_deref())?;
         validate_optional_text("principalId", self.principal_id.as_deref())?;
+        validate_optional_text(
+            "authenticatedProviderId",
+            self.authenticated_provider_id.as_deref(),
+        )?;
+        for role in &self.authenticated_roles {
+            require_nonempty("authenticatedRoles entry", role)?;
+        }
+        if let Some(value) = self.portal_binding_digest.as_deref() {
+            require_digest("portalBindingDigest", value)?;
+        }
         validate_optional_text("claimOwner", self.claim_owner.as_deref())?;
         if let Some(value) = self.claimed_at {
             require_protocol_timestamp("claimedAt", value)?;
@@ -186,16 +199,23 @@ impl AuthBrowserFlow {
             return invalid("claimOwner and claimedAt must both be null or both be set");
         }
         let principal = self.principal_id.is_some();
+        let authenticated =
+            self.authenticated_provider_id.is_some() && self.portal_binding_digest.is_some();
+        if principal != authenticated || (!authenticated && !self.authenticated_roles.is_empty()) {
+            return invalid("browser flow authenticated claim is incomplete");
+        }
         let claim = self.claim_owner.is_some();
         let result = self.durable_result_digest.is_some();
         let completed = self.completed_at.is_some();
         let valid = match self.state {
             AuthBrowserFlowState::ChooseProvider => !principal && !claim && !result && !completed,
-            AuthBrowserFlowState::Authenticated => principal && !claim && !result && !completed,
-            AuthBrowserFlowState::ApprovalRequired => principal && !claim && !result && !completed,
-            AuthBrowserFlowState::ApprovalDenied => principal && !claim && !result && completed,
-            AuthBrowserFlowState::Approved => principal && !claim && result && completed,
-            AuthBrowserFlowState::Consumed => principal && claim && result && completed,
+            AuthBrowserFlowState::Authenticated => authenticated && !claim && !result && !completed,
+            AuthBrowserFlowState::ApprovalRequired => {
+                authenticated && !claim && !result && !completed
+            }
+            AuthBrowserFlowState::ApprovalDenied => authenticated && !claim && !result && completed,
+            AuthBrowserFlowState::Approved => authenticated && !claim && result && completed,
+            AuthBrowserFlowState::Consumed => authenticated && claim && result && completed,
             AuthBrowserFlowState::Expired => !claim && !result && completed,
         };
         if !valid {
@@ -256,6 +276,7 @@ pub(crate) struct AuthOAuthState {
     pub nonce: String,
     pub redirect_uri: String,
     pub browser_binding_digest: String,
+    pub portal_binding_digest: Option<String>,
     pub portal_id: Option<String>,
     pub portal_policy_digest: Option<String>,
     pub claim_owner: Option<String>,
@@ -336,6 +357,12 @@ impl AuthOAuthState {
         require_nonempty("nonce", &self.nonce)?;
         require_nonempty("redirectUri", &self.redirect_uri)?;
         require_digest("browserBindingDigest", &self.browser_binding_digest)?;
+        if let Some(value) = self.portal_binding_digest.as_deref() {
+            require_digest("portalBindingDigest", value)?;
+        }
+        if (self.kind == AuthOAuthKind::Browser) != self.portal_binding_digest.is_some() {
+            return invalid("browser OAuth state requires a portal binding digest");
+        }
         validate_optional_text("portalId", self.portal_id.as_deref())?;
         if let Some(value) = self.portal_policy_digest.as_deref() {
             require_digest("portalPolicyDigest", value)?;
@@ -394,6 +421,7 @@ impl AuthOAuthState {
             && self.nonce == replacement.nonce
             && self.redirect_uri == replacement.redirect_uri
             && self.browser_binding_digest == replacement.browser_binding_digest
+            && self.portal_binding_digest == replacement.portal_binding_digest
             && self.portal_id == replacement.portal_id
             && self.portal_policy_digest == replacement.portal_policy_digest
             && self.created_at == replacement.created_at
@@ -628,6 +656,14 @@ fn validate_browser_replacement(
 ) -> Result<(), AuthorizationStateError> {
     if current.version != expected_version
         || !current.preserves_transcript(replacement)
+        || current.principal_id.is_some()
+            && (current.principal_id != replacement.principal_id
+                || current.authenticated_provider_id != replacement.authenticated_provider_id
+                || current.authenticated_roles != replacement.authenticated_roles
+                || current.portal_binding_digest != replacement.portal_binding_digest)
+        || current.principal_id.is_none()
+            && replacement.principal_id.is_some()
+            && replacement.state != AuthBrowserFlowState::Authenticated
         || !valid_browser_transition(current.state, replacement.state)
     {
         return Err(AuthorizationStateError::StorageConflict);

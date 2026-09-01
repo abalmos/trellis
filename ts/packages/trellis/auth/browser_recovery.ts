@@ -20,13 +20,7 @@ function machineCode(error: unknown): string | undefined {
   if (!error || typeof error !== "object") return undefined;
   const record = error as Record<string, unknown>;
   if (typeof record.code === "string") return record.code;
-  if (!record.context || typeof record.context !== "object") return undefined;
-  const context = record.context as Record<string, unknown>;
-  return typeof context.code === "string"
-    ? context.code
-    : typeof context.reason === "string"
-    ? context.reason
-    : undefined;
+  return undefined;
 }
 
 /** Classifies an exact auth machine error code. */

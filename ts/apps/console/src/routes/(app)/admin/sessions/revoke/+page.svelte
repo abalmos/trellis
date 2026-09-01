@@ -1,7 +1,6 @@
 <script lang="ts">
   import { ulid } from "ulid";
   import { isErr } from "@qlever-llc/result";
-  import { loadSessionKey } from "@qlever-llc/trellis/auth/browser";
   import type { AuthSessionsRevokeInput } from "@trellis/apis/trellis.auth";
   import { goto } from "$app/navigation";
   import { resolve } from "$app/paths";
@@ -26,17 +25,17 @@
   let pending = $state(false);
   let sessions = $state<SessionRecord[]>([]);
   let selectedSessionKey = $state("");
-  let currentSessionKey = $state<string | null>(null);
+  let currentSessionId = $state<string | null>(null);
   let confirmationModal: ConfirmationModal | undefined = $state();
 
   const selectedSession = $derived(sessions.find((session) => session.sessionId === selectedSessionKey) ?? null);
-  const selectedSessionIsCurrent = $derived(!!currentSessionKey && selectedSessionKey === currentSessionKey);
+  const selectedSessionIsCurrent = $derived(selectedSessionKey === currentSessionId);
 
   async function load() {
     loading = true;
     error = null;
     try {
-      currentSessionKey = (await loadSessionKey())?.sessionKey ?? null;
+      currentSessionId = (await trellis.authSessionsMe({}).orThrow()).session.sessionId;
       const response = await trellis.authSessionsList({ limit: 500 }).take();
       if (isErr(response)) { error = errorMessage(response); return; }
       sessions = response.entries ?? [];
@@ -125,7 +124,7 @@
           <select class="select select-bordered select-sm" bind:value={selectedSessionKey} required>
             {#each sessions as session (session.sessionId)}
               {@const summary = describeSessionPrincipal(session)}
-              <option value={session.sessionId}>{summary.title} — {formatShortKey(session.sessionKeyId)}{session.sessionKeyId === currentSessionKey ? " — Current" : ""}</option>
+              <option value={session.sessionId}>{summary.title} — {formatShortKey(session.sessionKeyId)}{session.sessionId === currentSessionId ? " — Current" : ""}</option>
             {/each}
           </select>
         </label>

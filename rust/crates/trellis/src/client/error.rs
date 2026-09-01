@@ -408,39 +408,6 @@ fn format_rpc_error_payload(raw: &str) -> String {
     format_rpc_error_value(&value, raw)
 }
 
-fn format_bootstrap_http_payload(raw: &str) -> String {
-    let Ok(value) = serde_json::from_str::<Value>(raw) else {
-        return raw.to_string();
-    };
-
-    let reason = value.get("reason").and_then(Value::as_str);
-    let message = value
-        .get("message")
-        .and_then(Value::as_str)
-        .or(reason)
-        .unwrap_or(raw);
-
-    let mut formatted = match reason {
-        Some(reason) if message != reason => format!("{reason}: {message}"),
-        _ => message.to_string(),
-    };
-
-    if let Some(object) = value.as_object() {
-        let context = object
-            .iter()
-            .filter(|(key, value)| {
-                key.as_str() != "reason" && key.as_str() != "message" && !value.is_null()
-            })
-            .map(|(key, value)| format!("{key}={}", format_json_value(value)))
-            .collect::<Vec<_>>();
-        if !context.is_empty() {
-            formatted.push_str(&format!(" ({})", context.join(", ")));
-        }
-    }
-
-    formatted
-}
-
 /// Errors returned by the Trellis client runtime.
 #[derive(thiserror::Error, Debug)]
 pub enum TrellisClientError {
@@ -462,8 +429,8 @@ pub enum TrellisClientError {
     #[error("nats request error: {0}")]
     NatsRequest(String),
 
-    #[error("service bootstrap failed with HTTP {status}: {}", format_bootstrap_http_payload(.body))]
-    BootstrapHttp { status: u16, body: String },
+    #[error("Trellis HTTP request failed with status {status}: {code}")]
+    BootstrapHttp { status: u16, code: String },
 
     #[error("service bootstrap error: {0}")]
     Bootstrap(String),
@@ -498,7 +465,7 @@ pub enum TrellisClientError {
 
 #[cfg(test)]
 mod tests {
-    use super::{format_bootstrap_http_payload, format_rpc_error_payload, RpcErrorPayload};
+    use super::{format_rpc_error_payload, RpcErrorPayload};
 
     #[test]
     fn formats_validation_error_payload_human_readably() {
@@ -600,37 +567,5 @@ mod tests {
 
         assert!(payload.decode_validation().unwrap().is_none());
         assert!(payload.decode_schema_validation().unwrap().is_none());
-    }
-
-    #[test]
-    fn formats_bootstrap_http_failure_payload_human_readably() {
-        let raw = r#"{"contractDigest":"digest-new","contractId":"trellis.jobs@v1","deploymentId":"svc/jobs","instanceId":"svc_1","message":"Service deployment 'svc/jobs' authority does not cover contract 'trellis.jobs@v1' digest 'digest-new'. An authority plan was created.","planId":"plan_1","reason":"authority_update_required"}"#;
-
-        assert_eq!(
-            format_bootstrap_http_payload(raw),
-            "authority_update_required: Service deployment 'svc/jobs' authority does not cover contract 'trellis.jobs@v1' digest 'digest-new'. An authority plan was created. (contractDigest=digest-new, contractId=trellis.jobs@v1, deploymentId=svc/jobs, instanceId=svc_1, planId=plan_1)"
-        );
-    }
-
-    #[test]
-    fn bootstrap_http_failure_falls_back_to_reason() {
-        assert_eq!(
-            format_bootstrap_http_payload(r#"{"reason":"invalid_signature"}"#),
-            "invalid_signature"
-        );
-    }
-
-    #[test]
-    fn bootstrap_http_error_display_uses_formatted_payload() {
-        let error = super::TrellisClientError::BootstrapHttp {
-            status: 409,
-            body: r#"{"reason":"service_contract_mismatch","message":"Apply the contract first."}"#
-                .to_string(),
-        };
-
-        assert_eq!(
-            error.to_string(),
-            "service bootstrap failed with HTTP 409: service_contract_mismatch: Apply the contract first."
-        );
     }
 }

@@ -1,10 +1,7 @@
 <script lang="ts">
   import { browser } from "$app/environment";
   import { onMount } from "svelte";
-  import {
-    portalRedirectLocation,
-    submitPortalApproval,
-  } from "@qlever-llc/trellis/auth/browser";
+  import { portalRedirectLocation } from "@qlever-llc/trellis/auth/browser";
   import { trellisUrl } from "$lib/config";
   import PortalBrand from "$lib/components/PortalBrand.svelte";
   import { createLoginPortalFlow } from "$lib/portal_login";
@@ -117,22 +114,24 @@
   }
 
   function visibleFlowError(): string | null {
-    return visiblePortalFlowError(flow.error);
+    return visiblePortalFlowError(flow.error, flow.errorCode);
   }
 
   function setFlowError(message: string): void {
     flow.error = message;
+    flow.errorCode = null;
   }
 
   function clearFlowError(): void {
     flow.error = null;
+    flow.errorCode = null;
   }
 
   async function loadFlow(): Promise<void> {
     const state = await flow.load();
     if (
       !state &&
-      shouldShowPortalExpiredState(flow.error)
+      shouldShowPortalExpiredState(flow.error, flow.errorCode)
     ) {
       clearFlowError();
       flow.state = { status: "expired" };
@@ -157,11 +156,7 @@
     let redirected = false;
 
     try {
-      const nextState = await submitPortalApproval(
-        { authUrl: trellisUrl },
-        flow.flowId,
-        "denied",
-      );
+      const nextState = await flow.deny();
       const nextLocation = portalRedirectLocation(nextState);
       if (nextLocation) {
         if (shouldStayOnPortalCompletionPage(pageUrl(), nextLocation)) {
@@ -201,6 +196,7 @@
         flowId: flow.flowId,
         username,
         password: localPassword,
+        portalBindingDigest: flow.binding.digest,
       });
       localPassword = "";
       await loadFlow();
@@ -235,6 +231,7 @@
         password: registrationPassword,
         name,
         email,
+        portalBindingDigest: flow.binding.digest,
       });
       registrationPassword = "";
       await loadFlow();
@@ -554,6 +551,14 @@
               </a>
             {/if}
           {/each}
+        </div>
+      {:else if flow.state?.status === "processing"}
+        <div class="flex items-center gap-4 py-3">
+          <span class="loading loading-ring loading-lg"></span>
+          <div>
+            <p class="text-sm font-medium text-base-content">Finishing sign-in</p>
+            <p class="portal-copy text-xs">Applying the authenticated portal policy.</p>
+          </div>
         </div>
       {:else if flow.state?.status === "approval_required"}
         <div>

@@ -15,8 +15,8 @@ use url::Url;
 use super::bootstrap::{device_bootstrap, service_bootstrap};
 use super::browser::{
     bind_flow, complete_admin_account, console_index, console_page, decide_approval,
-    get_account_flow, get_flow, local_login, oidc_callback, portal_asset, portal_index,
-    portal_page, register_local, start_account_flow_oidc, start_auth, start_oidc,
+    get_account_flow, get_flow, get_portal_flow, local_login, oidc_callback, portal_asset,
+    portal_index, portal_page, register_local, start_account_flow_oidc, start_auth, start_oidc,
 };
 use super::security::{canonical_origin, security_headers};
 use super::well_known::refresh_context;
@@ -42,6 +42,7 @@ enum RouteHandler {
     DeviceBootstrap,
     ContextRefresh,
     GetFlow,
+    GetPortalFlow,
     LocalLogin,
     RegisterLocal,
     GetAccountFlow,
@@ -103,6 +104,11 @@ const ROUTES: &[RouteDefinition] = &[
         method: RouteMethod::Get,
         path: "/auth/flow/:flow_id",
         handler: RouteHandler::GetFlow,
+    },
+    RouteDefinition {
+        method: RouteMethod::Post,
+        path: "/auth/flow/:flow_id/portal",
+        handler: RouteHandler::GetPortalFlow,
     },
     RouteDefinition {
         method: RouteMethod::Post,
@@ -211,6 +217,9 @@ where
         }
         (RouteMethod::Get, RouteHandler::GetFlow) => {
             routes.route(route.path, get(get_flow::<R, E>))
+        }
+        (RouteMethod::Post, RouteHandler::GetPortalFlow) => {
+            routes.route(route.path, post(get_portal_flow::<R, E>))
         }
         (RouteMethod::Post, RouteHandler::LocalLogin) => {
             routes.route(route.path, post(local_login::<R, E>))

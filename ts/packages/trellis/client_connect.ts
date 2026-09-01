@@ -27,13 +27,10 @@ import {
   base64urlDecode,
   base64urlEncode,
   BrowserAuthorizationContextStore,
-  getOrCreateSessionKey,
-  getPublicSessionKey,
-  type SessionKeyOptions,
-  setSessionId,
+  toArrayBuffer,
 } from "./auth/browser.ts";
-import { toArrayBuffer } from "./auth/browser.ts";
-import { type SessionKeyHandle, signBytes } from "./auth/browser/session.ts";
+import { browserInstallationScope } from "./auth/browser/storage.ts";
+import { decodeTrellisHttpError } from "./auth/http_error.ts";
 import {
   importEd25519PrivateKeyFromSeedBase64url,
   publicKeyBase64urlFromSeed,
@@ -46,7 +43,6 @@ import {
 import { estimateMidpointClockOffsetMs } from "./auth/time.ts";
 import { type CallerRuntime, createCallerRuntime } from "./caller.ts";
 import type { ClientOpts } from "./client.ts";
-import { isAuthorizationPending } from "./client_connect_internal.ts";
 import {
   observeNatsTrellisConnection,
   type TrellisConnection,
@@ -74,6 +70,11 @@ import { recordTrellisDuration } from "./telemetry/mod.ts";
 type ClientContract = NativeProtocolContract & {
   readonly [CONTRACT_STATE_METADATA]?: ContractStateMetadata;
 };
+
+/** Browser caller runtime whose lifecycle owner can revoke and end its session. */
+export type ConnectedTrellisClient<TContract extends ClientContract> =
+  & CallerRuntime<TContract>
+  & { logout(): Promise<void> };
 
 function createConnectedClient(args: {
   name: string;
@@ -137,14 +138,13 @@ function clientConnectResult<T>(
 
 type BrowserClientAuthOptions = {
   mode?: "browser";
-  handle?: SessionKeyHandle;
   provider?: string;
   redirectTo?: string | (() => string);
   landingPath?: string;
   context?: unknown;
   currentUrl?: URL | string | (() => URL | string);
   flowId?: string;
-  sessionKey?: SessionKeyOptions;
+  persistence?: "remembered" | "temporary";
   authorizationContextStore?: AuthorizationContextStore;
 };
 
@@ -154,6 +154,7 @@ type SessionKeyClientAuthOptionsBase = {
   sessionId?: string;
   provider?: string;
   redirectTo: string;
+  currentUrl?: URL | string | (() => URL | string);
   context?: unknown;
   flowId?: string;
 };
@@ -235,7 +236,6 @@ type ClientRuntimeIdentity = {
   sessionNkey: string;
   seed: Uint8Array;
   sessionId?: string;
-  setSessionId(sessionId: string): Promise<void>;
   auth: TrellisAuth;
   sign(data: Uint8Array): Promise<Uint8Array>;
 };
@@ -263,6 +263,7 @@ const ClientBootstrapReadySchema = Type.Object({
     sessionId: Type.String({ minLength: 1 }),
     participantId: Type.String({ minLength: 1 }),
     participantDigest: Type.String({ minLength: 1 }),
+    participantNeedsDigest: Type.String({ minLength: 1 }),
     transports: ClientTransportsSchema,
     transport: Type.Object({
       inboxPrefix: Type.String({ minLength: 1 }),
@@ -271,9 +272,11 @@ const ClientBootstrapReadySchema = Type.Object({
     }),
     authorizationContext: AuthorizationContextBundleSchema,
   }),
-}, { additionalProperties: true });
+}, { additionalProperties: false });
 
-type ClientBootstrapReady = StaticDecode<typeof ClientBootstrapReadySchema>;
+type ClientBootstrapReady = StaticDecode<typeof ClientBootstrapReadySchema> & {
+  readonly serverClockOffsetMs?: number;
+};
 type ClientBootstrapAuthRequired = {
   status: "auth_required";
   serverNow: number;
@@ -416,13 +419,17 @@ function normalizeTrellisUrl(trellisUrl: string): string {
   return new URL(trellisUrl).toString().replace(/\/$/, "");
 }
 
-function resolveCurrentUrl(auth?: BrowserClientAuthOptions): URL | null {
+function resolveCurrentUrl(
+  auth?: { currentUrl?: URL | string | (() => URL | string) },
+): URL | null {
   const currentUrl = typeof auth?.currentUrl === "function"
     ? auth.currentUrl()
     : auth?.currentUrl;
   if (currentUrl instanceof URL) return currentUrl;
   if (typeof currentUrl === "string") return new URL(currentUrl);
-  return null;
+  return typeof globalThis.location === "undefined"
+    ? null
+    : new URL(globalThis.location.href);
 }
 
 function resolveRedirectTo(
@@ -457,6 +464,7 @@ function resolveConfiguredRedirectTo(
 async function createSessionKeyRuntimeIdentity(
   sessionKeySeed: string,
   sessionId?: string,
+  mode: "browser" | "session_key" = "session_key",
 ): Promise<ClientRuntimeIdentity> {
   const seed = base64urlDecode(sessionKeySeed);
   const privateKey = await importEd25519PrivateKeyFromSeedBase64url(
@@ -474,16 +482,12 @@ async function createSessionKeyRuntimeIdentity(
   };
 
   const identity: ClientRuntimeIdentity = {
-    mode: "session_key",
+    mode,
     sessionKey,
     sessionNkey: auth.sessionNkey,
     seed,
     auth,
     sessionId,
-    setSessionId: (value) => {
-      identity.sessionId = value;
-      return Promise.resolve();
-    },
     sign,
   };
   return identity;
@@ -491,7 +495,7 @@ async function createSessionKeyRuntimeIdentity(
 
 async function resolveClientIdentity(
   auth: ClientAuthOptions | undefined,
-  storageScope: string,
+  installation?: BrowserAuthorizationContextStore,
 ): Promise<ClientRuntimeIdentity> {
   if (auth?.mode === "session_key") {
     return await createSessionKeyRuntimeIdentity(
@@ -500,24 +504,14 @@ async function resolveClientIdentity(
     );
   }
 
-  const handle = auth?.handle ?? await getOrCreateSessionKey({
-    ...auth?.sessionKey,
-    storageScope,
-  });
-  const sessionAuth = await createAuth({
-    sessionKeySeed: base64urlEncode(handle.seed),
-  });
-  return {
-    mode: "browser",
-    sessionKey: getPublicSessionKey(handle),
-    sessionNkey: sessionAuth.sessionNkey,
-    seed: handle.seed,
-    sessionId: handle.sessionId,
-    auth: sessionAuth,
-    setSessionId: (sessionId) =>
-      Promise.resolve(setSessionId(handle, sessionId)),
-    sign: (data) => signBytes(handle, data),
-  };
+  if (!installation) {
+    throw new Error("browser installation storage is unavailable");
+  }
+  return await createSessionKeyRuntimeIdentity(
+    base64urlEncode(await installation.getOrCreateSessionSeed()),
+    await installation.sessionId(),
+    "browser",
+  );
 }
 
 async function bindClientFlow(args: {
@@ -528,6 +522,7 @@ async function bindClientFlow(args: {
   participant: ClientConnectArgsFor<ClientContract>["participant"];
 }): Promise<ClientBootstrapReady> {
   const startedAt = performance.now();
+  const requestStartedAtMs = Date.now();
   const requestId = ulid();
   const issuedAt = Date.now();
   const unsigned = {
@@ -560,24 +555,19 @@ async function bindClientFlow(args: {
   let response = await fetch(url, init);
   for (const delay of [100, 200, 400, 800]) {
     if (response.status !== 503) break;
-    let authorizationPending = false;
-    try {
-      const value: unknown = await response.clone().json();
-      authorizationPending = isAuthorizationPending(value);
-    } catch {
-      // The terminal response below retains malformed error bodies for diagnostics.
-    }
-    if (!authorizationPending) break;
+    const error = await decodeTrellisHttpError(response.clone());
+    if (error.code !== "authorization_pending") break;
     await new Promise((resolve) => setTimeout(resolve, delay));
     response = await fetch(url, init);
   }
   if (!response.ok) {
-    const reason = await response.text();
+    const error = await decodeTrellisHttpError(response);
     throw createTransportError({
-      code: "bind_failed",
+      code: error.code,
       message: "Trellis could not finish the sign-in step.",
       hint: "Start the sign-in flow again.",
-      context: { status: response.status, trellisUrl: args.trellisUrl, reason },
+      cause: error,
+      context: { status: error.status, trellisUrl: args.trellisUrl },
     });
   }
 
@@ -587,17 +577,6 @@ async function bindClientFlow(args: {
     hint: "Start the sign-in flow again.",
     context: { flowId: args.flowId },
   });
-  if (
-    payload && typeof payload === "object" &&
-    (payload as { status?: unknown }).status === "expired"
-  ) {
-    throw createTransportError({
-      code: "flow_expired",
-      message: "The Trellis sign-in step expired.",
-      hint: "Start the sign-in flow again.",
-      context: { flowId: args.flowId },
-    });
-  }
   let parsed: StaticDecode<typeof BindWireSchema>;
   try {
     parsed = Value.Parse(BindWireSchema, payload) as StaticDecode<
@@ -612,7 +591,11 @@ async function bindClientFlow(args: {
       context: { flowId: args.flowId },
     });
   }
-  await args.identity.setSessionId(parsed.session.sessionId);
+  const serverClockOffsetMs = estimateMidpointClockOffsetMs({
+    requestStartedAtMs,
+    responseReceivedAtMs: Date.now(),
+    serverNowSeconds: parsed.serverNow / 1_000,
+  });
   recordTrellisDuration(
     "trellis.connect.duration",
     performance.now() - startedAt,
@@ -625,10 +608,12 @@ async function bindClientFlow(args: {
   return {
     status: "ready",
     serverNow: parsed.serverNow / 1_000,
+    serverClockOffsetMs,
     connectInfo: {
       sessionId: parsed.session.sessionId,
       participantId: parsed.session.participantId,
       participantDigest: parsed.session.participantArtifactDigest,
+      participantNeedsDigest: parsed.session.participantNeedsDigest,
       transports: parsed.nats.transports,
       transport: {
         inboxPrefix: parsed.session.inboxPrefix,
@@ -646,6 +631,7 @@ async function recoverClientBootstrapWithRetry(args: {
   cache: AuthorizationContextCache;
   deps: ClientConnectDeps;
   offsetState: ClockOffsetState;
+  onTerminalSession?: () => Promise<void>;
 }): Promise<ClientBootstrapResponse> {
   if (!args.identity.sessionId) {
     return {
@@ -683,6 +669,7 @@ async function recoverClientBootstrapWithRetry(args: {
         sessionId: args.identity.sessionId,
         auth: args.identity.auth,
         cache: args.cache,
+        requiredTransport: "websocket",
       });
       const responseReceivedAtMs = args.deps.now();
       const serverClockOffsetMs = estimateMidpointClockOffsetMs({
@@ -719,6 +706,7 @@ async function recoverClientBootstrapWithRetry(args: {
           sessionId: session.sessionId,
           participantId: session.participantId,
           participantDigest: session.participantArtifactDigest,
+          participantNeedsDigest: session.participantNeedsDigest,
           transports: nats.transports,
           transport: {
             inboxPrefix: session.inboxPrefix,
@@ -733,6 +721,7 @@ async function recoverClientBootstrapWithRetry(args: {
         error instanceof AuthorizationContextRefreshError &&
         error.terminal
       ) {
+        await args.onTerminalSession?.();
         return {
           status: "auth_required",
           serverNow: args.deps.now() / 1_000,
@@ -877,13 +866,14 @@ async function buildSessionKeyLoginUrl(args: {
     }),
   });
   if (!response.ok) {
-    const reason = await response.text();
+    const error = await decodeTrellisHttpError(response);
     throw createTransportError({
-      code: "auth_request_failed",
+      code: error.code,
       message: "Trellis could not start sign-in.",
       hint:
         "Retry sign-in. If it keeps failing, check Trellis availability and access.",
-      context: { status: response.status, reason, trellisUrl: args.trellisUrl },
+      cause: error,
+      context: { status: error.status, trellisUrl: args.trellisUrl },
     });
   }
 
@@ -928,16 +918,22 @@ export async function connectClientWithDeps<
 >(
   args: ClientConnectArgsFor<TContract>,
   deps: ClientConnectDeps,
-): Promise<CallerRuntime<TContract>> {
+): Promise<ConnectedTrellisClient<TContract>> {
   const totalStartedAt = performance.now();
   const trellisUrl = normalizeTrellisUrl(args.trellisUrl);
-  const trustScope = `${
-    new URL(trellisUrl).origin
-  }:${args.participant.id}:${args.participant.artifactDigest}`;
-  const identity = await resolveClientIdentity(args.auth, trustScope);
-  const currentUrl = args.auth?.mode === "session_key"
-    ? null
-    : resolveCurrentUrl(args.auth);
+  const trustScope = browserInstallationScope(
+    trellisUrl,
+    args.participant.id,
+    args.participant.artifactDigest,
+  );
+  const browserInstallation = args.auth?.mode === "session_key"
+    ? undefined
+    : new BrowserAuthorizationContextStore(
+      trustScope,
+      args.auth?.persistence ?? "remembered",
+    );
+  let identity = await resolveClientIdentity(args.auth, browserInstallation);
+  const currentUrl = resolveCurrentUrl(args.auth);
   const browserAuth = args.auth?.mode === "session_key" ? undefined : args.auth;
   const callbackFlowId = args.auth?.mode === "session_key"
     ? args.auth.flowId
@@ -961,7 +957,7 @@ export async function connectClientWithDeps<
     deps.authorizationContextStore ??
     (args.auth?.mode === "session_key"
       ? new MemoryAuthorizationContextStore()
-      : new BrowserAuthorizationContextStore(trustScope));
+      : browserInstallation!);
   const authorizationContexts = new AuthorizationContextCache(
     trellisUrl,
     `installation:${trustScope}`,
@@ -990,7 +986,6 @@ export async function connectClientWithDeps<
         identity,
         participant: args.participant,
       });
-      if (currentUrl) cleanupBrowserCallbackUrl(currentUrl);
     } catch (error) {
       if (currentUrl && isExpiredBindError(error)) {
         cleanupBrowserCallbackUrl(currentUrl);
@@ -1008,6 +1003,15 @@ export async function connectClientWithDeps<
       cache: authorizationContexts,
       deps,
       offsetState,
+      onTerminalSession: async () => {
+        if (
+          browserInstallation &&
+          !await browserInstallation.endSession(identity.sessionId)
+        ) {
+          globalThis.location?.reload();
+          throw new Error("browser installation changed in another tab");
+        }
+      },
     });
   recordTrellisDuration(
     "trellis.connect.duration",
@@ -1020,10 +1024,28 @@ export async function connectClientWithDeps<
   );
 
   const authStartedAt = performance.now();
-  const bootstrap = needsReauth(initialBootstrap) ||
+  let bootstrap = initialBootstrap;
+  if (
+    needsReauth(initialBootstrap) ||
+    !bootstrapTargetsRequestedContract(initialBootstrap, args)
+  ) {
+    if (
+      initialBootstrap.status === "ready" &&
       !bootstrapTargetsRequestedContract(initialBootstrap, args)
-    ? await resolveAuthRequired(args, identity, currentUrl)
-    : initialBootstrap;
+    ) {
+      if (
+        browserInstallation &&
+        !await browserInstallation.endSession(identity.sessionId)
+      ) {
+        globalThis.location?.reload();
+        throw new Error("browser installation changed in another tab");
+      }
+    }
+    if (browserInstallation) {
+      identity = await resolveClientIdentity(args.auth, browserInstallation);
+    }
+    bootstrap = await resolveAuthRequired(args, identity, currentUrl);
+  }
   recordTrellisDuration(
     "trellis.connect.duration",
     performance.now() - authStartedAt,
@@ -1053,31 +1075,58 @@ export async function connectClientWithDeps<
 
   const transport = await deps.loadTransport();
   identity.auth.setServerClockOffsetMs(
-    offsetState.serverClockOffsetMs + deps.now() - Date.now(),
+    (bootstrap.serverClockOffsetMs ?? offsetState.serverClockOffsetMs) +
+      deps.now() - Date.now(),
   );
+  offsetState.serverClockOffsetMs = bootstrap.serverClockOffsetMs ??
+    offsetState.serverClockOffsetMs;
   authorizationContexts.setServerClockOffsetMs(
     offsetState.serverClockOffsetMs,
   );
+  selectClientRuntimeTransportServers(bootstrap.connectInfo.transports);
   await authorizationContexts.install(
     bootstrap.connectInfo.authorizationContext,
     {
       bootstrapJwt: bootstrap.connectInfo.transport.jwt,
       bootstrapJwtExpiresAt: bootstrap.connectInfo.transport.jwtExpiresAt,
     },
+    authorizationContexts.correctedNowSeconds(),
+    () => true,
+    {
+      sessionId: bootstrap.connectInfo.sessionId,
+      participantId: bootstrap.connectInfo.participantId,
+      participantArtifactDigest: bootstrap.connectInfo.participantDigest,
+      participantNeedsDigest: bootstrap.connectInfo.participantNeedsDigest,
+      inboxPrefix: bootstrap.connectInfo.transport.inboxPrefix,
+      transports: bootstrap.connectInfo.transports,
+    },
   );
+  identity.sessionId = bootstrap.connectInfo.sessionId;
+  if (callbackFlowId && currentUrl) cleanupBrowserCallbackUrl(currentUrl);
   const runtimeState = {
     participantDigest: bootstrap.connectInfo.participantDigest,
     sessionId: bootstrap.connectInfo.sessionId,
     jwt: () => authorizationContexts.routingJwt(),
     contextDigest: () => authorizationContexts.current().contextDigest,
   };
+  let endingSession = false;
   const handleSessionNotFound = identity.mode === "browser"
     ? async () => {
+      if (endingSession) return;
+      if (!await browserInstallation?.endSession(identity.sessionId)) {
+        if (nc && !nc.isClosed()) await nc.close();
+        globalThis.location?.reload();
+        return;
+      }
+      const replacementIdentity = await resolveClientIdentity(
+        browserAuth,
+        browserInstallation,
+      );
       const latestCurrentUrl = resolveCurrentUrl(browserAuth);
       try {
         await resolveAuthRequired(
           args,
-          identity,
+          replacementIdentity,
           latestCurrentUrl,
         );
       } catch (error) {
@@ -1185,7 +1234,8 @@ export async function connectClientWithDeps<
       return nc.reconnect();
     },
     onTerminalFailure: async () => {
-      if (!nc.isClosed()) await nc.drain();
+      if (!nc.isClosed()) await nc.close();
+      await handleSessionNotFound?.();
     },
   });
   void nc.closed().then(stopContextRefresh, stopContextRefresh);
@@ -1223,7 +1273,57 @@ export async function connectClientWithDeps<
       outcome: "ok",
     },
   );
-  return createCallerRuntime(client, args.contract);
+  const caller = createCallerRuntime(client, args.contract);
+  return Object.assign(caller, {
+    logout: async () => {
+      endingSession = true;
+      try {
+        const logout = Reflect.get(caller, "authSessionsLogout");
+        if (typeof logout !== "function") {
+          throw new Error(
+            "the participant contract must use Auth.Sessions.Logout",
+          );
+        }
+        const result = Reflect.apply(logout, caller, [{}]);
+        if (!(result instanceof AsyncResult)) {
+          throw new Error("Auth.Sessions.Logout returned an invalid result");
+        }
+        const operationCompleted = await Promise.race([
+          result.orThrow().then(() => true),
+          nc.closed().then(() => false),
+        ]);
+        if (!operationCompleted) {
+          try {
+            await refreshAuthorizationContextWithMetadata({
+              trellisUrl,
+              sessionId: identity.sessionId!,
+              auth: identity.auth,
+              cache: authorizationContexts,
+              requiredTransport: "websocket",
+            });
+            throw new Error("logout did not revoke the current session");
+          } catch (error) {
+            if (
+              !(error instanceof AuthorizationContextRefreshError) ||
+              !error.terminal
+            ) {
+              throw error;
+            }
+          }
+        }
+      } finally {
+        try {
+          await browserInstallation?.endSession(identity.sessionId);
+        } finally {
+          try {
+            if (!nc.isClosed()) await nc.close();
+          } finally {
+            endingSession = false;
+          }
+        }
+      }
+    },
+  });
 }
 
 async function resolveAuthRequired<
@@ -1311,7 +1411,7 @@ export class TrellisClient {
   >(
     args: ClientConnectArgsFor<TContract>,
   ): AsyncResult<
-    CallerRuntime<TContract>,
+    ConnectedTrellisClient<TContract>,
     TransportError | UnexpectedError | ClientAuthHandledError
   >;
   static connect(

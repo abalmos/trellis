@@ -15,8 +15,11 @@ use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Output, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+
+use base64::Engine as _;
+use sha2::Digest as _;
 
 use async_nats::jetstream::{self, stream};
 use async_nats::ConnectOptions;
@@ -217,14 +220,14 @@ pub enum TrellisTestError {
     },
 
     /// A Trellis HTTP endpoint returned a non-success status.
-    #[error("Trellis HTTP request failed ({status}) for {url}: {body}")]
+    #[error("Trellis HTTP request failed ({status}) for {url}: {code}")]
     HttpStatus {
         /// Requested URL.
         url: String,
         /// HTTP status code.
         status: u16,
-        /// Response body, when readable.
-        body: String,
+        /// Exact Trellis machine error code.
+        code: String,
     },
 
     /// A Trellis flow endpoint returned an unexpected status.
@@ -583,6 +586,8 @@ pub struct TrellisTestRuntime {
     nats: Option<NatsContainer>,
     nats_proxy: Option<NatsTcpProxy>,
     nats_websocket_proxy: Option<NatsTcpProxy>,
+    retiring_nats_proxy: Option<NatsTcpProxy>,
+    retiring_nats_websocket_proxy: Option<NatsTcpProxy>,
     trellis: Option<TrellisProcess>,
     trellis_url: String,
     nats_url: String,
@@ -1153,6 +1158,8 @@ impl TrellisTestRuntime {
                     nats: None,
                     nats_proxy: None,
                     nats_websocket_proxy: None,
+                    retiring_nats_proxy: None,
+                    retiring_nats_websocket_proxy: None,
                     trellis: None,
                     trellis_url: shared.trellis_url.clone(),
                     nats_url: shared.nats_url.clone(),
@@ -1256,6 +1263,8 @@ impl TrellisTestRuntime {
             nats,
             nats_proxy,
             nats_websocket_proxy,
+            retiring_nats_proxy: None,
+            retiring_nats_websocket_proxy: None,
             trellis,
             trellis_url,
             nats_url,
@@ -1688,6 +1697,33 @@ impl TrellisTestRuntime {
         ))
     }
 
+    /// Advertise replacement NATS proxies while keeping the previous endpoints reachable.
+    pub async fn stage_nats_proxy_rotation(
+        &mut self,
+    ) -> Result<((String, String), (String, String)), TrellisTestError> {
+        let replacement = NatsTcpProxy::start(&self.nats_upstream_url).await?;
+        let websocket_replacement = NatsTcpProxy::start(&self.nats_websocket_upstream_url).await?;
+        let previous_url = self.nats_url.clone();
+        let replacement_url = replacement.url.clone();
+        let previous_websocket_url = self.nats_websocket_url.clone();
+        let replacement_websocket_url = websocket_replacement.url.clone();
+        self.restart_control_plane_with_nats_urls(&replacement_url, &replacement_websocket_url)
+            .await?;
+        self.retiring_nats_proxy = self.nats_proxy.replace(replacement);
+        self.retiring_nats_websocket_proxy =
+            self.nats_websocket_proxy.replace(websocket_replacement);
+        Ok((
+            (previous_url, replacement_url),
+            (previous_websocket_url, replacement_websocket_url),
+        ))
+    }
+
+    /// Retire endpoints retained by [`Self::stage_nats_proxy_rotation`].
+    pub fn retire_staged_nats_proxies(&mut self) {
+        self.retiring_nats_proxy = None;
+        self.retiring_nats_websocket_proxy = None;
+    }
+
     /// Stop only the Trellis control-plane process, preserving workdir state and NATS.
     pub fn stop_control_plane(&mut self) -> Result<(), TrellisTestError> {
         let Some(mut trellis) = self.trellis.take() else {
@@ -1863,8 +1899,8 @@ impl TrellisTestAdmin {
             .await
         {
             Err(TrellisTestError::HttpStatus {
-                status: 409, body, ..
-            }) if body.contains("account_flow_consumed") => {}
+                status: 409, code, ..
+            }) if code == "account_flow_consumed" => {}
             result => result?,
         }
         self.bootstrap_complete = true;
@@ -2150,11 +2186,24 @@ impl TrellisTestAdmin {
                     .call("authDeploymentAuthorityPlan", &plan_request)
                     .await?
             } else {
-                GeneratedAuthClient::new(self.connect_admin(bootstrap_url).await?)
-                    .rpc()
-                    .auth()
-                    .deployment_authority_plan(&plan_request)
-                    .await?
+                let caller = GeneratedAuthClient::new(self.connect_admin(bootstrap_url).await?);
+                let mut attempts = 0;
+                loop {
+                    attempts += 1;
+                    match caller
+                        .rpc()
+                        .auth()
+                        .deployment_authority_plan(&plan_request)
+                        .await
+                    {
+                        Ok(planned) => break planned,
+                        Err(
+                            trellis_rs::generated::CallError::Timeout
+                            | trellis_rs::generated::CallError::Transport(_),
+                        ) if attempts < 3 => {}
+                        Err(error) => return Err(error.into()),
+                    }
+                }
             };
         let plan = AuthorityPlanSummary {
             plan_id: planned.proposal.proposal_id,
@@ -2198,11 +2247,24 @@ impl TrellisTestAdmin {
                         .call("authDeploymentAuthorityAcceptUpdate", &request)
                         .await?
                 } else {
-                    GeneratedAuthClient::new(self.connect_admin(bootstrap_url).await?)
-                        .rpc()
-                        .auth()
-                        .deployment_authority_accept_update(&request)
-                        .await?
+                    let caller = GeneratedAuthClient::new(self.connect_admin(bootstrap_url).await?);
+                    let mut attempts = 0;
+                    loop {
+                        attempts += 1;
+                        match caller
+                            .rpc()
+                            .auth()
+                            .deployment_authority_accept_update(&request)
+                            .await
+                        {
+                            Ok(accepted) => break accepted,
+                            Err(
+                                trellis_rs::generated::CallError::Timeout
+                                | trellis_rs::generated::CallError::Transport(_),
+                            ) if attempts < 3 => {}
+                            Err(error) => return Err(error.into()),
+                        }
+                    }
                 }
             }
             AuthorityPlanClassification::Migration => {
@@ -2220,11 +2282,25 @@ impl TrellisTestAdmin {
                             .call("authDeploymentAuthorityAcceptMigration", &request)
                             .await?
                     } else {
-                        GeneratedAuthClient::new(self.connect_admin(bootstrap_url).await?)
-                            .rpc()
-                            .auth()
-                            .deployment_authority_accept_migration(&request)
-                            .await?
+                        let caller =
+                            GeneratedAuthClient::new(self.connect_admin(bootstrap_url).await?);
+                        let mut attempts = 0;
+                        loop {
+                            attempts += 1;
+                            match caller
+                                .rpc()
+                                .auth()
+                                .deployment_authority_accept_migration(&request)
+                                .await
+                            {
+                                Ok(accepted) => break accepted,
+                                Err(
+                                    trellis_rs::generated::CallError::Timeout
+                                    | trellis_rs::generated::CallError::Transport(_),
+                                ) if attempts < 3 => {}
+                                Err(error) => return Err(error.into()),
+                            }
+                        }
                     };
                 serde_json::from_value(serde_json::to_value(accepted)?)?
             }
@@ -4119,10 +4195,25 @@ where
     let status = response.status();
     let text = response.text().await?;
     if !status.is_success() {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct ErrorEnvelope {
+            error: ErrorCode,
+        }
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct ErrorCode {
+            code: String,
+        }
+        let code = serde_json::from_str::<ErrorEnvelope>(&text)
+            .ok()
+            .map(|envelope| envelope.error.code)
+            .filter(|code| !code.is_empty())
+            .unwrap_or_else(|| "invalid_http_error_envelope".to_owned());
         return Err(TrellisTestError::HttpStatus {
             url: url.to_string(),
             status: status.as_u16(),
-            body: text,
+            code,
         });
     }
     Ok(serde_json::from_str(&text)?)
@@ -4222,10 +4313,16 @@ async fn perform_local_login(
     username: &str,
     password: &str,
 ) -> Result<Value, TrellisTestError> {
+    let binding = portal_binding(flow_id)?;
     post_json_with_origin(
         &format!("{}/auth/login/local", trim_url(trellis_url)),
         trellis_url,
-        &json!({ "flowId": flow_id, "username": username, "password": password }),
+        &json!({
+            "flowId": flow_id,
+            "username": username,
+            "password": password,
+            "portalBindingDigest": portal_binding_digest(&binding),
+        }),
     )
     .await
 }
@@ -4236,6 +4333,7 @@ async fn register_local_user(
     username: &str,
     password: &str,
 ) -> Result<Value, TrellisTestError> {
+    let binding = portal_binding(flow_id)?;
     post_json_with_origin(
         &format!(
             "{}/auth/flow/{}/register/local",
@@ -4248,18 +4346,20 @@ async fn register_local_user(
             "password": password,
             "name": username,
             "email": null,
+            "portalBindingDigest": portal_binding_digest(&binding),
         }),
     )
     .await
 }
 
 async fn submit_portal_approval(trellis_url: &str, flow_id: &str) -> Result<(), TrellisTestError> {
-    let flow_url = format!("{}/auth/flow/{}", trim_url(trellis_url), flow_id);
-    let response = reqwest::Client::builder()
-        .no_proxy()
-        .build()?
-        .get(&flow_url)
+    let binding = portal_binding(flow_id)?;
+    let client = reqwest::Client::builder().no_proxy().build()?;
+    let flow_url = format!("{}/auth/flow/{}/portal", trim_url(trellis_url), flow_id);
+    let response = client
+        .post(&flow_url)
         .header(reqwest::header::ORIGIN, trellis_url)
+        .header("trellis-portal-binding", &binding)
         .send()
         .await?;
     let flow: PortalFlowStatus = decode_http_json(&flow_url, response).await?;
@@ -4269,8 +4369,14 @@ async fn submit_portal_approval(trellis_url: &str, flow_id: &str) -> Result<(), 
         "consentViewDigest": flow.consent_view_digest,
         "selectedOptionalBundles": [],
     });
-    let approved =
-        post_json_with_origin::<PortalFlowStatus, _>(&url, trellis_url, &request).await?;
+    let response = client
+        .post(&url)
+        .header(reqwest::header::ORIGIN, trellis_url)
+        .header("trellis-portal-binding", binding)
+        .json(&request)
+        .send()
+        .await?;
+    let approved: PortalFlowStatus = decode_http_json(&url, response).await?;
     if approved.state == "approved" {
         Ok(())
     } else {
@@ -4279,6 +4385,30 @@ async fn submit_portal_approval(trellis_url: &str, flow_id: &str) -> Result<(), 
             status: approved.state,
         })
     }
+}
+
+fn portal_binding(flow_id: &str) -> Result<String, TrellisTestError> {
+    static BINDINGS: OnceLock<Mutex<HashMap<String, String>>> = OnceLock::new();
+    let mut bindings = BINDINGS
+        .get_or_init(|| Mutex::new(HashMap::new()))
+        .lock()
+        .map_err(|_| TrellisTestError::IntegrationControl("portal binding lock poisoned".into()))?;
+    Ok(bindings
+        .entry(flow_id.to_string())
+        .or_insert_with(|| {
+            let seed = nkeys::KeyPair::new_user()
+                .seed()
+                .expect("encode random test portal binding seed");
+            trellis_protocol::sha256_base64url(&seed)
+        })
+        .clone())
+}
+
+fn portal_binding_digest(binding: &str) -> String {
+    let binding = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .decode(binding)
+        .expect("decode generated test portal binding");
+    base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(sha2::Sha256::digest(binding))
 }
 
 async fn bind_flow(
@@ -4310,13 +4440,8 @@ async fn bind_flow(
     let response = loop {
         match post_json_with_origin::<CompletedFlowSession, _>(&bind_url, trellis_url, &raw).await {
             Err(TrellisTestError::HttpStatus {
-                status: 503, body, ..
-            }) if serde_json::from_str::<serde_json::Value>(&body)
-                .ok()
-                .and_then(|value| value.pointer("/error/code")?.as_str().map(str::to_owned))
-                .as_deref()
-                == Some("authorization_pending") =>
-            {
+                status: 503, code, ..
+            }) if code == "authorization_pending" => {
                 tokio::time::sleep(Duration::from_millis(50)).await;
             }
             result => break result?,

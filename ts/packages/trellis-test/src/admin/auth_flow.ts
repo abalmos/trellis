@@ -1,5 +1,9 @@
 import type { ClientAuthContinuation } from "@qlever-llc/trellis";
-import { fetchPortalFlowState } from "@qlever-llc/trellis/auth/browser";
+import {
+  createPortalBinding,
+  fetchPortalFlowState,
+  type PortalBinding,
+} from "@qlever-llc/trellis/auth/browser";
 
 import { ADMIN_USERNAME } from "./methods.ts";
 import { recordTrellisDuration } from "./metrics.ts";
@@ -25,13 +29,16 @@ export async function performLocalLogin(args: {
   trellisUrl: string;
   flowId: string;
   password: string;
-}): Promise<void> {
+  binding?: PortalBinding;
+}): Promise<PortalBinding> {
+  const binding = args.binding ?? await createPortalBinding();
   const startedAt = performance.now();
   try {
     await postJson(`${args.trellisUrl}/auth/login/local`, {
       flowId: args.flowId,
       username: ADMIN_USERNAME,
       password: args.password,
+      portalBindingDigest: binding.digest,
     });
   } finally {
     recordTrellisDuration(
@@ -40,17 +47,23 @@ export async function performLocalLogin(args: {
       { phase: "local_login", authFlow: "local" },
     );
   }
+  return binding;
 }
 
 export async function approveLocalFlowIfNeeded(args: {
   trellisUrl: string;
   flowId: string;
+  binding: PortalBinding;
 }): Promise<void> {
   const startedAt = performance.now();
   const initialFetchStartedAt = performance.now();
   const state = await fetchPortalFlowState(
-    { authUrl: args.trellisUrl },
+    {
+      authUrl: args.trellisUrl,
+      portalOrigin: new URL(args.trellisUrl).origin,
+    },
     args.flowId,
+    args.binding,
   );
   recordTrellisDuration(
     "trellis.auth.flow.duration",
@@ -76,10 +89,15 @@ export async function approveLocalFlowIfNeeded(args: {
         consentViewDigest: state.consentViewDigest,
         selectedOptionalBundles: [],
       },
+      { "trellis-portal-binding": args.binding.secret },
     );
     const approved = await fetchPortalFlowState(
-      { authUrl: args.trellisUrl },
+      {
+        authUrl: args.trellisUrl,
+        portalOrigin: new URL(args.trellisUrl).origin,
+      },
       args.flowId,
+      args.binding,
     );
     recordTrellisDuration(
       "trellis.auth.flow.duration",
@@ -110,7 +128,7 @@ export async function completeLocalAuthFlow(args: {
 }): Promise<ClientAuthContinuation> {
   const startedAt = performance.now();
   const flowId = flowIdFromUrl(args.loginUrl);
-  await performLocalLogin({
+  const binding = await performLocalLogin({
     trellisUrl: args.trellisUrl,
     flowId,
     password: args.password,
@@ -118,6 +136,7 @@ export async function completeLocalAuthFlow(args: {
   await approveLocalFlowIfNeeded({
     trellisUrl: args.trellisUrl,
     flowId,
+    binding,
   });
   recordTrellisDuration(
     "trellis.auth.flow.duration",

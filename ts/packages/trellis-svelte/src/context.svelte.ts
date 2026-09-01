@@ -1,6 +1,6 @@
 import type {
   CallerContract,
-  CallerRuntime,
+  ConnectedTrellisClient,
   TrellisConnection,
   TrellisConnectionStatus,
 } from "@qlever-llc/trellis";
@@ -12,7 +12,7 @@ export type TrellisContractLike = CallerContract;
 
 /** Real connected Trellis client type exposed by a Svelte app context. */
 export type TrellisClientFor<TContract extends TrellisContractLike> =
-  CallerRuntime<TContract>;
+  ConnectedTrellisClient<TContract>;
 
 /** Minimal client surface required for Trellis Svelte context clients. */
 export type TrellisContextClient = {

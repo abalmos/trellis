@@ -1,3 +1,5 @@
+import { decodeTrellisHttpError } from "@qlever-llc/trellis/auth/browser";
+
 /** Provider entry returned by the account-flow state endpoint. */
 export type AccountFlowProvider = {
   id: string;
@@ -179,28 +181,6 @@ async function parseJson(response: Response): Promise<unknown> {
   }
 }
 
-function responseErrorBody(value: unknown): string | null {
-  if (!isRecord(value)) return null;
-  if (typeof value.error === "string") return value.error;
-  return isRecord(value.error) && typeof value.error.code === "string"
-    ? value.error.code
-    : null;
-}
-
-function responseErrorDetails(value: unknown): Record<string, unknown> | null {
-  return isRecord(value) ? value : null;
-}
-
-function passwordPolicyMinimum(
-  details: Record<string, unknown> | null,
-): number | null {
-  const minLength = details?.minLength;
-  return typeof minLength === "number" && Number.isInteger(minLength) &&
-      minLength > 0
-    ? minLength
-    : null;
-}
-
 /** Extract the account flow id from a portal URL. */
 export function accountFlowIdFromUrl(url: URL): string | null {
   const flowId = url.searchParams.get("flowId")?.trim();
@@ -360,18 +340,13 @@ export function parseAccountFlowState(value: unknown): AccountFlowState {
 export function formatAccountFlowError(
   status: number,
   error: string | null,
-  details: Record<string, unknown> | null = null,
 ): string {
   if (error === "local_password_too_short") {
-    const minLength = passwordPolicyMinimum(details);
-    return minLength === null
-      ? "Choose a longer password."
-      : `Password must be at least ${minLength} characters.`;
+    return "Choose a longer password.";
   }
   if (error && error in ACCOUNT_FLOW_ERROR_MESSAGES) {
     return ACCOUNT_FLOW_ERROR_MESSAGES[error];
   }
-  if (error?.startsWith("Password must be at least ")) return `${error}.`;
   if (error) return `Account request failed (${status}): ${error}`;
   return `Account request failed with status ${status}.`;
 }
@@ -385,16 +360,11 @@ export async function loadAccountFlowState(
   const response = await fetcher(
     new URL(`/auth/account-flow/${encodeURIComponent(flowId)}`, trellisUrl),
   );
-  const body = await parseJson(response);
   if (!response.ok) {
-    throw new Error(
-      formatAccountFlowError(
-        response.status,
-        responseErrorBody(body),
-        responseErrorDetails(body),
-      ),
-    );
+    const error = await decodeTrellisHttpError(response);
+    throw new Error(formatAccountFlowError(error.status, error.code));
   }
+  const body = await parseJson(response);
   return parseAccountFlowState(body);
 }
 
@@ -427,17 +397,11 @@ export async function completeAccountFlowLocalPassword(
       body: JSON.stringify(payload),
     },
   );
-  const body = await parseJson(response);
-
   if (!response.ok) {
-    throw new Error(
-      formatAccountFlowError(
-        response.status,
-        responseErrorBody(body),
-        responseErrorDetails(body),
-      ),
-    );
+    const error = await decodeTrellisHttpError(response);
+    throw new Error(formatAccountFlowError(error.status, error.code));
   }
+  const body = await parseJson(response);
   if (
     isRecord(body) &&
     (body.status === "created" || body.status === "updated") &&

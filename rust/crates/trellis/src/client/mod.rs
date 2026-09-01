@@ -11,6 +11,7 @@ mod connection;
 mod descriptor;
 mod error;
 mod events;
+mod http_error;
 mod operations;
 mod proof;
 mod state;
@@ -71,6 +72,7 @@ pub use events::{
     OutboxStore, PostgresInboxStore, PostgresOutboxStore, PreparedTrellisEvent, SqliteInboxStore,
     SqliteOutboxStore,
 };
+pub use http_error::{decode_trellis_http_error, TrellisHttpError};
 pub use operations::{
     control_subject, DeclaredOperationUpdates, HasOperationUpdates, NoOperationUpdates,
     OperationDescriptor, OperationEvent, OperationInputBuilder, OperationInvoker, OperationRef,

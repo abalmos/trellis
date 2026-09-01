@@ -36,14 +36,6 @@ impl SessionAuth {
         })
     }
 
-    /// Sign a domain-separated string value with `SHA-256(prefix:value)`.
-    #[doc = concat!("Trellis API operation `", stringify!(sign_sha256_domain), "`.")]
-    pub fn sign_sha256_domain(&self, prefix: &str, value: &str) -> String {
-        let digest = sha256(format!("{prefix}:{value}").as_bytes());
-        let signature: Signature = self.signing_key.sign(&digest);
-        base64url_encode(&signature.to_bytes())
-    }
-
     #[doc = concat!("Trellis API operation `", stringify!(sign_sha256_bytes), "`.")]
     pub fn sign_sha256_bytes(&self, bytes: &[u8]) -> String {
         let digest = sha256(bytes);

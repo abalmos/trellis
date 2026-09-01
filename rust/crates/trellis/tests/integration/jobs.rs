@@ -293,6 +293,10 @@ impl<T> AbortOnDrop<T> {
         }
     }
 
+    fn is_finished(&self) -> bool {
+        self.handle.as_ref().is_none_or(JoinHandle::is_finished)
+    }
+
     async fn abort_and_wait(mut self) {
         if let Some(handle) = self.handle.take() {
             handle.abort();
@@ -327,6 +331,9 @@ struct JobsFixture {
     jobs_worker_runtime: trellis_rs::jobs::TestJobsWorkerRuntime,
     keyed_run_state: Arc<KeyedJobRunState>,
     failing_attempts: Arc<tokio::sync::Mutex<Vec<u64>>>,
+    process_jobs: Arc<tokio::sync::Mutex<Vec<(String, trellis_rs::jobs::Job)>>>,
+    process_started: Arc<tokio::sync::Mutex<Vec<String>>>,
+    process_completed: Arc<tokio::sync::Mutex<Vec<String>>>,
 }
 
 #[derive(Debug, Default)]
@@ -339,11 +346,12 @@ struct KeyedJobRunState {
     second_started_before_release: std::sync::atomic::AtomicBool,
 }
 
-async fn setup_jobs_fixture() -> JobsFixture {
-    let runtime =
-        trellis_test::TrellisTestRuntime::start(trellis_test::TrellisTestRuntimeOptions::default())
-            .await
-            .expect("start live Trellis test runtime");
+async fn setup_jobs_fixture_with_rotation(rotate: bool) -> JobsFixture {
+    let mut options = trellis_test::TrellisTestRuntimeOptions::default();
+    options.rotatable_nats_proxy = rotate;
+    let mut runtime = trellis_test::TrellisTestRuntime::start(options)
+        .await
+        .expect("start live Trellis test runtime");
     let bootstrap_url = runtime
         .wait_for_bootstrap_url(Duration::from_secs(10))
         .await
@@ -398,13 +406,7 @@ async fn setup_jobs_fixture() -> JobsFixture {
     .await
     .expect("connect live Rust jobs service runtime");
 
-    let nats = async_nats::ConnectOptions::new()
-        .credentials_file(runtime.workdir().join("nats/creds/trellis-auth.creds"))
-        .await
-        .expect("load jobs test credentials")
-        .connect(runtime.nats_url())
-        .await
-        .expect("connect jobs test transport");
+    let nats = service.caller().integration_test_nats();
     let jobs_worker_runtime = service
         .test_jobs_worker_runtime()
         .expect("build jobs worker runtime");
@@ -461,13 +463,18 @@ async fn setup_jobs_fixture() -> JobsFixture {
     let long_started = Arc::new(tokio::sync::Notify::new());
     let update_release = Arc::new(tokio::sync::Notify::new());
     let failing_attempts = Arc::new(tokio::sync::Mutex::new(Vec::new()));
+    let process_jobs = Arc::new(tokio::sync::Mutex::new(Vec::new()));
+    let process_started = Arc::new(tokio::sync::Mutex::new(Vec::new()));
+    let process_completed = Arc::new(tokio::sync::Mutex::new(Vec::new()));
 
     let process_manager = manager.clone();
     let update_waiter = waiter.clone();
     let fixture_keyed_waiter = keyed_waiter.clone();
+    let process_jobs_for_rpc = Arc::clone(&process_jobs);
     service.register_rpc::<DocumentsProcessRpc, _, _>(move |_context, input| {
         let manager = process_manager.clone();
         let waiter = waiter.clone();
+        let process_jobs = Arc::clone(&process_jobs_for_rpc);
         async move {
             let job = manager
                 .create(
@@ -478,6 +485,10 @@ async fn setup_jobs_fixture() -> JobsFixture {
                 )
                 .await
                 .map_err(|error| ServerError::Nats(error.to_string()))?;
+            process_jobs
+                .lock()
+                .await
+                .push((input.document_id.clone(), job.clone()));
             let terminal: trellis_rs::jobs::Job = waiter
                 .wait_for_terminal(job)
                 .await
@@ -570,12 +581,16 @@ async fn setup_jobs_fixture() -> JobsFixture {
     });
 
     let service_handle = service.generated_handle();
+    let service_caller = service.caller().clone();
+    let service_provider = service.integration_test_authorization_provider();
     let service_task = AbortOnDrop::new(tokio::spawn(async move { service.run().await }));
 
     let worker_keyed_run_state = Arc::clone(&keyed_run_state);
     let worker_long_started = Arc::clone(&long_started);
     let worker_failing_attempts = Arc::clone(&failing_attempts);
     let worker_update_release = Arc::clone(&update_release);
+    let worker_process_started = Arc::clone(&process_started);
+    let worker_process_completed = Arc::clone(&process_completed);
     let worker_host = jobs_worker_runtime
         .start(
             "jobs-fixture-service".to_string(),
@@ -585,6 +600,8 @@ async fn setup_jobs_fixture() -> JobsFixture {
                 let long_started = Arc::clone(&worker_long_started);
                 let failing_attempts = Arc::clone(&worker_failing_attempts);
                 let update_release = Arc::clone(&worker_update_release);
+                let process_started = Arc::clone(&worker_process_started);
+                let process_completed = Arc::clone(&worker_process_completed);
                 async move {
                     if active_job.job().job_type == "keyedProcessDocument"
                         || active_job.job().job_type.ends_with("KeyedProcessDocument")
@@ -659,6 +676,10 @@ async fn setup_jobs_fixture() -> JobsFixture {
                     let payload: JobPayload =
                         serde_json::from_value(active_job.job().payload.clone())
                             .map_err(|error| JobProcessError::failed(error.to_string()))?;
+                    process_started
+                        .lock()
+                        .await
+                        .push(payload.document_id.clone());
                     if payload.document_id == "doc-update" {
                         update_release.notified().await;
                     }
@@ -677,6 +698,10 @@ async fn setup_jobs_fixture() -> JobsFixture {
                         )
                         .await
                         .map_err(|error| JobProcessError::failed(error.to_string()))?;
+                    process_completed
+                        .lock()
+                        .await
+                        .push(payload.document_id.clone());
                     let result = serde_json::to_value(JobResult {
                         document_id: payload.document_id,
                         processed_by: "rust-service-job".to_string(),
@@ -707,6 +732,57 @@ async fn setup_jobs_fixture() -> JobsFixture {
             .expect("connect live Rust jobs client"),
     );
 
+    if rotate {
+        let before_rotation = call_documents_process_with_retry(&client, "before-rotation").await;
+        assert_eq!(before_rotation.document_id, "before-rotation");
+        let lifecycle = service_caller.integration_test_nats().statistics();
+        let provider = service_provider;
+        let before = provider.integration_test_io_counters();
+        let ((retired_url, _), _) = runtime
+            .stage_nats_proxy_rotation()
+            .await
+            .expect("rotate jobs service endpoint");
+        service_caller
+            .integration_test_refresh_authorization_context()
+            .await
+            .expect("refresh jobs service on the same NATS client");
+        client
+            .refresh_authorization_context()
+            .await
+            .expect("refresh jobs caller on the same NATS client");
+        runtime.retire_staged_nats_proxies();
+        assert!(Arc::ptr_eq(
+            &lifecycle,
+            &service_caller.integration_test_nats().statistics()
+        ));
+        let deadline = Instant::now() + Duration::from_secs(15);
+        loop {
+            if provider.integration_test_provider_ready()
+                && provider
+                    .integration_test_io_counters()
+                    .revocation_watch_initializations
+                    > before.revocation_watch_initializations
+            {
+                break;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "provider watches did not become ready after rotation"
+            );
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+        assert!(
+            !service_task.is_finished(),
+            "service router or worker task exited during endpoint rotation"
+        );
+        assert!(
+            tokio::net::TcpStream::connect(retired_url.trim_start_matches("nats://"))
+                .await
+                .is_err(),
+            "retired jobs endpoint remained usable"
+        );
+    }
+
     JobsFixture {
         _runtime: runtime,
         _admin: admin,
@@ -725,7 +801,14 @@ async fn setup_jobs_fixture() -> JobsFixture {
         jobs_worker_runtime,
         keyed_run_state,
         failing_attempts,
+        process_jobs,
+        process_started,
+        process_completed,
     }
+}
+
+async fn setup_jobs_fixture() -> JobsFixture {
+    setup_jobs_fixture_with_rotation(false).await
 }
 
 #[tokio::test]
@@ -1593,6 +1676,81 @@ async fn jobs_admin_list_services_filters_stale_worker_heartbeats() {
         .expect("call second paged Jobs.ListServices");
     assert_eq!(second_page.offset, 1);
     assert_ne!(first_page.entries[0].name, second_page.entries[0].name);
+}
+
+#[tokio::test]
+async fn service_endpoint_rotation_preserves_rpc_and_worker_subscriptions() {
+    assert_runtime_case_registered(
+        "jobs.service-endpoint-rotation-preserves-rpc-and-worker-subscriptions",
+        "jobs",
+        "jobs",
+    );
+    let fixture = setup_jobs_fixture_with_rotation(true).await;
+    let call = {
+        let client = Arc::clone(&fixture.client);
+        tokio::spawn(async move {
+            client
+                .call::<DocumentsProcessRpc>(&WorkflowInput {
+                    document_id: "rotation-worker".to_string(),
+                })
+                .await
+        })
+    };
+    let deadline = Instant::now() + Duration::from_secs(15);
+    let job = loop {
+        if let Some((_, job)) = fixture
+            .process_jobs
+            .lock()
+            .await
+            .iter()
+            .find(|(document_id, _)| document_id == "rotation-worker")
+            .cloned()
+        {
+            break job;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "job submission RPC was not accepted"
+        );
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    };
+    let deadline = Instant::now() + Duration::from_secs(15);
+    while !fixture
+        .process_started
+        .lock()
+        .await
+        .iter()
+        .any(|document_id| document_id == "rotation-worker")
+    {
+        assert!(
+            Instant::now() < deadline,
+            "durable worker did not receive the job"
+        );
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+    let deadline = Instant::now() + Duration::from_secs(15);
+    while !fixture
+        .process_completed
+        .lock()
+        .await
+        .iter()
+        .any(|document_id| document_id == "rotation-worker")
+    {
+        assert!(Instant::now() < deadline, "job handler did not complete");
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+    let terminal = tokio::time::timeout(Duration::from_secs(15), fixture.update_waiter.get(job))
+        .await
+        .expect("durable terminal lifecycle read timed out")
+        .expect("read durable terminal lifecycle");
+    assert_eq!(terminal.state, JobState::Completed);
+    let output = tokio::time::timeout(Duration::from_secs(15), call)
+        .await
+        .expect("job waiter did not observe the terminal lifecycle")
+        .expect("join Documents.Process RPC")
+        .expect("complete Documents.Process RPC");
+    assert_eq!(output.document_id, "rotation-worker");
+    assert_eq!(output.processed_by, "rust-service-job");
 }
 
 async fn call_documents_process_with_retry(

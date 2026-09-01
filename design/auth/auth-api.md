@@ -7,13 +7,18 @@ description: Current Rust-owned authentication and authorization boundaries.
 
 ## Source Of Truth
 
-The exact wire API is the source-owned `trellis.api.v1` artifact at
+The generated Auth RPC, operation, and event surface is owned by the
+source-owned `trellis.api.v1` artifact at
 `rust/crates/runtime/trellis.api.json`. The Rust and TypeScript generated SDKs
-are derived from that artifact and MUST NOT be edited by hand.
+are derived from that artifact and MUST NOT be edited by hand. Rust route-owned
+DTOs are authoritative for browser, account, bootstrap, and refresh HTTP
+boundaries; TypeScript mirrors those DTOs with strict schemas verified by
+conformance and live integration tests.
 
 This document describes boundary and lifecycle semantics. It intentionally does
-not duplicate every generated request or response field. For exact names,
-nullability, error codes, and schemas, use the artifact and generated API docs.
+not duplicate every request or response field. For exact generated NATS
+surfaces, use the artifact and generated API docs. For exact HTTP shapes, use
+the Rust route DTOs.
 
 The paired runtime identity is `rust/crates/runtime/trellis.participant.json`.
 Administration uses the separate source-owned
@@ -110,9 +115,10 @@ remains fail-closed.
 
 ## Browser And Account Flows
 
-Browser flows are CAS-backed and carry the session key and exact participant
-binding established by the initiating proof. Local login uses Argon2id. OIDC
-uses discovery, PKCE, nonce verification, access-token-hash validation, and a
+Browser flows are CAS-backed and use the initiating signed request ULID as both
+`requestId` and `flowId`; they carry the session key and exact participant
+binding established by that proof. Local login uses Argon2id. OIDC uses
+discovery, PKCE, nonce verification, access-token-hash validation, and a
 claim-before-exchange state transition. An exchange with an unknown outcome
 becomes terminal `restart_required` rather than risking replay.
 
@@ -122,11 +128,23 @@ portal and provider policy revision again, and only then claims and exchanges
 the state. Unknown identities register only when current portal policy permits
 it; identity-link flows remain target-bound and never self-register.
 
-The flow response contains a server-owned consent view and digest. Approval
-accepts only `{ approved, consentViewDigest, selectedOptionalBundles }`;
-caller-authored grants, capabilities, expiry, resource atoms, and platform
-authority are rejected. It re-resolves the exact participant before deciding the
-same immutable authority proposal used by administrative flows. Bind creates the
+The selected portal browser generates one 32-byte verifier, retains it in
+portal-origin `sessionStorage`, and sends only its SHA-256 digest during local
+or OIDC authentication. Successful authentication atomically claims the
+principal, provider result, and verifier digest. The public flow projection
+contains no authenticated profile, principal id, or consent digest. Bodyless
+`POST /auth/flow/:flowId/portal`, approval, and denial require the exact
+selected portal origin plus the raw verifier in `Trellis-Portal-Binding`; the
+verifier is constant-time checked against the claimed digest. It never appears
+in URLs, redirects, logs, or an approval-only field. The OIDC cookie remains a
+distinct callback-CSRF and continuity control.
+
+The portal-authenticated detail contains the server-owned consent view and
+digest. Approval accepts only
+`{ approved, consentViewDigest, selectedOptionalBundles }`; caller-authored
+grants, capabilities, expiry, resource atoms, and platform authority are
+rejected. It re-resolves the exact participant before deciding the same
+immutable authority proposal used by administrative flows. Bind creates the
 session through the shared aggregate transaction.
 
 Account-management flow tokens are returned once and stored only as hashes. One

@@ -4,6 +4,7 @@ use super::super::*;
 #[serde(rename_all = "camelCase")]
 pub(crate) struct OidcStartQuery {
     flow_id: String,
+    portal_binding_digest: String,
 }
 
 pub(crate) async fn start_oidc<R, E>(
@@ -31,6 +32,7 @@ where
     if flow.state != AuthBrowserFlowState::ChooseProvider {
         return Err(HttpError::conflict("flow_not_pending"));
     }
+    validate_portal_binding_digest(&query.portal_binding_digest)?;
     let (portal, settings) = state
         .service
         .repository()
@@ -46,6 +48,7 @@ where
         flow.flow_id,
         AuthOAuthKind::Browser,
         Some((&portal, &settings)),
+        Some(query.portal_binding_digest),
     )
     .await
 }
@@ -113,6 +116,7 @@ where
         flow_token,
         AuthOAuthKind::AccountFlow,
         portal.as_ref().map(|(portal, settings)| (portal, settings)),
+        None,
     )
     .await
 }
@@ -123,6 +127,7 @@ async fn begin_oidc<R, E>(
     flow_id: String,
     kind: AuthOAuthKind,
     portal_policy: Option<(&LoginPortalRecord, &LoginSettingsRecord)>,
+    portal_binding_digest: Option<String>,
 ) -> Result<Response, HttpError>
 where
     R: AccountRepository
@@ -188,6 +193,7 @@ where
             nonce: nonce.secret().clone(),
             redirect_uri: provider.redirect_uri.as_str().to_owned(),
             browser_binding_digest,
+            portal_binding_digest,
             portal_id,
             portal_policy_digest,
             claim_owner: None,
@@ -343,11 +349,17 @@ where
                     | AuthBrowserFlowState::Consumed
             )
         {
-            return Ok(Redirect::temporary(&format!(
-                "{}/login?flowId={}",
-                state.public_origin.trim_end_matches('/'),
-                flow.flow_id,
-            ))
+            let (portal, _) = state
+                .service
+                .repository()
+                .get_login_portal(&flow.portal_id)
+                .await?
+                .ok_or_else(|| HttpError::gone("portal_unavailable"))?;
+            return Ok(Redirect::temporary(&super::request::portal_url(
+                &portal,
+                &state.public_origin,
+                &flow.flow_id,
+            )?)
             .into_response());
         }
     }
@@ -744,6 +756,10 @@ where
             provider_id: oauth.provider_id.clone(),
             roles: oauth.authenticated_roles.clone(),
         },
+        oauth
+            .portal_binding_digest
+            .clone()
+            .ok_or_else(|| HttpError::internal("oauth_portal_binding_missing"))?,
         now,
     )
     .await?;
@@ -768,11 +784,17 @@ where
         }
         Err(error) => return Err(error.into()),
     }
-    Ok(Redirect::temporary(&format!(
-        "{}/login?flowId={}",
-        state.public_origin.trim_end_matches('/'),
-        completed.flow_id
-    ))
+    let (portal, _) = state
+        .service
+        .repository()
+        .get_login_portal(&completed.portal_id)
+        .await?
+        .ok_or_else(|| HttpError::gone("portal_unavailable"))?;
+    Ok(Redirect::temporary(&super::request::portal_url(
+        &portal,
+        &state.public_origin,
+        &completed.flow_id,
+    )?)
     .into_response())
 }
 

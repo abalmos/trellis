@@ -4,21 +4,13 @@
 
 export {
   classifyBrowserAuthError,
-  clearSessionKey,
   createAuth,
-  generateSessionKey,
-  getOrCreateSessionKey,
-  getPublicSessionKey,
-  hasSessionKey,
   isRecoverableBrowserAuthError,
-  loadSessionKey,
-  signBytes,
 } from "./auth.ts";
 export type {
   BrowserAuthRecoveryClassification,
   BrowserAuthRecoveryKind,
   NatsConnectOptions,
-  SessionKeyHandle,
 } from "./auth.ts";
 export {
   canonicalizeJson,
@@ -81,6 +73,7 @@ export type {
   ClientAuthContinuation,
   ClientAuthOptions,
   ClientAuthRequiredContext,
+  ConnectedTrellisClient,
   TrellisClientConnectArgs,
 } from "./client_connect.ts";
 export { ClientAuthHandledError, TrellisClient } from "./client_connect.ts";

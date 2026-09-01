@@ -159,7 +159,9 @@ https://raw.githubusercontent.com/qlever-llc/trellis/main/docs/static/llms.txt
   `{ flowId, loginUrl }`; approval has no caller idempotency key; bind replay is
   server-owned by immutable `flowId`. Refresh returns and atomically replaces the
   complete session, route JWT and expiry, typed transports, server clock, and
-  authorization context.
+  authorization context. One participant-scoped browser installation owns its
+  seed, session/runtime state, and trust floor; connected `logout()` revokes the
+  server session, retains trust, clears that exact session, and drains NATS.
 - The trust chain is a pinned authorization root, a root-signed current manifest
   containing active issuer public keys, and an issuer-signed short-lived context.
   Clients durably retain the

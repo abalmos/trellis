@@ -13,24 +13,6 @@ use trellis_protocol::{
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct AuthProofFixture {
-    name: String,
-    seed: String,
-    session_key: String,
-    oauth_init: DomainSigFixture,
-    flow_bind: DomainSigFixture,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct DomainSigFixture {
-    redirect_to: Option<String>,
-    flow_id: Option<String>,
-    sig: String,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
 struct AuthorizationChainFixture {
     session_seed: String,
     session_public_key: String,
@@ -76,37 +58,6 @@ fn bytes_to_hex(bytes: &[u8]) -> String {
         write!(&mut out, "{:02x}", byte).unwrap();
     }
     out
-}
-
-#[test]
-fn auth_proof_matches_shared_conformance_vectors() {
-    let fixture_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../../conformance/auth-proof/vectors.json");
-    let fixtures: Vec<AuthProofFixture> =
-        serde_json::from_str(&fs::read_to_string(fixture_path).unwrap()).unwrap();
-
-    assert!(fixtures.len() >= 2);
-
-    for fixture in fixtures {
-        assert!(fixture.name.starts_with("proof-layout-current"));
-        let auth = SessionAuth::from_seed_base64url(&fixture.seed).unwrap();
-        assert_eq!(auth.session_key, fixture.session_key);
-
-        assert_eq!(
-            auth.sign_sha256_domain(
-                "oauth-init",
-                &format!(
-                    "{}:null",
-                    fixture.oauth_init.redirect_to.as_deref().unwrap()
-                )
-            ),
-            fixture.oauth_init.sig
-        );
-        assert_eq!(
-            auth.sign_sha256_domain("bind-flow", fixture.flow_bind.flow_id.as_deref().unwrap()),
-            fixture.flow_bind.sig
-        );
-    }
 }
 
 fn chain_fixture() -> AuthorizationChainFixture {

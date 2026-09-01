@@ -1,5 +1,5 @@
 use super::super::*;
-use super::local::BrowserFlowResponse;
+use super::local::{portal_flow_response, PortalFlowResponse};
 use crate::platform::auth::policy::portal_allows_authenticated_provider;
 
 #[derive(Deserialize, Serialize)]
@@ -15,7 +15,7 @@ pub(crate) async fn decide_approval<R, E>(
     Path(flow_id): Path<String>,
     headers: HeaderMap,
     Json(request): Json<ApprovalRequest>,
-) -> Result<Json<BrowserFlowResponse>, HttpError>
+) -> Result<Json<PortalFlowResponse>, HttpError>
 where
     R: AccountRepository
         + AuthorityEvidenceRepository
@@ -40,6 +40,7 @@ where
         .await?
         .ok_or_else(|| HttpError::gone("portal_unavailable"))?;
     require_selected_portal_origin(&headers, &portal, &state.public_origin)?;
+    require_portal_binding(&flow, &headers)?;
     let request_value =
         serde_json::to_value(&request).map_err(|_| HttpError::bad_request("invalid_approval"))?;
     let request_digest = trellis_protocol::digest_json(&request_value)
@@ -63,7 +64,7 @@ where
         {
             return Err(HttpError::conflict("approval_replay_mismatch"));
         }
-        return Ok(Json(flow_response(flow)));
+        return Ok(Json(portal_flow_response(&state, flow).await?));
     }
     if flow.state != AuthBrowserFlowState::ApprovalRequired {
         return Err(HttpError::conflict("flow_not_awaiting_approval"));
@@ -90,7 +91,7 @@ where
             .ephemeral
             .replace_browser_flow(expected, flow.clone())
             .await?;
-        return Ok(Json(flow_response(flow)));
+        return Ok(Json(portal_flow_response(&state, flow).await?));
     }
     let principal_id = flow
         .principal_id
@@ -182,7 +183,7 @@ where
         }
         flow = current;
     }
-    Ok(Json(flow_response(flow)))
+    Ok(Json(portal_flow_response(&state, flow).await?))
 }
 
 pub(super) async fn apply_trusted_portal_authority<R, E>(
@@ -374,6 +375,7 @@ pub(super) async fn complete_authenticated_flow<R, E>(
     mut flow: AuthBrowserFlow,
     principal_id: String,
     attributes: ProviderLoginAttributes,
+    portal_binding_digest: String,
     now: i64,
 ) -> Result<AuthBrowserFlow, HttpError>
 where
@@ -396,6 +398,9 @@ where
         let expected = flow.version;
         flow.state = AuthBrowserFlowState::Authenticated;
         flow.principal_id = Some(principal_id.clone());
+        flow.authenticated_provider_id = Some(attributes.provider_id.clone());
+        flow.authenticated_roles = attributes.roles.clone();
+        flow.portal_binding_digest = Some(portal_binding_digest.clone());
         flow.version += 1;
         match state
             .ephemeral
@@ -409,8 +414,12 @@ where
             Err(error) => return Err(error.into()),
         }
     }
-    if flow.principal_id.as_deref() != Some(&principal_id) {
-        return Err(HttpError::conflict("flow_principal_conflict"));
+    if flow.principal_id.as_deref() != Some(&principal_id)
+        || flow.authenticated_provider_id.as_deref() != Some(&attributes.provider_id)
+        || flow.authenticated_roles != attributes.roles
+        || flow.portal_binding_digest.as_deref() != Some(&portal_binding_digest)
+    {
+        return Err(HttpError::conflict("flow_authentication_conflict"));
     }
     if matches!(
         flow.state,

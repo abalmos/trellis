@@ -1,6 +1,7 @@
 import { Value } from "typebox/value";
 import { ulid } from "ulid";
 
+import { decodeTrellisHttpError, TrellisHttpError } from "../http_error.ts";
 import { base64urlDecode, base64urlEncode, sha256 } from "../utils.ts";
 import { sessionProofRequestDigest } from "../session_proof.ts";
 import type { TrellisAuth } from "../session_auth.ts";
@@ -14,13 +15,33 @@ import type {
 import { AuthorizationContextRefreshResponseSchema as ResponseSchema } from "./types.ts";
 
 /** HTTP refresh failure with terminal-state classification. */
-export class AuthorizationContextRefreshError extends Error {
+export class AuthorizationContextRefreshError extends TrellisHttpError {
   readonly terminal: boolean;
 
-  constructor(readonly status: number) {
-    super(`Authorization context refresh failed with HTTP ${status}`);
+  constructor(status: number, code: string) {
+    super(status, code);
     this.name = "AuthorizationContextRefreshError";
-    this.terminal = status === 401 || status === 403 || status === 409;
+    this.terminal = [
+      "session_not_found",
+      "session_expired",
+      "session_revoked",
+      "user_not_found",
+      "user_inactive",
+      "participant_not_found",
+      "participant_changed",
+      "contract_changed",
+      "authority_not_found",
+      "authority_rejected",
+      "authority_revoked",
+      "authority_expired",
+      "deployment_inactive",
+      "instance_inactive",
+      "device_inactive",
+      "activation_required",
+      "delegation_expired",
+      "context_refresh_mismatch",
+      "invalid_proof",
+    ].includes(code);
   }
 }
 
@@ -32,6 +53,7 @@ export async function refreshAuthorizationContextWithMetadata(args: {
   cache: AuthorizationContextCache;
   fetch?: typeof globalThis.fetch;
   shouldInstall?: () => boolean;
+  requiredTransport?: "native" | "websocket";
 }): Promise<AuthorizationContextRefreshResult> {
   const fetch = args.fetch ?? globalThis.fetch;
   let current: VerifiedAuthorizationContext | undefined;
@@ -83,11 +105,22 @@ export async function refreshAuthorizationContextWithMetadata(args: {
       body: JSON.stringify({ ...request, proof }),
     },
   );
-  if (!response.ok) throw new AuthorizationContextRefreshError(response.status);
+  if (!response.ok) {
+    const error = await decodeTrellisHttpError(response);
+    throw new AuthorizationContextRefreshError(error.status, error.code);
+  }
   const next = Value.Parse(
     ResponseSchema,
     await response.json(),
   ) as AuthorizationContextRefreshResponse;
+  if (
+    args.requiredTransport &&
+    !next.nats.transports[args.requiredTransport]?.natsServers.length
+  ) {
+    throw new Error(
+      `authorization refresh has no ${args.requiredTransport} NATS endpoints`,
+    );
+  }
   const serverClockOffsetMs = next.serverNow - Math.trunc(
     (requestStartedAt + args.cache.nowMilliseconds()) / 2,
   );
@@ -132,7 +165,6 @@ export function startAuthorizationContextRefresh(args: {
   fetch?: typeof globalThis.fetch;
   onTerminalFailure?: (error: unknown) => void | Promise<void>;
   onTransientFailure?: (error: unknown) => void | Promise<void>;
-  onExpired?: (error: unknown) => void | Promise<void>;
   onRefresh?: (context: VerifiedAuthorizationContext) => void | Promise<void>;
 }): () => void {
   let stopped = false;

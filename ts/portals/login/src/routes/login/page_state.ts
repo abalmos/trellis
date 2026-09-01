@@ -1,6 +1,6 @@
 import {
-  type BrowserAuthRecoveryClassification,
   classifyBrowserAuthError,
+  decodeTrellisHttpError,
 } from "@qlever-llc/trellis/auth/browser";
 
 export const MISSING_PORTAL_FLOW_ID_ERROR = "Missing flow id.";
@@ -37,6 +37,7 @@ type LocalLoginRequestRecord = {
   flowId: string;
   username: string;
   password: string;
+  portalBindingDigest: string;
 };
 
 type LocalRegistrationRequestRecord = {
@@ -44,6 +45,7 @@ type LocalRegistrationRequestRecord = {
   password: string;
   name: string;
   email: string;
+  portalBindingDigest: string;
 };
 
 type RegistrationProvider = {
@@ -94,12 +96,7 @@ function isCapabilityMetadata(value: unknown): value is CapabilityMetadata {
 }
 
 async function responseErrorCode(response: Response): Promise<string | null> {
-  try {
-    const body = await response.json();
-    return isRecord(body) && typeof body.error === "string" ? body.error : null;
-  } catch {
-    return null;
-  }
+  return (await decodeTrellisHttpError(response)).code;
 }
 
 export function localLoginErrorMessage(
@@ -298,9 +295,9 @@ export function shouldOfferPortalReturnLink(
 
 export function classifyPortalFlowError(
   error: string | null,
-  classification?: BrowserAuthRecoveryClassification | null,
-): BrowserAuthRecoveryClassification | null {
-  if (!error && !classification) return null;
+  errorCode: string | null = null,
+) {
+  if (!error && !errorCode) return null;
   if (error === MISSING_PORTAL_FLOW_ID_ERROR) {
     return {
       kind: "recoverable_expired_flow",
@@ -308,22 +305,22 @@ export function classifyPortalFlowError(
       reason: "missing_flow_id",
     };
   }
-  return classification ?? classifyBrowserAuthError(error);
+  return classifyBrowserAuthError(errorCode ? { code: errorCode } : null);
 }
 
 export function shouldShowPortalExpiredState(
   error: string | null,
-  classification?: BrowserAuthRecoveryClassification | null,
+  errorCode: string | null = null,
 ): boolean {
-  const portalClassification = classifyPortalFlowError(error, classification);
+  const portalClassification = classifyPortalFlowError(error, errorCode);
   return portalClassification?.kind === "recoverable_expired_flow";
 }
 
 export function visiblePortalFlowError(
   error: string | null,
-  classification?: BrowserAuthRecoveryClassification | null,
+  errorCode: string | null = null,
 ): string | null {
   if (!error) return null;
-  const portalClassification = classifyPortalFlowError(error, classification);
+  const portalClassification = classifyPortalFlowError(error, errorCode);
   return portalClassification?.recoverable ? null : error;
 }

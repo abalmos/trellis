@@ -339,12 +339,16 @@ export class TrellisTestAdminAutomation {
     const startedAt = performance.now();
     await this.#completeBootstrap();
     const flowId = flowIdFromUrl(ctx.loginUrl);
-    await performLocalLogin({
+    const binding = await performLocalLogin({
       trellisUrl: this.#trellisUrl,
       flowId,
       password: this.#adminPassword,
     });
-    await approveLocalFlowIfNeeded({ trellisUrl: this.#trellisUrl, flowId });
+    await approveLocalFlowIfNeeded({
+      trellisUrl: this.#trellisUrl,
+      flowId,
+      binding,
+    });
     recordTrellisDuration(
       "trellis.admin.workflow.duration",
       performance.now() - startedAt,
