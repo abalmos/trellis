@@ -185,7 +185,17 @@
 
         {#if active}
           {#each unavailableProviders(active) as provider (provider.id)}
-            <a class="btn btn-outline btn-block" href={accountFlowProviderLoginUrl(trellisUrl, active.flowId, provider.id)}>
+            <a
+              class="btn btn-outline btn-block"
+              href={accountFlowProviderLoginUrl(
+                trellisUrl,
+                active.flowId,
+                provider.id,
+                browserFlowId && portalBindingDigest
+                  ? { browserFlowId, portalBindingDigest }
+                  : undefined,
+              )}
+            >
               Continue with {provider.displayName}
             </a>
           {/each}

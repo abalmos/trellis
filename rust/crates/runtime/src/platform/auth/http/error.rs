@@ -163,16 +163,7 @@ impl IntoResponse for HttpError {
         (
             self.status,
             [(CONTENT_TYPE, "application/json")],
-            Json(if self.code == "password_unchanged" {
-                json!({
-                    "error": {
-                        "code": self.code,
-                        "message": "New password must differ from the current password."
-                    }
-                })
-            } else {
-                json!({ "error": { "code": self.code } })
-            }),
+            Json(json!({ "error": { "code": self.code } })),
         )
             .into_response()
     }

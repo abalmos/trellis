@@ -71,6 +71,9 @@ import {
   AuthSessionsRevokeResponseSchema,
   AuthUserIdentitiesList,
 } from "@trellis/apis/trellis.auth";
+import { EventLogQuery } from "@trellis/apis/trellis.eventlog";
+import { HealthQuery } from "@trellis/apis/trellis.health";
+import { JobsQuery } from "@trellis/apis/trellis.jobs";
 import {
   StateAdminDelete,
   StateAdminDeleteRequestSchema,
@@ -82,10 +85,11 @@ import {
   StateAdminListRequestSchema,
   StateAdminListResponseSchema,
 } from "@trellis/apis/trellis.state";
+import type { Static, TSchema } from "typebox";
+
 import administrationParticipantSource from "../../../../../rust/crates/trellis/artifacts/trellis.admin.participant.json" with {
   type: "json",
 };
-import type { Static, TSchema } from "typebox";
 
 export const ADMIN_USERNAME = "admin";
 const adminDescriptors = defineAppContract(() => ({
@@ -123,6 +127,9 @@ const adminDescriptors = defineAppContract(() => ({
     StateAdminDelete,
     StateAdminGet,
     StateAdminList,
+    JobsQuery,
+    EventLogQuery,
+    HealthQuery,
   ],
 }));
 

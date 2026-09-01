@@ -75,8 +75,8 @@ Deno.test("password completion omits username for reset flows", async () => {
 
 Deno.test("password maps account-flow password policy errors", async () => {
   assertEquals(
-    formatAccountFlowError(400, "local_password_too_short", { minLength: 12 }),
-    "Password must be at least 12 characters.",
+    formatAccountFlowError(400, "local_password_too_short"),
+    "Choose a longer password.",
   );
 
   await assertRejects(
@@ -88,12 +88,12 @@ Deno.test("password maps account-flow password policy errors", async () => {
         () =>
           Promise.resolve(
             jsonResponse(
-              { error: "local_password_too_short", minLength: 12 },
+              { error: { code: "local_password_too_short" } },
               { status: 400 },
             ),
           ),
       ),
     Error,
-    "Password must be at least 12 characters.",
+    "Choose a longer password.",
   );
 });

@@ -277,11 +277,14 @@ pub(crate) struct AuthOAuthState {
     pub redirect_uri: String,
     pub browser_binding_digest: String,
     pub portal_binding_digest: Option<String>,
+    pub browser_flow_id: Option<String>,
     pub portal_id: Option<String>,
     pub portal_policy_digest: Option<String>,
     pub claim_owner: Option<String>,
     pub result_digest: Option<String>,
     pub authenticated_principal_id: Option<String>,
+    pub authenticated_provider_subject: Option<String>,
+    pub authenticated_email: Option<String>,
     pub authenticated_roles: Vec<String>,
     pub created_at: i64,
     pub expires_at: i64,
@@ -360,8 +363,13 @@ impl AuthOAuthState {
         if let Some(value) = self.portal_binding_digest.as_deref() {
             require_digest("portalBindingDigest", value)?;
         }
-        if (self.kind == AuthOAuthKind::Browser) != self.portal_binding_digest.is_some() {
+        if self.kind == AuthOAuthKind::Browser && self.portal_binding_digest.is_none() {
             return invalid("browser OAuth state requires a portal binding digest");
+        }
+        if self.kind == AuthOAuthKind::AccountFlow
+            && self.browser_flow_id.is_some() != self.portal_binding_digest.is_some()
+        {
+            return invalid("OAuth browser continuation and portal binding must both be present");
         }
         validate_optional_text("portalId", self.portal_id.as_deref())?;
         if let Some(value) = self.portal_policy_digest.as_deref() {
@@ -375,11 +383,19 @@ impl AuthOAuthState {
             "authenticatedPrincipalId",
             self.authenticated_principal_id.as_deref(),
         )?;
+        validate_optional_text(
+            "authenticatedProviderSubject",
+            self.authenticated_provider_subject.as_deref(),
+        )?;
+        validate_optional_text("authenticatedEmail", self.authenticated_email.as_deref())?;
         for role in &self.authenticated_roles {
             require_nonempty("authenticatedRoles entry", role)?;
         }
-        if self.authenticated_principal_id.is_none() && !self.authenticated_roles.is_empty() {
-            return invalid("OAuth authenticated roles require a principal");
+        if self.authenticated_principal_id.is_none()
+            && self.authenticated_provider_subject.is_none()
+            && !self.authenticated_roles.is_empty()
+        {
+            return invalid("OAuth authenticated roles require a verified provider result");
         }
         if let Some(value) = self.result_digest.as_deref() {
             require_digest("resultDigest", value)?;
@@ -394,16 +410,19 @@ impl AuthOAuthState {
         let claimed = self.claim_owner.is_some();
         let result = self.result_digest.is_some();
         let authenticated = self.authenticated_principal_id.is_some();
+        let provider_result = self.authenticated_provider_subject.is_some()
+            || self.authenticated_email.is_some()
+            || !self.authenticated_roles.is_empty();
         let valid = match self.status {
-            AuthOAuthStatus::Pending => !claimed && !result && !authenticated,
+            AuthOAuthStatus::Pending => !claimed && !result && !authenticated && !provider_result,
             AuthOAuthStatus::Claimed | AuthOAuthStatus::RestartRequired => {
-                claimed && !result && !authenticated
+                claimed && !result && !authenticated && !provider_result
             }
             AuthOAuthStatus::ExchangeStarted => claimed && !result,
             AuthOAuthStatus::Completed => {
                 claimed && result && (self.kind != AuthOAuthKind::Browser || authenticated)
             }
-            AuthOAuthStatus::Expired => !result && !authenticated,
+            AuthOAuthStatus::Expired => !result,
         };
         if !valid {
             return invalid("OAuth claim/result fields do not match status");
@@ -728,6 +747,7 @@ fn valid_oauth_transition(current: AuthOAuthStatus, next: AuthOAuthStatus) -> bo
             AuthOAuthStatus::ExchangeStarted,
             AuthOAuthStatus::ExchangeStarted
                 | AuthOAuthStatus::Completed
+                | AuthOAuthStatus::Expired
                 | AuthOAuthStatus::RestartRequired
         ) | (AuthOAuthStatus::RestartRequired, AuthOAuthStatus::Expired)
     )

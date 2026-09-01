@@ -47,6 +47,12 @@ where
         tracing::warn!(%error, "invalid auth request shape");
         HttpError::bad_request("invalid_auth_request")
     })?;
+    if ulid::Ulid::from_string(&request.request_id)
+        .map(|parsed| parsed.to_string() != request.request_id)
+        .unwrap_or(true)
+    {
+        return Err(HttpError::bad_request("invalid_auth_request"));
+    }
     validate_redirect(&request.redirect_target, &state.allowed_redirect_origins)?;
     let request_digest = proof_request_digest(&raw).map_err(|error| {
         tracing::warn!(%error, "invalid auth request proof envelope");

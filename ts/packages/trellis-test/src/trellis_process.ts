@@ -1,7 +1,8 @@
 import { dirname, join } from "@std/path";
+
 import type { ReservedPort } from "./control_plane_config.ts";
-import type { TrellisTestRuntimeStartOptions } from "./types.ts";
 import { recordTrellisTestProcessStart } from "./integration/metrics.ts";
+import type { TrellisTestRuntimeStartOptions } from "./types.ts";
 
 const DEFAULT_OUTPUT_TAIL_CHARS = 8_192;
 const READINESS_POLL_INTERVAL_MS = 25;
@@ -241,8 +242,10 @@ function jsonBootstrapUrl(line: string): string | undefined {
     return undefined;
   }
   if (!isRecord(parsed)) return undefined;
-  const value = parsed.bootstrapUrl ??
-    (isRecord(parsed.fields) ? parsed.fields.bootstrapUrl : undefined);
+  const value = parsed.adminAccountUrl ?? parsed.bootstrapUrl ??
+    (isRecord(parsed.fields)
+      ? parsed.fields.adminAccountUrl ?? parsed.fields.bootstrapUrl
+      : undefined);
   return typeof value === "string" && value.length > 0 ? value : undefined;
 }
 

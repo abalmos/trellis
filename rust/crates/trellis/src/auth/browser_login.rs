@@ -41,13 +41,18 @@ fn administration_participant() -> Result<AdministrationParticipant, TrellisAuth
         "../../artifacts/trellis.admin.participant.json"
     ))?;
     let participant = parse_participant(&participant_value)?;
-    let api_value: Value = serde_json::from_str(crate::internal_sdk::auth::api::API_JSON)?;
-    let api = parse_api(&api_value)?;
     let mut apis = BTreeMap::new();
-    apis.insert(api.id().to_owned(), api.clone());
-    let state_api_value: Value = serde_json::from_str(crate::internal_sdk::state::api::API_JSON)?;
-    let state_api = parse_api(&state_api_value)?;
-    apis.insert(state_api.id().to_owned(), state_api);
+    for api_json in [
+        crate::internal_sdk::auth::api::API_JSON,
+        crate::internal_sdk::state::api::API_JSON,
+        crate::internal_sdk::jobs::api::API_JSON,
+        crate::internal_sdk::health::api::API_JSON,
+        crate::internal_sdk::eventlog::api::API_JSON,
+    ] {
+        let api_value: Value = serde_json::from_str(api_json)?;
+        let api = parse_api(&api_value)?;
+        apis.insert(api.id().to_owned(), api);
+    }
     let resolved = resolve_participant(&participant, &apis)?;
     Ok(AdministrationParticipant {
         id: participant.id().to_owned(),

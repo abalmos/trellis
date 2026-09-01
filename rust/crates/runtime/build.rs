@@ -18,13 +18,13 @@ fn collect_files(directory: &Path, files: &mut Vec<PathBuf>) {
 fn generate_index(root: &Path, output_name: &str) {
     println!("cargo:rerun-if-changed={}", root.display());
     let mut files = Vec::new();
-    collect_files(&root, &mut files);
+    collect_files(root, &mut files);
     files.sort();
     let entries = files
         .iter()
         .map(|path| {
             let relative = path
-                .strip_prefix(&root)
+                .strip_prefix(root)
                 .expect("embedded application path below root")
                 .to_string_lossy()
                 .replace('\\', "/");

@@ -85,11 +85,14 @@ fn oauth_state() -> AuthOAuthState {
         redirect_uri: "https://auth.example/callback".to_owned(),
         browser_binding_digest: DIGEST.to_owned(),
         portal_binding_digest: Some(DIGEST.to_owned()),
+        browser_flow_id: None,
         portal_id: Some("builtin".to_owned()),
         portal_policy_digest: Some(DIGEST.to_owned()),
         claim_owner: None,
         result_digest: None,
         authenticated_principal_id: None,
+        authenticated_provider_subject: None,
+        authenticated_email: None,
         authenticated_roles: Vec::new(),
         created_at: 100,
         expires_at: 1_000,
@@ -336,6 +339,28 @@ async fn repository_conformance(repository: impl AuthEphemeralRepository + Clone
 #[tokio::test]
 async fn in_memory_repository_conforms() {
     repository_conformance(InMemoryAuthEphemeralRepository::default()).await;
+}
+
+#[tokio::test]
+async fn account_flow_oauth_accepts_browser_continuation_binding() {
+    let repository = InMemoryAuthEphemeralRepository::default();
+    let mut state = oauth_state();
+    state.kind = AuthOAuthKind::AccountFlow;
+    state.status = AuthOAuthStatus::ExchangeStarted;
+    state.browser_flow_id = Some("browser-flow-1".to_owned());
+    state.claim_owner = Some("claim-owner".to_owned());
+    state.authenticated_provider_subject = Some("provider-subject".to_owned());
+    state.authenticated_roles = vec!["administrator".to_owned()];
+    repository.create_oauth_state(state.clone()).await.unwrap();
+    state.authenticated_principal_id = Some("principal-1".to_owned());
+    state.version += 1;
+    repository
+        .replace_oauth_state(1, state.clone())
+        .await
+        .unwrap();
+    state.status = AuthOAuthStatus::Expired;
+    state.version += 1;
+    repository.replace_oauth_state(2, state).await.unwrap();
 }
 
 #[tokio::test]

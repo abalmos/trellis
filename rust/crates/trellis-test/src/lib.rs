@@ -3835,8 +3835,14 @@ fn builtin_api_artifacts() -> std::collections::BTreeMap<String, Value> {
     )]
     .into_iter()
     .collect();
-    ensure_builtin_api(trellis_runtime_apis::state::API_ID, &mut apis)
-        .expect("embedded State API artifact parses");
+    for api_id in [
+        trellis_runtime_apis::state::API_ID,
+        trellis_runtime_apis::jobs::API_ID,
+        trellis_runtime_apis::health::API_ID,
+        trellis_runtime_apis::eventlog::API_ID,
+    ] {
+        ensure_builtin_api(api_id, &mut apis).expect("embedded platform API artifact parses");
+    }
     apis
 }
 
@@ -4363,6 +4369,15 @@ async fn submit_portal_approval(trellis_url: &str, flow_id: &str) -> Result<(), 
         .send()
         .await?;
     let flow: PortalFlowStatus = decode_http_json(&flow_url, response).await?;
+    if flow.state == "approved" {
+        return Ok(());
+    }
+    if flow.state != "approval_required" {
+        return Err(TrellisTestError::UnexpectedFlowStatus {
+            flow_id: flow_id.to_string(),
+            status: flow.state,
+        });
+    }
     let url = format!("{}/auth/flow/{}/approval", trim_url(trellis_url), flow_id);
     let request = json!({
         "approved": true,
@@ -5726,17 +5741,13 @@ fn cleanup_started(
 }
 
 fn parse_trellis_bootstrap_url(log: &str) -> Option<String> {
-    let marker = "\"bootstrapUrl\":\"";
+    let marker = "\"adminAccountUrl\":\"";
     for line in log.lines() {
         if let Some(start) = line.find(marker) {
             let url_start = start + marker.len();
             if let Some(end) = line[url_start..].find('"') {
                 return Some(line[url_start..url_start + end].replace("\\/", "/"));
             }
-        }
-        if let Some(start) = line.find("TRELLIS_ADMIN_BOOTSTRAP_URL=") {
-            let value = &line[start + "TRELLIS_ADMIN_BOOTSTRAP_URL=".len()..];
-            return value.split_whitespace().next().map(ToOwned::to_owned);
         }
     }
     None
@@ -5951,11 +5962,12 @@ file.close();
 
     #[test]
     fn parse_bootstrap_url_accepts_json_log_line() {
-        let log = r#"{"bootstrapUrl":"http://127.0.0.1:3000/login/admin/bootstrap?flowId=abc"}"#;
+        let log =
+            r#"{"adminAccountUrl":"http://127.0.0.1:3000/console/profile?adminAccountToken=abc"}"#;
 
         assert_eq!(
             parse_trellis_bootstrap_url(log).unwrap(),
-            "http://127.0.0.1:3000/login/admin/bootstrap?flowId=abc"
+            "http://127.0.0.1:3000/console/profile?adminAccountToken=abc"
         );
     }
 

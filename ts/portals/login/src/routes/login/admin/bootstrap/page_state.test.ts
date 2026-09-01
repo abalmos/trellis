@@ -1,10 +1,26 @@
 import { assertEquals } from "@std/assert";
 
 import {
+  accountFlowProviderLoginUrl,
   adminBootstrapFlowId,
   completeAdminBootstrap,
   formatAdminBootstrapError,
 } from "./page_state.ts";
+
+Deno.test("administrator OIDC carries the Console browser flow binding", () => {
+  assertEquals(
+    accountFlowProviderLoginUrl(
+      "https://trellis.example",
+      "admin-token",
+      "oidc",
+      {
+        browserFlowId: "flow_console",
+        portalBindingDigest: "binding_digest",
+      },
+    ),
+    "https://trellis.example/auth/account-flow/admin-token/login/oidc?browserFlowId=flow_console&portalBindingDigest=binding_digest",
+  );
+});
 
 Deno.test("administrator completion carries the Console browser flow", async () => {
   let submitted: unknown;
@@ -109,7 +125,7 @@ Deno.test("formatAdminBootstrapError displays safe validation messages", () => {
     formatAdminBootstrapError({
       status: 400,
       error: "password_unchanged",
-      message: "New password must differ from the current password.",
+      message: null,
     }),
     "New password must differ from the current password.",
   );

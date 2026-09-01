@@ -7,6 +7,13 @@ pub(crate) struct OidcStartQuery {
     portal_binding_digest: String,
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct AccountFlowOidcStartQuery {
+    browser_flow_id: Option<String>,
+    portal_binding_digest: Option<String>,
+}
+
 pub(crate) async fn start_oidc<R, E>(
     State(state): State<AuthHttpState<R, E>>,
     Path(provider_id): Path<String>,
@@ -49,6 +56,7 @@ where
         AuthOAuthKind::Browser,
         Some((&portal, &settings)),
         Some(query.portal_binding_digest),
+        None,
     )
     .await
 }
@@ -56,6 +64,7 @@ where
 pub(crate) async fn start_account_flow_oidc<R, E>(
     State(state): State<AuthHttpState<R, E>>,
     Path((flow_token, provider_id)): Path<(String, String)>,
+    Query(query): Query<AccountFlowOidcStartQuery>,
 ) -> Result<Response, HttpError>
 where
     R: AccountRepository
@@ -110,13 +119,30 @@ where
     } else {
         None
     };
+    if query.browser_flow_id.is_some() != query.portal_binding_digest.is_some() {
+        return Err(HttpError::bad_request("browser_flow_binding_incomplete"));
+    }
+    if let Some(portal_binding_digest) = query.portal_binding_digest.as_deref() {
+        validate_portal_binding_digest(portal_binding_digest)?;
+        let browser_flow = load_flow(
+            &state.ephemeral,
+            query.browser_flow_id.as_deref().expect("checked together"),
+        )
+        .await?;
+        if browser_flow.state != AuthBrowserFlowState::ChooseProvider
+            || browser_flow.portal_id != "builtin"
+        {
+            return Err(HttpError::conflict("oauth_flow_changed"));
+        }
+    }
     begin_oidc(
         &state,
         provider_id,
         flow_token,
         AuthOAuthKind::AccountFlow,
         portal.as_ref().map(|(portal, settings)| (portal, settings)),
-        None,
+        query.portal_binding_digest,
+        query.browser_flow_id,
     )
     .await
 }
@@ -128,6 +154,7 @@ async fn begin_oidc<R, E>(
     kind: AuthOAuthKind,
     portal_policy: Option<(&LoginPortalRecord, &LoginSettingsRecord)>,
     portal_binding_digest: Option<String>,
+    browser_flow_id: Option<String>,
 ) -> Result<Response, HttpError>
 where
     R: AccountRepository
@@ -194,11 +221,14 @@ where
             redirect_uri: provider.redirect_uri.as_str().to_owned(),
             browser_binding_digest,
             portal_binding_digest,
+            browser_flow_id,
             portal_id,
             portal_policy_digest,
             claim_owner: None,
             result_digest: None,
             authenticated_principal_id: None,
+            authenticated_provider_subject: None,
+            authenticated_email: None,
             authenticated_roles: Vec::new(),
             created_at: now,
             expires_at: checked_add(now, 15 * 60_000)?,
@@ -321,6 +351,27 @@ where
             .await?;
         return Err(HttpError::gone("oauth_expired"));
     }
+    if pending.kind == AuthOAuthKind::AccountFlow
+        && matches!(
+            pending.status,
+            AuthOAuthStatus::ExchangeStarted | AuthOAuthStatus::Completed
+        )
+        && pending.provider_id == provider_id
+        && pending.expires_at >= now_ms()?
+        && pending.authenticated_provider_subject.is_some()
+    {
+        require_oauth_browser_binding(&query.state, &pending, headers)?;
+        return complete_first_admin_oauth(state, pending, now_ms()?).await;
+    }
+    if pending.kind == AuthOAuthKind::AccountFlow
+        && pending.status == AuthOAuthStatus::ExchangeStarted
+        && pending.provider_id == provider_id
+        && pending.expires_at >= now_ms()?
+    {
+        require_oauth_browser_binding(&query.state, &pending, headers)?;
+        mark_oauth_restart_required(&state.ephemeral, &mut pending).await?;
+        return Err(HttpError::conflict("oauth_restart_required"));
+    }
     if pending.kind == AuthOAuthKind::Browser
         && matches!(
             pending.status,
@@ -427,6 +478,17 @@ where
                     && pending.portal_id.is_some())
             {
                 return Err(HttpError::conflict("oauth_flow_changed"));
+            }
+            if let Some(browser_flow_id) = pending.browser_flow_id.as_deref() {
+                if pending.portal_binding_digest.is_none() {
+                    return Err(HttpError::conflict("oauth_flow_changed"));
+                }
+                let browser_flow = load_flow(&state.ephemeral, browser_flow_id).await?;
+                if browser_flow.state != AuthBrowserFlowState::ChooseProvider
+                    || browser_flow.portal_id != "builtin"
+                {
+                    return Err(HttpError::conflict("oauth_flow_changed"));
+                }
             }
         }
     }
@@ -541,69 +603,16 @@ where
                 mark_oauth_restart_required(&state.ephemeral, &mut oauth).await?;
                 return Err(HttpError::unauthorized("federated_login_denied"));
             }
-            let participant_id = flow.payload["participantId"]
-                .as_str()
-                .ok_or_else(|| HttpError::internal("first_admin_target_missing"))?;
-            let participant_artifact_digest = flow.payload["participantArtifactDigest"]
-                .as_str()
-                .ok_or_else(|| HttpError::internal("first_admin_target_missing"))?;
-            let participant_needs_digest = flow.payload["participantNeedsDigest"]
-                .as_str()
-                .ok_or_else(|| HttpError::internal("first_admin_target_missing"))?;
-            let binding = state
-                .service
-                .repository()
-                .get_participant_binding(participant_id, participant_artifact_digest)
-                .await?
-                .ok_or_else(|| HttpError::internal("first_admin_target_missing"))?;
-            if binding.needs_digest != participant_needs_digest {
-                return Err(HttpError::conflict("first_admin_target_changed"));
-            }
-            let grant_set = binding.resolve()?.proposal().required().grant_set().clone();
-            let digest = digest_parts(&[provider_id, &subject, &oauth.state_id]);
-            let outcome = state
-                .service
-                .complete_first_admin_federated(FirstAdminFederatedRegistration {
-                    token: oauth.flow_id.clone(),
-                    expected_flow_version: flow.version,
-                    provider: provider_id.to_owned(),
-                    provider_subject: subject,
-                    display_name: None,
-                    email: claims.email().map(|email| email.as_str().to_owned()),
-                    image_url: None,
-                    participant_id: participant_id.to_owned(),
-                    participant_artifact_digest: participant_artifact_digest.to_owned(),
-                    participant_needs_digest: participant_needs_digest.to_owned(),
-                    grant_set,
-                    authority_expires_at: None,
-                    completed_at: now,
-                    idempotency: idempotency(
-                        &token_hash,
-                        "first_admin.federated.complete",
-                        "system:first-admin",
-                        &oauth.state_id,
-                        &digest,
-                        now,
-                    )?,
-                    actions: Vec::new(),
-                })
-                .await?;
-            let principal_id = match outcome {
-                IdempotentOutcome::Applied(account) => account.principal.principal_id,
-                IdempotentOutcome::Replayed(_) => {
-                    return Err(HttpError::conflict("account_flow_consumed"));
-                }
-            };
             let expected = oauth.version;
-            oauth.status = AuthOAuthStatus::Completed;
-            oauth.result_digest = Some(digest_parts(&[&principal_id]));
+            oauth.authenticated_provider_subject = Some(subject);
+            oauth.authenticated_email = claims.email().map(|email| email.as_str().to_owned());
+            oauth.authenticated_roles = provider_attributes.roles;
             oauth.version += 1;
-            state.ephemeral.replace_oauth_state(expected, oauth).await?;
-            return Ok(Redirect::temporary(&format!(
-                "{}/login/account/complete",
-                state.public_origin.trim_end_matches('/')
-            ))
-            .into_response());
+            state
+                .ephemeral
+                .replace_oauth_state(expected, oauth.clone())
+                .await?;
+            return complete_first_admin_oauth(state, oauth, now).await;
         }
         let principal_id = flow
             .target_principal_id
@@ -795,6 +804,157 @@ where
         &state.public_origin,
         &completed.flow_id,
     )?)
+    .into_response())
+}
+
+async fn complete_first_admin_oauth<R, E>(
+    state: &AuthHttpState<R, E>,
+    mut oauth: AuthOAuthState,
+    now: i64,
+) -> Result<Response, HttpError>
+where
+    R: AccountRepository
+        + AuthorityEvidenceRepository
+        + AuthorityRepository
+        + ContextRepository
+        + DeploymentRepository
+        + OutboxRepository
+        + PortalRepository
+        + ProvisioningRepository
+        + SessionRepository
+        + Clone
+        + Send
+        + Sync
+        + 'static,
+    E: AuthEphemeralRepository + Clone,
+{
+    let subject = oauth
+        .authenticated_provider_subject
+        .clone()
+        .ok_or_else(|| HttpError::internal("oauth_result_missing_subject"))?;
+    let Some((token_hash, flow)) =
+        load_account_flow_by_token(state.service.repository(), &oauth.flow_id).await?
+    else {
+        return Err(HttpError::gone("account_flow_expired"));
+    };
+    if flow.kind != super::super::super::AccountFlowKind::AdminAccount
+        || !matches!(
+            flow.state,
+            AccountFlowState::Pending | AccountFlowState::Consumed
+        )
+    {
+        return Err(HttpError::conflict("account_flow_not_eligible"));
+    }
+    let participant_id = flow.payload["participantId"]
+        .as_str()
+        .ok_or_else(|| HttpError::internal("first_admin_target_missing"))?;
+    let participant_artifact_digest = flow.payload["participantArtifactDigest"]
+        .as_str()
+        .ok_or_else(|| HttpError::internal("first_admin_target_missing"))?;
+    let participant_needs_digest = flow.payload["participantNeedsDigest"]
+        .as_str()
+        .ok_or_else(|| HttpError::internal("first_admin_target_missing"))?;
+    let binding = state
+        .service
+        .repository()
+        .get_participant_binding(participant_id, participant_artifact_digest)
+        .await?
+        .ok_or_else(|| HttpError::internal("first_admin_target_missing"))?;
+    if binding.needs_digest != participant_needs_digest {
+        return Err(HttpError::conflict("first_admin_target_changed"));
+    }
+    let digest = digest_parts(&[&oauth.provider_id, &subject, &oauth.state_id]);
+    let outcome = state
+        .service
+        .complete_first_admin_federated(FirstAdminFederatedRegistration {
+            token: oauth.flow_id.clone(),
+            expected_flow_version: flow.version,
+            provider: oauth.provider_id.clone(),
+            provider_subject: subject,
+            display_name: None,
+            email: oauth.authenticated_email.clone(),
+            image_url: None,
+            participant_id: participant_id.to_owned(),
+            participant_artifact_digest: participant_artifact_digest.to_owned(),
+            participant_needs_digest: participant_needs_digest.to_owned(),
+            grant_set: binding.resolve()?.proposal().required().grant_set().clone(),
+            authority_expires_at: None,
+            completed_at: now,
+            idempotency: idempotency(
+                &token_hash,
+                "first_admin.federated.complete",
+                "system:first-admin",
+                &oauth.state_id,
+                &digest,
+                now,
+            )?,
+            actions: Vec::new(),
+        })
+        .await?;
+    let principal_id = match outcome {
+        IdempotentOutcome::Applied(account) => account.principal.principal_id,
+        IdempotentOutcome::Replayed(value) => value
+            .get("principalId")
+            .and_then(Value::as_str)
+            .ok_or_else(|| HttpError::internal("first_admin_replay_invalid"))?
+            .to_owned(),
+    };
+    if oauth.authenticated_principal_id.as_deref() != Some(&principal_id) {
+        let expected = oauth.version;
+        oauth.authenticated_principal_id = Some(principal_id.clone());
+        oauth.version += 1;
+        state
+            .ephemeral
+            .replace_oauth_state(expected, oauth.clone())
+            .await?;
+    }
+    let browser_completion = if let Some(browser_flow_id) = oauth.browser_flow_id.as_deref() {
+        let browser_flow = load_flow(&state.ephemeral, browser_flow_id).await?;
+        Some(
+            super::consent::complete_authenticated_flow(
+                state,
+                browser_flow,
+                principal_id.clone(),
+                ProviderLoginAttributes {
+                    provider_id: oauth.provider_id.clone(),
+                    roles: oauth.authenticated_roles.clone(),
+                },
+                oauth
+                    .portal_binding_digest
+                    .clone()
+                    .ok_or_else(|| HttpError::internal("oauth_portal_binding_missing"))?,
+                now,
+            )
+            .await?,
+        )
+    } else {
+        None
+    };
+    if oauth.status != AuthOAuthStatus::Completed {
+        let expected = oauth.version;
+        oauth.status = AuthOAuthStatus::Completed;
+        oauth.result_digest = Some(digest_parts(&[&principal_id]));
+        oauth.version += 1;
+        state.ephemeral.replace_oauth_state(expected, oauth).await?;
+    }
+    if let Some(completed) = browser_completion {
+        let (portal, _) = state
+            .service
+            .repository()
+            .get_login_portal(&completed.portal_id)
+            .await?
+            .ok_or_else(|| HttpError::gone("portal_unavailable"))?;
+        return Ok(Redirect::temporary(&super::request::portal_url(
+            &portal,
+            &state.public_origin,
+            &completed.flow_id,
+        )?)
+        .into_response());
+    }
+    Ok(Redirect::temporary(&format!(
+        "{}/login/account/complete",
+        state.public_origin.trim_end_matches('/')
+    ))
     .into_response())
 }
 

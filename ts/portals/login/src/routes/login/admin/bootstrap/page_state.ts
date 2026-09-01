@@ -63,6 +63,7 @@ const KNOWN_ERROR_MESSAGES: Record<string, string> = {
     "This request is missing permission to create the first admin account.",
   flow_consume_conflict:
     "This bootstrap request was completed elsewhere. Refresh and check the admin account.",
+  password_unchanged: "New password must differ from the current password.",
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {

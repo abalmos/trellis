@@ -45,11 +45,6 @@ import { ulid } from "ulid";
 
 import { integrationSlug } from "../integration/_support/names.ts";
 import {
-  clientA as defaultBrowserClientA,
-  clientB as defaultBrowserClientB,
-  clientC as defaultBrowserClientC,
-} from "./default_client_fixture/contract.ts";
-import {
   type LiveTrellisRuntime,
   withTrellisRuntime,
 } from "../integration/_support/runtime.ts";
@@ -60,6 +55,11 @@ import {
 } from "../integration/device-activation/_fixture.ts";
 import { startTestOidcProvider } from "../packages/trellis-test/src/integration/oidc_provider.ts";
 import { createAuth } from "../packages/trellis/auth/session_auth.ts";
+import {
+  clientA as defaultBrowserClientA,
+  clientB as defaultBrowserClientB,
+  clientC as defaultBrowserClientC,
+} from "./default_client_fixture/contract.ts";
 
 const buildDir = resolve("portals/login/build");
 const consoleBuildDir = resolve("apps/console/build-embedded");
@@ -732,11 +732,16 @@ withLivePortalPage(
       await page.getByLabel("Username").fill(username);
       await page.getByLabel("Password").fill(password);
       await page.getByRole("button", { name: "Sign in" }).last().click();
-      await page.getByRole("button", { name: "Approve" }).click();
+      const callbackUrl =
+        `${appOrigin}/__default-client/?participant=${participant}`;
+      await Promise.race([
+        page.getByRole("button", { name: "Approve" }).waitFor().then(() =>
+          page.getByRole("button", { name: "Approve" }).click()
+        ),
+        page.waitForURL(callbackUrl),
+      ]);
       try {
-        await page.waitForURL(
-          `${appOrigin}/__default-client/?participant=${participant}`,
-        );
+        await page.waitForURL(callbackUrl);
         await page.getByText("connected", { exact: true }).waitFor();
       } catch (error) {
         throw new Error(
@@ -770,7 +775,7 @@ withLivePortalPage(
         disabled: false,
         portalId: "default-browser-installation",
         displayName: "Default Browser Installation",
-        entryUrl: `${portalOrigin}/_trellis/portal/users/login`,
+        entryUrl: `${portalOrigin}/login`,
         expectedVersion: null,
         idempotencyKey: ulid(),
         loginSettings: {
@@ -892,14 +897,10 @@ withLivePortalPage(
       const pendingC = crashRecords.find((record) =>
         String(record.id).includes(defaultBrowserClientC.CONTRACT_ID)
       );
-      assert(pendingC?.seed);
-      assertEquals(pendingC.seed.length, 32);
+      const pendingSeed = pendingC?.seed;
+      assert(pendingSeed);
+      assertEquals(pendingSeed.length, 32);
 
-      await page.goto(loginUrl);
-      await page.getByLabel("Username").fill(username);
-      await page.getByLabel("Password").fill(password);
-      await page.getByRole("button", { name: "Sign in" }).last().click();
-      await page.getByRole("button", { name: "Approve" }).waitFor();
       const callbackMatcher = (url: URL) =>
         url.pathname.startsWith("/__default-client") &&
         url.searchParams.has("flowId");
@@ -908,55 +909,69 @@ withLivePortalPage(
           contentType: "text/html",
           body: "<!doctype html><p>crashed before install</p>",
         }));
-      await page.getByRole("button", { name: "Approve" }).click();
+      await page.goto(loginUrl);
+      await page.getByLabel("Username").fill(username);
+      await page.getByLabel("Password").fill(password);
+      await page.getByRole("button", { name: "Sign in" }).last().click();
+      await Promise.race([
+        page.getByRole("button", { name: "Approve" }).waitFor().then(() =>
+          page.getByRole("button", { name: "Approve" }).click()
+        ),
+        page.waitForURL(callbackMatcher),
+      ]);
       await page.getByText("crashed before install", { exact: true }).waitFor();
       const callbackUrl = page.url();
 
-      let replayClient;
+      const replayClient = await (async () => {
+        try {
+          return await TrellisClient.connect({
+            trellisUrl: runtime.trellisUrl,
+            contract: defaultBrowserClientC,
+            participant: {
+              id: defaultBrowserClientC.CONTRACT_ID,
+              artifactDigest: defaultBrowserClientC.CONTRACT_DIGEST,
+            },
+            auth: {
+              mode: "session_key",
+              sessionKeySeed: base64urlEncode(new Uint8Array(pendingSeed)),
+              redirectTo: callbackUrl,
+              currentUrl: callbackUrl,
+              flowId: crashFlowId,
+              authorizationContextStore: new MemoryAuthorizationContextStore(),
+            },
+          }).orThrow();
+        } catch (error) {
+          throw new Error(
+            JSON.stringify(
+              typeof error === "object" && error !== null &&
+                typeof Reflect.get(error, "toSerializable") === "function"
+                ? Reflect.apply(Reflect.get(error, "toSerializable"), error, [])
+                : error,
+            ),
+            { cause: error },
+          );
+        }
+      })();
       try {
-        replayClient = await TrellisClient.connect({
-          trellisUrl: runtime.trellisUrl,
-          contract: defaultBrowserClientC,
-          participant: {
-            id: defaultBrowserClientC.CONTRACT_ID,
-            artifactDigest: defaultBrowserClientC.CONTRACT_DIGEST,
-          },
-          auth: {
-            mode: "session_key",
-            sessionKeySeed: base64urlEncode(new Uint8Array(pendingC.seed)),
-            redirectTo: callbackUrl,
-            currentUrl: callbackUrl,
-            flowId: crashFlowId,
-            authorizationContextStore: new MemoryAuthorizationContextStore(),
-          },
-        }).orThrow();
-      } catch (error) {
-        throw new Error(
-          JSON.stringify(
-            typeof error === "object" && error !== null &&
-              typeof Reflect.get(error, "toSerializable") === "function"
-              ? Reflect.apply(Reflect.get(error, "toSerializable"), error, [])
-              : error,
-          ),
-          { cause: error },
-        );
-      }
-      const replayMe = await replayClient.authSessionsMe({}).orThrow();
+        const replayMe = await replayClient.authSessionsMe({}).orThrow();
 
-      await page.unroute(callbackMatcher);
-      await page.reload();
-      await page.getByText("connected", { exact: true }).waitFor();
-      const installedC = (await installationRecords() as Array<{
-        id: string;
-        authorization?: { session?: { sessionId: string } };
-      }>).find((record) =>
-        String(record.id).includes(defaultBrowserClientC.CONTRACT_ID)
-      );
-      assert(installedC?.authorization?.session);
-      assertEquals(
-        installedC.authorization.session.sessionId,
-        replayMe.session.sessionId,
-      );
+        await page.unroute(callbackMatcher);
+        await page.reload();
+        await page.getByText("connected", { exact: true }).waitFor();
+        const installedC = (await installationRecords() as Array<{
+          id: string;
+          authorization?: { session?: { sessionId: string } };
+        }>).find((record) =>
+          String(record.id).includes(defaultBrowserClientC.CONTRACT_ID)
+        );
+        assert(installedC?.authorization?.session);
+        assertEquals(
+          installedC.authorization.session.sessionId,
+          replayMe.session.sessionId,
+        );
+      } finally {
+        await replayClient.connection.close().catch(() => undefined);
+      }
     } finally {
       await admin.connection.close().catch(() => undefined);
       defaultClientFixtureRoot = undefined;
@@ -3302,6 +3317,7 @@ async function completeLocalLoginByFetch(args: {
     const detail = await fetchJson(
       `${args.trellisUrl}/auth/flow/${encodeURIComponent(args.flowId)}/portal`,
       {
+        method: "POST",
         headers: {
           origin: args.origin,
           "trellis-portal-binding": binding.secret,

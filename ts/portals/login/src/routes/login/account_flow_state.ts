@@ -192,13 +192,25 @@ export function accountFlowProviderLoginUrl(
   trellisUrl: string,
   flowId: string,
   providerId: string,
+  continuation?: {
+    browserFlowId: string;
+    portalBindingDigest: string;
+  },
 ): string {
-  return new URL(
+  const url = new URL(
     `/auth/account-flow/${encodeURIComponent(flowId)}/login/${
       encodeURIComponent(providerId)
     }`,
     trellisUrl,
-  ).toString();
+  );
+  if (continuation) {
+    url.searchParams.set("browserFlowId", continuation.browserFlowId);
+    url.searchParams.set(
+      "portalBindingDigest",
+      continuation.portalBindingDigest,
+    );
+  }
+  return url.toString();
 }
 
 /** Parse account-flow OAuth/OIDC completion query parameters from a portal URL. */

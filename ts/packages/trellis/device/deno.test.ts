@@ -40,10 +40,18 @@ Deno.test("checkDeviceActivation persists provisioned activation state", async (
         state: "activation_pending",
         serverNow: Date.now(),
         activation: {
+          state: "pending",
           reviewId: "review_123",
           activationUrl:
             "https://trellis.example.com/login/device?flowId=review_123",
+          expiresAt: Date.now() + 60_000,
+          retryAfterMs: 1_000,
         },
+        session: null,
+        authorization: null,
+        nats: null,
+        authorizationContext: null,
+        proposal: null,
       }));
     }) as typeof fetch;
 
@@ -76,11 +84,34 @@ Deno.test("checkDeviceActivation reports an already active device", async () => 
           serverNow: Date.now(),
           session: {
             sessionId: "session_123",
+            principalId: identity.principalId,
+            principalKind: "device",
+            participantId: identity.participantId,
+            participantKind: "device",
+            participantArtifactDigest: identity.participantArtifactDigest,
+            participantNeedsDigest: identity.participantNeedsDigest,
+            sessionPublicKey: "session-public-key",
+            sessionKeyId: "session-key-id",
             inboxPrefix: "_INBOX.session_123",
+            state: "active",
+            createdAt: 1,
+            lastSeenAt: 1,
+            expiresAt: null,
+            revokedAt: null,
+            version: 1,
           },
           authorization: {
+            participantId: identity.participantId,
             participantArtifactDigest: deviceContract.CONTRACT_DIGEST,
+            participantNeedsDigest: identity.participantNeedsDigest,
+            participantJson: "{}",
+            effectiveGrants: {},
+            resourceBindings: [],
+            resourceRuntime: {},
+            effectiveAuthorityExpiresAt: null,
           },
+          activation: null,
+          proposal: null,
           nats: {
             jwt: "jwt",
             jwtExpiresAt: 2_000_000_000,
@@ -115,6 +146,12 @@ Deno.test("checkDeviceActivation preserves rejected activation state", async () 
       Promise.resolve(Response.json({
         state: "activation_rejected",
         serverNow: Date.now(),
+        session: null,
+        authorization: null,
+        nats: null,
+        authorizationContext: null,
+        activation: null,
+        proposal: null,
       }))) as typeof fetch;
 
     assertEquals(
