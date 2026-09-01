@@ -176,6 +176,19 @@ pub(crate) struct AccountFlowResponse {
     allowed_providers: Option<Vec<String>>,
     expires_at: Option<i64>,
     password_policy: Option<AccountFlowPasswordPolicy>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    target: Option<AccountFlowTarget>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct AccountFlowTarget {
+    user_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    email: Option<String>,
+    active: bool,
 }
 
 #[derive(Serialize)]
@@ -216,6 +229,7 @@ where
             allowed_providers: None,
             expires_at: None,
             password_policy: None,
+            target: None,
         }));
     };
     let status = if flow.state == AccountFlowState::Consumed {
@@ -235,6 +249,28 @@ where
                 .map(|credential| credential.normalized_username),
             None => None,
         }
+    } else {
+        None
+    };
+    let target = if let Some(principal_id) = flow.target_principal_id.as_deref() {
+        let profile = state
+            .service
+            .repository()
+            .get_user_profile(principal_id)
+            .await?;
+        let principal = state
+            .service
+            .repository()
+            .get_principal(principal_id)
+            .await?;
+        profile.map(|p| AccountFlowTarget {
+            user_id: p.principal_id,
+            name: p.display_name,
+            email: p.email,
+            active: principal.map_or(false, |pr| {
+                pr.state == super::super::super::domain::PrincipalState::Active
+            }),
+        })
     } else {
         None
     };
@@ -275,6 +311,7 @@ where
         .then(|| AccountFlowPasswordPolicy {
             min_length: state.service.password_min_length(),
         }),
+        target,
     }))
 }
 

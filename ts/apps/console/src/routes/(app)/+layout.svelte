@@ -21,8 +21,8 @@
     onAuthRequired(loginUrl: string): void;
     onRecoverableAuthError(error: unknown): void | Promise<void>;
     children: Snippet;
-    loading: Snippet;
-    recoveringAuth: Snippet;
+    loading?: Snippet;
+    recoveringAuth?: Snippet;
     error: Snippet<[unknown]>;
   };
 
@@ -31,6 +31,8 @@
   let { children }: Props = $props();
   let initialized = $state(false);
   let adminAccountToken = $state<string | null>(null);
+  let showConnectingModal = $state(false);
+  let connectingTimer: ReturnType<typeof setTimeout> | null = null;
 
   function currentPath(): string {
     return window.location.pathname + window.location.search;
@@ -52,6 +54,14 @@
 
     setSelectedTrellisUrl(APP_CONFIG.authUrl);
     initialized = true;
+
+    connectingTimer = setTimeout(() => {
+      showConnectingModal = true;
+    }, 4500);
+
+    return () => {
+      if (connectingTimer) clearTimeout(connectingTimer);
+    };
   });
 
   function redirectToLogin(loginUrl: string): void {
@@ -124,6 +134,19 @@
   function goToConsole(): void {
     window.location.href = "/console";
   }
+
+  function dismissConnecting(): void {
+    if (connectingTimer) {
+      clearTimeout(connectingTimer);
+      connectingTimer = null;
+    }
+    showConnectingModal = false;
+  }
+
+  function connectingAction(node: HTMLElement): { destroy(): void } {
+    dismissConnecting();
+    return { destroy() {} };
+  }
 </script>
 
 {#if initialized}
@@ -133,30 +156,11 @@
     onAuthRequired={redirectToLogin}
     onRecoverableAuthError={recoverAuth}
   >
-    {#snippet loading()}
-      <div class="flex min-h-screen items-center justify-center bg-base-200 px-4 py-10">
-        <div class="card trellis-card w-full max-w-sm border border-base-300 bg-base-100 shadow-none">
-          <div class="card-body text-center gap-3">
-            <h1 class="text-lg font-semibold">Connecting</h1>
-            <span class="loading loading-spinner loading-md mx-auto"></span>
-          </div>
-        </div>
-      </div>
-    {/snippet}
-
-    {#snippet recoveringAuth()}
-      <div class="flex min-h-screen items-center justify-center bg-base-200 px-4 py-10">
-        <div class="card trellis-card w-full max-w-sm border border-base-300 bg-base-100 shadow-none">
-          <div class="card-body text-center gap-3">
-            <h1 class="text-lg font-semibold">Connecting</h1>
-            <span class="loading loading-spinner loading-md mx-auto"></span>
-          </div>
-        </div>
-      </div>
-    {/snippet}
+    {#snippet loading()}{/snippet}
+    {#snippet recoveringAuth()}{/snippet}
 
     {#snippet error(connectError)}
-      <div class="flex min-h-screen items-center justify-center bg-base-200 px-4 py-10">
+      <div use:connectingAction class="flex min-h-screen items-center justify-center bg-base-200 px-4 py-10">
         <div class="flex flex-col items-center text-center">
           <svg class="mb-6 h-16 w-16 text-base-content/30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
             <path d="M18 10h-4V6" />
@@ -178,18 +182,39 @@
     {/snippet}
 
     {#if adminAccountToken}
-      <AdminAccountRedirect token={adminAccountToken} />
+      <div use:connectingAction>
+        <AdminAccountRedirect token={adminAccountToken} />
+      </div>
     {:else}
       <AuthenticatedApp>
-        {@render children()}
+        <div use:connectingAction>
+          {@render children()}
+        </div>
       </AuthenticatedApp>
     {/if}
   </ConsoleTrellisProvider>
+
+  {#if showConnectingModal}
+    <dialog class="modal modal-open">
+      <div class="modal-box">
+        <div class="flex flex-col items-center gap-4 py-4">
+          <span class="loading loading-spinner loading-lg"></span>
+          <div class="text-center">
+            <p class="text-sm font-medium">Connecting to Trellis</p>
+            <p class="mt-1 text-xs text-base-content/60">This is taking longer than usual...</p>
+          </div>
+        </div>
+      </div>
+      <form method="dialog" class="modal-backdrop">
+        <button>close</button>
+      </form>
+    </dialog>
+  {/if}
 {:else}
   <div class="flex min-h-screen items-center justify-center bg-base-200 px-4 py-10">
     <div class="card trellis-card w-full max-w-sm border border-base-300 bg-base-100 shadow-none">
       <div class="card-body text-center gap-3">
-        <h1 class="text-lg font-semibold">Redirecting to sign in</h1>
+        <h1 class="text-lg font-semibold">Loading console</h1>
         <span class="loading loading-spinner loading-md mx-auto"></span>
       </div>
     </div>

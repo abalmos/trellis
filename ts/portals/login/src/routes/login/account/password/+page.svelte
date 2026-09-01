@@ -28,6 +28,7 @@
   let error = $state<string | null>(null);
   let completion = $state<LocalPasswordSuccess | null>(null);
   let password = $state("");
+  let confirmPassword = $state("");
   let name = $state("");
   let email = $state("");
   let defaultsApplied = false;
@@ -41,7 +42,9 @@
   const passwordMinLength = $derived(active ? passwordMinimumLength(active) : null);
   const passwordCurrentError = $derived(active ? passwordPolicyError(active, password) : null);
   const passwordHelp = $derived(active ? passwordCurrentError ?? passwordPolicyHint(active) : "");
-  const canSubmit = $derived(Boolean(active && flowId && supportsLocal && (isResetFlow || fixedUsername) && password && !passwordCurrentError && !submitting && !completion));
+  const passwordsMatch = $derived(password.length > 0 && password === confirmPassword);
+  const confirmError = $derived(confirmPassword.length > 0 && !passwordsMatch ? "Passwords do not match" : null);
+  const canSubmit = $derived(Boolean(active && flowId && supportsLocal && (isResetFlow || fixedUsername) && password && passwordsMatch && !passwordCurrentError && !submitting && !completion));
 
   function currentFlowId(): string | null {
     if (!browser) return null;
@@ -95,6 +98,7 @@
         },
       );
       password = "";
+      confirmPassword = "";
     } catch (caught) {
       error = caught instanceof Error ? caught.message : String(caught);
     } finally {
@@ -143,7 +147,16 @@
             {#if !isResetFlow && fixedUsername}
               <label class="form-control gap-1.5"><span class="label-text text-sm font-medium text-base-content">Username</span><input class="input input-bordered w-full" autocomplete="username" disabled readonly value={fixedUsername} /></label>
             {/if}
-            <label class="form-control gap-1.5"><span class="label-text text-sm font-medium text-base-content">Password</span><input class="input input-bordered w-full" aria-describedby="password-help" autocomplete="new-password" disabled={submitting} minlength={passwordMinLength ?? undefined} required type="password" bind:value={password} /><span id="password-help" class={passwordCurrentError ? "text-xs text-error" : "text-xs text-base-content/55"}>{passwordHelp}</span></label>
+            <label class="form-control gap-1.5">
+              <span class="label-text text-sm font-medium text-base-content">Password</span>
+              <input class="input input-bordered w-full" aria-describedby="password-help" autocomplete="new-password" disabled={submitting} minlength={passwordMinLength ?? undefined} required type="password" bind:value={password} />
+              <span id="password-help" class:text-error={!!passwordCurrentError} class="text-xs text-base-content/55">{passwordHelp}</span>
+            </label>
+            <label class="form-control gap-1.5">
+              <span class="label-text text-sm font-medium text-base-content">Confirm password</span>
+              <input class="input input-bordered w-full" aria-describedby="confirm-help" autocomplete="new-password" disabled={submitting} required type="password" bind:value={confirmPassword} />
+              <span id="confirm-help" class:text-error={!!confirmError} class="text-xs text-base-content/55">{confirmError ?? "Re-enter your password"}</span>
+            </label>
             <label class="form-control gap-1.5"><span class="label-text text-sm font-medium text-base-content">Name <span class="font-normal text-base-content/45">optional</span></span><input class="input input-bordered w-full" autocomplete="name" disabled={submitting} bind:value={name} /></label>
             <label class="form-control gap-1.5"><span class="label-text text-sm font-medium text-base-content">Email <span class="font-normal text-base-content/45">optional</span></span><input class="input input-bordered w-full" autocomplete="email" disabled={submitting} type="email" bind:value={email} /></label>
             <button class="btn btn-primary btn-block" disabled={!canSubmit} type="submit">{#if submitting}<span class="loading loading-spinner loading-sm" aria-hidden="true"></span>Saving...{:else}{action}{/if}</button>

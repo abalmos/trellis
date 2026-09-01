@@ -79,7 +79,21 @@ impl HttpError {
 
 impl From<AuthorizationStateError> for HttpError {
     fn from(error: AuthorizationStateError) -> Self {
-        tracing::warn!(%error, "auth HTTP domain operation failed");
+        let server_error = matches!(
+            &error,
+            AuthorizationStateError::RequiredDependencyUnavailable(_)
+                | AuthorizationStateError::RequiredResourceUnavailable(_)
+                | AuthorizationStateError::AuthorityStale
+                | AuthorizationStateError::MaterializationStale
+                | AuthorizationStateError::ContextLifetimeUnavailable
+                | AuthorizationStateError::ContextSnapshotChanged
+                | AuthorizationStateError::Storage(_)
+        );
+        if server_error {
+            tracing::warn!(%error, "auth HTTP domain operation failed");
+        } else {
+            tracing::debug!(%error, "auth HTTP request denied");
+        }
         match error {
             AuthorizationStateError::InvalidRecord(message)
                 if message == "new password must differ from current password" =>
@@ -128,7 +142,21 @@ impl From<AuthorizationStateError> for HttpError {
 }
 
 pub(super) fn map_issuance_error(error: AuthorizationStateError) -> HttpError {
-    tracing::warn!(%error, "auth issuance denied");
+    let server_error = matches!(
+        &error,
+        AuthorizationStateError::AuthorityStale
+            | AuthorizationStateError::MaterializationStale
+            | AuthorizationStateError::ContextSnapshotChanged
+            | AuthorizationStateError::RequiredDependencyUnavailable(_)
+            | AuthorizationStateError::RequiredResourceUnavailable(_)
+            | AuthorizationStateError::ContextLifetimeUnavailable
+            | AuthorizationStateError::Storage(_)
+    );
+    if server_error {
+        tracing::warn!(%error, "auth issuance denied");
+    } else {
+        tracing::debug!(%error, "auth issuance rejected");
+    }
     match error {
         AuthorizationStateError::AuthorityStale
         | AuthorizationStateError::MaterializationStale

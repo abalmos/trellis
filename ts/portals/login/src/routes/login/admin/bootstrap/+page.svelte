@@ -18,6 +18,7 @@
 
   let username = $state("");
   let password = $state("");
+  let confirmPassword = $state("");
   let name = $state("");
   let email = $state("");
   let flowId = $state<string | null>(null);
@@ -32,8 +33,10 @@
   const active = $derived(flowState?.status === "active" ? flowState : null);
   const loadedTerminalFlow = $derived(flowState?.status === "expired" || flowState?.status === "consumed");
   const localAvailable = $derived(active ? hasLocalProvider(active) : flowState === null);
+  const passwordsMatch = $derived(password.length > 0 && password === confirmPassword);
+  const confirmError = $derived(confirmPassword.length > 0 && !passwordsMatch ? "Passwords do not match" : null);
   const canSubmit = $derived(
-    Boolean(flowId) && !loadedTerminalFlow && localAvailable && username.trim().length > 0 && password.length > 0 && !submitting && !completion,
+    Boolean(flowId) && !loadedTerminalFlow && localAvailable && username.trim().length > 0 && password.length > 0 && passwordsMatch && !submitting && !completion,
   );
 
   function currentFlowId(): string | null {
@@ -237,28 +240,39 @@
             />
           </label>
 
-          {#if active?.mode !== "edit"}
-            <label class="form-control gap-1.5">
-              <span class="label-text text-sm font-medium text-base-content">Name <span class="font-normal text-base-content/45">optional</span></span>
-              <input
-                class="input input-bordered w-full"
-                autocomplete="name"
-                disabled={submitting || !flowId}
-                bind:value={name}
-              />
-            </label>
+          <label class="form-control gap-1.5">
+            <span class="label-text text-sm font-medium text-base-content">Confirm password</span>
+            <input
+              class="input input-bordered w-full"
+              autocomplete="new-password"
+              disabled={submitting || !flowId}
+              required
+              type="password"
+              bind:value={confirmPassword}
+            />
+            <span class:text-error={!!confirmError} class="text-xs text-base-content/55">{confirmError ?? "Re-enter your password"}</span>
+          </label>
 
-            <label class="form-control gap-1.5">
-              <span class="label-text text-sm font-medium text-base-content">Email <span class="font-normal text-base-content/45">optional</span></span>
-              <input
-                class="input input-bordered w-full"
-                autocomplete="email"
-                disabled={submitting || !flowId}
-                type="email"
-                bind:value={email}
-              />
-            </label>
-          {/if}
+          <label class="form-control gap-1.5">
+            <span class="label-text text-sm font-medium text-base-content">Name <span class="font-normal text-base-content/45">optional</span></span>
+            <input
+              class="input input-bordered w-full"
+              autocomplete="name"
+              disabled={submitting || !flowId}
+              bind:value={name}
+            />
+          </label>
+
+          <label class="form-control gap-1.5">
+            <span class="label-text text-sm font-medium text-base-content">Email <span class="font-normal text-base-content/45">optional</span></span>
+            <input
+              class="input input-bordered w-full"
+              autocomplete="email"
+              disabled={submitting || !flowId}
+              type="email"
+              bind:value={email}
+            />
+          </label>
 
           <button class="btn btn-primary btn-block" disabled={!canSubmit} type="submit">
             {#if submitting}
