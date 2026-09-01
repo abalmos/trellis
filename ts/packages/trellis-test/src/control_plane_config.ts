@@ -188,24 +188,37 @@ export async function reserveHostTestSlot(): Promise<
 
 /** Reserves a localhost TCP port until a child process is ready to bind it. */
 export function reserveLocalPort(port = 0): ReservedPort {
-  while (true) {
-    const listener = Deno.listen({ hostname: "127.0.0.1", port });
-    const reservedPort = listener.addr.port;
-    const lockRoot = Deno.env.get("TRELLIS_TEST_PORT_LOCK_DIR") ??
-      (Deno.build.os === "windows" ? Deno.env.get("TEMP") : "/tmp");
-    if (lockRoot === undefined) {
-      listener.close();
-      throw new Error("no temporary directory is configured");
-    }
+  const firstPrivatePort = 49_152;
+  const privatePortCount = 16_384;
+  const lockRoot = Deno.env.get("TRELLIS_TEST_PORT_LOCK_DIR") ??
+    (Deno.build.os === "windows" ? Deno.env.get("TEMP") : "/tmp");
+  if (lockRoot === undefined) {
+    throw new Error("no temporary directory is configured");
+  }
+  Deno.mkdirSync(lockRoot, { recursive: true });
+  const start = Deno.pid % privatePortCount;
+  for (
+    let attempt = 0;
+    attempt < (port === 0 ? privatePortCount : 1);
+    attempt++
+  ) {
+    const reservedPort = port ||
+      firstPrivatePort + (start + attempt) % privatePortCount;
     const lockPath = `${lockRoot}/trellis-test-port-${reservedPort}.lock`;
-    let lockFile: Deno.FsFile | undefined;
-    try {
-      lockFile = tryAcquireProcessLock(lockPath);
-    } catch (error) {
-      listener.close();
-      throw error;
+    const lockFile = tryAcquireProcessLock(lockPath);
+    if (lockFile === undefined) {
+      if (port !== 0) {
+        throw new Error(
+          `localhost TCP port ${port} is reserved by another test`,
+        );
+      }
+      continue;
     }
-    if (lockFile !== undefined) {
+    try {
+      const listener = Deno.listen({
+        hostname: "127.0.0.1",
+        port: reservedPort,
+      });
       let socketHeld = true;
       let lockHeld = true;
       return {
@@ -226,12 +239,19 @@ export function reserveLocalPort(port = 0): ReservedPort {
           }
         },
       };
-    }
-    listener.close();
-    if (port !== 0) {
-      throw new Error(`localhost TCP port ${port} is reserved by another test`);
+    } catch (error) {
+      releaseProcessLock(lockPath, lockFile);
+      if (
+        port === 0 &&
+        (error instanceof Deno.errors.AddrInUse ||
+          error instanceof Deno.errors.PermissionDenied)
+      ) {
+        continue;
+      }
+      throw error;
     }
   }
+  throw new Error("no private localhost TCP port is available");
 }
 
 function tryAcquireProcessLock(lockPath: string): Deno.FsFile | undefined {

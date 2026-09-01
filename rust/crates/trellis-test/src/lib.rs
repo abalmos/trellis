@@ -14,7 +14,7 @@ use std::io::{self, Seek, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Output, Stdio};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -5179,26 +5179,47 @@ fn try_acquire_file_lock(lock_path: &Path) -> io::Result<Option<File>> {
 
 /// Reserves a local TCP port with a host-wide lease held until the returned guard is dropped.
 pub fn reserve_local_port() -> Result<TrellisTestPortReservation, TrellisTestError> {
-    loop {
-        let listener = TcpListener::bind(("127.0.0.1", 0))?;
-        let port = listener.local_addr()?.port();
-        let lock_root = std::env::var_os("TRELLIS_TEST_PORT_LOCK_DIR")
-            .map(PathBuf::from)
-            .unwrap_or_else(|| {
-                if cfg!(windows) {
-                    std::env::temp_dir()
-                } else {
-                    PathBuf::from("/tmp")
-                }
-            });
+    const FIRST_PRIVATE_PORT: u64 = 49_152;
+    const PRIVATE_PORT_COUNT: u64 = 16_384;
+    static NEXT_PORT: AtomicU64 = AtomicU64::new(0);
+
+    let lock_root = std::env::var_os("TRELLIS_TEST_PORT_LOCK_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| {
+            if cfg!(windows) {
+                std::env::temp_dir()
+            } else {
+                PathBuf::from("/tmp")
+            }
+        });
+    fs::create_dir_all(&lock_root)?;
+    let start = u64::from(std::process::id()) % PRIVATE_PORT_COUNT;
+    for _ in 0..PRIVATE_PORT_COUNT {
+        let offset = NEXT_PORT.fetch_add(1, Ordering::Relaxed);
+        let port = (FIRST_PRIVATE_PORT + (start + offset) % PRIVATE_PORT_COUNT) as u16;
         let lock_path = lock_root.join(format!("trellis-test-port-{port}.lock"));
         if let Some(lock_file) = try_acquire_file_lock(&lock_path)? {
-            return Ok(TrellisTestPortReservation {
-                listener: Some(listener),
-                _lock_file: lock_file,
-            });
+            match TcpListener::bind(("127.0.0.1", port)) {
+                Ok(listener) => {
+                    return Ok(TrellisTestPortReservation {
+                        listener: Some(listener),
+                        _lock_file: lock_file,
+                    });
+                }
+                Err(error)
+                    if matches!(
+                        error.kind(),
+                        io::ErrorKind::AddrInUse | io::ErrorKind::PermissionDenied
+                    ) => {}
+                Err(error) => return Err(error.into()),
+            }
         }
     }
+    Err(io::Error::new(
+        io::ErrorKind::AddrNotAvailable,
+        "no private local TCP port is available",
+    )
+    .into())
 }
 
 fn is_podman_port_race(error: &TrellisTestError) -> bool {
