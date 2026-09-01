@@ -206,11 +206,14 @@ fn browser_account_bodies_reject_unknown_and_retired_fields() {
         "email": null,
     });
     assert!(
-        serde_json::from_value::<super::browser::FirstAdminRequest>(first_admin.clone()).is_ok()
+        serde_json::from_value::<super::browser::AdminAccountRequest>(first_admin.clone()).is_ok()
     );
+    let mut continued = first_admin.clone();
+    continued["browserFlowId"] = serde_json::json!("flow_console");
+    assert!(serde_json::from_value::<super::browser::AdminAccountRequest>(continued).is_ok());
     let mut unknown = first_admin;
     unknown["unexpected"] = serde_json::json!(true);
-    assert!(serde_json::from_value::<super::browser::FirstAdminRequest>(unknown).is_err());
+    assert!(serde_json::from_value::<super::browser::AdminAccountRequest>(unknown).is_err());
 
     let registration = serde_json::json!({
         "username": "user",

@@ -225,7 +225,7 @@ pub(crate) async fn start(context: &RuntimeContext) -> Result<SubsystemHandle, R
         &auth_service,
         &administration,
         &public_origin,
-        context.rotate_first_admin,
+        context.reset_admin,
         now,
     )
     .await?;
@@ -370,7 +370,7 @@ async fn ensure_first_admin(
     service: &AuthService<SqliteAuthorizationStore>,
     administration: &ParticipantBindingRecord,
     public_origin: &str,
-    rotate: bool,
+    reset_admin: bool,
     now: i64,
 ) -> Result<(), RuntimeError> {
     let target = FirstAdminAuthorityTarget {
@@ -378,13 +378,13 @@ async fn ensure_first_admin(
         participant_artifact_digest: administration.artifact_digest.clone(),
         participant_needs_digest: administration.needs_digest.clone(),
     };
-    let bootstrap = if rotate {
+    let bootstrap = if reset_admin {
         service
-            .rotate_first_admin_flow(public_origin, &target, now)
+            .rotate_admin_account_flow(public_origin, &target, now)
             .await
     } else {
         service
-            .ensure_first_admin_flow(public_origin, &target, now)
+            .ensure_admin_account_flow(public_origin, &target, now)
             .await
     }
     .map_err(|error| RuntimeError::Platform(error.to_string()))?;
@@ -392,9 +392,9 @@ async fn ensure_first_admin(
     if let Some(bootstrap) = bootstrap {
         if let Some(bootstrap_url) = bootstrap.bootstrap_url {
             tracing::warn!(
-                bootstrapUrl = %bootstrap_url,
+                adminAccountUrl = %bootstrap_url,
                 expiresAt = bootstrap.expires_at,
-                "first administrator bootstrap required"
+                "administrator account setup or recovery requested"
             );
         } else {
             tracing::warn!(

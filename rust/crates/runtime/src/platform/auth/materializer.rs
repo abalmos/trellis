@@ -80,7 +80,9 @@ fn materialize_available(
         .permissions()
         .to_vec();
     for dependency in participant.required_apis() {
-        require_dependency(dependency, true, &snapshot.dependencies)?;
+        if !super::builtins::is_platform_api(dependency.api(), dependency.api_digest()) {
+            require_dependency(dependency, true, &snapshot.dependencies)?;
+        }
     }
     require_resource_needs(
         participant.participant_id(),
@@ -88,7 +90,9 @@ fn materialize_available(
         &snapshot.resources,
     )?;
     for dependency in participant.optional_apis() {
-        if dependency_available(dependency, false, &snapshot.dependencies) {
+        if super::builtins::is_platform_api(dependency.api(), dependency.api_digest())
+            || dependency_available(dependency, false, &snapshot.dependencies)
+        {
             requested.extend_from_slice(dependency.grant_set().permissions());
         }
     }
@@ -129,7 +133,8 @@ fn materialize_available(
         if participant.optional_apis().iter().any(|dependency| {
             dependency.api() == capability.api()
                 && dependency.api_digest() == capability.api_digest()
-                && dependency_available(dependency, false, &snapshot.dependencies)
+                && (super::builtins::is_platform_api(dependency.api(), dependency.api_digest())
+                    || dependency_available(dependency, false, &snapshot.dependencies))
         }) {
             requested_capabilities.insert(capability.name().to_owned());
         }

@@ -19,15 +19,17 @@ export type AccountFlowTarget = {
 
 /** Supported account-flow kinds surfaced to the built-in portal pages. */
 export type AccountFlowKind =
-  | "admin_bootstrap"
+  | "admin_account"
   | "identity_link"
-  | "local_password_reset";
+  | "password_reset";
 
 /** Active account-flow state returned by the backend. */
 export type ActiveAccountFlowState = {
   status: "active";
   flowId: string;
   kind: AccountFlowKind | string;
+  mode?: "create" | "edit";
+  username?: string;
   targetUserId?: string;
   allowedProviders: string[] | null;
   profileHint: Record<string, unknown> | null;
@@ -65,6 +67,7 @@ export type LocalPasswordInput = {
   password: string;
   name: string;
   email: string;
+  browserFlowId?: string;
 };
 
 /** Successful local-password completion response. */
@@ -72,6 +75,7 @@ export type LocalPasswordSuccess = {
   status: "created";
   userId: string;
   returnTo?: string;
+  browserFlowId?: string;
 };
 
 /** OAuth/OIDC callback query state for a completed account flow. */
@@ -253,6 +257,7 @@ export function defaultProfileValue(
   state: ActiveAccountFlowState,
   key: "username" | "name" | "email",
 ): string {
+  if (key === "username" && state.username) return state.username;
   const targetValue = key === "username" ? undefined : state.target?.[key];
   if (targetValue) return targetValue;
   return profileHintString(state.profileHint, key);
@@ -277,8 +282,8 @@ export function flowKindLabel(kind: string): string {
       return "account link";
     case "local_password_reset":
       return "password reset";
-    case "admin_bootstrap":
-      return "admin bootstrap";
+    case "admin_account":
+      return "administrator account";
     default:
       return kind.replaceAll("_", " ");
   }
@@ -304,6 +309,10 @@ export function parseAccountFlowState(value: unknown): AccountFlowState {
     return {
       status: "consumed",
       kind: body.kind,
+      ...(body.mode === "create" || body.mode === "edit"
+        ? { mode: body.mode }
+        : {}),
+      ...(typeof body.username === "string" ? { username: body.username } : {}),
       ...(typeof body.targetUserId === "string"
         ? { targetUserId: body.targetUserId }
         : {}),
@@ -405,6 +414,7 @@ export async function completeAccountFlowLocalPassword(
   if (username) payload.username = username;
   if (name) payload.name = name;
   if (email) payload.email = email;
+  if (input.browserFlowId) payload.browserFlowId = input.browserFlowId;
 
   const response = await fetcher(
     new URL(
@@ -434,10 +444,14 @@ export async function completeAccountFlowLocalPassword(
     typeof body.userId === "string"
   ) {
     const returnTo = safeRelativeReturnTo(body.returnTo);
+    const browserFlowId = typeof body.browserFlowId === "string"
+      ? body.browserFlowId
+      : undefined;
     return {
       status: "created",
       userId: body.userId,
       ...(returnTo ? { returnTo } : {}),
+      ...(browserFlowId ? { browserFlowId } : {}),
     };
   }
   throw new Error(

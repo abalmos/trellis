@@ -1,0 +1,17 @@
+- I think I want to break `trellis server` things out to just `trellis-server` and not conflate the CLI and the server process.
+- I think we should not automiatcally download nats. Maybe a flag like `trellis-server -n` would do it, but by default you would need to provide the url to connect to in the config?
+- We should use stanard XDG paths (/var, /etc, etc. for root, ~/.config, ~/.var, etc. for user land).
+- NATS process output should go to a seperate log file and only to stdout when --verbose is used.
+- Maybe we have a `trellis-server -d` for "dev" mode which implies, -v, -n, and other useful dev settings.
+- log output is for humans to read right now. Can we have an interactive session mode where the logs are more human readable?
+
+- Logging out of admin console does nothing (page just reloads)
+- Can we make the time for page load to "connected" faster. It seems too slow right now, particuarly for all local connections
+
+- UI's should *not* use a "card" as the primary/only thing on *any* screen of the default portal or console.
+- Console hosted under `/admin` rather then `/console`?
+- Should the deault portal and the admin console just be one joined svelte-kit project?
+- Can we make it easy to dev where console/portal are hosted with a `deno task dev` or `npm task dev`, but the "production" or released trelis-server has it baked in? Maybe it is always baked and we just have a way to override to something else (this could be used in practice for production in whitelabel cases (common for us))
+- For the admin reset screen, I would like username to be pre-filled if this is a reset and not just a first time. Aka, prefill the username, name, and email if we reseting an exsting root admin acount
+- Password resets should ask for password twice and verify they match in UI.
+- Let's remove "connecting..." screens. They just make things feel "slow". We could have a connecting modal popup in the Sevlte trellis compoents for something if the connecting phase takes ... say longer then 4 or 5 seconds.

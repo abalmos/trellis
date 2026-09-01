@@ -6,6 +6,7 @@ import {
 import Value from "typebox/value";
 
 import {
+  adminAccountTokenFromUrl,
   approveLocalFlowIfNeeded,
   completeLocalAuthFlow,
   flowIdFromUrl,
@@ -157,7 +158,7 @@ export class TrellisTestAdminAutomation {
       const startedAt = performance.now();
       try {
         const bootstrapUrl = await this.#getBootstrapUrl();
-        const flowId = flowIdFromUrl(bootstrapUrl);
+        const flowId = adminAccountTokenFromUrl(bootstrapUrl);
         const response = await postJson(
           `${this.#trellisUrl}/auth/account-flow/${
             encodeURIComponent(flowId)

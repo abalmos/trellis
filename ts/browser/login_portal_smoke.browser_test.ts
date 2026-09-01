@@ -355,7 +355,9 @@ Deno.test("browser.embedded-console starts same-origin login", async () => {
         });
         assertEquals(
           await page.evaluate(() =>
-            globalThis.__TRELLIS_RUNTIME_CONFIG__?.authUrl
+            (globalThis as typeof globalThis & {
+              __TRELLIS_RUNTIME_CONFIG__?: { authUrl?: string };
+            }).__TRELLIS_RUNTIME_CONFIG__?.authUrl
           ),
           origin,
         );

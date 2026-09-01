@@ -78,7 +78,7 @@ where
     if !matches!(
         flow.kind,
         super::super::super::AccountFlowKind::IdentityLink
-            | super::super::super::AccountFlowKind::FirstAdmin
+            | super::super::super::AccountFlowKind::AdminAccount
     ) || flow.state != AccountFlowState::Pending
         || flow.expires_at < now_ms()?
         || flow
@@ -88,7 +88,12 @@ where
     {
         return Err(HttpError::conflict("account_flow_not_eligible"));
     }
-    let portal = if flow.kind == super::super::super::AccountFlowKind::FirstAdmin {
+    if flow.kind == super::super::super::AccountFlowKind::AdminAccount
+        && flow.target_principal_id.is_some()
+    {
+        return Err(HttpError::bad_request("account_flow_provider_not_allowed"));
+    }
+    let portal = if flow.kind == super::super::super::AccountFlowKind::AdminAccount {
         let portal = state
             .service
             .repository()
@@ -397,14 +402,14 @@ where
             if !matches!(
                 flow.kind,
                 super::super::super::AccountFlowKind::IdentityLink
-                    | super::super::super::AccountFlowKind::FirstAdmin
+                    | super::super::super::AccountFlowKind::AdminAccount
             ) || flow.state != AccountFlowState::Pending
                 || flow.expires_at < now_ms()?
                 || flow
                     .target_provider_id
                     .as_deref()
                     .is_some_and(|target| target != provider_id)
-                || (flow.kind == super::super::super::AccountFlowKind::FirstAdmin
+                || (flow.kind == super::super::super::AccountFlowKind::AdminAccount
                     && pending.portal_id.as_deref() != Some("builtin"))
                 || (flow.kind == super::super::super::AccountFlowKind::IdentityLink
                     && pending.portal_id.is_some())
@@ -502,7 +507,7 @@ where
         if !matches!(
             flow.kind,
             super::super::super::AccountFlowKind::IdentityLink
-                | super::super::super::AccountFlowKind::FirstAdmin
+                | super::super::super::AccountFlowKind::AdminAccount
         ) || flow.state != AccountFlowState::Pending
             || flow.expires_at < now
             || flow
@@ -513,7 +518,7 @@ where
             mark_oauth_restart_required(&state.ephemeral, &mut oauth).await?;
             return Err(HttpError::conflict("account_flow_not_eligible"));
         }
-        if flow.kind == super::super::super::AccountFlowKind::FirstAdmin {
+        if flow.kind == super::super::super::AccountFlowKind::AdminAccount {
             if state
                 .service
                 .repository()

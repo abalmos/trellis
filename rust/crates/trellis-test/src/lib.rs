@@ -4067,6 +4067,16 @@ fn flow_id_from_url(url: &str) -> Result<String, TrellisTestError> {
         .ok_or_else(|| TrellisTestError::MissingFlowId(url.to_string()))
 }
 
+fn first_admin_token_from_url(url: &str) -> Result<String, TrellisTestError> {
+    let parsed =
+        reqwest::Url::parse(url).map_err(|_| TrellisTestError::MissingFlowId(url.to_string()))?;
+    parsed
+        .query_pairs()
+        .find_map(|(key, value)| (key == "adminAccountToken").then(|| value.into_owned()))
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| TrellisTestError::MissingFlowId(url.to_string()))
+}
+
 async fn post_json<T, B>(url: &str, body: &B) -> Result<T, TrellisTestError>
 where
     T: for<'de> Deserialize<'de>,
@@ -4123,7 +4133,7 @@ async fn complete_first_admin_bootstrap(
     bootstrap_url: &str,
     password: &str,
 ) -> Result<(), TrellisTestError> {
-    let flow_id = flow_id_from_url(bootstrap_url)?;
+    let flow_id = first_admin_token_from_url(bootstrap_url)?;
     let response: FirstAdminBootstrapResponse = match post_json_with_origin(
         &format!(
             "{}/auth/account-flow/{}/local-password",

@@ -1955,6 +1955,7 @@ mod tests {
                     token: reset_token,
                     expected_flow_version: 1,
                     username: None,
+                    authority: None,
                     password: "current password".to_owned(),
                     consumed_at: NOW_MS + 2,
                     idempotency: IdempotencyResultRecord {
@@ -2262,9 +2263,12 @@ mod tests {
                 .complete_password_reset(PasswordResetCompletion {
                     token_hash: token_hash.clone(),
                     expected_flow_version: 1,
+                    flow_kind: AccountFlowKind::PasswordReset,
                     expected_credential_version: Some(1),
                     replacement: wrong_identity,
                     identity: None,
+                    authority: None,
+                    expected_authority_version: None,
                     consumed_at: NOW_MS + 3,
                     idempotency: IdempotencyResultRecord {
                         scope_key: URL_SAFE_NO_PAD.encode([32; 32]),
@@ -2287,9 +2291,12 @@ mod tests {
             .complete_password_reset(PasswordResetCompletion {
                 token_hash: token_hash.clone(),
                 expected_flow_version: 1,
+                flow_kind: AccountFlowKind::PasswordReset,
                 expected_credential_version: Some(1),
                 replacement: replacement.clone(),
                 identity: None,
+                authority: None,
+                expected_authority_version: None,
                 consumed_at: NOW_MS + 3,
                 idempotency: IdempotencyResultRecord {
                     scope_key: URL_SAFE_NO_PAD.encode([17; 32]),
@@ -2330,9 +2337,12 @@ mod tests {
             .complete_password_reset(PasswordResetCompletion {
                 token_hash,
                 expected_flow_version: 1,
+                flow_kind: AccountFlowKind::PasswordReset,
                 expected_credential_version: Some(1),
                 replacement,
                 identity: None,
+                authority: None,
+                expected_authority_version: None,
                 consumed_at: NOW_MS + 3,
                 idempotency: IdempotencyResultRecord {
                     scope_key: URL_SAFE_NO_PAD.encode([18; 32]),

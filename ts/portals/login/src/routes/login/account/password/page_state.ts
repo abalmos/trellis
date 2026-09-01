@@ -67,19 +67,17 @@ export function passwordPolicyError(
 
 /** Whether this portal route is intended for the loaded active flow. */
 export function isExpectedPasswordFlow(state: ActiveAccountFlowState): boolean {
-  return state.kind === "first_admin" || state.kind === "password_reset";
+  return state.kind === "password_reset";
 }
 
 /** Primary heading for password reset flows. */
 export function passwordFlowTitle(kind: string): string {
-  if (kind === "first_admin") return "Create the first administrator";
   if (kind === "password_reset") return "Reset your password";
   return "Set local credentials";
 }
 
 /** Submit button text for password reset flows. */
 export function passwordFlowAction(kind: string): string {
-  if (kind === "first_admin") return "Create administrator";
   if (kind === "password_reset") return "Reset password";
   return "Save credentials";
 }

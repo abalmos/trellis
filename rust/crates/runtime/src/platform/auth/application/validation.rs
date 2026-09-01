@@ -280,7 +280,7 @@ pub(crate) fn validate_account_flow(
                 flow.target_principal_id.is_some(),
                 flow.target_provider_id.is_some()
             ),
-            (AccountFlowKind::FirstAdmin, false, false)
+            (AccountFlowKind::AdminAccount, false, false)
                 | (AccountFlowKind::PasswordReset, true, false)
                 | (AccountFlowKind::IdentityLink, true, false)
                 | (AccountFlowKind::IdentityLink, true, true)

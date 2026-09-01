@@ -84,6 +84,9 @@ where
                 .map(|dependency| (dependency, false)),
         )
         .filter_map(|(dependency, required)| {
+            if super::builtins::is_platform_api(dependency.api(), dependency.api_digest()) {
+                return None;
+            }
             let provider = providers.iter().find(|provider| {
                 provider.0 == dependency.api() && provider.1 == dependency.api_digest()
             });

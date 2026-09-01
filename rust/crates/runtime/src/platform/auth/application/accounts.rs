@@ -62,6 +62,8 @@ pub struct CompletePasswordResetInput {
     pub expected_flow_version: u64,
     /// Username required only when installing the first local credential.
     pub username: Option<String>,
+    /// Canonical administrator authority restored by an admin-account flow.
+    pub authority: Option<IdentityAuthorityRecord>,
     /// Plaintext password retained only for this call.
     pub password: String,
     /// Completion time in Unix milliseconds.
@@ -307,11 +309,11 @@ mod tests {
         };
 
         assert!(service
-            .ensure_first_admin_flow("not a URL", &target, NOW)
+            .ensure_admin_account_flow("not a URL", &target, NOW)
             .await
             .is_err());
         let first = service
-            .ensure_first_admin_flow("https://auth.example/base", &target, NOW)
+            .ensure_admin_account_flow("https://auth.example/base", &target, NOW)
             .await?
             .ok_or("first-admin flow missing")?;
         let first_record = repository
@@ -319,13 +321,19 @@ mod tests {
             .await?
             .ok_or("first-admin record missing")?;
         assert_eq!(first_record.state, AccountFlowState::Pending);
-        assert!(!first
-            .bootstrap_url
-            .as_deref()
-            .ok_or("first-admin URL missing")?
-            .contains(&first.flow_id_hash));
+        let bootstrap_url = url::Url::parse(
+            first
+                .bootstrap_url
+                .as_deref()
+                .ok_or("first-admin URL missing")?,
+        )?;
+        assert_eq!(bootstrap_url.path(), "/console/profile");
+        assert!(bootstrap_url
+            .query_pairs()
+            .any(|(key, value)| key == "adminAccountToken" && !value.is_empty()));
+        assert!(!bootstrap_url.as_str().contains(&first.flow_id_hash));
         let second = service
-            .ensure_first_admin_flow("https://auth.example/base", &target, NOW + 1)
+            .ensure_admin_account_flow("https://auth.example/base", &target, NOW + 1)
             .await?
             .ok_or("pending first-admin flow missing")?;
         assert_eq!(second.flow_id_hash, first.flow_id_hash);
@@ -339,7 +347,7 @@ mod tests {
             AccountFlowState::Pending
         );
         let replacement = service
-            .rotate_first_admin_flow("https://auth.example/base", &target, NOW + 2)
+            .rotate_admin_account_flow("https://auth.example/base", &target, NOW + 2)
             .await?
             .ok_or("first-admin flow was not rotated")?;
         assert_ne!(replacement.flow_id_hash, first.flow_id_hash);
@@ -353,7 +361,7 @@ mod tests {
             AccountFlowState::Revoked
         );
         let after_expiry = service
-            .ensure_first_admin_flow(
+            .ensure_admin_account_flow(
                 "https://auth.example/base",
                 &target,
                 replacement.expires_at + 1,
@@ -426,7 +434,7 @@ mod tests {
 
 impl<R> AuthService<R>
 where
-    R: AccountRepository + Clone,
+    R: AccountRepository + AuthorityRepository + Clone,
 {
     pub(crate) async fn change_password(
         &self,
@@ -506,6 +514,7 @@ where
             token,
             expected_flow_version,
             username,
+            authority,
             password,
             consumed_at,
             mut idempotency,
@@ -536,13 +545,16 @@ where
             hash_password(&password, Some(self.config.password_min_length))?;
         let replacement = LocalCredentialRecord {
             principal_id: principal_id.to_owned(),
-            normalized_username: match &current {
-                Some(current) => current.normalized_username.clone(),
-                None => normalize_username(username.as_deref().ok_or_else(|| {
-                    AuthorizationStateError::InvalidRecord(
-                        "username is required when installing a local credential".to_owned(),
-                    )
-                })?)?,
+            normalized_username: match username {
+                Some(username) => normalize_username(&username)?,
+                None => current
+                    .as_ref()
+                    .map(|current| current.normalized_username.clone())
+                    .ok_or_else(|| {
+                        AuthorizationStateError::InvalidRecord(
+                            "username is required when installing a local credential".to_owned(),
+                        )
+                    })?,
             },
             password_hash,
             hash_profile,
@@ -557,20 +569,31 @@ where
                 None => 1,
             },
         };
-        if let Some(current) = &current {
-            super::validation::validate_replacement_credential(
-                current,
-                &replacement,
-                principal_id,
-            )?;
-        } else {
-            super::validation::validate_local_credential(&replacement)?;
+        super::validation::validate_local_credential(&replacement)?;
+        if flow.kind != AccountFlowKind::AdminAccount {
+            if let Some(current) = &current {
+                super::validation::validate_replacement_credential(
+                    current,
+                    &replacement,
+                    principal_id,
+                )?;
+            }
         }
-        let identity = current.is_none().then(|| ProviderIdentityLink {
+        let existing_identity = match &current {
+            Some(current) => {
+                self.repository
+                    .get_provider_identity("local", &current.normalized_username)
+                    .await?
+            }
+            None => None,
+        };
+        let identity = Some(ProviderIdentityLink {
             provider: "local".to_owned(),
             provider_subject: replacement.normalized_username.clone(),
             principal_id: principal_id.to_owned(),
-            linked_at: consumed_at,
+            linked_at: existing_identity
+                .as_ref()
+                .map_or(consumed_at, |identity| identity.linked_at),
             last_seen_at: consumed_at,
         });
         if let Some(identity) = &identity {
@@ -581,9 +604,14 @@ where
             .complete_password_reset(PasswordResetCompletion {
                 token_hash,
                 expected_flow_version,
+                flow_kind: flow.kind,
                 expected_credential_version: current.as_ref().map(|current| current.version),
                 replacement,
                 identity,
+                expected_authority_version: authority
+                    .as_ref()
+                    .and_then(|authority| (authority.version > 1).then_some(authority.version - 1)),
+                authority,
                 consumed_at,
                 idempotency,
                 actions,

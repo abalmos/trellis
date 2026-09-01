@@ -129,14 +129,18 @@ authority are rejected. It re-resolves the exact participant before deciding the
 same immutable authority proposal used by administrative flows. Bind creates the
 session through the shared aggregate transaction.
 
-Account-management flow tokens are returned once and stored only as hashes.
-First-admin bootstrap creates one unexpired single-use flow when no usable
-administrator authority exists and emits its URL only when newly created.
-Restart reuses the pending flow without rotating or reprinting the secret.
-`trellis-server --rotate-first-admin` is the explicit operator replacement path.
-Local and configured OIDC completion atomically create the first account and
-exact administration authority; only one concurrent completion can succeed. It
-never logs a default password.
+Account-management flow tokens are returned once and stored only as hashes. One
+`admin_account` flow creates or edits the durable bootstrap administrator.
+Startup creates and emits the initial flow once; restart reuses an unexpired
+pending flow without rotating or reprinting its secret. Local and configured
+OIDC completion atomically create the initial account and exact administration
+authority; only one concurrent completion can succeed.
+
+`trellis server ... --reset-admin` revokes the prior pending token and emits a
+new URL. After setup, local completion atomically changes that same principal's
+username and password, preserves or restores its permanent canonical authority,
+and revokes existing sessions and contexts. Additional administrators do not
+affect which principal is recovered. Trellis never logs a default password.
 
 Service and device bootstrap may present one exact participant artifact plus all
 referenced API artifacts. The server parses, normalizes, resolves, and stores

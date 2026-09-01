@@ -100,6 +100,13 @@ a bootstrap URL for the first admin; run
 `trellis server all --config "$HOME/trellis/trellis/config.toml" --check` before
 any run to see which stores the first run will create.
 
+The initial administrator remains the permanent bootstrap administrator. To
+change its username and password, start Trellis with `--reset-admin`. Trellis
+prints a replacement one-time URL, preserves the account and administration
+authority, and revokes its existing sessions when the reset is completed. The
+command targets this bootstrap account even when additional administrators
+exist.
+
 ### External NATS (production pattern)
 
 To run against an external NATS server instead of a managed one, pass its URL:

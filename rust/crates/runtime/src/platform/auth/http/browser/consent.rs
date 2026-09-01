@@ -424,7 +424,31 @@ where
         return Err(HttpError::conflict("flow_not_pending"));
     }
     let expected = flow.version;
-    let mut completed = if let Some(approved) =
+    let existing_authority = state
+        .service
+        .repository()
+        .get_identity_authority(&principal_id, &flow.participant_id)
+        .await?
+        .filter(|authority| {
+            authority.state == AuthorityState::Accepted
+                && authority.participant_artifact_digest == flow.participant_artifact_digest
+                && authority.accepted_needs_digest == flow.participant_needs_digest
+                && authority
+                    .expires_at
+                    .is_none_or(|expires_at| expires_at > now)
+        });
+    let mut completed = if let Some(authority) = existing_authority {
+        flow.state = AuthBrowserFlowState::Approved;
+        flow.durable_result_digest = Some(
+            trellis_protocol::digest_json(
+                &serde_json::to_value(DesiredAuthorityRecord::Identity(authority))
+                    .map_err(|_| HttpError::internal("authority_encode"))?,
+            )
+            .map_err(|_| HttpError::internal("authority_digest"))?,
+        );
+        flow.completed_at = Some(now);
+        flow
+    } else if let Some(approved) =
         apply_trusted_portal_authority(state, flow.clone(), attributes, now).await?
     {
         approved

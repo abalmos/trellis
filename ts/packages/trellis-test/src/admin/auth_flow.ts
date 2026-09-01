@@ -11,6 +11,16 @@ export function flowIdFromUrl(url: string): string {
   return flowId;
 }
 
+export function adminAccountTokenFromUrl(url: string): string {
+  const token = new URL(url).searchParams.get("adminAccountToken");
+  if (!token) {
+    throw new Error(
+      `Trellis administrator URL is missing adminAccountToken: ${url}`,
+    );
+  }
+  return token;
+}
+
 export async function performLocalLogin(args: {
   trellisUrl: string;
   flowId: string;

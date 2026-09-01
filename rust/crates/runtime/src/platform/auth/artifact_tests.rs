@@ -30,28 +30,29 @@ fn source_auth_artifacts_are_valid_and_digest_pinned() {
     let participant = parse_participant(&participant_value).expect("validate auth participant");
     assert_eq!(participant.id(), "trellis-auth-runtime");
 
-    let mut admin_value: Value = serde_json::from_str(include_str!(
+    let admin_value: Value = serde_json::from_str(include_str!(
         "../../../../trellis/artifacts/trellis.admin.participant.json"
     ))
     .expect("parse admin participant JSON");
-    admin_value["uses"]["required"]["auth"]["apiDigest"] =
-        Value::String(trellis_runtime_apis::auth::API_DIGEST.to_owned());
     lint_participant_authoring(&admin_value).expect("lint admin participant");
     let admin = parse_participant(&admin_value).expect("validate admin participant");
     assert_eq!(admin.id(), "trellis-platform-administration");
     let resolved = trellis_protocol::resolve_participant(
         &admin,
-        &std::collections::BTreeMap::from([
-            (api.id().to_owned(), api),
-            (
-                trellis_runtime_apis::state::API_ID.to_owned(),
-                parse_api(
-                    &serde_json::from_str(trellis_runtime_apis::state::API_JSON)
-                        .expect("parse state API JSON"),
-                )
-                .expect("validate state API"),
-            ),
-        ]),
+        &[
+            trellis_runtime_apis::auth::API_JSON,
+            trellis_runtime_apis::jobs::API_JSON,
+            trellis_runtime_apis::eventlog::API_JSON,
+            trellis_runtime_apis::health::API_JSON,
+            trellis_runtime_apis::state::API_JSON,
+        ]
+        .into_iter()
+        .map(|api_json| {
+            let api = parse_api(&serde_json::from_str(api_json).expect("parse API JSON"))
+                .expect("validate API");
+            (api.id().to_owned(), api)
+        })
+        .collect(),
     )
     .expect("resolve admin participant");
     assert!(!resolved

@@ -4,44 +4,67 @@ use serde_json::Value;
 
 use super::{AuthorizationStateError, ParticipantBindingRecord, ParticipantBindingState};
 
-fn state_api_value() -> Result<Value, AuthorizationStateError> {
-    let api: Value = serde_json::from_str(trellis_runtime_apis::state::API_JSON)
-        .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
-    trellis_protocol::lint_api_authoring(&api)
-        .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
-    Ok(api)
+pub(crate) fn is_platform_api(api_id: &str, api_digest: &str) -> bool {
+    [
+        (
+            trellis_runtime_apis::auth::API_ID,
+            trellis_runtime_apis::auth::API_DIGEST,
+        ),
+        (
+            trellis_runtime_apis::core::API_ID,
+            trellis_runtime_apis::core::API_DIGEST,
+        ),
+        (
+            trellis_runtime_apis::eventlog::API_ID,
+            trellis_runtime_apis::eventlog::API_DIGEST,
+        ),
+        (
+            trellis_runtime_apis::health::API_ID,
+            trellis_runtime_apis::health::API_DIGEST,
+        ),
+        (
+            trellis_runtime_apis::jobs::API_ID,
+            trellis_runtime_apis::jobs::API_DIGEST,
+        ),
+        (
+            trellis_runtime_apis::state::API_ID,
+            trellis_runtime_apis::state::API_DIGEST,
+        ),
+    ]
+    .contains(&(api_id, api_digest))
 }
 
 pub(crate) fn administration_participant_binding(
     resolved_at: i64,
 ) -> Result<ParticipantBindingRecord, AuthorizationStateError> {
-    let api_value: Value = serde_json::from_str(trellis_runtime_apis::auth::API_JSON)
-        .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
-    let api = trellis_protocol::parse_api(&api_value)
-        .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
-    let state_api_value = state_api_value()?;
-    let state_api = trellis_protocol::parse_api(&state_api_value)
-        .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
     let mut participant_value: Value = serde_json::from_str(include_str!(
         "../../../../trellis/artifacts/trellis.admin.participant.json"
     ))
     .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
-    participant_value["uses"]["required"]["auth"]["apiDigest"] = Value::String(
-        api.digest()
-            .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?,
-    );
-    participant_value["uses"]["required"]["state"]["apiDigest"] = Value::String(
-        state_api
-            .digest()
-            .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?,
-    );
+    let mut api_values = BTreeMap::new();
+    for (section, api_json) in [
+        ("required", trellis_runtime_apis::auth::API_JSON),
+        ("required", trellis_runtime_apis::jobs::API_JSON),
+        ("required", trellis_runtime_apis::state::API_JSON),
+        ("optional", trellis_runtime_apis::eventlog::API_JSON),
+        ("optional", trellis_runtime_apis::health::API_JSON),
+    ] {
+        let api_value: Value = serde_json::from_str(api_json)
+            .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
+        trellis_protocol::lint_api_authoring(&api_value)
+            .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
+        let api = trellis_protocol::parse_api(&api_value)
+            .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
+        participant_value["uses"][section][api.id()]["apiDigest"] = Value::String(
+            api.digest()
+                .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?,
+        );
+        api_values.insert(api.id().to_owned(), api_value);
+    }
     builtin_participant_binding(
         &serde_json::to_string(&participant_value)
             .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?,
-        BTreeMap::from([
-            (api.id().to_owned(), api_value),
-            (state_api.id().to_owned(), state_api_value),
-        ]),
+        api_values,
         resolved_at,
     )
 }
@@ -140,5 +163,21 @@ mod state_api_digest_test {
     fn admin_binding_includes_state_admin_api() {
         let binding = super::administration_participant_binding(0).expect("admin binding");
         assert!(binding.api_artifacts_json.contains("trellis.state@v1"));
+    }
+
+    #[test]
+    fn platform_api_identity_requires_the_canonical_digest() {
+        assert!(super::is_platform_api(
+            trellis_runtime_apis::jobs::API_ID,
+            trellis_runtime_apis::jobs::API_DIGEST,
+        ));
+        assert!(!super::is_platform_api(
+            trellis_runtime_apis::jobs::API_ID,
+            trellis_runtime_apis::auth::API_DIGEST,
+        ));
+        assert!(!super::is_platform_api(
+            "example.jobs@v1",
+            trellis_runtime_apis::jobs::API_DIGEST,
+        ));
     }
 }

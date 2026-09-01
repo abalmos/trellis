@@ -104,6 +104,8 @@ pub(crate) struct AccountFlowResponse {
     status: &'static str,
     flow_id: Option<String>,
     kind: Option<super::super::super::AccountFlowKind>,
+    mode: Option<&'static str>,
+    username: Option<String>,
     allowed_providers: Option<Vec<String>>,
     expires_at: Option<i64>,
     password_policy: Option<AccountFlowPasswordPolicy>,
@@ -142,6 +144,8 @@ where
             status: "expired",
             flow_id: None,
             kind: None,
+            mode: None,
+            username: None,
             allowed_providers: None,
             expires_at: None,
             password_policy: None,
@@ -154,44 +158,74 @@ where
     } else {
         "pending"
     };
+    let username = if flow.kind == super::super::super::AccountFlowKind::AdminAccount {
+        match flow.target_principal_id.as_deref() {
+            Some(principal_id) => state
+                .service
+                .repository()
+                .get_local_credential(principal_id)
+                .await?
+                .map(|credential| credential.normalized_username),
+            None => None,
+        }
+    } else {
+        None
+    };
     Ok(Json(AccountFlowResponse {
         status,
         flow_id: Some(flow_token),
         kind: Some(flow.kind),
-        allowed_providers: flow
-            .payload
-            .get("allowedProviders")
-            .and_then(serde_json::Value::as_array)
-            .map(|providers| {
-                providers
-                    .iter()
-                    .filter_map(serde_json::Value::as_str)
-                    .map(str::to_owned)
-                    .collect()
-            }),
-        expires_at: Some(flow.expires_at),
-        password_policy: (flow.kind == super::super::super::AccountFlowKind::PasswordReset).then(
-            || AccountFlowPasswordPolicy {
-                min_length: state.service.password_min_length(),
+        mode: (flow.kind == super::super::super::AccountFlowKind::AdminAccount).then_some(
+            if flow.target_principal_id.is_some() {
+                "edit"
+            } else {
+                "create"
             },
         ),
+        username,
+        allowed_providers: if flow.kind == super::super::super::AccountFlowKind::AdminAccount
+            && flow.target_principal_id.is_some()
+        {
+            Some(vec!["local".to_owned()])
+        } else {
+            flow.payload
+                .get("allowedProviders")
+                .and_then(serde_json::Value::as_array)
+                .map(|providers| {
+                    providers
+                        .iter()
+                        .filter_map(serde_json::Value::as_str)
+                        .map(str::to_owned)
+                        .collect()
+                })
+        },
+        expires_at: Some(flow.expires_at),
+        password_policy: matches!(
+            flow.kind,
+            super::super::super::AccountFlowKind::AdminAccount
+                | super::super::super::AccountFlowKind::PasswordReset
+        )
+        .then(|| AccountFlowPasswordPolicy {
+            min_length: state.service.password_min_length(),
+        }),
     }))
 }
 
 #[derive(Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub(crate) struct FirstAdminRequest {
+pub(crate) struct AdminAccountRequest {
     username: Option<String>,
     password: String,
     name: Option<String>,
     email: Option<String>,
+    browser_flow_id: Option<String>,
 }
 
-pub(crate) async fn complete_first_admin<R, E>(
+pub(crate) async fn complete_admin_account<R, E>(
     State(state): State<AuthHttpState<R, E>>,
     Path(flow_token): Path<String>,
     headers: HeaderMap,
-    Json(request): Json<FirstAdminRequest>,
+    Json(request): Json<AdminAccountRequest>,
 ) -> Result<Json<Value>, HttpError>
 where
     R: AccountRepository
@@ -218,10 +252,18 @@ where
     let (token_hash, flow) = load_account_flow_by_token(state.service.repository(), &flow_token)
         .await?
         .ok_or_else(|| HttpError::gone("account_flow_expired"))?;
-    if flow.state != AccountFlowState::Pending || flow.expires_at < now_ms()? {
+    let is_first_admin_continuation_retry = flow.kind
+        == super::super::super::AccountFlowKind::AdminAccount
+        && flow.state == AccountFlowState::Consumed
+        && request.browser_flow_id.is_some();
+    if (!is_first_admin_continuation_retry && flow.state != AccountFlowState::Pending)
+        || (flow.state == AccountFlowState::Pending && flow.expires_at < now_ms()?)
+    {
         return Err(HttpError::conflict("account_flow_consumed"));
     }
     let now = now_ms()?;
+    let admin_account_edit = flow.kind == super::super::super::AccountFlowKind::AdminAccount
+        && flow.target_principal_id.is_some();
     let request_digest = trellis_protocol::digest_json(
         &serde_json::to_value(&request)
             .map_err(|_| HttpError::bad_request("invalid_account_flow"))?,
@@ -234,6 +276,7 @@ where
                 token: flow_token,
                 expected_flow_version: flow.version,
                 username: request.username,
+                authority: None,
                 password: request.password,
                 consumed_at: now,
                 idempotency: idempotency(
@@ -320,7 +363,7 @@ where
             IdempotentOutcome::Replayed(_) => Err(HttpError::conflict("account_flow_consumed")),
         };
     }
-    if flow.kind != super::super::super::AccountFlowKind::FirstAdmin {
+    if flow.kind != super::super::super::AccountFlowKind::AdminAccount {
         return Err(HttpError::bad_request("account_flow_provider_required"));
     }
     let username = request
@@ -343,6 +386,20 @@ where
         .await?
         .ok_or_else(|| HttpError::internal("first_admin_target_missing"))?;
     let grant_set = binding.resolve()?.proposal().required().grant_set().clone();
+    let browser_flow_id = request.browser_flow_id.clone();
+    let browser_flow = if let Some(browser_flow_id) = browser_flow_id.as_deref() {
+        let browser_flow = load_flow(&state.ephemeral, browser_flow_id).await?;
+        let (portal, _) = state
+            .service
+            .repository()
+            .get_login_portal(&browser_flow.portal_id)
+            .await?
+            .ok_or_else(|| HttpError::gone("portal_unavailable"))?;
+        require_selected_portal_origin(&headers, &portal, &state.public_origin)?;
+        Some(browser_flow)
+    } else {
+        None
+    };
     let outcome = state
         .service
         .complete_first_admin(FirstAdminRegistration {
@@ -370,13 +427,37 @@ where
             actions: Vec::new(),
         })
         .await?;
-    match outcome {
-        IdempotentOutcome::Applied(account) => Ok(Json(json!({
-            "status": "created",
-            "userId": account.principal.principal_id,
-        }))),
-        IdempotentOutcome::Replayed(_) => Err(HttpError::conflict("account_flow_consumed")),
+    let principal_id = match outcome {
+        IdempotentOutcome::Applied(account) => account.principal.principal_id,
+        IdempotentOutcome::Replayed(value) => value
+            .get("principalId")
+            .and_then(Value::as_str)
+            .ok_or_else(|| HttpError::internal("first_admin_replay_invalid"))?
+            .to_owned(),
+    };
+    if let Some(browser_flow) = browser_flow {
+        let browser_flow_id = browser_flow.flow_id.clone();
+        super::consent::complete_authenticated_flow(
+            &state,
+            browser_flow,
+            principal_id.clone(),
+            ProviderLoginAttributes {
+                provider_id: "local".to_owned(),
+                roles: Vec::new(),
+            },
+            now,
+        )
+        .await?;
+        return Ok(Json(json!({
+            "status": if admin_account_edit { "updated" } else { "created" },
+            "userId": principal_id,
+            "browserFlowId": browser_flow_id,
+        })));
     }
+    Ok(Json(json!({
+        "status": if admin_account_edit { "updated" } else { "created" },
+        "userId": principal_id,
+    })))
 }
 
 pub(crate) async fn local_login<R, E>(

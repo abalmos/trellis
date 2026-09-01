@@ -4,23 +4,15 @@ import {
   wsconnect,
 } from "@nats-io/nats-core";
 import {
-  CONTRACT_STATE_METADATA,
-  type ContractStateMetadata,
-} from "./contract_support/mod.ts";
-import { getContractRuntime } from "./contract_support/contract_runtime.ts";
-import type { NativeProtocolContract } from "./contract_support/protocol_artifacts.ts";
-import { resolveNativeProtocolPresentation } from "./contract_support/protocol_resolution.ts";
-import { type CallerRuntime, createCallerRuntime } from "./caller.ts";
-import {
-  base64urlDecode,
-  base64urlEncode,
-  BrowserAuthorizationContextStore,
-  getOrCreateSessionKey,
-  getPublicSessionKey,
-  type SessionKeyOptions,
-  setSessionId,
-} from "./auth/browser.ts";
-import { createAuth, type TrellisAuth } from "./auth/session_auth.ts";
+  AsyncResult,
+  BaseError,
+  Result,
+  UnexpectedError,
+} from "@qlever-llc/result";
+import { type StaticDecode, Type } from "typebox";
+import { Value } from "typebox/value";
+import { ulid } from "ulid";
+
 import {
   AuthorizationContextBundleSchema,
   AuthorizationContextCache,
@@ -32,17 +24,42 @@ import {
   startAuthorizationContextRefresh,
 } from "./auth/authorization_context.ts";
 import {
-  SESSION_PROOF_FORMAT_V1,
-  sessionProofRequestDigest,
-} from "./auth/session_proof.ts";
-import { estimateMidpointClockOffsetMs } from "./auth/time.ts";
+  base64urlDecode,
+  base64urlEncode,
+  BrowserAuthorizationContextStore,
+  getOrCreateSessionKey,
+  getPublicSessionKey,
+  type SessionKeyOptions,
+  setSessionId,
+} from "./auth/browser.ts";
 import { toArrayBuffer } from "./auth/browser.ts";
+import { type SessionKeyHandle, signBytes } from "./auth/browser/session.ts";
 import {
   importEd25519PrivateKeyFromSeedBase64url,
   publicKeyBase64urlFromSeed,
 } from "./auth/keys.ts";
+import { createAuth, type TrellisAuth } from "./auth/session_auth.ts";
+import {
+  SESSION_PROOF_FORMAT_V1,
+  sessionProofRequestDigest,
+} from "./auth/session_proof.ts";
+import { estimateMidpointClockOffsetMs } from "./auth/time.ts";
+import { type CallerRuntime, createCallerRuntime } from "./caller.ts";
 import type { ClientOpts } from "./client.ts";
+import { isAuthorizationPending } from "./client_connect_internal.ts";
+import {
+  observeNatsTrellisConnection,
+  type TrellisConnection,
+} from "./connection.ts";
+import { getContractRuntime } from "./contract_support/contract_runtime.ts";
+import {
+  CONTRACT_STATE_METADATA,
+  type ContractStateMetadata,
+} from "./contract_support/mod.ts";
+import type { NativeProtocolContract } from "./contract_support/protocol_artifacts.ts";
+import { resolveNativeProtocolPresentation } from "./contract_support/protocol_resolution.ts";
 import type { RuntimeApi } from "./contract_support/runtime.ts";
+import { TransportError } from "./errors/index.ts";
 import {
   DEFAULT_RUNTIME_MAX_RECONNECT_ATTEMPTS,
   type RuntimeTransport,
@@ -52,21 +69,6 @@ import {
   Trellis,
   type TrellisOpts,
 } from "./session.ts";
-import { TransportError } from "./errors/index.ts";
-import {
-  AsyncResult,
-  BaseError,
-  Result,
-  UnexpectedError,
-} from "@qlever-llc/result";
-import { type StaticDecode, Type } from "typebox";
-import { Value } from "typebox/value";
-import { ulid } from "ulid";
-import { type SessionKeyHandle, signBytes } from "./auth/browser/session.ts";
-import {
-  observeNatsTrellisConnection,
-  type TrellisConnection,
-} from "./connection.ts";
 import { recordTrellisDuration } from "./telemetry/mod.ts";
 
 type ClientContract = NativeProtocolContract & {
@@ -534,27 +536,41 @@ async function bindClientFlow(args: {
     proof: { format: SESSION_PROOF_FORMAT_V1, signature: "" },
   };
   const requestDigest = await sessionProofRequestDigest(unsigned);
-  const response = await fetch(
-    `${args.trellisUrl}/auth/flow/${encodeURIComponent(args.flowId)}/bind`,
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Origin: args.origin,
-      },
-      body: JSON.stringify({
-        ...unsigned,
-        proof: await args.identity.auth.signSessionProof({
-          purpose: "userAuthBind",
-          requestId,
-          issuedAt,
-          flowId: args.flowId,
-          sessionPublicKey: args.identity.sessionKey,
-          requestDigest,
-        }),
-      }),
+  const url = `${args.trellisUrl}/auth/flow/${
+    encodeURIComponent(args.flowId)
+  }/bind`;
+  const init: RequestInit = {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Origin: args.origin,
     },
-  );
+    body: JSON.stringify({
+      ...unsigned,
+      proof: await args.identity.auth.signSessionProof({
+        purpose: "userAuthBind",
+        requestId,
+        issuedAt,
+        flowId: args.flowId,
+        sessionPublicKey: args.identity.sessionKey,
+        requestDigest,
+      }),
+    }),
+  };
+  let response = await fetch(url, init);
+  for (const delay of [100, 200, 400, 800]) {
+    if (response.status !== 503) break;
+    let authorizationPending = false;
+    try {
+      const value: unknown = await response.clone().json();
+      authorizationPending = isAuthorizationPending(value);
+    } catch {
+      // The terminal response below retains malformed error bodies for diagnostics.
+    }
+    if (!authorizationPending) break;
+    await new Promise((resolve) => setTimeout(resolve, delay));
+    response = await fetch(url, init);
+  }
   if (!response.ok) {
     const reason = await response.text();
     throw createTransportError({

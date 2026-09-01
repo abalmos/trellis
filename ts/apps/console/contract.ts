@@ -89,15 +89,20 @@ import {
   EventLogQuery,
   EventLogWatch,
 } from "@trellis/apis/trellis.eventlog";
+import {
+  StateAdminDelete,
+  StateAdminGet,
+  StateAdminList,
+} from "@trellis/apis/trellis.state";
 
 export const contract = defineAppContract(
   () => ({
-    id: "trellis.console@v1",
+    id: "trellis-platform-administration",
     apiId: "trellis.console@v1",
     apiVersion: "1.0.0",
     displayName: "Trellis Console",
     description:
-      "Drive the Trellis admin console's contract-declared Auth, Health, and Jobs access.",
+      "Drive the Trellis administration client's contract-declared platform access.",
     uses: [
       AuthDeploymentsCreate,
       AuthDeviceUserAuthoritiesReviewsDecide,
@@ -161,6 +166,9 @@ export const contract = defineAppContract(
       AuthPortalsLoginSettingsUpdate,
       AuthPortalsRoutesPut,
       AuthPortalsRoutesRemove,
+      StateAdminDelete,
+      StateAdminGet,
+      StateAdminList,
       JobsInspect,
       JobsCancel,
       JobsRetry,

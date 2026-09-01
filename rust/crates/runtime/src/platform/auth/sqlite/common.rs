@@ -200,6 +200,10 @@ fn migrate_test_schema(connection: &Connection) -> Result<(), AuthorizationState
             "auth_capability_groups",
             include_str!("../../../storage/sqlite/platform/V1004__auth_console_policy.sql"),
         ),
+        (
+            "auth_bootstrap_administrator",
+            include_str!("../../../storage/sqlite/platform/V1005__bootstrap_administrator.sql"),
+        ),
     ] {
         let migrated = connection
             .query_row(

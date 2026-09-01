@@ -14,7 +14,7 @@ use url::Url;
 
 use super::bootstrap::{device_bootstrap, service_bootstrap};
 use super::browser::{
-    bind_flow, complete_first_admin, console_index, console_page, decide_approval,
+    bind_flow, complete_admin_account, console_index, console_page, decide_approval,
     get_account_flow, get_flow, local_login, oidc_callback, portal_asset, portal_index,
     portal_page, register_local, start_account_flow_oidc, start_auth, start_oidc,
 };
@@ -63,6 +63,19 @@ struct RouteDefinition {
     method: RouteMethod,
     path: &'static str,
     handler: RouteHandler,
+}
+
+impl RouteDefinition {
+    fn is_static(self) -> bool {
+        matches!(
+            self.handler,
+            RouteHandler::PortalIndex
+                | RouteHandler::PortalPage
+                | RouteHandler::PortalAsset
+                | RouteHandler::ConsoleIndex
+                | RouteHandler::ConsolePage
+        )
+    }
 }
 
 const ROUTES: &[RouteDefinition] = &[
@@ -209,7 +222,7 @@ where
             routes.route(route.path, get(get_account_flow::<R, E>))
         }
         (RouteMethod::Post, RouteHandler::CompleteFirstAdmin) => {
-            routes.route(route.path, post(complete_first_admin::<R, E>))
+            routes.route(route.path, post(complete_admin_account::<R, E>))
         }
         (RouteMethod::Get, RouteHandler::StartOidc) => {
             routes.route(route.path, get(start_oidc::<R, E>))
@@ -305,6 +318,14 @@ where
             .allow_headers(AllowHeaders::mirror_request())
             .allow_credentials(true)
     };
+    let content_security_policy = super::security::content_security_policy(
+        &options.websocket_nats_servers,
+    )
+    .map_err(|error| {
+        AuthorizationStateError::InvalidRecord(format!(
+            "WebSocket NATS URL is invalid for Content Security Policy: {error}"
+        ))
+    })?;
     let state = AuthHttpState {
         service: options.service,
         ephemeral: options.ephemeral,
@@ -318,20 +339,14 @@ where
         proof_policy: trellis_protocol::SessionProofPolicy::default(),
         portal_override_dir: options.portal_override_dir,
     };
-    let mut routes: Router<AuthHttpState<R, E>> = Router::new();
+    let mut api_routes: Router<AuthHttpState<R, E>> = Router::new();
+    let mut static_routes: Router<AuthHttpState<R, E>> = Router::new();
     for route in ROUTES {
-        routes = add_route::<R, E>(routes, *route);
-    }
-    let mut routes = routes
-        .layer(RequestBodyLimitLayer::new(MAX_AUTH_REQUEST_BODY_BYTES))
-        .layer(cors)
-        .layer(middleware::from_fn(security_headers))
-        .with_state(state);
-    if use_hsts {
-        routes = routes.layer(SetResponseHeaderLayer::if_not_present(
-            axum::http::header::STRICT_TRANSPORT_SECURITY,
-            HeaderValue::from_static("max-age=31536000; includeSubDomains"),
-        ));
+        if route.is_static() {
+            static_routes = add_route::<R, E>(static_routes, *route);
+        } else {
+            api_routes = add_route::<R, E>(api_routes, *route);
+        }
     }
     if options.rate_limit_max > 0 {
         let mut builder = GovernorConfigBuilder::default();
@@ -343,9 +358,24 @@ where
         let config = builder.finish().ok_or_else(|| {
             AuthorizationStateError::InvalidRecord("HTTP rate limit is invalid".to_owned())
         })?;
-        routes = routes.layer(GovernorLayer {
+        api_routes = api_routes.layer(GovernorLayer {
             config: Arc::new(config),
         });
+    }
+    let mut routes = api_routes
+        .merge(static_routes)
+        .layer(RequestBodyLimitLayer::new(MAX_AUTH_REQUEST_BODY_BYTES))
+        .layer(cors)
+        .layer(middleware::from_fn_with_state(
+            content_security_policy,
+            security_headers,
+        ))
+        .with_state(state);
+    if use_hsts {
+        routes = routes.layer(SetResponseHeaderLayer::if_not_present(
+            axum::http::header::STRICT_TRANSPORT_SECURITY,
+            HeaderValue::from_static("max-age=31536000; includeSubDomains"),
+        ));
     }
     Ok(routes)
 }
@@ -431,6 +461,22 @@ mod tests {
                 .await
                 .unwrap();
             assert_ne!(response.status(), StatusCode::NOT_FOUND, "{method} {path}");
+        }
+    }
+
+    #[test]
+    fn static_browser_routes_are_not_api_rate_limited() {
+        for route in ROUTES {
+            assert_eq!(
+                route.is_static(),
+                route.path == "/login"
+                    || route.path.starts_with("/login/")
+                    || route.path.starts_with("/assets/login/")
+                    || route.path == "/console"
+                    || route.path.starts_with("/console/"),
+                "{}",
+                route.path
+            );
         }
     }
 }

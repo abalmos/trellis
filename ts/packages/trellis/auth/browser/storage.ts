@@ -129,13 +129,13 @@ export async function storeSessionId(
   });
 }
 
-/** Origin-scoped atomic IndexedDB authorization context store. */
+/** Scope-keyed atomic IndexedDB authorization context store. */
 export class BrowserAuthorizationContextStore
   implements AuthorizationContextStore {
   readonly #id: string;
 
   constructor(scope: string) {
-    this.#id = `${TRUST_ID}:${new URL(scope).origin}`;
+    this.#id = `${TRUST_ID}:${scope}`;
   }
 
   async load(): Promise<AuthorizationClientState | undefined> {

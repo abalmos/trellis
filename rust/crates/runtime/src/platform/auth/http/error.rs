@@ -81,6 +81,11 @@ impl From<AuthorizationStateError> for HttpError {
     fn from(error: AuthorizationStateError) -> Self {
         tracing::warn!(%error, "auth HTTP domain operation failed");
         match error {
+            AuthorizationStateError::InvalidRecord(message)
+                if message == "new password must differ from current password" =>
+            {
+                Self::bad_request("password_unchanged")
+            }
             AuthorizationStateError::InvalidRecord(_) => Self::bad_request("invalid_request"),
             AuthorizationStateError::SessionMissing => Self::not_found("session_not_found"),
             AuthorizationStateError::SessionExpired => Self::unauthorized("session_expired"),
@@ -158,7 +163,16 @@ impl IntoResponse for HttpError {
         (
             self.status,
             [(CONTENT_TYPE, "application/json")],
-            Json(json!({ "error": { "code": self.code } })),
+            Json(if self.code == "password_unchanged" {
+                json!({
+                    "error": {
+                        "code": self.code,
+                        "message": "New password must differ from the current password."
+                    }
+                })
+            } else {
+                json!({ "error": { "code": self.code } })
+            }),
         )
             .into_response()
     }

@@ -130,6 +130,22 @@ impl AccountRepository for SqliteAuthorizationStore {
                 command.profile,
                 command.expected_version,
             )?;
+            if principal.state != super::super::PrincipalState::Active
+                && transaction
+                    .query_row(
+                        "SELECT 1 FROM auth_bootstrap_administrator
+                         WHERE singleton = 1 AND principal_id = ?1",
+                        [&principal.principal_id],
+                        |_| Ok(()),
+                    )
+                    .optional()
+                    .map_err(sql_error)?
+                    .is_some()
+            {
+                return Err(AuthorizationStateError::InvalidRecord(
+                    "the bootstrap administrator principal must remain active".to_owned(),
+                ));
+            }
             let principal_authorization_changed = current_principal.state != principal.state;
             let principal_changed = transaction
                 .execute(
@@ -362,33 +378,42 @@ impl AccountRepository for SqliteAuthorizationStore {
         .await
     }
 
-    async fn replace_first_admin_flow(
+    async fn replace_admin_account_flow(
         &self,
-        flow: AccountFlowRecord,
+        mut flow: AccountFlowRecord,
         now: i64,
         rotate: bool,
     ) -> Result<Option<AccountFlowRecord>, AuthorizationStateError> {
         super::super::domain::require_protocol_timestamp("now", now)?;
-        if flow.kind != super::super::AccountFlowKind::FirstAdmin
+        if flow.kind != super::super::AccountFlowKind::AdminAccount
             || flow.created_at > now
             || flow.expires_at <= now
         {
             return Err(AuthorizationStateError::InvalidRecord(
-                "replacement first-admin flow must be pending and unexpired".to_owned(),
+                "replacement admin-account flow must be pending and unexpired".to_owned(),
             ));
         }
         self.run(move |connection| {
             let transaction = connection.transaction().map_err(sql_error)?;
-            if sql_has_active_administrator(&transaction, now)? {
+            let bootstrap_principal_id = transaction
+                .query_row(
+                    "SELECT principal_id FROM auth_bootstrap_administrator WHERE singleton = 1",
+                    [],
+                    |row| row.get::<_, String>(0),
+                )
+                .optional()
+                .map_err(sql_error)?;
+            if bootstrap_principal_id.is_some() && !rotate {
                 return Ok(None);
             }
+            flow.target_principal_id = bootstrap_principal_id;
             let existing = transaction
                 .query_row(
                     "SELECT flow_id, kind, token_hash, target_principal_id, target_provider_id,
                             return_location, payload_json, state, created_at, expires_at,
                             consumed_at, version
                      FROM auth_account_flows
-                     WHERE kind = 'first_admin' AND state = 'pending' AND expires_at > ?1
+                     WHERE kind = 'admin_account' AND state = 'pending' AND expires_at > ?1
                      ORDER BY created_at, flow_id LIMIT 1",
                     [now],
                     decode_account_flow,
@@ -401,7 +426,7 @@ impl AccountRepository for SqliteAuthorizationStore {
                 }
                 if existing.version >= super::super::MAX_PROTOCOL_INTEGER {
                     return Err(AuthorizationStateError::InvalidRecord(
-                        "first-admin flow version overflow".to_owned(),
+                        "admin-account flow version overflow".to_owned(),
                     ));
                 }
                 transaction
@@ -415,7 +440,7 @@ impl AccountRepository for SqliteAuthorizationStore {
             transaction
                 .execute(
                     "UPDATE auth_account_flows SET state = 'expired', version = version + 1
-                     WHERE kind = 'first_admin' AND state = 'pending' AND expires_at <= ?1",
+                     WHERE kind = 'admin_account' AND state = 'pending' AND expires_at <= ?1",
                     [now],
                 )
                 .map_err(map_write_error)?;
@@ -435,9 +460,9 @@ impl AccountRepository for SqliteAuthorizationStore {
             if let Some(result) = sqlite_idempotency_replay(&transaction, &command.idempotency)? {
                 return Ok(IdempotentOutcome::Replayed(result));
             }
-            if command.flow.kind == super::super::model::AccountFlowKind::FirstAdmin {
+            if command.flow.kind == super::super::model::AccountFlowKind::AdminAccount {
                 return Err(AuthorizationStateError::InvalidRecord(
-                    "first-admin flows must use replace_first_admin_flow".to_owned(),
+                    "administrator-account flows must use replace_admin_account_flow".to_owned(),
                 ));
             }
             insert_account_flow(&transaction, &command.flow)?;
@@ -474,7 +499,7 @@ impl AccountRepository for SqliteAuthorizationStore {
                 &transaction,
                 &command.token_hash,
                 command.expected_flow_version,
-                super::super::model::AccountFlowKind::PasswordReset,
+                command.flow_kind,
                 command.consumed_at,
             )?;
             let principal_id = flow.target_principal_id.clone().ok_or_else(|| {
@@ -482,6 +507,31 @@ impl AccountRepository for SqliteAuthorizationStore {
                     "password-reset flow has no target principal".to_owned(),
                 )
             })?;
+            if command.flow_kind == super::super::model::AccountFlowKind::AdminAccount
+                && transaction
+                    .query_row(
+                        "SELECT principal_id FROM auth_bootstrap_administrator WHERE singleton = 1",
+                        [],
+                        |row| row.get::<_, String>(0),
+                    )
+                    .optional()
+                    .map_err(sql_error)?
+                    .as_deref()
+                    != Some(principal_id.as_str())
+            {
+                return Err(AuthorizationStateError::StorageConflict);
+            }
+            if command.flow_kind == super::super::model::AccountFlowKind::AdminAccount {
+                transaction
+                    .execute(
+                        "UPDATE auth_principals
+                         SET state = 'active', updated_at = ?1, version = version + 1,
+                             disabled_at = NULL, revoked_at = NULL
+                         WHERE principal_id = ?2 AND state != 'active'",
+                        params![command.consumed_at, principal_id],
+                    )
+                    .map_err(map_write_error)?;
+            }
             let current = load_local_credential(&transaction, &principal_id)?;
             if current.as_ref().map(|current| current.version)
                 != command.expected_credential_version
@@ -489,12 +539,27 @@ impl AccountRepository for SqliteAuthorizationStore {
                 return Err(AuthorizationStateError::StorageConflict);
             }
             if let Some(current) = current {
-                validate_replacement_credential(&current, &command.replacement, &principal_id)?;
+                super::super::application::validation::validate_local_credential(
+                    &command.replacement,
+                )?;
+                if command.replacement.principal_id != principal_id
+                    || command.replacement.version != current.version + 1
+                    || command.replacement.updated_at < current.updated_at
+                    || command.replacement.password_changed_at < current.password_changed_at
+                {
+                    return Err(AuthorizationStateError::StorageConflict);
+                }
+                if command.identity.is_none()
+                    && command.replacement.normalized_username != current.normalized_username
+                {
+                    return Err(AuthorizationStateError::StorageConflict);
+                }
                 let changed = transaction
                     .execute(
-                    "UPDATE auth_local_credentials SET password_hash = ?1, hash_profile = ?2, failed_attempts = ?3, locked_until = ?4, password_changed_at = ?5, updated_at = ?6, version = ?7
-                 WHERE principal_id = ?8 AND version = ?9",
+                    "UPDATE auth_local_credentials SET normalized_username = ?1, password_hash = ?2, hash_profile = ?3, failed_attempts = ?4, locked_until = ?5, password_changed_at = ?6, updated_at = ?7, version = ?8
+                 WHERE principal_id = ?9 AND version = ?10",
                     params![
+                        command.replacement.normalized_username,
                         command.replacement.password_hash,
                         i64::from(command.replacement.hash_profile),
                         i64::from(command.replacement.failed_attempts),
@@ -509,6 +574,24 @@ impl AccountRepository for SqliteAuthorizationStore {
                     .map_err(map_write_error)?;
                 if changed != 1 {
                     return Err(AuthorizationStateError::StorageConflict);
+                }
+                if let Some(identity) = command.identity.as_ref() {
+                    if identity.principal_id != principal_id
+                        || identity.provider != "local"
+                        || identity.provider_subject != command.replacement.normalized_username
+                    {
+                        return Err(AuthorizationStateError::StorageConflict);
+                    }
+                    let changed = transaction
+                        .execute(
+                            "UPDATE auth_provider_identities SET provider_subject = ?1, last_seen_at = ?2
+                             WHERE provider = 'local' AND principal_id = ?3",
+                            params![identity.provider_subject, identity.last_seen_at, principal_id],
+                        )
+                        .map_err(map_write_error)?;
+                    if changed != 1 {
+                        return Err(AuthorizationStateError::StorageConflict);
+                    }
                 }
             } else {
                 super::super::application::validation::validate_local_credential(
@@ -552,6 +635,14 @@ impl AccountRepository for SqliteAuthorizationStore {
                         ],
                     )
                     .map_err(map_write_error)?;
+            }
+            if let Some(mut authority) = command.authority {
+                put_identity_authority(
+                    &transaction,
+                    &mut authority,
+                    command.expected_authority_version,
+                    true,
+                )?;
             }
             transaction
                 .execute(
@@ -670,12 +761,20 @@ impl AccountRepository for SqliteAuthorizationStore {
                 &transaction,
                 &command.token_hash,
                 command.expected_flow_version,
-                super::super::model::AccountFlowKind::FirstAdmin,
+                super::super::model::AccountFlowKind::AdminAccount,
                 command.consumed_at,
             )?;
             if flow.target_principal_id.is_some()
                 || flow.target_provider_id.is_some()
-                || sql_has_active_administrator(&transaction, command.consumed_at)?
+                || transaction
+                    .query_row(
+                        "SELECT 1 FROM auth_bootstrap_administrator WHERE singleton = 1",
+                        [],
+                        |_| Ok(()),
+                    )
+                    .optional()
+                    .map_err(sql_error)?
+                    .is_some()
             {
                 return Err(AuthorizationStateError::StorageConflict);
             }
@@ -687,7 +786,14 @@ impl AccountRepository for SqliteAuthorizationStore {
                 Some(&command.identity),
             )?;
             let mut authority = command.authority;
-            put_identity_authority(&transaction, &mut authority, None)?;
+            put_identity_authority(&transaction, &mut authority, None, false)?;
+            transaction
+                .execute(
+                    "INSERT INTO auth_bootstrap_administrator (singleton, principal_id, created_at)
+                     VALUES (1, ?1, ?2)",
+                    params![command.principal.principal_id, command.consumed_at],
+                )
+                .map_err(map_write_error)?;
             let completed = consume_sql_flow(&transaction, &flow, command.consumed_at)?;
             insert_sql_idempotency_and_actions(
                 &transaction,
@@ -1174,28 +1280,6 @@ impl PortalRepository for SqliteAuthorizationStore {
         )
         .await
     }
-}
-
-pub(in crate::platform::auth) fn sql_has_active_administrator(
-    connection: &Connection,
-    now: i64,
-) -> Result<bool, AuthorizationStateError> {
-    connection
-        .query_row(
-            "SELECT EXISTS(
-            SELECT 1
-            FROM auth_identity_authorities authority
-            JOIN auth_principals principal ON principal.principal_id = authority.principal_id
-            JOIN json_each(authority.desired_capabilities_json) capability
-            WHERE principal.kind = 'user' AND principal.state = 'active'
-              AND authority.state = 'accepted'
-              AND (authority.expires_at IS NULL OR authority.expires_at > ?1)
-              AND capability.value = 'admin'
-        )",
-            [now],
-            |row| row.get::<_, bool>(0),
-        )
-        .map_err(sql_error)
 }
 
 pub(in crate::platform::auth) fn insert_account_flow(

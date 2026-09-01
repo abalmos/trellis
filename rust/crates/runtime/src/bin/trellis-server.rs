@@ -14,9 +14,9 @@ struct Args {
     /// Path to the Trellis runtime TOML configuration.
     #[arg(long)]
     config: PathBuf,
-    /// Replace an existing pending first-administrator bootstrap URL.
+    /// Issue a one-time password-reset URL for the sole active administrator.
     #[arg(long)]
-    rotate_first_admin: bool,
+    reset_admin: bool,
     /// Validate configuration and authorization trust, then exit.
     #[arg(long)]
     check: bool,
@@ -43,7 +43,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     trellis_runtime::run(RuntimeOptions {
         mode: args.mode,
         config_path: args.config,
-        rotate_first_admin: args.rotate_first_admin,
+        reset_admin: args.reset_admin,
         nats_override: None,
     })
     .await?;

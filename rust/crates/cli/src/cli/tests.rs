@@ -9,7 +9,7 @@ fn parses_server_command_with_auto_managed_nats_defaults() {
             assert_eq!(args.mode, RuntimeMode::All);
             assert_eq!(args.config, PathBuf::from("trellis/config.toml"));
             assert_eq!(args.nats, None);
-            assert!(!args.rotate_first_admin);
+            assert!(!args.reset_admin);
             assert!(!args.check);
             assert_eq!(args.cache_dir, None);
             assert_eq!(args.nats_binary, None);
@@ -29,14 +29,14 @@ fn parses_server_command_with_external_nats_and_flags() {
         "trellis/config.toml",
         "--nats",
         "nats://nats.example.com:4222",
-        "--rotate-first-admin",
+        "--reset-admin",
         "--check",
     ]);
     match cli.command {
         TopLevelCommand::Server(args) => {
             assert_eq!(args.mode, RuntimeMode::Jobs);
             assert_eq!(args.nats.as_deref(), Some("nats://nats.example.com:4222"));
-            assert!(args.rotate_first_admin);
+            assert!(args.reset_admin);
             assert!(args.check);
             assert_eq!(args.cache_dir, None);
             assert_eq!(args.nats_binary, None);

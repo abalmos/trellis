@@ -169,11 +169,14 @@ fn sqlite_platform_store_migrates_marker_schema() -> Result<(), Box<dyn std::err
     assert_migration(&path, 1001, "authorization_state")?;
     assert_migration(&path, 1002, "auth_service_cutover")?;
     assert_migration(&path, 1003, "authorization_context_runtime")?;
+    assert_migration(&path, 1004, "auth_console_policy")?;
+    assert_migration(&path, 1005, "bootstrap_administrator")?;
     assert_table(&path, "auth_principals")?;
     assert_table(&path, "auth_sessions")?;
     assert_table(&path, "auth_materialized_authorities")?;
     assert_table(&path, "auth_authorization_trust_state")?;
     assert_table(&path, "auth_authorization_contexts")?;
+    assert_table(&path, "auth_bootstrap_administrator")?;
     Ok(())
 }
 
@@ -262,7 +265,7 @@ async fn sqlite_platform_store_upgrades_populated_accepted_m7_schema(
     store.migrate()?;
     store.migrate()?;
 
-    assert_migration_order(&path, &[1000, 1001, 1002, 1003, 1004])?;
+    assert_migration_order(&path, &[1000, 1001, 1002, 1003, 1004, 1005])?;
     let connection = rusqlite::Connection::open(&path)?;
     connection.pragma_update(None, "foreign_keys", true)?;
     let foreign_key_errors = connection
@@ -440,7 +443,7 @@ fn sqlite_platform_store_upgrades_accepted_m8_and_preserves_post_commit_actions(
     store.migrate()?;
     store.migrate()?;
 
-    assert_migration_order(&path, &[1000, 1001, 1002, 1003, 1004])?;
+    assert_migration_order(&path, &[1000, 1001, 1002, 1003, 1004, 1005])?;
     let connection = Connection::open(&path)?;
     connection.pragma_update(None, "foreign_keys", true)?;
     let actions = connection
@@ -570,7 +573,7 @@ fn runtime_stores_all_mode_migrates_all_selected_subsystems(
     assert_marker(&jobs_path, "trellis_jobs_projection_store_marker")?;
     assert_marker(&health_path, "trellis_health_projection_store_marker")?;
     assert_marker(&eventlog_path, "trellis_eventlog_store_marker")?;
-    assert_migration_order(&platform_path, &[1000, 1001, 1002, 1003, 1004])?;
+    assert_migration_order(&platform_path, &[1000, 1001, 1002, 1003, 1004, 1005])?;
     assert_migration_order(&jobs_path, &[2000])?;
     assert_migration_order(&health_path, &[3000, 3001])?;
     assert_migration_order(&eventlog_path, &[4000])?;
@@ -612,5 +615,78 @@ fn open_sqlite_applies_configured_pragmas() -> Result<(), Box<dyn std::error::Er
     let journal_mode: String = connection.query_row("PRAGMA journal_mode", [], |row| row.get(0))?;
     assert_eq!(busy_timeout, 2_500);
     assert_eq!(journal_mode.to_lowercase(), "wal");
+    Ok(())
+}
+
+#[test]
+fn bootstrap_administrator_migration_preserves_the_initial_admin(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let connection = rusqlite::Connection::open_in_memory()?;
+    for migration in [
+        include_str!("sqlite/platform/V1000__platform_init.sql"),
+        include_str!("sqlite/platform/V1001__authorization_state.sql"),
+        include_str!("sqlite/platform/V1002__auth_service_cutover.sql"),
+        include_str!("sqlite/platform/V1003__authorization_context_runtime.sql"),
+        include_str!("sqlite/platform/V1004__auth_console_policy.sql"),
+    ] {
+        connection.execute_batch(migration)?;
+    }
+    let digest = "a".repeat(43);
+    connection.execute(
+        "INSERT INTO auth_participant_bindings (
+            participant_id, participant_kind, artifact_digest, needs_digest,
+            participant_json, api_artifacts_json, resolved_at, state
+         ) VALUES ('trellis-platform-administration', 'app', ?1, ?1, '{}', '{}', 1, 'resolved')",
+        [&digest],
+    )?;
+    for (principal_id, created_at) in [("initial_admin", 10), ("later_admin", 20)] {
+        connection.execute(
+            "INSERT INTO auth_principals (
+                principal_id, kind, state, created_at, updated_at, version
+             ) VALUES (?1, 'user', 'active', ?2, ?2, 1)",
+            rusqlite::params![principal_id, created_at],
+        )?;
+        connection.execute(
+            "INSERT INTO auth_identity_authorities (
+                authority_id, principal_id, participant_id, participant_artifact_digest,
+                accepted_needs_digest, desired_grant_set_json, desired_capabilities_json,
+                state, version, created_at, updated_at, decision_at, decision_by
+             ) VALUES (?1, ?2, 'trellis-platform-administration', ?3, ?3, '{}', '[\"admin\"]',
+                       'accepted', 1, ?4, ?4, ?4, 'portal')",
+            rusqlite::params![
+                format!("authority_{principal_id}"),
+                principal_id,
+                digest,
+                created_at
+            ],
+        )?;
+    }
+    connection.execute(
+        "INSERT INTO auth_account_flows (
+            flow_id, kind, token_hash, payload_json, state, created_at, expires_at, version
+         ) VALUES ('legacy_flow', 'first_admin', ?1, '{}', 'pending', 1, 100, 1)",
+        ["b".repeat(43)],
+    )?;
+
+    connection.execute_batch(include_str!(
+        "sqlite/platform/V1005__bootstrap_administrator.sql"
+    ))?;
+
+    assert_eq!(
+        connection.query_row(
+            "SELECT principal_id FROM auth_bootstrap_administrator WHERE singleton = 1",
+            [],
+            |row| row.get::<_, String>(0),
+        )?,
+        "initial_admin"
+    );
+    assert_eq!(
+        connection.query_row(
+            "SELECT kind FROM auth_account_flows WHERE flow_id = 'legacy_flow'",
+            [],
+            |row| row.get::<_, String>(0),
+        )?,
+        "admin_account"
+    );
     Ok(())
 }

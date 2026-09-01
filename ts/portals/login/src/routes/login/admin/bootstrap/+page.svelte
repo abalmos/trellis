@@ -20,6 +20,7 @@
   let name = $state("");
   let email = $state("");
   let flowId = $state<string | null>(null);
+  let browserFlowId = $state<string | null>(null);
   let flowState = $state.raw<AccountFlowState | null>(null);
   let loading = $state(true);
   let error = $state<string | null>(null);
@@ -72,6 +73,11 @@
     error = null;
     try {
       flowState = await loadAccountFlowState(trellisUrl, activeFlowId);
+      if (flowState.status === "active") {
+        username = flowState.username ?? username;
+        name = flowState.target?.name ?? name;
+        email = flowState.target?.email ?? email;
+      }
     } catch (caught) {
       error = caught instanceof Error ? caught.message : String(caught);
     } finally {
@@ -92,7 +98,13 @@
         password,
         name,
         email,
+        ...(browserFlowId ? { browserFlowId } : {}),
       });
+      if (completion.browserFlowId) {
+        window.location.replace(
+          `/login?flowId=${encodeURIComponent(completion.browserFlowId)}`,
+        );
+      }
     } catch (caught) {
       error = caught instanceof Error ? caught.message : String(caught);
     } finally {
@@ -101,6 +113,7 @@
   }
 
   onMount(() => {
+    browserFlowId = new URL(window.location.href).searchParams.get("browserFlowId");
     void loadFlow();
   });
 </script>
@@ -131,19 +144,11 @@
         <div>
           <h1 class="text-xl font-semibold tracking-[-0.025em] text-base-content">Admin account ready</h1>
           <p class="portal-copy mt-2 text-sm">
-            The first admin account is ready. You can now sign in and
-            finish configuring Trellis.
+            The administrator account is ready.
           </p>
         </div>
 
-        <div class="portal-subtle-panel rounded-box p-4 text-sm leading-6 text-base-content/70">
-          <p class="portal-section-label">Admin user</p>
-          <p class="mono mt-1 break-all text-base-content">{completion.userId}</p>
-        </div>
-
-        <p class="portal-copy text-sm">
-          Open a Trellis app login page to start a new sign-in flow.
-        </p>
+        <a class="btn btn-primary w-full" href="/console">Open admin console</a>
       {:else if flowState?.status === "expired"}
         <div>
           <h1 class="text-xl font-semibold tracking-[-0.025em] text-base-content">Bootstrap link expired</h1>
@@ -160,9 +165,13 @@
         </div>
       {:else}
         <div>
-          <h1 class="text-xl font-semibold tracking-[-0.025em] text-base-content">Create the first admin</h1>
+          <h1 class="text-xl font-semibold tracking-[-0.025em] text-base-content">
+            {active?.mode === "edit" ? "Edit the administrator" : "Create the administrator"}
+          </h1>
           <p class="portal-copy mt-2 text-sm">
-            Choose local credentials for the built-in administrator account.
+            {active?.mode === "edit"
+              ? "Change the built-in administrator username and password. Existing sessions will be revoked."
+              : "Choose local credentials for the built-in administrator account."}
           </p>
         </div>
 
@@ -210,33 +219,35 @@
             />
           </label>
 
-          <label class="form-control gap-1.5">
-            <span class="label-text text-sm font-medium text-base-content">Name <span class="font-normal text-base-content/45">optional</span></span>
-            <input
-              class="input input-bordered w-full"
-              autocomplete="name"
-              disabled={submitting || !flowId}
-              bind:value={name}
-            />
-          </label>
+          {#if active?.mode !== "edit"}
+            <label class="form-control gap-1.5">
+              <span class="label-text text-sm font-medium text-base-content">Name <span class="font-normal text-base-content/45">optional</span></span>
+              <input
+                class="input input-bordered w-full"
+                autocomplete="name"
+                disabled={submitting || !flowId}
+                bind:value={name}
+              />
+            </label>
 
-          <label class="form-control gap-1.5">
-            <span class="label-text text-sm font-medium text-base-content">Email <span class="font-normal text-base-content/45">optional</span></span>
-            <input
-              class="input input-bordered w-full"
-              autocomplete="email"
-              disabled={submitting || !flowId}
-              type="email"
-              bind:value={email}
-            />
-          </label>
+            <label class="form-control gap-1.5">
+              <span class="label-text text-sm font-medium text-base-content">Email <span class="font-normal text-base-content/45">optional</span></span>
+              <input
+                class="input input-bordered w-full"
+                autocomplete="email"
+                disabled={submitting || !flowId}
+                type="email"
+                bind:value={email}
+              />
+            </label>
+          {/if}
 
           <button class="btn btn-primary btn-block" disabled={!canSubmit} type="submit">
             {#if submitting}
               <span class="loading loading-spinner loading-sm" aria-hidden="true"></span>
-              Creating admin...
+              Saving administrator...
             {:else}
-              Create admin account
+              {active?.mode === "edit" ? "Update administrator" : "Create administrator"}
             {/if}
           </button>
         </form>

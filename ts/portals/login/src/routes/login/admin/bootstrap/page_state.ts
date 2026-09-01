@@ -14,18 +14,21 @@ export type AdminBootstrapInput = {
   password: string;
   name: string;
   email: string;
+  browserFlowId?: string;
 };
 
 /** Successful admin bootstrap completion response. */
 export type AdminBootstrapSuccess = {
-  status: "created";
+  status: "created" | "updated";
   userId: string;
+  browserFlowId?: string;
 };
 
 /** Backend error details used for user-facing bootstrap messages. */
 export type BootstrapErrorDetails = {
   status: number;
   error: string | null;
+  message: string | null;
 };
 
 /** Minimal fetch-compatible function used by the completion helper. */
@@ -65,14 +68,31 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function successBody(value: unknown): AdminBootstrapSuccess | null {
   if (!isRecord(value)) return null;
-  if (value.status !== "created") return null;
+  if (value.status !== "created" && value.status !== "updated") return null;
   if (typeof value.userId !== "string") return null;
-  return { status: "created", userId: value.userId };
+  return {
+    status: value.status,
+    userId: value.userId,
+    ...(typeof value.browserFlowId === "string"
+      ? { browserFlowId: value.browserFlowId }
+      : {}),
+  };
 }
 
-function responseErrorBody(value: unknown): string | null {
-  if (!isRecord(value)) return null;
-  return typeof value.error === "string" ? value.error : null;
+function responseErrorBody(
+  value: unknown,
+): Omit<BootstrapErrorDetails, "status"> {
+  if (!isRecord(value)) return { error: null, message: null };
+  if (typeof value.error === "string") {
+    return { error: value.error, message: null };
+  }
+  if (!isRecord(value.error)) return { error: null, message: null };
+  return {
+    error: typeof value.error.code === "string" ? value.error.code : null,
+    message: typeof value.error.message === "string"
+      ? value.error.message
+      : null,
+  };
 }
 
 async function parseJson(response: Response): Promise<unknown> {
@@ -93,6 +113,7 @@ export function adminBootstrapFlowId(url: URL): string | null {
 export function formatAdminBootstrapError(
   details: BootstrapErrorDetails,
 ): string {
+  if (details.message) return details.message;
   if (details.error && details.error in KNOWN_ERROR_MESSAGES) {
     return KNOWN_ERROR_MESSAGES[details.error];
   }
@@ -124,6 +145,7 @@ export async function completeAdminBootstrap(
   const email = input.email.trim();
   if (name) payload.name = name;
   if (email) payload.email = email;
+  if (input.browserFlowId) payload.browserFlowId = input.browserFlowId;
 
   const response = await fetcher(url, {
     method: "POST",
@@ -143,7 +165,7 @@ export async function completeAdminBootstrap(
   throw new Error(
     formatAdminBootstrapError({
       status: response.status,
-      error: responseErrorBody(body),
+      ...responseErrorBody(body),
     }),
   );
 }

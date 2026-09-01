@@ -82,8 +82,6 @@ import {
   StateAdminListRequestSchema,
   StateAdminListResponseSchema,
 } from "@trellis/apis/trellis.state";
-import { API_DIGEST as AUTH_API_DIGEST } from "@trellis/apis/trellis.auth";
-import { API_DIGEST as STATE_API_DIGEST } from "@trellis/apis/trellis.state";
 import administrationParticipantSource from "../../../../../rust/crates/trellis/artifacts/trellis.admin.participant.json" with {
   type: "json",
 };
@@ -131,8 +129,6 @@ const adminDescriptors = defineAppContract(() => ({
 const administrationParticipant = structuredClone(
   administrationParticipantSource,
 );
-administrationParticipant.uses.required.auth.apiDigest = AUTH_API_DIGEST;
-administrationParticipant.uses.required.state.apiDigest = STATE_API_DIGEST;
 const administrationParticipantDigest = participantDigest(
   administrationParticipant,
 );

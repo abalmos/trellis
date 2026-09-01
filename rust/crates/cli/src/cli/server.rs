@@ -15,9 +15,9 @@ pub struct ServerArgs {
     /// Use an external NATS server at this URL instead of managing a local one.
     #[arg(long, conflicts_with_all = ["nats_binary", "cache_dir", "nats_state_dir"])]
     pub nats: Option<String>,
-    /// Replace an existing pending first-administrator bootstrap URL.
+    /// Issue a one-time password-reset URL for the sole active administrator.
     #[arg(long)]
-    pub rotate_first_admin: bool,
+    pub reset_admin: bool,
     /// Validate configuration and authorization trust, then exit.
     #[arg(long)]
     pub check: bool,

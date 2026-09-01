@@ -239,15 +239,20 @@ The built-in portal is compiled reproducibly from `ts/portals/login` and
 embedded in the Rust binary. A development-only `TRELLIS_BUILTIN_PORTAL_DIR`
 override may serve local assets.
 
-When no accepted unexpired administrator authority exists, startup creates one
-single-use account flow. Only its hash is stored. Ordinary restarts reuse the
-same unexpired pending flow without rotating or reprinting its secret. Operators
-may explicitly replace it with `trellis-server --rotate-first-admin`; rotation
-atomically revokes the old pending flow. Local-password and configured OIDC
-completion both create the account, identity, and exact built-in administration
-participant authority in one transaction, with a durable active-admin check that
-prevents concurrent double completion. Mandatory admin grants are derived from
-that artifact rather than assumed or stored as a mutable group.
+Trellis records one durable bootstrap-administrator principal. Before that
+principal exists, startup creates one single-use `admin_account` flow; ordinary
+restarts reuse its unexpired pending flow without rotating or reprinting the
+secret. Local-password and configured OIDC completion create the principal,
+identity, and exact built-in administration participant authority in one
+transaction. That canonical authority is permanent and cannot be revoked or
+downgraded; additional administrators remain independently manageable.
+
+`trellis server ... --reset-admin` atomically revokes any previous pending
+administrator-account flow and emits a new one-time URL. Before initial setup it
+creates the bootstrap administrator. Afterwards it edits the same principal's
+local username and password, restores its canonical authority, and revokes its
+existing sessions and authorization contexts. It never selects among accounts
+that later receive administrative authority.
 
 ## NATS Auth Callout
 

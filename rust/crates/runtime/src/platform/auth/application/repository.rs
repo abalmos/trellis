@@ -2,8 +2,8 @@ use async_trait::async_trait;
 use serde_json::Value;
 
 use super::super::{
-    AccountFlowRecord, AuthorityDecisionRecord, AuthorityProposalRecord, AuthorizationStateError,
-    DeploymentProfileRecord, DeploymentRecord, DesiredAuthorityRecord,
+    AccountFlowKind, AccountFlowRecord, AuthorityDecisionRecord, AuthorityProposalRecord,
+    AuthorizationStateError, DeploymentProfileRecord, DeploymentRecord, DesiredAuthorityRecord,
     DeviceActivationReviewRecord, DeviceActivationReviewState, DeviceDelegationRecord,
     DeviceProvisioningSecretRecord, DeviceRecord, IdempotencyResultRecord, IdentityAuthorityRecord,
     LocalCredentialRecord, LoginPortalRecord, LoginSettingsRecord, PortalRouteRecord,
@@ -70,12 +70,18 @@ pub(crate) struct PasswordResetCompletion {
     pub token_hash: String,
     /// Expected pending flow version.
     pub expected_flow_version: u64,
+    /// Expected account-flow kind.
+    pub flow_kind: AccountFlowKind,
     /// Credential version observed before hashing; `None` requires first install.
     pub expected_credential_version: Option<u64>,
     /// Complete replacement credential with version `current + 1`.
     pub replacement: LocalCredentialRecord,
     /// Local identity installed atomically with a first credential.
     pub identity: Option<ProviderIdentityLink>,
+    /// Canonical authority to restore for bootstrap-administrator recovery.
+    pub authority: Option<IdentityAuthorityRecord>,
+    /// Expected current authority version when restoring authority.
+    pub expected_authority_version: Option<u64>,
     /// Completion time in Unix milliseconds.
     pub consumed_at: i64,
     /// Durable proof claim and replay result.
@@ -544,13 +550,14 @@ pub(crate) trait AccountRepository: Send + Sync {
     ) -> Result<LocalCredentialRecord, AuthorizationStateError>;
 
     /// Create the startup first-admin flow, or return the existing unexpired pending flow.
-    async fn replace_first_admin_flow(
+    async fn replace_admin_account_flow(
         &self,
         flow: AccountFlowRecord,
         now: i64,
         rotate: bool,
     ) -> Result<Option<AccountFlowRecord>, AuthorizationStateError>;
 
+    /// Revoke prior pending password resets for one principal and insert the replacement.
     /// Create one pending flow with a globally unique token hash.
     async fn create_account_flow(
         &self,

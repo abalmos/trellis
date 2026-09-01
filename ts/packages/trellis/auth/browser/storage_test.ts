@@ -63,3 +63,16 @@ Deno.test("browser trust updates are atomic across concurrent tabs", async () =>
   assertEquals((await first.load())?.trust.minimumManifestGeneration, 8);
   await first.resetTrust();
 });
+
+Deno.test("browser trust state is isolated by opaque scope", async () => {
+  const origin = `https://${ulid()}.example.com`;
+  const first = new BrowserAuthorizationContextStore(`${origin}:participant-a`);
+  const second = new BrowserAuthorizationContextStore(
+    `${origin}:participant-b`,
+  );
+  await first.commit(state(7, "manifest-a"));
+  await second.commit(state(8, "manifest-b"));
+
+  assertEquals((await first.load())?.trust.minimumManifestGeneration, 7);
+  assertEquals((await second.load())?.trust.minimumManifestGeneration, 8);
+});

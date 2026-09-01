@@ -1,4 +1,5 @@
 use axum::body::Body;
+use axum::extract::State;
 use axum::http::header::{
     CONTENT_SECURITY_POLICY, COOKIE, ORIGIN, REFERRER_POLICY, X_CONTENT_TYPE_OPTIONS,
     X_FRAME_OPTIONS,
@@ -16,6 +17,27 @@ use url::Url;
 use super::super::ephemeral::AuthOAuthState;
 use super::super::{LoginPortalRecord, LoginSettingsRecord};
 use super::{digest_parts, HttpError};
+
+const CONTENT_SECURITY_POLICY_PREFIX: &str = "default-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'";
+
+pub(super) fn content_security_policy(
+    websocket_nats_servers: &[String],
+) -> Result<HeaderValue, url::ParseError> {
+    let mut origins = websocket_nats_servers
+        .iter()
+        .map(|server| Url::parse(server).map(|url| url.origin().ascii_serialization()))
+        .collect::<Result<Vec<_>, _>>()?;
+    origins.sort();
+    origins.dedup();
+    Ok(HeaderValue::from_str(&format!(
+        "{CONTENT_SECURITY_POLICY_PREFIX}{}",
+        origins
+            .iter()
+            .map(|origin| format!(" {origin}"))
+            .collect::<String>()
+    ))
+    .expect("URL origins produce a valid CSP header"))
+}
 
 pub(super) fn validate_redirect(
     redirect: &str,
@@ -140,7 +162,11 @@ pub(super) fn require_selected_portal_origin(
     )
 }
 
-pub(super) async fn security_headers(request: Request<Body>, next: Next) -> Response {
+pub(super) async fn security_headers(
+    State(content_security_policy): State<HeaderValue>,
+    request: Request<Body>,
+    next: Next,
+) -> Response {
     let mut response = next.run(request).await;
     let headers = response.headers_mut();
     headers.insert(X_CONTENT_TYPE_OPTIONS, HeaderValue::from_static("nosniff"));
@@ -150,11 +176,33 @@ pub(super) async fn security_headers(request: Request<Body>, next: Next) -> Resp
         HeaderName::from_static("permissions-policy"),
         HeaderValue::from_static("camera=(), microphone=(), geolocation=()"),
     );
-    headers.insert(
-        CONTENT_SECURITY_POLICY,
-        HeaderValue::from_static(
-            "default-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'",
-        ),
-    );
+    headers.insert(CONTENT_SECURITY_POLICY, content_security_policy);
     response
+}
+
+#[cfg(test)]
+mod tests {
+    use super::content_security_policy;
+
+    #[test]
+    fn content_security_policy_allows_wasm_without_javascript_eval() {
+        let policy = content_security_policy(&[]).expect("content security policy");
+        let policy = policy.to_str().expect("ASCII content security policy");
+        assert!(policy.contains("'wasm-unsafe-eval'"));
+        assert!(!policy.contains(" 'unsafe-eval'"));
+    }
+
+    #[test]
+    fn content_security_policy_allows_only_configured_websocket_origins() {
+        let policy = content_security_policy(&[
+            "wss://nats.example.com/client".to_owned(),
+            "ws://localhost:8080".to_owned(),
+            "ws://localhost:8080/duplicate".to_owned(),
+        ])
+        .expect("content security policy");
+        assert!(policy
+            .to_str()
+            .expect("ASCII content security policy")
+            .ends_with(" ws://localhost:8080 wss://nats.example.com"));
+    }
 }

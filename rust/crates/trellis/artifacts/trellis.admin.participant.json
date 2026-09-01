@@ -1,100 +1,136 @@
 {
   "format": "trellis.participant.v1",
   "id": "trellis-platform-administration",
-  "displayName": "Trellis Platform Administration",
-  "description": "Built-in participant for authenticated Trellis administration clients.",
-  "kind": "agent",
-  "schemas": {},
-  "implements": {},
+  "displayName": "Trellis Console",
+  "description": "Drive the Trellis administration client's contract-declared platform access.",
+  "kind": "app",
   "uses": {
     "required": {
-      "auth": {
+      "trellis.auth@v1": {
         "api": "trellis.auth@v1",
         "apiDigest": "Fs_nA37wXgMpLRfB7IyYDhIEDUdSl3PdNp6ehnXcV1A",
         "rpc": {
           "call": [
-            "Auth.Sessions.Me",
-            "Auth.Sessions.Logout",
-            "Auth.Sessions.List",
-            "Auth.Sessions.Revoke",
-            "Auth.Connections.List",
-            "Auth.Connections.Kick",
-            "Auth.Users.Resolve",
-            "Auth.Users.List",
-            "Auth.Users.Get",
-            "Auth.Users.Create",
-            "Auth.Users.Update",
-            "Auth.Users.Password.Change",
-            "Auth.Users.PasswordReset.Create",
-            "Auth.Users.IdentityLink.Create",
-            "Auth.UserIdentities.List",
-            "Auth.UserIdentities.Unlink",
-            "Auth.IdentityAuthority.List",
-            "Auth.IdentityAuthority.Revoke",
-            "Auth.Deployments.Create",
-            "Auth.Deployments.List",
-            "Auth.Deployments.Enable",
-            "Auth.Deployments.Disable",
-            "Auth.Deployments.Remove",
-            "Auth.ServiceInstances.Provision",
-            "Auth.ServiceInstances.List",
-            "Auth.ServiceInstances.Enable",
-            "Auth.ServiceInstances.Disable",
-            "Auth.ServiceInstances.Remove",
-            "Auth.DeploymentAuthority.List",
-            "Auth.DeploymentAuthority.Get",
-            "Auth.DeploymentAuthority.Plans.List",
-            "Auth.DeploymentAuthority.Plans.Get",
-            "Auth.DeploymentAuthority.Plan",
-            "Auth.DeploymentAuthority.AcceptUpdate",
-            "Auth.DeploymentAuthority.AcceptMigration",
-            "Auth.DeploymentAuthority.Reject",
-            "Auth.DeploymentAuthority.Reconcile",
-            "Auth.Devices.Provision",
-            "Auth.Devices.List",
-            "Auth.Devices.Enable",
-            "Auth.Devices.Disable",
-            "Auth.Devices.Remove",
-            "Auth.Devices.ConnectInfo.Get",
-            "Auth.DeviceUserAuthorities.List",
-            "Auth.DeviceUserAuthorities.Revoke",
-            "Auth.DeviceUserAuthorities.Reviews.List",
-            "Auth.DeviceUserAuthorities.Reviews.Decide",
-            "Auth.Portals.List",
-            "Auth.Portals.Get",
-            "Auth.Portals.Put",
-            "Auth.Portals.Remove",
-            "Auth.Portals.LoginSettings.Get",
-            "Auth.Portals.LoginSettings.Update",
-            "Auth.Portals.Routes.Put",
-            "Auth.Portals.Routes.Remove",
-            "Auth.Portals.GrantOverrides.List",
-            "Auth.Portals.GrantOverrides.Put",
-            "Auth.Portals.GrantOverrides.Remove",
+            "Auth.Capabilities.List",
             "Auth.CapabilityGroups.Delete",
             "Auth.CapabilityGroups.Get",
             "Auth.CapabilityGroups.List",
             "Auth.CapabilityGroups.Put",
-            "Auth.Capabilities.List"
+            "Auth.Connections.Kick",
+            "Auth.Connections.List",
+            "Auth.DeploymentAuthority.AcceptMigration",
+            "Auth.DeploymentAuthority.AcceptUpdate",
+            "Auth.DeploymentAuthority.Get",
+            "Auth.DeploymentAuthority.List",
+            "Auth.DeploymentAuthority.Plan",
+            "Auth.DeploymentAuthority.Plans.Get",
+            "Auth.DeploymentAuthority.Plans.List",
+            "Auth.DeploymentAuthority.Reconcile",
+            "Auth.DeploymentAuthority.Reject",
+            "Auth.Deployments.Create",
+            "Auth.Deployments.Disable",
+            "Auth.Deployments.Enable",
+            "Auth.Deployments.List",
+            "Auth.Deployments.Remove",
+            "Auth.DeviceUserAuthorities.List",
+            "Auth.DeviceUserAuthorities.Reviews.Decide",
+            "Auth.DeviceUserAuthorities.Reviews.List",
+            "Auth.DeviceUserAuthorities.Revoke",
+            "Auth.Devices.Disable",
+            "Auth.Devices.Enable",
+            "Auth.Devices.List",
+            "Auth.Devices.Provision",
+            "Auth.Devices.Remove",
+            "Auth.IdentityAuthority.Get",
+            "Auth.IdentityAuthority.List",
+            "Auth.IdentityAuthority.Revoke",
+            "Auth.IdentityGrants.List",
+            "Auth.IdentityGrants.Revoke",
+            "Auth.Portals.Get",
+            "Auth.Portals.GrantOverrides.List",
+            "Auth.Portals.GrantOverrides.Put",
+            "Auth.Portals.GrantOverrides.Remove",
+            "Auth.Portals.List",
+            "Auth.Portals.LoginSettings.Get",
+            "Auth.Portals.LoginSettings.Update",
+            "Auth.Portals.Put",
+            "Auth.Portals.Remove",
+            "Auth.Portals.Routes.Put",
+            "Auth.Portals.Routes.Remove",
+            "Auth.ServiceInstances.Disable",
+            "Auth.ServiceInstances.Enable",
+            "Auth.ServiceInstances.List",
+            "Auth.ServiceInstances.Provision",
+            "Auth.ServiceInstances.Remove",
+            "Auth.Sessions.List",
+            "Auth.Sessions.Logout",
+            "Auth.Sessions.Me",
+            "Auth.Sessions.Revoke",
+            "Auth.UserIdentities.List",
+            "Auth.Users.Create",
+            "Auth.Users.IdentityLink.Create",
+            "Auth.Users.List",
+            "Auth.Users.Password.Change",
+            "Auth.Users.PasswordReset.Create",
+            "Auth.Users.Update"
           ]
         }
       },
-      "state": {
+      "trellis.jobs@v1": {
+        "api": "trellis.jobs@v1",
+        "apiDigest": "qVQbpA0Lhmv3S4TcDfkvg4Pl5OvXCKEOrZUpt6Yq524",
+        "rpc": {
+          "call": [
+            "Jobs.Cancel",
+            "Jobs.DismissDLQ",
+            "Jobs.Inspect",
+            "Jobs.ListDLQ",
+            "Jobs.ListServices",
+            "Jobs.Metrics",
+            "Jobs.Query",
+            "Jobs.ReplayDLQ",
+            "Jobs.Retry"
+          ]
+        },
+        "feeds": {
+          "subscribe": ["Jobs.Watch"]
+        }
+      },
+      "trellis.state@v1": {
         "api": "trellis.state@v1",
         "apiDigest": "qs1u5DVKbglPE25fTx77AadXTT-MDwSkmHVFJlCwE2A",
         "rpc": {
-          "call": [
-            "State.Admin.Delete",
-            "State.Admin.Get",
-            "State.Admin.List"
-          ]
+          "call": ["State.Admin.Delete", "State.Admin.Get", "State.Admin.List"]
         }
       }
     },
-    "optional": {}
-  },
-  "state": {},
-  "jobQueues": {},
-  "eventConsumers": {},
-  "resources": {}
+    "optional": {
+      "trellis.eventlog@v1": {
+        "api": "trellis.eventlog@v1",
+        "apiDigest": "ldHKKyQCxcEYuuIRjwPa9CZMEKV8mNUyGkAtSh9MzZ8",
+        "rpc": {
+          "call": [
+            "EventLog.Consumers.Inspect",
+            "EventLog.Consumers.Query",
+            "EventLog.Inspect",
+            "EventLog.Metrics",
+            "EventLog.Query"
+          ]
+        },
+        "feeds": {
+          "subscribe": ["EventLog.Watch"]
+        }
+      },
+      "trellis.health@v1": {
+        "api": "trellis.health@v1",
+        "apiDigest": "didAZZoUrnCyj4EF01tWRMkd2UlHrMvYnwWyGmBg5Uk",
+        "rpc": {
+          "call": ["Health.Inspect", "Health.Metrics", "Health.Query"]
+        },
+        "feeds": {
+          "subscribe": ["Health.Watch"]
+        }
+      }
+    }
+  }
 }

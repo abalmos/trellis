@@ -8,11 +8,12 @@ use crate::platform::auth::application::repository::{
     ProviderIdentityUnlink, SessionCreation, SessionRepository,
 };
 use crate::platform::auth::{
-    AccountFlowKind, AccountFlowRecord, AccountFlowState, AuthorityDecision, AuthorityRepository,
-    AuthorityState, AuthorizationStateError, DesiredAuthorityRecord, IdempotencyResultRecord,
-    IdentityAuthorityRecord, LocalCredentialRecord, NewSession, PostCommitActionKind,
-    PostCommitActionRecord, PrincipalKind, PrincipalRecord, PrincipalState, ProviderIdentityLink,
-    SessionRecord, SessionState, SqliteAuthorizationStore,
+    AccountFlowKind, AccountFlowRecord, AccountFlowState, AuthService, AuthServiceConfig,
+    AuthorityDecision, AuthorityRepository, AuthorityState, AuthorizationStateError,
+    DesiredAuthorityRecord, FirstAdminAuthorityTarget, FirstAdminRegistration,
+    IdempotencyResultRecord, IdentityAuthorityRecord, LocalCredentialRecord, NewSession,
+    PostCommitActionKind, PostCommitActionRecord, PrincipalKind, PrincipalRecord, PrincipalState,
+    ProviderIdentityLink, SessionRecord, SessionState, SqliteAuthorizationStore,
 };
 
 pub(super) async fn exercise_account_flows(
@@ -54,7 +55,7 @@ pub(super) async fn exercise_account_flows(
         .await?;
     let old_first_admin = AccountFlowRecord {
         flow_id: "flow_first_admin_old".to_owned(),
-        kind: AccountFlowKind::FirstAdmin,
+        kind: AccountFlowKind::AdminAccount,
         token_hash: digest(30),
         target_principal_id: None,
         target_provider_id: None,
@@ -68,7 +69,7 @@ pub(super) async fn exercise_account_flows(
     };
     assert_eq!(
         store
-            .replace_first_admin_flow(old_first_admin.clone(), NOW, false)
+            .replace_admin_account_flow(old_first_admin.clone(), NOW, false)
             .await?,
         Some(old_first_admin.clone())
     );
@@ -77,7 +78,7 @@ pub(super) async fn exercise_account_flows(
     duplicate_first_admin.token_hash = digest(31);
     assert_eq!(
         store
-            .replace_first_admin_flow(duplicate_first_admin, NOW + 1, false)
+            .replace_admin_account_flow(duplicate_first_admin, NOW + 1, false)
             .await?
             .ok_or("pending first-admin flow missing")?,
         old_first_admin
@@ -144,12 +145,12 @@ pub(super) async fn exercise_account_flows(
     blocked_flow.token_hash = digest(32);
     assert_eq!(
         store
-            .replace_first_admin_flow(blocked_flow, NOW + 2, false)
+            .replace_admin_account_flow(blocked_flow, NOW + 2, false)
             .await?,
         None
     );
 
-    let initial_password_flow = AccountFlowRecord {
+    let replacement_password_flow = AccountFlowRecord {
         flow_id: "flow_initial_password".to_owned(),
         kind: AccountFlowKind::PasswordReset,
         token_hash: digest(247),
@@ -165,8 +166,8 @@ pub(super) async fn exercise_account_flows(
     };
     store
         .create_account_flow(AccountFlowCreation {
-            flow: initial_password_flow.clone(),
-            idempotency: proof(248, "account-flow.create"),
+            flow: replacement_password_flow.clone(),
+            idempotency: proof(249, "account-flow.create"),
             actions: Vec::new(),
         })
         .await?;
@@ -191,11 +192,14 @@ pub(super) async fn exercise_account_flows(
     assert!(matches!(
         store
             .complete_password_reset(PasswordResetCompletion {
-                token_hash: initial_password_flow.token_hash,
+                token_hash: replacement_password_flow.token_hash,
                 expected_flow_version: 1,
+                flow_kind: AccountFlowKind::PasswordReset,
                 expected_credential_version: None,
                 replacement: initial_credential.clone(),
                 identity: Some(initial_identity.clone()),
+                authority: None,
+                expected_authority_version: None,
                 consumed_at: NOW + 3,
                 idempotency: proof(250, "password-reset.complete"),
                 actions: Vec::new(),
@@ -212,6 +216,54 @@ pub(super) async fn exercise_account_flows(
             .get_provider_identity("local", "first-admin-local")
             .await?,
         Some(initial_identity)
+    );
+
+    let service = AuthService::new(store.clone(), AuthServiceConfig::default())?;
+    let authority_target = FirstAdminAuthorityTarget {
+        participant_id: app_fixture.binding.participant_id.clone(),
+        participant_artifact_digest: app_fixture.binding.artifact_digest.clone(),
+        participant_needs_digest: app_fixture.binding.needs_digest.clone(),
+    };
+    let reset = service
+        .rotate_admin_account_flow("https://auth.example/base", &authority_target, NOW + 4)
+        .await?
+        .expect("admin reset flow");
+    let reset_url = url::Url::parse(reset.bootstrap_url.as_deref().expect("admin reset URL"))?;
+    let reset_token = reset_url
+        .query_pairs()
+        .find_map(|(key, value)| (key == "adminAccountToken").then(|| value.into_owned()))
+        .expect("admin reset token");
+    service
+        .complete_first_admin(FirstAdminRegistration {
+            token: reset_token,
+            expected_flow_version: 1,
+            username: "renamed-admin".to_owned(),
+            password: "replacement password".to_owned(),
+            display_name: "First Administrator".to_owned(),
+            email: None,
+            image_url: None,
+            participant_id: authority_target.participant_id.clone(),
+            participant_artifact_digest: authority_target.participant_artifact_digest.clone(),
+            participant_needs_digest: authority_target.participant_needs_digest.clone(),
+            grant_set: app_fixture.required_grants.clone(),
+            authority_expires_at: None,
+            completed_at: NOW + 5,
+            idempotency: proof(251, "admin-account.complete"),
+            actions: Vec::new(),
+        })
+        .await?;
+    assert!(matches!(
+        service
+            .authenticate_local("renamed-admin", "replacement password", NOW + 6)
+            .await?,
+        crate::platform::auth::LocalAuthentication::Authenticated { principal }
+            if principal.principal_id == admin.principal_id
+    ));
+    assert_eq!(
+        service
+            .authenticate_local("first-admin-local", "initial-password-hash", NOW + 6)
+            .await?,
+        crate::platform::auth::LocalAuthentication::Denied
     );
 
     let password_flow = AccountFlowRecord {
@@ -253,9 +305,12 @@ pub(super) async fn exercise_account_flows(
             .complete_password_reset(PasswordResetCompletion {
                 token_hash: password_flow.token_hash.clone(),
                 expected_flow_version: 1,
+                flow_kind: AccountFlowKind::PasswordReset,
                 expected_credential_version: Some(1),
                 replacement: replacement.clone(),
                 identity: None,
+                authority: None,
+                expected_authority_version: None,
                 consumed_at: NOW + 3,
                 idempotency: password_proof.clone(),
                 actions: vec![conflicting_action, password_kick.clone()],
@@ -286,9 +341,12 @@ pub(super) async fn exercise_account_flows(
     let password_command = PasswordResetCompletion {
         token_hash: password_flow.token_hash.clone(),
         expected_flow_version: 1,
+        flow_kind: AccountFlowKind::PasswordReset,
         expected_credential_version: Some(1),
         replacement: replacement.clone(),
         identity: None,
+        authority: None,
+        expected_authority_version: None,
         consumed_at: NOW + 3,
         idempotency: password_proof.clone(),
         actions: vec![password_action.clone(), password_kick],
@@ -324,9 +382,12 @@ pub(super) async fn exercise_account_flows(
     let mut mismatch_command = PasswordResetCompletion {
         token_hash: password_flow.token_hash,
         expected_flow_version: 2,
+        flow_kind: AccountFlowKind::PasswordReset,
         expected_credential_version: Some(2),
         replacement: credential.clone(),
         identity: None,
+        authority: None,
+        expected_authority_version: None,
         consumed_at: NOW + 4,
         idempotency: mismatched_proof,
         actions: Vec::new(),

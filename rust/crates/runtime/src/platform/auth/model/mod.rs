@@ -196,8 +196,8 @@ pub struct PortalRouteRecord {
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AccountFlowKind {
-    /// Bootstrap the first active administrator.
-    FirstAdmin,
+    /// Create or recover the bootstrap administrator account.
+    AdminAccount,
     /// Link another provider identity to an existing account.
     IdentityLink,
     /// Replace a local password after proof of account control.

@@ -45,8 +45,8 @@ pub struct RuntimeOptions {
     pub mode: RuntimeMode,
     /// Path to the TOML runtime config file.
     pub config_path: PathBuf,
-    /// Explicitly rotate an unexpired pending first-administrator bootstrap flow.
-    pub rotate_first_admin: bool,
+    /// Issue a one-time password-reset URL for the sole active administrator.
+    pub reset_admin: bool,
     /// Optional replacement for the configured NATS endpoints (the managed local NATS
     /// server used by `trellis server`). `None` keeps the configured values.
     pub nats_override: Option<NatsEndpointOverride>,
@@ -551,7 +551,7 @@ pub(crate) struct RuntimeContext {
     /// Runtime mode selected for this process.
     pub(crate) mode: RuntimeMode,
     /// Whether startup must rotate the pending first-administrator bootstrap flow.
-    pub(crate) rotate_first_admin: bool,
+    pub(crate) reset_admin: bool,
     /// Optional replacement for the configured NATS endpoints (managed local NATS).
     pub(crate) nats_override: Option<NatsEndpointOverride>,
     /// SQLite stores opened for the selected subsystems.
@@ -637,7 +637,7 @@ pub async fn run(options: RuntimeOptions) -> Result<(), RuntimeError> {
     let result = run_owned(
         config,
         options.mode,
-        options.rotate_first_admin,
+        options.reset_admin,
         options.nats_override,
         trellis_nats.clone(),
         &mut ownership,
@@ -684,7 +684,7 @@ fn preserve_primary(
 async fn run_owned(
     config: RuntimeConfig,
     mode: RuntimeMode,
-    rotate_first_admin: bool,
+    reset_admin: bool,
     nats_override: Option<NatsEndpointOverride>,
     trellis_nats: async_nats::Client,
     ownership: &mut RuntimeOwnership,
@@ -697,7 +697,7 @@ async fn run_owned(
     let context = RuntimeContext {
         config,
         mode,
-        rotate_first_admin,
+        reset_admin,
         nats_override,
         stores,
         trellis_nats,
@@ -982,7 +982,7 @@ mod tests {
         let options = RuntimeOptions {
             mode: RuntimeMode::All,
             config_path: PathBuf::from("config.toml"),
-            rotate_first_admin: false,
+            reset_admin: false,
             nats_override: Some(NatsEndpointOverride {
                 servers: "nats://127.0.0.1:4222".to_string(),
                 websocket: Some("ws://127.0.0.1:8080".to_string()),

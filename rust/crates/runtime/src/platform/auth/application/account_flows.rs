@@ -166,8 +166,47 @@ pub struct CompleteIdentityLinkInput {
 
 impl<R> AuthService<R>
 where
-    R: AccountRepository + ContextRepository + Clone,
+    R: AccountRepository
+        + AuthorityEvidenceRepository
+        + AuthorityRepository
+        + ContextRepository
+        + Clone,
 {
+    async fn materialize_admin_authority(
+        &self,
+        authority_id: String,
+        principal_id: &str,
+        participant_id: &str,
+        participant_artifact_digest: &str,
+        participant_needs_digest: &str,
+        now: i64,
+    ) -> Result<(), AuthorizationStateError> {
+        let binding = self
+            .repository
+            .get_participant_binding(participant_id, participant_artifact_digest)
+            .await?
+            .ok_or_else(|| {
+                AuthorizationStateError::InvalidRecord(
+                    "administrator participant binding is missing".to_owned(),
+                )
+            })?;
+        let target = AuthorityTarget {
+            kind: AuthorityKind::Identity,
+            authority_id,
+        };
+        let scope = AuthorityEvidenceScope {
+            target: target.clone(),
+            participant_id: participant_id.to_owned(),
+            participant_artifact_digest: participant_artifact_digest.to_owned(),
+            participant_needs_digest: participant_needs_digest.to_owned(),
+        };
+        ensure_identity_resources(&self.repository, scope.clone(), &binding, principal_id, now)
+            .await?;
+        ensure_authority_dependencies(&self.repository, scope, &binding, now).await?;
+        self.authorization.reconcile_authority(&target, now).await?;
+        Ok(())
+    }
+
     /// Complete a first-administrator flow and reconcile its exact authority.
     ///
     /// # Errors
@@ -192,6 +231,81 @@ where
             ));
         }
         let token_hash = URL_SAFE_NO_PAD.encode(Sha256::digest(token));
+        let flow = self
+            .repository
+            .get_account_flow_by_hash(&token_hash)
+            .await?
+            .ok_or(AuthorizationStateError::StorageConflict)?;
+        if let Some(principal_id) = flow.target_principal_id.clone() {
+            let account = self
+                .user(&principal_id)
+                .await?
+                .ok_or(AuthorizationStateError::StorageConflict)?;
+            let current = self
+                .repository
+                .get_identity_authority(&principal_id, &input.participant_id)
+                .await?;
+            let authority = IdentityAuthorityRecord {
+                authority_id: current.as_ref().map_or_else(
+                    || format!("auth_{}", Ulid::new()),
+                    |authority| authority.authority_id.clone(),
+                ),
+                principal_id: principal_id.clone(),
+                participant_id: input.participant_id.clone(),
+                participant_artifact_digest: input.participant_artifact_digest.clone(),
+                accepted_needs_digest: input.participant_needs_digest.clone(),
+                desired_grant_set: input.grant_set.clone(),
+                desired_capabilities: vec!["admin".to_owned()],
+                state: AuthorityState::Accepted,
+                version: current
+                    .as_ref()
+                    .map_or(1, |authority| authority.version + 1),
+                created_at: current
+                    .as_ref()
+                    .map_or(input.completed_at, |authority| authority.created_at),
+                updated_at: input.completed_at,
+                expires_at: input.authority_expires_at,
+                decision: Some(AuthorityDecision {
+                    decided_at: input.completed_at,
+                    decided_by: "system:admin-account".to_owned(),
+                    reason: None,
+                }),
+            };
+            super::validation::validate_first_admin_authority(
+                &authority,
+                &account.principal,
+                input.completed_at,
+            )?;
+            let authority_id = authority.authority_id.clone();
+            let outcome = self
+                .complete_password_reset(CompletePasswordResetInput {
+                    token: input.token,
+                    expected_flow_version: input.expected_flow_version,
+                    username: Some(input.username),
+                    authority: Some(authority),
+                    password: input.password,
+                    consumed_at: input.completed_at,
+                    idempotency: input.idempotency,
+                    actions: input.actions,
+                })
+                .await?;
+            self.materialize_admin_authority(
+                authority_id,
+                &principal_id,
+                &input.participant_id,
+                &input.participant_artifact_digest,
+                &input.participant_needs_digest,
+                input.completed_at,
+            )
+            .await?;
+            return Ok(match outcome {
+                IdempotentOutcome::Applied(_) => IdempotentOutcome::Applied(FirstAdminAccount {
+                    principal: account.principal,
+                    profile: account.profile,
+                }),
+                IdempotentOutcome::Replayed(value) => IdempotentOutcome::Replayed(value),
+            });
+        }
         let username = normalize_username(&input.username)?;
         let (password_hash, hash_profile) =
             hash_password(&input.password, Some(self.config.password_min_length))?;
@@ -294,15 +408,15 @@ where
                 })?
                 .to_owned(),
         };
-        self.authorization
-            .reconcile_authority(
-                &AuthorityTarget {
-                    kind: AuthorityKind::Identity,
-                    authority_id,
-                },
-                input.completed_at,
-            )
-            .await?;
+        self.materialize_admin_authority(
+            authority_id,
+            &principal.principal_id,
+            &authority.participant_id,
+            &authority.participant_artifact_digest,
+            &authority.accepted_needs_digest,
+            input.completed_at,
+        )
+        .await?;
         Ok(match outcome {
             IdempotentOutcome::Applied(_) => {
                 IdempotentOutcome::Applied(FirstAdminAccount { principal, profile })
@@ -452,9 +566,9 @@ where
         super::validation::validate_idempotency_and_actions(&input.idempotency, &input.actions)?;
         super::super::domain::require_protocol_timestamp("createdAt", input.created_at)?;
         super::super::domain::require_protocol_timestamp("expiresAt", input.expires_at)?;
-        if input.kind == AccountFlowKind::FirstAdmin {
+        if input.kind == AccountFlowKind::AdminAccount {
             return Err(AuthorizationStateError::InvalidRecord(
-                "first-admin flows use ensure_first_admin_flow".to_owned(),
+                "administrator-account flows use ensure_admin_account_flow".to_owned(),
             ));
         }
         let mut secret = [0_u8; 32];
@@ -574,7 +688,7 @@ where
     ///
     /// Returns an invalid-record error for an invalid base URL or timestamp,
     /// and a repository or entropy error when the flow cannot be committed.
-    pub(crate) async fn ensure_first_admin_flow(
+    pub(crate) async fn ensure_admin_account_flow(
         &self,
         portal_base_url: &str,
         authority_target: &FirstAdminAuthorityTarget,
@@ -590,7 +704,7 @@ where
     ///
     /// Returns an invalid-record error for an invalid base URL or timestamp,
     /// and a repository or entropy error when rotation cannot be committed.
-    pub(crate) async fn rotate_first_admin_flow(
+    pub(crate) async fn rotate_admin_account_flow(
         &self,
         portal_base_url: &str,
         authority_target: &FirstAdminAuthorityTarget,
@@ -628,7 +742,7 @@ where
         let token_hash = URL_SAFE_NO_PAD.encode(Sha256::digest(secret));
         let flow = AccountFlowRecord {
             flow_id: format!("afl_{}", Ulid::new()),
-            kind: AccountFlowKind::FirstAdmin,
+            kind: AccountFlowKind::AdminAccount,
             token_hash: token_hash.clone(),
             target_principal_id: None,
             target_provider_id: None,
@@ -647,7 +761,7 @@ where
         super::validation::validate_account_flow(&flow)?;
         let stored = if let Some(stored) = self
             .repository
-            .replace_first_admin_flow(flow, now, rotate)
+            .replace_admin_account_flow(flow, now, rotate)
             .await?
         {
             stored
@@ -656,11 +770,11 @@ where
         };
         let created = stored.token_hash == token_hash;
         let bootstrap_url = if created {
-            bootstrap_url.set_path("/login/account/password");
+            bootstrap_url.set_path("/console/profile");
             bootstrap_url.set_query(None);
             bootstrap_url
                 .query_pairs_mut()
-                .append_pair("flowId", &token);
+                .append_pair("adminAccountToken", &token);
             Some(bootstrap_url.into())
         } else {
             None

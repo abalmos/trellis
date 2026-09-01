@@ -59,7 +59,7 @@ fn endpoint_override(args: &ServerArgs) -> NatsEndpointOverride {
         },
         None => NatsEndpointOverride {
             servers: format!("nats://127.0.0.1:{NATS_PORT}"),
-            websocket: Some(format!("ws://127.0.0.1:{NATS_WS_PORT}")),
+            websocket: Some(format!("ws://localhost:{NATS_WS_PORT}")),
         },
     }
 }
@@ -87,7 +87,7 @@ async fn run_runtime(
     trellis_runtime::run(RuntimeOptions {
         mode: args.mode,
         config_path: args.config.clone(),
-        rotate_first_admin: args.rotate_first_admin,
+        reset_admin: args.reset_admin,
         nats_override: Some(nats_override.clone()),
     })
     .await
@@ -255,7 +255,7 @@ mod tests {
             mode: trellis_runtime::RuntimeMode::All,
             config: PathBuf::from("config.toml"),
             nats: None,
-            rotate_first_admin: false,
+            reset_admin: false,
             check: false,
             cache_dir: None,
             nats_binary: None,
@@ -263,7 +263,7 @@ mod tests {
         };
         let override_ = endpoint_override(&args);
         assert_eq!(override_.servers, "nats://127.0.0.1:4222");
-        assert_eq!(override_.websocket.as_deref(), Some("ws://127.0.0.1:8080"));
+        assert_eq!(override_.websocket.as_deref(), Some("ws://localhost:8080"));
     }
 
     #[test]
@@ -272,7 +272,7 @@ mod tests {
             mode: trellis_runtime::RuntimeMode::All,
             config: PathBuf::from("config.toml"),
             nats: Some("nats://external.example:4222".to_string()),
-            rotate_first_admin: false,
+            reset_admin: false,
             check: false,
             cache_dir: None,
             nats_binary: None,
@@ -457,7 +457,7 @@ mod tests {
             mode: trellis_runtime::RuntimeMode::All,
             config: PathBuf::from("config.toml"),
             nats: None,
-            rotate_first_admin: false,
+            reset_admin: false,
             check: false,
             cache_dir: Some(cache_dir.clone()),
             nats_binary: Some(binary.clone()),

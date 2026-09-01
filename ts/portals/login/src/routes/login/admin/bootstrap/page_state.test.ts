@@ -2,8 +2,44 @@ import { assertEquals } from "@std/assert";
 
 import {
   adminBootstrapFlowId,
+  completeAdminBootstrap,
   formatAdminBootstrapError,
 } from "./page_state.ts";
+
+Deno.test("administrator completion carries the Console browser flow", async () => {
+  let submitted: unknown;
+  const result = await completeAdminBootstrap(
+    "http://trellis.example",
+    "admin-token",
+    {
+      username: "admin",
+      password: "secret-password",
+      name: "Admin",
+      email: "",
+      browserFlowId: "flow_console",
+    },
+    async (_input, init) => {
+      submitted = JSON.parse(String(init?.body));
+      return new Response(JSON.stringify({
+        status: "updated",
+        userId: "usr_admin",
+        browserFlowId: "flow_console",
+      }));
+    },
+  );
+
+  assertEquals(result, {
+    status: "updated",
+    userId: "usr_admin",
+    browserFlowId: "flow_console",
+  });
+  assertEquals(submitted, {
+    username: "admin",
+    password: "secret-password",
+    name: "Admin",
+    browserFlowId: "flow_console",
+  });
+});
 
 Deno.test("adminBootstrapFlowId reads a non-empty flow id", () => {
   assertEquals(
@@ -35,25 +71,44 @@ Deno.test("adminBootstrapFlowId treats missing and blank values as absent", () =
 
 Deno.test("formatAdminBootstrapError maps known backend errors", () => {
   assertEquals(
-    formatAdminBootstrapError({ status: 410, error: "flow_expired" }),
+    formatAdminBootstrapError({
+      status: 410,
+      error: "flow_expired",
+      message: null,
+    }),
     "This bootstrap request has expired. Start bootstrap again.",
   );
   assertEquals(
-    formatAdminBootstrapError({ status: 409, error: "local_identity_exists" }),
+    formatAdminBootstrapError({
+      status: 409,
+      error: "local_identity_exists",
+      message: null,
+    }),
     "That username is already in use. Choose a different username.",
   );
 });
 
 Deno.test("formatAdminBootstrapError keeps raw fallback for unknown errors", () => {
   assertEquals(
-    formatAdminBootstrapError({ status: 418, error: "teapot" }),
+    formatAdminBootstrapError({ status: 418, error: "teapot", message: null }),
     "Bootstrap failed (418): teapot",
   );
 });
 
 Deno.test("formatAdminBootstrapError keeps status fallback when error body is absent", () => {
   assertEquals(
-    formatAdminBootstrapError({ status: 500, error: null }),
+    formatAdminBootstrapError({ status: 500, error: null, message: null }),
     "Bootstrap failed with status 500.",
+  );
+});
+
+Deno.test("formatAdminBootstrapError displays safe validation messages", () => {
+  assertEquals(
+    formatAdminBootstrapError({
+      status: 400,
+      error: "password_unchanged",
+      message: "New password must differ from the current password.",
+    }),
+    "New password must differ from the current password.",
   );
 });
