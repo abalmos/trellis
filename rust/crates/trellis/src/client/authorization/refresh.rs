@@ -228,6 +228,7 @@ pub(crate) fn spawn_authorization_context_refresh_task(
     contexts: Arc<AuthorizationContextCache>,
     auth: Arc<SessionAuth>,
     nats: async_nats::Client,
+    timeout_ms: u64,
 ) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
         loop {
@@ -280,6 +281,7 @@ pub(crate) fn spawn_authorization_context_refresh_task(
                         &previous,
                         &refreshed,
                         credentials_changed,
+                        timeout_ms,
                     )
                     .await
                     {

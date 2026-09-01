@@ -347,8 +347,10 @@ struct KeyedJobRunState {
 }
 
 async fn setup_jobs_fixture_with_rotation(rotate: bool) -> JobsFixture {
-    let mut options = trellis_test::TrellisTestRuntimeOptions::default();
-    options.rotatable_nats_proxy = rotate;
+    let options = trellis_test::TrellisTestRuntimeOptions {
+        rotatable_nats_proxy: rotate,
+        ..Default::default()
+    };
     let mut runtime = trellis_test::TrellisTestRuntime::start(options)
         .await
         .expect("start live Trellis test runtime");

@@ -135,6 +135,12 @@ impl NatsJobWaiter {
             .subscribe(updates_subject)
             .await
             .map_err(|error| jobs_message(format!("job updates subscribe failed: {error}")))?;
+        tokio::time::timeout(self.timeout, self.nats.flush())
+            .await
+            .map_err(|_| jobs_message("flush job update subscriptions timed out".to_string()))?
+            .map_err(|error| {
+                jobs_message(format!("flush job update subscriptions failed: {error}"))
+            })?;
         let lifecycle_stream = jetstream::new(self.nats.clone())
             .get_stream_no_info(JOBS_STREAM)
             .await

@@ -462,8 +462,10 @@ async fn authorization_registry_provider_cache_is_nats_local_and_revocation_live
         "rpc",
     );
 
-    let mut options = trellis_test::TrellisTestRuntimeOptions::default();
-    options.rotatable_nats_proxy = true;
+    let options = trellis_test::TrellisTestRuntimeOptions {
+        rotatable_nats_proxy: true,
+        ..Default::default()
+    };
     let mut runtime = trellis_test::TrellisTestRuntime::start(options)
         .await
         .expect("start live Trellis test runtime");

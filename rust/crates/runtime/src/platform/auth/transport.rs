@@ -422,6 +422,7 @@ fn compile_resource(
             publish.insert(format!("$JS.ACK.{work_stream}.>"));
             if let Some(prefix) = updates_prefix {
                 publish.insert(format!("{prefix}.>"));
+                subscribe.insert(format!("{prefix}.>"));
             }
         }
         (
@@ -460,13 +461,14 @@ fn invalid_error(message: impl Into<String>) -> AuthorizationStateError {
 
 #[cfg(test)]
 mod tests {
-    use super::compile_test_transport_permissions;
+    use super::{compile_resource, compile_test_transport_permissions};
     use crate::platform::auth::{
         AuthorityKind, IssuableAuthorizationState, ParticipantBindingRecord,
         ParticipantBindingState, ResourceBindingEvidence, ResourceBindingState,
         ResourceProviderIdentity,
     };
     use serde_json::Value;
+    use std::collections::BTreeSet;
     use trellis_protocol::{
         parse_api, parse_participant, resolve_participant, ApiSurfaceKind,
         AuthorizationAuthorityKind, AuthorizationAuthorityRef, AuthorizationParticipant,
@@ -554,6 +556,46 @@ mod tests {
         assert!(!permissions
             .subscribe
             .contains(&"feed.v1.Jobs.Watch".to_owned()));
+    }
+
+    #[test]
+    fn job_process_update_subscription_is_resource_exact() {
+        let resource = ResourceBindingEvidence {
+            resource_kind: "jobQueue".to_owned(),
+            local_name: "documents".to_owned(),
+            binding_id: "binding-documents".to_owned(),
+            owner_participant_id: "acme.jobs@v1".to_owned(),
+            provider_identity: ResourceProviderIdentity::JobQueue {
+                namespace: "tr_jobs_documents".to_owned(),
+                work_stream: "JOBS_WORK_DOCUMENTS".to_owned(),
+                publish_prefix: "trellis.jobs.tr_jobs_documents.process".to_owned(),
+                updates_prefix: Some("trellis.job_updates.tr_jobs_documents.process".to_owned()),
+                work_subject: "trellis.work.tr_jobs_documents.process".to_owned(),
+                consumer: "worker-documents".to_owned(),
+            },
+            state: ResourceBindingState::Available,
+            materialized_at: 1,
+            error: None,
+        };
+        let mut publish = BTreeSet::new();
+        let mut subscribe = BTreeSet::new();
+
+        compile_resource(
+            &resource,
+            PermissionAction::Process,
+            &mut publish,
+            &mut subscribe,
+        )
+        .unwrap();
+
+        assert_eq!(
+            subscribe,
+            BTreeSet::from([
+                "trellis.job_updates.tr_jobs_documents.process.>".to_owned(),
+                "trellis.jobs.tr_jobs_documents.process.>".to_owned(),
+                "trellis.work.tr_jobs_documents.process".to_owned(),
+            ])
+        );
     }
 
     #[test]

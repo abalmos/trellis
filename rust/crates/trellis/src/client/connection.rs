@@ -1065,8 +1065,11 @@ fn spawn_authorization_context_refresh_task(
     contexts: std::sync::Arc<AuthorizationContextCache>,
     auth: Arc<SessionAuth>,
     nats: async_nats::Client,
+    timeout_ms: u64,
 ) -> JoinHandle<()> {
-    crate::client::authorization::spawn_authorization_context_refresh_task(contexts, auth, nats)
+    crate::client::authorization::spawn_authorization_context_refresh_task(
+        contexts, auth, nats, timeout_ms,
+    )
 }
 
 /// Connected provider-cache handle returned by attach.
@@ -1201,6 +1204,7 @@ pub(crate) async fn apply_native_runtime_refresh(
     previous: &AuthorizationRuntimeBinding,
     refreshed: &AuthorizationRuntimeBinding,
     credentials_changed: bool,
+    timeout_ms: u64,
 ) -> Result<(), TrellisClientError> {
     if previous.session_id != refreshed.session_id
         || previous.participant_id != refreshed.participant_id
@@ -1218,9 +1222,19 @@ pub(crate) async fn apply_native_runtime_refresh(
     nats.set_server_pool(refreshed.transports.native.nats_servers.as_slice())
         .await
         .map_err(|error| TrellisClientError::NatsConnect(error.to_string()))?;
+    let connects = nats.statistics().connects.load(Ordering::Relaxed);
     nats.force_reconnect()
         .await
-        .map_err(|error| TrellisClientError::NatsConnect(error.to_string()))
+        .map_err(|error| TrellisClientError::NatsConnect(error.to_string()))?;
+    timeout(Duration::from_millis(timeout_ms), async {
+        while nats.statistics().connects.load(Ordering::Relaxed) <= connects {
+            tokio::time::sleep(Duration::from_millis(1)).await;
+        }
+        nats.flush().await
+    })
+    .await
+    .map_err(|_| TrellisClientError::Timeout)?
+    .map_err(|error| TrellisClientError::NatsConnect(error.to_string()))
 }
 
 async fn connect_bootstrapped_service(
@@ -1387,6 +1401,7 @@ async fn connect_bootstrapped_service(
         authorization_contexts.clone(),
         auth.clone(),
         nats.clone(),
+        timeout_ms,
     ));
     Ok(TrellisClient {
         nats,
@@ -1776,6 +1791,7 @@ impl TrellisClient {
             authorization_contexts.clone(),
             auth.clone(),
             nats.clone(),
+            opts.timeout_ms,
         ));
         Ok(Self {
             nats,
@@ -1864,8 +1880,14 @@ impl TrellisClient {
         contexts.refresh(&self.auth).await?;
         let refreshed = contexts.runtime_binding()?;
         let credentials_changed = previous_context_digest != contexts.context_digest()?;
-        apply_native_runtime_refresh(&self.nats, &previous, &refreshed, credentials_changed)
-            .await?;
+        apply_native_runtime_refresh(
+            &self.nats,
+            &previous,
+            &refreshed,
+            credentials_changed,
+            self.timeout_ms,
+        )
+        .await?;
         contexts.bundle()
     }
 
