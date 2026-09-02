@@ -211,12 +211,8 @@
     </dialog>
   {/if}
 {:else}
-  <div class="flex min-h-screen items-center justify-center bg-base-200 px-4 py-10">
-    <div class="card trellis-card w-full max-w-sm border border-base-300 bg-base-100 shadow-none">
-      <div class="card-body text-center gap-3">
-        <h1 class="text-lg font-semibold">Loading console</h1>
-        <span class="loading loading-spinner loading-md mx-auto"></span>
-      </div>
-    </div>
+  <div class="flex min-h-screen flex-col items-center justify-center gap-3 bg-base-200 px-4 py-10 text-center">
+    <h1 class="text-lg font-semibold">Loading console</h1>
+    <span class="loading loading-spinner loading-md"></span>
   </div>
 {/if}

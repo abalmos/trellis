@@ -21,14 +21,10 @@
 <svelte:head><title>Sign In · Trellis</title></svelte:head>
 
 {#if !APP_CONFIG.authUrl}
-  <div class="flex min-h-screen items-center justify-center bg-base-200 px-4">
-    <div class="card trellis-card w-full max-w-md border border-base-300 bg-base-100 shadow-none">
-      <div class="card-body gap-4">
-        <h1 class="text-xl font-semibold">Trellis is not configured</h1>
-        <Notice variant="error" class="text-sm">
-          Set the Console Trellis endpoint in runtime configuration.
-        </Notice>
-      </div>
-    </div>
+  <div class="flex min-h-screen flex-col items-center justify-center gap-4 bg-base-200 px-4 text-center">
+    <h1 class="text-xl font-semibold">Trellis is not configured</h1>
+    <Notice variant="error" class="max-w-md text-sm">
+      Set the Console Trellis endpoint in runtime configuration.
+    </Notice>
   </div>
 {/if}

@@ -19,7 +19,7 @@
     ></span>
   </span>
   <span class="min-w-0">
-    <span class="block text-[2.45rem] font-bold leading-[0.88] tracking-[-0.055em] text-[#101828] sm:text-[3.05rem]">
+    <span class="block text-[2.45rem] font-bold leading-[0.88] tracking-[-0.055em] text-base-content">
       Trellis
     </span>
     <span class="portal-eyebrow mt-2 block text-[0.7rem] font-semibold sm:text-[0.78rem]">

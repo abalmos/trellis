@@ -33,11 +33,17 @@ The UI MUST NOT resemble:
 ## HARD CONSTRAINTS (DO NOT VIOLATE)
 
 - DO NOT use charts as primary UI
+- DO NOT use a card as the primary or only thing on any screen
+- DO NOT use DaisyUI `card` as default panel chrome
 - DO NOT create large card grids
 - DO NOT exceed 4 primary panels on screen
 - DO NOT introduce new colors outside defined tokens
 - DO NOT use decorative UI elements
 - DO NOT use excessive whitespace
+
+`card` is permitted only where it is a very good fit to the data being presented
+(rare). The default content container is the bordered section primitive
+(`Panel.svelte` / `trellis-section`), never a DaisyUI card frame.
 
 Charts are permitted as **secondary** diagnostic artifacts only when they
 explain a specific data series that the operator is already looking at. The
@@ -91,11 +97,11 @@ Rules:
 
 ### REQUIRED COMPONENTS
 
-Use DaisyUI primitives:
+Use DaisyUI primitives and the Trellis section layer:
 
-- Layout: `drawer`, `navbar`, `card`
+- Layout: `drawer`, `navbar`, `Panel` (`trellis-section` bordered sections)
 - Controls: `btn`, `badge`, `input`
-- Data: `table`, `progress`
+- Data: `table` (`DataTable`), `progress`, `MetricsLedger`, `StatusBadge`
 
 ---
 
@@ -109,7 +115,6 @@ Only override DaisyUI when:
 
 Allowed overrides:
 
-- Reduce card shadow
 - Tighten table row height
 - Adjust spacing
 
@@ -132,9 +137,9 @@ Allowed overrides:
 - Use monospace for identifiers
 - Fixed column layout
 
-### Cards
+### Panels
 
-- Minimal shadow
+- No card frame, no shadow
 - Thin border
 - Header height: ~56px
 
@@ -319,6 +324,7 @@ MUST include:
 ## ANTI-PATTERNS (STRICTLY FORBIDDEN)
 
 - Charts or graphs as primary UI
+- Cards as primary content or default panel chrome
 - Large card grids
 - Uneven spacing
 - Decorative UI elements

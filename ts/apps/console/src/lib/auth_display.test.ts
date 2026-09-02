@@ -23,7 +23,7 @@ Deno.test("describeSessionPrincipal renders explicit user app and agent metadata
           subject: "123",
         },
       },
-      contractId: "trellis.console@v1",
+      contractId: "trellis-app.console@v1",
       contractDisplayName: "Trellis Console",
       createdAt: Date.parse("2026-04-10T00:00:00.000Z"),
       lastAuth: Date.parse("2026-04-10T01:00:00.000Z"),
@@ -31,7 +31,7 @@ Deno.test("describeSessionPrincipal renders explicit user app and agent metadata
     {
       title: "usr_123",
       details:
-        "Ada Lovelace • github:123 • idn_github_123 • Trellis Console (trellis.console@v1)",
+        "Ada Lovelace • github:123 • idn_github_123 • Trellis Console (trellis-app.console@v1)",
     },
   );
 

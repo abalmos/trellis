@@ -133,15 +133,15 @@
   <title>Bootstrap admin · Trellis</title>
 </svelte:head>
 
-<div
-  class="portal-shell flex min-h-screen flex-col items-center justify-center gap-7 px-4 py-10 sm:px-6"
+<main
+  class="portal-shell flex min-h-screen justify-center px-4 py-10 sm:px-6"
   data-theme="portal"
 >
-  <div class="portal-card card w-full max-w-md border border-base-300">
-    <div class="card-body gap-6 p-7 sm:p-8">
-      <div class="flex justify-center">
-        <PortalBrand subtitle="Admin bootstrap" />
-      </div>
+  <div class="portal-page w-full max-w-md">
+    <header class="portal-header">
+      <PortalBrand subtitle="Admin bootstrap" />
+    </header>
+    <div class="portal-body">
 
       {#if loading}
         <div class="flex items-center gap-4 py-3" aria-live="polite">
@@ -250,11 +250,11 @@
               type="password"
               bind:value={confirmPassword}
             />
-            <span class:text-error={!!confirmError} class="text-xs text-base-content/55">{confirmError ?? "Re-enter your password"}</span>
+            <span class:text-error={!!confirmError} class="text-xs text-base-content/65">{confirmError ?? "Re-enter your password"}</span>
           </label>
 
           <label class="form-control gap-1.5">
-            <span class="label-text text-sm font-medium text-base-content">Name <span class="font-normal text-base-content/45">optional</span></span>
+            <span class="label-text text-sm font-medium text-base-content">Name <span class="font-normal text-base-content/65">optional</span></span>
             <input
               class="input input-bordered w-full"
               autocomplete="name"
@@ -264,7 +264,7 @@
           </label>
 
           <label class="form-control gap-1.5">
-            <span class="label-text text-sm font-medium text-base-content">Email <span class="font-normal text-base-content/45">optional</span></span>
+            <span class="label-text text-sm font-medium text-base-content">Email <span class="font-normal text-base-content/65">optional</span></span>
             <input
               class="input input-bordered w-full"
               autocomplete="email"
@@ -297,4 +297,4 @@
       {/if}
     </div>
   </div>
-</div>
+</main>

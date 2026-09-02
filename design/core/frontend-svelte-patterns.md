@@ -155,5 +155,5 @@ Rules:
 
 The Trellis repo's local frontend apps keep explicit `kit.alias` objects in each
 SvelteKit config. App workspaces should add each consumer-local aggregate SDK
-specifier they use, such as `@trellis/apis/trellis.demo-service`, to their
-app-local aliases.
+specifier they use, such as `@trellis/apis/demo.service`, to their app-local
+aliases.

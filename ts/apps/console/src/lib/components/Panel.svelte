@@ -13,7 +13,7 @@
   let { title, eyebrow, children, actions, footer, class: className = "" }: Props = $props();
 </script>
 
-<section class={["card trellis-panel", className]}>
+<section class={["trellis-section trellis-panel", className]}>
   {#if title || eyebrow || actions}
     <div class="trellis-panel-header px-4 py-3 sm:px-5">
       <div class="flex min-h-6 items-center justify-between gap-3">
@@ -22,7 +22,7 @@
             <p class="text-[0.65rem] font-semibold uppercase tracking-[0.12em] text-base-content/45">{eyebrow}</p>
           {/if}
           {#if title}
-            <h2 class="card-title truncate text-base font-bold leading-none">{title}</h2>
+            <h2 class="truncate text-base font-semibold leading-none">{title}</h2>
           {/if}
         </div>
         {#if actions}
@@ -34,7 +34,7 @@
     </div>
   {/if}
 
-  <div class="card-body p-4 sm:p-5">
+  <div class="trellis-section-body p-4 sm:p-5">
     {@render children()}
   </div>
 

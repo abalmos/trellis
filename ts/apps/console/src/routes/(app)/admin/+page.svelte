@@ -153,12 +153,12 @@
     jobsUnavailableMessage = null;
     try {
       const [sessionsRes, connectionsRes, instancesRes, authoritiesRes, authorityPlansRes, deviceReviewsRes] = await Promise.all([
-        trellis.authSessionsList({ limit: 500 }).take(),
-        trellis.authConnectionsList({ limit: 500 }).take(),
-        trellis.authServiceInstancesList({ limit: 500 }).take(),
-        trellis.authDeploymentAuthorityList({ limit: 500 }).take(),
+        trellis.authSessionsList({ limit: 100 }).take(),
+        trellis.authConnectionsList({ limit: 100 }).take(),
+        trellis.authServiceInstancesList({ limit: 100 }).take(),
+        trellis.authDeploymentAuthorityList({ limit: 100 }).take(),
         trellis.authDeploymentAuthorityPlansList({ state: "pending", limit: authorityPlanPreviewLimit }).take(),
-        trellis.authDeviceUserAuthoritiesReviewsList({ state: "pending", limit: 500 }).take(),
+        trellis.authDeviceUserAuthoritiesReviewsList({ state: "pending", limit: 100 }).take(),
       ]);
       if (isErr(sessionsRes)) { error = errorMessage(sessionsRes); return; }
       if (isErr(connectionsRes)) { error = errorMessage(connectionsRes); return; }
@@ -239,10 +239,10 @@
     <InlineMetricsStrip metrics={metrics} class="mt-4" />
 
     <div class="mt-4 grid gap-4 xl:grid-cols-[minmax(0,1.2fr)_minmax(420px,0.8fr)]">
-      <section class="card trellis-card bg-base-100">
-        <div class="card-body p-0">
+      <section class="trellis-section bg-base-100">
+        <div class="trellis-section-body p-0">
           <div class="flex h-14 items-center justify-between border-b border-base-300 px-5">
-            <h2 class="card-title text-base">Service Instances</h2>
+            <h2 class="text-base font-semibold">Service Instances</h2>
             <a href={resolve("/admin/services")} class="btn btn-ghost btn-sm">View services <Icon name="arrowRight" size={16} /></a>
           </div>
           {#if displayInstances.length === 0}
@@ -285,15 +285,15 @@
       </section>
 
       <div class="space-y-4">
-        <section class="card trellis-card bg-base-100">
-          <div class="card-body gap-4 p-5">
-            <div class="flex items-center justify-between"><h2 class="card-title text-base">Live Health</h2><a href={resolve("/admin/health-events")} class="btn btn-ghost btn-xs">View all</a></div>
+        <section class="trellis-section bg-base-100">
+          <div class="trellis-section-body gap-4 p-5">
+            <div class="flex items-center justify-between"><h2 class="text-base font-semibold">Live Health</h2><a href={resolve("/admin/health-events")} class="btn btn-ghost btn-xs">View all</a></div>
             <EmptyState title="Live health opens in Health Events" description="Heartbeat-derived healthy, degraded, unhealthy, and offline states require the live health event stream." class="py-4" />
           </div>
         </section>
 
-        <section class="card trellis-card overflow-hidden bg-base-100">
-          <div class="flex h-14 items-center justify-between border-b border-base-300 px-5"><h2 class="card-title text-base">Jobs Snapshot</h2><a href={resolve("/admin/jobs")} class="btn btn-ghost btn-xs">View all</a></div>
+        <section class="trellis-section overflow-hidden bg-base-100">
+          <div class="flex h-14 items-center justify-between border-b border-base-300 px-5"><h2 class="text-base font-semibold">Jobs Snapshot</h2><a href={resolve("/admin/jobs")} class="btn btn-ghost btn-xs">View all</a></div>
           {#if jobsUnavailableMessage}
             <div class="m-5 space-y-2">
               <Notice variant="info">{jobsUnavailableMessage}</Notice>
@@ -313,8 +313,8 @@
           {/if}
         </section>
 
-        <section class="card trellis-card overflow-hidden bg-base-100">
-          <div class="flex h-14 items-center justify-between border-b border-base-300 px-5"><h2 class="card-title text-base">Pending Work</h2><span class="badge badge-sm {pendingWorkTotal > 0 ? 'badge-warning' : 'badge-ghost'}">{pendingWorkTotal} pending</span></div>
+        <section class="trellis-section overflow-hidden bg-base-100">
+          <div class="flex h-14 items-center justify-between border-b border-base-300 px-5"><h2 class="text-base font-semibold">Pending Work</h2><span class="badge badge-sm {pendingWorkTotal > 0 ? 'badge-warning' : 'badge-ghost'}">{pendingWorkTotal} pending</span></div>
           {#if pendingWorkTotal === 0}
             <div class="px-5 py-3 text-sm text-base-content/60">No device activation reviews or authority plans waiting.</div>
           {:else}

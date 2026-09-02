@@ -58,15 +58,15 @@
       {#if active.target.email && active.target.email !== active.target.name}
         <p class="portal-copy">{active.target.email}</p>
       {/if}
-      <p class="mono mt-1 break-all text-xs text-base-content/45">{active.target.userId}</p>
+      <p class="mono mt-1 break-all text-xs text-base-content/65">{active.target.userId}</p>
     </section>
   {/if}
 {/snippet}
 
-<div class="portal-shell flex min-h-screen flex-col items-center justify-center gap-7 px-4 py-10 sm:px-6" data-theme="portal">
-  <div class="portal-card card w-full max-w-md border border-base-300">
-    <div class="card-body gap-6 p-7 sm:p-8">
-      <div class="flex justify-center"><PortalBrand subtitle="Account invitation" /></div>
+<main class="portal-shell flex min-h-screen justify-center px-4 py-10 sm:px-6" data-theme="portal">
+  <div class="portal-page w-full max-w-md">
+    <header class="portal-header"><PortalBrand subtitle="Account invitation" /></header>
+    <div class="portal-body">
 
       {#if loading}
         <div class="flex items-center gap-4 py-3" aria-live="polite">
@@ -86,4 +86,4 @@
       {#if error}<div class="alert alert-error text-sm" role="alert"><span>{error}</span></div>{/if}
     </div>
   </div>
-</div>
+</main>

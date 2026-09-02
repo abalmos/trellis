@@ -10,10 +10,12 @@
     getInitials,
     getPageTitle,
     getRoleLabel,
-    requiresAdminRoute,
+    requiresCapabilityRoute,
     type NavSection,
   } from "../control-panel.ts";
   import ActionMenu from "./ActionMenu.svelte";
+  import CommandPalette from "./CommandPalette.svelte";
+  import { buildCommandIndex } from "../commands.ts";
   import Icon from "./Icon.svelte";
   import LoadingState from "./LoadingState.svelte";
   import Notice from "./Notice.svelte";
@@ -42,6 +44,21 @@
   }: Props = $props();
 
   let drawerOpen = $state(false);
+  let paletteOpen = $state(false);
+
+  const commandIndex = $derived(buildCommandIndex(navSections));
+  const paletteShortcut = $derived(
+    typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform ?? navigator.userAgent)
+      ? "⌘K"
+      : "Ctrl K",
+  );
+
+  function handleWindowKeydown(event: KeyboardEvent) {
+    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") {
+      event.preventDefault();
+      paletteOpen = !paletteOpen;
+    }
+  }
 
   const routePath = $derived(toRoutePath(page.url.pathname));
   const pageTitle = $derived(getPageTitle(routePath));
@@ -83,6 +100,8 @@
   });
 </script>
 
+<svelte:window onkeydown={handleWindowKeydown} />
+
 <svelte:head>
   <title>{pageTitle} · Trellis</title>
 </svelte:head>
@@ -93,7 +112,7 @@
   <input id="trellis-nav" type="checkbox" class="drawer-toggle" bind:checked={drawerOpen} />
 
   <div class="drawer-content flex min-w-0 flex-col">
-    <header class="navbar trellis-topbar sticky top-0 z-30 h-16 min-h-16 border-b border-base-300 bg-base-100/95 px-4 backdrop-blur lg:px-7">
+    <header class="navbar trellis-topbar sticky top-0 z-30 h-16 min-h-16 border-b border-base-300 bg-base-100 px-4 lg:px-7">
       <div class="navbar-start gap-3">
         <button
           type="button"
@@ -103,11 +122,16 @@
         >
           <Icon name="menu" size={20} />
         </button>
-        <label class="input input-bordered input-sm hidden w-[420px] items-center gap-2 bg-base-100 md:flex">
-          <Icon name="search" size={16} class="opacity-50" />
-          <input type="search" class="grow" placeholder="Search or run command..." aria-label="Search or run command" readonly />
-          <kbd class="kbd kbd-xs">⌘ K</kbd>
-        </label>
+        <button
+          type="button"
+          class="btn btn-ghost btn-sm h-9 gap-2 border border-base-300 bg-base-200/60 px-3 font-normal text-base-content/70"
+          aria-label="Open command palette"
+          onclick={() => { paletteOpen = true; }}
+        >
+          <Icon name="search" size={15} class="opacity-60" />
+          <span class="hidden md:inline">Search pages and views</span>
+          <kbd class="kbd kbd-xs hidden md:inline-flex">{paletteShortcut}</kbd>
+        </button>
       </div>
       <div class="navbar-end gap-2 sm:gap-3">
         <StatusBadge label={`${connectionLabel}: Trellis`} status={connectionVariant} class="hidden sm:inline-flex px-3" />
@@ -117,9 +141,6 @@
           <Icon name="sun" size={20} class="swap-off" />
           <Icon name="moon" size={20} class="swap-on" />
         </label>
-        <button class="btn btn-ghost btn-square btn-sm" aria-label="Notifications">
-          <Icon name="bell" size={20} />
-        </button>
         {#if profile}
           <ActionMenu buttonBaseClass="btn btn-ghost gap-2 rounded-full pr-2" widthClass="w-64" ariaLabel="Open user menu">
             {#snippet summary()}
@@ -156,7 +177,7 @@
         <Notice variant="error" class="mb-4">{authFailure}</Notice>
       {/if}
 
-      {#if requiresAdminRoute(routePath) && !profileLoaded}
+      {#if requiresCapabilityRoute(routePath) && !profileLoaded}
         <LoadingState label="Loading operator profile" class="min-h-[40vh]" />
       {:else}
         {@render children()}
@@ -198,12 +219,13 @@
 
       <div class="m-3 rounded-box border border-white/10 bg-white/5 p-4 text-sm">
         <div class="mb-3 flex items-center gap-2 text-slate-100">
-          <span class="h-2.5 w-2.5 rounded-full bg-success"></span>
-          Connected: Trellis
+          <span class={["h-2.5 w-2.5 rounded-full", connectionStatus === "connected" ? "bg-success" : connectionStatus === "reconnecting" ? "bg-warning" : "bg-error"]}></span>
+          {connectionLabel}: Trellis
         </div>
         <div class="text-slate-400">Trellis Runtime</div>
-        <div class="mt-1 text-xs text-slate-500">v1.12.3</div>
       </div>
     </aside>
   </div>
 </div>
+
+<CommandPalette commands={commandIndex} bind:open={paletteOpen} />

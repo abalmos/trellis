@@ -109,10 +109,6 @@
     }
   }
 
-  function loadingMessageDelay(): Promise<void> {
-    return new Promise((resolve) => globalThis.setTimeout(resolve, 700));
-  }
-
   function visibleFlowError(): string | null {
     return visiblePortalFlowError(flow.error, flow.errorCode);
   }
@@ -292,9 +288,9 @@
   items: TechnicalDetail[],
   capabilityKeys: string[],
 )}
-  <details class="portal-details portal-debug-details max-w-xl px-3 text-center">
+  <details class="portal-details portal-debug-details">
     <summary
-      class="inline-flex cursor-pointer items-center gap-2 rounded-field text-[0.68rem] leading-5 text-base-content/45"
+      class="inline-flex cursor-pointer items-center gap-2 rounded-field text-[0.68rem] leading-5 text-base-content/65"
     >
       {#if userId}
         <span class="mono break-all">{userId}</span>
@@ -302,16 +298,16 @@
       {/if}
       <span>Technical details</span>
     </summary>
-    <dl class="mx-auto mt-3 grid max-w-xl gap-3 rounded-box border border-base-300 bg-base-100 p-4 text-left text-xs text-base-content/60">
+    <dl class="mt-3 grid max-w-xl gap-3 rounded-box border border-base-300 bg-base-100 p-4 text-left text-xs text-base-content/60">
       {#each items as item (item.label)}
         <div>
-          <dt class="font-medium text-base-content/45">{item.label}</dt>
+          <dt class="font-medium text-base-content/65">{item.label}</dt>
           <dd class="mono mt-1 break-all leading-5">{item.value}</dd>
         </div>
       {/each}
       {#if capabilityKeys.length > 0}
         <div>
-          <dt class="font-medium text-base-content/45">Raw capability keys</dt>
+          <dt class="font-medium text-base-content/65">Raw capability keys</dt>
           <dd>
             <ul class="mt-1 grid gap-1">
               {#each capabilityKeys as key (key)}
@@ -325,34 +321,31 @@
   </details>
 {/snippet}
 
-<div
-  class="portal-shell flex min-h-screen flex-col items-center justify-center gap-7 px-4 py-10 sm:px-6"
+<main
+  class="portal-shell flex min-h-screen justify-center px-4 py-10 sm:px-6"
   data-theme="portal"
 >
   <div
     class={[
-      "portal-card card w-full border border-base-300",
+      "portal-page w-full",
       flow.state?.status === "approval_required" ||
       flow.state?.status === "insufficient_capabilities"
         ? "max-w-xl"
         : "max-w-md",
     ]}
   >
-    <div class="card-body gap-6 p-7 sm:p-8">
-      <div class="flex justify-center">
-        <PortalBrand subtitle="Login portal" />
-      </div>
-
+    <header class="portal-header">
+      <PortalBrand subtitle="Login portal" />
+    </header>
+    <div class="portal-body">
       {#if flow.loading}
-        {#await loadingMessageDelay() then}
-          <div class="flex items-center gap-4 py-3">
-            <span class="loading loading-ring loading-lg"></span>
-            <div>
-              <p class="text-sm font-medium text-base-content">Loading request</p>
-              <p class="portal-copy text-xs">Resolving provider and approval state.</p>
-            </div>
+        <div class="flex items-center gap-4 py-3">
+          <span class="loading loading-ring loading-lg"></span>
+          <div>
+            <p class="text-sm font-medium text-base-content">Loading request</p>
+            <p class="portal-copy text-xs">Resolving provider and approval state.</p>
           </div>
-        {/await}
+        </div>
       {:else if flow.state?.status === "choose_provider"}
         <div>
           <h1 class="text-center text-xl font-semibold tracking-[-0.025em] text-base-content">Choose a sign-in method</h1>
@@ -584,7 +577,7 @@
                   {entry.capability.description}
                 </p>
                 {#if entry.capability.consequence}
-                  <p class="mt-1 text-xs leading-5 text-base-content/55">
+                  <p class="mt-1 text-xs leading-5 text-base-content/65">
                     {entry.capability.consequence}
                   </p>
                 {/if}
@@ -598,7 +591,7 @@
           </ul>
         </section>
 
-        <div class="portal-action-row -mx-7 -mb-7 flex flex-col gap-2.5 rounded-b-box px-7 py-5 sm:-mx-8 sm:-mb-8 sm:px-8">
+        <div class="portal-action-row flex flex-col gap-2.5 pt-5">
           <button
             class="btn btn-primary btn-block"
             disabled={flow.loading || denying}
@@ -646,7 +639,7 @@
                     {metadata.description}
                   </p>
                   {#if metadata.consequence}
-                    <p class="mt-1 text-xs leading-5 text-base-content/55">
+                    <p class="mt-1 text-xs leading-5 text-base-content/65">
                       {metadata.consequence}
                     </p>
                   {/if}
@@ -738,4 +731,4 @@
       flow.state.missingCapabilities,
     )}
   {/if}
-</div>
+</main>

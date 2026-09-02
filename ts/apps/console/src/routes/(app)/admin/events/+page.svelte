@@ -1,10 +1,14 @@
 <script lang="ts">
   import { onDestroy, onMount } from "svelte";
+  import { page } from "$app/state";
   import EmptyState from "../../../../lib/components/EmptyState.svelte";
+  import DataTable from "../../../../lib/components/DataTable.svelte";
   import LoadingState from "../../../../lib/components/LoadingState.svelte";
+  import MetricsLedger from "../../../../lib/components/MetricsLedger.svelte";
   import Notice from "../../../../lib/components/Notice.svelte";
   import PageToolbar from "../../../../lib/components/PageToolbar.svelte";
   import Panel from "../../../../lib/components/Panel.svelte";
+  import StatusBadge from "../../../../lib/components/StatusBadge.svelte";
   import { compactDuration, errorMessage, formatDate, jsonBlock } from "../../../../lib/format";
   import { getTrellis } from "../../../../lib/trellis";
   import type {
@@ -121,7 +125,16 @@
   let selectedConsumer = $state.raw<{ row: ConsumerRow; detail: Record<string, unknown> | null } | null>(null);
   let detailLoading = $state(false);
   let detailError = $state<string | null>(null);
-  let focus = $state<Focus>("exceptions");
+  let focus = $state<Focus>(asEventFocus(page.url.searchParams.get("focus")) ?? "exceptions");
+  let handledFocusParam = page.url.searchParams.get("focus");
+
+  $effect(() => {
+    const value = page.url.searchParams.get("focus");
+    if (value === handledFocusParam) return;
+    handledFocusParam = value;
+    const next = asEventFocus(value);
+    if (next && next !== focus) selectFocus(next);
+  });
   let selectedEventType = $state.raw<EventTypeRef | null>(null);
   let attentionConsumersOnly = $state(false);
   let searchText = $state("");
@@ -265,6 +278,28 @@
     return "badge-error";
   }
 
+  function consumerVariant(consumer: ConsumerRow): "healthy" | "degraded" | "unhealthy" | "offline" {
+    if (consumer.status === "current" || consumer.status === "processing") return "healthy";
+    if (consumer.status === "behind" || consumer.status === "saturated") return "degraded";
+    if (consumer.status === "unmanaged") return "offline";
+    return "unhealthy";
+  }
+
+  const ledgerItems = $derived([
+    { id: "all", label: "Event flow", value: (metrics?.summary.total ?? 0).toLocaleString(), detail: `${eventRate.toLocaleString(undefined, { maximumFractionDigits: 1 })} per minute`, tone: "info" as const, active: focus === "all" },
+    { id: "exceptions", label: "Integrity exceptions", value: (metrics?.summary.integrityExceptions ?? 0).toLocaleString(), detail: `${metrics?.summary.total ? (metrics.summary.integrityExceptions / metrics.summary.total * 100).toFixed(2) : "0.00"}% of events`, tone: "error" as const, active: focus === "exceptions" },
+    { id: "unresolved", label: "Unresolved", value: (metrics?.summary.byResolution.unresolved ?? 0).toLocaleString(), detail: "owner not resolved", tone: "warning" as const, active: focus === "unresolved" },
+    { id: "consumers", label: "Consumers", value: attentionConsumers.length, detail: `need attention · ${consumerTotal} total`, tone: "error" as const, active: attentionConsumersOnly },
+    { id: "oldest-lag", label: "Oldest lag", value: ageLabel(oldestLagConsumer?.oldestPendingAt), detail: oldestLagConsumer?.consumerName ?? "no pending events", tone: "warning" as const, active: selectedConsumer?.row.consumerName === oldestLagConsumer?.consumerName, disabled: !oldestLagConsumer },
+    { id: "largest", label: "Payload", value: formatBytes(metrics?.summary.payloadSizeBytes ?? 0), detail: `${formatBytes(averagePayload)} average`, tone: "success" as const, active: focus === "largest" },
+  ]);
+
+  function handleLedgerSelect(id: string) {
+    if (id === "consumers") showAttentionConsumers();
+    else if (id === "oldest-lag") selectOldestLag();
+    else if (id === "all" || id === "exceptions" || id === "unresolved" || id === "largest") selectFocus(id);
+  }
+
   function formatBytes(bytes: number): string {
     if (bytes < 1024) return `${Math.round(bytes)} B`;
     if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
@@ -401,6 +436,11 @@
   function selectFocus(value: Focus) {
     focus = value;
     resetAndLoad();
+  }
+
+  function asEventFocus(value: string | null): Focus | null {
+    if (value === "all" || value === "exceptions" || value === "unresolved" || value === "malformed" || value === "largest") return value;
+    return null;
   }
 
   function selectEventType(eventType: EventTypeRef) {
@@ -540,9 +580,9 @@
       {#if lastUpdated}<span class="text-xs text-base-content/50">Updated {lastUpdated.toLocaleTimeString()}</span>{/if}
     {/snippet}
     {#snippet actions()}
-      <div class="window-switcher" aria-label="Metrics window">
+      <div class="trellis-segment" role="group" aria-label="Metrics window">
         {#each windows as option (option.value)}
-          <button class:active={windowValue === option.value} aria-pressed={windowValue === option.value} onclick={() => { windowValue = option.value; resetAndLoad(); }}>{option.label}</button>
+          <button type="button" class:active={windowValue === option.value} aria-pressed={windowValue === option.value} onclick={() => { windowValue = option.value; resetAndLoad(); }}>{option.label}</button>
         {/each}
       </div>
       <button class="btn btn-ghost btn-sm" onclick={() => { void load(false); }} disabled={loading || refreshing}>{refreshing ? "Refreshing" : "Refresh"}</button>
@@ -558,71 +598,50 @@
   {:else if unavailableMessage}
     <EmptyState title="Event Log is unavailable" description="Event publishing and consuming continue without the optional visibility service." />
   {:else}
-    <div class="event-ledger" aria-label="Event health summary">
-      <button class:active={focus === "all"} aria-pressed={focus === "all"} onclick={() => selectFocus("all")}>
-        <span><i class="dot blue"></i>Event flow</span><strong>{(metrics?.summary.total ?? 0).toLocaleString()}</strong><small>{eventRate.toLocaleString(undefined, { maximumFractionDigits: 1 })} per minute</small>
-      </button>
-      <button class:active={focus === "exceptions"} aria-pressed={focus === "exceptions"} onclick={() => selectFocus("exceptions")}>
-        <span><i class="dot red"></i>Integrity exceptions</span><strong>{(metrics?.summary.integrityExceptions ?? 0).toLocaleString()}</strong><small>{metrics?.summary.total ? (metrics.summary.integrityExceptions / metrics.summary.total * 100).toFixed(2) : "0.00"}% of events</small>
-      </button>
-      <button class:active={focus === "unresolved"} aria-pressed={focus === "unresolved"} onclick={() => selectFocus("unresolved")}>
-        <span><i class="dot amber"></i>Unresolved</span><strong>{(metrics?.summary.byResolution.unresolved ?? 0).toLocaleString()}</strong><small>owner not resolved</small>
-      </button>
-      <button class:active={attentionConsumersOnly} aria-pressed={attentionConsumersOnly} onclick={showAttentionConsumers}>
-        <span><i class="dot red"></i>Consumers</span><strong>{attentionConsumers.length}</strong><small>need attention · {consumerTotal} total</small>
-      </button>
-      <button class:active={selectedConsumer?.row.consumerName === oldestLagConsumer?.consumerName} aria-pressed={selectedConsumer?.row.consumerName === oldestLagConsumer?.consumerName} onclick={selectOldestLag} disabled={!oldestLagConsumer}>
-        <span><i class="dot amber"></i>Oldest lag</span><strong>{ageLabel(oldestLagConsumer?.oldestPendingAt)}</strong><small>{oldestLagConsumer?.consumerName ?? "no pending events"}</small>
-      </button>
-      <button class:active={focus === "largest"} aria-pressed={focus === "largest"} onclick={() => selectFocus("largest")}>
-        <span><i class="dot green"></i>Payload</span><strong>{formatBytes(metrics?.summary.payloadSizeBytes ?? 0)}</strong><small>{formatBytes(averagePayload)} average</small>
-      </button>
-    </div>
+    <MetricsLedger ariaLabel="Event health summary" items={ledgerItems} onSelect={handleLedgerSelect} />
 
     <div class="health-layout">
-      <section class="consumer-health">
-        <div class="section-heading">
-          <div><h2>Consumer delivery health</h2><p>Known Trellis consumers first; external consumers remain neutral.</p></div>
-          <span>{displayedConsumers.length} of {consumerTotal}</span>
-        </div>
+      <Panel eyebrow="Secondary" title="Consumer delivery health" class="consumer-health min-w-0">
+        {#snippet actions()}<span class="text-sm text-base-content/70">{displayedConsumers.length} of {consumerTotal}</span>{/snippet}
+        <p class="text-sm text-base-content/70">Known Trellis consumers first; external consumers remain neutral.</p>
         {#if displayedConsumers.length === 0}
           <EmptyState title="No consumers need attention" description="All known Trellis consumers are current or processing." />
         {:else}
-          <div class="consumer-matrix" aria-label="Consumer delivery health">
-            <div class="consumer-header">
-              <span>Consumer deployment / contract</span><span>Status</span><span>Pending</span><span>Ack</span><span>Pulls</span><span>Oldest</span><span>Redeliv.</span>
-            </div>
-            {#each displayedConsumers as consumer (`${consumer.stream}:${consumer.consumerName}`)}
-              <button
-                class:selected={selectedConsumer?.row.consumerName === consumer.consumerName && selectedConsumer.row.stream === consumer.stream}
-                class="consumer-row"
-                onclick={() => { void inspectConsumer(consumer); }}
-              >
-                <span class="consumer-identity"><strong>{consumer.deploymentId ?? consumer.consumerName}</strong><small>{consumer.contractId ?? consumer.managedBy}{consumer.group ? ` / ${consumer.group}` : ""}</small></span>
-                <span class="consumer-status"><i class={['dot', isAttentionConsumer(consumer) ? consumer.status === 'behind' || consumer.status === 'saturated' ? 'amber' : 'red' : consumer.status === 'unmanaged' ? 'neutral' : 'green']}></i>{consumer.status}</span>
-                <span class="consumer-value" class:pressure={consumer.pending > 0} data-label="Pending">{consumer.pending.toLocaleString()}</span>
-                <span class="consumer-value" data-label="Ack">{consumer.ackPending.toLocaleString()}</span>
-                <span class="consumer-value" data-label="Pulls">{consumer.waitingPulls.toLocaleString()}</span>
-                <span class="consumer-value" class:pressure={isAttentionConsumer(consumer)} data-label="Oldest">{ageLabel(consumer.oldestPendingAt)}</span>
-                <span class="consumer-value" class:pressure={(consumer.redelivered ?? 0) > 0} data-label="Redeliv.">{consumer.redelivered ?? 0}</span>
-              </button>
-            {/each}
-          </div>
+          <DataTable>
+            <thead><tr><th>Consumer deployment / contract</th><th>Status</th><th>Pending</th><th>Ack</th><th>Pulls</th><th>Oldest</th><th>Redelivered</th></tr></thead>
+            <tbody>
+              {#each displayedConsumers as consumer (`${consumer.stream}:${consumer.consumerName}`)}
+                {@const selected = selectedConsumer?.row.consumerName === consumer.consumerName && selectedConsumer.row.stream === consumer.stream}
+                <tr class:row-selected={selected} onclick={() => { void inspectConsumer(consumer); }}>
+                  <td class="min-w-0">
+                    <button type="button" class="link link-hover block max-w-xs truncate text-left trellis-identifier" onclick={() => { void inspectConsumer(consumer); }}>{consumer.deploymentId ?? consumer.consumerName}</button>
+                    <span class="trellis-metadata trellis-identifier block max-w-xs truncate">{consumer.contractId ?? consumer.managedBy}{consumer.group ? ` / ${consumer.group}` : ""}</span>
+                  </td>
+                  <td><StatusBadge label={consumer.status} status={consumerVariant(consumer)} /></td>
+                  <td class="tabular-nums" class:cell-pressure={consumer.pending > 0}>{consumer.pending.toLocaleString()}</td>
+                  <td class="tabular-nums">{consumer.ackPending.toLocaleString()}</td>
+                  <td class="tabular-nums">{consumer.waitingPulls.toLocaleString()}</td>
+                  <td class="tabular-nums" class:cell-pressure={isAttentionConsumer(consumer)}>{ageLabel(consumer.oldestPendingAt)}</td>
+                  <td class="tabular-nums" class:cell-pressure={(consumer.redelivered ?? 0) > 0}>{consumer.redelivered ?? 0}</td>
+                </tr>
+              {/each}
+            </tbody>
+          </DataTable>
         {/if}
-      </section>
+      </Panel>
 
-      <aside class="event-rail" aria-label="Event flow and integrity">
-        <section class="mini-chart">
-          <div><h2>Event volume</h2><strong>{eventRate.toLocaleString(undefined, { maximumFractionDigits: 1 })}/min</strong></div>
-          <p>{(metrics?.summary.total ?? 0).toLocaleString()} events · {windowOption.label}</p>
+      <aside class="event-rail flex flex-col gap-4" aria-label="Event flow and integrity">
+        <Panel eyebrow="Secondary" title="Event volume">
+          {#snippet actions()}<strong class="tabular-nums">{eventRate.toLocaleString(undefined, { maximumFractionDigits: 1 })}/min</strong>{/snippet}
+          <p class="text-sm text-base-content/70">{(metrics?.summary.total ?? 0).toLocaleString()} events · {windowOption.label}</p>
           <svg viewBox="0 0 260 52" preserveAspectRatio="none" role="img" aria-label={`Event volume over ${windowOption.label}`}>
             <path class="chart-grid" d="M0 46H260 M0 26H260" />
             <polyline class="event-line" points={eventPoints} />
           </svg>
-        </section>
-        <section class="mini-chart">
-          <div><h2>Integrity exceptions</h2><strong class="text-error">{metrics?.summary.integrityExceptions ?? 0}</strong></div>
-          <p>Verification and resolution failures</p>
+        </Panel>
+        <Panel eyebrow="Secondary" title="Integrity exceptions">
+          {#snippet actions()}<strong class="tabular-nums text-error">{metrics?.summary.integrityExceptions ?? 0}</strong>{/snippet}
+          <p class="text-sm text-base-content/70">Verification and resolution failures</p>
           <svg viewBox="0 0 260 52" preserveAspectRatio="none" role="img" aria-label={`Integrity exceptions over ${windowOption.label}`}>
             <path class="chart-grid" d="M0 46H260 M0 26H260" />
             <polyline class="exception-line" points={exceptionPoints} />
@@ -637,30 +656,31 @@
               <button aria-pressed={focus === "malformed"} onclick={() => selectFocus("malformed")}><span>malformed</span><strong>{metrics?.summary.byResolution.malformed}</strong></button>
             {/if}
           </div>
-        </section>
-        <section class="event-types">
-          <div class="section-heading"><div><h2>Highest-volume types</h2><p>Resolved owner/event pairs.</p></div></div>
-          {#each eventTypesByCount.slice(0, 6) as eventType (`${eventType.ownerContractId}:${eventType.ownerEventName}`)}
-            <button class:active={selectedEventType?.ownerContractId === eventType.ownerContractId && selectedEventType.ownerEventName === eventType.ownerEventName} aria-pressed={selectedEventType?.ownerContractId === eventType.ownerContractId && selectedEventType.ownerEventName === eventType.ownerEventName} onclick={() => selectEventType(eventType)}>
-              <span><strong>{eventType.ownerEventName}</strong><small>{eventType.ownerContractId}</small></span><b>{eventType.count.toLocaleString()}</b>
-              <i style={`--width: ${metrics?.summary.total ? eventType.count / metrics.summary.total * 100 : 0}%`}></i>
-            </button>
-          {:else}
-            <p class="text-xs text-base-content/55">No resolved event types in this window.</p>
-          {/each}
-        </section>
+        </Panel>
+        <Panel eyebrow="Secondary" title="Highest-volume types">
+          <div class="event-types">
+            {#each eventTypesByCount.slice(0, 6) as eventType (`${eventType.ownerContractId}:${eventType.ownerEventName}`)}
+              <button class:active={selectedEventType?.ownerContractId === eventType.ownerContractId && selectedEventType.ownerEventName === eventType.ownerEventName} aria-pressed={selectedEventType?.ownerContractId === eventType.ownerContractId && selectedEventType.ownerEventName === eventType.ownerEventName} onclick={() => selectEventType(eventType)}>
+                <span><strong>{eventType.ownerEventName}</strong><small>{eventType.ownerContractId}</small></span><b>{eventType.count.toLocaleString()}</b>
+                <i style={`--width: ${metrics?.summary.total ? eventType.count / metrics.summary.total * 100 : 0}%`}></i>
+              </button>
+            {:else}
+              <p class="text-sm text-base-content/70">No resolved event types in this window.</p>
+            {/each}
+          </div>
+        </Panel>
       </aside>
     </div>
 
-    <section class="focused-events">
-      <div class="section-heading list-heading">
-        <div><h2>{focusTitle}</h2><p>{focusDescription}</p></div>
-        <div class="event-tools">
-          <input class="input input-bordered input-sm" placeholder="Search event metadata" bind:value={searchText} onchange={resetAndLoad} />
+    <Panel eyebrow="Primary" title={focusTitle}>
+      {#snippet actions()}
+        <div class="flex items-center gap-2">
+          <input class="input input-bordered input-sm w-56" placeholder="Search event metadata" bind:value={searchText} onchange={resetAndLoad} />
           {#if selectedEventType || ownerContractId || publisherDeploymentId || searchText}<button class="btn btn-ghost btn-sm" onclick={clearEventFilters}>Clear scope</button>{/if}
-          <span>{rows.length} shown from {total}</span>
+          <span class="text-sm text-base-content/70">{rows.length} shown from {total}</span>
         </div>
-      </div>
+      {/snippet}
+      <p class="text-sm text-base-content/70">{focusDescription}</p>
       {#if selectedEventType || ownerContractId || publisherDeploymentId}
         <div class="active-scope" aria-label="Active event scope">
           {#if selectedEventType}<button onclick={() => { selectedEventType = null; resetAndLoad(); }}>type: {selectedEventType.ownerContractId} / {selectedEventType.ownerEventName} ×</button>{/if}
@@ -671,24 +691,33 @@
       {#if rows.length === 0}
         <EmptyState title="No events match this operational view" description="Choose another status, widen the window, or clear the active scope." />
       {:else}
-        <div class="event-list" aria-label={focusTitle}>
-          <div class="event-header"><span>Time</span><span>Subject / event</span><span>Owner</span><span>Publisher</span><span>Integrity</span><span>Payload</span></div>
-          {#each rows as row (`${row.streamSequence}:${row.eventId}`)}
-            <div class="event-row">
-              <span data-label="Time">{formatDate(row.eventTime)}</span>
-              <button class="event-subject" onclick={() => { void inspectEvent(row); }}><strong>{row.subject}</strong><small>seq {row.streamSequence}</small></button>
-              <button class="identifier" onclick={() => selectOwner(row.ownerContractId)}>{subjectOwner(row)}</button>
-              <button class="identifier" onclick={() => selectPublisher(row.publisherDeploymentId)}>{publisherLabel(row)}</button>
-              <span><i class={['badge badge-sm', statusBadgeClass(row.verificationStatus)]}>{row.verificationStatus}</i>{#if row.resolution !== "resolved"}<i class={['badge badge-sm', statusBadgeClass(row.resolution)]}>{row.resolution}</i>{/if}</span>
-              <span data-label="Payload">{formatBytes(row.payloadSizeBytes)}</span>
-            </div>
-          {/each}
-        </div>
+        <DataTable>
+          <thead><tr><th>Time</th><th>Subject / event</th><th>Owner</th><th>Publisher</th><th>Integrity</th><th>Payload</th></tr></thead>
+          <tbody>
+            {#each rows as row (`${row.streamSequence}:${row.eventId}`)}
+              <tr>
+                <td class="whitespace-nowrap">{formatDate(row.eventTime)}</td>
+                <td class="min-w-0">
+                  <button type="button" class="link link-hover block max-w-md truncate text-left trellis-identifier" onclick={() => { void inspectEvent(row); }}>{row.subject}</button>
+                  <span class="trellis-metadata">seq {row.streamSequence}</span>
+                </td>
+                <td class="min-w-0"><button type="button" class="link link-hover block max-w-xs truncate text-left trellis-identifier" onclick={() => selectOwner(row.ownerContractId)}>{subjectOwner(row)}</button></td>
+                <td><button type="button" class="link link-hover trellis-identifier" onclick={() => selectPublisher(row.publisherDeploymentId)}>{publisherLabel(row)}</button></td>
+                <td><span class="flex gap-1"><span class={["badge badge-sm trellis-badge-soft border-0", statusBadgeClass(row.verificationStatus)]}>{row.verificationStatus}</span>{#if row.resolution !== "resolved"}<span class={["badge badge-sm trellis-badge-soft border-0", statusBadgeClass(row.resolution)]}>{row.resolution}</span>{/if}</span></td>
+                <td class="tabular-nums">{formatBytes(row.payloadSizeBytes)}</td>
+              </tr>
+            {/each}
+          </tbody>
+        </DataTable>
         {#if offset > 0 || offset + pageLimit < total}
-          <div class="pagination"><button class="btn btn-outline btn-xs" onclick={goPrevious} disabled={offset === 0}>Previous</button><span>Page {Math.floor(offset / pageLimit) + 1}</span><button class="btn btn-outline btn-xs" onclick={goNext} disabled={offset + pageLimit >= total}>Next</button></div>
+          <div class="flex items-center justify-end gap-3 text-sm text-base-content/70">
+            <button class="btn btn-outline btn-xs" onclick={goPrevious} disabled={offset === 0}>Previous</button>
+            <span>Page {Math.floor(offset / pageLimit) + 1}</span>
+            <button class="btn btn-outline btn-xs" onclick={goNext} disabled={offset + pageLimit >= total}>Next</button>
+          </div>
         {/if}
       {/if}
-    </section>
+    </Panel>
 
     {#if detailLoading}
       <Panel eyebrow="Detail" title="Loading detail"><LoadingState label="Loading detail" /></Panel>
@@ -717,114 +746,37 @@
 
 <style>
   .events-page { display: grid; gap: 1rem; }
-  .window-switcher { display: flex; gap: 0.15rem; }
-  .window-switcher button { border: 0; border-radius: 0.4rem; color: color-mix(in oklab, var(--color-base-content) 58%, transparent); cursor: pointer; font-size: 0.72rem; font-weight: 650; padding: 0.28rem 0.48rem; }
-  .window-switcher button.active { background: var(--color-base-content); color: var(--color-base-100); }
-  .event-ledger { border-block: 1px solid var(--color-base-300); display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); }
-  .event-ledger button { background: transparent; border: 0; border-right: 1px solid var(--color-base-300); cursor: pointer; min-width: 0; padding: 0.75rem 0.85rem; text-align: left; }
-  .event-ledger button:last-child { border-right: 0; }
-  .event-ledger button:hover, .event-ledger button.active { background: color-mix(in oklab, var(--color-base-200) 72%, transparent); }
-  .event-ledger button:disabled { cursor: default; opacity: 0.65; }
-  .event-ledger span { align-items: center; color: color-mix(in oklab, var(--color-base-content) 58%, transparent); display: flex; font-size: 0.64rem; font-weight: 750; gap: 0.2rem; letter-spacing: 0.065em; text-transform: uppercase; }
-  .event-ledger strong { display: block; font-size: 1.25rem; letter-spacing: -0.03em; margin: 0.22rem 0 0.08rem; }
-  .event-ledger small { color: color-mix(in oklab, var(--color-base-content) 52%, transparent); display: block; font-size: 0.66rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .dot { border-radius: 50%; display: inline-block; flex: 0 0 auto; height: 0.38rem; width: 0.38rem; }
-  .dot.blue { background: var(--color-info); } .dot.red { background: var(--color-error); } .dot.amber { background: var(--color-warning); } .dot.green { background: var(--color-success); } .dot.neutral { background: color-mix(in oklab, var(--color-base-content) 42%, transparent); }
-  .health-layout { display: grid; gap: 1.15rem; grid-template-columns: minmax(38rem, 1fr) 17.5rem; }
-  .section-heading { align-items: end; display: flex; gap: 1rem; justify-content: space-between; margin-bottom: 0.55rem; }
-  .section-heading h2 { font-size: 0.88rem; font-weight: 720; letter-spacing: -0.012em; margin: 0; }
-  .section-heading p { color: color-mix(in oklab, var(--color-base-content) 56%, transparent); font-size: 0.71rem; margin: 0.08rem 0 0; }
-  .section-heading > span, .event-tools > span { color: color-mix(in oklab, var(--color-base-content) 55%, transparent); font-size: 0.68rem; white-space: nowrap; }
-  .consumer-matrix { border-bottom: 1px solid var(--color-base-300); }
-  .consumer-header, .consumer-row { align-items: center; display: grid; gap: 0.6rem; grid-template-columns: minmax(12rem, 1.5fr) 5.5rem 4.8rem 4rem 4rem 5.1rem 4.5rem; }
-  .consumer-header { border-bottom: 1px solid var(--color-base-300); color: color-mix(in oklab, var(--color-base-content) 52%, transparent); font-size: 0.58rem; font-weight: 750; letter-spacing: 0.06em; padding: 0.42rem 0.55rem; text-transform: uppercase; }
-  .consumer-row { background: transparent; border: 0; border-top: 1px solid color-mix(in oklab, var(--color-base-300) 68%, transparent); cursor: pointer; font-size: 0.7rem; padding: 0.6rem 0.55rem; text-align: left; width: 100%; }
-  .consumer-row:first-of-type { border-top: 0; }
-  .consumer-row:hover, .consumer-row.selected { background: color-mix(in oklab, var(--color-base-200) 72%, transparent); }
-  .consumer-identity { min-width: 0; }
-  .consumer-identity strong, .consumer-identity small { display: block; font-family: var(--font-mono, ui-monospace, monospace); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .consumer-identity strong { font-size: 0.72rem; }
-  .consumer-identity small { color: color-mix(in oklab, var(--color-base-content) 48%, transparent); font-size: 0.62rem; margin-top: 0.12rem; }
-  .consumer-status { align-items: center; display: flex; font-size: 0.65rem; font-weight: 700; gap: 0.3rem; text-transform: capitalize; }
-  .consumer-value { font-variant-numeric: tabular-nums; }
-  .pressure { color: var(--color-error); font-weight: 700; }
-  .event-rail { border-left: 1px solid var(--color-base-300); padding-left: 1.1rem; }
-  .mini-chart { border-bottom: 1px solid var(--color-base-300); margin-bottom: 0.9rem; padding-bottom: 0.9rem; }
-  .mini-chart > div:first-child { align-items: baseline; display: flex; justify-content: space-between; }
-  .mini-chart h2 { font-size: 0.72rem; margin: 0; }
-  .mini-chart strong { font-size: 0.8rem; }
-  .mini-chart p { color: color-mix(in oklab, var(--color-base-content) 52%, transparent); font-size: 0.64rem; margin: 0.1rem 0 0.45rem; }
-  .mini-chart svg { display: block; height: 3.25rem; width: 100%; }
+  .health-layout { display: grid; gap: 1.15rem; grid-template-columns: minmax(0, 1fr) 20rem; align-items: start; }
+  .event-rail { min-width: 0; }
+  .row-selected { background: color-mix(in oklab, var(--color-primary) 10%, var(--color-base-100)); }
+  .cell-pressure { color: var(--color-error); font-weight: 700; }
+  .event-rail svg { display: block; height: 3.5rem; width: 100%; }
   .chart-grid { fill: none; stroke: color-mix(in oklab, var(--color-base-300) 75%, transparent); stroke-width: 1; }
   .event-line, .exception-line { fill: none; stroke-linecap: round; stroke-linejoin: round; stroke-width: 2; }
   .event-line { stroke: var(--color-info); } .exception-line { stroke: var(--color-error); }
-  .integrity-breakdown { display: grid; gap: 0.16rem; margin-top: 0.3rem; }
-  .integrity-breakdown button { background: transparent; border: 0; cursor: pointer; display: flex; font-size: 0.63rem; justify-content: space-between; padding: 0.16rem 0; text-align: left; text-transform: capitalize; }
+  .integrity-breakdown { display: grid; gap: 0.25rem; }
+  .integrity-breakdown button { background: transparent; border: 0; cursor: pointer; display: flex; font-size: 0.8rem; justify-content: space-between; padding: 0.2rem 0; text-align: left; text-transform: capitalize; }
   .integrity-breakdown button:hover span { text-decoration: underline; }
-  .event-types .section-heading { margin-bottom: 0.32rem; }
+  .event-types { display: grid; gap: 0.35rem; min-width: 0; }
   .event-types button { background: transparent; border: 0; border-radius: 0.35rem; cursor: pointer; display: grid; gap: 0.15rem 0.5rem; grid-template-columns: minmax(0, 1fr) auto; margin: 0 -0.25rem; padding: 0.3rem 0.25rem; text-align: left; width: calc(100% + 0.5rem); }
   .event-types button:hover, .event-types button.active { background: color-mix(in oklab, var(--color-base-200) 72%, transparent); }
   .event-types button span { min-width: 0; }
-  .event-types button strong, .event-types button small { display: block; font-family: var(--font-mono, ui-monospace, monospace); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .event-types button strong { font-size: 0.65rem; } .event-types button small { color: color-mix(in oklab, var(--color-base-content) 48%, transparent); font-size: 0.58rem; }
-  .event-types button b { font-size: 0.64rem; font-variant-numeric: tabular-nums; }
-  .event-types button i { background: color-mix(in oklab, var(--color-info) 70%, var(--color-base-300)); border-radius: 0.2rem; grid-column: 1 / -1; height: 0.18rem; width: var(--width); }
-  .focused-events { margin-top: 0.4rem; }
-  .list-heading { align-items: center; }
-  .event-tools { align-items: center; display: flex; gap: 0.45rem; }
-  .event-tools input { width: min(17rem, 28vw); }
-  .active-scope { display: flex; flex-wrap: wrap; gap: 0.3rem; margin: -0.15rem 0 0.55rem; }
-  .active-scope button { background: color-mix(in oklab, var(--color-base-200) 82%, transparent); border: 1px solid var(--color-base-300); border-radius: 999px; cursor: pointer; font-family: var(--font-mono, ui-monospace, monospace); font-size: 0.62rem; padding: 0.2rem 0.48rem; }
-  .event-list { border-bottom: 1px solid var(--color-base-300); }
-  .event-header, .event-row { align-items: center; display: grid; gap: 0.65rem; grid-template-columns: 8rem minmax(12rem, 1.3fr) minmax(10rem, 1fr) minmax(9rem, 0.9fr) 9rem 4.5rem; }
-  .event-header { border-bottom: 1px solid var(--color-base-300); color: color-mix(in oklab, var(--color-base-content) 52%, transparent); font-size: 0.58rem; font-weight: 750; letter-spacing: 0.06em; padding: 0.42rem 0.55rem; text-transform: uppercase; }
-  .event-row { background: transparent; border-bottom: 1px solid color-mix(in oklab, var(--color-base-300) 68%, transparent); font-size: 0.67rem; padding: 0.58rem 0.55rem; text-align: left; width: 100%; }
-  .event-row:hover { background: color-mix(in oklab, var(--color-base-200) 72%, transparent); }
-  .event-row > span, .event-row > button { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .event-row > button { background: transparent; border: 0; cursor: pointer; padding: 0; text-align: left; }
-  .event-subject strong, .event-subject small { display: block; font-family: var(--font-mono, ui-monospace, monospace); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .event-subject small { color: color-mix(in oklab, var(--color-base-content) 45%, transparent); font-size: 0.58rem; }
-  .identifier { font-family: var(--font-mono, ui-monospace, monospace); }
-  .identifier:hover { text-decoration: underline; }
-  .event-row .badge + .badge { margin-left: 0.18rem; }
-  .pagination { align-items: center; display: flex; font-size: 0.68rem; gap: 0.55rem; justify-content: flex-end; padding-top: 0.6rem; }
+  .event-types button strong, .event-types button small { display: block; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .event-types button strong { font-size: 0.8rem; } .event-types button small { color: color-mix(in oklab, var(--color-base-content) 62%, transparent); font-size: 0.72rem; }
+  .event-types button b { font-size: 0.8rem; font-variant-numeric: tabular-nums; }
+  .event-types button i { background: color-mix(in oklab, var(--color-info) 70%, var(--color-base-300)); border-radius: 0.2rem; grid-column: 1 / -1; height: 0.2rem; width: var(--width); }
+  .active-scope { display: flex; flex-wrap: wrap; gap: 0.35rem; }
+  .active-scope button { background: color-mix(in oklab, var(--color-base-200) 82%, transparent); border: 1px solid var(--color-base-300); border-radius: 999px; cursor: pointer; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 0.72rem; padding: 0.25rem 0.6rem; }
+  .active-scope button:hover { background: color-mix(in oklab, var(--color-base-200) 60%, transparent); }
   .detail-grid, .payload-grid { display: grid; gap: 0.75rem; grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr)); }
-  h3 { font-size: 0.72rem; font-weight: 700; letter-spacing: 0.08em; margin-bottom: 0.35rem; text-transform: uppercase; }
+  .detail-grid h3 { font-size: 0.78rem; font-weight: 700; letter-spacing: 0.08em; margin-bottom: 0.35rem; text-transform: uppercase; }
   .detail-grid p { align-items: baseline; display: flex; gap: 0.45rem; margin: 0.15rem 0; }
-  .detail-grid p span { color: color-mix(in oklab, var(--color-base-content) 52%, transparent); font-size: 0.72rem; min-width: 6rem; }
-  code, pre { font-family: var(--font-mono, ui-monospace, monospace); }
+  .detail-grid p span { color: color-mix(in oklab, var(--color-base-content) 64%, transparent); font-size: 0.78rem; min-width: 6rem; }
+  code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
   pre { background: color-mix(in oklab, var(--color-base-200) 80%, transparent); border: 1px solid var(--color-base-300); border-radius: var(--radius-box, 1rem); max-height: 24rem; overflow: auto; padding: 0.75rem; white-space: pre-wrap; }
 
   @media (max-width: 75rem) {
     .health-layout { grid-template-columns: 1fr; }
-    .event-rail { border-left: 0; border-top: 1px solid var(--color-base-300); display: grid; gap: 1rem; grid-template-columns: repeat(3, 1fr); padding: 1rem 0 0; }
-    .mini-chart { border-bottom: 0; border-right: 1px solid var(--color-base-300); margin: 0; padding: 0 1rem 0 0; }
-  }
-
-  @media (max-width: 56rem) {
-    .event-ledger { grid-template-columns: repeat(3, 1fr); }
-    .event-ledger button:nth-child(3n) { border-right: 0; }
-    .event-ledger button:nth-child(-n + 3) { border-bottom: 1px solid var(--color-base-300); }
-    .consumer-header, .event-header { display: none; }
-    .consumer-row { grid-template-columns: repeat(4, 1fr); }
-    .consumer-identity { grid-column: 1 / -1; }
-    .consumer-row > :nth-child(6), .consumer-row > :nth-child(7) { display: none; }
-    .consumer-row [data-label]::before { color: color-mix(in oklab, var(--color-base-content) 48%, transparent); content: attr(data-label); display: block; font-size: 0.54rem; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; }
-    .event-row { grid-template-columns: minmax(0, 1fr) auto; }
-    .event-row > :nth-child(1), .event-row > :nth-child(3), .event-row > :nth-child(4) { display: none; }
-    .event-row > :nth-child(6) { text-align: right; }
-  }
-
-  @media (max-width: 42rem) {
-    .event-ledger { grid-template-columns: repeat(2, 1fr); }
-    .event-ledger button:nth-child(3n) { border-right: 1px solid var(--color-base-300); }
-    .event-ledger button:nth-child(2n) { border-right: 0; }
-    .event-ledger button { border-bottom: 1px solid var(--color-base-300); }
-    .event-ledger button:nth-last-child(-n + 2) { border-bottom: 0; }
-    .event-rail { display: block; }
-    .mini-chart { border-bottom: 1px solid var(--color-base-300); border-right: 0; margin-bottom: 0.9rem; padding: 0 0 0.9rem; }
-    .list-heading { align-items: flex-start; flex-direction: column; }
-    .event-tools { flex-wrap: wrap; width: 100%; }
-    .event-tools input { flex: 1 1 12rem; width: auto; }
+    .event-rail { display: grid; grid-template-columns: repeat(auto-fit, minmax(18rem, 1fr)); }
   }
 </style>

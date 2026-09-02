@@ -4,9 +4,9 @@
   import { page } from "$app/state";
   import { onDestroy, onMount } from "svelte";
   import DataTable from "../../../../../lib/components/DataTable.svelte";
+  import ConfirmationModal from "../../../../../lib/components/ConfirmationModal.svelte";
   import EmptyState from "../../../../../lib/components/EmptyState.svelte";
   import Icon from "../../../../../lib/components/Icon.svelte";
-  import JobAttemptTimeline from "../../../../../lib/components/JobAttemptTimeline.svelte";
   import JobEventTimeline from "../../../../../lib/components/JobEventTimeline.svelte";
   import { jobTimelineEventsForAttempt } from "../../../../../lib/job_event_timeline";
   import JsonTree from "../../../../../lib/components/JsonTree.svelte";
@@ -55,6 +55,7 @@
   let watchReloadTimer: ReturnType<typeof setTimeout> | undefined;
   let loadSequence = 0;
   let activeAttemptIndex = $state(0);
+  let confirmationModal: ConfirmationModal | undefined = $state();
 
   const job = $derived(inspection?.job);
   const attempts = $derived(inspection?.attempts ?? []);
@@ -244,6 +245,30 @@
     }
   }
 
+  async function guardedAction(name: "cancel" | "dismiss") {
+    const actionJobId = job?.id ?? currentJobId;
+    const confirmed = await confirmationModal?.confirm(
+      name === "dismiss"
+        ? {
+            title: "Dismiss dead-lettered job?",
+            message: "The job record is discarded and cannot be recovered.",
+            confirmLabel: "Dismiss DLQ",
+            targetLabel: "Job",
+            targetName: actionJobId,
+            expectedValue: actionJobId,
+          }
+        : {
+            title: "Cancel job?",
+            message: "Cancellation stops the current attempt. Work already committed is not rolled back.",
+            confirmLabel: "Cancel job",
+            targetLabel: "Job",
+            targetName: actionJobId,
+          },
+    );
+    if (!confirmed) return;
+    await runAction(name);
+  }
+
   function clearWatchReload() {
     if (!watchReloadTimer) return;
     clearTimeout(watchReloadTimer);
@@ -409,15 +434,15 @@
             </button>
           {/if}
           {#if canCancel}
-            <button class="btn btn-outline btn-sm" onclick={() => runAction("cancel")} disabled={actionBusy !== null}>
+            <button class="btn btn-outline btn-sm" onclick={() => void guardedAction("cancel")} disabled={actionBusy !== null}>
               {actionBusy === "cancel" ? "Cancelling…" : "Cancel"}
             </button>
           {/if}
           {#if canDlq}
-            <button class="btn btn-outline btn-sm" onclick={() => runAction("replay")} disabled={actionBusy !== null}>
+            <button class="btn btn-outline btn-sm" title="Requeue this dead-letter (DLQ) job for another attempt" onclick={() => runAction("replay")} disabled={actionBusy !== null}>
               {actionBusy === "replay" ? "Replaying…" : "Replay DLQ"}
             </button>
-            <button class="btn btn-outline btn-sm" onclick={() => runAction("dismiss")} disabled={actionBusy !== null}>
+            <button class="btn btn-error btn-outline btn-sm" title="Discard this dead-letter (DLQ) job permanently" onclick={() => void guardedAction("dismiss")} disabled={actionBusy !== null}>
               {actionBusy === "dismiss" ? "Dismissing…" : "Dismiss DLQ"}
             </button>
           {/if}
@@ -949,6 +974,8 @@
    {/if}
  </section>
 
+<ConfirmationModal bind:this={confirmationModal} />
+
 <style>
   .job-detail {
     display: grid;
@@ -956,7 +983,7 @@
   }
 
   .job-deployment-link {
-    color: color-mix(in oklab, var(--color-base-content) 45%, transparent);
+    color: color-mix(in oklab, var(--color-base-content) 62%, transparent);
     font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
     font-size: 0.7rem;
     font-weight: 400;
@@ -1055,8 +1082,10 @@
     50% { opacity: 0.7; }
   }
 
-  .stats-cell:has(.text-error) .stats-cell-value {
-    animation: deadline-pulse 2s ease-in-out infinite;
+  @media (prefers-reduced-motion: no-preference) {
+    .stats-cell:has(.text-error) .stats-cell-value {
+      animation: deadline-pulse 2s ease-in-out infinite;
+    }
   }
 
   @keyframes retry-emphasis {
@@ -1064,14 +1093,16 @@
     50% { transform: scale(1.02); }
   }
 
-  .stats-cell:has(.text-warning) .stats-cell-value {
-    animation: retry-emphasis 1.5s ease-in-out infinite;
+  @media (prefers-reduced-motion: no-preference) {
+    .stats-cell:has(.text-warning) .stats-cell-value {
+      animation: retry-emphasis 1.5s ease-in-out infinite;
+    }
   }
 
   .stats-cell-label {
-    color: color-mix(in oklab, var(--color-base-content) 45%, transparent);
-    font-size: 0.6rem;
-    font-weight: 300;
+    color: color-mix(in oklab, var(--color-base-content) 64%, transparent);
+    font-size: 0.68rem;
+    font-weight: 500;
     letter-spacing: 0.05em;
     text-transform: uppercase;
   }
@@ -1103,9 +1134,9 @@
   }
 
   .stats-cell-baseline {
-    color: color-mix(in oklab, var(--color-base-content) 45%, transparent);
-    font-size: 0.6rem;
-    font-weight: 300;
+    color: color-mix(in oklab, var(--color-base-content) 62%, transparent);
+    font-size: 0.68rem;
+    font-weight: 400;
     letter-spacing: 0.02em;
   }
 
@@ -1140,7 +1171,6 @@
     top: 50%;
     transform: translate(-50%, -50%);
     width: 2px;
-    transition: left 0.4s cubic-bezier(0.25, 1, 0.5, 1);
   }
 
   .status-row-rule {
@@ -1250,8 +1280,8 @@
   }
 
   .lineage-label {
-    color: color-mix(in oklab, var(--color-base-content) 50%, transparent);
-    font-size: 0.65rem;
+    color: color-mix(in oklab, var(--color-base-content) 64%, transparent);
+    font-size: 0.68rem;
     letter-spacing: 0.04em;
     min-width: 4.5rem;
     text-transform: uppercase;
@@ -1301,8 +1331,8 @@
   }
 
   .wait-meta dt {
-    color: color-mix(in oklab, var(--color-base-content) 50%, transparent);
-    font-size: 0.6rem;
+    color: color-mix(in oklab, var(--color-base-content) 64%, transparent);
+    font-size: 0.68rem;
     letter-spacing: 0.04em;
     text-transform: uppercase;
   }
@@ -1404,7 +1434,7 @@
   }
 
   :global(.error-context-row dt) {
-    color: color-mix(in oklab, var(--color-base-content) 50%, transparent);
+    color: color-mix(in oklab, var(--color-base-content) 64%, transparent);
     text-transform: uppercase;
     letter-spacing: 0.04em;
     font-size: 0.65rem;
@@ -1503,8 +1533,8 @@
   }
 
   .identity-list dt {
-    color: color-mix(in oklab, var(--color-base-content) 50%, transparent);
-    font-size: 0.7rem;
+    color: color-mix(in oklab, var(--color-base-content) 64%, transparent);
+    font-size: 0.72rem;
     letter-spacing: 0.04em;
     text-transform: uppercase;
   }
@@ -1569,7 +1599,7 @@
     max-height: 20rem;
     padding: 0.85rem 1rem;
     white-space: pre;
-    border-left: 3px solid color-mix(in oklab, var(--color-error) 35%, transparent);
+    border: 1px solid color-mix(in oklab, var(--color-error) 35%, var(--color-base-300));
   }
 
   .break-anywhere {

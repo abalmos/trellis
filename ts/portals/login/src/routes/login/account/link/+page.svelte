@@ -134,15 +134,15 @@
       <p class="portal-section-label">Target account</p>
       <p class="mt-1 font-semibold text-base-content">{active.target.name ?? active.target.email ?? active.target.userId}</p>
       {#if active.target.email && active.target.email !== active.target.name}<p class="portal-copy">{active.target.email}</p>{/if}
-      <p class="mono mt-1 break-all text-xs text-base-content/45">{active.target.userId}</p>
+      <p class="mono mt-1 break-all text-xs text-base-content/65">{active.target.userId}</p>
     </section>
   {/if}
 {/snippet}
 
-<div class="portal-shell flex min-h-screen flex-col items-center justify-center gap-7 px-4 py-10 sm:px-6" data-theme="portal">
-  <div class="portal-card card w-full max-w-md border border-base-300">
-    <div class="card-body gap-6 p-7 sm:p-8">
-      <div class="flex justify-center"><PortalBrand subtitle="Account link" /></div>
+<main class="portal-shell flex min-h-screen justify-center px-4 py-10 sm:px-6" data-theme="portal">
+  <div class="portal-page w-full max-w-md">
+    <header class="portal-header"><PortalBrand subtitle="Account link" /></header>
+    <div class="portal-body">
       {#if loading}
         <div class="flex items-center gap-4 py-3" aria-live="polite"><span class="loading loading-ring loading-lg" aria-hidden="true"></span><div><p class="text-sm font-medium text-base-content">Loading account link</p><p class="portal-copy text-xs">Resolving account-flow state.</p></div></div>
       {:else if completion}
@@ -164,8 +164,8 @@
           <form class="grid gap-4" onsubmit={(event) => { event.preventDefault(); void submitLocal(); }}>
             <label class="form-control gap-1.5"><span class="label-text text-sm font-medium text-base-content">Username</span><input class="input input-bordered w-full" autocomplete="username" disabled={submitting} required bind:value={username} /></label>
             <label class="form-control gap-1.5"><span class="label-text text-sm font-medium text-base-content">Password</span><input class="input input-bordered w-full" autocomplete="new-password" disabled={submitting} required type="password" bind:value={password} /></label>
-            <label class="form-control gap-1.5"><span class="label-text text-sm font-medium text-base-content">Name <span class="font-normal text-base-content/45">optional</span></span><input class="input input-bordered w-full" autocomplete="name" disabled={submitting} bind:value={name} /></label>
-            <label class="form-control gap-1.5"><span class="label-text text-sm font-medium text-base-content">Email <span class="font-normal text-base-content/45">optional</span></span><input class="input input-bordered w-full" autocomplete="email" disabled={submitting} type="email" bind:value={email} /></label>
+            <label class="form-control gap-1.5"><span class="label-text text-sm font-medium text-base-content">Name <span class="font-normal text-base-content/65">optional</span></span><input class="input input-bordered w-full" autocomplete="name" disabled={submitting} bind:value={name} /></label>
+            <label class="form-control gap-1.5"><span class="label-text text-sm font-medium text-base-content">Email <span class="font-normal text-base-content/65">optional</span></span><input class="input input-bordered w-full" autocomplete="email" disabled={submitting} type="email" bind:value={email} /></label>
             <button class="btn btn-primary btn-block" disabled={!canSubmit} type="submit">{#if submitting}<span class="loading loading-spinner loading-sm" aria-hidden="true"></span>Linking...{:else}Link credentials{/if}</button>
           </form>
         {/if}
@@ -176,4 +176,4 @@
       {#if error}<div class="alert alert-error text-sm" role="alert"><span>{error}</span></div>{/if}
     </div>
   </div>
-</div>
+</main>

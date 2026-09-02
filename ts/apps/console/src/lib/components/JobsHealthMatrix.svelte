@@ -85,7 +85,7 @@
     >
       <span role="cell" class="jobs-matrix-type">
         <span class="jobs-matrix-key">{group.label}</span>
-        <span class={["jobs-health", severity(group)]}>
+        <span class={["badge badge-sm trellis-badge-soft border-0 font-semibold", severity(group) === "danger" ? "badge-error" : severity(group) === "warning" ? "badge-warning" : "badge-success"]}>
           {group.failureRate === undefined ? "No completions" : `${(group.failureRate * 100).toFixed(1)}% failed`}
         </span>
       </span>
@@ -135,7 +135,7 @@
 
   .jobs-matrix-row.selected {
     background: color-mix(in oklab, var(--color-primary) 10%, var(--color-base-100));
-    box-shadow: inset 2px 0 color-mix(in oklab, var(--color-primary) 70%, var(--color-base-content));
+    box-shadow: inset 0 -2px color-mix(in oklab, var(--color-primary) 70%, var(--color-base-content));
   }
 
   .jobs-matrix-row:focus-visible {
@@ -144,9 +144,9 @@
   }
 
   .jobs-matrix-head {
-    color: color-mix(in oklab, var(--color-base-content) 48%, transparent);
+    color: color-mix(in oklab, var(--color-base-content) 64%, transparent);
     cursor: default;
-    font-size: 0.62rem;
+    font-size: 0.68rem;
     font-weight: 700;
     letter-spacing: 0.07em;
     min-height: 2.25rem;
@@ -177,29 +177,6 @@
     white-space: nowrap;
   }
 
-  .jobs-health {
-    border-radius: 0.3rem;
-    flex: none;
-    font-size: 0.62rem;
-    font-weight: 650;
-    padding: 0.14rem 0.32rem;
-  }
-
-  .jobs-health.danger {
-    background: color-mix(in oklab, var(--color-error) 13%, transparent);
-    color: color-mix(in oklab, var(--color-error) 78%, var(--color-base-content));
-  }
-
-  .jobs-health.warning {
-    background: color-mix(in oklab, var(--color-warning) 14%, transparent);
-    color: color-mix(in oklab, var(--color-warning) 65%, var(--color-base-content));
-  }
-
-  .jobs-health.healthy {
-    background: color-mix(in oklab, var(--color-success) 12%, transparent);
-    color: color-mix(in oklab, var(--color-success) 70%, var(--color-base-content));
-  }
-
   .danger {
     color: color-mix(in oklab, var(--color-error) 78%, var(--color-base-content));
     font-weight: 700;
@@ -217,7 +194,7 @@
 
   .jobs-sparkline {
     align-items: center;
-    color: color-mix(in oklab, var(--color-base-content) 42%, transparent);
+    color: color-mix(in oklab, var(--color-base-content) 58%, transparent);
     display: flex;
     height: 1.35rem;
     justify-content: flex-end;
@@ -238,7 +215,7 @@
   }
 
   .jobs-matrix-empty {
-    color: color-mix(in oklab, var(--color-base-content) 55%, transparent);
+    color: color-mix(in oklab, var(--color-base-content) 66%, transparent);
     font-size: 0.78rem;
     margin: 0;
     padding: 1.5rem 0.5rem;
@@ -268,9 +245,10 @@
     }
 
     .jobs-matrix-row > span:not(:first-child)::before {
-      color: color-mix(in oklab, var(--color-base-content) 48%, transparent);
+      color: color-mix(in oklab, var(--color-base-content) 64%, transparent);
       content: attr(data-label);
-      font-size: 0.58rem;
+      display: block;
+      font-size: 0.68rem;
       font-weight: 700;
       letter-spacing: 0.06em;
       text-transform: uppercase;

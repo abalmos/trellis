@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { ulid } from "ulid";
   import { isErr, type BaseError, type Result } from "@qlever-llc/result";
   import type { DeploymentAuthority, DeploymentAuthorityMaterialization } from "@qlever-llc/trellis/auth";
   import type {
@@ -11,6 +12,9 @@
   } from "@trellis/apis/trellis.auth";
   import { resolve } from "$app/paths";
   import { onMount } from "svelte";
+  import BulkActionBar from "$lib/components/BulkActionBar.svelte";
+  import BulkResult from "$lib/components/BulkResult.svelte";
+  import ConfirmationModal from "$lib/components/ConfirmationModal.svelte";
   import DataTable from "$lib/components/DataTable.svelte";
   import EmptyState from "$lib/components/EmptyState.svelte";
   import Icon from "$lib/components/Icon.svelte";
@@ -21,12 +25,14 @@
   import SelectableRecordButton from "$lib/components/SelectableRecordButton.svelte";
   import SelectionRail from "$lib/components/SelectionRail.svelte";
   import StatusBadge from "$lib/components/StatusBadge.svelte";
+  import Term from "$lib/components/Term.svelte";
   import {
     type AuthorityCapabilityDefinition,
     createsCapabilityRows,
     givenCapabilityRows,
   } from "$lib/authority_console";
   import { errorMessage, formatDate } from "$lib/format";
+  import { bulkExpectedCount, bulkTargetDetails, runBulk, toggleAll, toggleId } from "$lib/bulk.ts";
   import { getTrellis } from "$lib/trellis";
 
   type DeviceDeployment = AuthDeploymentsListOutput["entries"][number];
@@ -190,6 +196,53 @@
     return `${instance.instanceId}:${instance.createdAt}:${instance.identityPublicKey ?? ""}`;
   }
 
+  let selectedInstanceIds = $state(new Set<string>());
+  let bulkBusy = $state(false);
+  let bulkResult = $state<{ succeeded: number; failed: string[] } | null>(null);
+  let failedInstances = $state.raw<DeviceInstance[]>([]);
+  let confirmationModal: ConfirmationModal | undefined = $state();
+
+  const disableableInstances = $derived(selectedInstances.filter((instance) => instance.state !== "disabled"));
+  const selectableInstanceIds = $derived(disableableInstances.map((instance) => instance.instanceId));
+
+  async function disableInstances(targets: DeviceInstance[]) {
+    bulkBusy = true;
+    bulkResult = null;
+    const outcome = await runBulk(targets, async (instance) => {
+      const response = await trellis.authDevicesDisable({
+        expectedVersion: instance.version,
+        idempotencyKey: ulid(),
+        instanceId: instance.instanceId,
+        reason: null,
+      }).take();
+      if (isErr(response)) throw new Error(errorMessage(response));
+    });
+    failedInstances = outcome.failed.map((failure) => failure.target);
+    for (const instance of targets) selectedInstanceIds.delete(instance.instanceId);
+    bulkResult = {
+      succeeded: outcome.succeeded,
+      failed: outcome.failed.map((failure) => `${failure.target.instanceId}: ${failure.reason}`),
+    };
+    bulkBusy = false;
+    void load();
+  }
+
+  async function requestBulkDisable() {
+    const targets = disableableInstances.filter((instance) => selectedInstanceIds.has(instance.instanceId));
+    if (targets.length === 0) return;
+    const confirmed = await confirmationModal?.confirm({
+      title: `Disable ${targets.length} device instance${targets.length === 1 ? "" : "s"}?`,
+      message: "Selected device instances stop operating. Each must complete activation again before use.",
+      confirmLabel: `Disable ${targets.length}`,
+      targetLabel: "Instances",
+      targetName: `${targets.length} instances`,
+      expectedValue: bulkExpectedCount(targets.length),
+      details: bulkTargetDetails(targets.map((instance) => instance.instanceId)),
+    });
+    if (!confirmed) return;
+    await disableInstances(targets);
+  }
+
   function activationRowKey(activation: Activation): string {
     return `${activation.device.instanceId}:${activation.authority?.authorityId ?? "none"}:${activation.device.updatedAt}`;
   }
@@ -238,12 +291,12 @@
     error = null;
     try {
       const [deploymentsResponse, instancesResponse, activationsResponse, reviewsResponse, authoritiesResponse, capabilitiesResponse] = await Promise.all([
-        trellis.authDeploymentsList({ kind: "device", limit: 500 }).take(),
-        trellis.authDevicesList({ limit: 500 }).take(),
-        trellis.authDeviceUserAuthoritiesList({ limit: 500 }).take(),
-        trellis.authDeviceUserAuthoritiesReviewsList({ limit: 500 }).take(),
-        trellis.authDeploymentAuthorityList({ limit: 500 }).take(),
-        trellis.authCapabilitiesList({ limit: 500 }).take(),
+        trellis.authDeploymentsList({ kind: "device", limit: 100 }).take(),
+        trellis.authDevicesList({ limit: 100 }).take(),
+        trellis.authDeviceUserAuthoritiesList({ limit: 100 }).take(),
+        trellis.authDeviceUserAuthoritiesReviewsList({ limit: 100 }).take(),
+        trellis.authDeploymentAuthorityList({ limit: 100 }).take(),
+        trellis.authCapabilitiesList({ limit: 100 }).take(),
       ]);
 
       if (isErr(deploymentsResponse)) { error = errorMessage(deploymentsResponse); return; }
@@ -347,7 +400,7 @@
         {#if !selectedDeployment}
           <Panel><EmptyState title="Select a deployment" description="Choose a device deployment from the left rail to inspect instances, activations, and reviews." /></Panel>
         {:else}
-          <Panel class="flex min-w-0 flex-1 flex-col [&>.card-body]:flex-1">
+          <Panel class="flex min-w-0 flex-1 flex-col [&>.trellis-section-body]:flex-1">
             <div class="flex flex-wrap items-start justify-between gap-3 border-b border-base-300 pb-3">
               <div class="flex min-w-0 items-start gap-3">
                 <div class="rounded-box bg-primary/10 p-2.5 text-primary"><Icon name="phone" size={22} /></div>
@@ -396,7 +449,7 @@
                 <div class="flex flex-wrap items-center justify-between gap-2">
                   <div>
                     <div class="font-medium">Deployment authority tracked</div>
-                    <div class="mt-1 text-xs text-base-content/70">Desired device authority is reconciled into materialized runtime grants.</div>
+                    <div class="mt-1 text-xs text-base-content/70"><Term term="desired authority" /> for this device is reconciled into <Term term="materialized authority" /> runtime grants.</div>
                   </div>
                   <div class="flex flex-wrap gap-1">
                     <span class="badge badge-outline badge-sm trellis-identifier">{selectedDeploymentAuthority.version}</span>
@@ -415,6 +468,23 @@
 
             <div id={tabPanelId(activeTab)} class="mt-4 flex-1" role="tabpanel" aria-labelledby={tabId(activeTab)}>
               {#if activeTab === "instances"}
+                {#if bulkResult}
+                  <BulkResult
+                    succeeded={bulkResult.succeeded}
+                    failed={bulkResult.failed}
+                    pastTense="instances disabled"
+                    onRetry={failedInstances.length > 0 ? () => void disableInstances(failedInstances) : undefined}
+                    onDismiss={() => { bulkResult = null; }}
+                  />
+                {:else if selectedInstanceIds.size > 0}
+                  <BulkActionBar count={selectedInstanceIds.size} noun="instance" onClear={() => selectedInstanceIds.clear()}>
+                    {#snippet actions()}
+                      <button class="btn btn-error btn-outline btn-sm" disabled={bulkBusy} onclick={() => void requestBulkDisable()}>
+                        {bulkBusy ? "Disabling…" : "Disable selected"}
+                      </button>
+                    {/snippet}
+                  </BulkActionBar>
+                {/if}
                 <div class="mb-2 flex justify-end">
                   <label class="label cursor-pointer gap-2 py-0">
                     <span class="label-text text-sm">Metadata</span>
@@ -425,10 +495,37 @@
                   <EmptyState title="No device instances" description="Provisioned device identities for this deployment appear here." />
                 {:else}
                   <DataTable>
-                      <thead><tr><th>Instance</th><th>Identity key</th><th>Name</th><th>Serial</th><th>Model</th>{#if showMetadata}<th>Metadata</th>{/if}<th>State</th><th>Created</th><th>Actions</th></tr></thead>
+                      <thead><tr>
+                        <th>
+                          <span class="sr-only">Select all instances</span>
+                          <input
+                            type="checkbox"
+                            class="checkbox checkbox-xs"
+                            aria-label="Select all instances"
+                            disabled={bulkBusy || selectableInstanceIds.length === 0}
+                            checked={selectableInstanceIds.length > 0 && selectableInstanceIds.every((id) => selectedInstanceIds.has(id))}
+                            indeterminate={selectableInstanceIds.some((id) => selectedInstanceIds.has(id)) && !selectableInstanceIds.every((id) => selectedInstanceIds.has(id))}
+                            onchange={() => toggleAll(selectedInstanceIds, selectableInstanceIds)}
+                          />
+                        </th>
+                        <th>Instance</th><th>Identity key</th><th>Name</th><th>Serial</th><th>Model</th>{#if showMetadata}<th>Metadata</th>{/if}<th>State</th><th>Created</th><th>Actions</th></tr></thead>
                       <tbody>
                         {#each selectedInstances as instance (instanceRowKey(instance))}
                           <tr>
+                            <td>
+                              {#if instance.state !== "disabled"}
+                                <input
+                                  type="checkbox"
+                                  class="checkbox checkbox-xs"
+                                  aria-label={`Select instance {instance.instanceId}`}
+                                  disabled={bulkBusy}
+                                  checked={selectedInstanceIds.has(instance.instanceId)}
+                                  onchange={() => toggleId(selectedInstanceIds, instance.instanceId)}
+                                />
+                              {:else}
+                                <span class="text-xs text-base-content/50">—</span>
+                              {/if}
+                            </td>
                             <td class="trellis-identifier font-medium">{instance.instanceId}</td>
                             <td class="trellis-identifier text-base-content/60">{instance.identityPublicKey ?? "—"}</td>
                             <td class="text-base-content/60">{metadataValue(instance.instanceId, "name") ?? "—"}</td>
@@ -592,3 +689,5 @@
     </div>
   {/if}
 </section>
+
+<ConfirmationModal bind:this={confirmationModal} />

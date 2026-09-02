@@ -26,7 +26,7 @@
     <dl class="mt-3 grid gap-3 text-xs text-base-content/60">
       {#each items as item (item.label)}
         <div>
-          <dt class="font-medium text-base-content/45">{item.label}</dt>
+          <dt class="font-medium text-base-content/65">{item.label}</dt>
           <dd class="mono mt-1 break-all leading-5">{item.value}</dd>
         </div>
       {/each}
@@ -34,17 +34,15 @@
   </details>
 {/snippet}
 
-<div
-  class="portal-shell flex min-h-screen flex-col items-center justify-center gap-7 px-4 py-10 sm:px-6"
+<main
+  class="portal-shell flex min-h-screen justify-center px-4 py-10 sm:px-6"
   data-theme="portal"
 >
-  <div
-    class="portal-card card w-full max-w-lg border border-base-300"
-  >
-    <div class="card-body gap-6 p-7 sm:p-8">
-      <div class="flex justify-center">
-        <PortalBrand subtitle="Device approval" />
-      </div>
+  <div class="portal-page max-w-lg">
+    <header class="portal-header">
+      <PortalBrand subtitle="Device approval" />
+    </header>
+    <div class="portal-body">
 
       {#if controller.loading}
         <div class="flex items-center gap-4 py-3">
@@ -109,7 +107,7 @@
             </p>
             <dl class="mt-3 flex flex-col gap-2 text-sm">
               <div>
-                <dt class="text-xs font-medium text-base-content/45">
+                <dt class="text-xs font-medium text-base-content/65">
                   Request handle
                 </dt>
                 <dd class="mono mt-0.5 break-all text-base-content">
@@ -210,4 +208,4 @@
       {/if}
     </div>
   </div>
-</div>
+</main>

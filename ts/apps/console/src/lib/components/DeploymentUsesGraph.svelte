@@ -234,7 +234,7 @@
   });
 </script>
 
-<section class={["card trellis-card bg-base-100", className]} aria-labelledby={`${componentId}-title`} aria-describedby={`${componentId}-description ${componentId}-fallback`}>
+<section class={["trellis-section bg-base-100", className]} aria-labelledby={`${componentId}-title`} aria-describedby={`${componentId}-description ${componentId}-fallback`}>
   <div class="border-b border-base-300 px-4 py-3">
     <div class="flex flex-wrap items-start justify-between gap-3">
       <div class="min-w-0">
@@ -251,7 +251,7 @@
     </div>
   </div>
 
-  <div class="card-body gap-3 p-4">
+  <div class="trellis-section-body gap-3 p-4">
     <div class="flex flex-wrap gap-2 text-xs text-base-content/65" aria-hidden="true">
       <span class="inline-flex items-center gap-1"><span class="h-2 w-2 rounded-full bg-primary"></span>Deployment</span>
       <span class="inline-flex items-center gap-1"><span class="h-2 w-2 rounded-full bg-secondary"></span>Contract</span>

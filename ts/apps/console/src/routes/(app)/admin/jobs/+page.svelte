@@ -1,5 +1,6 @@
 <script lang="ts">
   import { resolve } from "$app/paths";
+  import { page } from "$app/state";
   import { onMount } from "svelte";
   import type {
     JobsListServicesOutput,
@@ -9,14 +10,23 @@
     JobsQueryOutput,
   } from "@trellis/apis/trellis.jobs";
   import EmptyState from "../../../../lib/components/EmptyState.svelte";
+  import BulkActionBar from "../../../../lib/components/BulkActionBar.svelte";
+  import BulkResult from "../../../../lib/components/BulkResult.svelte";
+  import ConfirmationModal from "../../../../lib/components/ConfirmationModal.svelte";
+  import DataTable from "../../../../lib/components/DataTable.svelte";
   import JobsHealthMatrix from "../../../../lib/components/JobsHealthMatrix.svelte";
   import JobsScopedCharts from "../../../../lib/components/JobsScopedCharts.svelte";
   import LoadingState from "../../../../lib/components/LoadingState.svelte";
+  import MetricsLedger from "../../../../lib/components/MetricsLedger.svelte";
   import Notice from "../../../../lib/components/Notice.svelte";
   import PageToolbar from "../../../../lib/components/PageToolbar.svelte";
+  import Panel from "../../../../lib/components/Panel.svelte";
+  import StatusBadge from "../../../../lib/components/StatusBadge.svelte";
+  import Term from "../../../../lib/components/Term.svelte";
   import { compactDuration, errorMessage } from "../../../../lib/format";
   import { loadJobsMetrics } from "../../../../lib/jobs_metrics.ts";
-  import { loadJobsPageData } from "../../../../lib/jobs_page.ts";
+  import { cancelJob, loadJobsPageData } from "../../../../lib/jobs_page.ts";
+  import { bulkExpectedCount, bulkTargetDetails, runBulk, toggleAll, toggleId } from "../../../../lib/bulk.ts";
   import { getTrellis } from "../../../../lib/trellis";
 
   type Job = JobsQueryOutput["entries"][number];
@@ -48,10 +58,27 @@
   let metrics = $state.raw<JobsMetricsOutput | null>(null);
   let metricsWindow = $state<MetricsWindow>("1h");
   let selectedJobType = $state<string | null>(null);
-  let focus = $state<Focus>("running-risk");
+  let focus = $state<Focus>(asFocus(page.url.searchParams.get("focus")) ?? "running-risk");
+  let handledFocusParam = page.url.searchParams.get("focus");
+
+  $effect(() => {
+    const value = page.url.searchParams.get("focus");
+    if (value === handledFocusParam) return;
+    handledFocusParam = value;
+    const next = asFocus(value);
+    if (next && next !== focus) {
+      focus = next;
+      void loadJobs(false);
+    }
+  });
   let lastUpdated = $state<Date | null>(null);
   let jobsSequence = 0;
   let metricsSequence = 0;
+  let selectedJobs = $state(new Set<string>());
+  let bulkBusy = $state(false);
+  let bulkResult = $state<{ succeeded: number; failed: string[] } | null>(null);
+  let failedJobs = $state.raw<Job[]>([]);
+  let confirmationModal: ConfirmationModal | undefined = $state();
 
   const workerCount = $derived(services.reduce((sum, service) => sum + service.workers.length, 0));
   const windowLabel = $derived(windows.find((option) => option.value === metricsWindow)?.title ?? metricsWindow);
@@ -60,6 +87,8 @@
       ? [...jobs].sort((left, right) => riskPriority(left) - riskPriority(right) || (right.runtimeMs ?? 0) - (left.runtimeMs ?? 0))
       : jobs,
   );
+  const cancellableJobs = $derived(focusedJobs.filter((job) => job.state === "active" || job.state === "pending" || job.state === "retry"));
+  const selectableJobIds = $derived(cancellableJobs.map((job) => job.id));
   const overview = $derived.by(() => {
     const byState: Record<string, number> = {};
     let backlog = 0;
@@ -95,11 +124,48 @@
     };
   });
 
+  function asFocus(value: string | null): Focus | null {
+    if (value === "running-risk" || value === "running" || value === "action" || value === "completed" || value === "failed" || value === "dead" || value === "backlog") return value;
+    return null;
+  }
+
   function resolveMetricsStep(window: MetricsWindow): JobsMetricsInput["step"] {
     if (window === "15m" || window === "1h") return "1m";
     if (window === "6h") return "5m";
     if (window === "24h") return "15m";
     return "1h";
+  }
+
+  async function cancelJobs(targets: Job[]) {
+    bulkBusy = true;
+    bulkResult = null;
+    const outcome = await runBulk(targets, async (job) => {
+      await cancelJob({ action: (input) => trellis.jobsCancel(input) }, job.id);
+    });
+    failedJobs = outcome.failed.map((failure) => failure.target);
+    for (const job of targets) selectedJobs.delete(job.id);
+    bulkResult = {
+      succeeded: outcome.succeeded,
+      failed: outcome.failed.map((failure) => `${failure.target.id}: ${failure.reason}`),
+    };
+    bulkBusy = false;
+    void loadJobs();
+  }
+
+  async function requestBulkCancel() {
+    const targets = cancellableJobs.filter((job) => selectedJobs.has(job.id));
+    if (targets.length === 0) return;
+    const confirmed = await confirmationModal?.confirm({
+      title: `Cancel ${targets.length} job${targets.length === 1 ? "" : "s"}?`,
+      message: "Queued and running work stops. Work already committed by a job is not rolled back.",
+      confirmLabel: `Cancel ${targets.length}`,
+      targetLabel: "Jobs",
+      targetName: `${targets.length} jobs`,
+      expectedValue: bulkExpectedCount(targets.length),
+      details: bulkTargetDetails(targets.map((job) => `${job.type} ${job.id}`)),
+    });
+    if (!confirmed) return;
+    await cancelJobs(targets);
   }
 
   function focusStates(value: Focus): JobState[] {
@@ -257,6 +323,28 @@
     return Math.min(100, Math.max(0, (current / total) * 100));
   }
 
+  function jobStateVariant(job: Job): "healthy" | "degraded" | "unhealthy" | "offline" {
+    const label = jobStateLabel(job);
+    if (label === "completed") return "healthy";
+    if (label === "waiting" || label === "slow" || label === "pending" || label === "retry") return "degraded";
+    if (label === "failed" || label === "dead" || label === "stale") return "unhealthy";
+    return "offline";
+  }
+
+  const ledgerItems = $derived([
+    { id: "action", label: "Action needed", value: overview.action, detail: `${overview.failed} failed · ${overview.dead} dead · ${overview.retrying} retrying`, tone: "error" as const, active: focus === "action", attention: true },
+    { id: "running", label: "Running", value: overview.running, detail: `${overview.slow} slow · ${workerCount} workers`, tone: "success" as const, active: focus === "running" || focus === "running-risk" },
+    { id: "completed", label: "Processed", value: overview.processed.toLocaleString(), detail: `completed · ${windowLabel.toLowerCase()}`, tone: "success" as const, active: focus === "completed" },
+    { id: "failed", label: "Failed", value: overview.failed, detail: `${overview.failureRate.toFixed(2)}% of completed`, tone: "error" as const, active: focus === "failed" },
+    { id: "dead", label: "Dead", value: overview.dead, detail: "requires replay or dismissal", tone: "error" as const, active: focus === "dead" },
+    { id: "backlog", label: "Backlog", value: overview.backlog, detail: "pending + retrying", tone: "warning" as const, active: focus === "backlog" },
+  ]);
+
+  function handleLedgerSelect(id: string) {
+    if (id === "running") selectFocus("running");
+    else if (id === "action" || id === "completed" || id === "failed" || id === "dead" || id === "backlog") selectFocus(id);
+  }
+
   onMount(() => {
     void refresh(true);
   });
@@ -267,12 +355,13 @@
 <section class="jobs-page">
   <PageToolbar title="Jobs" description="Execution health across services and job types.">
     {#snippet actions()}
-      <div class="jobs-window" aria-label="Metrics window">
+      <div class="trellis-segment" role="group" aria-label="Metrics window">
         {#each windows as option (option.value)}
           <button
             type="button"
             class:active={metricsWindow === option.value}
             aria-pressed={metricsWindow === option.value}
+            title={option.title}
             onclick={() => selectWindow(option.value)}
           >{option.label}</button>
         {/each}
@@ -300,77 +389,110 @@
   {#if metricsLoading && !metrics}
     <LoadingState label="Loading job health" />
   {:else if metrics}
-    <div class="jobs-ledger" aria-label="Jobs status summary">
-      <button class:active={focus === "action"} class="attention" onclick={() => selectFocus("action")}>
-        <span><i></i>Action needed</span><strong>{overview.action}</strong><small>{overview.failed} failed · {overview.dead} dead · {overview.retrying} retrying</small>
-      </button>
-      <button class:active={focus === "running" || focus === "running-risk"} onclick={() => selectFocus("running")}>
-        <span><i class="healthy"></i>Running</span><strong>{overview.running}</strong><small>{overview.slow} slow · {workerCount} workers</small>
-      </button>
-      <button class:active={focus === "completed"} onclick={() => selectFocus("completed")}>
-        <span><i class="healthy"></i>Processed</span><strong>{overview.processed.toLocaleString()}</strong><small>completed · {windowLabel.toLowerCase()}</small>
-      </button>
-      <button class:active={focus === "failed"} onclick={() => selectFocus("failed")}>
-        <span><i></i>Failed</span><strong>{overview.failed}</strong><small>{overview.failureRate.toFixed(2)}% of completed</small>
-      </button>
-      <button class:active={focus === "dead"} onclick={() => selectFocus("dead")}>
-        <span><i></i>Dead</span><strong>{overview.dead}</strong><small>requires replay or dismissal</small>
-      </button>
-      <button class:active={focus === "backlog"} onclick={() => selectFocus("backlog")}>
-        <span><i class="warning"></i>Backlog</span><strong>{overview.backlog}</strong><small>pending + retrying</small>
-      </button>
-    </div>
+    <MetricsLedger ariaLabel="Jobs status summary" items={ledgerItems} onSelect={handleLedgerSelect} />
 
     <div class="jobs-overview">
-      <section class="jobs-matrix-section">
-        <header class="jobs-section-heading">
-          <div><h2>Job-type health</h2><p>Pressure and latency by execution contract. Select a type to scope live work.</p></div>
-          <span>{metrics.summary.length} types reporting</span>
-        </header>
+      <Panel eyebrow="Secondary" title="Job-type health">
+        {#snippet actions()}<span class="text-sm text-base-content/70">{metrics?.summary.length ?? 0} types reporting</span>{/snippet}
+        <p class="text-sm text-base-content/70">Pressure and latency by execution contract. Select a type to scope live work.</p>
         <JobsHealthMatrix summary={metrics.summary} buckets={metrics.buckets} selectedKey={selectedJobType} onSelect={selectJobType} />
-      </section>
+      </Panel>
       <JobsScopedCharts buckets={metrics.buckets} selectedKey={selectedJobType} {windowLabel} />
     </div>
   {/if}
 
   {#if !unavailableMessage}
-    <section class="jobs-focused">
-      <header class="jobs-section-heading">
-        <div><h2>{focusTitle()}</h2><p>{focusDescription()}</p></div>
-        <div class="jobs-focused-meta">
-          <span>{jobCount} matching</span>
+    <Panel eyebrow="Primary" title={focusTitle()}>
+      {#snippet actions()}
+        <div class="flex items-center gap-3">
+          <span class="text-sm text-base-content/70">{jobCount} matching</span>
           {#if selectedJobType}
-            <button type="button" onclick={() => selectJobType(null)}>Clear type</button>
+            <button type="button" class="btn btn-ghost btn-sm" onclick={() => selectJobType(null)}>Clear type</button>
           {/if}
         </div>
-      </header>
-
+      {/snippet}
+      <p class="text-sm text-base-content/70">{focusDescription()}</p>
+      {#if focus === "dead"}
+        <p class="text-sm text-base-content/70">The <Term term="DLQ" /> holds jobs awaiting a replay or dismissal decision.</p>
+      {/if}
+      {#if bulkResult}
+        <BulkResult
+          succeeded={bulkResult.succeeded}
+          failed={bulkResult.failed}
+          pastTense="jobs cancelled"
+          onRetry={failedJobs.length > 0 ? () => void cancelJobs(failedJobs) : undefined}
+          onDismiss={() => { bulkResult = null; }}
+        />
+      {:else if selectedJobs.size > 0}
+        <BulkActionBar count={selectedJobs.size} noun="job" onClear={() => selectedJobs.clear()}>
+          {#snippet actions()}
+            <button class="btn btn-error btn-outline btn-sm" disabled={bulkBusy} onclick={() => void requestBulkCancel()}>
+              {bulkBusy ? "Cancelling…" : "Cancel selected"}
+            </button>
+          {/snippet}
+        </BulkActionBar>
+      {/if}
       {#if loading}
         <LoadingState label="Loading focused jobs" class="min-h-32" />
       {:else if jobs.length === 0}
         <EmptyState title="No matching jobs" description="No retained jobs match this operational view." />
       {:else}
-        <div class="jobs-list">
-          {#each focusedJobs as job (job.id)}
-            {@const progress = jobProgress(job)}
-            <a class="jobs-row" href={resolve(jobRoute(job.id))}>
-              <span class="jobs-row-identity"><strong>{job.type}</strong><small>{job.id} · {job.service}</small></span>
-              <span class="jobs-row-key">{job.queueKey ?? "Unkeyed"}</span>
-              <span class={["jobs-row-state", `state-${jobStateLabel(job)}`]}>{jobStateLabel(job)}</span>
-              <span class="jobs-row-narrative">
-                <strong>{jobNarrative(job)}</strong>
-                {#if job.progress?.step}<small>{job.progress.step}</small>{/if}
-                {#if progress > 0}<span class="jobs-progress"><i style:--job-progress={`${progress}%`}></i></span>{/if}
-              </span>
-              <span class="jobs-row-duration"><small>{job.state === "pending" || job.state === "retry" ? "Queue age" : "Runtime"}</small>{jobDuration(job)}</span>
-              <span class="jobs-row-tries"><small>Attempt</small>{job.tries}/{job.maxTries}</span>
-            </a>
-          {/each}
-        </div>
+        <DataTable>
+          <thead><tr>
+            <th>
+              <span class="sr-only">Select all cancellable jobs</span>
+              <input
+                type="checkbox"
+                class="checkbox checkbox-xs"
+                aria-label="Select all cancellable jobs"
+                disabled={bulkBusy || selectableJobIds.length === 0}
+                checked={selectableJobIds.length > 0 && selectableJobIds.every((id) => selectedJobs.has(id))}
+                indeterminate={selectableJobIds.some((id) => selectedJobs.has(id)) && !selectableJobIds.every((id) => selectedJobs.has(id))}
+                onchange={() => toggleAll(selectedJobs, selectableJobIds)}
+              />
+            </th>
+            <th>Job type / id</th><th>Queue key</th><th>State</th><th>Status</th><th>Duration</th><th>Attempt</th></tr></thead>
+          <tbody>
+            {#each focusedJobs as job (job.id)}
+              {@const progress = jobProgress(job)}
+              <tr>
+                <td>
+                  {#if job.state === "active" || job.state === "pending" || job.state === "retry"}
+                    <input
+                      type="checkbox"
+                      class="checkbox checkbox-xs"
+                      aria-label={`Select job {job.id}`}
+                      disabled={bulkBusy}
+                      checked={selectedJobs.has(job.id)}
+                      onchange={() => toggleId(selectedJobs, job.id)}
+                    />
+                  {:else}
+                    <span class="text-xs text-base-content/50">—</span>
+                  {/if}
+                </td>
+                <td class="min-w-0">
+                  <a class="link link-hover block max-w-md truncate text-left trellis-identifier font-medium" href={resolve(jobRoute(job.id))}>{job.type}</a>
+                  <span class="trellis-metadata trellis-identifier block max-w-md truncate">{job.id} · {job.service}</span>
+                </td>
+                <td class="trellis-metadata trellis-identifier block max-w-xs truncate">{job.queueKey ?? "Unkeyed"}</td>
+                <td><StatusBadge label={jobStateLabel(job)} status={jobStateVariant(job)} /></td>
+                <td class="max-w-md">
+                  <span class="block truncate text-sm" title={jobNarrative(job)}>{jobNarrative(job)}</span>
+                  {#if job.progress?.step}<span class="trellis-metadata block truncate">{job.progress.step}</span>{/if}
+                  {#if progress > 0}<span class="jobs-progress"><i style:--job-progress={`${progress}%`}></i></span>{/if}
+                </td>
+                <td class="whitespace-nowrap tabular-nums text-sm">{job.state === "pending" || job.state === "retry" ? "Queue " : "Run "}{jobDuration(job)}</td>
+                <td class="tabular-nums text-sm">{job.tries}/{job.maxTries}</td>
+              </tr>
+            {/each}
+          </tbody>
+        </DataTable>
       {/if}
-    </section>
+    </Panel>
   {/if}
 </section>
+
+<ConfirmationModal bind:this={confirmationModal} />
 
 <style>
   .jobs-page {
@@ -383,274 +505,21 @@
   }
 
   .jobs-updated {
-    color: color-mix(in oklab, var(--color-base-content) 45%, transparent);
-    font-size: 0.68rem;
+    color: color-mix(in oklab, var(--color-base-content) 64%, transparent);
+    font-size: 0.72rem;
     margin: -1.15rem 0 -0.75rem;
     text-align: right;
-  }
-
-  .jobs-window {
-    background: color-mix(in oklab, var(--color-base-200) 75%, var(--color-base-100));
-    border: 1px solid color-mix(in oklab, var(--color-base-300) 85%, transparent);
-    border-radius: var(--radius-field, 0.5rem);
-    display: flex;
-    padding: 0.18rem;
-  }
-
-  .jobs-window button {
-    border: 0;
-    border-radius: calc(var(--radius-field, 0.5rem) - 0.15rem);
-    color: color-mix(in oklab, var(--color-base-content) 58%, transparent);
-    cursor: pointer;
-    font-size: 0.7rem;
-    font-weight: 650;
-    min-height: 1.8rem;
-    padding: 0 0.65rem;
-  }
-
-  .jobs-window button.active {
-    background: var(--color-base-100);
-    box-shadow: 0 1px 2px color-mix(in oklab, var(--color-base-content) 12%, transparent);
-    color: var(--color-base-content);
-  }
-
-  .jobs-window button:focus-visible {
-    box-shadow: var(--trellis-focus-ring);
-    outline: none;
-  }
-
-  .jobs-ledger {
-    border-bottom: 1px solid color-mix(in oklab, var(--color-base-300) 85%, transparent);
-    border-top: 1px solid color-mix(in oklab, var(--color-base-300) 85%, transparent);
-    display: grid;
-    grid-template-columns: repeat(6, minmax(0, 1fr));
-  }
-
-  .jobs-ledger > button {
-    background: transparent;
-    border: 0;
-    border-right: 1px solid color-mix(in oklab, var(--color-base-300) 75%, transparent);
-    display: grid;
-    gap: 0.2rem;
-    min-width: 0;
-    padding: 0.8rem 1rem;
-    text-align: left;
-  }
-
-  .jobs-ledger > :last-child {
-    border-right: 0;
-  }
-
-  .jobs-ledger > button {
-    cursor: pointer;
-    transition: background-color 150ms cubic-bezier(0.22, 1, 0.36, 1);
-  }
-
-  .jobs-ledger > button:hover {
-    background: color-mix(in oklab, var(--color-base-200) 55%, transparent);
-  }
-
-  .jobs-ledger > button.active {
-    background: color-mix(in oklab, var(--color-primary) 9%, var(--color-base-100));
-    box-shadow: inset 0 -2px color-mix(in oklab, var(--color-primary) 75%, var(--color-base-content));
-  }
-
-  .jobs-ledger > button.attention.active {
-    background: color-mix(in oklab, var(--color-error) 9%, var(--color-base-100));
-    box-shadow: inset 0 -2px color-mix(in oklab, var(--color-error) 75%, var(--color-base-content));
-  }
-
-  .jobs-ledger > button:focus-visible {
-    box-shadow: var(--trellis-focus-ring);
-    outline: none;
-  }
-
-  .jobs-ledger span {
-    align-items: center;
-    color: color-mix(in oklab, var(--color-base-content) 58%, transparent);
-    display: flex;
-    font-size: 0.62rem;
-    font-weight: 720;
-    gap: 0.35rem;
-    letter-spacing: 0.055em;
-    text-transform: uppercase;
-  }
-
-  .jobs-ledger i {
-    background: var(--color-error);
-    border-radius: 50%;
-    height: 0.35rem;
-    width: 0.35rem;
-  }
-
-  .jobs-ledger i.healthy {
-    background: var(--color-success);
-  }
-
-  .jobs-ledger i.warning {
-    background: var(--color-warning);
-  }
-
-  .jobs-ledger strong {
-    font-size: 1.35rem;
-    font-variant-numeric: tabular-nums;
-    letter-spacing: -0.035em;
-    line-height: 1.15;
-  }
-
-  .jobs-ledger small {
-    color: color-mix(in oklab, var(--color-base-content) 45%, transparent);
-    font-size: 0.62rem;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
   }
 
   .jobs-overview {
     display: grid;
     gap: 1.5rem;
     grid-template-columns: minmax(0, 1.6fr) minmax(14rem, 0.52fr);
+    align-items: start;
   }
 
-  .jobs-matrix-section,
-  .jobs-focused {
+  .jobs-overview > * {
     min-width: 0;
-  }
-
-  .jobs-section-heading {
-    align-items: flex-end;
-    display: flex;
-    gap: 1rem;
-    justify-content: space-between;
-    margin-bottom: 0.7rem;
-  }
-
-  .jobs-section-heading h2 {
-    font-size: 0.88rem;
-    font-weight: 720;
-    margin: 0;
-  }
-
-  .jobs-section-heading p,
-  .jobs-section-heading > span,
-  .jobs-focused-meta {
-    color: color-mix(in oklab, var(--color-base-content) 52%, transparent);
-    font-size: 0.68rem;
-    margin: 0.15rem 0 0;
-  }
-
-  .jobs-focused-meta {
-    align-items: center;
-    display: flex;
-    gap: 0.75rem;
-  }
-
-  .jobs-focused-meta button {
-    background: transparent;
-    border: 0;
-    color: color-mix(in oklab, var(--color-primary) 75%, var(--color-base-content));
-    cursor: pointer;
-    font-size: inherit;
-    font-weight: 700;
-    padding: 0;
-  }
-
-  .jobs-list {
-    border-top: 1px solid color-mix(in oklab, var(--color-base-300) 85%, transparent);
-  }
-
-  .jobs-row {
-    align-items: center;
-    border-bottom: 1px solid color-mix(in oklab, var(--color-base-300) 75%, transparent);
-    color: inherit;
-    display: grid;
-    gap: 0.85rem;
-    grid-template-columns: minmax(11rem, 1.4fr) minmax(6rem, 0.7fr) 5rem minmax(11rem, 1.25fr) 5rem 3.25rem;
-    min-height: 3.7rem;
-    padding: 0.45rem 0.5rem;
-    text-decoration: none;
-    transition: background-color 150ms cubic-bezier(0.22, 1, 0.36, 1);
-  }
-
-  .jobs-row:hover {
-    background: color-mix(in oklab, var(--color-base-200) 55%, transparent);
-  }
-
-  .jobs-row:focus-visible {
-    box-shadow: var(--trellis-focus-ring);
-    outline: none;
-  }
-
-  .jobs-row-identity,
-  .jobs-row-narrative,
-  .jobs-row-duration,
-  .jobs-row-tries {
-    min-width: 0;
-  }
-
-  .jobs-row-identity strong {
-    display: block;
-    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-    font-size: 0.75rem;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .jobs-row small {
-    color: color-mix(in oklab, var(--color-base-content) 43%, transparent);
-    display: block;
-    font-size: 0.6rem;
-    margin-top: 0.15rem;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .jobs-row-key {
-    color: color-mix(in oklab, var(--color-base-content) 58%, transparent);
-    font-size: 0.68rem;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .jobs-row-state {
-    align-items: center;
-    display: flex;
-    font-size: 0.68rem;
-    font-weight: 680;
-    gap: 0.35rem;
-  }
-
-  .jobs-row-state::before {
-    background: var(--color-primary);
-    border-radius: 50%;
-    content: "";
-    height: 0.35rem;
-    width: 0.35rem;
-  }
-
-  .jobs-row-state.state-waiting::before,
-  .jobs-row-state.state-slow::before,
-  .jobs-row-state.state-pending::before {
-    background: var(--color-warning);
-  }
-
-  .jobs-row-state.state-retry::before,
-  .jobs-row-state.state-failed::before,
-  .jobs-row-state.state-dead::before,
-  .jobs-row-state.state-stale::before {
-    background: var(--color-error);
-  }
-
-  .jobs-row-narrative > strong {
-    display: block;
-    font-size: 0.68rem;
-    font-weight: 500;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
   }
 
   .jobs-progress {
@@ -669,110 +538,9 @@
     width: var(--job-progress);
   }
 
-  .jobs-row-duration,
-  .jobs-row-tries {
-    font-size: 0.68rem;
-    font-variant-numeric: tabular-nums;
-  }
-
   @media (max-width: 1100px) {
-    .jobs-ledger {
-      grid-template-columns: repeat(3, minmax(0, 1fr));
-    }
-
-    .jobs-ledger > :nth-child(3) {
-      border-right: 0;
-    }
-
-    .jobs-ledger > :nth-child(-n + 3) {
-      border-bottom: 1px solid color-mix(in oklab, var(--color-base-300) 75%, transparent);
-    }
-
     .jobs-overview {
       grid-template-columns: 1fr;
-    }
-
-    .jobs-row {
-      grid-template-columns: minmax(10rem, 1.35fr) 5rem minmax(10rem, 1fr) 4.5rem 3rem;
-    }
-
-    .jobs-row-key {
-      display: none;
-    }
-  }
-
-  @media (max-width: 700px) {
-    .jobs-page {
-      gap: 1.25rem;
-    }
-
-    .jobs-updated {
-      display: none;
-    }
-
-    .jobs-window {
-      overflow-x: auto;
-      width: 100%;
-    }
-
-    .jobs-window button {
-      flex: 1;
-      min-width: 2.75rem;
-    }
-
-    .jobs-ledger {
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-    }
-
-    .jobs-ledger > :nth-child(3) {
-      border-right: 1px solid color-mix(in oklab, var(--color-base-300) 75%, transparent);
-    }
-
-    .jobs-ledger > :nth-child(2n) {
-      border-right: 0;
-    }
-
-    .jobs-ledger > :nth-child(-n + 4) {
-      border-bottom: 1px solid color-mix(in oklab, var(--color-base-300) 75%, transparent);
-    }
-
-    .jobs-ledger > button {
-      padding: 0.75rem;
-    }
-
-    .jobs-section-heading {
-      align-items: flex-start;
-      flex-direction: column;
-      gap: 0.4rem;
-    }
-
-    .jobs-row {
-      gap: 0.6rem;
-      grid-template-columns: 1fr auto;
-      padding: 0.75rem 0.25rem;
-    }
-
-    .jobs-row-identity,
-    .jobs-row-narrative {
-      grid-column: 1;
-    }
-
-    .jobs-row-state,
-    .jobs-row-duration {
-      grid-column: 2;
-      justify-self: end;
-    }
-
-    .jobs-row-narrative {
-      grid-row: 2;
-    }
-
-    .jobs-row-duration {
-      grid-row: 2;
-    }
-
-    .jobs-row-tries {
-      display: none;
     }
   }
 </style>
