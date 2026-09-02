@@ -36,7 +36,7 @@
     error = null;
     try {
       currentSessionId = (await trellis.authSessionsMe({}).orThrow()).session.sessionId;
-      const response = await trellis.authSessionsList({ limit: 500 }).take();
+      const response = await trellis.authSessionsList({ limit: 100 }).take();
       if (isErr(response)) { error = errorMessage(response); return; }
       sessions = response.entries ?? [];
       const requestedSessionKey = page.url.searchParams.get("sessionKey");
@@ -124,7 +124,7 @@
           <select class="select select-bordered select-sm" bind:value={selectedSessionKey} required>
             {#each sessions as session (session.sessionId)}
               {@const summary = describeSessionPrincipal(session)}
-              <option value={session.sessionId}>{summary.title} — {formatShortKey(session.sessionKeyId)}{session.sessionId === currentSessionId ? " — Current" : ""}</option>
+              <option value={session.sessionId}>{summary.title} · {formatShortKey(session.sessionKeyId)}{session.sessionId === currentSessionId ? " · Current" : ""}</option>
             {/each}
           </select>
         </label>

@@ -636,6 +636,30 @@ impl AccountRepository for SqliteAuthorizationStore {
                     )
                     .map_err(map_write_error)?;
             }
+            if let Some(profile) = command.profile.as_ref() {
+                if profile.principal_id != principal_id || profile.version == 0 {
+                    return Err(AuthorizationStateError::StorageConflict);
+                }
+                let changed = transaction
+                    .execute(
+                        "UPDATE auth_user_profiles
+                         SET display_name = ?1, email = ?2, image_url = ?3, updated_at = ?4, version = ?5
+                         WHERE principal_id = ?6 AND version = ?7",
+                        params![
+                            profile.display_name,
+                            profile.email,
+                            profile.image_url,
+                            profile.updated_at,
+                            to_sql_version(profile.version)?,
+                            principal_id,
+                            to_sql_version(profile.version - 1)?
+                        ],
+                    )
+                    .map_err(map_write_error)?;
+                if changed != 1 {
+                    return Err(AuthorizationStateError::StorageConflict);
+                }
+            }
             if let Some(mut authority) = command.authority {
                 put_identity_authority(
                     &transaction,

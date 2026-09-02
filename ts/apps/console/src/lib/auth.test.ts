@@ -1,6 +1,9 @@
-import { deepEqual, equal } from "node:assert/strict";
+import { equal, notDeepEqual } from "node:assert/strict";
 
 import administrationParticipant from "../../../../../rust/crates/trellis/artifacts/trellis.admin.participant.json" with {
+  type: "json",
+};
+import consoleParticipant from "../../.trellis/generated/protocol/participants/trellis-app.console@v1.json" with {
   type: "json",
 };
 import { nativeProtocolPresentation } from "../../../../packages/trellis/contract_support/protocol_artifacts.ts";
@@ -52,9 +55,26 @@ Deno.test("administrator token is removed before Console records its return URL"
   );
 });
 
-Deno.test("Console is the canonical platform administration participant", () => {
-  deepEqual(
-    nativeProtocolPresentation(contract).participant,
+Deno.test("Console is separate from the internal platform administration participant", () => {
+  const participant = nativeProtocolPresentation(contract).participant;
+  equal(participant.id, "trellis-app.console@v1");
+  notDeepEqual(
+    participant,
     administrationParticipant,
   );
+});
+
+Deno.test("Console requests every operation behind its route capabilities", () => {
+  const required = consoleParticipant.uses.required;
+  equal(
+    required["trellis.auth@v1"].rpc?.call?.includes("Auth.Users.Resolve"),
+    true,
+  );
+  equal(
+    required["trellis.auth@v1"].rpc?.call?.includes(
+      "Auth.Devices.ConnectInfo.Get",
+    ),
+    true,
+  );
+  equal("trellis.eventlog@v1" in required, true);
 });

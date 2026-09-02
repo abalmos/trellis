@@ -2,10 +2,10 @@
 
 export const API_ID = "trellis.jobs@v1" as const;
 export const API_DIGEST =
-  "qVQbpA0Lhmv3S4TcDfkvg4Pl5OvXCKEOrZUpt6Yq524" as const;
+  "oANPL-s0S0c94R9YqkdoF1yRN0ER2wWqbRqUegqKXR8" as const;
 export const API = {
   "capabilities": {
-    "trellis.jobs::admin.mutate": {
+    "trellis.jobs::mutate": {
       "allows": [{
         "action": "call",
         "target": {
@@ -40,7 +40,7 @@ export const API = {
         },
       }],
     },
-    "trellis.jobs::admin.read": {
+    "trellis.jobs::read": {
       "allows": [{
         "action": "call",
         "target": {
@@ -91,7 +91,7 @@ export const API = {
         },
       }],
     },
-    "trellis.jobs::admin.stream": {
+    "trellis.jobs::stream": {
       "allows": [{
         "action": "subscribe",
         "target": {
@@ -104,18 +104,18 @@ export const API = {
     },
   },
   "consent": {
-    "trellis.jobs::admin.mutate": {
+    "trellis.jobs::mutate": {
       "consequence": "Can change background job execution state.",
       "description":
         "Cancel, retry, replay, or dismiss Jobs service work items.",
       "title": "Mutate jobs admin data",
     },
-    "trellis.jobs::admin.read": {
+    "trellis.jobs::read": {
       "consequence": "",
       "description": "View Jobs services, jobs, and dead-letter queues.",
       "title": "Read jobs admin data",
     },
-    "trellis.jobs::admin.stream": {
+    "trellis.jobs::stream": {
       "consequence": "",
       "description": "Subscribe to Jobs live workbench updates.",
       "title": "Stream jobs admin data",

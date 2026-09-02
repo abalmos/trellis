@@ -4,11 +4,11 @@ manifest-digest = "XRigm8Wm7kYPSg0VHnJKpgV0_f4al_N7QYkNou-aHRg"
 [[api]]
 id = "trellis.auth@v1"
 version = "1.0.0"
-api-digest = "Fs_nA37wXgMpLRfB7IyYDhIEDUdSl3PdNp6ehnXcV1A"
+api-digest = "3QSyOlZqSZ0e25CGmf7N9xOZXjOeomA-GUi7bG9WxaQ"
 path = "../../../rust/crates/runtime/.trellis/generated/protocol/apis/trellis.auth@v1.json"
 
 [[api]]
 id = "trellis.state@v1"
 version = "1.0.0"
-api-digest = "qs1u5DVKbglPE25fTx77AadXTT-MDwSkmHVFJlCwE2A"
+api-digest = "hGgfotCC_9mlYwTUdaZtMTeia-KVGCGyqPop--LGa1w"
 path = "../../../rust/crates/runtime/.trellis/generated/protocol/apis/trellis.state@v1.json"

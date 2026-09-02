@@ -54,6 +54,7 @@ Deno.test("administrator completion carries the Console browser flow", async () 
     username: "admin",
     password: "secret-password",
     name: "Admin",
+    email: null,
     browserFlowId: "flow_console",
     portalBindingDigest: "binding_digest",
   });

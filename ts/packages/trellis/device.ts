@@ -964,7 +964,9 @@ export async function connectDeviceWithDeps<
     auth: bootstrap.sessionAuth,
     cache: authorizationContexts,
     onRefresh: () =>
-      connection.status.phase === "connected" ? undefined : nc.reconnect(),
+      connection.status.phase !== "connected"
+        ? nc.reconnect()
+        : undefined,
     onTerminalFailure: async () => {
       if (!nc.isClosed()) await nc.drain();
     },

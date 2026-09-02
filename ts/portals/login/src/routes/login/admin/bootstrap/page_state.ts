@@ -124,15 +124,12 @@ export async function completeAdminBootstrap(
     `/auth/account-flow/${encodeURIComponent(flowId)}/local-password`,
     trellisUrl,
   );
-  const payload: Record<string, string> = {
+  const payload: Record<string, string | null> = {
     username: input.username,
     password: input.password,
+    name: input.name.trim() || null,
+    email: input.email.trim() || null,
   };
-
-  const name = input.name.trim();
-  const email = input.email.trim();
-  if (name) payload.name = name;
-  if (email) payload.email = email;
   if (input.browserFlowId) payload.browserFlowId = input.browserFlowId;
   if (input.portalBindingDigest) {
     payload.portalBindingDigest = input.portalBindingDigest;

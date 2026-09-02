@@ -6,8 +6,8 @@ use trellis_contracts::{
     ContractKind, ContractsError,
 };
 
-const READ_CAPABILITY: &str = "events.read";
-const STREAM_CAPABILITY: &str = "events.stream";
+const READ_CAPABILITY: &str = "read";
+const STREAM_CAPABILITY: &str = "stream";
 const UNEXPECTED_ERROR: &str = "UnexpectedError";
 const VALIDATION_ERROR: &str = "ValidationError";
 const NOT_FOUND_ERROR: &str = "NotFoundError";

@@ -34,8 +34,8 @@ export function createFeedsFixture(caseId: string) {
   const serviceContract = defineServiceContract(
     { schemas: feedSchemas },
     (ref) => ({
-      id: `trellis.integration.feeds-service.${slug}@v1`,
-      apiId: `trellis.integration.feeds-service.${slug}@v1`,
+      id: `integration.feeds-service.${slug}@v1`,
+      apiId: `integration.feeds-service.${slug}@v1`,
       apiVersion: "1.0.0",
       displayName: `Trellis Integration Feeds Service (${slug})`,
       description: "Exercises generated feed subscribe and handler surfaces.",
@@ -58,8 +58,8 @@ export function createFeedsFixture(caseId: string) {
   );
 
   const clientContract = defineAppContract(() => ({
-    id: `trellis.integration.feeds-client.${slug}@v1`,
-    apiId: `trellis.integration.feeds-client.${slug}@v1`,
+    id: `integration.feeds-client.${slug}@v1`,
+    apiId: `integration.feeds-client.${slug}@v1`,
     apiVersion: "1.0.0",
     displayName: `Trellis Integration Feeds Client (${slug})`,
     description: "App/client participant for the feeds integration fixture.",
@@ -67,8 +67,8 @@ export function createFeedsFixture(caseId: string) {
   }));
 
   const unauthorizedClientContract = defineAppContract(() => ({
-    id: `trellis.integration.feeds-unauthorized-client.${slug}@v1`,
-    apiId: `trellis.integration.feeds-unauthorized-client.${slug}@v1`,
+    id: `integration.feeds-unauthorized-client.${slug}@v1`,
+    apiId: `integration.feeds-unauthorized-client.${slug}@v1`,
     apiVersion: "1.0.0",
     displayName: `Trellis Integration Feeds Unauthorized Client (${slug})`,
     description: "App/client participant without feed subscribe authority.",

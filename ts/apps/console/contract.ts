@@ -1,4 +1,4 @@
-import { defineAppContract, optional } from "@qlever-llc/trellis/contracts";
+import { defineAppContract } from "@qlever-llc/trellis/contracts";
 import {
   AuthCapabilitiesList,
   AuthCapabilityGroupsDelete,
@@ -21,6 +21,7 @@ import {
   AuthDeploymentsEnable,
   AuthDeploymentsList,
   AuthDeploymentsRemove,
+  AuthDevicesConnectInfoGet,
   AuthDevicesDisable,
   AuthDevicesEnable,
   AuthDevicesList,
@@ -57,21 +58,25 @@ import {
   AuthSessionsRevoke,
   AuthUserIdentitiesList,
   AuthUsersCreate,
+  AuthUsersGet,
   AuthUsersIdentityLinkCreate,
   AuthUsersList,
   AuthUsersPasswordChange,
   AuthUsersPasswordResetCreate,
+  AuthUsersResolve,
   AuthUsersUpdate,
 } from "@trellis/apis/trellis.auth";
 import {
   HealthInspect,
   HealthMetrics,
   HealthQuery,
+  HealthStatusChanged,
   HealthWatch,
 } from "@trellis/apis/trellis.health";
 import {
   JobsCancel,
   JobsDismissDLQ,
+  JobsGetKey,
   JobsInspect,
   JobsListDLQ,
   JobsListServices,
@@ -97,8 +102,8 @@ import {
 
 export const contract = defineAppContract(
   () => ({
-    id: "trellis-platform-administration",
-    apiId: "trellis.console@v1",
+    id: "trellis-app.console@v1",
+    apiId: "trellis-app.console@v1",
     apiVersion: "1.0.0",
     displayName: "Trellis Console",
     description:
@@ -139,6 +144,7 @@ export const contract = defineAppContract(
       AuthDeviceUserAuthoritiesReviewsList,
       AuthDeviceUserAuthoritiesList,
       AuthDevicesList,
+      AuthDevicesConnectInfoGet,
       AuthDeploymentsList,
       AuthSessionsLogout,
       AuthSessionsMe,
@@ -146,7 +152,9 @@ export const contract = defineAppContract(
       AuthSessionsList,
       AuthUserIdentitiesList,
       AuthUsersList,
+      AuthUsersResolve,
       AuthUsersCreate,
+      AuthUsersGet,
       AuthUsersIdentityLinkCreate,
       AuthUsersPasswordChange,
       AuthUsersPasswordResetCreate,
@@ -178,16 +186,19 @@ export const contract = defineAppContract(
       JobsListDLQ,
       JobsReplayDLQ,
       JobsDismissDLQ,
+      JobsGetKey,
       JobsWatch,
-      optional(
-        EventLogQuery,
-        EventLogInspect,
-        EventLogMetrics,
-        EventLogConsumersQuery,
-        EventLogConsumersInspect,
-        EventLogWatch,
-      ),
-      optional(HealthQuery, HealthInspect, HealthMetrics, HealthWatch),
+      EventLogQuery,
+      EventLogInspect,
+      EventLogMetrics,
+      EventLogConsumersQuery,
+      EventLogConsumersInspect,
+      EventLogWatch,
+      HealthQuery,
+      HealthInspect,
+      HealthMetrics,
+      HealthWatch,
+      HealthStatusChanged.subscribe,
     ],
   }),
 );

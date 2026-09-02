@@ -80,6 +80,8 @@ pub(crate) struct PasswordResetCompletion {
     pub identity: Option<ProviderIdentityLink>,
     /// Canonical authority to restore for bootstrap-administrator recovery.
     pub authority: Option<IdentityAuthorityRecord>,
+    /// Optional profile replacement committed in the same transaction.
+    pub profile: Option<UserProfileRecord>,
     /// Expected current authority version when restoring authority.
     pub expected_authority_version: Option<u64>,
     /// Completion time in Unix milliseconds.

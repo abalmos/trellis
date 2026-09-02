@@ -1,7 +1,7 @@
 format = 1
 
 [apis]
-"trellis.demo-service@v1" = { version = "1.0.0", path = "../ts/service/.trellis/generated/protocol/apis/trellis.demo-service@v1.json" }
+"demo.service@v1" = { version = "1.0.0", path = "../ts/service/.trellis/generated/protocol/apis/demo.service@v1.json" }
 
 [apis."trellis.state@v1"]
 version = "^1.0.0"

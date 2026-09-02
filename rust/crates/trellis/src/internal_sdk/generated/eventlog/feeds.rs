@@ -9,5 +9,5 @@ impl FeedDescriptor for EventLogWatchFeedDescriptor {
     const EVENT_SCHEMA_JSON: &'static str = super::schemas::EVENT_LOG_WATCH_EVENT_SCHEMA_JSON;
     const KEY: &'static str = "EventLog.Watch";
     const SUBJECT: &'static str = "feed.v1.EventLog.Watch";
-    const SUBSCRIBE_CAPABILITIES: &'static [&'static str] = &["trellis.eventlog::events.stream"];
+    const SUBSCRIBE_CAPABILITIES: &'static [&'static str] = &["trellis.eventlog::stream"];
 }

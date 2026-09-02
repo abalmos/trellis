@@ -89,11 +89,11 @@
     error = null;
     sessionsWarning = null;
     try {
-      const usersResponse = await trellis.authUsersList({ limit: 500 }).take();
+      const usersResponse = await trellis.authUsersList({ limit: 100 }).take();
       if (isErr(usersResponse)) { error = errorMessage(usersResponse); return; }
       users = usersResponse.entries ?? [];
 
-      const sessionsResponse = await trellis.authSessionsList({ limit: 500 }).take();
+      const sessionsResponse = await trellis.authSessionsList({ limit: 100 }).take();
       if (isErr(sessionsResponse)) {
         sessionsWarning = `Last-auth metadata unavailable: ${errorMessage(sessionsResponse)}`;
         userLastAuth = {};

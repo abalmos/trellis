@@ -109,7 +109,7 @@ pub(super) async fn exercise_account_flows(
         participant_artifact_digest: app_fixture.binding.artifact_digest.clone(),
         accepted_needs_digest: app_fixture.binding.needs_digest.clone(),
         desired_grant_set: app_fixture.required_grants.clone(),
-        desired_capabilities: vec!["admin".to_owned()],
+        desired_capabilities: vec!["example.manage".to_owned()],
         state: AuthorityState::Accepted,
         version: 1,
         created_at: NOW + 1,
@@ -199,6 +199,7 @@ pub(super) async fn exercise_account_flows(
                 replacement: initial_credential.clone(),
                 identity: Some(initial_identity.clone()),
                 authority: None,
+                profile: None,
                 expected_authority_version: None,
                 consumed_at: NOW + 3,
                 idempotency: proof(250, "password-reset.complete"),
@@ -239,13 +240,14 @@ pub(super) async fn exercise_account_flows(
             expected_flow_version: 1,
             username: "renamed-admin".to_owned(),
             password: "replacement password".to_owned(),
-            display_name: "First Administrator".to_owned(),
-            email: None,
+            display_name: Some("Renamed Administrator".to_owned()),
+            email: Some("renamed@example.test".to_owned()),
             image_url: None,
             participant_id: authority_target.participant_id.clone(),
             participant_artifact_digest: authority_target.participant_artifact_digest.clone(),
             participant_needs_digest: authority_target.participant_needs_digest.clone(),
             grant_set: app_fixture.required_grants.clone(),
+            capabilities: vec!["trellis.auth::capabilities.delegate".to_owned()],
             authority_expires_at: None,
             completed_at: NOW + 5,
             idempotency: proof(251, "admin-account.complete"),
@@ -264,6 +266,18 @@ pub(super) async fn exercise_account_flows(
             .authenticate_local("first-admin-local", "initial-password-hash", NOW + 6)
             .await?,
         crate::platform::auth::LocalAuthentication::Denied
+    );
+    let updated_profile = store
+        .get_user_profile(&admin.principal_id)
+        .await?
+        .expect("updated administrator profile");
+    assert_eq!(
+        updated_profile.display_name.as_deref(),
+        Some("Renamed Administrator")
+    );
+    assert_eq!(
+        updated_profile.email.as_deref(),
+        Some("renamed@example.test")
     );
 
     let password_flow = AccountFlowRecord {
@@ -310,6 +324,7 @@ pub(super) async fn exercise_account_flows(
                 replacement: replacement.clone(),
                 identity: None,
                 authority: None,
+                profile: None,
                 expected_authority_version: None,
                 consumed_at: NOW + 3,
                 idempotency: password_proof.clone(),
@@ -346,6 +361,7 @@ pub(super) async fn exercise_account_flows(
         replacement: replacement.clone(),
         identity: None,
         authority: None,
+        profile: None,
         expected_authority_version: None,
         consumed_at: NOW + 3,
         idempotency: password_proof.clone(),
@@ -387,6 +403,7 @@ pub(super) async fn exercise_account_flows(
         replacement: credential.clone(),
         identity: None,
         authority: None,
+        profile: None,
         expected_authority_version: None,
         consumed_at: NOW + 4,
         idempotency: mismatched_proof,

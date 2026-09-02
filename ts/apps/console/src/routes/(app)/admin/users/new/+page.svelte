@@ -133,7 +133,7 @@
     loading = true;
     error = null;
     try {
-      const capabilitiesResponse = await trellis.authCapabilitiesList({ limit: 500 }).take();
+      const capabilitiesResponse = await trellis.authCapabilitiesList({ limit: 100 }).take();
       if (isErr(capabilitiesResponse)) { error = errorMessage(capabilitiesResponse); return; }
       capabilities = (capabilitiesResponse.entries ?? []).map((capability) => ({
         ...capability,

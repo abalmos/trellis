@@ -109,6 +109,9 @@ https://raw.githubusercontent.com/qlever-llc/trellis/main/docs/static/llms-full.
   code. Do not extract NATS, credentials, bindings, subjects, or generic
   request/publish/subscribe methods.
 - If a facade lacks a declared capability, fix the contract or generator. Do not
+  add role-shaped bypasses. Trellis capabilities are API-scoped keys such as
+  `trellis.jobs::read`; `trellis.*` APIs, capabilities, participants, and
+  deployments are platform-reserved.
   add a transport shim in the service repository.
 - Protocol tooling can call `trellis_protocol::resolve_participant(...)` with
   one validated participant artifact and its exact digest-pinned API artifacts.

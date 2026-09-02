@@ -106,11 +106,7 @@ fn print_check_report(
 }
 
 fn init_tracing(verbose: u8) -> miette::Result<()> {
-    let filter = match verbose {
-        0 => EnvFilter::new("warn"),
-        1 => EnvFilter::new("info"),
-        _ => EnvFilter::new("debug"),
-    };
+    let filter = EnvFilter::new(tracing_filter(verbose));
 
     tracing_subscriber::fmt()
         .with_env_filter(filter)
@@ -118,6 +114,15 @@ fn init_tracing(verbose: u8) -> miette::Result<()> {
         .try_init()
         .map_err(|error| miette::miette!(error.to_string()))?;
     Ok(())
+}
+
+fn tracing_filter(verbose: u8) -> &'static str {
+    match verbose {
+        0 => "warn",
+        1 => "info",
+        2 => "debug,async_nats=info",
+        _ => "trace",
+    }
 }
 
 pub(crate) fn base64url_encode(bytes: &[u8]) -> String {
@@ -286,7 +291,7 @@ pub(crate) fn release_channel(prerelease: bool) -> ReleaseChannel {
 mod tests {
     use super::{
         is_rejected_admin_session_error, map_admin_session_error, map_admin_session_result,
-        rejected_admin_session_error_report, rejected_admin_session_report,
+        rejected_admin_session_error_report, rejected_admin_session_report, tracing_filter,
     };
     use std::env;
     use std::fs;
@@ -320,6 +325,14 @@ mod tests {
             session_seed: "seed".to_string(),
             expires_at: Some(1_767_225_600_000),
         }
+    }
+
+    #[test]
+    fn verbosity_controls_dependency_noise() {
+        assert_eq!(tracing_filter(0), "warn");
+        assert_eq!(tracing_filter(1), "info");
+        assert_eq!(tracing_filter(2), "debug,async_nats=info");
+        assert_eq!(tracing_filter(3), "trace");
     }
 
     #[test]

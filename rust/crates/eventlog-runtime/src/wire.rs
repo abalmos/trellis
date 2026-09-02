@@ -2,8 +2,8 @@ use serde_json::Value;
 use trellis_rs::service::{FeedDescriptor, RpcDescriptor};
 
 const ANY_SCHEMA: &str = "{}";
-const READ_CAPABILITY: &[&str] = &["trellis.eventlog::events.read"];
-const STREAM_CAPABILITY: &[&str] = &["trellis.eventlog::events.stream"];
+const READ_CAPABILITY: &[&str] = &["trellis.eventlog::read"];
+const STREAM_CAPABILITY: &[&str] = &["trellis.eventlog::stream"];
 
 macro_rules! rpc_descriptor {
     ($name:ident, $key:literal, $subject:literal) => {

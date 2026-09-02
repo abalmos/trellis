@@ -11,7 +11,7 @@ impl EventDescriptor for AuthConnectionsClosedEventDescriptor {
         super::schemas::AUTH_CONNECTIONS_CLOSED_EVENT_SCHEMA_JSON;
     const PUBLISH_CAPABILITIES: &'static [&'static str] = &[];
     const DELEGATED_PUBLISH: bool = false;
-    const SUBSCRIBE_CAPABILITIES: &'static [&'static str] = &["trellis.auth::events.observe"];
+    const SUBSCRIBE_CAPABILITIES: &'static [&'static str] = &["trellis.auth::events.stream"];
 }
 /// Descriptor for `Auth.Connections.Kicked`.
 pub struct AuthConnectionsKickedEventDescriptor;
@@ -24,7 +24,7 @@ impl EventDescriptor for AuthConnectionsKickedEventDescriptor {
         super::schemas::AUTH_CONNECTIONS_KICKED_EVENT_SCHEMA_JSON;
     const PUBLISH_CAPABILITIES: &'static [&'static str] = &[];
     const DELEGATED_PUBLISH: bool = false;
-    const SUBSCRIBE_CAPABILITIES: &'static [&'static str] = &["trellis.auth::events.observe"];
+    const SUBSCRIBE_CAPABILITIES: &'static [&'static str] = &["trellis.auth::events.stream"];
 }
 /// Descriptor for `Auth.Connections.Opened`.
 pub struct AuthConnectionsOpenedEventDescriptor;
@@ -37,7 +37,7 @@ impl EventDescriptor for AuthConnectionsOpenedEventDescriptor {
         super::schemas::AUTH_CONNECTIONS_OPENED_EVENT_SCHEMA_JSON;
     const PUBLISH_CAPABILITIES: &'static [&'static str] = &[];
     const DELEGATED_PUBLISH: bool = false;
-    const SUBSCRIBE_CAPABILITIES: &'static [&'static str] = &["trellis.auth::events.observe"];
+    const SUBSCRIBE_CAPABILITIES: &'static [&'static str] = &["trellis.auth::events.stream"];
 }
 /// Descriptor for `Auth.DeviceUserAuthorities.Approved`.
 pub struct AuthDeviceUserAuthoritiesApprovedEventDescriptor;
@@ -51,8 +51,8 @@ impl EventDescriptor for AuthDeviceUserAuthoritiesApprovedEventDescriptor {
     const PUBLISH_CAPABILITIES: &'static [&'static str] = &[];
     const DELEGATED_PUBLISH: bool = false;
     const SUBSCRIBE_CAPABILITIES: &'static [&'static str] = &[
-        "trellis.auth::device.review",
-        "trellis.auth::events.observe",
+        "trellis.auth::devices.review",
+        "trellis.auth::events.stream",
     ];
 }
 /// Descriptor for `Auth.DeviceUserAuthorities.Requested`.
@@ -67,8 +67,8 @@ impl EventDescriptor for AuthDeviceUserAuthoritiesRequestedEventDescriptor {
     const PUBLISH_CAPABILITIES: &'static [&'static str] = &[];
     const DELEGATED_PUBLISH: bool = false;
     const SUBSCRIBE_CAPABILITIES: &'static [&'static str] = &[
-        "trellis.auth::device.review",
-        "trellis.auth::events.observe",
+        "trellis.auth::devices.review",
+        "trellis.auth::events.stream",
     ];
 }
 /// Descriptor for `Auth.DeviceUserAuthorities.Resolved`.
@@ -83,8 +83,8 @@ impl EventDescriptor for AuthDeviceUserAuthoritiesResolvedEventDescriptor {
     const PUBLISH_CAPABILITIES: &'static [&'static str] = &[];
     const DELEGATED_PUBLISH: bool = false;
     const SUBSCRIBE_CAPABILITIES: &'static [&'static str] = &[
-        "trellis.auth::device.review",
-        "trellis.auth::events.observe",
+        "trellis.auth::devices.review",
+        "trellis.auth::events.stream",
     ];
 }
 /// Descriptor for `Auth.DeviceUserAuthorities.ReviewRequested`.
@@ -100,8 +100,8 @@ impl EventDescriptor for AuthDeviceUserAuthoritiesReviewRequestedEventDescriptor
     const PUBLISH_CAPABILITIES: &'static [&'static str] = &[];
     const DELEGATED_PUBLISH: bool = false;
     const SUBSCRIBE_CAPABILITIES: &'static [&'static str] = &[
-        "trellis.auth::device.review",
-        "trellis.auth::events.observe",
+        "trellis.auth::devices.review",
+        "trellis.auth::events.stream",
     ];
 }
 /// Descriptor for `Auth.Sessions.Revoked`.
@@ -114,5 +114,5 @@ impl EventDescriptor for AuthSessionsRevokedEventDescriptor {
     const EVENT_SCHEMA_JSON: &'static str = super::schemas::AUTH_SESSIONS_REVOKED_EVENT_SCHEMA_JSON;
     const PUBLISH_CAPABILITIES: &'static [&'static str] = &[];
     const DELEGATED_PUBLISH: bool = false;
-    const SUBSCRIBE_CAPABILITIES: &'static [&'static str] = &["trellis.auth::events.observe"];
+    const SUBSCRIBE_CAPABILITIES: &'static [&'static str] = &["trellis.auth::events.stream"];
 }

@@ -62,15 +62,21 @@ underlying sessions.
 Capability names have two forms:
 
 - local capability names are authored inside the owning contract, for example
-  `users.read` or `admin.read`
+  `users.read` or `stream`
 - global capability keys are emitted into canonical native API artifacts and
   grant records as `<contract namespace>::<local capability>`, for example
-  `trellis.jobs::admin.read`
+  `trellis.jobs::read`
 
 The contract namespace is the contract `id` with a trailing major-version suffix
 removed. For example, both `trellis.jobs@v1` and `trellis.jobs@v2` map to the
 capability namespace `trellis.jobs`. This keeps grants stable across intentional
 major contract-version upgrades when the capability meaning is preserved.
+
+The `trellis.*` namespace is reserved for definitions owned by Trellis: API IDs,
+capability namespaces, participant IDs, and deployment IDs. Deployment-owned
+registration rejects definitions in that namespace; Trellis built-ins are
+admitted only by exact ID and canonical digest. Other participants may reference
+and receive canonical Trellis capabilities through normal authority decisions.
 
 Rules:
 
@@ -83,8 +89,11 @@ Rules:
   `trellis.api.v1` and `trellis.participant.v1` manifests
 - if a capability reference matches a declared top-level capability, tooling
   projects it to the global key in the emitted manifest
-- undeclared platform or external capability strings such as `service` and
-  `admin` remain raw strings and are not rewritten
+- `trellis.*` API, participant, deployment, and capability namespaces are
+  reserved for exact Trellis-owned built-in artifacts; deployment-owned
+  artifacts cannot define identifiers in that namespace
+- principal kinds such as service and bootstrap administrator are domain
+  identity properties, not role-shaped capabilities
 - capability metadata belongs to the owning contract; other contracts reference
   used APIs by logical `uses` selections, not by redeclaring another contract's
   capability metadata
@@ -94,15 +103,14 @@ Rules:
 - changing machine capability allows changes the semantic API digest; changing
   consent wording alone does not
 
-| Pattern                          | Example                      | Meaning                    | Who Can Claim   |
-| -------------------------------- | ---------------------------- | -------------------------- | --------------- |
-| `<namespace>::<domain>.<action>` | `trellis.auth::users.read`   | Can read users             | Users, Services |
-| `<namespace>::<domain>.<action>` | `graph::partners.write`      | Can mutate partners        | Users, Services |
-| `service`                        | —                            | Backend service principal  | Services only   |
-| `admin`                          | —                            | Administrative access      | Users, Services |
-| `<namespace>::<domain>.<action>` | `trellis.jobs::admin.read`   | Read jobs admin data       | Users, Services |
-| `<namespace>::<domain>.<action>` | `trellis.jobs::admin.mutate` | Mutate jobs admin state    | Users, Services |
-| `<namespace>::<domain>.<action>` | `trellis.jobs::admin.stream` | Observe jobs admin streams | Users, Services |
+| Pattern                          | Example                               | Meaning              | Who Can Claim   |
+| -------------------------------- | ------------------------------------- | -------------------- | --------------- |
+| `<namespace>::<domain>.<action>` | `trellis.auth::users.read`            | Can read users       | Users, Services |
+| `<namespace>::<domain>.<action>` | `graph::partners.write`               | Can mutate partners  | Users, Services |
+| `<namespace>::<action>`          | `trellis.jobs::read`                  | Read jobs data       | Users           |
+| `<namespace>::<action>`          | `trellis.jobs::mutate`                | Mutate jobs state    | Users           |
+| `<namespace>::<action>`          | `trellis.jobs::stream`                | Observe jobs streams | Users           |
+| `<namespace>::<domain>.<action>` | `trellis.auth::capabilities.delegate` | Delegate authority   | Users           |
 
 Deployments may still encounter role-shaped strings such as `users:read`, but
 the architectural model is capability-oriented. New Trellis-owned contract

@@ -59,8 +59,8 @@ export function createRpcFixture(caseId: string) {
   const serviceContract = defineServiceContract(
     { schemas: rpcSchemas, errors: { NotFoundError } },
     (ref) => ({
-      id: `trellis.integration.rpc-service.${slug}@v1`,
-      apiId: `trellis.integration.rpc-service.${slug}@v1`,
+      id: `integration.rpc-service.${slug}@v1`,
+      apiId: `integration.rpc-service.${slug}@v1`,
       apiVersion: "1.0.0",
       displayName: `Trellis Integration RPC Service (${slug})`,
       description:
@@ -101,8 +101,8 @@ export function createRpcFixture(caseId: string) {
   );
 
   const clientContract = defineAppContract(() => ({
-    id: `trellis.integration.rpc-client.${slug}@v1`,
-    apiId: `trellis.integration.rpc-client.${slug}@v1`,
+    id: `integration.rpc-client.${slug}@v1`,
+    apiId: `integration.rpc-client.${slug}@v1`,
     apiVersion: "1.0.0",
     displayName: `Trellis Integration RPC Client (${slug})`,
     description: "App/client participant for the RPC integration fixture.",
@@ -115,8 +115,8 @@ export function createRpcFixture(caseId: string) {
   const scopedClientContract = clientContract;
 
   const unauthorizedClientContract = defineAppContract(() => ({
-    id: `trellis.integration.rpc-unauthorized-client.${slug}@v1`,
-    apiId: `trellis.integration.rpc-unauthorized-client.${slug}@v1`,
+    id: `integration.rpc-unauthorized-client.${slug}@v1`,
+    apiId: `integration.rpc-unauthorized-client.${slug}@v1`,
     apiVersion: "1.0.0",
     displayName: `Trellis Integration Unauthorized RPC Client (${slug})`,
     description: "App/client without rpc.call authority for Entity.Get.",

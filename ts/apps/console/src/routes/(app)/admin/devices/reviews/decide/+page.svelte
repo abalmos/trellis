@@ -32,7 +32,7 @@
   let reviews = $state<Review[]>([]);
   let deviceInstances = $state<DeviceInstance[]>([]);
   let selectedReviewId = $state(page.url.searchParams.get("review") ?? "");
-  let decision = $state<"approve" | "reject">("approve");
+  let decision = $state<"approve" | "reject" | "">("");
   let reason = $state("");
   let showMetadata = $state(false);
   let confirmationModal: ConfirmationModal | undefined = $state();
@@ -58,8 +58,8 @@
     error = null;
     try {
       const [reviewsResponse, instancesResponse] = await Promise.all([
-        trellis.authDeviceUserAuthoritiesReviewsList({ state: "pending", limit: 500 }).take(),
-        trellis.authDevicesList({ limit: 500 }).take(),
+        trellis.authDeviceUserAuthoritiesReviewsList({ state: "pending", limit: 100 }).take(),
+        trellis.authDevicesList({ limit: 100 }).take(),
       ]);
       if (isErr(reviewsResponse)) { error = errorMessage(reviewsResponse); return; }
       if (isErr(instancesResponse)) { error = errorMessage(instancesResponse); return; }
@@ -81,7 +81,7 @@
   }
 
   async function decideReview() {
-    if (!selectedReview) return;
+    if (!selectedReview || !decision) return;
     pending = true;
     error = null;
     try {
@@ -96,6 +96,7 @@
       if (isErr(response)) { error = errorMessage(response); return; }
       notifications.success(`Review ${selectedReview.reviewId} ${decision === "approve" ? "approved" : "rejected"}.`, decision === "approve" ? "Approved" : "Rejected");
       reason = "";
+      decision = "";
       await load();
     } catch (e) {
       error = errorMessage(e);
@@ -105,7 +106,7 @@
   }
 
   async function requestDecision() {
-    if (!selectedReview) return;
+    if (!selectedReview || !decision) return;
     if (decision === "reject") {
       const confirmed = await confirmationModal?.confirm({
         title: "Reject activation review?",
@@ -114,6 +115,15 @@
         targetLabel: "Review",
         targetName: selectedReview.reviewId,
         expectedValue: selectedReview.reviewId,
+      });
+      if (!confirmed) return;
+    } else {
+      const confirmed = await confirmationModal?.confirm({
+        title: "Approve activation review?",
+        message: "This grants device authority and completes the original activation operation with an approved result.",
+        confirmLabel: "Approve review",
+        targetLabel: "Review",
+        targetName: selectedReview.reviewId,
       });
       if (!confirmed) return;
     }
@@ -158,7 +168,8 @@
 
           <label class="form-control gap-1">
             <span class="label-text text-xs">Decision</span>
-            <select class="select select-bordered select-sm" bind:value={decision}>
+            <select class="select select-bordered select-sm" bind:value={decision} required>
+              <option value="" disabled>Choose approve or reject</option>
               <option value="approve">Approve</option>
               <option value="reject">Reject</option>
             </select>
@@ -170,8 +181,8 @@
           </label>
 
           <div class="flex justify-end">
-            <button type="submit" class={["btn btn-sm", decision === "approve" ? "btn-outline" : "btn-error"]} disabled={pending || !selectedReview}>
-              {pending ? "Submitting…" : decision === "approve" ? "Approve review" : "Reject review"}
+            <button type="submit" class={["btn btn-sm", decision === "reject" ? "btn-error" : "btn-outline"]} disabled={pending || !selectedReview || !decision}>
+              {pending ? "Submitting…" : decision === "approve" ? "Approve review" : decision === "reject" ? "Reject review" : "Submit decision"}
             </button>
           </div>
         </form>

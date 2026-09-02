@@ -10,8 +10,8 @@ const duplicateEventContract = defineServiceContract(
     },
   },
   (ref) => ({
-    id: "trellis.test.event-capture@v1",
-    apiId: "trellis.test.event-capture@v1",
+    id: "test.event-capture@v1",
+    apiId: "test.event-capture@v1",
     apiVersion: "1.0.0",
     displayName: "Trellis Test Event Capture",
     description: "Verifies event capture validation.",

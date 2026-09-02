@@ -36,7 +36,7 @@
     loading = true;
     error = null;
     try {
-      const response = await trellis.authDevicesList({ limit: 500 }).take();
+      const response = await trellis.authDevicesList({ limit: 100 }).take();
       if (isErr(response)) { error = errorMessage(response); return; }
       const loadedInstances = response.entries ?? [];
       const loadedDisableableInstances = loadedInstances.filter((instance) => instance.state !== "disabled");

@@ -13,24 +13,24 @@ use trellis_rs::service::{
 
 use crate::support::assertions::assert_runtime_case_registered;
 
-const SOURCE_CONTRACT_ID: &str = "trellis.integration.event-consumers-source-rust@v1";
+const SOURCE_CONTRACT_ID: &str = "integration.event-consumers-source-rust@v1";
 
 struct EventConsumerContract;
 
 const SOURCE_API_SOURCE_JSON: &str = r#"{
   "format": "trellis.api.v1",
-  "id": "trellis.integration.event-consumers-source-rust@v1",
+  "id": "integration.event-consumers-source-rust@v1",
   "version": "1.0.0",
   "displayName": "Trellis Rust Event Consumers Source",
   "description": "Publishes source events for Rust durable consumer integration tests.",
   "capabilities": {
     "publishEvents": {"allows": [
-      {"target": {"kind": "apiSurface", "api": "trellis.integration.event-consumers-source-rust@v1", "surface": "event", "name": "Source.Pinged"}, "action": "publish"},
-      {"target": {"kind": "apiSurface", "api": "trellis.integration.event-consumers-source-rust@v1", "surface": "event", "name": "Source.Ponged"}, "action": "publish"}
+      {"target": {"kind": "apiSurface", "api": "integration.event-consumers-source-rust@v1", "surface": "event", "name": "Source.Pinged"}, "action": "publish"},
+      {"target": {"kind": "apiSurface", "api": "integration.event-consumers-source-rust@v1", "surface": "event", "name": "Source.Ponged"}, "action": "publish"}
     ]},
     "readEvents": {"allows": [
-      {"target": {"kind": "apiSurface", "api": "trellis.integration.event-consumers-source-rust@v1", "surface": "event", "name": "Source.Pinged"}, "action": "subscribe"},
-      {"target": {"kind": "apiSurface", "api": "trellis.integration.event-consumers-source-rust@v1", "surface": "event", "name": "Source.Ponged"}, "action": "subscribe"}
+      {"target": {"kind": "apiSurface", "api": "integration.event-consumers-source-rust@v1", "surface": "event", "name": "Source.Pinged"}, "action": "subscribe"},
+      {"target": {"kind": "apiSurface", "api": "integration.event-consumers-source-rust@v1", "surface": "event", "name": "Source.Ponged"}, "action": "subscribe"}
     ]}
   },
   "schemas": {
@@ -2014,32 +2014,32 @@ fn test_contract(manifest_json: &str) -> trellis_test::TrellisTestContract {
 
     let (id, display_name, description) = match manifest_json {
         MISSING_GROUP_CONSUMER_JSON => (
-            "trellis.integration.event-consumers-missing-group-rust@v1",
+            "integration.event-consumers-missing-group-rust@v1",
             "Trellis Rust Event Consumers Missing Group",
             "Uses source events but intentionally declares no durable event consumer group.",
         ),
         AMBIGUOUS_GROUP_CONSUMER_JSON => (
-            "trellis.integration.event-consumers-ambiguous-group-rust@v1",
+            "integration.event-consumers-ambiguous-group-rust@v1",
             "Trellis Rust Event Consumers Ambiguous Group",
             "Declares two durable groups for one source event to require an explicit group.",
         ),
         DEPENDENCY_CONSUMER_JSON => (
-            "trellis.integration.event-consumers-dependency-rust@v1",
+            "integration.event-consumers-dependency-rust@v1",
             "Trellis Rust Event Consumers Dependency",
             "Consumes source events through one Trellis-provisioned durable group.",
         ),
         PARALLEL_DEPENDENCY_CONSUMER_JSON => (
-            "trellis.integration.event-consumers-parallel-dependency-rust@v1",
+            "integration.event-consumers-parallel-dependency-rust@v1",
             "Trellis Rust Event Consumers Parallel Dependency",
             "Consumes source events through a parallel Trellis-provisioned durable group.",
         ),
         GROUPED_DEPENDENCY_CONSUMER_JSON => (
-            "trellis.integration.event-consumers-grouped-dependency-rust@v1",
+            "integration.event-consumers-grouped-dependency-rust@v1",
             "Trellis Rust Event Consumers Grouped Dependency",
             "Consumes two source events through one Trellis-provisioned durable group.",
         ),
         SELF_CONSUMER_JSON => (
-            "trellis.integration.event-consumers-self-rust@v1",
+            "integration.event-consumers-self-rust@v1",
             "Trellis Rust Event Consumers Self",
             "Publishes and consumes self-owned events through durable groups.",
         ),
@@ -2146,8 +2146,8 @@ fn event_consumer_group(
 
 fn publisher_contract() -> trellis_test::TrellisTestContract {
     let manifest = trellis_rs::contracts::ContractBuilder::authoring(
-        "trellis.integration.event-consumers-publisher-rust@v1",
-        "trellis.integration.event-consumers-publisher-rust@v1",
+        "integration.event-consumers-publisher-rust@v1",
+        "integration.event-consumers-publisher-rust@v1",
         "1.0.0",
         "Trellis Rust Event Consumers Publisher",
         "Publishes source events through a Rust app facade.",
@@ -2155,7 +2155,7 @@ fn publisher_contract() -> trellis_test::TrellisTestContract {
     )
     .use_ref(
         "source",
-        trellis_rs::contracts::use_contract("trellis.integration.event-consumers-source-rust@v1")
+        trellis_rs::contracts::use_contract("integration.event-consumers-source-rust@v1")
             .with_event_publish(["Source.Pinged", "Source.Ponged"]),
     );
 

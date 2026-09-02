@@ -50,7 +50,7 @@
     loading = true;
     error = null;
     try {
-      const portalsResponse = await trellis.authPortalsList({ limit: 500 }).take();
+      const portalsResponse = await trellis.authPortalsList({ limit: 100 }).take();
       if (isErr(portalsResponse)) {
         error = errorMessage(portalsResponse);
         return;

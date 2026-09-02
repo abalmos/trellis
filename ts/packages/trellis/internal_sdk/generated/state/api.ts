@@ -2,10 +2,10 @@
 
 export const API_ID = "trellis.state@v1" as const;
 export const API_DIGEST =
-  "qs1u5DVKbglPE25fTx77AadXTT-MDwSkmHVFJlCwE2A" as const;
+  "hGgfotCC_9mlYwTUdaZtMTeia-KVGCGyqPop--LGa1w" as const;
 export const API = {
   "capabilities": {
-    "admin": {
+    "trellis.state::mutate": {
       "allows": [{
         "action": "call",
         "target": {
@@ -14,7 +14,10 @@ export const API = {
           "name": "State.Admin.Delete",
           "surface": "rpc",
         },
-      }, {
+      }],
+    },
+    "trellis.state::read": {
+      "allows": [{
         "action": "call",
         "target": {
           "api": "trellis.state@v1",
@@ -31,6 +34,18 @@ export const API = {
           "surface": "rpc",
         },
       }],
+    },
+  },
+  "consent": {
+    "trellis.state::mutate": {
+      "consequence": "Can delete participant state.",
+      "description": "Delete state entries across participants.",
+      "title": "Mutate participant state",
+    },
+    "trellis.state::read": {
+      "consequence": "",
+      "description": "Inspect state entries across participants.",
+      "title": "Read participant state",
     },
   },
   "description":

@@ -34,7 +34,7 @@
     loading = true;
     error = null;
     try {
-      const response = await trellis.authDeploymentsList({ kind: "device", limit: 500 }).take();
+      const response = await trellis.authDeploymentsList({ kind: "device", limit: 100 }).take();
       if (isErr(response)) { error = errorMessage(response); return; }
       const loadedDeployments = (response.entries ?? []).filter((deployment): deployment is Deployment => deployment.kind === "device");
       const loadedActiveDeployments = loadedDeployments.filter((deployment) => deployment.state === "active");

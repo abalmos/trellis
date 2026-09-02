@@ -308,6 +308,13 @@ function providerNats(
           : subject.slice(marker + ".$KV.".length).replace(".", ":");
         if (!key) return noMessage();
         calls.push(key);
+        if (
+          key === `contexts:revocation.${chain.contextDigest}` &&
+          revocations[0] !== undefined
+        ) {
+          const value = utf8(JSON.stringify(revocations[0]));
+          records.set(key, { value, revision: ++revision });
+        }
         const record = records.get(key);
         if (!record) {
           return {
@@ -710,6 +717,7 @@ Deno.test("refresh wake is retained before registration and coalesced while runn
   let calls = 0;
   let active = 0;
   let maximumActive = 0;
+  let reconnects = 0;
   const fetch: typeof globalThis.fetch = async () => {
     calls += 1;
     active += 1;
@@ -752,6 +760,9 @@ Deno.test("refresh wake is retained before registration and coalesced while runn
     auth,
     cache,
     fetch,
+    onRefresh: () => {
+      reconnects += 1;
+    },
   });
   await waitForCalls(1);
   cache.requestRefresh();
@@ -759,6 +770,7 @@ Deno.test("refresh wake is retained before registration and coalesced while runn
   releases.shift()?.();
   await waitForCalls(2);
   assertEquals(maximumActive, 1);
+  assertEquals(reconnects, 0);
 
   stop();
   cache.requestRefresh();
@@ -772,11 +784,15 @@ Deno.test("refresh wake is retained before registration and coalesced while runn
     auth,
     cache,
     fetch,
+    onRefresh: () => {
+      reconnects += 1;
+    },
   });
   await waitForCalls(3);
   releases.shift()?.();
   stopRestarted();
   assertEquals(maximumActive, 1);
+  assertEquals(reconnects, 0);
 });
 
 Deno.test("stale terminal refresh cannot clear newer local routing material", async () => {
@@ -1021,7 +1037,7 @@ Deno.test("authorization trust pin survives context clearing", async () => {
   );
 });
 
-Deno.test("provider cache reuses its installed context without registry I/O", async () => {
+Deno.test("provider cache rechecks revocation without refetching its installed context", async () => {
   const chain = vectors.completeChain;
   const calls: string[] = [];
   const cache = await readyProvider(await providerContextCache(), calls);
@@ -1030,7 +1046,10 @@ Deno.test("provider cache reuses its installed context without registry I/O", as
     assertEquals(verified.contextDigest, chain.contextDigest);
     const fetched = cache.ioCounters();
     await cache.resolveContext(chain.contextDigest);
-    assertEquals(cache.ioCounters(), fetched);
+    assertEquals(cache.ioCounters(), {
+      ...fetched,
+      revocationGets: fetched.revocationGets + 1,
+    });
     assertEquals(fetched.contextGets, 0);
   } finally {
     cache.stop();
@@ -1084,7 +1103,7 @@ Deno.test("provider cache wakes refresh for own revocation and disconnect", asyn
   unregisterDisconnect();
 });
 
-Deno.test("provider cache reuses an installed client trust chain without registry I/O", async () => {
+Deno.test("provider cache reuses installed trust while rechecking revocation", async () => {
   const policy = vectors.defaults.policy;
   const installed = new AuthorizationContextCache(
     "https://trellis.test",
@@ -1117,6 +1136,7 @@ Deno.test("provider cache reuses an installed client trust chain without registr
     assertEquals(provider.ioCounters(), {
       ...before,
       contextVerifications: before.contextVerifications + 1,
+      revocationGets: before.revocationGets + 3,
     });
   } finally {
     provider.stop();
@@ -1135,6 +1155,7 @@ Deno.test("provider cache coalesces concurrent unknown context resolution", asyn
     ]);
     assert(results.every((result) => result.status === "rejected"));
     assertEquals(cache.ioCounters().contextGets, 1);
+    assertEquals(cache.ioCounters().revocationGets, 3);
   } finally {
     cache.stop();
   }
@@ -1261,7 +1282,7 @@ Deno.test("same request and event proofs are accepted", async () => {
     );
     assert(!invalid.ok);
     const first = await cache.verifyRequest(providerRequest());
-    assert(first.ok);
+    assert(first.ok, JSON.stringify(first));
     const duplicate = await cache.verifyRequest(providerRequest());
     assert(duplicate.ok);
 
@@ -1504,7 +1525,7 @@ Deno.test("local auth cache hits do not fetch the provider registry", async () =
   });
   const secondValue = second.take();
   if (isErr(secondValue)) throw secondValue.error;
-  assertEquals(calls.length, fetched);
+  assertEquals(calls.length, fetched + 1);
 });
 
 Deno.test("local event auth uses exact permission and raw event bytes", async () => {

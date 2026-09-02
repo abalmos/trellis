@@ -74,6 +74,9 @@ https://raw.githubusercontent.com/qlever-llc/trellis/main/docs/static/llms.txt
   `minItems`, and every `anyOf` or `oneOf` branch proves the path and type.
   Required event consumers cannot depend on optional API uses.
 - Participants select exact actions, never named capabilities. A capability is
+  API-scoped (`trellis.jobs::read`, for example). The `trellis.*` API,
+  capability, participant, and deployment namespaces are reserved for
+  Trellis-owned artifacts; raw `admin` is not a capability.
   presented as review evidence only when all of its permission atoms are in the
   exact request; partial and uncovered permissions remain explicit, and
   capability evidence includes its defining API digest and never expands runtime

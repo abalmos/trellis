@@ -13,7 +13,7 @@ impl RpcDescriptor for StateAdminDeleteRpc {
     const OUTPUT_SCHEMA_JSON: &'static str = super::schemas::STATE_ADMIN_DELETE_OUTPUT_SCHEMA_JSON;
     const KEY: &'static str = "State.Admin.Delete";
     const SUBJECT: &'static str = "rpc.v1.State.Admin.Delete";
-    const CALLER_CAPABILITIES: &'static [&'static str] = &["admin"];
+    const CALLER_CAPABILITIES: &'static [&'static str] = &["trellis.state::mutate"];
     const ERRORS: &'static [&'static str] = &["AuthError", "UnexpectedError", "ValidationError"];
 }
 /// Errors declared by `State.Admin.Delete`.
@@ -59,7 +59,7 @@ impl RpcDescriptor for StateAdminGetRpc {
     const OUTPUT_SCHEMA_JSON: &'static str = super::schemas::STATE_ADMIN_GET_OUTPUT_SCHEMA_JSON;
     const KEY: &'static str = "State.Admin.Get";
     const SUBJECT: &'static str = "rpc.v1.State.Admin.Get";
-    const CALLER_CAPABILITIES: &'static [&'static str] = &["admin"];
+    const CALLER_CAPABILITIES: &'static [&'static str] = &["trellis.state::read"];
     const ERRORS: &'static [&'static str] = &["AuthError", "UnexpectedError", "ValidationError"];
 }
 /// Errors declared by `State.Admin.Get`.
@@ -105,7 +105,7 @@ impl RpcDescriptor for StateAdminListRpc {
     const OUTPUT_SCHEMA_JSON: &'static str = super::schemas::STATE_ADMIN_LIST_OUTPUT_SCHEMA_JSON;
     const KEY: &'static str = "State.Admin.List";
     const SUBJECT: &'static str = "rpc.v1.State.Admin.List";
-    const CALLER_CAPABILITIES: &'static [&'static str] = &["admin"];
+    const CALLER_CAPABILITIES: &'static [&'static str] = &["trellis.state::read"];
     const ERRORS: &'static [&'static str] = &["AuthError", "UnexpectedError", "ValidationError"];
 }
 /// Errors declared by `State.Admin.List`.

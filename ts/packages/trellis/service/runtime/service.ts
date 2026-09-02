@@ -2935,9 +2935,9 @@ export function connectTrellisServiceWithRuntimeDeps<
           auth: sessionAuth,
           cache: authorizationContexts,
           onRefresh: () =>
-            service.connection.status.phase === "connected"
-              ? undefined
-              : nc.reconnect(),
+            service.connection.status.phase !== "connected"
+              ? nc.reconnect()
+              : undefined,
           onTerminalFailure: () => nc.drain(),
         });
         recordTrellisDuration(

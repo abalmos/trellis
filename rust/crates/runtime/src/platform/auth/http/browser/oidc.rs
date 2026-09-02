@@ -769,6 +769,7 @@ where
             .portal_binding_digest
             .clone()
             .ok_or_else(|| HttpError::internal("oauth_portal_binding_missing"))?,
+        false,
         now,
     )
     .await?;
@@ -864,6 +865,7 @@ where
         return Err(HttpError::conflict("first_admin_target_changed"));
     }
     let digest = digest_parts(&[&oauth.provider_id, &subject, &oauth.state_id]);
+    let (grant_set, capabilities) = super::complete_participant_authority(&binding)?;
     let outcome = state
         .service
         .complete_first_admin_federated(FirstAdminFederatedRegistration {
@@ -877,7 +879,8 @@ where
             participant_id: participant_id.to_owned(),
             participant_artifact_digest: participant_artifact_digest.to_owned(),
             participant_needs_digest: participant_needs_digest.to_owned(),
-            grant_set: binding.resolve()?.proposal().required().grant_set().clone(),
+            grant_set,
+            capabilities,
             authority_expires_at: None,
             completed_at: now,
             idempotency: idempotency(
@@ -923,6 +926,7 @@ where
                     .portal_binding_digest
                     .clone()
                     .ok_or_else(|| HttpError::internal("oauth_portal_binding_missing"))?,
+                true,
                 now,
             )
             .await?,

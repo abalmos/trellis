@@ -44,7 +44,7 @@ pub struct FirstAdminRegistration {
     /// New plaintext password, retained only for this call.
     pub password: String,
     /// User-facing profile name.
-    pub display_name: String,
+    pub display_name: Option<String>,
     /// Required-nullable profile email.
     pub email: Option<String>,
     /// Required-nullable profile image URL.
@@ -57,6 +57,8 @@ pub struct FirstAdminRegistration {
     pub participant_needs_digest: String,
     /// Exact grants required to invoke administrator surfaces.
     pub grant_set: GrantSet,
+    /// Exact capabilities required by the complete administration participant.
+    pub capabilities: Vec<String>,
     /// Required-nullable authority expiry.
     pub authority_expires_at: Option<i64>,
     /// Completion time in Unix milliseconds.
@@ -92,6 +94,8 @@ pub struct FirstAdminFederatedRegistration {
     pub participant_needs_digest: String,
     /// Exact grants required to invoke administrator surfaces.
     pub grant_set: GrantSet,
+    /// Exact capabilities required by the complete administration participant.
+    pub capabilities: Vec<String>,
     /// Required-nullable authority expiry.
     pub authority_expires_at: Option<i64>,
     /// Completion time in Unix milliseconds.
@@ -255,7 +259,7 @@ where
                 participant_artifact_digest: input.participant_artifact_digest.clone(),
                 accepted_needs_digest: input.participant_needs_digest.clone(),
                 desired_grant_set: input.grant_set.clone(),
-                desired_capabilities: vec!["admin".to_owned()],
+                desired_capabilities: input.capabilities.clone(),
                 state: AuthorityState::Accepted,
                 version: current
                     .as_ref()
@@ -276,6 +280,16 @@ where
                 &account.principal,
                 input.completed_at,
             )?;
+            let profile = UserProfileRecord {
+                display_name: input.display_name.clone(),
+                email: input.email.clone(),
+                image_url: input.image_url.clone(),
+                updated_at: input.completed_at,
+                version: account.profile.version.checked_add(1).ok_or_else(|| {
+                    AuthorizationStateError::InvalidRecord("profile version overflow".to_owned())
+                })?,
+                ..account.profile.clone()
+            };
             let authority_id = authority.authority_id.clone();
             let outcome = self
                 .complete_password_reset(CompletePasswordResetInput {
@@ -283,6 +297,7 @@ where
                     expected_flow_version: input.expected_flow_version,
                     username: Some(input.username),
                     authority: Some(authority),
+                    profile: Some(profile.clone()),
                     password: input.password,
                     consumed_at: input.completed_at,
                     idempotency: input.idempotency,
@@ -301,7 +316,7 @@ where
             return Ok(match outcome {
                 IdempotentOutcome::Applied(_) => IdempotentOutcome::Applied(FirstAdminAccount {
                     principal: account.principal,
-                    profile: account.profile,
+                    profile,
                 }),
                 IdempotentOutcome::Replayed(value) => IdempotentOutcome::Replayed(value),
             });
@@ -322,7 +337,7 @@ where
         };
         let profile = UserProfileRecord {
             principal_id: principal_id.clone(),
-            display_name: Some(input.display_name),
+            display_name: input.display_name,
             email: input.email,
             image_url: input.image_url,
             created_at: input.completed_at,
@@ -354,7 +369,7 @@ where
             participant_artifact_digest: input.participant_artifact_digest,
             accepted_needs_digest: input.participant_needs_digest,
             desired_grant_set: input.grant_set,
-            desired_capabilities: vec!["admin".to_owned()],
+            desired_capabilities: input.capabilities,
             state: AuthorityState::Accepted,
             version: 1,
             created_at: input.completed_at,
@@ -482,7 +497,7 @@ where
             participant_artifact_digest: input.participant_artifact_digest,
             accepted_needs_digest: input.participant_needs_digest,
             desired_grant_set: input.grant_set,
-            desired_capabilities: vec!["admin".to_owned()],
+            desired_capabilities: input.capabilities,
             state: AuthorityState::Accepted,
             version: 1,
             created_at: input.completed_at,

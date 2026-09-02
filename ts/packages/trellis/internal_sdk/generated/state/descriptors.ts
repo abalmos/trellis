@@ -48,7 +48,7 @@ export const StateAdminDelete = rpcAction(
     output: schema<Types.StateAdminDeleteOutput>(
       StateAdminDeleteResponseSchema,
     ),
-    callerCapabilities: ["admin"] as const,
+    callerCapabilities: ["trellis.state::mutate"] as const,
     errors: ["AuthError", "UnexpectedError", "ValidationError"] as const,
     declaredErrorTypes: [
       "AuthError",
@@ -88,7 +88,7 @@ export const StateAdminGet = rpcAction(
     }),
     input: schema<Types.StateAdminGetInput>(StateAdminGetRequestSchema),
     output: schema<Types.StateAdminGetOutput>(StateAdminGetResponseSchema),
-    callerCapabilities: ["admin"] as const,
+    callerCapabilities: ["trellis.state::read"] as const,
     errors: ["AuthError", "UnexpectedError", "ValidationError"] as const,
     declaredErrorTypes: [
       "AuthError",
@@ -128,7 +128,7 @@ export const StateAdminList = rpcAction(
     }),
     input: schema<Types.StateAdminListInput>(StateAdminListRequestSchema),
     output: schema<Types.StateAdminListOutput>(StateAdminListResponseSchema),
-    callerCapabilities: ["admin"] as const,
+    callerCapabilities: ["trellis.state::read"] as const,
     errors: ["AuthError", "UnexpectedError", "ValidationError"] as const,
     declaredErrorTypes: [
       "AuthError",

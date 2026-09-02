@@ -300,8 +300,8 @@ its atom; capability metadata authorizes only when every mapped atom is present.
 Transport subjects and bindings are never read back as authority.
 
 Connected providers use the authorization registry over internal NATS KV, not
-HTTP. They establish the current-manifest and revocation watches, verify the
-current manifest, consume the revocation watch's initial state, then become
+HTTP. They establish the current-manifest watch and the active context's exact
+revocation watch, verify the current manifest and revocation state, then become
 ready. Quiet watches remain healthy. Actual connection/watch failure makes the
 provider unready; reconnect recreates both watches and reconstructs one initial
 state. Unknown current context digests require one exact context read; cache

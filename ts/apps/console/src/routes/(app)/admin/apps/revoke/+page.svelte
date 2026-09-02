@@ -34,7 +34,7 @@
     error = null;
     try {
       const requestedGrant = page.url.searchParams.get("grant");
-      const response = await trellis.authIdentityAuthorityList({ limit: 500 }).take();
+      const response = await trellis.authIdentityAuthorityList({ limit: 100 }).take();
       if (isErr(response)) { error = errorMessage(response); return; }
       identityGrants = response.entries ?? [];
       const match = identityGrants.find((entry) => entry.authorityId === requestedGrant) ?? identityGrants[0] ?? null;

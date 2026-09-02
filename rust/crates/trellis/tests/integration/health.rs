@@ -22,7 +22,7 @@ const CASE_ID: &str = "health.projection-lifecycle-and-recovery";
 const SERVICE_NAME: &str = "health-fixture-service";
 const SERVICE_API_SOURCE_JSON: &str = r#"{
   "format": "trellis.api.v1",
-  "id": "trellis.integration.health-service@v1",
+  "id": "integration.health-service@v1",
   "version": "1.0.0",
   "displayName": "Trellis Integration Health Service",
   "description": "Publishes runtime health samples for projection coverage."
@@ -183,7 +183,7 @@ async fn service_heartbeat_uses_refreshed_native_connection() {
         .await
         .expect("observe first admin bootstrap URL");
     let service_contract = trellis_test::TrellisTestContract::from_native_api_json(
-        "trellis.integration.health-service@v1",
+        "integration.health-service@v1",
         SERVICE_API_SOURCE_JSON,
         trellis_rs::contracts::ContractKind::Service,
     )
@@ -257,7 +257,7 @@ async fn health_projection_lifecycle_and_recovery() {
         .expect("observe first admin bootstrap URL");
     let mut admin = runtime.admin();
     let service_contract = trellis_test::TrellisTestContract::from_native_api_json(
-        "trellis.integration.health-service@v1",
+        "integration.health-service@v1",
         SERVICE_API_SOURCE_JSON,
         trellis_rs::contracts::ContractKind::Service,
     )
@@ -271,8 +271,8 @@ async fn health_projection_lifecycle_and_recovery() {
     let observer_contract =
         trellis_test::TrellisTestContract::from_builder_with_referenced_contracts(
             trellis_rs::contracts::ContractBuilder::authoring(
-                "trellis.integration.health-observer@v1",
-                "trellis.integration.health-observer@v1",
+                "integration.health-observer@v1",
+                "integration.health-observer@v1",
                 "1.0.0",
                 "Trellis Integration Health Observer",
                 "Reads the Trellis health projection.",

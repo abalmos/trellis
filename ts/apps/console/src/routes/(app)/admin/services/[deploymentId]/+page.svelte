@@ -107,15 +107,15 @@
     error = null;
     notice = null;
     try {
-      const authoritiesResponse = await trellis.authDeploymentAuthorityList({ limit: 500 }).take();
+      const authoritiesResponse = await trellis.authDeploymentAuthorityList({ limit: 100 }).take();
       if (isErr(authoritiesResponse)) { error = errorMessage(authoritiesResponse); return; }
       const authorityId = authoritiesResponse.entries.find((authority) => authority.deploymentId === selectedDeploymentId)?.authorityId;
       if (!authorityId) { error = "Deployment authority not found."; return; }
       const [detailResponse, instancesResponse, plansResponse, capabilitiesResponse] = await Promise.all([
         trellis.authDeploymentAuthorityGet({ authorityId }).take(),
-        trellis.authServiceInstancesList({ limit: 500 }).take(),
+        trellis.authServiceInstancesList({ limit: 100 }).take(),
         trellis.authDeploymentAuthorityPlansList({ deploymentId: selectedDeploymentId, limit: authorityPlanPreviewLimit }).take(),
-        trellis.authCapabilitiesList({ limit: 500 }).take(),
+        trellis.authCapabilitiesList({ limit: 100 }).take(),
       ]);
       if (isErr(detailResponse)) { error = errorMessage(detailResponse); return; }
       if (isErr(instancesResponse)) { error = errorMessage(instancesResponse); return; }
@@ -151,7 +151,7 @@
     error = null;
     notice = null;
     try {
-      const current = await trellis.authDeploymentAuthorityList({ limit: 500 }).take();
+      const current = await trellis.authDeploymentAuthorityList({ limit: 100 }).take();
       if (isErr(current)) { error = errorMessage(current); return; }
       const accepted = current.entries.find((entry) => entry.deploymentId === authority.deploymentId);
       if (!accepted) { error = "Deployment authority not found."; return; }
@@ -197,7 +197,7 @@
     {#snippet actions()}
       <a class="btn btn-ghost btn-sm" href={resolve("/(app)/admin/services")}>Back to services</a>
       <button class="btn btn-ghost btn-sm" onclick={load} disabled={loading}>Refresh</button>
-      <button class="btn btn-warning btn-outline btn-sm" onclick={reconcile} disabled={!authority || reconciling}>{reconciling ? "Reconciling…" : "Reconcile"}</button>
+      <button class="btn btn-outline btn-sm" title="Reconciliation: validates authority inputs and replaces materialized permissions atomically" onclick={reconcile} disabled={!authority || reconciling}>{reconciling ? "Reconciling…" : "Reconcile"}</button>
     {/snippet}
   </PageToolbar>
 

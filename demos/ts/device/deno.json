@@ -4,7 +4,7 @@
   "version": "0.0.0",
   "exports": "./src/main.ts",
   "imports": {
-    "@trellis/apis/trellis.demo-service": "./.trellis/generated/ts/trellis-apis/trellis.demo-service.ts"
+    "@trellis/apis/demo.service": "./.trellis/generated/ts/trellis-apis/demo.service.ts"
   },
   "tasks": {
     "check": "deno task -c ../../../ts/deno.json install && deno task check:installed",

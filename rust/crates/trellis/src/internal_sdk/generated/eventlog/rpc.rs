@@ -15,7 +15,7 @@ impl RpcDescriptor for EventLogConsumersInspectRpc {
         super::schemas::EVENT_LOG_CONSUMERS_INSPECT_OUTPUT_SCHEMA_JSON;
     const KEY: &'static str = "EventLog.Consumers.Inspect";
     const SUBJECT: &'static str = "rpc.v1.EventLog.Consumers.Inspect";
-    const CALLER_CAPABILITIES: &'static [&'static str] = &["trellis.eventlog::events.read"];
+    const CALLER_CAPABILITIES: &'static [&'static str] = &["trellis.eventlog::read"];
     const ERRORS: &'static [&'static str] =
         &["NotFoundError", "UnexpectedError", "ValidationError"];
 }
@@ -58,7 +58,7 @@ impl RpcDescriptor for EventLogConsumersQueryRpc {
         super::schemas::EVENT_LOG_CONSUMERS_QUERY_OUTPUT_SCHEMA_JSON;
     const KEY: &'static str = "EventLog.Consumers.Query";
     const SUBJECT: &'static str = "rpc.v1.EventLog.Consumers.Query";
-    const CALLER_CAPABILITIES: &'static [&'static str] = &["trellis.eventlog::events.read"];
+    const CALLER_CAPABILITIES: &'static [&'static str] = &["trellis.eventlog::read"];
     const ERRORS: &'static [&'static str] = &["UnexpectedError", "ValidationError"];
 }
 /// Errors declared by `EventLog.Consumers.Query`.
@@ -93,7 +93,7 @@ impl RpcDescriptor for EventLogInspectRpc {
     const OUTPUT_SCHEMA_JSON: &'static str = super::schemas::EVENT_LOG_INSPECT_OUTPUT_SCHEMA_JSON;
     const KEY: &'static str = "EventLog.Inspect";
     const SUBJECT: &'static str = "rpc.v1.EventLog.Inspect";
-    const CALLER_CAPABILITIES: &'static [&'static str] = &["trellis.eventlog::events.read"];
+    const CALLER_CAPABILITIES: &'static [&'static str] = &["trellis.eventlog::read"];
     const ERRORS: &'static [&'static str] =
         &["NotFoundError", "UnexpectedError", "ValidationError"];
 }
@@ -134,7 +134,7 @@ impl RpcDescriptor for EventLogMetricsRpc {
     const OUTPUT_SCHEMA_JSON: &'static str = super::schemas::EVENT_LOG_METRICS_OUTPUT_SCHEMA_JSON;
     const KEY: &'static str = "EventLog.Metrics";
     const SUBJECT: &'static str = "rpc.v1.EventLog.Metrics";
-    const CALLER_CAPABILITIES: &'static [&'static str] = &["trellis.eventlog::events.read"];
+    const CALLER_CAPABILITIES: &'static [&'static str] = &["trellis.eventlog::read"];
     const ERRORS: &'static [&'static str] = &["UnexpectedError", "ValidationError"];
 }
 /// Errors declared by `EventLog.Metrics`.
@@ -169,7 +169,7 @@ impl RpcDescriptor for EventLogQueryRpc {
     const OUTPUT_SCHEMA_JSON: &'static str = super::schemas::EVENT_LOG_QUERY_OUTPUT_SCHEMA_JSON;
     const KEY: &'static str = "EventLog.Query";
     const SUBJECT: &'static str = "rpc.v1.EventLog.Query";
-    const CALLER_CAPABILITIES: &'static [&'static str] = &["trellis.eventlog::events.read"];
+    const CALLER_CAPABILITIES: &'static [&'static str] = &["trellis.eventlog::read"];
     const ERRORS: &'static [&'static str] = &["UnexpectedError", "ValidationError"];
 }
 /// Errors declared by `EventLog.Query`.

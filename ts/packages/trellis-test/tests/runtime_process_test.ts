@@ -49,8 +49,8 @@ Deno.test("TrellisTestRuntime.start requires explicit trellis command", async ()
 const runtimeProcessContract = defineServiceContract(
   {},
   () => ({
-    id: "trellis.test.runtime-process@v1",
-    apiId: "trellis.test.runtime-process@v1",
+    id: "test.runtime-process@v1",
+    apiId: "test.runtime-process@v1",
     apiVersion: "1.0.0",
     displayName: "Trellis Test Runtime Process Service",
     description: "Verifies public service bootstrap against a spawned runtime.",
@@ -67,8 +67,8 @@ const entitySchemas = {
 const entityContract = defineServiceContract(
   { schemas: entitySchemas },
   (ref) => ({
-    id: "trellis.test.entity-live@v1",
-    apiId: "trellis.test.entity-live@v1",
+    id: "test.entity-live@v1",
+    apiId: "test.entity-live@v1",
     apiVersion: "1.0.0",
     displayName: "Trellis Test Entity Live Service",
     description: "Service-repo style entity contract for live runtime tests.",

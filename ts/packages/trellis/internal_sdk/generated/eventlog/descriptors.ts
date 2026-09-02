@@ -49,7 +49,7 @@ export const EventLogConsumersInspect = rpcAction(
     output: schema<Types.EventLogConsumersInspectOutput>(
       EventLogConsumersInspectResponseSchema,
     ),
-    callerCapabilities: ["trellis.eventlog::events.read"] as const,
+    callerCapabilities: ["trellis.eventlog::read"] as const,
     errors: ["NotFoundError", "UnexpectedError", "ValidationError"] as const,
     declaredErrorTypes: [
       "NotFoundError",
@@ -94,7 +94,7 @@ export const EventLogConsumersQuery = rpcAction(
     output: schema<Types.EventLogConsumersQueryOutput>(
       EventLogConsumersQueryResponseSchema,
     ),
-    callerCapabilities: ["trellis.eventlog::events.read"] as const,
+    callerCapabilities: ["trellis.eventlog::read"] as const,
     errors: ["UnexpectedError", "ValidationError"] as const,
     declaredErrorTypes: ["UnexpectedError", "ValidationError"] as const,
     runtimeErrors: [
@@ -126,7 +126,7 @@ export const EventLogInspect = rpcAction(
     }),
     input: schema<Types.EventLogInspectInput>(EventLogInspectRequestSchema),
     output: schema<Types.EventLogInspectOutput>(EventLogInspectResponseSchema),
-    callerCapabilities: ["trellis.eventlog::events.read"] as const,
+    callerCapabilities: ["trellis.eventlog::read"] as const,
     errors: ["NotFoundError", "UnexpectedError", "ValidationError"] as const,
     declaredErrorTypes: [
       "NotFoundError",
@@ -167,7 +167,7 @@ export const EventLogMetrics = rpcAction(
     }),
     input: schema<Types.EventLogMetricsInput>(EventLogMetricsRequestSchema),
     output: schema<Types.EventLogMetricsOutput>(EventLogMetricsResponseSchema),
-    callerCapabilities: ["trellis.eventlog::events.read"] as const,
+    callerCapabilities: ["trellis.eventlog::read"] as const,
     errors: ["UnexpectedError", "ValidationError"] as const,
     declaredErrorTypes: ["UnexpectedError", "ValidationError"] as const,
     runtimeErrors: [
@@ -199,7 +199,7 @@ export const EventLogQuery = rpcAction(
     }),
     input: schema<Types.EventLogQueryInput>(EventLogQueryRequestSchema),
     output: schema<Types.EventLogQueryOutput>(EventLogQueryResponseSchema),
-    callerCapabilities: ["trellis.eventlog::events.read"] as const,
+    callerCapabilities: ["trellis.eventlog::read"] as const,
     errors: ["UnexpectedError", "ValidationError"] as const,
     declaredErrorTypes: ["UnexpectedError", "ValidationError"] as const,
     runtimeErrors: [
@@ -231,7 +231,7 @@ export const EventLogWatch = feedAction(
     }),
     input: schema<Types.EventLogWatchInput>(EventLogWatchRequestSchema),
     event: schema<Types.EventLogWatchEvent>(EventLogWatchFrameSchema),
-    subscribeCapabilities: ["trellis.eventlog::events.stream"] as const,
+    subscribeCapabilities: ["trellis.eventlog::stream"] as const,
   },
   "EventLogWatch",
   ACTION_SOURCE,

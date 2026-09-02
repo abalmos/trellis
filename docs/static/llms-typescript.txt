@@ -193,6 +193,10 @@ Rules:
   `nats`; service permissions require current materialization for the accepted
   desired authority version. Stale or obsolete persisted projections are repaired
   by Trellis storage upgrade and reconciliation.
+- Capability keys are API-scoped (`trellis.jobs::read`, for example). The
+  `trellis.*` namespace is reserved for Trellis-owned APIs, capabilities,
+  participants, and deployments. Gate UI by exact capabilities, never raw
+  `admin`.
 - Deployment materialization is shared by the deployment and exact participant.
   Session and instance eligibility is checked separately, so one unhealthy
   instance does not rewrite authority for healthy peers.

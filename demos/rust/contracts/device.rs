@@ -1,9 +1,9 @@
 use serde_json::{json, Value};
+use trellis_apis::state::api::API_JSON as STATE_API_JSON;
 use trellis_contracts::{
     state, ApiArtifact, ApiBuilder, ContractArtifacts, ContractBuilder, ContractKind,
     ContractStateKind, ContractsError,
 };
-use trellis_apis::state::api::API_JSON as STATE_API_JSON;
 
 #[path = "service.rs"]
 mod service;
@@ -11,7 +11,7 @@ mod service;
 /// Build the Rust-authored Field Device demo native API.
 pub fn api_artifact() -> Result<ApiArtifact, ContractsError> {
     ApiBuilder::authoring(
-        "trellis.demo-device@v1",
+        "demo.device@v1",
         "1.0.0",
         "Field Device Demo",
         "Activated Field Device TUI for the consolidated demo.",
@@ -73,17 +73,14 @@ pub fn contract_artifacts() -> Result<ContractArtifacts, ContractsError> {
     let state_api: Value = serde_json::from_str(STATE_API_JSON)?;
     let api = api_artifact()?;
     let api_value = api.normalized_value()?;
-    let base = ContractBuilder::from_api(
-        "trellis.demo-device@v1",
-        api_value.clone(),
-        ContractKind::Device,
-    )?
-    .build()?;
+    let base =
+        ContractBuilder::from_api("demo.device@v1", api_value.clone(), ContractKind::Device)?
+            .build()?;
     let mut participant = base.participant_value()?;
     participant["uses"] = json!({
         "required": {
-            "trellis.demo-service@v1": {
-                "api": "trellis.demo-service@v1",
+            "demo.service@v1": {
+                "api": "demo.service@v1",
                 "apiDigest": ApiBuilder::new(service_api.clone()).build()?.digest()?,
                 "rpc": {"call": ["Assignments.List", "Evidence.Download", "Evidence.List", "Sites.Get", "Sites.List"]},
                 "operations": {
@@ -101,7 +98,7 @@ pub fn contract_artifacts() -> Result<ContractArtifacts, ContractsError> {
         }
     });
     ContractBuilder::from_native(api_value, participant)
-        .referenced_api("trellis.demo-service@v1", service_api)
+        .referenced_api("demo.service@v1", service_api)
         .referenced_api("trellis.state@v1", state_api)
         .build()
 }

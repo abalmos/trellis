@@ -6,9 +6,9 @@ use trellis_contracts::{
     ContractKind, ContractsError,
 };
 
-const READ_CAPABILITY: &str = "admin.read";
-const MUTATE_CAPABILITY: &str = "admin.mutate";
-const STREAM_CAPABILITY: &str = "admin.stream";
+const READ_CAPABILITY: &str = "read";
+const MUTATE_CAPABILITY: &str = "mutate";
+const STREAM_CAPABILITY: &str = "stream";
 const UNEXPECTED_ERROR: &str = "UnexpectedError";
 const VALIDATION_ERROR: &str = "ValidationError";
 const NOT_FOUND_ERROR: &str = "NotFoundError";

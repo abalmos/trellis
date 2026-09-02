@@ -50,8 +50,8 @@ export function createOperationsFixture(
   const serviceContract = defineServiceContract(
     { schemas: operationSchemas },
     (ref) => ({
-      id: `trellis.integration.operations-service.${slug}@v1`,
-      apiId: `trellis.integration.operations-service.${slug}@v1`,
+      id: `integration.operations-service.${slug}@v1`,
+      apiId: `integration.operations-service.${slug}@v1`,
       apiVersion: "1.0.0",
       displayName: `Trellis Integration Operations Service (${slug})`,
       description: "Exercises generated operation start and watch surfaces.",
@@ -121,8 +121,8 @@ export function createOperationsFixture(
   );
 
   const clientContract = defineAppContract(() => ({
-    id: `trellis.integration.operations-client.${slug}@v1`,
-    apiId: `trellis.integration.operations-client.${slug}@v1`,
+    id: `integration.operations-client.${slug}@v1`,
+    apiId: `integration.operations-client.${slug}@v1`,
     apiVersion: "1.0.0",
     displayName: `Trellis Integration Operations Client (${slug})`,
     description:
@@ -139,8 +139,8 @@ export function createOperationsFixture(
   }));
 
   const unauthorizedClientContract = defineAppContract(() => ({
-    id: `trellis.integration.operations-unauthorized-client.${slug}@v1`,
-    apiId: `trellis.integration.operations-unauthorized-client.${slug}@v1`,
+    id: `integration.operations-unauthorized-client.${slug}@v1`,
+    apiId: `integration.operations-unauthorized-client.${slug}@v1`,
     apiVersion: "1.0.0",
     displayName: `Trellis Integration Unauthorized Operations Client (${slug})`,
     description:

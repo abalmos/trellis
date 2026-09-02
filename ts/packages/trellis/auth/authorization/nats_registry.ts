@@ -19,12 +19,13 @@ export type ManifestPointer = {
 /** Registry I/O counters observed since provider-cache start. */
 export type AuthorizationRegistryIoCounters = {
   contextGets: number;
+  revocationGets: number;
   trustGets: number;
   revocationWatchInitializations: number;
   watchStarts: number;
 };
 
-type RegistryEntry = {
+export type RegistryEntry = {
   value: Uint8Array;
   revision: number;
   operation: string;
@@ -37,6 +38,7 @@ export class AuthorizationRegistryReader {
   readonly #direct: DirectStreamAPI;
   readonly #binding: AuthorizationRegistryBinding;
   #contextGets = 0;
+  #revocationGets = 0;
   #trustGets = 0;
   #revocationWatchInitializations = 0;
   #watchStarts = 0;
@@ -77,6 +79,7 @@ export class AuthorizationRegistryReader {
   ioCounters(): AuthorizationRegistryIoCounters {
     return {
       contextGets: this.#contextGets,
+      revocationGets: this.#revocationGets,
       trustGets: this.#trustGets,
       revocationWatchInitializations: this.#revocationWatchInitializations,
       watchStarts: this.#watchStarts,
@@ -90,6 +93,16 @@ export class AuthorizationRegistryReader {
     return await this.#putOrNull(
       this.#binding.contextBucket,
       digest,
+    );
+  }
+
+  /** Read one revocation marker by its exact context digest key. */
+  async getRevocation(digest: string): Promise<RegistryEntry | null> {
+    assertRegistryKey(digest, "authorization context digest");
+    this.#revocationGets += 1;
+    return await this.#putOrNull(
+      this.#binding.contextBucket,
+      `${REVOCATION_PREFIX}${digest}`,
     );
   }
 
@@ -127,15 +140,15 @@ export class AuthorizationRegistryReader {
     return watcher[Symbol.asyncIterator]();
   }
 
-  /** Subscribe to all revocation updates, including delete tombstones. */
-  async watchRevocations(): Promise<{
+  /** Subscribe only to the active context's revocation key. */
+  async watchRevocation(contextDigest: string): Promise<{
     iterator: AsyncIterator<KvWatchEntry>;
     initialPending: number;
   }> {
     this.#watchStarts += 1;
     this.#revocationWatchInitializations += 1;
     const watcher = await this.#contexts.watch({
-      key: `${REVOCATION_PREFIX}>`,
+      key: `${REVOCATION_PREFIX}${contextDigest}`,
     });
     return {
       iterator: watcher[Symbol.asyncIterator](),
@@ -144,9 +157,18 @@ export class AuthorizationRegistryReader {
   }
 
   async #putOrNull(bucket: string, key: string): Promise<RegistryEntry | null> {
-    const entry = await this.#direct.getMessage(`KV_${bucket}`, {
-      last_by_subj: `$KV.${bucket}.${key}`,
-    });
+    let entry;
+    try {
+      entry = await this.#direct.getMessage(`KV_${bucket}`, {
+        last_by_subj: `$KV.${bucket}.${key}`,
+      });
+    } catch (error) {
+      if (
+        typeof error === "object" && error !== null && "code" in error &&
+        error.code === 404
+      ) return null;
+      throw error;
+    }
     if (!entry) return null;
     const operation = entry.header?.get("KV-Operation") || "PUT";
     return operation === "PUT"

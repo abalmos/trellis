@@ -4,6 +4,69 @@ use serde_json::Value;
 
 use super::{AuthorizationStateError, ParticipantBindingRecord, ParticipantBindingState};
 
+pub(crate) const ADMINISTRATION_PARTICIPANT_ID: &str = "trellis.platform-administration";
+pub(crate) const AUTH_RUNTIME_PARTICIPANT_ID: &str = "trellis.auth-runtime";
+
+pub(crate) fn validate_participant_namespace(participant_id: &str) -> Result<(), String> {
+    if participant_id.starts_with("trellis.")
+        && !matches!(
+            participant_id,
+            ADMINISTRATION_PARTICIPANT_ID | AUTH_RUNTIME_PARTICIPANT_ID
+        )
+    {
+        return Err(format!(
+            "participant id '{participant_id}' uses the reserved 'trellis.' namespace"
+        ));
+    }
+    Ok(())
+}
+
+pub(crate) fn validate_binding_namespace(
+    binding: &ParticipantBindingRecord,
+) -> Result<(), AuthorizationStateError> {
+    if binding.participant_id.starts_with("trellis.") {
+        let canonical_digest = match binding.participant_id.as_str() {
+            ADMINISTRATION_PARTICIPANT_ID => {
+                administration_participant_binding(binding.resolved_at)?.artifact_digest
+            }
+            AUTH_RUNTIME_PARTICIPANT_ID => {
+                auth_runtime_participant_binding(binding.resolved_at)?.artifact_digest
+            }
+            _ => {
+                return Err(AuthorizationStateError::InvalidRecord(format!(
+                    "participant id '{}' uses the reserved 'trellis.' namespace",
+                    binding.participant_id
+                )))
+            }
+        };
+        if binding.artifact_digest != canonical_digest {
+            return Err(AuthorizationStateError::InvalidRecord(format!(
+                "participant '{}' does not match its canonical Trellis artifact",
+                binding.participant_id
+            )));
+        }
+    }
+
+    let artifacts: BTreeMap<String, Value> = serde_json::from_str(&binding.api_artifacts_json)
+        .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
+    for (api_id, value) in artifacts {
+        if !api_id.starts_with("trellis.") {
+            continue;
+        }
+        let api = trellis_protocol::parse_api(&value)
+            .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
+        let digest = api
+            .digest()
+            .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
+        if !is_platform_api(&api_id, &digest) {
+            return Err(AuthorizationStateError::InvalidRecord(format!(
+                "API '{api_id}' uses the reserved 'trellis.' namespace"
+            )));
+        }
+    }
+    Ok(())
+}
+
 pub(crate) fn is_platform_api(api_id: &str, api_digest: &str) -> bool {
     [
         (
@@ -47,7 +110,7 @@ pub(crate) fn administration_participant_binding(
         ("required", trellis_runtime_apis::jobs::API_JSON),
         ("required", trellis_runtime_apis::state::API_JSON),
         ("optional", trellis_runtime_apis::eventlog::API_JSON),
-        ("optional", trellis_runtime_apis::health::API_JSON),
+        ("required", trellis_runtime_apis::health::API_JSON),
     ] {
         let api_value: Value = serde_json::from_str(api_json)
             .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
@@ -176,8 +239,28 @@ mod state_api_digest_test {
             trellis_runtime_apis::auth::API_DIGEST,
         ));
         assert!(!super::is_platform_api(
+            "trellis.community-defined@v1",
+            trellis_runtime_apis::auth::API_DIGEST,
+        ));
+        assert!(!super::is_platform_api(
             "example.jobs@v1",
             trellis_runtime_apis::jobs::API_DIGEST,
         ));
+    }
+
+    #[test]
+    fn trellis_participant_namespace_is_platform_reserved() {
+        assert!(
+            super::validate_participant_namespace(super::ADMINISTRATION_PARTICIPANT_ID).is_ok()
+        );
+        assert!(super::validate_participant_namespace(super::AUTH_RUNTIME_PARTICIPANT_ID).is_ok());
+        assert!(super::validate_participant_namespace("example.console").is_ok());
+        assert!(super::validate_participant_namespace("trellis-app.console@v1").is_ok());
+        assert!(super::validate_participant_namespace("demo.app@v1").is_ok());
+        assert!(super::validate_participant_namespace("trellis.deployment-owned").is_err());
+
+        let mut forged = super::administration_participant_binding(0).expect("admin binding");
+        forged.artifact_digest = "forged".to_owned();
+        assert!(super::validate_binding_namespace(&forged).is_err());
     }
 }

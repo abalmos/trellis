@@ -1956,6 +1956,7 @@ mod tests {
                     expected_flow_version: 1,
                     username: None,
                     authority: None,
+                    profile: None,
                     password: "current password".to_owned(),
                     consumed_at: NOW_MS + 2,
                     idempotency: IdempotencyResultRecord {
@@ -2268,6 +2269,7 @@ mod tests {
                     replacement: wrong_identity,
                     identity: None,
                     authority: None,
+                    profile: None,
                     expected_authority_version: None,
                     consumed_at: NOW_MS + 3,
                     idempotency: IdempotencyResultRecord {
@@ -2296,6 +2298,7 @@ mod tests {
                 replacement: replacement.clone(),
                 identity: None,
                 authority: None,
+                profile: None,
                 expected_authority_version: None,
                 consumed_at: NOW_MS + 3,
                 idempotency: IdempotencyResultRecord {
@@ -2342,6 +2345,7 @@ mod tests {
                 replacement,
                 identity: None,
                 authority: None,
+                profile: None,
                 expected_authority_version: None,
                 consumed_at: NOW_MS + 3,
                 idempotency: IdempotencyResultRecord {

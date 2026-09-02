@@ -31,6 +31,10 @@ export const routeTitles = {
   "/admin/health-events": "Health",
   "/admin/events": "Events",
   "/admin/jobs": "Jobs",
+  "/admin/grants": "Grants",
+  "/admin/capability-groups": "Capability Groups",
+  "/admin/capability-groups/edit": "Edit Capability Group",
+  "/admin/capability-groups/new": "New Capability Group",
   "/admin/portals": "Portals",
   "/admin/portals/login": "Portal Policy",
   "/admin/portals/login/default": "Built-In Login Portal",
@@ -46,14 +50,35 @@ export type NavItem = {
   href: AppPathname;
   label: string;
   icon: string;
-  adminOnly?: boolean;
+  capabilities?: readonly string[];
 };
 
 export type NavSection = {
   title: string;
   items: NavItem[];
-  adminOnly?: boolean;
 };
+
+const CAPABILITIES = {
+  authorityRead: "trellis.auth::authorities.read",
+  capabilityRead: "trellis.auth::capabilities.read",
+  delegate: "trellis.auth::capabilities.delegate",
+  devicesRead: "trellis.auth::devices.read",
+  eventlogRead: "trellis.eventlog::read",
+  healthRead: "trellis.health::read",
+  jobsRead: "trellis.jobs::read",
+  portalsRead: "trellis.auth::portals.read",
+  servicesRead: "trellis.auth::services.read",
+  sessionsRead: "trellis.auth::sessions.read",
+  usersRead: "trellis.auth::users.read",
+} as const;
+
+const overviewCapabilities = [
+  CAPABILITIES.usersRead,
+  CAPABILITIES.healthRead,
+  CAPABILITIES.sessionsRead,
+  CAPABILITIES.eventlogRead,
+  CAPABILITIES.jobsRead,
+] as const;
 
 const navSections: NavSection[] = [
   {
@@ -62,52 +87,120 @@ const navSections: NavSection[] = [
   },
   {
     title: "Operate",
-    adminOnly: true,
     items: [
-      { href: "/admin", label: "Overview", icon: "users" },
-      { href: "/admin/health-events", label: "Health Events", icon: "alert" },
-      { href: "/admin/sessions", label: "Sessions", icon: "activity" },
-      { href: "/admin/events", label: "Events", icon: "activity" },
-      { href: "/admin/jobs", label: "Jobs", icon: "clipboard" },
+      {
+        href: "/admin",
+        label: "Overview",
+        icon: "users",
+        capabilities: overviewCapabilities,
+      },
+      {
+        href: "/admin/health-events",
+        label: "Health Events",
+        icon: "alert",
+        capabilities: [CAPABILITIES.healthRead],
+      },
+      {
+        href: "/admin/sessions",
+        label: "Sessions",
+        icon: "activity",
+        capabilities: [CAPABILITIES.sessionsRead],
+      },
+      {
+        href: "/admin/events",
+        label: "Events",
+        icon: "activity",
+        capabilities: [CAPABILITIES.eventlogRead],
+      },
+      {
+        href: "/admin/jobs",
+        label: "Jobs",
+        icon: "clipboard",
+        capabilities: [CAPABILITIES.jobsRead],
+      },
+      {
+        href: "/admin/grants",
+        label: "Grants",
+        icon: "key",
+        capabilities: [CAPABILITIES.authorityRead],
+      },
       {
         href: "/admin/authority/plans",
         label: "Authority Plans",
         icon: "clipboard",
+        capabilities: [CAPABILITIES.authorityRead],
       },
-      { href: "/admin/portals", label: "Portals", icon: "database" },
+      {
+        href: "/admin/capability-groups",
+        label: "Capability Groups",
+        icon: "key",
+        capabilities: [CAPABILITIES.capabilityRead],
+      },
+      {
+        href: "/admin/portals",
+        label: "Portals",
+        icon: "database",
+        capabilities: [CAPABILITIES.portalsRead],
+      },
     ],
   },
   {
     title: "Manage",
-    adminOnly: true,
     items: [
       {
         href: "/admin/services",
         label: "Services",
         icon: "server",
+        capabilities: [CAPABILITIES.servicesRead],
       },
-      { href: "/admin/devices", label: "Devices", icon: "phone" },
-      { href: "/admin/users", label: "Users", icon: "users" },
+      {
+        href: "/admin/devices",
+        label: "Devices",
+        icon: "phone",
+        capabilities: [CAPABILITIES.devicesRead],
+      },
+      {
+        href: "/admin/users",
+        label: "Users",
+        icon: "users",
+        capabilities: [CAPABILITIES.usersRead],
+      },
     ],
   },
 ];
 
-export function requiresAdminRoute(pathname: string): boolean {
+function hasCapabilities(
+  profile: Profile,
+  capabilities: readonly string[],
+): boolean {
+  const granted = new Set(profile?.capabilities ?? []);
+  return capabilities.every((capability) => granted.has(capability));
+}
+
+export function canAccessRoute(pathname: string, profile: Profile): boolean {
+  if (!pathname.startsWith("/admin")) return true;
+  const item = navSections.flatMap((section) => section.items)
+    .filter((candidate) =>
+      pathname === candidate.href || pathname.startsWith(`${candidate.href}/`)
+    )
+    .sort((left, right) => right.href.length - left.href.length)[0];
+  return item !== undefined &&
+    hasCapabilities(profile, item.capabilities ?? []);
+}
+
+export function requiresCapabilityRoute(pathname: string): boolean {
   return pathname === "/admin" || pathname.startsWith("/admin/");
 }
 
-export function isAdmin(profile: Profile): boolean {
-  return profile?.capabilities?.includes("admin") ?? false;
-}
-
 export function getVisibleNavSections(profile: Profile): NavSection[] {
-  const admin = isAdmin(profile);
   return navSections
-    .filter((section) => !section.adminOnly || admin)
     .map((section) => ({
       ...section,
-      items: section.items.filter((item) => !item.adminOnly || admin),
-    }));
+      items: section.items.filter((item) =>
+        hasCapabilities(profile, item.capabilities ?? [])
+      ),
+    }))
+    .filter((section) => section.items.length > 0);
 }
 
 function hasRouteTitle(pathname: string): pathname is keyof typeof routeTitles {
@@ -119,7 +212,14 @@ export function getPageTitle(pathname: string): string {
 }
 
 export function getRoleLabel(profile: Profile): string {
-  if (isAdmin(profile)) return "Administrator";
+  if (profile?.capabilities?.includes(CAPABILITIES.delegate)) {
+    return "Administrator";
+  }
+  if (
+    profile?.capabilities?.some((capability) =>
+      capability.startsWith("trellis.")
+    )
+  ) return "Operator";
   if (profile?.capabilities?.includes("service")) return "Service principal";
   return "Member";
 }

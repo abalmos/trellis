@@ -139,13 +139,13 @@ pub(crate) fn validate_first_admin_authority(
         || !authority
             .desired_capabilities
             .iter()
-            .any(|value| value == "admin")
+            .any(|value| value == "trellis.auth::capabilities.delegate")
         || authority
             .expires_at
             .is_some_and(|expires_at| expires_at <= completed_at)
     {
         return Err(super::super::AuthorizationStateError::InvalidRecord(
-            "first-admin authority must be accepted, exact, active, and administrative".to_owned(),
+            "bootstrap authority must be accepted, exact, active, and delegating".to_owned(),
         ));
     }
     Ok(())
@@ -158,12 +158,22 @@ pub(crate) fn validate_account_list(
     if let Some(cursor) = cursor {
         require_nonempty("cursor", cursor)?;
     }
-    if limit > 100 {
+    // RPC pagination reads one extra row to determine whether a next page exists.
+    if limit > 101 {
         return Err(super::super::AuthorizationStateError::InvalidRecord(
-            "user account list limit exceeds 100".to_owned(),
+            "user account list limit exceeds internal maximum 101".to_owned(),
         ));
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn account_list_allows_one_row_of_pagination_lookahead() {
+        assert!(super::validate_account_list(None, 101).is_ok());
+        assert!(super::validate_account_list(None, 102).is_err());
+    }
 }
 
 pub(crate) fn validate_local_credential(

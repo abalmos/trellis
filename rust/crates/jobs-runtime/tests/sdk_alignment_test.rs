@@ -39,11 +39,11 @@ fn generated_jobs_contract_uses_scoped_rpc_capability_names() {
         .and_then(serde_json::Value::as_object)
         .expect("jobs API capabilities");
 
-    assert!(capabilities.contains_key("trellis.jobs::admin.read"));
-    assert!(capabilities.contains_key("trellis.jobs::admin.mutate"));
+    assert!(capabilities.contains_key("trellis.jobs::read"));
+    assert!(capabilities.contains_key("trellis.jobs::mutate"));
 
     let jobs_cancel = capabilities
-        .get("trellis.jobs::admin.mutate")
+        .get("trellis.jobs::mutate")
         .expect("jobs mutate capability");
     assert_eq!(
         jobs_cancel
@@ -61,7 +61,7 @@ fn generated_jobs_contract_uses_scoped_rpc_capability_names() {
     assert!(rpc.get("Jobs.Get").is_none());
 
     let jobs_get = capabilities
-        .get("trellis.jobs::admin.read")
+        .get("trellis.jobs::read")
         .expect("jobs read capability");
     assert!(jobs_get
         .get("allows")

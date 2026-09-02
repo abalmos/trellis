@@ -6,8 +6,8 @@ export const contract = defineServiceContract(
     schemas,
   },
   (ref) => ({
-    id: "trellis.demo-service@v1",
-    apiId: "trellis.demo-service@v1",
+    id: "demo.service@v1",
+    apiId: "demo.service@v1",
     apiVersion: "1.0.0",
     displayName: "Field Ops Demo Service",
     description: "Consolidated Field Ops demo service for Trellis concepts.",

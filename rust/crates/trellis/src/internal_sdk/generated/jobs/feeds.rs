@@ -9,5 +9,5 @@ impl FeedDescriptor for JobsWatchFeedDescriptor {
     const EVENT_SCHEMA_JSON: &'static str = super::schemas::JOBS_WATCH_EVENT_SCHEMA_JSON;
     const KEY: &'static str = "Jobs.Watch";
     const SUBJECT: &'static str = "feed.v1.Jobs.Watch";
-    const SUBSCRIBE_CAPABILITIES: &'static [&'static str] = &["trellis.jobs::admin.stream"];
+    const SUBSCRIBE_CAPABILITIES: &'static [&'static str] = &["trellis.jobs::stream"];
 }

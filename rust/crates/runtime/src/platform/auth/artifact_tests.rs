@@ -28,7 +28,7 @@ fn source_auth_artifacts_are_valid_and_digest_pinned() {
             .expect("parse auth participant JSON");
     lint_participant_authoring(&participant_value).expect("lint auth participant");
     let participant = parse_participant(&participant_value).expect("validate auth participant");
-    assert_eq!(participant.id(), "trellis-auth-runtime");
+    assert_eq!(participant.id(), "trellis.auth-runtime");
 
     let admin_value: Value = serde_json::from_str(include_str!(
         "../../../../trellis/artifacts/trellis.admin.participant.json"
@@ -36,7 +36,7 @@ fn source_auth_artifacts_are_valid_and_digest_pinned() {
     .expect("parse admin participant JSON");
     lint_participant_authoring(&admin_value).expect("lint admin participant");
     let admin = parse_participant(&admin_value).expect("validate admin participant");
-    assert_eq!(admin.id(), "trellis-platform-administration");
+    assert_eq!(admin.id(), "trellis.platform-administration");
     let resolved = trellis_protocol::resolve_participant(
         &admin,
         &[
@@ -64,7 +64,7 @@ fn source_auth_artifacts_are_valid_and_digest_pinned() {
 
 #[test]
 fn accepted_auth_machine_api_is_preserved() {
-    let baseline = normalized_api(include_str!(
+    let mut baseline = normalized_api(include_str!(
         "../../../../../../conformance/baselines/trellis-auth-3ef0aa94.api.json"
     ));
     let current_source: Value = serde_json::from_str(include_str!("../../../trellis.api.json"))
@@ -95,9 +95,22 @@ fn accepted_auth_machine_api_is_preserved() {
             .remove(&schema)
             .expect("policy RPC schema");
     }
-    projection["capabilities"]["admin"]["allows"] =
-        baseline["capabilities"]["admin"]["allows"].clone();
-    projection["consent"] = baseline["consent"].clone();
+    projection
+        .as_object_mut()
+        .expect("auth object")
+        .remove("consent");
+    projection
+        .as_object_mut()
+        .expect("auth object")
+        .remove("capabilities");
+    baseline
+        .as_object_mut()
+        .expect("auth object")
+        .remove("consent");
+    baseline
+        .as_object_mut()
+        .expect("auth object")
+        .remove("capabilities");
     fn remove_review_amendment(value: &mut serde_json::Value) {
         match value {
             serde_json::Value::Object(object) => {
@@ -251,9 +264,27 @@ fn accepted_builtin_machine_apis_are_preserved() {
             trellis_runtime_apis::state::API_JSON,
         ),
     ] {
+        let baseline = normalized_api(baseline_source);
+        let mut current = normalized_api(current_source);
+        current
+            .as_object_mut()
+            .expect("API object")
+            .remove("capabilities");
+        current
+            .as_object_mut()
+            .expect("API object")
+            .remove("consent");
+        let mut baseline = baseline;
+        baseline
+            .as_object_mut()
+            .expect("API object")
+            .remove("capabilities");
+        baseline
+            .as_object_mut()
+            .expect("API object")
+            .remove("consent");
         assert_eq!(
-            normalized_api(current_source),
-            normalized_api(baseline_source),
+            current, baseline,
             "{name} machine API drifted from accepted parent 3ef0aa94"
         );
     }
@@ -303,7 +334,7 @@ fn central_trellis_participant_resolves_all_builtin_apis_with_exact_pins() {
     let participant = parse_participant(&participant_value).expect("validate central participant");
     let resolved = trellis_protocol::resolve_participant(&participant, &apis)
         .expect("resolve central participant against final built-ins");
-    assert_eq!(resolved.participant_id(), "trellis-auth-runtime");
+    assert_eq!(resolved.participant_id(), "trellis.auth-runtime");
 }
 
 fn normalized_api(source: &str) -> Value {

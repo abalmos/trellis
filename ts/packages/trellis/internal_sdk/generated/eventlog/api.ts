@@ -2,10 +2,10 @@
 
 export const API_ID = "trellis.eventlog@v1" as const;
 export const API_DIGEST =
-  "ldHKKyQCxcEYuuIRjwPa9CZMEKV8mNUyGkAtSh9MzZ8" as const;
+  "YXwUBXSxRzix71_jemo6p0y_dxk5F-LOz1QsV3IT1OU" as const;
 export const API = {
   "capabilities": {
-    "trellis.eventlog::events.read": {
+    "trellis.eventlog::read": {
       "allows": [{
         "action": "call",
         "target": {
@@ -48,7 +48,7 @@ export const API = {
         },
       }],
     },
-    "trellis.eventlog::events.stream": {
+    "trellis.eventlog::stream": {
       "allows": [{
         "action": "subscribe",
         "target": {
@@ -61,12 +61,12 @@ export const API = {
     },
   },
   "consent": {
-    "trellis.eventlog::events.read": {
+    "trellis.eventlog::read": {
       "consequence": "",
       "description": "View projected Trellis events and event consumer health.",
       "title": "Read Event Log data",
     },
-    "trellis.eventlog::events.stream": {
+    "trellis.eventlog::stream": {
       "consequence": "",
       "description": "Subscribe to Event Log live invalidation frames.",
       "title": "Stream Event Log changes",

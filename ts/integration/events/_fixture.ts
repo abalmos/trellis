@@ -17,8 +17,8 @@ export function createEventsFixture(caseId: string) {
   const serviceContract = defineServiceContract(
     { schemas: eventSchemas },
     (ref) => ({
-      id: `trellis.integration.events-service.${slug}@v1`,
-      apiId: `trellis.integration.events-service.${slug}@v1`,
+      id: `integration.events-service.${slug}@v1`,
+      apiId: `integration.events-service.${slug}@v1`,
       apiVersion: "1.0.0",
       displayName: `Trellis Integration Events Service (${slug})`,
       description: "Exercises generated event publish and subscribe surfaces.",
@@ -48,8 +48,8 @@ export function createEventsFixture(caseId: string) {
   );
 
   const pubSubClientContract = defineAppContract(() => ({
-    id: `trellis.integration.events-pubsub-client.${slug}@v1`,
-    apiId: `trellis.integration.events-pubsub-client.${slug}@v1`,
+    id: `integration.events-pubsub-client.${slug}@v1`,
+    apiId: `integration.events-pubsub-client.${slug}@v1`,
     apiVersion: "1.0.0",
     displayName: `Trellis Integration Events PubSub Client (${slug})`,
     description:
@@ -61,8 +61,8 @@ export function createEventsFixture(caseId: string) {
   }));
 
   const subscribeOnlyClientContract = defineAppContract(() => ({
-    id: `trellis.integration.events-subscribe-only-client.${slug}@v1`,
-    apiId: `trellis.integration.events-subscribe-only-client.${slug}@v1`,
+    id: `integration.events-subscribe-only-client.${slug}@v1`,
+    apiId: `integration.events-subscribe-only-client.${slug}@v1`,
     apiVersion: "1.0.0",
     displayName: `Trellis Integration Events Subscribe-Only Client (${slug})`,
     description: "App/client participant without event publish authority.",
@@ -70,8 +70,8 @@ export function createEventsFixture(caseId: string) {
   }));
 
   const publishOnlyClientContract = defineAppContract(() => ({
-    id: `trellis.integration.events-publish-only-client.${slug}@v1`,
-    apiId: `trellis.integration.events-publish-only-client.${slug}@v1`,
+    id: `integration.events-publish-only-client.${slug}@v1`,
+    apiId: `integration.events-publish-only-client.${slug}@v1`,
     apiVersion: "1.0.0",
     displayName: `Trellis Integration Events Publish-Only Client (${slug})`,
     description: "App/client participant without event subscribe authority.",

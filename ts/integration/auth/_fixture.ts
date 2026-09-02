@@ -34,7 +34,7 @@ export function createAuthLocalLoginFixture(
   } as const;
 
   const serviceContractId =
-    `trellis.integration.auth-local-login-service.${slug}@v1`;
+    `integration.auth-local-login-service.${slug}@v1`;
   const pingCapability = serviceContractId.replace(/@v\d+$/, "") +
     "::authLocalLoginPing";
   const deploymentId = `auth-local-login-deployment-${slug}`;
@@ -69,8 +69,8 @@ export function createAuthLocalLoginFixture(
   );
 
   const eventContract = defineServiceContract({ schemas }, (ref) => ({
-    id: `trellis.integration.auth-local-login-events.${slug}@v1`,
-    apiId: `trellis.integration.auth-local-login-events.${slug}@v1`,
+    id: `integration.auth-local-login-events.${slug}@v1`,
+    apiId: `integration.auth-local-login-events.${slug}@v1`,
     apiVersion: "1.0.0",
     displayName: `Trellis Integration Auth Local Login Events (${slug})`,
     description: "Event API used to prove revoked event proofs fail closed.",
@@ -104,8 +104,8 @@ export function createAuthLocalLoginFixture(
     `Trellis Integration Auth Local Login Agent (${slug})`;
 
   const clientContract = defineAppContract(() => ({
-    id: `trellis.integration.auth-local-login-client.${slug}@v1`,
-    apiId: `trellis.integration.auth-local-login-client.${slug}@v1`,
+    id: `integration.auth-local-login-client.${slug}@v1`,
+    apiId: `integration.auth-local-login-client.${slug}@v1`,
     apiVersion: "1.0.0",
     displayName: clientDisplayName,
     description: "App participant for the auth local-login binding fixture.",
@@ -126,8 +126,8 @@ export function createAuthLocalLoginFixture(
   }));
 
   const agentContract = defineAgentContract(() => ({
-    id: `trellis.integration.auth-local-login-agent.${slug}@v1`,
-    apiId: `trellis.integration.auth-local-login-agent.${slug}@v1`,
+    id: `integration.auth-local-login-agent.${slug}@v1`,
+    apiId: `integration.auth-local-login-agent.${slug}@v1`,
     apiVersion: "1.0.0",
     displayName: agentDisplayName,
     description: "Agent participant for the auth local-login binding fixture.",
@@ -135,8 +135,8 @@ export function createAuthLocalLoginFixture(
   }));
 
   const sessionAdminContract = defineAppContract(() => ({
-    id: `trellis.integration.auth-session-revoke-admin.${slug}@v1`,
-    apiId: `trellis.integration.auth-session-revoke-admin.${slug}@v1`,
+    id: `integration.auth-session-revoke-admin.${slug}@v1`,
+    apiId: `integration.auth-session-revoke-admin.${slug}@v1`,
     apiVersion: "1.0.0",
     displayName: `Trellis Integration Auth Session Revoke Admin (${slug})`,
     description:

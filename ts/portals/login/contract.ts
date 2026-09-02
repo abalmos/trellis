@@ -2,8 +2,8 @@ import { defineAppContract } from "@qlever-llc/trellis/contracts";
 import { AuthDeviceUserAuthoritiesResolve } from "@trellis/apis/trellis.auth";
 
 export const contract = defineAppContract(() => ({
-  id: "trellis.portal.activation@v1",
-  apiId: "trellis.portal.activation@v1",
+  id: "trellis-app.portal@v1",
+  apiId: "trellis-app.portal@v1",
   apiVersion: "1.0.0",
   displayName: "Trellis Device Activation",
   description:

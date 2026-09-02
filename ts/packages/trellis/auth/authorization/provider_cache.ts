@@ -1,5 +1,5 @@
+import type { KvWatchEntry } from "@nats-io/kv";
 import type { NatsConnection } from "@nats-io/nats-core";
-import type { KvEntry, KvWatchEntry } from "@nats-io/kv";
 
 import type {
   AuthorizationContextHandle,
@@ -21,6 +21,7 @@ import {
   AuthorizationRegistryReader,
   type ManifestPointer,
   parseManifestPointer,
+  type RegistryEntry,
   registryWatchEntry,
 } from "./nats_registry.ts";
 import type {
@@ -311,6 +312,7 @@ export class AuthorizationProviderCache {
     contextDigest: string,
   ): Promise<VerifiedAuthorizationContextTokenProjection> {
     this.#requireHealthy();
+    await this.#refreshRevocation(contextDigest);
     const entry = await this.#resolveEntry(contextDigest);
     const state = await this.#ensureVerified(entry, false, this.#now());
     const { assertAuthorizationContextHandleCurrentWasm } = await import(
@@ -329,6 +331,7 @@ export class AuthorizationProviderCache {
   ): Promise<VerifyAuthorizationRequestResult> {
     try {
       this.#requireHealthy();
+      await this.#refreshRevocation(request.contextDigest);
       const entry = await this.#resolveEntry(request.contextDigest);
       const { verifyAuthorizationRequestWasm } = await import(
         "../protocol_wasm.ts"
@@ -358,6 +361,7 @@ export class AuthorizationProviderCache {
     try {
       this.#requireHealthy();
       parseEventTime(event.eventTime);
+      await this.#refreshRevocation(event.contextDigest);
       const entry = await this.#resolveEntry(event.contextDigest);
       const revokedAt = this.#revocationEvidence(entry.contextDigest);
       const { verifyAuthorizationEventWasm } = await import(
@@ -397,37 +401,61 @@ export class AuthorizationProviderCache {
     });
     this.#restartWatch = requestRestart;
     const manifestWatch = await this.#registry.watchManifestCurrent();
-    const revocations = await this.#registry.watchRevocations();
-    const revocationWatch = revocations.iterator;
+    let revocationWatch:
+      | { iterator: AsyncIterator<KvWatchEntry>; initialPending: number }
+      | undefined;
+    let ownContextDigest: string | undefined;
     try {
-      // Watches are established before their initial current state is read.
+      ownContextDigest = this.#cache.current().contextDigest;
+    } catch {
+      // Recovery may start without an installed context.
+    }
+    if (ownContextDigest) {
+      revocationWatch = await this.#registry.watchRevocation(ownContextDigest);
+    }
+    try {
       await this.#initializeManifest();
-      for (let index = 0; index < revocations.initialPending; index += 1) {
-        const entry = await revocationWatch.next();
-        if (entry.done) {
-          throw new Error("authorization revocation initial watch ended");
+      if (revocationWatch) {
+        for (
+          let index = 0;
+          index < revocationWatch.initialPending;
+          index += 1
+        ) {
+          const next = await revocationWatch.iterator.next();
+          if (next.done) {
+            throw new Error("authorization revocation watch ended");
+          }
+          this.#observeRevocation(next.value);
         }
-        this.#observeRevocation(entry.value);
       }
       if (!this.#connected) return "restart";
       this.#markReady();
       let manifestNext = manifestWatch.next();
-      let revocationNext = revocationWatch.next();
+      let revocationNext = revocationWatch?.iterator.next();
       while (!this.#stopped) {
         const event = await Promise.race([
           manifestNext.then((result) => ({
             kind: "manifest" as const,
             result,
           })),
-          revocationNext.then((result) => ({
-            kind: "revocation" as const,
-            result,
-          })),
+          ...(revocationNext
+            ? [
+              revocationNext.then((result) => ({
+                kind: "revocation" as const,
+                result,
+              })),
+            ]
+            : []),
           restart,
         ]);
         if (event.kind === "restart") return "restart";
         if (event.result.done) {
           throw new Error(`${event.kind} authorization registry watch ended`);
+        }
+        if (event.kind === "revocation") {
+          revocationNext = revocationWatch?.iterator.next();
+          this.#observeRevocation(event.result.value);
+          continue;
         }
         if (event.kind === "manifest") {
           manifestNext = manifestWatch.next();
@@ -439,14 +467,12 @@ export class AuthorizationProviderCache {
           );
           return "restart";
         }
-        revocationNext = revocationWatch.next();
-        this.#observeRevocation(event.result.value);
       }
       return "stopped";
     } finally {
       if (this.#restartWatch === requestRestart) this.#restartWatch = undefined;
       await closeIterator(manifestWatch);
-      await closeIterator(revocationWatch);
+      if (revocationWatch) await closeIterator(revocationWatch.iterator);
     }
   }
 
@@ -540,13 +566,9 @@ export class AuthorizationProviderCache {
   }
 
   #observeRevocation(
-    entry: KvEntry | ReturnType<typeof registryWatchEntry>,
+    entry: KvWatchEntry,
   ): void {
-    const update = "operation" in entry &&
-        (entry.operation === "PUT" || entry.operation === "DEL" ||
-          entry.operation === "PURGE")
-      ? registryWatchEntry(entry as KvWatchEntry)
-      : entry;
+    const update = registryWatchEntry(entry);
     const key = update.key;
     const revision = update.revision;
     if (revision < (this.#revocationRevisions.get(key) ?? 0)) return;
@@ -604,7 +626,7 @@ export class AuthorizationProviderCache {
     epoch: number,
   ): Promise<ProviderContextEntry> {
     this.#contextResolves += 1;
-    let contextEntry;
+    let contextEntry: RegistryEntry | null;
     try {
       contextEntry = await this.#registry.getContext(contextDigest);
     } catch (error) {
@@ -638,7 +660,8 @@ export class AuthorizationProviderCache {
     }
     if (this.#contexts.size >= MAX_CACHED_CONTEXTS) {
       // ponytail: bounded LRU; raise the cap only if registry reads prove costly.
-      this.#contexts.delete(this.#contexts.keys().next().value!);
+      const oldest = this.#contexts.keys().next().value;
+      if (oldest) this.#contexts.delete(oldest);
     }
     this.#contexts.set(contextDigest, entry);
     return entry;
@@ -731,7 +754,7 @@ export class AuthorizationProviderCache {
         "authorization context manifest is not current",
       );
     }
-    let manifestEntry;
+    let manifestEntry: RegistryEntry | null;
     try {
       manifestEntry = await this.#registry.getManifest(generation);
     } catch (error) {
@@ -815,6 +838,14 @@ export class AuthorizationProviderCache {
 
   #revocationEvidence(contextDigest: string): number | undefined {
     return this.#revocations.get(contextDigest);
+  }
+
+  async #refreshRevocation(contextDigest: string): Promise<void> {
+    if (this.#revocations.has(contextDigest)) return;
+    const entry = await this.#registry.getRevocation(contextDigest);
+    if (entry?.operation === "PUT") {
+      this.#revocations.set(contextDigest, parseRevocation(entry.value));
+    }
   }
 
   #assertSourceTrust(): void {

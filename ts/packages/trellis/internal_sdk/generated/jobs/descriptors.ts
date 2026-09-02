@@ -55,7 +55,7 @@ export const JobsCancel = rpcAction(
     }),
     input: schema<Types.JobsCancelInput>(JobsCancelRequestSchema),
     output: schema<Types.JobsCancelOutput>(JobsCancelResponseSchema),
-    callerCapabilities: ["trellis.jobs::admin.mutate"] as const,
+    callerCapabilities: ["trellis.jobs::mutate"] as const,
     errors: ["NotFoundError", "UnexpectedError", "ValidationError"] as const,
     declaredErrorTypes: [
       "NotFoundError",
@@ -96,7 +96,7 @@ export const JobsDismissDLQ = rpcAction(
     }),
     input: schema<Types.JobsDismissDLQInput>(JobsDismissDLQRequestSchema),
     output: schema<Types.JobsDismissDLQOutput>(JobsDismissDLQResponseSchema),
-    callerCapabilities: ["trellis.jobs::admin.mutate"] as const,
+    callerCapabilities: ["trellis.jobs::mutate"] as const,
     errors: ["NotFoundError", "UnexpectedError", "ValidationError"] as const,
     declaredErrorTypes: [
       "NotFoundError",
@@ -137,7 +137,7 @@ export const JobsGetKey = rpcAction(
     }),
     input: schema<Types.JobsGetKeyInput>(JobsGetKeyRequestSchema),
     output: schema<Types.JobsGetKeyOutput>(JobsGetKeyResponseSchema),
-    callerCapabilities: ["trellis.jobs::admin.read"] as const,
+    callerCapabilities: ["trellis.jobs::read"] as const,
     errors: ["NotFoundError", "UnexpectedError", "ValidationError"] as const,
     declaredErrorTypes: [
       "NotFoundError",
@@ -178,7 +178,7 @@ export const JobsInspect = rpcAction(
     }),
     input: schema<Types.JobsInspectInput>(JobsInspectRequestSchema),
     output: schema<Types.JobsInspectOutput>(JobsInspectResponseSchema),
-    callerCapabilities: ["trellis.jobs::admin.read"] as const,
+    callerCapabilities: ["trellis.jobs::read"] as const,
     errors: ["NotFoundError", "UnexpectedError", "ValidationError"] as const,
     declaredErrorTypes: [
       "NotFoundError",
@@ -219,7 +219,7 @@ export const JobsListDLQ = rpcAction(
     }),
     input: schema<Types.JobsListDLQInput>(JobsListDLQRequestSchema),
     output: schema<Types.JobsListDLQOutput>(JobsListDLQResponseSchema),
-    callerCapabilities: ["trellis.jobs::admin.read"] as const,
+    callerCapabilities: ["trellis.jobs::read"] as const,
     errors: ["UnexpectedError", "ValidationError"] as const,
     declaredErrorTypes: ["UnexpectedError", "ValidationError"] as const,
     runtimeErrors: [
@@ -253,7 +253,7 @@ export const JobsListServices = rpcAction(
     output: schema<Types.JobsListServicesOutput>(
       JobsListServicesResponseSchema,
     ),
-    callerCapabilities: ["trellis.jobs::admin.read"] as const,
+    callerCapabilities: ["trellis.jobs::read"] as const,
     errors: ["UnexpectedError", "ValidationError"] as const,
     declaredErrorTypes: ["UnexpectedError", "ValidationError"] as const,
     runtimeErrors: [
@@ -285,7 +285,7 @@ export const JobsMetrics = rpcAction(
     }),
     input: schema<Types.JobsMetricsInput>(JobsMetricsRequestSchema),
     output: schema<Types.JobsMetricsOutput>(JobsMetricsResponseSchema),
-    callerCapabilities: ["trellis.jobs::admin.read"] as const,
+    callerCapabilities: ["trellis.jobs::read"] as const,
     errors: ["UnexpectedError", "ValidationError"] as const,
     declaredErrorTypes: ["UnexpectedError", "ValidationError"] as const,
     runtimeErrors: [
@@ -317,7 +317,7 @@ export const JobsQuery = rpcAction(
     }),
     input: schema<Types.JobsQueryInput>(JobsQueryRequestSchema),
     output: schema<Types.JobsQueryOutput>(JobsQueryResponseSchema),
-    callerCapabilities: ["trellis.jobs::admin.read"] as const,
+    callerCapabilities: ["trellis.jobs::read"] as const,
     errors: ["UnexpectedError", "ValidationError"] as const,
     declaredErrorTypes: ["UnexpectedError", "ValidationError"] as const,
     runtimeErrors: [
@@ -349,7 +349,7 @@ export const JobsReplayDLQ = rpcAction(
     }),
     input: schema<Types.JobsReplayDLQInput>(JobsReplayDLQRequestSchema),
     output: schema<Types.JobsReplayDLQOutput>(JobsReplayDLQResponseSchema),
-    callerCapabilities: ["trellis.jobs::admin.mutate"] as const,
+    callerCapabilities: ["trellis.jobs::mutate"] as const,
     errors: ["NotFoundError", "UnexpectedError", "ValidationError"] as const,
     declaredErrorTypes: [
       "NotFoundError",
@@ -390,7 +390,7 @@ export const JobsRetry = rpcAction(
     }),
     input: schema<Types.JobsRetryInput>(JobsRetryRequestSchema),
     output: schema<Types.JobsRetryOutput>(JobsRetryResponseSchema),
-    callerCapabilities: ["trellis.jobs::admin.mutate"] as const,
+    callerCapabilities: ["trellis.jobs::mutate"] as const,
     errors: ["NotFoundError", "UnexpectedError", "ValidationError"] as const,
     declaredErrorTypes: [
       "NotFoundError",
@@ -431,7 +431,7 @@ export const JobsWatch = feedAction(
     }),
     input: schema<Types.JobsWatchInput>(JobsWatchRequestSchema),
     event: schema<Types.JobsWatchEvent>(JobsWatchFrameSchema),
-    subscribeCapabilities: ["trellis.jobs::admin.stream"] as const,
+    subscribeCapabilities: ["trellis.jobs::stream"] as const,
   },
   "JobsWatch",
   ACTION_SOURCE,

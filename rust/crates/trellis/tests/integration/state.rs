@@ -34,37 +34,37 @@ fn state_contract(
 
     let (id, display_name, description, kind) = match fixture {
         StateFixture::Client => (
-            "trellis.integration.state-client@v1",
+            "integration.state-client@v1",
             "Trellis Integration State Client",
             "Exercises Trellis-managed State.",
             ContractKind::App,
         ),
         StateFixture::Migration => (
-            "trellis.integration.state-client@v1",
+            "integration.state-client@v1",
             "Trellis Integration State Client V2",
             "Exercises Trellis-managed State migration.",
             ContractKind::App,
         ),
         StateFixture::Compatible => (
-            "trellis.integration.state-client@v1",
+            "integration.state-client@v1",
             "Trellis Integration State Client Compatible",
             "Exercises compatible State lineage changes.",
             ContractKind::App,
         ),
         StateFixture::Other => (
-            "trellis.integration.state-other@v1",
+            "integration.state-other@v1",
             "Trellis Integration Other State Client",
             "Exercises State contract namespace isolation.",
             ContractKind::App,
         ),
         StateFixture::Agent => (
-            "trellis.integration.state-agent@v1",
+            "integration.state-agent@v1",
             "Trellis Integration State Agent",
             "Proves agents cannot use normal State.",
             ContractKind::Agent,
         ),
         StateFixture::Service => (
-            "trellis.integration.state-service@v1",
+            "integration.state-service@v1",
             "Trellis Integration State Service",
             "Proves services cannot use normal State.",
             ContractKind::Service,

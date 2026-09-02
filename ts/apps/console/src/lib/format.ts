@@ -162,6 +162,23 @@ export function errorMessage(error: unknown): string {
   if (error && typeof error === "object") {
     const candidate = error as ErrorLike;
 
+    const remoteIssues = candidate.error?.remoteError?.issues;
+    if (Array.isArray(remoteIssues) && remoteIssues.length > 0) {
+      return formatIssues(remoteIssues) ?? "Validation failed";
+    }
+
+    const localIssues = candidate.error?.issues;
+    if (Array.isArray(localIssues) && localIssues.length > 0) {
+      return formatIssues(localIssues) ?? "Validation failed";
+    }
+
+    const remoteContextMessage = formatContextMessage(
+      candidate.error?.remoteError?.context,
+    );
+    if (remoteContextMessage) {
+      return remoteContextMessage;
+    }
+
     const directContext = typeof candidate.getContext === "function"
       ? candidate.getContext()
       : undefined;
@@ -178,23 +195,6 @@ export function errorMessage(error: unknown): string {
     const nestedContextMessage = formatContextMessage(candidate.error?.context);
     if (nestedContextMessage) {
       return nestedContextMessage;
-    }
-
-    const remoteIssues = candidate.error?.remoteError?.issues;
-    if (Array.isArray(remoteIssues)) {
-      return formatIssues(remoteIssues) ?? "Validation failed";
-    }
-
-    const localIssues = candidate.error?.issues;
-    if (Array.isArray(localIssues)) {
-      return formatIssues(localIssues) ?? "Validation failed";
-    }
-
-    const remoteContextMessage = formatContextMessage(
-      candidate.error?.remoteError?.context,
-    );
-    if (remoteContextMessage) {
-      return remoteContextMessage;
     }
 
     const directReasonMessage = formatAuthReason(candidate.reason);

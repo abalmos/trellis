@@ -2,67 +2,11 @@
 
 export const API_ID = "trellis.auth@v1" as const;
 export const API_DIGEST =
-  "Fs_nA37wXgMpLRfB7IyYDhIEDUdSl3PdNp6ehnXcV1A" as const;
+  "3QSyOlZqSZ0e25CGmf7N9xOZXjOeomA-GUi7bG9WxaQ" as const;
 export const API = {
   "capabilities": {
-    "admin": {
+    "trellis.auth::authorities.mutate": {
       "allows": [{
-        "action": "call",
-        "target": {
-          "api": "trellis.auth@v1",
-          "kind": "apiSurface",
-          "name": "Auth.Capabilities.List",
-          "surface": "rpc",
-        },
-      }, {
-        "action": "call",
-        "target": {
-          "api": "trellis.auth@v1",
-          "kind": "apiSurface",
-          "name": "Auth.CapabilityGroups.Delete",
-          "surface": "rpc",
-        },
-      }, {
-        "action": "call",
-        "target": {
-          "api": "trellis.auth@v1",
-          "kind": "apiSurface",
-          "name": "Auth.CapabilityGroups.Get",
-          "surface": "rpc",
-        },
-      }, {
-        "action": "call",
-        "target": {
-          "api": "trellis.auth@v1",
-          "kind": "apiSurface",
-          "name": "Auth.CapabilityGroups.List",
-          "surface": "rpc",
-        },
-      }, {
-        "action": "call",
-        "target": {
-          "api": "trellis.auth@v1",
-          "kind": "apiSurface",
-          "name": "Auth.CapabilityGroups.Put",
-          "surface": "rpc",
-        },
-      }, {
-        "action": "call",
-        "target": {
-          "api": "trellis.auth@v1",
-          "kind": "apiSurface",
-          "name": "Auth.Connections.Kick",
-          "surface": "rpc",
-        },
-      }, {
-        "action": "call",
-        "target": {
-          "api": "trellis.auth@v1",
-          "kind": "apiSurface",
-          "name": "Auth.Connections.List",
-          "surface": "rpc",
-        },
-      }, {
         "action": "call",
         "target": {
           "api": "trellis.auth@v1",
@@ -83,6 +27,41 @@ export const API = {
         "target": {
           "api": "trellis.auth@v1",
           "kind": "apiSurface",
+          "name": "Auth.DeploymentAuthority.Plan",
+          "surface": "rpc",
+        },
+      }, {
+        "action": "call",
+        "target": {
+          "api": "trellis.auth@v1",
+          "kind": "apiSurface",
+          "name": "Auth.DeploymentAuthority.Reconcile",
+          "surface": "rpc",
+        },
+      }, {
+        "action": "call",
+        "target": {
+          "api": "trellis.auth@v1",
+          "kind": "apiSurface",
+          "name": "Auth.DeploymentAuthority.Reject",
+          "surface": "rpc",
+        },
+      }, {
+        "action": "call",
+        "target": {
+          "api": "trellis.auth@v1",
+          "kind": "apiSurface",
+          "name": "Auth.IdentityAuthority.Revoke",
+          "surface": "rpc",
+        },
+      }],
+    },
+    "trellis.auth::authorities.read": {
+      "allows": [{
+        "action": "call",
+        "target": {
+          "api": "trellis.auth@v1",
+          "kind": "apiSurface",
           "name": "Auth.DeploymentAuthority.Get",
           "surface": "rpc",
         },
@@ -92,14 +71,6 @@ export const API = {
           "api": "trellis.auth@v1",
           "kind": "apiSurface",
           "name": "Auth.DeploymentAuthority.List",
-          "surface": "rpc",
-        },
-      }, {
-        "action": "call",
-        "target": {
-          "api": "trellis.auth@v1",
-          "kind": "apiSurface",
-          "name": "Auth.DeploymentAuthority.Plan",
           "surface": "rpc",
         },
       }, {
@@ -123,7 +94,7 @@ export const API = {
         "target": {
           "api": "trellis.auth@v1",
           "kind": "apiSurface",
-          "name": "Auth.DeploymentAuthority.Reconcile",
+          "name": "Auth.IdentityAuthority.Get",
           "surface": "rpc",
         },
       }, {
@@ -131,10 +102,113 @@ export const API = {
         "target": {
           "api": "trellis.auth@v1",
           "kind": "apiSurface",
-          "name": "Auth.DeploymentAuthority.Reject",
+          "name": "Auth.IdentityAuthority.List",
+          "surface": "rpc",
+        },
+      }],
+    },
+    "trellis.auth::capabilities.delegate": {
+      "allows": [{
+        "action": "call",
+        "target": {
+          "api": "trellis.auth@v1",
+          "kind": "apiSurface",
+          "name": "Auth.CapabilityGroups.Delete",
           "surface": "rpc",
         },
       }, {
+        "action": "call",
+        "target": {
+          "api": "trellis.auth@v1",
+          "kind": "apiSurface",
+          "name": "Auth.CapabilityGroups.Put",
+          "surface": "rpc",
+        },
+      }, {
+        "action": "call",
+        "target": {
+          "api": "trellis.auth@v1",
+          "kind": "apiSurface",
+          "name": "Auth.DeploymentAuthority.AcceptMigration",
+          "surface": "rpc",
+        },
+      }, {
+        "action": "call",
+        "target": {
+          "api": "trellis.auth@v1",
+          "kind": "apiSurface",
+          "name": "Auth.DeploymentAuthority.AcceptUpdate",
+          "surface": "rpc",
+        },
+      }, {
+        "action": "call",
+        "target": {
+          "api": "trellis.auth@v1",
+          "kind": "apiSurface",
+          "name": "Auth.Portals.GrantOverrides.Put",
+          "surface": "rpc",
+        },
+      }, {
+        "action": "call",
+        "target": {
+          "api": "trellis.auth@v1",
+          "kind": "apiSurface",
+          "name": "Auth.Portals.GrantOverrides.Remove",
+          "surface": "rpc",
+        },
+      }],
+    },
+    "trellis.auth::capabilities.read": {
+      "allows": [{
+        "action": "call",
+        "target": {
+          "api": "trellis.auth@v1",
+          "kind": "apiSurface",
+          "name": "Auth.Capabilities.List",
+          "surface": "rpc",
+        },
+      }, {
+        "action": "call",
+        "target": {
+          "api": "trellis.auth@v1",
+          "kind": "apiSurface",
+          "name": "Auth.CapabilityGroups.Get",
+          "surface": "rpc",
+        },
+      }, {
+        "action": "call",
+        "target": {
+          "api": "trellis.auth@v1",
+          "kind": "apiSurface",
+          "name": "Auth.CapabilityGroups.List",
+          "surface": "rpc",
+        },
+      }],
+    },
+    "trellis.auth::connections.kick": {
+      "allows": [{
+        "action": "call",
+        "target": {
+          "api": "trellis.auth@v1",
+          "kind": "apiSurface",
+          "name": "Auth.Connections.Kick",
+          "surface": "rpc",
+        },
+      }],
+    },
+    "trellis.auth::connections.read": {
+      "allows": [{
+        "action": "call",
+        "target": {
+          "api": "trellis.auth@v1",
+          "kind": "apiSurface",
+          "name": "Auth.Connections.List",
+          "surface": "rpc",
+        },
+      }],
+    },
+    "trellis.auth::deployments.mutate": {
+      "allows": [{
         "action": "call",
         "target": {
           "api": "trellis.auth@v1",
@@ -163,42 +237,24 @@ export const API = {
         "target": {
           "api": "trellis.auth@v1",
           "kind": "apiSurface",
-          "name": "Auth.Deployments.List",
-          "surface": "rpc",
-        },
-      }, {
-        "action": "call",
-        "target": {
-          "api": "trellis.auth@v1",
-          "kind": "apiSurface",
           "name": "Auth.Deployments.Remove",
           "surface": "rpc",
         },
-      }, {
+      }],
+    },
+    "trellis.auth::deployments.read": {
+      "allows": [{
         "action": "call",
         "target": {
           "api": "trellis.auth@v1",
           "kind": "apiSurface",
-          "name": "Auth.DeviceUserAuthorities.List",
+          "name": "Auth.Deployments.List",
           "surface": "rpc",
         },
-      }, {
-        "action": "call",
-        "target": {
-          "api": "trellis.auth@v1",
-          "kind": "apiSurface",
-          "name": "Auth.DeviceUserAuthorities.Reviews.Decide",
-          "surface": "rpc",
-        },
-      }, {
-        "action": "call",
-        "target": {
-          "api": "trellis.auth@v1",
-          "kind": "apiSurface",
-          "name": "Auth.DeviceUserAuthorities.Reviews.List",
-          "surface": "rpc",
-        },
-      }, {
+      }],
+    },
+    "trellis.auth::devices.mutate": {
+      "allows": [{
         "action": "call",
         "target": {
           "api": "trellis.auth@v1",
@@ -227,14 +283,6 @@ export const API = {
         "target": {
           "api": "trellis.auth@v1",
           "kind": "apiSurface",
-          "name": "Auth.Devices.List",
-          "surface": "rpc",
-        },
-      }, {
-        "action": "call",
-        "target": {
-          "api": "trellis.auth@v1",
-          "kind": "apiSurface",
           "name": "Auth.Devices.Provision",
           "surface": "rpc",
         },
@@ -246,12 +294,15 @@ export const API = {
           "name": "Auth.Devices.Remove",
           "surface": "rpc",
         },
-      }, {
+      }],
+    },
+    "trellis.auth::devices.read": {
+      "allows": [{
         "action": "call",
         "target": {
           "api": "trellis.auth@v1",
           "kind": "apiSurface",
-          "name": "Auth.IdentityAuthority.Get",
+          "name": "Auth.DeviceUserAuthorities.List",
           "surface": "rpc",
         },
       }, {
@@ -259,7 +310,7 @@ export const API = {
         "target": {
           "api": "trellis.auth@v1",
           "kind": "apiSurface",
-          "name": "Auth.IdentityAuthority.List",
+          "name": "Auth.DeviceUserAuthorities.Reviews.List",
           "surface": "rpc",
         },
       }, {
@@ -267,7 +318,7 @@ export const API = {
         "target": {
           "api": "trellis.auth@v1",
           "kind": "apiSurface",
-          "name": "Auth.IdentityAuthority.Revoke",
+          "name": "Auth.Devices.ConnectInfo.Get",
           "surface": "rpc",
         },
       }, {
@@ -275,204 +326,12 @@ export const API = {
         "target": {
           "api": "trellis.auth@v1",
           "kind": "apiSurface",
-          "name": "Auth.IdentityGrants.List",
-          "surface": "rpc",
-        },
-      }, {
-        "action": "call",
-        "target": {
-          "api": "trellis.auth@v1",
-          "kind": "apiSurface",
-          "name": "Auth.IdentityGrants.Revoke",
-          "surface": "rpc",
-        },
-      }, {
-        "action": "call",
-        "target": {
-          "api": "trellis.auth@v1",
-          "kind": "apiSurface",
-          "name": "Auth.Portals.Get",
-          "surface": "rpc",
-        },
-      }, {
-        "action": "call",
-        "target": {
-          "api": "trellis.auth@v1",
-          "kind": "apiSurface",
-          "name": "Auth.Portals.GrantOverrides.List",
-          "surface": "rpc",
-        },
-      }, {
-        "action": "call",
-        "target": {
-          "api": "trellis.auth@v1",
-          "kind": "apiSurface",
-          "name": "Auth.Portals.GrantOverrides.Put",
-          "surface": "rpc",
-        },
-      }, {
-        "action": "call",
-        "target": {
-          "api": "trellis.auth@v1",
-          "kind": "apiSurface",
-          "name": "Auth.Portals.GrantOverrides.Remove",
-          "surface": "rpc",
-        },
-      }, {
-        "action": "call",
-        "target": {
-          "api": "trellis.auth@v1",
-          "kind": "apiSurface",
-          "name": "Auth.Portals.List",
-          "surface": "rpc",
-        },
-      }, {
-        "action": "call",
-        "target": {
-          "api": "trellis.auth@v1",
-          "kind": "apiSurface",
-          "name": "Auth.Portals.LoginSettings.Get",
-          "surface": "rpc",
-        },
-      }, {
-        "action": "call",
-        "target": {
-          "api": "trellis.auth@v1",
-          "kind": "apiSurface",
-          "name": "Auth.Portals.LoginSettings.Update",
-          "surface": "rpc",
-        },
-      }, {
-        "action": "call",
-        "target": {
-          "api": "trellis.auth@v1",
-          "kind": "apiSurface",
-          "name": "Auth.Portals.Put",
-          "surface": "rpc",
-        },
-      }, {
-        "action": "call",
-        "target": {
-          "api": "trellis.auth@v1",
-          "kind": "apiSurface",
-          "name": "Auth.Portals.Remove",
-          "surface": "rpc",
-        },
-      }, {
-        "action": "call",
-        "target": {
-          "api": "trellis.auth@v1",
-          "kind": "apiSurface",
-          "name": "Auth.Portals.Routes.Put",
-          "surface": "rpc",
-        },
-      }, {
-        "action": "call",
-        "target": {
-          "api": "trellis.auth@v1",
-          "kind": "apiSurface",
-          "name": "Auth.Portals.Routes.Remove",
-          "surface": "rpc",
-        },
-      }, {
-        "action": "call",
-        "target": {
-          "api": "trellis.auth@v1",
-          "kind": "apiSurface",
-          "name": "Auth.ServiceInstances.Disable",
-          "surface": "rpc",
-        },
-      }, {
-        "action": "call",
-        "target": {
-          "api": "trellis.auth@v1",
-          "kind": "apiSurface",
-          "name": "Auth.ServiceInstances.Enable",
-          "surface": "rpc",
-        },
-      }, {
-        "action": "call",
-        "target": {
-          "api": "trellis.auth@v1",
-          "kind": "apiSurface",
-          "name": "Auth.ServiceInstances.List",
-          "surface": "rpc",
-        },
-      }, {
-        "action": "call",
-        "target": {
-          "api": "trellis.auth@v1",
-          "kind": "apiSurface",
-          "name": "Auth.ServiceInstances.Provision",
-          "surface": "rpc",
-        },
-      }, {
-        "action": "call",
-        "target": {
-          "api": "trellis.auth@v1",
-          "kind": "apiSurface",
-          "name": "Auth.ServiceInstances.Remove",
-          "surface": "rpc",
-        },
-      }, {
-        "action": "call",
-        "target": {
-          "api": "trellis.auth@v1",
-          "kind": "apiSurface",
-          "name": "Auth.Sessions.List",
-          "surface": "rpc",
-        },
-      }, {
-        "action": "call",
-        "target": {
-          "api": "trellis.auth@v1",
-          "kind": "apiSurface",
-          "name": "Auth.Sessions.Revoke",
-          "surface": "rpc",
-        },
-      }, {
-        "action": "call",
-        "target": {
-          "api": "trellis.auth@v1",
-          "kind": "apiSurface",
-          "name": "Auth.Users.Create",
-          "surface": "rpc",
-        },
-      }, {
-        "action": "call",
-        "target": {
-          "api": "trellis.auth@v1",
-          "kind": "apiSurface",
-          "name": "Auth.Users.Get",
-          "surface": "rpc",
-        },
-      }, {
-        "action": "call",
-        "target": {
-          "api": "trellis.auth@v1",
-          "kind": "apiSurface",
-          "name": "Auth.Users.List",
-          "surface": "rpc",
-        },
-      }, {
-        "action": "call",
-        "target": {
-          "api": "trellis.auth@v1",
-          "kind": "apiSurface",
-          "name": "Auth.Users.PasswordReset.Create",
-          "surface": "rpc",
-        },
-      }, {
-        "action": "call",
-        "target": {
-          "api": "trellis.auth@v1",
-          "kind": "apiSurface",
-          "name": "Auth.Users.Update",
+          "name": "Auth.Devices.List",
           "surface": "rpc",
         },
       }],
     },
-    "trellis.auth::device.review": {
+    "trellis.auth::devices.review": {
       "allows": [{
         "action": "subscribe",
         "target": {
@@ -513,17 +372,9 @@ export const API = {
           "name": "Auth.DeviceUserAuthorities.Reviews.Decide",
           "surface": "rpc",
         },
-      }, {
-        "action": "call",
-        "target": {
-          "api": "trellis.auth@v1",
-          "kind": "apiSurface",
-          "name": "Auth.DeviceUserAuthorities.Reviews.List",
-          "surface": "rpc",
-        },
       }],
     },
-    "trellis.auth::events.observe": {
+    "trellis.auth::events.stream": {
       "allows": [{
         "action": "subscribe",
         "target": {
@@ -590,27 +441,343 @@ export const API = {
         },
       }],
     },
+    "trellis.auth::portals.mutate": {
+      "allows": [{
+        "action": "call",
+        "target": {
+          "api": "trellis.auth@v1",
+          "kind": "apiSurface",
+          "name": "Auth.Portals.GrantOverrides.Put",
+          "surface": "rpc",
+        },
+      }, {
+        "action": "call",
+        "target": {
+          "api": "trellis.auth@v1",
+          "kind": "apiSurface",
+          "name": "Auth.Portals.GrantOverrides.Remove",
+          "surface": "rpc",
+        },
+      }, {
+        "action": "call",
+        "target": {
+          "api": "trellis.auth@v1",
+          "kind": "apiSurface",
+          "name": "Auth.Portals.LoginSettings.Update",
+          "surface": "rpc",
+        },
+      }, {
+        "action": "call",
+        "target": {
+          "api": "trellis.auth@v1",
+          "kind": "apiSurface",
+          "name": "Auth.Portals.Put",
+          "surface": "rpc",
+        },
+      }, {
+        "action": "call",
+        "target": {
+          "api": "trellis.auth@v1",
+          "kind": "apiSurface",
+          "name": "Auth.Portals.Remove",
+          "surface": "rpc",
+        },
+      }, {
+        "action": "call",
+        "target": {
+          "api": "trellis.auth@v1",
+          "kind": "apiSurface",
+          "name": "Auth.Portals.Routes.Put",
+          "surface": "rpc",
+        },
+      }, {
+        "action": "call",
+        "target": {
+          "api": "trellis.auth@v1",
+          "kind": "apiSurface",
+          "name": "Auth.Portals.Routes.Remove",
+          "surface": "rpc",
+        },
+      }],
+    },
+    "trellis.auth::portals.read": {
+      "allows": [{
+        "action": "call",
+        "target": {
+          "api": "trellis.auth@v1",
+          "kind": "apiSurface",
+          "name": "Auth.Portals.Get",
+          "surface": "rpc",
+        },
+      }, {
+        "action": "call",
+        "target": {
+          "api": "trellis.auth@v1",
+          "kind": "apiSurface",
+          "name": "Auth.Portals.GrantOverrides.List",
+          "surface": "rpc",
+        },
+      }, {
+        "action": "call",
+        "target": {
+          "api": "trellis.auth@v1",
+          "kind": "apiSurface",
+          "name": "Auth.Portals.List",
+          "surface": "rpc",
+        },
+      }, {
+        "action": "call",
+        "target": {
+          "api": "trellis.auth@v1",
+          "kind": "apiSurface",
+          "name": "Auth.Portals.LoginSettings.Get",
+          "surface": "rpc",
+        },
+      }],
+    },
+    "trellis.auth::services.mutate": {
+      "allows": [{
+        "action": "call",
+        "target": {
+          "api": "trellis.auth@v1",
+          "kind": "apiSurface",
+          "name": "Auth.ServiceInstances.Disable",
+          "surface": "rpc",
+        },
+      }, {
+        "action": "call",
+        "target": {
+          "api": "trellis.auth@v1",
+          "kind": "apiSurface",
+          "name": "Auth.ServiceInstances.Enable",
+          "surface": "rpc",
+        },
+      }, {
+        "action": "call",
+        "target": {
+          "api": "trellis.auth@v1",
+          "kind": "apiSurface",
+          "name": "Auth.ServiceInstances.Provision",
+          "surface": "rpc",
+        },
+      }, {
+        "action": "call",
+        "target": {
+          "api": "trellis.auth@v1",
+          "kind": "apiSurface",
+          "name": "Auth.ServiceInstances.Remove",
+          "surface": "rpc",
+        },
+      }],
+    },
+    "trellis.auth::services.read": {
+      "allows": [{
+        "action": "call",
+        "target": {
+          "api": "trellis.auth@v1",
+          "kind": "apiSurface",
+          "name": "Auth.ServiceInstances.List",
+          "surface": "rpc",
+        },
+      }],
+    },
+    "trellis.auth::sessions.read": {
+      "allows": [{
+        "action": "call",
+        "target": {
+          "api": "trellis.auth@v1",
+          "kind": "apiSurface",
+          "name": "Auth.Sessions.List",
+          "surface": "rpc",
+        },
+      }],
+    },
+    "trellis.auth::sessions.revoke": {
+      "allows": [{
+        "action": "call",
+        "target": {
+          "api": "trellis.auth@v1",
+          "kind": "apiSurface",
+          "name": "Auth.Sessions.Revoke",
+          "surface": "rpc",
+        },
+      }],
+    },
+    "trellis.auth::users.mutate": {
+      "allows": [{
+        "action": "call",
+        "target": {
+          "api": "trellis.auth@v1",
+          "kind": "apiSurface",
+          "name": "Auth.Users.Create",
+          "surface": "rpc",
+        },
+      }, {
+        "action": "call",
+        "target": {
+          "api": "trellis.auth@v1",
+          "kind": "apiSurface",
+          "name": "Auth.Users.PasswordReset.Create",
+          "surface": "rpc",
+        },
+      }, {
+        "action": "call",
+        "target": {
+          "api": "trellis.auth@v1",
+          "kind": "apiSurface",
+          "name": "Auth.Users.Update",
+          "surface": "rpc",
+        },
+      }],
+    },
+    "trellis.auth::users.read": {
+      "allows": [{
+        "action": "call",
+        "target": {
+          "api": "trellis.auth@v1",
+          "kind": "apiSurface",
+          "name": "Auth.Users.Get",
+          "surface": "rpc",
+        },
+      }, {
+        "action": "call",
+        "target": {
+          "api": "trellis.auth@v1",
+          "kind": "apiSurface",
+          "name": "Auth.Users.List",
+          "surface": "rpc",
+        },
+      }, {
+        "action": "call",
+        "target": {
+          "api": "trellis.auth@v1",
+          "kind": "apiSurface",
+          "name": "Auth.Users.Resolve",
+          "surface": "rpc",
+        },
+      }],
+    },
   },
   "consent": {
-    "admin": {
+    "trellis.auth::authorities.mutate": {
       "consequence":
-        "The participant can change authentication and authorization state for this installation.",
-      "description":
-        "Manage users, sessions, deployments, exact authority, devices, and portals.",
-      "title": "Administer Trellis authentication",
+        "The participant can perform Trellis Auth authorities mutate operations.",
+      "description": "Use Trellis Auth authorities mutate operations.",
+      "title": "Authorities Mutate",
     },
-    "trellis.auth::device.review": {
+    "trellis.auth::authorities.read": {
       "consequence":
-        "Approved devices may connect only when deployment authority and required user delegation are current.",
-      "description": "Review device activation and user-delegation workflows.",
-      "title": "Review device activation",
+        "The participant can perform Trellis Auth authorities read operations.",
+      "description": "Use Trellis Auth authorities read operations.",
+      "title": "Authorities Read",
     },
-    "trellis.auth::events.observe": {
+    "trellis.auth::capabilities.delegate": {
       "consequence":
-        "Authentication lifecycle metadata may be visible to the participant.",
-      "description":
-        "Subscribe to session, connection, and device authentication lifecycle events.",
-      "title": "Observe authentication events",
+        "The participant can perform Trellis Auth capabilities delegate operations.",
+      "description": "Use Trellis Auth capabilities delegate operations.",
+      "title": "Capabilities Delegate",
+    },
+    "trellis.auth::capabilities.read": {
+      "consequence":
+        "The participant can perform Trellis Auth capabilities read operations.",
+      "description": "Use Trellis Auth capabilities read operations.",
+      "title": "Capabilities Read",
+    },
+    "trellis.auth::connections.kick": {
+      "consequence":
+        "The participant can perform Trellis Auth connections kick operations.",
+      "description": "Use Trellis Auth connections kick operations.",
+      "title": "Connections Kick",
+    },
+    "trellis.auth::connections.read": {
+      "consequence":
+        "The participant can perform Trellis Auth connections read operations.",
+      "description": "Use Trellis Auth connections read operations.",
+      "title": "Connections Read",
+    },
+    "trellis.auth::deployments.mutate": {
+      "consequence":
+        "The participant can perform Trellis Auth deployments mutate operations.",
+      "description": "Use Trellis Auth deployments mutate operations.",
+      "title": "Deployments Mutate",
+    },
+    "trellis.auth::deployments.read": {
+      "consequence":
+        "The participant can perform Trellis Auth deployments read operations.",
+      "description": "Use Trellis Auth deployments read operations.",
+      "title": "Deployments Read",
+    },
+    "trellis.auth::devices.mutate": {
+      "consequence":
+        "The participant can perform Trellis Auth devices mutate operations.",
+      "description": "Use Trellis Auth devices mutate operations.",
+      "title": "Devices Mutate",
+    },
+    "trellis.auth::devices.read": {
+      "consequence":
+        "The participant can perform Trellis Auth devices read operations.",
+      "description": "Use Trellis Auth devices read operations.",
+      "title": "Devices Read",
+    },
+    "trellis.auth::devices.review": {
+      "consequence":
+        "The participant can perform Trellis Auth devices review operations.",
+      "description": "Use Trellis Auth devices review operations.",
+      "title": "Devices Review",
+    },
+    "trellis.auth::events.stream": {
+      "consequence":
+        "The participant can perform Trellis Auth events stream operations.",
+      "description": "Use Trellis Auth events stream operations.",
+      "title": "Events Stream",
+    },
+    "trellis.auth::portals.mutate": {
+      "consequence":
+        "The participant can perform Trellis Auth portals mutate operations.",
+      "description": "Use Trellis Auth portals mutate operations.",
+      "title": "Portals Mutate",
+    },
+    "trellis.auth::portals.read": {
+      "consequence":
+        "The participant can perform Trellis Auth portals read operations.",
+      "description": "Use Trellis Auth portals read operations.",
+      "title": "Portals Read",
+    },
+    "trellis.auth::services.mutate": {
+      "consequence":
+        "The participant can perform Trellis Auth services mutate operations.",
+      "description": "Use Trellis Auth services mutate operations.",
+      "title": "Services Mutate",
+    },
+    "trellis.auth::services.read": {
+      "consequence":
+        "The participant can perform Trellis Auth services read operations.",
+      "description": "Use Trellis Auth services read operations.",
+      "title": "Services Read",
+    },
+    "trellis.auth::sessions.read": {
+      "consequence":
+        "The participant can perform Trellis Auth sessions read operations.",
+      "description": "Use Trellis Auth sessions read operations.",
+      "title": "Sessions Read",
+    },
+    "trellis.auth::sessions.revoke": {
+      "consequence":
+        "The participant can perform Trellis Auth sessions revoke operations.",
+      "description": "Use Trellis Auth sessions revoke operations.",
+      "title": "Sessions Revoke",
+    },
+    "trellis.auth::users.mutate": {
+      "consequence":
+        "The participant can perform Trellis Auth users mutate operations.",
+      "description": "Use Trellis Auth users mutate operations.",
+      "title": "Users Mutate",
+    },
+    "trellis.auth::users.read": {
+      "consequence":
+        "The participant can perform Trellis Auth users read operations.",
+      "description": "Use Trellis Auth users read operations.",
+      "title": "Users Read",
     },
   },
   "description":

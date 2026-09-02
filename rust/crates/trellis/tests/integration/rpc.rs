@@ -10,22 +10,22 @@ use trellis_rs::service::{ConnectedServiceRuntime, DeclaredRpcError, ServerError
 
 use crate::support::assertions::{assert_case_registered, assert_runtime_case_registered};
 
-const RPC_SERVICE_ID: &str = "trellis.integration.rpc-service@v1";
-const RPC_CLIENT_ID: &str = "trellis.integration.rpc-client@v1";
-const RPC_UNAUTHORIZED_CLIENT_ID: &str = "trellis.integration.rpc-unauthorized-client@v1";
-const RPC_READ_CAPABILITY: &str = "trellis.integration.rpc-service::read";
+const RPC_SERVICE_ID: &str = "integration.rpc-service@v1";
+const RPC_CLIENT_ID: &str = "integration.rpc-client@v1";
+const RPC_UNAUTHORIZED_CLIENT_ID: &str = "integration.rpc-unauthorized-client@v1";
+const RPC_READ_CAPABILITY: &str = "integration.rpc-service::read";
 
 const RPC_SERVICE_API_SOURCE_JSON: &str = r#"{
   "format": "trellis.api.v1",
-  "id": "trellis.integration.rpc-service@v1",
+  "id": "integration.rpc-service@v1",
   "version": "1.0.0",
   "displayName": "Trellis Integration RPC Service",
   "description": "Exercises client-to-service RPC through generated surfaces.",
   "capabilities": {
-    "trellis.integration.rpc-service::read": {"allows": [
-      {"target": {"kind": "apiSurface", "api": "trellis.integration.rpc-service@v1", "surface": "rpc", "name": "Entity.Get"}, "action": "call"},
-      {"target": {"kind": "apiSurface", "api": "trellis.integration.rpc-service@v1", "surface": "rpc", "name": "Validation.Annotated"}, "action": "call"},
-      {"target": {"kind": "apiSurface", "api": "trellis.integration.rpc-service@v1", "surface": "rpc", "name": "Validation.Mixed"}, "action": "call"}
+    "integration.rpc-service::read": {"allows": [
+      {"target": {"kind": "apiSurface", "api": "integration.rpc-service@v1", "surface": "rpc", "name": "Entity.Get"}, "action": "call"},
+      {"target": {"kind": "apiSurface", "api": "integration.rpc-service@v1", "surface": "rpc", "name": "Validation.Annotated"}, "action": "call"},
+      {"target": {"kind": "apiSurface", "api": "integration.rpc-service@v1", "surface": "rpc", "name": "Validation.Mixed"}, "action": "call"}
     ]}
   },
   "schemas": {

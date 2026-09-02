@@ -423,44 +423,8 @@ fn validate_policy(
     policy: &PortalGrantOverrideRecord,
     groups: &BTreeMap<String, CapabilityGroupRecord>,
 ) -> Result<(), AuthorizationStateError> {
-    let mut selected = policy
-        .direct_capabilities
-        .iter()
-        .chain(
-            policy
-                .role_mappings
-                .iter()
-                .flat_map(|mapping| &mapping.direct_capabilities),
-        )
-        .collect::<BTreeSet<_>>();
-    let mut pending = policy
-        .capability_group_keys
-        .iter()
-        .chain(
-            policy
-                .role_mappings
-                .iter()
-                .flat_map(|mapping| &mapping.capability_group_keys),
-        )
-        .collect::<Vec<_>>();
-    let mut visited = BTreeSet::new();
-    while let Some(key) = pending.pop() {
-        if !visited.insert(key) {
-            continue;
-        }
-        if let Some(group) = groups.get(key) {
-            selected.extend(&group.capabilities);
-            pending.extend(&group.included_groups);
-        }
-    }
-    let selects_reserved = selected.iter().any(|capability| {
-        capability
-            .rsplit_once("::")
-            .is_some_and(|(_, name)| matches!(name, "admin" | "provision" | "activate"))
-    });
     let valid = !policy.portal_id.is_empty()
         && !policy.participant_id.is_empty()
-        && (policy.participant_id == "trellis-platform-administration" || !selects_reserved)
         && is_sorted_unique_nonempty(&policy.direct_capabilities)
         && is_sorted_unique_nonempty(&policy.capability_group_keys)
         && policy
@@ -650,20 +614,23 @@ mod tests {
             .await
             .unwrap()
             .unwrap();
-        reserved_policy.direct_capabilities = vec!["app::admin".to_owned(), "app::base".to_owned()];
+        reserved_policy.direct_capabilities = vec![
+            "trellis.auth::users.mutate".to_owned(),
+            "app::base".to_owned(),
+        ];
         reserved_policy.version = 2;
         assert!(store
             .put_portal_grant_override(reserved_policy, Some(1), idempotency("policy-reserved"))
             .await
             .is_err());
-        let mut reserved_group = group("operators", &[], &["app::admin"]);
+        let mut reserved_group = group("operators", &[], &["trellis.auth::users.mutate"]);
         reserved_group.version = 2;
         assert!(store
             .put_capability_group(reserved_group, Some(1), idempotency("operators-reserved"))
             .await
-            .is_err());
+            .is_ok());
         assert!(store
-            .delete_capability_group("operators", 1, idempotency("operators-delete-referenced"))
+            .delete_capability_group("operators", 2, idempotency("operators-delete-referenced"))
             .await
             .is_err());
         assert!(matches!(
@@ -675,7 +642,7 @@ mod tests {
         ));
         assert!(matches!(
             store
-                .delete_capability_group("operators", 1, idempotency("operators-delete"))
+                .delete_capability_group("operators", 2, idempotency("operators-delete"))
                 .await
                 .unwrap(),
             IdempotentOutcome::Applied(true)

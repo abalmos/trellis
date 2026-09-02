@@ -64,6 +64,8 @@ pub struct CompletePasswordResetInput {
     pub username: Option<String>,
     /// Canonical administrator authority restored by an admin-account flow.
     pub authority: Option<IdentityAuthorityRecord>,
+    /// Optional profile replacement committed by administrator recovery.
+    pub profile: Option<UserProfileRecord>,
     /// Plaintext password retained only for this call.
     pub password: String,
     /// Completion time in Unix milliseconds.
@@ -303,7 +305,7 @@ mod tests {
             },
         )?;
         let target = FirstAdminAuthorityTarget {
-            participant_id: "trellis-platform-administration".to_owned(),
+            participant_id: "trellis.platform-administration".to_owned(),
             participant_artifact_digest: "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE".to_owned(),
             participant_needs_digest: "AgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgI".to_owned(),
         };
@@ -515,6 +517,7 @@ where
             expected_flow_version,
             username,
             authority,
+            profile,
             password,
             consumed_at,
             mut idempotency,
@@ -612,6 +615,7 @@ where
                     .as_ref()
                     .and_then(|authority| (authority.version > 1).then_some(authority.version - 1)),
                 authority,
+                profile,
                 consumed_at,
                 idempotency,
                 actions,

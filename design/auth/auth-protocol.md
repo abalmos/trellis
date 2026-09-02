@@ -294,15 +294,16 @@ the active context, verifies it against the current manifest, requires the NATS
 NKey to encode the context session key, loads the exact participant binding and
 current physical resource bindings, and compiles transport permissions directly.
 
-Providers establish `manifest.current` and `revocation.>` watches, verify the
-current manifest, consume the revocation watch's initial state, then become
-ready. Quiet watches remain healthy. Actual connection/watch failure makes the
-provider unready; reconnect recreates both watches and reconstructs one initial
-state. Unknown current contexts require one exact context GET. Historical events
-require one exact context GET and one exact manifest-generation GET. Registry
+Providers establish a `manifest.current` watch and one exact
+`revocation.<own-context-digest>` watch, verify the current manifest and exact
+revocation state, then become ready. Quiet watches remain healthy. Actual
+connection/watch failure makes the provider unready; reconnect recreates both
+watches. Unknown contexts require exact context and revocation GETs. Historical
+events additionally require one exact manifest-generation GET. Registry
 permissions allow only those content-addressed reads and consumer creation for
-the fixed `manifest.current` and `revocation.>` filters; stream-sequence reads,
-whole-bucket watches, enumeration, and writes remain denied.
+the fixed manifest key and the caller's exact revocation key; wildcard
+revocation history, stream-sequence reads, enumeration, and writes remain
+denied.
 
 ## Local Request And Event Verification
 

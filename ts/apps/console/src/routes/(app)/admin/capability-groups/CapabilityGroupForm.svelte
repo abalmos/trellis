@@ -207,7 +207,7 @@
     capabilitiesLoading = true;
     try {
       const capabilitiesResponse = await withLoadTimeout(
-        trellis.authCapabilitiesList({ limit: 500 }).take(),
+        trellis.authCapabilitiesList({ limit: 100 }).take(),
         "Capabilities",
       );
       if (isErr(capabilitiesResponse)) {

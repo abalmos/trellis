@@ -120,10 +120,10 @@
     error = null;
     try {
       const [deploymentsRes, instancesRes, authoritiesRes, plansRes] = await Promise.all([
-        trellis.authDeploymentsList({ kind: "service", limit: 500 }).take(),
-        trellis.authServiceInstancesList({ limit: 500 }).take(),
-        trellis.authDeploymentAuthorityList({ limit: 500 }).take(),
-        trellis.authDeploymentAuthorityPlansList({ state: "pending", limit: 500 }).take(),
+        trellis.authDeploymentsList({ kind: "service", limit: 100 }).take(),
+        trellis.authServiceInstancesList({ limit: 100 }).take(),
+        trellis.authDeploymentAuthorityList({ limit: 100 }).take(),
+        trellis.authDeploymentAuthorityPlansList({ state: "pending", limit: 100 }).take(),
       ]);
       if (isErr(deploymentsRes)) { error = errorMessage(deploymentsRes); return; }
       if (isErr(instancesRes)) { error = errorMessage(instancesRes); return; }

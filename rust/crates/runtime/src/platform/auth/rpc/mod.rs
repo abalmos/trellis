@@ -1234,7 +1234,7 @@ impl AuthRpcProcessor {
         if !caller
             .capabilities
             .iter()
-            .any(|value| value == "admin" || value == "trellis.auth::device.review")
+            .any(|value| value == "trellis.auth::devices.review")
         {
             return Err(AuthorizationStateError::InvalidRecord(
                 "caller lacks administrative review authority".to_owned(),
@@ -1469,11 +1469,6 @@ impl AuthRpcProcessor {
         let input: Value = serde_json::from_slice(payload)
             .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
         let key = required_string(&input, "groupKey")?;
-        if key == "admin" {
-            return Err(AuthorizationStateError::InvalidRecord(
-                "the admin capability group is built in".to_owned(),
-            ));
-        }
         let now = now_millis()?;
         let current = self.service.repository().get_capability_group(key).await?;
         let expected_version = input.get("expectedVersion").and_then(Value::as_u64);
@@ -1545,11 +1540,6 @@ impl AuthRpcProcessor {
         let input: Value = serde_json::from_slice(payload)
             .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
         let key = required_string(&input, "groupKey")?;
-        if key == "admin" {
-            return Err(AuthorizationStateError::InvalidRecord(
-                "the admin capability group is built in".to_owned(),
-            ));
-        }
         let now = now_millis()?;
         let outcome = self
             .service
@@ -1588,7 +1578,10 @@ impl AuthRpcProcessor {
             .and_then(Value::as_str)
             .unwrap_or(&caller.principal_id);
         if principal_id != caller.principal_id
-            && !caller.capabilities.iter().any(|value| value == "admin")
+            && !caller
+                .capabilities
+                .iter()
+                .any(|value| value == "trellis.auth::authorities.read")
         {
             return Err(AuthorizationStateError::InvalidRecord(
                 "identity grants belong to another user".to_owned(),
@@ -1643,7 +1636,10 @@ impl AuthRpcProcessor {
             .unwrap_or(&caller.principal_id);
         if authority.principal_id != target
             || (target != caller.principal_id
-                && !caller.capabilities.iter().any(|value| value == "admin"))
+                && !caller
+                    .capabilities
+                    .iter()
+                    .any(|value| value == "trellis.auth::authorities.mutate"))
         {
             return Err(AuthorizationStateError::InvalidRecord(
                 "identity grant belongs to another user".to_owned(),

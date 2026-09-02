@@ -7,9 +7,8 @@
   import { onDestroy, onMount } from "svelte";
   import { buildConsoleLoginUrl } from "../auth";
   import {
+    canAccessRoute,
     getVisibleNavSections,
-    isAdmin,
-    requiresAdminRoute,
     type NavSection,
   } from "../control-panel.ts";
   import { errorMessage } from "../format";
@@ -45,12 +44,12 @@
     return pathname;
   }
 
-  function enforceAdminAccess(pathname: string): void {
-    if (!profileLoaded || !requiresAdminRoute(pathname) || isAdmin(profile)) {
+  function enforceCapabilityAccess(pathname: string): void {
+    if (!profileLoaded || canAccessRoute(pathname, profile)) {
       return;
     }
 
-    authFailure = "Administrator access is required for operations pages.";
+    authFailure = "Your account does not have access to this operations page.";
     void goto(resolve("/profile"));
   }
 
@@ -68,7 +67,7 @@
 
   afterNavigate(({ to }) => {
     if (!to) return;
-    enforceAdminAccess(toRoutePath(to.url.pathname));
+    enforceCapabilityAccess(toRoutePath(to.url.pathname));
   });
 
   onMount(() => {
@@ -89,7 +88,7 @@
       } finally {
         if (active) {
           profileLoaded = true;
-          enforceAdminAccess(toRoutePath(page.url.pathname));
+      enforceCapabilityAccess(toRoutePath(page.url.pathname));
         }
       }
     })();

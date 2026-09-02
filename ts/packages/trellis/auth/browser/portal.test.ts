@@ -50,7 +50,7 @@ Deno.test("portalRedirectLocation returns auth-owned redirect locations", () => 
       status: "approval_denied",
       flowId: "flow-1",
       approval: {
-        contractId: "trellis.console@v1",
+        contractId: "trellis-app.console@v1",
         contractDigest: "digest",
         displayName: "Trellis Console",
         description: "Admin console",
@@ -153,7 +153,7 @@ Deno.test("submitPortalApproval posts decision and parses next state", async () 
           ...(call === 2 ? { consentViewDigest: "consent-digest" } : {}),
           consentView: {
             participant: {
-              id: "trellis.console@v1",
+              id: "trellis-app.console@v1",
               digest: "digest",
               displayName: "Trellis Console",
               description: "Admin console",
@@ -199,7 +199,7 @@ Deno.test("submitPortalApproval posts decision and parses next state", async () 
         consentViewDigest: "consent-digest",
         consentView: {
           participant: {
-            id: "trellis.console@v1",
+            id: "trellis-app.console@v1",
             digest: "digest",
             displayName: "Trellis Console",
             description: "Admin console",

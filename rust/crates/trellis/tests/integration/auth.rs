@@ -26,23 +26,23 @@ use trellis_runtime_apis::auth as auth_sdk;
 
 use crate::support::assertions::{assert_case_registered, assert_runtime_case_registered};
 
-const SERVICE_ID: &str = "trellis.integration.trusted-portal-service@v1";
-const CLIENT_ID: &str = "trellis.integration.trusted-portal-client@v1";
-const APPROVED_CLIENT_ID: &str = "trellis.integration.approved-client@v1";
-const READ_CAPABILITY: &str = "trellis.integration.trusted-portal-service::read";
-const PUBLISH_CAPABILITY: &str = "trellis.integration.trusted-portal-service::publish";
+const SERVICE_ID: &str = "integration.trusted-portal-service@v1";
+const CLIENT_ID: &str = "integration.trusted-portal-client@v1";
+const APPROVED_CLIENT_ID: &str = "integration.approved-client@v1";
+const READ_CAPABILITY: &str = "integration.trusted-portal-service::read";
+const PUBLISH_CAPABILITY: &str = "integration.trusted-portal-service::publish";
 const API_SOURCE: &str = r#"{
   "format": "trellis.api.v1",
-  "id": "trellis.integration.trusted-portal-service@v1",
+  "id": "integration.trusted-portal-service@v1",
   "version": "1.0.0",
   "displayName": "Trusted Portal Integration Service",
   "description": "Exercises trusted-portal authority transitions.",
   "capabilities": {
-    "trellis.integration.trusted-portal-service::read": {"allows": [
-      {"target": {"kind": "apiSurface", "api": "trellis.integration.trusted-portal-service@v1", "surface": "rpc", "name": "Value.Get"}, "action": "call"}
+    "integration.trusted-portal-service::read": {"allows": [
+      {"target": {"kind": "apiSurface", "api": "integration.trusted-portal-service@v1", "surface": "rpc", "name": "Value.Get"}, "action": "call"}
     ]},
-    "trellis.integration.trusted-portal-service::publish": {"allows": [
-      {"target": {"kind": "apiSurface", "api": "trellis.integration.trusted-portal-service@v1", "surface": "event", "name": "Value.Changed"}, "action": "publish"}
+    "integration.trusted-portal-service::publish": {"allows": [
+      {"target": {"kind": "apiSurface", "api": "integration.trusted-portal-service@v1", "surface": "event", "name": "Value.Changed"}, "action": "publish"}
     ]}
   },
   "schemas": {
@@ -369,8 +369,8 @@ async fn provision_device_activation_case_with_delegation(
     .expect("build Auth API reference contract");
     let contract = trellis_test::TrellisTestContract::from_builder_with_referenced_contracts(
         trellis_rs::contracts::ContractBuilder::authoring(
-            format!("trellis.integration.{case_id}.device@v1"),
-            format!("trellis.integration.{case_id}.device@v1"),
+            format!("integration.{case_id}.device@v1"),
+            format!("integration.{case_id}.device@v1"),
             "1.0.0",
             "Device Activation Integration Device",
             "Exercises current preregistered device activation.",
@@ -437,8 +437,8 @@ async fn connect_device_activation_user(fixture: &mut Fixture, case_id: &str) ->
     .expect("build Auth API reference contract");
     let contract = trellis_test::TrellisTestContract::from_builder_with_referenced_contracts(
         trellis_rs::contracts::ContractBuilder::authoring(
-            format!("trellis.integration.{case_id}.activator@v1"),
-            format!("trellis.integration.{case_id}.activator@v1"),
+            format!("integration.{case_id}.activator@v1"),
+            format!("integration.{case_id}.activator@v1"),
             "1.0.0",
             "Device Activation Integration User",
             "Exercises user activation and unprivileged review denial.",
@@ -3090,8 +3090,8 @@ async fn hostile_old_context_is_denied_after_reduction() {
     let listener_contract =
         trellis_test::TrellisTestContract::from_builder_with_referenced_contracts(
             trellis_rs::contracts::ContractBuilder::authoring(
-                "trellis.integration.trusted-portal-listener@v1",
-                "trellis.integration.trusted-portal-listener@v1",
+                "integration.trusted-portal-listener@v1",
+                "integration.trusted-portal-listener@v1",
                 "1.0.0",
                 "Trusted Portal Replay Listener",
                 "Receives trusted-portal replay attempts through local proof validation.",

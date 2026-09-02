@@ -3,6 +3,6 @@ format = 1
 [apis]
 "trellis.state@v1" = { version = "1.0.0", path = "../../rust/crates/runtime/.trellis/generated/protocol/apis/trellis.state@v1.json" }
 
-[apis."trellis.demo-service@v1"]
+[apis."demo.service@v1"]
 version = "^1.0.0"
-path = "../ts/service/.trellis/generated/protocol/apis/trellis.demo-service@v1.json"
+path = "../ts/service/.trellis/generated/protocol/apis/demo.service@v1.json"

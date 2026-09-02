@@ -105,7 +105,7 @@
           <select class="select select-bordered select-sm" bind:value={selectedIdentityGrantId} required>
             {#each grants as grant (grant.identityGrantId)}
               {@const summary = describeUserGrant(grant)}
-              <option value={grant.identityGrantId}>{summary.title} — {grant.contractEvidence.contractId}</option>
+              <option value={grant.identityGrantId}>{summary.title} · {grant.contractEvidence.contractId}</option>
             {/each}
           </select>
         </label>

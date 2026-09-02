@@ -13,7 +13,7 @@ impl RpcDescriptor for JobsCancelRpc {
     const OUTPUT_SCHEMA_JSON: &'static str = super::schemas::JOBS_CANCEL_OUTPUT_SCHEMA_JSON;
     const KEY: &'static str = "Jobs.Cancel";
     const SUBJECT: &'static str = "rpc.v1.Jobs.Cancel";
-    const CALLER_CAPABILITIES: &'static [&'static str] = &["trellis.jobs::admin.mutate"];
+    const CALLER_CAPABILITIES: &'static [&'static str] = &["trellis.jobs::mutate"];
     const ERRORS: &'static [&'static str] =
         &["NotFoundError", "UnexpectedError", "ValidationError"];
 }
@@ -54,7 +54,7 @@ impl RpcDescriptor for JobsDismissDLQRpc {
     const OUTPUT_SCHEMA_JSON: &'static str = super::schemas::JOBS_DISMISS_DLQ_OUTPUT_SCHEMA_JSON;
     const KEY: &'static str = "Jobs.DismissDLQ";
     const SUBJECT: &'static str = "rpc.v1.Jobs.DismissDLQ";
-    const CALLER_CAPABILITIES: &'static [&'static str] = &["trellis.jobs::admin.mutate"];
+    const CALLER_CAPABILITIES: &'static [&'static str] = &["trellis.jobs::mutate"];
     const ERRORS: &'static [&'static str] =
         &["NotFoundError", "UnexpectedError", "ValidationError"];
 }
@@ -95,7 +95,7 @@ impl RpcDescriptor for JobsGetKeyRpc {
     const OUTPUT_SCHEMA_JSON: &'static str = super::schemas::JOBS_GET_KEY_OUTPUT_SCHEMA_JSON;
     const KEY: &'static str = "Jobs.GetKey";
     const SUBJECT: &'static str = "rpc.v1.Jobs.GetKey";
-    const CALLER_CAPABILITIES: &'static [&'static str] = &["trellis.jobs::admin.read"];
+    const CALLER_CAPABILITIES: &'static [&'static str] = &["trellis.jobs::read"];
     const ERRORS: &'static [&'static str] =
         &["NotFoundError", "UnexpectedError", "ValidationError"];
 }
@@ -136,7 +136,7 @@ impl RpcDescriptor for JobsInspectRpc {
     const OUTPUT_SCHEMA_JSON: &'static str = super::schemas::JOBS_INSPECT_OUTPUT_SCHEMA_JSON;
     const KEY: &'static str = "Jobs.Inspect";
     const SUBJECT: &'static str = "rpc.v1.Jobs.Inspect";
-    const CALLER_CAPABILITIES: &'static [&'static str] = &["trellis.jobs::admin.read"];
+    const CALLER_CAPABILITIES: &'static [&'static str] = &["trellis.jobs::read"];
     const ERRORS: &'static [&'static str] =
         &["NotFoundError", "UnexpectedError", "ValidationError"];
 }
@@ -177,7 +177,7 @@ impl RpcDescriptor for JobsListDLQRpc {
     const OUTPUT_SCHEMA_JSON: &'static str = super::schemas::JOBS_LIST_DLQ_OUTPUT_SCHEMA_JSON;
     const KEY: &'static str = "Jobs.ListDLQ";
     const SUBJECT: &'static str = "rpc.v1.Jobs.ListDLQ";
-    const CALLER_CAPABILITIES: &'static [&'static str] = &["trellis.jobs::admin.read"];
+    const CALLER_CAPABILITIES: &'static [&'static str] = &["trellis.jobs::read"];
     const ERRORS: &'static [&'static str] = &["UnexpectedError", "ValidationError"];
 }
 /// Errors declared by `Jobs.ListDLQ`.
@@ -212,7 +212,7 @@ impl RpcDescriptor for JobsListServicesRpc {
     const OUTPUT_SCHEMA_JSON: &'static str = super::schemas::JOBS_LIST_SERVICES_OUTPUT_SCHEMA_JSON;
     const KEY: &'static str = "Jobs.ListServices";
     const SUBJECT: &'static str = "rpc.v1.Jobs.ListServices";
-    const CALLER_CAPABILITIES: &'static [&'static str] = &["trellis.jobs::admin.read"];
+    const CALLER_CAPABILITIES: &'static [&'static str] = &["trellis.jobs::read"];
     const ERRORS: &'static [&'static str] = &["UnexpectedError", "ValidationError"];
 }
 /// Errors declared by `Jobs.ListServices`.
@@ -247,7 +247,7 @@ impl RpcDescriptor for JobsMetricsRpc {
     const OUTPUT_SCHEMA_JSON: &'static str = super::schemas::JOBS_METRICS_OUTPUT_SCHEMA_JSON;
     const KEY: &'static str = "Jobs.Metrics";
     const SUBJECT: &'static str = "rpc.v1.Jobs.Metrics";
-    const CALLER_CAPABILITIES: &'static [&'static str] = &["trellis.jobs::admin.read"];
+    const CALLER_CAPABILITIES: &'static [&'static str] = &["trellis.jobs::read"];
     const ERRORS: &'static [&'static str] = &["UnexpectedError", "ValidationError"];
 }
 /// Errors declared by `Jobs.Metrics`.
@@ -282,7 +282,7 @@ impl RpcDescriptor for JobsQueryRpc {
     const OUTPUT_SCHEMA_JSON: &'static str = super::schemas::JOBS_QUERY_OUTPUT_SCHEMA_JSON;
     const KEY: &'static str = "Jobs.Query";
     const SUBJECT: &'static str = "rpc.v1.Jobs.Query";
-    const CALLER_CAPABILITIES: &'static [&'static str] = &["trellis.jobs::admin.read"];
+    const CALLER_CAPABILITIES: &'static [&'static str] = &["trellis.jobs::read"];
     const ERRORS: &'static [&'static str] = &["UnexpectedError", "ValidationError"];
 }
 /// Errors declared by `Jobs.Query`.
@@ -317,7 +317,7 @@ impl RpcDescriptor for JobsReplayDLQRpc {
     const OUTPUT_SCHEMA_JSON: &'static str = super::schemas::JOBS_REPLAY_DLQ_OUTPUT_SCHEMA_JSON;
     const KEY: &'static str = "Jobs.ReplayDLQ";
     const SUBJECT: &'static str = "rpc.v1.Jobs.ReplayDLQ";
-    const CALLER_CAPABILITIES: &'static [&'static str] = &["trellis.jobs::admin.mutate"];
+    const CALLER_CAPABILITIES: &'static [&'static str] = &["trellis.jobs::mutate"];
     const ERRORS: &'static [&'static str] =
         &["NotFoundError", "UnexpectedError", "ValidationError"];
 }
@@ -358,7 +358,7 @@ impl RpcDescriptor for JobsRetryRpc {
     const OUTPUT_SCHEMA_JSON: &'static str = super::schemas::JOBS_RETRY_OUTPUT_SCHEMA_JSON;
     const KEY: &'static str = "Jobs.Retry";
     const SUBJECT: &'static str = "rpc.v1.Jobs.Retry";
-    const CALLER_CAPABILITIES: &'static [&'static str] = &["trellis.jobs::admin.mutate"];
+    const CALLER_CAPABILITIES: &'static [&'static str] = &["trellis.jobs::mutate"];
     const ERRORS: &'static [&'static str] =
         &["NotFoundError", "UnexpectedError", "ValidationError"];
 }

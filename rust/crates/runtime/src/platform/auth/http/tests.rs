@@ -147,7 +147,7 @@ fn browser_approval_wire_rejects_caller_authored_machine_authority() {
             "approved": true,
             "consentViewDigest": DIGEST,
             "selectedOptionalBundles": [],
-            "capabilities": ["admin"],
+            "capabilities": ["trellis.jobs::read"],
         }))
         .is_err()
     );
@@ -536,4 +536,25 @@ fn refresh_transport_metadata_omits_unconfigured_native_transport() {
         serde_json::json!(["ws://localhost:8080"])
     );
     assert!(value.get("servers").is_none());
+}
+#[test]
+fn administrator_grants_include_optional_console_surfaces() {
+    let binding = super::super::administration_participant_binding(0)
+        .expect("administration participant binding");
+    let (grants, capabilities) = super::browser::complete_participant_authority(&binding)
+        .unwrap_or_else(|_| panic!("complete administration grant set"));
+    let json = serde_json::to_string(&grants).expect("serialize administration grants");
+    assert!(json.contains("Health.Query"));
+    assert!(json.contains("Health.Watch"));
+    assert!(json.contains("EventLog.Query"));
+    assert!(capabilities.contains(&"trellis.jobs::read".to_owned()));
+    assert!(capabilities.contains(&"trellis.jobs::mutate".to_owned()));
+    assert!(capabilities.contains(&"trellis.jobs::stream".to_owned()));
+    assert!(capabilities.contains(&"trellis.eventlog::read".to_owned()));
+    assert!(capabilities.contains(&"trellis.eventlog::stream".to_owned()));
+    assert!(
+        capabilities.contains(&"trellis.auth::capabilities.delegate".to_owned()),
+        "{capabilities:?}"
+    );
+    assert!(capabilities.contains(&"trellis.health::read".to_owned()));
 }

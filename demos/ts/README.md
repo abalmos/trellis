@@ -95,9 +95,9 @@ Use the `rootSecret` field from the provision JSON as `<root-secret>`.
 
 The first run for a new root secret prints an activation URL and QR code. Unless
 the deployment routes device activation to a custom portal, the URL opens the
-Trellis-owned `trellis.portal.activation@v1` portal. Open the URL, approve the
-device, and let the TUI continue. Later runs with the same root secret should
-reconnect without another approval step.
+bundled `trellis-app.portal@v1` portal. Open the URL, approve the device, and
+let the TUI continue. Later runs with the same root secret should reconnect
+without another approval step.
 
 ## Start The Browser App
 

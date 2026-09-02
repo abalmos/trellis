@@ -12,14 +12,14 @@ import {
   SitesGet,
   SitesList,
   SitesRefresh,
-} from "@trellis/apis/trellis.demo-service";
+} from "./.trellis/generated/ts/trellis-apis/demo.service.ts";
 import * as schemas from "./schemas/index.ts";
 
 const contract = defineAppContract(
   { schemas },
   (ref) => ({
-    id: "trellis.demo-app@v1",
-    apiId: "trellis.demo-app@v1",
+    id: "demo.app@v1",
+    apiId: "demo.app@v1",
     apiVersion: "1.0.0",
     displayName: "Field Ops Console",
     description: "Browser console for the consolidated Field Ops demo.",

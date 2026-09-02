@@ -195,7 +195,9 @@ export function startAuthorizationContextRefresh(args: {
       });
       if (stopped) return;
       failures = 0;
-      await args.onRefresh?.(result.context);
+      if (before !== result.context.contextDigest) {
+        await args.onRefresh?.(result.context);
+      }
       schedule(
         refreshDelay(
           args.cache,

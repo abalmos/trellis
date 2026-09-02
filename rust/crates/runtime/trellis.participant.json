@@ -1,6 +1,6 @@
 {
   "format": "trellis.participant.v1",
-  "id": "trellis-auth-runtime",
+  "id": "trellis.auth-runtime",
   "displayName": "Trellis Auth Runtime",
   "description": "Rust-owned platform participant that implements authentication, bootstrap, and auth callout.",
   "kind": "service",
@@ -302,7 +302,7 @@
   "implements": {
     "auth": {
       "api": "trellis.auth@v1",
-      "apiDigest": "Fs_nA37wXgMpLRfB7IyYDhIEDUdSl3PdNp6ehnXcV1A"
+      "apiDigest": "3QSyOlZqSZ0e25CGmf7N9xOZXjOeomA-GUi7bG9WxaQ"
     }
   },
   "uses": {

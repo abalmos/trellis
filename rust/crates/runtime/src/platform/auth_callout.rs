@@ -494,7 +494,27 @@ impl CalloutProcessor {
             .transport_permissions(&verified_context)
             .await
             .map_err(|error| denied(error.to_string()))?;
-        tracing::debug!(subscribe = ?permissions.subscribe, "loaded NATS inbox permissions");
+        tracing::debug!(
+            publish_count = permissions.publish.len(),
+            subscribe_count = permissions.subscribe.len(),
+            jobs_list_services = permissions
+                .publish
+                .iter()
+                .any(|subject| subject == "rpc.v1.Jobs.ListServices"),
+            jobs_metrics = permissions
+                .publish
+                .iter()
+                .any(|subject| subject == "rpc.v1.Jobs.Metrics"),
+            event_log_query = permissions
+                .publish
+                .iter()
+                .any(|subject| subject == "rpc.v1.EventLog.Query"),
+            health_watch = permissions
+                .publish
+                .iter()
+                .any(|subject| subject == "feed.v1.Health.Watch"),
+            "compiled NATS authorization permissions"
+        );
         let expires_at_ms = [
             Some(
                 verified_context

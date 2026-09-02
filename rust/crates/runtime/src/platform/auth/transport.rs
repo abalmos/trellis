@@ -76,16 +76,12 @@ pub(crate) fn compile_transport_permissions(
         registry.trust_bucket
     ));
     publish.insert(format!(
-        "$JS.API.DIRECT.GET.{context_stream}.$KV.{}.*",
+        "$JS.API.DIRECT.GET.{context_stream}.$KV.{}.>",
         registry.context_bucket
     ));
     publish.insert(format!(
         "$JS.API.CONSUMER.CREATE.{trust_stream}.*.$KV.{}.manifest.current",
         registry.trust_bucket
-    ));
-    publish.insert(format!(
-        "$JS.API.CONSUMER.CREATE.{context_stream}.*.$KV.{}.revocation.>",
-        registry.context_bucket
     ));
     publish.insert(format!("$JS.API.CONSUMER.INFO.{trust_stream}.*"));
     publish.insert(format!("$JS.API.CONSUMER.INFO.{context_stream}.*"));
@@ -481,6 +477,68 @@ mod tests {
     }
 
     #[test]
+    fn canonical_administrator_compiles_all_console_transport_subjects() {
+        let binding = super::super::administration_participant_binding(1)
+            .expect("administration participant binding");
+        let resolved = binding
+            .resolve()
+            .expect("resolved administration participant");
+        let state = IssuableAuthorizationState {
+            principal: AuthorizationPrincipal {
+                kind: AuthorizationPrincipalKind::User,
+                id: "usr_admin".to_owned(),
+            },
+            session_id: "ses_admin".to_owned(),
+            session_public_key: "session-key".to_owned(),
+            session_key_id: "session-key-id".to_owned(),
+            inbox_prefix: "_INBOX.admin".to_owned(),
+            participant: AuthorizationParticipant {
+                kind: binding.participant_kind,
+                id: binding.participant_id.clone(),
+                artifact_digest: binding.artifact_digest.clone(),
+                needs_digest: binding.needs_digest.clone(),
+            },
+            authority_ref: AuthorizationAuthorityRef {
+                kind: AuthorizationAuthorityKind::Identity,
+                id: "auth_admin".to_owned(),
+                version: 1,
+            },
+            deployment_id: None,
+            instance_id: None,
+            grant_set: GrantSet::new(
+                resolved
+                    .proposal()
+                    .required()
+                    .grant_set()
+                    .permissions()
+                    .iter()
+                    .chain(resolved.proposal().optional().grant_set().permissions())
+                    .cloned()
+                    .collect(),
+            ),
+            resource_bindings: Vec::new(),
+            capabilities: vec!["trellis.jobs::read".to_owned()],
+            session_expires_at: None,
+            effective_authority_expires_at: None,
+            delegation_expires_at: None,
+            materialization_version: 1,
+        };
+
+        let permissions =
+            compile_test_transport_permissions(&state, &binding, &test_registry_binding())
+                .expect("administrator transport permissions");
+
+        for subject in [
+            "rpc.v1.Jobs.ListServices",
+            "rpc.v1.Jobs.Metrics",
+            "rpc.v1.EventLog.Query",
+            "feed.v1.Health.Watch",
+        ] {
+            assert!(permissions.publish.iter().any(|allowed| allowed == subject));
+        }
+    }
+
+    #[test]
     fn registry_read_watch_is_granted_and_writes_are_denied() {
         let (binding, state) = fixture();
         let permissions =
@@ -498,14 +556,17 @@ mod tests {
         }
         for allowed in [
             "$JS.API.DIRECT.GET.KV_trellis_authorization_trust.$KV.trellis_authorization_trust.manifest.*",
-            "$JS.API.DIRECT.GET.KV_trellis_authorization_contexts.$KV.trellis_authorization_contexts.*",
+            "$JS.API.DIRECT.GET.KV_trellis_authorization_contexts.$KV.trellis_authorization_contexts.>",
             "$JS.API.CONSUMER.CREATE.KV_trellis_authorization_trust.*.$KV.trellis_authorization_trust.manifest.current",
-            "$JS.API.CONSUMER.CREATE.KV_trellis_authorization_contexts.*.$KV.trellis_authorization_contexts.revocation.>",
             "$JS.FC.KV_trellis_authorization_trust.>",
             "$JS.FC.KV_trellis_authorization_contexts.>",
         ] {
             assert!(permissions.publish.contains(&allowed.to_owned()));
         }
+        assert!(!permissions
+            .publish
+            .iter()
+            .any(|subject| subject.ends_with(".revocation.>")));
         assert!(permissions.publish.contains(&"$JS.API.INFO".to_owned()));
         // KV value writes, registry administration, and stream mutation are denied.
         for denied in [
@@ -614,7 +675,7 @@ mod tests {
             .unwrap(),
             PermissionAtom::new(
                 PermissionTarget::participant_resource(
-                    "trellis-auth-runtime",
+                    "trellis.auth-runtime",
                     ParticipantResourceKind::Kv,
                     "browserFlows",
                 )
@@ -627,7 +688,7 @@ mod tests {
             resource_kind: "kv".to_owned(),
             local_name: "browserFlows".to_owned(),
             binding_id: "binding-browser-flows".to_owned(),
-            owner_participant_id: "trellis-auth-runtime".to_owned(),
+            owner_participant_id: "trellis.auth-runtime".to_owned(),
             provider_identity: ResourceProviderIdentity::Kv {
                 bucket: "AUTH_BROWSER_FLOWS".to_owned(),
             },
@@ -667,7 +728,7 @@ mod tests {
     #[test]
     fn resource_binding_never_creates_authority() {
         let (binding, mut state) = fixture();
-        state.resource_bindings = vec![kv_binding("trellis-auth-runtime")];
+        state.resource_bindings = vec![kv_binding("trellis.auth-runtime")];
 
         state.grant_set = GrantSet::new(Vec::new());
         let none =
@@ -710,7 +771,7 @@ mod tests {
     #[test]
     fn resource_atom_for_another_participant_fails_closed() {
         let (binding, mut state) = fixture();
-        state.resource_bindings = vec![kv_binding("trellis-auth-runtime")];
+        state.resource_bindings = vec![kv_binding("trellis.auth-runtime")];
         state.grant_set = GrantSet::new(vec![PermissionAtom::new(
             PermissionTarget::participant_resource(
                 "other-participant",
@@ -729,7 +790,7 @@ mod tests {
     fn kv_atom(action: PermissionAction) -> PermissionAtom {
         PermissionAtom::new(
             PermissionTarget::participant_resource(
-                "trellis-auth-runtime",
+                "trellis.auth-runtime",
                 ParticipantResourceKind::Kv,
                 "browserFlows",
             )
@@ -755,7 +816,7 @@ mod tests {
     }
 
     fn fixture() -> (ParticipantBindingRecord, IssuableAuthorizationState) {
-        fixture_for("trellis-auth-runtime")
+        fixture_for("trellis.auth-runtime")
     }
 
     fn fixture_for(participant_id: &str) -> (ParticipantBindingRecord, IssuableAuthorizationState) {

@@ -58,7 +58,7 @@
   type CapabilityView = AuthCapabilitiesListOutput["entries"][number] & { key: string };
   type CapabilityGroupView = { groupKey: string; displayName: string; capabilities: string[]; includedGroups: string[] };
 
-  const CATALOG_PAGE_SIZE = 500;
+  const CATALOG_PAGE_SIZE = 100;
 
   let { mode, targetPortalId = null }: { mode: "create" | "edit"; targetPortalId?: string | null } = $props();
 

@@ -40,7 +40,7 @@
     loading = true;
     error = null;
     try {
-      const response = await trellis.authDeviceUserAuthoritiesList({ limit: 500 }).take();
+      const response = await trellis.authDeviceUserAuthoritiesList({ limit: 100 }).take();
       if (isErr(response)) { error = errorMessage(response); return; }
       const loadedActivations = response.entries ?? [];
       const loadedActiveActivations = loadedActivations.filter((activation) => activation.authority?.state === "accepted");

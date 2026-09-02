@@ -55,7 +55,7 @@ cargo run --manifest-path demos/rust/Cargo.toml -p trellis-rust-demo-service
 cargo run --manifest-path demos/rust/Cargo.toml -p trellis-rust-demo-device
 ```
 
-The Rust service mounts generated `trellis.demo-service@v1` RPC and operation
+The Rust service mounts generated `demo.service@v1` RPC and operation
 handlers and can run either through authenticated service bootstrap or the raw
 local NATS developer loop. The Rust device can run offline, with user/session
 credentials, or through a demo-local activated-device persistence flow; online

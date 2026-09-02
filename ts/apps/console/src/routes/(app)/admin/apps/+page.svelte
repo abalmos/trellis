@@ -24,7 +24,7 @@
     loading = true;
     error = null;
 
-    const res = await trellis.authIdentityAuthorityList({ limit: 500 }).take();
+    const res = await trellis.authIdentityAuthorityList({ limit: 100 }).take();
     loading = false;
     if (isErr(res)) {
       error = errorMessage(res);

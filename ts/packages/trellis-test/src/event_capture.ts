@@ -277,10 +277,10 @@ export async function startTrellisTestEventCapture<
   });
 
   const appContract = defineAppContract(() => ({
-    id: `trellis.test.event-capture.${
+    id: `test.event-capture.${
       captureContractName(args.options.name)
     }@v1`,
-    apiId: `trellis.test.event-capture.${
+    apiId: `test.event-capture.${
       captureContractName(args.options.name)
     }@v1`,
     apiVersion: "1.0.0",

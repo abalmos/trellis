@@ -1,14 +1,14 @@
 format = 1
-manifest-digest = "0GgLp--YsAh2zmIDyOjKW-2GPZWMwsvr54bNMMl6Imk"
+manifest-digest = "RBCp4gSM5f6nfFV0CxRkyPLFSsYNZv-QplynKXPw0Tk"
 
 [[api]]
-id = "trellis.demo-service@v1"
+id = "demo.service@v1"
 version = "1.0.0"
-api-digest = "1zqVxOWHVsaouHgDqzT1HciDo0L5UMNneWwVjhdJomk"
-path = "../ts/service/.trellis/generated/protocol/apis/trellis.demo-service@v1.json"
+api-digest = "8chy0eVOlkTw5fE6AKm7QPY0nHVQUPPRMDUhAnj2Ybc"
+path = "../ts/service/.trellis/generated/protocol/apis/demo.service@v1.json"
 
 [[api]]
 id = "trellis.state@v1"
 version = "1.0.0"
-api-digest = "qs1u5DVKbglPE25fTx77AadXTT-MDwSkmHVFJlCwE2A"
+api-digest = "hGgfotCC_9mlYwTUdaZtMTeia-KVGCGyqPop--LGa1w"
 path = "../../rust/crates/runtime/.trellis/generated/protocol/apis/trellis.state@v1.json"

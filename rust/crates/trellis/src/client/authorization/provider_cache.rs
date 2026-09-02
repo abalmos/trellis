@@ -514,8 +514,14 @@ impl AuthorizationProviderCache {
         self.sync_trust_material()?;
         // Subscribe before reading the pointer so racing updates remain queued.
         let mut manifests = registry.watch_manifest_current().await?;
-        let mut revocations = registry.watch_revocations().await?;
-        self.initialize_watch_state(registry, &mut revocations)
+        let mut revocations = if let Some(own) = self.own.as_ref() {
+            let digest = own.context_digest()?;
+            registry.record_revocation_watch_initialization();
+            Some(registry.watch_revocation(&digest).await?)
+        } else {
+            None
+        };
+        self.initialize_watch_state(registry, revocations.as_mut())
             .await?;
         let mut was_connected = true;
         let mut connection_check = tokio::time::interval(Duration::from_millis(100));
@@ -552,69 +558,42 @@ impl AuthorizationProviderCache {
                     let pointer = manifest_pointer_from_entry(&entry)?;
                     self.observe_manifest(&pointer, entry.revision).await?;
                 }
-                entry = revocations.next() => {
-                    let entry = entry.ok_or_else(|| {
-                        TrellisClientError::Bootstrap("revocation watch ended".into())
-                    })?.map_err(|error| {
-                        TrellisClientError::Bootstrap(format!(
-                            "revocation watch failed: {error}"
-                        ))
-                    })?;
-                    match super::registry::revocation_entry(entry) {
-                        RevocationWatchEntry::Applied { key, value, revision } => {
-                            self.observe_revocation_value(&key, &value, revision)?;
-                        }
-                        RevocationWatchEntry::Removed { key, revision } => {
-                            self.observe_revocation_removal(&key, revision)?;
-                        }
+                entry = async {
+                    match revocations.as_mut() {
+                        Some(watch) => watch.next().await,
+                        None => std::future::pending().await,
                     }
+                } => {
+                    let entry = entry.ok_or_else(|| TrellisClientError::Bootstrap(
+                        "authorization revocation watch ended".into(),
+                    ))??;
+                    self.observe_revocation_entry(entry)?;
                 }
             }
         }
     }
 
-    /// Initialize current state from the exact pointer and the history-bearing
-    /// revocation watch that remains active for live updates.
+    /// Initialize current trust state from the exact manifest pointer.
     async fn initialize_watch_state(
         &self,
         registry: &AuthorizationRegistryReader,
-        revocations: &mut super::registry::RegistryWatch,
+        revocations: Option<&mut super::registry::RegistryWatch>,
     ) -> Result<(), TrellisClientError> {
         let (manifest, revision) = registry
             .get_manifest_current()
             .await?
             .ok_or_else(|| TrellisClientError::Bootstrap("manifest.current is missing".into()))?;
         self.observe_manifest(&manifest, revision).await?;
-        if revocations.initially_empty() {
-            registry.record_revocation_watch_initialization();
-            self.record_healthy();
-            return Ok(());
-        }
-        loop {
-            let entry = revocations.next().await.ok_or_else(|| {
-                TrellisClientError::Bootstrap("initial revocation watch ended".into())
-            })?;
-            let entry = entry.map_err(|error| {
-                TrellisClientError::Bootstrap(format!("initial revocation watch failed: {error}"))
-            })?;
-            let seen_current = entry.seen_current;
-            match super::registry::revocation_entry(entry) {
-                RevocationWatchEntry::Applied {
-                    key,
-                    value,
-                    revision,
-                } => {
-                    self.observe_revocation_value(&key, &value, revision)?;
-                }
-                RevocationWatchEntry::Removed { key, revision } => {
-                    self.observe_revocation_removal(&key, revision)?;
-                }
-            }
-            if seen_current {
-                break;
+        if let Some(revocations) = revocations {
+            if !revocations.initially_empty() {
+                let entry = revocations.next().await.ok_or_else(|| {
+                    TrellisClientError::Bootstrap(
+                        "authorization revocation watch ended during initialization".into(),
+                    )
+                })??;
+                self.observe_revocation_entry(entry)?;
             }
         }
-        registry.record_revocation_watch_initialization();
         self.record_healthy();
         Ok(())
     }
@@ -727,6 +706,22 @@ impl AuthorizationProviderCache {
         state.health.last_update_at = now;
         state.health.healthy = was_healthy;
         Ok(())
+    }
+
+    fn observe_revocation_entry(
+        &self,
+        entry: super::registry::RegistryWatchEntry,
+    ) -> Result<(), TrellisClientError> {
+        match super::registry::revocation_entry(entry) {
+            RevocationWatchEntry::Applied {
+                key,
+                value,
+                revision,
+            } => self.observe_revocation_value(&key, &value, revision),
+            RevocationWatchEntry::Removed { key, revision } => {
+                self.observe_revocation_removal(&key, revision)
+            }
+        }
     }
 
     fn observe_revocation_value(
@@ -932,6 +927,7 @@ impl AuthorizationProviderCache {
         verification_time: i64,
         historical: bool,
     ) -> Result<VerifiedAuthorizationContext, TrellisClientError> {
+        self.refresh_revocation(digest).await?;
         self.prune_contexts(self.now_seconds()?)?;
         let known = self.active_context_raw(digest)?;
         if let Some(context) = known {
@@ -985,6 +981,25 @@ impl AuthorizationProviderCache {
                 .insert(digest.to_owned(), context.clone());
         }
         Ok(context)
+    }
+
+    async fn refresh_revocation(&self, digest: &str) -> Result<(), TrellisClientError> {
+        if self.revocation_time(digest)?.is_some() {
+            return Ok(());
+        }
+        let Some(registry) = self.registry.as_ref() else {
+            return Ok(());
+        };
+        if let Some(value) = registry.get_revocation(digest).await? {
+            let revoked_at = parse_revocation_record(&value)?;
+            let mut state = self.write_state()?;
+            state
+                .revocations
+                .entry(digest.to_owned())
+                .and_modify(|current| *current = (*current).max(revoked_at))
+                .or_insert(revoked_at);
+        }
+        Ok(())
     }
 
     fn drop_in_flight(&self, digest: &str, pending: &Arc<PendingContext>) {

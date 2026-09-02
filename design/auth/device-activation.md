@@ -39,7 +39,7 @@ Key decisions:
 - Trellis resolves the device instance, device deployment, and activation portal
   policy from preregistered records
 - the built-in device activation portal is the Trellis-owned app contract
-  `trellis.portal.activation@v1`
+  `trellis-app.portal@v1`
 - the activation portal is still a browser web app; if it calls Trellis after
   login, it does so as the logged-in user rather than as a service
 - devices present a contract proposal at runtime; deployments validate requested

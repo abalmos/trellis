@@ -276,7 +276,7 @@ const liveDeviceActivationRejectedUsername =
   }`;
 const liveDeviceActivationRejectedPassword =
   `trellis-integration-${liveDeviceActivationRejectedCaseId}-password-2026`;
-const deviceActivationPortalContractId = "trellis.portal.activation@v1";
+const deviceActivationPortalContractId = "trellis-app.portal@v1";
 type AuthLocalLoginFixture = ReturnType<typeof createAuthLocalLoginFixture>;
 type DeviceActivationFixture = ReturnType<typeof createDeviceActivationFixture>;
 type SessionAdminClient = Awaited<

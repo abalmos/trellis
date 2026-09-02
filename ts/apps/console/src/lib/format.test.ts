@@ -25,6 +25,20 @@ Deno.test("errorMessage prefers explicit server messages", () => {
   );
 });
 
+Deno.test("errorMessage prefers validation issues over generic invalid_request copy", () => {
+  equal(
+    errorMessage({
+      getContext: () => ({ reason: "invalid_request" }),
+      error: {
+        remoteError: {
+          issues: [{ path: "#/properties/limit", message: "must be <= 100" }],
+        },
+      },
+    }),
+    "#/properties/limit: must be <= 100",
+  );
+});
+
 Deno.test("errorMessage renders auth reasons as actionable copy", () => {
   equal(
     errorMessage({ reason: "insufficient_permissions" }),

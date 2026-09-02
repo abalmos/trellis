@@ -22,13 +22,13 @@ use trellis_runtime_apis::jobs::types::{
 
 use crate::support::assertions::assert_runtime_case_registered;
 
-const JOBS_SERVICE_ID: &str = "trellis.integration.jobs-service@v1";
-const JOBS_CLIENT_ID: &str = "trellis.integration.jobs-client@v1";
-const JOBS_ADMIN_CLIENT_ID: &str = "trellis.integration.jobs-admin-client@v1";
+const JOBS_SERVICE_ID: &str = "integration.jobs-service@v1";
+const JOBS_CLIENT_ID: &str = "integration.jobs-client@v1";
+const JOBS_ADMIN_CLIENT_ID: &str = "integration.jobs-admin-client@v1";
 
 const JOBS_SERVICE_API_SOURCE_JSON: &str = r#"{
   "format": "trellis.api.v1",
-  "id": "trellis.integration.jobs-service@v1",
+  "id": "integration.jobs-service@v1",
   "version": "1.0.0",
   "displayName": "Trellis Integration Jobs Service",
   "description": "Exercises service-local jobs behind a client-visible RPC.",
@@ -1425,8 +1425,8 @@ async fn jobs_terminal_local_job_edges_and_admin_rpcs() {
             "jobs-admin-mutating",
             "JobsAdminMutatingPassword-1",
             vec![
-                "trellis.jobs::admin.read".to_string(),
-                "trellis.jobs::admin.mutate".to_string(),
+                "trellis.jobs::read".to_string(),
+                "trellis.jobs::mutate".to_string(),
             ],
         )
         .await

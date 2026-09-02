@@ -209,12 +209,13 @@ registry KV handles, bucket names, and watch subjects are internal runtime
 material and are not exposed as service APIs.
 
 Provider runtimes resolve authorization evidence from the connected internal
-NATS KV registry. They watch the current manifest generation and revocations,
-load both initial snapshots before becoming ready, fail closed while unready,
-and stop after their bounded staleness limit. Revocations apply immediately in
-memory and are not undone by a deleted record. Unknown context digests resolve
-exact evidence once per digest; ordinary request and event cache hits perform
-zero HTTP, SQLite, Auth RPC, or registry I/O.
+NATS KV registry. They watch the current manifest generation and only their
+active context's exact revocation key, load both initial snapshots before
+becoming ready, fail closed while unready, and stop after their bounded
+staleness limit. Revocations apply immediately in memory and are not undone by a
+deleted record. Unknown context digests resolve exact evidence once per digest;
+ordinary request and event cache hits perform zero HTTP, SQLite, Auth RPC, or
+registry I/O.
 
 ## Authority
 

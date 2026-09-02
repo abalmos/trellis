@@ -191,8 +191,8 @@ export function requireDeviceAuthorityList(
 export function createDeviceActivationFixture(caseId: string) {
   const slug = integrationSlug(caseId);
   const adminContract = defineAppContract(() => ({
-    id: `trellis.integration.device-activation-admin.${slug}@v1`,
-    apiId: `trellis.integration.device-activation-admin.${slug}@v1`,
+    id: `integration.device-activation-admin.${slug}@v1`,
+    apiId: `integration.device-activation-admin.${slug}@v1`,
     apiVersion: "1.0.0",
     displayName: `Trellis Integration Device Activation Admin (${slug})`,
     description:
@@ -226,8 +226,8 @@ export function createDeviceActivationFixture(caseId: string) {
   }));
 
   const deviceContract = defineDeviceContract(() => ({
-    id: `trellis.integration.device-activation-device.${slug}@v1`,
-    apiId: `trellis.integration.device-activation-device.${slug}@v1`,
+    id: `integration.device-activation-device.${slug}@v1`,
+    apiId: `integration.device-activation-device.${slug}@v1`,
     apiVersion: "1.0.0",
     displayName: `Trellis Integration Activated Device (${slug})`,
     description:

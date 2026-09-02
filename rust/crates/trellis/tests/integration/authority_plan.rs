@@ -11,10 +11,10 @@ use super::resources::{resources_service_contract, ResourcesServiceContract};
 use crate::support::assertions::assert_runtime_case_registered;
 
 const DEPLOYMENT: &str = "authority-plan-integration";
-const SERVICE_ID: &str = "trellis.integration.authority-plan-service@v1";
+const SERVICE_ID: &str = "integration.authority-plan-service@v1";
 const BASE_API: &str = r#"{
   "format": "trellis.api.v1",
-  "id": "trellis.integration.authority-plan-service@v1",
+  "id": "integration.authority-plan-service@v1",
   "version": "1.0.0",
   "displayName": "Authority Plan Integration Service",
   "description": "Exercises authority-plan service startup.",
@@ -27,7 +27,7 @@ const BASE_API: &str = r#"{
 }"#;
 const METADATA_API: &str = r#"{
   "format": "trellis.api.v1",
-  "id": "trellis.integration.authority-plan-service@v1",
+  "id": "integration.authority-plan-service@v1",
   "version": "1.0.0",
   "displayName": "Renamed Authority Plan Service",
   "description": "Changes human-facing metadata without changing machine identity.",
@@ -40,7 +40,7 @@ const METADATA_API: &str = r#"{
 }"#;
 const INCOMPATIBLE_API: &str = r#"{
   "format": "trellis.api.v1",
-  "id": "trellis.integration.authority-plan-service@v1",
+  "id": "integration.authority-plan-service@v1",
   "version": "1.0.0",
   "displayName": "Authority Plan Integration Service",
   "description": "Changes the existing RPC schema incompatibly.",
@@ -53,7 +53,7 @@ const INCOMPATIBLE_API: &str = r#"{
 }"#;
 const ADDITIVE_API: &str = r#"{
   "format": "trellis.api.v1",
-  "id": "trellis.integration.authority-plan-service@v1",
+  "id": "integration.authority-plan-service@v1",
   "version": "1.0.0",
   "displayName": "Authority Plan Integration Service",
   "description": "Exercises authority-plan service startup.",
@@ -515,8 +515,8 @@ async fn compatible_metadata_replacement_connects_without_approval() {
     let service_task = tokio::spawn(async move { service.run().await });
     let client_contract = TrellisTestContract::from_builder_with_referenced_contracts(
         trellis_rs::contracts::ContractBuilder::authoring(
-            "trellis.integration.authority-plan-metadata-client@v1",
-            "trellis.integration.authority-plan-metadata-client@v1",
+            "integration.authority-plan-metadata-client@v1",
+            "integration.authority-plan-metadata-client@v1",
             "1.0.0",
             "Authority Plan Metadata Client",
             "Calls the metadata-only replacement service.",
@@ -654,8 +654,8 @@ async fn accepted_incompatible_migration_replaces_service_contract() {
     let service_task = tokio::spawn(async move { service.run().await });
     let client_contract = TrellisTestContract::from_builder_with_referenced_contracts(
         trellis_rs::contracts::ContractBuilder::authoring(
-            "trellis.integration.authority-plan-incompatible-client@v1",
-            "trellis.integration.authority-plan-incompatible-client@v1",
+            "integration.authority-plan-incompatible-client@v1",
+            "integration.authority-plan-incompatible-client@v1",
             "1.0.0",
             "Authority Plan Incompatible Client",
             "Calls the accepted incompatible replacement.",
@@ -798,8 +798,8 @@ async fn additive_approval_flow() {
 
     let client_contract = TrellisTestContract::from_builder_with_referenced_contracts(
         trellis_rs::contracts::ContractBuilder::authoring(
-            "trellis.integration.authority-plan-client@v1",
-            "trellis.integration.authority-plan-client@v1",
+            "integration.authority-plan-client@v1",
+            "integration.authority-plan-client@v1",
             "1.0.0",
             "Authority Plan Integration Client",
             "Calls the service after authority approval.",

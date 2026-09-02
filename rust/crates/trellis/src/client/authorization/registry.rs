@@ -26,7 +26,6 @@ pub(crate) struct RegistryWatchEntry {
     pub(crate) value: Vec<u8>,
     pub(crate) revision: u64,
     pub(crate) removed: bool,
-    pub(crate) seen_current: bool,
 }
 
 pub(crate) struct RegistryWatch {
@@ -80,7 +79,6 @@ impl futures_util::Stream for RegistryWatch {
                     value: message.payload.to_vec(),
                     revision: info.stream_sequence,
                     removed,
-                    seen_current: self.seen_current,
                 })))
             }
             std::task::Poll::Ready(Some(Err(error))) => {
@@ -203,6 +201,25 @@ impl AuthorizationRegistryReader {
         Ok(value.map(|value| value.to_vec()))
     }
 
+    /// Exact revocation fetch by context digest; `Ok(None)` when active.
+    pub(crate) async fn get_revocation(
+        &self,
+        digest: &str,
+    ) -> Result<Option<Vec<u8>>, TrellisClientError> {
+        if !digest_key_is_valid(digest) {
+            return Err(TrellisClientError::Bootstrap(
+                "authorization context digest is invalid".into(),
+            ));
+        }
+        let key = format!("{REVOCATION_PREFIX}{digest}");
+        let value = self.contexts.get(key).await.map_err(|error| {
+            TrellisClientError::Bootstrap(format!(
+                "cannot read authorization context revocation {digest}: {error}"
+            ))
+        })?;
+        Ok(value.map(|value| value.to_vec()))
+    }
+
     /// Exact issuer-manifest fetch by generation.
     pub(crate) async fn get_manifest(
         &self,
@@ -247,11 +264,14 @@ impl AuthorizationRegistryReader {
         .await
     }
 
-    /// Watch all revocation records (`revocation.>`) with current state first.
-    pub(crate) async fn watch_revocations(&self) -> Result<RegistryWatch, TrellisClientError> {
+    /// Watch only one context's revocation record with current state first.
+    pub(crate) async fn watch_revocation(
+        &self,
+        context_digest: &str,
+    ) -> Result<RegistryWatch, TrellisClientError> {
         self.watch(
             &self.binding.context_bucket,
-            &format!("{REVOCATION_PREFIX}>"),
+            &format!("{REVOCATION_PREFIX}{context_digest}"),
             consumer::DeliverPolicy::LastPerSubject,
         )
         .await

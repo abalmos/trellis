@@ -50,7 +50,7 @@ Deno.test("shared runtime authority reset revokes stale accepted authority once"
     },
     {
       authorityId: "authority-admin",
-      participantId: "trellis-platform-administration",
+      participantId: "trellis.platform-administration",
       version: 7,
       state: "accepted",
     },
@@ -91,11 +91,11 @@ Deno.test("shared runtime authority reset revokes stale accepted authority once"
 
   await revokeStaleIntegrationAuthorities(
     port,
-    "trellis-platform-administration",
+    "trellis.platform-administration",
   );
   await revokeStaleIntegrationAuthorities(
     port,
-    "trellis-platform-administration",
+    "trellis.platform-administration",
   );
 
   assertEquals(revoked, ["authority-old"]);

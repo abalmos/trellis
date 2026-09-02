@@ -326,6 +326,10 @@ export function parseAccountFlowState(value: unknown): AccountFlowState {
       status: "active",
       flowId: body.flowId,
       kind: body.kind,
+      ...(body.mode === "create" || body.mode === "edit"
+        ? { mode: body.mode }
+        : {}),
+      ...(typeof body.username === "string" ? { username: body.username } : {}),
       ...(typeof body.targetUserId === "string"
         ? { targetUserId: body.targetUserId }
         : {}),

@@ -228,17 +228,6 @@ pub(crate) fn resolve_portal_authority_selection(
     }
     capabilities.sort();
     capabilities.dedup();
-    if consent.participant_id != "trellis-platform-administration"
-        && capabilities.iter().any(|capability| {
-            capability
-                .rsplit_once("::")
-                .is_some_and(|(_, name)| matches!(name, "admin" | "provision" | "activate"))
-        })
-    {
-        return Err(AuthorizationStateError::InvalidRecord(
-            "portal policy selects a reserved capability".to_owned(),
-        ));
-    }
     let grant_set = GrantSet::new(permissions);
     let digest_value = serde_json::to_value(EffectivePortalAuthority {
         format: "trellis.portal-effective-authority.v1",
@@ -468,14 +457,14 @@ mod tests {
             optional_grant_bundles: BTreeMap::new(),
             required_capabilities: vec![],
             optional_capability_definitions: BTreeMap::from([(
-                "app::admin".to_owned(),
+                "trellis.auth::users.mutate".to_owned(),
                 grant("Admin"),
             )]),
         };
         let policy = PortalGrantOverrideRecord {
             portal_id: "portal".to_owned(),
             participant_id: "app".to_owned(),
-            direct_capabilities: vec!["app::admin".to_owned()],
+            direct_capabilities: vec!["trellis.auth::users.mutate".to_owned()],
             capability_group_keys: vec![],
             role_mappings: vec![],
             created_at: 1,
@@ -492,6 +481,6 @@ mod tests {
                 roles: vec![],
             },
         )
-        .is_err());
+        .is_ok());
     }
 }

@@ -93,8 +93,8 @@ import administrationParticipantSource from "../../../../../rust/crates/trellis/
 
 export const ADMIN_USERNAME = "admin";
 const adminDescriptors = defineAppContract(() => ({
-  id: "trellis.test.admin@v1",
-  apiId: "trellis.test.admin@v1",
+  id: "test.admin@v1",
+  apiId: "test.admin@v1",
   apiVersion: "1.0.0",
   displayName: "Trellis Test Admin",
   description:
@@ -159,7 +159,7 @@ export const adminContract = Object.defineProperty(
     | "PARTICIPANT"
   >
   & {
-    readonly CONTRACT_ID: "trellis-platform-administration";
+    readonly CONTRACT_ID: "trellis.platform-administration";
     readonly CONTRACT_DIGEST: string;
     readonly PARTICIPANT: typeof administrationParticipant;
   };

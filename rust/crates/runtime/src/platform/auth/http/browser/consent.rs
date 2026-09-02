@@ -99,14 +99,6 @@ where
         .ok_or_else(|| HttpError::conflict("flow_has_no_principal"))?;
     let (grant_set, capabilities, selected_optional_bundles) =
         select_browser_authority(&flow.consent, &request.selected_optional_bundles)?;
-    let requests_reserved = capabilities.iter().any(|capability| {
-        capability
-            .rsplit_once("::")
-            .is_some_and(|(_, name)| matches!(name, "admin" | "provision" | "activate"))
-    });
-    if requests_reserved && flow.participant_id != "trellis-platform-administration" {
-        return Err(HttpError::forbidden("reserved_capability"));
-    }
     let signer_id = super::super::super::domain::validate_ed25519_public_key(
         "sessionPublicKey",
         &flow.session_public_key,
@@ -278,14 +270,6 @@ where
             )?;
             let selection =
                 resolve_portal_authority_selection(&policy, &groups, &consent, &attributes)?;
-            if selection.capabilities.iter().any(|capability| {
-                capability
-                    .rsplit_once("::")
-                    .is_some_and(|(_, name)| matches!(name, "admin" | "provision" | "activate"))
-            }) && flow.participant_id != "trellis-platform-administration"
-            {
-                return Err(HttpError::forbidden("reserved_capability"));
-            }
             let request_digest = trellis_protocol::digest_json(&json!({
                 "flowId": flow.flow_id,
                 "portalId": flow.portal_id,
@@ -376,6 +360,7 @@ pub(super) async fn complete_authenticated_flow<R, E>(
     principal_id: String,
     attributes: ProviderLoginAttributes,
     portal_binding_digest: String,
+    require_explicit_approval: bool,
     now: i64,
 ) -> Result<AuthBrowserFlow, HttpError>
 where
@@ -433,19 +418,24 @@ where
         return Err(HttpError::conflict("flow_not_pending"));
     }
     let expected = flow.version;
-    let existing_authority = state
-        .service
-        .repository()
-        .get_identity_authority(&principal_id, &flow.participant_id)
-        .await?
-        .filter(|authority| {
-            authority.state == AuthorityState::Accepted
-                && authority.participant_artifact_digest == flow.participant_artifact_digest
-                && authority.accepted_needs_digest == flow.participant_needs_digest
-                && authority
-                    .expires_at
-                    .is_none_or(|expires_at| expires_at > now)
-        });
+    let allow_automatic_approval = automatic_approval_allowed(require_explicit_approval);
+    let existing_authority = if !allow_automatic_approval {
+        None
+    } else {
+        state
+            .service
+            .repository()
+            .get_identity_authority(&principal_id, &flow.participant_id)
+            .await?
+            .filter(|authority| {
+                authority.state == AuthorityState::Accepted
+                    && authority.participant_artifact_digest == flow.participant_artifact_digest
+                    && authority.accepted_needs_digest == flow.participant_needs_digest
+                    && authority
+                        .expires_at
+                        .is_none_or(|expires_at| expires_at > now)
+            })
+    };
     let mut completed = if let Some(authority) = existing_authority {
         flow.state = AuthBrowserFlowState::Approved;
         flow.durable_result_digest = Some(
@@ -456,6 +446,9 @@ where
             .map_err(|_| HttpError::internal("authority_digest"))?,
         );
         flow.completed_at = Some(now);
+        flow
+    } else if !allow_automatic_approval {
+        flow.state = AuthBrowserFlowState::ApprovalRequired;
         flow
     } else if let Some(approved) =
         apply_trusted_portal_authority(state, flow.clone(), attributes, now).await?
@@ -497,6 +490,19 @@ where
             }
         }
         Err(error) => Err(error.into()),
+    }
+}
+
+fn automatic_approval_allowed(require_explicit_approval: bool) -> bool {
+    !require_explicit_approval
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn administrator_account_continuation_requires_explicit_approval() {
+        assert!(!super::automatic_approval_allowed(true));
+        assert!(super::automatic_approval_allowed(false));
     }
 }
 

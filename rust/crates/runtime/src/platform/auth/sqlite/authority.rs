@@ -938,20 +938,15 @@ pub(in crate::platform::auth) fn put_identity_authority(
         .map_err(sql_error)?
         .is_some();
     if is_bootstrap_administrator
-        && record.participant_id == "trellis-platform-administration"
-        && (record.state != AuthorityState::Accepted
-            || record.expires_at.is_some()
-            || !record
-                .desired_capabilities
-                .iter()
-                .any(|capability| capability == "admin"))
+        && record.participant_id == "trellis.platform-administration"
+        && (record.state != AuthorityState::Accepted || record.expires_at.is_some())
     {
         return Err(AuthorizationStateError::InvalidRecord(
             "bootstrap administrator authority is permanent".to_owned(),
         ));
     }
     if is_bootstrap_administrator
-        && record.participant_id == "trellis-platform-administration"
+        && record.participant_id == "trellis.platform-administration"
         && !allow_bootstrap_repair
     {
         let current =

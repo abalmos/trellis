@@ -12,7 +12,7 @@ import {
   SitesList,
   SitesRefresh,
   SitesRefreshed,
-} from "@trellis/apis/trellis.demo-service";
+} from "@trellis/apis/demo.service";
 import { Type } from "typebox";
 
 const schemas = {
@@ -33,8 +33,8 @@ const schemas = {
 const contract = defineDeviceContract(
   { schemas },
   (ref) => ({
-    id: "trellis.demo-device@v1",
-    apiId: "trellis.demo-device@v1",
+    id: "demo.device@v1",
+    apiId: "demo.device@v1",
     apiVersion: "1.0.0",
     displayName: "Field Device Demo",
     description: "Activated Field Device TUI for the consolidated demo.",

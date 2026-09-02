@@ -1,14 +1,30 @@
 {
+  "description": "Define the bootstrap administrator's platform authority independently of any client application.",
+  "displayName": "Trellis Platform Administration",
   "format": "trellis.participant.v1",
-  "id": "trellis-platform-administration",
-  "displayName": "Trellis Console",
-  "description": "Drive the Trellis administration client's contract-declared platform access.",
+  "id": "trellis.platform-administration",
   "kind": "app",
   "uses": {
+    "optional": {
+      "trellis.eventlog@v1": {
+        "api": "trellis.eventlog@v1",
+        "apiDigest": "YXwUBXSxRzix71_jemo6p0y_dxk5F-LOz1QsV3IT1OU",
+        "feeds": { "subscribe": ["EventLog.Watch"] },
+        "rpc": {
+          "call": [
+            "EventLog.Consumers.Inspect",
+            "EventLog.Consumers.Query",
+            "EventLog.Inspect",
+            "EventLog.Metrics",
+            "EventLog.Query"
+          ]
+        }
+      }
+    },
     "required": {
       "trellis.auth@v1": {
         "api": "trellis.auth@v1",
-        "apiDigest": "Fs_nA37wXgMpLRfB7IyYDhIEDUdSl3PdNp6ehnXcV1A",
+        "apiDigest": "3QSyOlZqSZ0e25CGmf7N9xOZXjOeomA-GUi7bG9WxaQ",
         "rpc": {
           "call": [
             "Auth.Capabilities.List",
@@ -68,6 +84,7 @@
             "Auth.Sessions.Revoke",
             "Auth.UserIdentities.List",
             "Auth.Users.Create",
+            "Auth.Users.Get",
             "Auth.Users.IdentityLink.Create",
             "Auth.Users.List",
             "Auth.Users.Password.Change",
@@ -76,13 +93,22 @@
           ]
         }
       },
+      "trellis.health@v1": {
+        "api": "trellis.health@v1",
+        "apiDigest": "didAZZoUrnCyj4EF01tWRMkd2UlHrMvYnwWyGmBg5Uk",
+        "events": { "subscribe": ["Health.StatusChanged"] },
+        "feeds": { "subscribe": ["Health.Watch"] },
+        "rpc": { "call": ["Health.Inspect", "Health.Metrics", "Health.Query"] }
+      },
       "trellis.jobs@v1": {
         "api": "trellis.jobs@v1",
-        "apiDigest": "qVQbpA0Lhmv3S4TcDfkvg4Pl5OvXCKEOrZUpt6Yq524",
+        "apiDigest": "oANPL-s0S0c94R9YqkdoF1yRN0ER2wWqbRqUegqKXR8",
+        "feeds": { "subscribe": ["Jobs.Watch"] },
         "rpc": {
           "call": [
             "Jobs.Cancel",
             "Jobs.DismissDLQ",
+            "Jobs.GetKey",
             "Jobs.Inspect",
             "Jobs.ListDLQ",
             "Jobs.ListServices",
@@ -91,44 +117,13 @@
             "Jobs.ReplayDLQ",
             "Jobs.Retry"
           ]
-        },
-        "feeds": {
-          "subscribe": ["Jobs.Watch"]
         }
       },
       "trellis.state@v1": {
         "api": "trellis.state@v1",
-        "apiDigest": "qs1u5DVKbglPE25fTx77AadXTT-MDwSkmHVFJlCwE2A",
+        "apiDigest": "hGgfotCC_9mlYwTUdaZtMTeia-KVGCGyqPop--LGa1w",
         "rpc": {
           "call": ["State.Admin.Delete", "State.Admin.Get", "State.Admin.List"]
-        }
-      }
-    },
-    "optional": {
-      "trellis.eventlog@v1": {
-        "api": "trellis.eventlog@v1",
-        "apiDigest": "ldHKKyQCxcEYuuIRjwPa9CZMEKV8mNUyGkAtSh9MzZ8",
-        "rpc": {
-          "call": [
-            "EventLog.Consumers.Inspect",
-            "EventLog.Consumers.Query",
-            "EventLog.Inspect",
-            "EventLog.Metrics",
-            "EventLog.Query"
-          ]
-        },
-        "feeds": {
-          "subscribe": ["EventLog.Watch"]
-        }
-      },
-      "trellis.health@v1": {
-        "api": "trellis.health@v1",
-        "apiDigest": "didAZZoUrnCyj4EF01tWRMkd2UlHrMvYnwWyGmBg5Uk",
-        "rpc": {
-          "call": ["Health.Inspect", "Health.Metrics", "Health.Query"]
-        },
-        "feeds": {
-          "subscribe": ["Health.Watch"]
         }
       }
     }

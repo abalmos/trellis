@@ -32,7 +32,7 @@
     loading = true;
     error = null;
     try {
-      const response = await trellis.authConnectionsList({ limit: 500 }).take();
+      const response = await trellis.authConnectionsList({ limit: 100 }).take();
       if (isErr(response)) { error = errorMessage(response); return; }
       connections = response.entries ?? [];
       const requestedUserNkey = page.url.searchParams.get("userNkey");
@@ -107,7 +107,7 @@
           <select class="select select-bordered select-sm" bind:value={selectedUserNkey} required>
             {#each connections as connection (connection.connectionId)}
               {@const summary = describeSessionPrincipal(connection)}
-              <option value={connection.connectionId}>{summary.title} — {formatShortKey(connection.userNkey)}</option>
+              <option value={connection.connectionId}>{summary.title} · {formatShortKey(connection.userNkey)}</option>
             {/each}
           </select>
         </label>

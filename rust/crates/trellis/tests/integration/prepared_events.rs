@@ -20,14 +20,14 @@ const STATUS: &str = "prepared-status";
 
 const PREPARED_EVENTS_API_SOURCE_JSON: &str = r#"{
   "format": "trellis.api.v1",
-  "id": "trellis.integration.prepared-events-rust@v1",
+  "id": "integration.prepared-events-rust@v1",
   "version": "1.0.0",
   "displayName": "Trellis Rust Prepared Events",
   "description": "Publishes and consumes prepared events for Rust integration parity.",
   "capabilities": {
-    "publishEvents": {"allows": [{"target": {"kind": "apiSurface", "api": "trellis.integration.prepared-events-rust@v1", "surface": "event", "name": "Entity.Changed"}, "action": "publish"}]},
+    "publishEvents": {"allows": [{"target": {"kind": "apiSurface", "api": "integration.prepared-events-rust@v1", "surface": "event", "name": "Entity.Changed"}, "action": "publish"}]},
     "readEvents": {"allows": [
-      {"target": {"kind": "apiSurface", "api": "trellis.integration.prepared-events-rust@v1", "surface": "event", "name": "Entity.Changed"}, "action": "subscribe"}
+      {"target": {"kind": "apiSurface", "api": "integration.prepared-events-rust@v1", "surface": "event", "name": "Entity.Changed"}, "action": "subscribe"}
     ]}
   },
   "schemas": {
@@ -85,7 +85,7 @@ async fn prepared_events_prepared_publish_preserves_custom_headers_and_annotates
         .expect("observe first admin bootstrap URL");
     let mut admin = runtime.admin();
     let contract = trellis_test::TrellisTestContract::from_native_api_json(
-        "trellis.integration.prepared-events-rust@v1",
+        "integration.prepared-events-rust@v1",
         PREPARED_EVENTS_API_SOURCE_JSON,
         trellis_rs::contracts::ContractKind::Service,
     )
@@ -103,8 +103,8 @@ async fn prepared_events_prepared_publish_preserves_custom_headers_and_annotates
     let listener_contract =
         trellis_test::TrellisTestContract::from_builder_with_referenced_contracts(
             trellis_rs::contracts::ContractBuilder::authoring(
-                "trellis.integration.prepared-events-listener-rust@v1",
-                "trellis.integration.prepared-events-listener-rust@v1",
+                "integration.prepared-events-listener-rust@v1",
+                "integration.prepared-events-listener-rust@v1",
                 "1.0.0",
                 "Trellis Rust Prepared Events Listener",
                 "Consumes prepared events with explicit authority.",
@@ -112,7 +112,7 @@ async fn prepared_events_prepared_publish_preserves_custom_headers_and_annotates
             )
             .use_ref(
                 "preparedEvents",
-                trellis_rs::contracts::use_contract("trellis.integration.prepared-events-rust@v1")
+                trellis_rs::contracts::use_contract("integration.prepared-events-rust@v1")
                     .with_event_subscribe(["Entity.Changed"]),
             ),
             &[&contract],
@@ -151,7 +151,7 @@ async fn prepared_events_prepared_publish_preserves_custom_headers_and_annotates
     let handler_observed = Arc::clone(&observed);
     let listener = listener_service
         .listen_event_with_api_id::<EntityChanged, _, _>(
-            "trellis.integration.prepared-events-rust@v1",
+            "integration.prepared-events-rust@v1",
             move |event, context| {
                 let handler_observed = Arc::clone(&handler_observed);
                 async move {

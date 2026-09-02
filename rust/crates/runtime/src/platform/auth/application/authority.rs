@@ -589,6 +589,7 @@ where
         } else {
             AuthorityProposalKind::Initial
         };
+        super::super::builtins::validate_binding_namespace(&binding)?;
         self.repository.put_participant_binding(binding).await?;
 
         let proposal = resolved.proposal();

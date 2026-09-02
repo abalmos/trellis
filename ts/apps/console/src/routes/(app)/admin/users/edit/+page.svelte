@@ -213,8 +213,8 @@
       if (!hasTargetParams) return;
 
       const [usersResponse, capabilitiesResponse] = await Promise.all([
-        trellis.authUsersList({ limit: 500 }).take(),
-        trellis.authCapabilitiesList({ limit: 500 }).take(),
+        trellis.authUsersList({ limit: 100 }).take(),
+        trellis.authCapabilitiesList({ limit: 100 }).take(),
       ]);
       if (isErr(usersResponse)) { error = errorMessage(usersResponse); return; }
       if (isErr(capabilitiesResponse)) { error = errorMessage(capabilitiesResponse); return; }

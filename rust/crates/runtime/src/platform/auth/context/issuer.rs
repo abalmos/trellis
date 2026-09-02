@@ -121,12 +121,18 @@ impl AuthorizationContextService {
                 Ok(resources)
             })
             .await?;
-        let permissions = compile_transport_permissions(
+        let mut permissions = compile_transport_permissions(
             signed,
             &binding,
             &resources,
             &AuthorizationRegistryBinding::from_config(&self.config),
         )?;
+        permissions.publish.push(format!(
+            "$JS.API.CONSUMER.CREATE.KV_{}.*.$KV.{}.revocation.{}",
+            self.config.context_bucket,
+            self.config.context_bucket,
+            context.context_digest(),
+        ));
         Ok(permissions)
     }
 

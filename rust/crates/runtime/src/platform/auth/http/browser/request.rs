@@ -89,11 +89,21 @@ where
     if let Some(participant_value) = &request.participant_artifact {
         let participant = parse_participant(participant_value)
             .map_err(|_| HttpError::bad_request("invalid_participant_artifact"))?;
+        super::super::super::builtins::validate_participant_namespace(participant.id())
+            .map_err(|_| HttpError::bad_request("reserved_participant"))?;
         let mut apis = BTreeMap::new();
         let mut api_values = BTreeMap::new();
         for value in &request.referenced_api_artifacts {
             let api =
                 parse_api(value).map_err(|_| HttpError::bad_request("invalid_api_artifact"))?;
+            let api_digest = api
+                .digest()
+                .map_err(|_| HttpError::bad_request("invalid_api_artifact"))?;
+            if api.id().starts_with("trellis.")
+                && !super::super::super::builtins::is_platform_api(api.id(), &api_digest)
+            {
+                return Err(HttpError::bad_request("reserved_api_namespace"));
+            }
             api_values.insert(
                 api.id().to_owned(),
                 api.normalized_value()
@@ -116,26 +126,29 @@ where
             );
             return Err(HttpError::bad_request("participant_binding_mismatch"));
         }
+        let binding = ParticipantBindingRecord {
+            participant_id: resolved.participant_id().to_owned(),
+            participant_kind: resolved.participant_kind(),
+            artifact_digest: resolved.participant_digest().to_owned(),
+            needs_digest,
+            participant_json: participant
+                .canonical_json()
+                .map_err(|_| HttpError::bad_request("invalid_participant_artifact"))?,
+            api_artifacts_json: canonicalize_json(
+                &serde_json::to_value(api_values)
+                    .map_err(|_| HttpError::bad_request("invalid_api_artifact"))?,
+            )
+            .map_err(|_| HttpError::bad_request("invalid_api_artifact"))?,
+            resolved_at: now,
+            state: ParticipantBindingState::Resolved,
+            error: None,
+        };
+        super::super::super::builtins::validate_binding_namespace(&binding)
+            .map_err(|_| HttpError::bad_request("reserved_artifact_namespace"))?;
         state
             .service
             .repository()
-            .put_participant_binding(ParticipantBindingRecord {
-                participant_id: resolved.participant_id().to_owned(),
-                participant_kind: resolved.participant_kind(),
-                artifact_digest: resolved.participant_digest().to_owned(),
-                needs_digest,
-                participant_json: participant
-                    .canonical_json()
-                    .map_err(|_| HttpError::bad_request("invalid_participant_artifact"))?,
-                api_artifacts_json: canonicalize_json(
-                    &serde_json::to_value(api_values)
-                        .map_err(|_| HttpError::bad_request("invalid_api_artifact"))?,
-                )
-                .map_err(|_| HttpError::bad_request("invalid_api_artifact"))?,
-                resolved_at: now,
-                state: ParticipantBindingState::Resolved,
-                error: None,
-            })
+            .put_participant_binding(binding)
             .await?;
     }
     let binding = state

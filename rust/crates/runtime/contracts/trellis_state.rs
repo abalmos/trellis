@@ -2,10 +2,13 @@
 
 use serde_json::{json, Value};
 use trellis_contracts::{
-    ApiArtifact, ApiBuilder, ContractArtifacts, ContractBuilder, ContractKind, ContractsError,
+    ApiArtifact, ApiBuilder, ContractArtifacts, ContractBuilder, ContractCapabilityMetadata,
+    ContractKind, ContractsError,
 };
 
 const AUTH_ERROR: &str = "AuthError";
+const READ_CAPABILITY: &str = "read";
+const MUTATE_CAPABILITY: &str = "mutate";
 const UNEXPECTED_ERROR: &str = "UnexpectedError";
 const VALIDATION_ERROR: &str = "ValidationError";
 
@@ -20,6 +23,22 @@ pub fn api_artifact() -> Result<ApiArtifact, ContractsError> {
     .docs_with_summary(
         "Participant state storage APIs.",
         "Provides authenticated read, write, list, delete, and admin inspection APIs for Trellis-managed participant state.",
+    )
+    .capability(
+        READ_CAPABILITY,
+        ContractCapabilityMetadata {
+            display_name: "Read participant state".to_string(),
+            description: "Inspect state entries across participants.".to_string(),
+            consequence: None,
+        },
+    )
+    .capability(
+        MUTATE_CAPABILITY,
+        ContractCapabilityMetadata {
+            display_name: "Mutate participant state".to_string(),
+            description: "Delete state entries across participants.".to_string(),
+            consequence: Some("Can delete participant state.".to_string()),
+        },
     )
     .schema("JsonValue", json!({}))
     .schema("StateAdminDeleteRequest", admin_request("delete"))
@@ -45,7 +64,7 @@ pub fn api_artifact() -> Result<ApiArtifact, ContractsError> {
             "StateAdminDeleteRequest",
             "StateAdminDeleteResponse",
         )
-        .with_call_capabilities(["admin"])
+        .with_call_capabilities([MUTATE_CAPABILITY])
         .docs_with_summary(
             "Admin delete a state value.",
             "Deletes one state value across participants for authorized administrators.",
@@ -58,7 +77,7 @@ pub fn api_artifact() -> Result<ApiArtifact, ContractsError> {
             "StateAdminGetRequest",
             "StateAdminGetResponse",
         )
-        .with_call_capabilities(["admin"])
+        .with_call_capabilities([READ_CAPABILITY])
         .docs_with_summary(
             "Admin read a state value.",
             "Returns one state value across participants for authorized administrators.",
@@ -71,7 +90,7 @@ pub fn api_artifact() -> Result<ApiArtifact, ContractsError> {
             "StateAdminListRequest",
             "StateAdminListResponse",
         )
-        .with_call_capabilities(["admin"])
+        .with_call_capabilities([READ_CAPABILITY])
         .docs_with_summary(
             "Admin list state values.",
             "Lists state values across participants for authorized administrators.",

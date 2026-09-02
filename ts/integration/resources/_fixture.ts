@@ -27,8 +27,8 @@ export function createResourcesFixture(caseId: string) {
   const serviceContract = defineServiceContract(
     { schemas: resourceSchemas },
     (ref) => ({
-      id: `trellis.integration.resources-service.${slug}@v1`,
-      apiId: `trellis.integration.resources-service.${slug}@v1`,
+      id: `integration.resources-service.${slug}@v1`,
+      apiId: `integration.resources-service.${slug}@v1`,
       apiVersion: "1.0.0",
       displayName: `Trellis Integration Resources Service (${slug})`,
       description: "Exercises service-bound KV and store resource handles.",
@@ -80,8 +80,8 @@ export function createResourcesFixture(caseId: string) {
   );
 
   const clientContract = defineAppContract(() => ({
-    id: `trellis.integration.resources-client.${slug}@v1`,
-    apiId: `trellis.integration.resources-client.${slug}@v1`,
+    id: `integration.resources-client.${slug}@v1`,
+    apiId: `integration.resources-client.${slug}@v1`,
     apiVersion: "1.0.0",
     displayName: `Trellis Integration Resources Client (${slug})`,
     description:

@@ -286,10 +286,11 @@ where
             },
         ),
         username,
-        allowed_providers: if flow.kind == super::super::super::AccountFlowKind::AdminAccount
-            && flow.target_principal_id.is_some()
-        {
-            Some(vec!["local".to_owned()])
+        allowed_providers: if flow.kind == super::super::super::AccountFlowKind::AdminAccount {
+            Some(admin_account_providers(
+                flow.target_principal_id.is_some(),
+                state.oidc_providers.keys(),
+            ))
         } else {
             flow.payload
                 .get("allowedProviders")
@@ -313,6 +314,30 @@ where
         }),
         target,
     }))
+}
+
+fn admin_account_providers<'a>(
+    edit: bool,
+    oidc_provider_ids: impl Iterator<Item = &'a String>,
+) -> Vec<String> {
+    let mut providers = vec!["local".to_owned()];
+    if !edit {
+        providers.extend(oidc_provider_ids.cloned());
+    }
+    providers
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn admin_account_create_offers_local_and_oidc_while_edit_is_local_only() {
+        let oidc = ["github".to_owned(), "google".to_owned()];
+        assert_eq!(
+            super::admin_account_providers(false, oidc.iter()),
+            ["local", "github", "google"],
+        );
+        assert_eq!(super::admin_account_providers(true, oidc.iter()), ["local"],);
+    }
 }
 
 #[derive(Deserialize, Serialize)]
@@ -382,6 +407,7 @@ where
                 expected_flow_version: flow.version,
                 username: request.username,
                 authority: None,
+                profile: None,
                 password: request.password,
                 consumed_at: now,
                 idempotency: idempotency(
@@ -490,7 +516,7 @@ where
         .get_participant_binding(participant_id, participant_artifact_digest)
         .await?
         .ok_or_else(|| HttpError::internal("first_admin_target_missing"))?;
-    let grant_set = binding.resolve()?.proposal().required().grant_set().clone();
+    let (grant_set, capabilities) = super::complete_participant_authority(&binding)?;
     let browser_flow_id = request.browser_flow_id.clone();
     let browser_flow = if let Some(browser_flow_id) = browser_flow_id.as_deref() {
         let portal_binding_digest = request
@@ -517,13 +543,14 @@ where
             expected_flow_version: flow.version,
             username: username.clone(),
             password: request.password,
-            display_name: request.name.unwrap_or(username),
+            display_name: request.name.filter(|value| !value.trim().is_empty()),
             email: request.email,
             image_url: None,
             participant_id: participant_id.to_owned(),
             participant_artifact_digest: participant_artifact_digest.to_owned(),
             participant_needs_digest: participant_needs_digest.to_owned(),
             grant_set,
+            capabilities,
             authority_expires_at: None,
             completed_at: now,
             idempotency: idempotency(
@@ -558,6 +585,7 @@ where
             request
                 .portal_binding_digest
                 .ok_or_else(|| HttpError::bad_request("portal_binding_digest_required"))?,
+            true,
             now,
         )
         .await?;
@@ -637,6 +665,7 @@ where
             roles: Vec::new(),
         },
         request.portal_binding_digest,
+        false,
         now,
     )
     .await?;
@@ -745,6 +774,7 @@ where
             roles: Vec::new(),
         },
         request.portal_binding_digest,
+        false,
         now,
     )
     .await?;

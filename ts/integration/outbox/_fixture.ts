@@ -22,8 +22,8 @@ export function createOutboxFixture(caseId: string) {
       },
     },
     (ref) => ({
-      id: `trellis.integration.outbox-service.${slug}@v1`,
-      apiId: `trellis.integration.outbox-service.${slug}@v1`,
+      id: `integration.outbox-service.${slug}@v1`,
+      apiId: `integration.outbox-service.${slug}@v1`,
       apiVersion: "1.0.0",
       displayName: `Trellis Integration Outbox Service (${slug})`,
       description: "Exercises live caller-owned SQL outbox dispatch.",
@@ -57,8 +57,8 @@ export function createOutboxFixture(caseId: string) {
     }),
   );
   const captureContract = defineAppContract(() => ({
-    id: `trellis.integration.outbox-capture.${slug}@v1`,
-    apiId: `trellis.integration.outbox-capture.${slug}@v1`,
+    id: `integration.outbox-capture.${slug}@v1`,
+    apiId: `integration.outbox-capture.${slug}@v1`,
     apiVersion: "1.0.0",
     displayName: `Trellis Integration Outbox Capture (${slug})`,
     description: "Captures committed SQL outbox events.",

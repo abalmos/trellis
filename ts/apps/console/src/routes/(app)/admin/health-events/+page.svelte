@@ -14,6 +14,7 @@
   import PageToolbar from "$lib/components/PageToolbar.svelte";
   import Panel from "$lib/components/Panel.svelte";
   import StatusBadge from "$lib/components/StatusBadge.svelte";
+  import Term from "$lib/components/Term.svelte";
   import { errorMessage, formatDate } from "$lib/format";
   import { getTrellis } from "$lib/trellis";
 
@@ -345,7 +346,7 @@
               </div>
 
               <div>
-                <h3 class="mb-2 text-xs font-semibold uppercase tracking-wide text-base-content/60">Latest heartbeat payload</h3>
+                <h3 class="mb-2 text-xs font-semibold uppercase tracking-wide text-base-content/60">Latest <Term term="heartbeat" /> payload</h3>
                 <pre class="max-h-80 overflow-auto rounded-box border border-base-300 bg-base-100 p-3 text-[11px] leading-5 text-base-content/80">{formatJson(selectedInstance.latestSample)}</pre>
               </div>
             {/if}

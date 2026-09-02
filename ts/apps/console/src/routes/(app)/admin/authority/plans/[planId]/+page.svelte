@@ -784,7 +784,7 @@
         "Loading the previous contract timed out.",
       );
       const authorityResponse = await withTimeout(
-        trellis.authDeploymentAuthorityList({ limit: 500 }).take(),
+        trellis.authDeploymentAuthorityList({ limit: 100 }).take(),
         15000,
         "Loading the deployment authority timed out.",
       );
@@ -1110,13 +1110,15 @@
                       </tr>
                     {:else}
                       {@const expanded = isGapExpanded(row.gapIndex)}
-                      <tr class="cursor-pointer bg-base-300/30 hover:bg-base-300/50 focus-within:bg-base-300/50" onclick={() => toggleGap(row.gapIndex)}>
+                      <tr class="bg-base-300/30 hover:bg-base-300/50">
                         <td colspan="5" class="px-2 py-1 text-center text-base-content/60">
-                          {#if expanded}
-                            <span>− collapse {row.beforeCount} unchanged line{row.beforeCount === 1 ? "" : "s"}</span>
-                          {:else}
-                            <span>⋯ expand {row.beforeCount} unchanged line{row.beforeCount === 1 ? "" : "s"} (lines {row.beforeStart}–{row.beforeStart + row.beforeCount - 1})</span>
-                          {/if}
+                          <button type="button" class="w-full cursor-pointer" onclick={() => toggleGap(row.gapIndex)}>
+                            {#if expanded}
+                              <span>− collapse {row.beforeCount} unchanged line{row.beforeCount === 1 ? "" : "s"}</span>
+                            {:else}
+                              <span>⋯ expand {row.beforeCount} unchanged line{row.beforeCount === 1 ? "" : "s"} (lines {row.beforeStart}–{row.beforeStart + row.beforeCount - 1})</span>
+                            {/if}
+                          </button>
                         </td>
                       </tr>
                       {#if expanded}

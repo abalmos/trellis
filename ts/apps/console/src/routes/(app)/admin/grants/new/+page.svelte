@@ -117,8 +117,8 @@
   async function load(): Promise<void> {
     try {
       const [portalResponse, capabilityResponse, groupResponse, policyResponse] = await Promise.all([
-        trellis.authPortalsList({ limit: 500 }).take(),
-        trellis.authCapabilitiesList({ limit: 500 }).take(),
+        trellis.authPortalsList({ limit: 100 }).take(),
+        trellis.authCapabilitiesList({ limit: 100 }).take(),
         trellis.authCapabilityGroupsList({ limit: 500, offset: 0 }).take(),
         trellis.authPortalsGrantOverridesList({ limit: 500, offset: 0 }).take(),
       ]);

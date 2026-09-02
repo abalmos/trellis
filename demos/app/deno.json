@@ -27,7 +27,7 @@
     "@qlever-llc/trellis/errors": "../../ts/packages/trellis/errors/index.ts",
     "@qlever-llc/trellis/service": "../../ts/packages/trellis/service/mod.ts",
     "@qlever-llc/trellis/service/deno": "../../ts/packages/trellis/service/deno.ts",
-    "@trellis/apis/trellis.demo-service": "./.trellis/generated/ts/trellis-apis/trellis.demo-service.ts",
+    "@trellis/apis/demo.service": "./.trellis/generated/ts/trellis-apis/demo.service.ts",
     "@sveltejs/acorn-typescript": "npm:@sveltejs/acorn-typescript@^1.0.9",
     "@sveltejs/adapter-auto": "npm:@sveltejs/adapter-auto@^7.0.1",
     "@sveltejs/adapter-static": "npm:@sveltejs/adapter-static@3.0.10",
