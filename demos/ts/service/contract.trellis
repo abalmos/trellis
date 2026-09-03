@@ -32,38 +32,38 @@ api "demo.service@v1" {
     }
 
     model AssignmentsListRequest {
-        limit: u32(maximum = 500);
-        offset?: u32;
+        limit: uint(maximum = 500);
+        offset?: uint;
     }
 
     model AssignmentsListResponse {
         entries: list<InspectionAssignment>;
-        count: u32;
-        offset: u32;
-        limit: u32;
-        nextOffset?: u32;
+        count: uint;
+        offset: uint;
+        limit: uint;
+        nextOffset?: uint;
     }
 
     model SiteSummary {
         siteId: NonEmptyString;
         siteName: NonEmptyString;
-        openInspections: u32;
-        overdueInspections: u32;
+        openInspections: uint;
+        overdueInspections: uint;
         latestStatus: NonEmptyString;
         lastReportAt: NonEmptyString;
     }
 
     model SitesListRequest {
-        limit: u32(maximum = 500);
-        offset?: u32;
+        limit: uint(maximum = 500);
+        offset?: uint;
     }
 
     model SitesListResponse {
         entries: list<SiteSummary>;
-        count: u32;
-        offset: u32;
-        limit: u32;
-        nextOffset?: u32;
+        count: uint;
+        offset: uint;
+        limit: uint;
+        nextOffset?: uint;
     }
 
     model SitesGetRequest { siteId: NonEmptyString; }
@@ -97,7 +97,7 @@ api "demo.service@v1" {
     model EvidenceUploadResponse {
         evidenceId: NonEmptyString;
         key: NonEmptyString;
-        size: u64;
+        size: uint;
         contentType?: NonEmptyString;
         fileName?: NonEmptyString;
         disposition: NonEmptyString;
@@ -105,28 +105,28 @@ api "demo.service@v1" {
     model EvidenceRecord {
         evidenceId: NonEmptyString;
         key: NonEmptyString;
-        size: u64;
+        size: uint;
         contentType?: NonEmptyString;
         evidenceType: NonEmptyString;
         fileName?: NonEmptyString;
         uploadedAt: NonEmptyString;
     }
     model EvidenceListRequest {
-        limit: u32(maximum = 500);
-        offset?: u32;
+        limit: uint(maximum = 500);
+        offset?: uint;
         prefix?: NonEmptyString;
     }
     model EvidenceListResponse {
         entries: list<EvidenceRecord>;
-        count: u32;
-        offset: u32;
-        limit: u32;
-        nextOffset?: u32;
+        count: uint;
+        offset: uint;
+        limit: uint;
+        nextOffset?: uint;
     }
     model EvidenceDownloadRequest { key: NonEmptyString; }
     model EvidenceFileInfo {
         key: NonEmptyString;
-        size: u64;
+        size: uint;
         updatedAt: NonEmptyString;
         digest?: NonEmptyString;
         contentType?: NonEmptyString;
@@ -134,7 +134,7 @@ api "demo.service@v1" {
     }
     model EvidenceDownloadInfo {
         key: NonEmptyString;
-        size: u64;
+        size: uint;
         updatedAt: NonEmptyString;
         digest: NonEmptyString;
         contentType?: NonEmptyString;
@@ -148,7 +148,7 @@ api "demo.service@v1" {
         transferId: NonEmptyString;
         subject: NonEmptyString;
         expiresAt: NonEmptyString;
-        chunkBytes: u64(minimum = 1);
+        chunkBytes: uint(minimum = 1);
         info: EvidenceDownloadInfo;
     }
     model EvidenceDownloadResponse { transfer: EvidenceDownloadGrant; }
@@ -179,13 +179,13 @@ api "demo.service@v1" {
         readiness: NonEmptyString;
         evidenceStatus: NonEmptyString;
     }
-    model ReportsListRequest { limit: u32(maximum = 500); offset?: u32; }
+    model ReportsListRequest { limit: uint(maximum = 500); offset?: uint; }
     model ReportsListResponse {
         entries: list<ReportRecord>;
-        count: u32;
-        offset: u32;
-        limit: u32;
-        nextOffset?: u32;
+        count: uint;
+        offset: uint;
+        limit: uint;
+        nextOffset?: uint;
     }
     model ReportsPublishedEvent {
         reportId: NonEmptyString;
@@ -214,7 +214,6 @@ api "demo.service@v1" {
         input AssignmentsListRequest;
         output AssignmentsListResponse;
         errors [UnexpectedError];
-        capabilities { call []; }
         docs {
             summary "List assignments.";
             markdown "Returns inspection assignments available to the caller.";
@@ -225,21 +224,18 @@ api "demo.service@v1" {
         input SitesListRequest;
         output SitesListResponse;
         errors [UnexpectedError];
-        capabilities { call []; }
     }
     rpc "Sites.Get" {
         version "v1";
         input SitesGetRequest;
         output SitesGetResponse;
         errors [UnexpectedError];
-        capabilities { call []; }
     }
     rpc "Evidence.List" {
         version "v1";
         input EvidenceListRequest;
         output EvidenceListResponse;
         errors [UnexpectedError];
-        capabilities { call []; }
     }
     rpc "Evidence.Download" {
         version "v1";
@@ -247,21 +243,18 @@ api "demo.service@v1" {
         output EvidenceDownloadResponse;
         errors [TransferError, UnexpectedError];
         transfer receive;
-        capabilities { call []; }
     }
     rpc "Evidence.Delete" {
         version "v1";
         input EvidenceDeleteRequest;
         output EvidenceDeleteResponse;
         errors [UnexpectedError];
-        capabilities { call []; }
     }
     rpc "Reports.List" {
         version "v1";
         input ReportsListRequest;
         output ReportsListResponse;
         errors [UnexpectedError];
-        capabilities { call []; }
     }
 
     operation "Sites.Refresh" {
@@ -269,7 +262,6 @@ api "demo.service@v1" {
         input SitesRefreshRequest;
         progress SitesRefreshProgress;
         output SitesRefreshResponse;
-        capabilities { call []; observe []; }
         docs {
             summary "Refresh site data.";
             markdown "Runs a caller-visible workflow that updates the site summary cache.";
@@ -281,7 +273,6 @@ api "demo.service@v1" {
         progress ReportsGenerateProgress;
         output ReportsGenerateResponse;
         cancellable;
-        capabilities { call []; observe []; cancel []; }
     }
     operation "Evidence.Upload" {
         version "v1";
@@ -289,7 +280,6 @@ api "demo.service@v1" {
         progress EvidenceUploadProgress;
         output EvidenceUploadResponse;
         transfer send;
-        capabilities { call []; observe []; }
     }
 
     event "Audit.Recorded" { version "v1"; payload AuditRecordedEvent; }
@@ -301,7 +291,6 @@ api "demo.service@v1" {
         version "v1";
         input ActivityLiveFeedRequest;
         event ActivityLiveFeedEvent;
-        capabilities { subscribe []; }
         docs {
             summary "Stream audit activity.";
             markdown "Subscribes to live activity records from audit, evidence, report, and site refresh events.";

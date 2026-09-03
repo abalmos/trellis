@@ -192,15 +192,15 @@ impl Parser<'_> {
         let ty = match name.value.as_str() {
             "string" => Type::String(self.constraints()?),
             "bool" => Type::Bool,
-            "u8" | "u16" | "u32" | "u64" => Type::Integer {
+            "uint" => Type::Integer {
                 unsigned: true,
                 constraints: self.constraints()?,
             },
-            "i8" | "i16" | "i32" | "i64" => Type::Integer {
+            "int" => Type::Integer {
                 unsigned: false,
                 constraints: self.constraints()?,
             },
-            "number" | "f32" | "f64" => Type::Number(self.constraints()?),
+            "number" => Type::Number(self.constraints()?),
             "list" | "map" => {
                 self.token(TokenKind::LAngle)?;
                 let member = self.ty()?;

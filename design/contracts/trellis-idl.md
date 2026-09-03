@@ -36,8 +36,8 @@ api "demo.service@v1" {
 
     type NonEmptyString = string(min_length = 1);
     model SitesListRequest {
-        limit: u32(maximum = 500);
-        offset?: u32;
+        limit: uint(maximum = 500);
+        offset?: uint;
     }
     model SiteSummary {
         siteId: NonEmptyString;
@@ -52,7 +52,6 @@ api "demo.service@v1" {
         input SitesListRequest;
         output SiteSummary;
         errors [UnexpectedError];
-        capabilities { call []; }
     }
 }
 
@@ -74,11 +73,11 @@ queues, documentation blocks, enums, string literals, and named unions.
 
 ## Types
 
-Initial scalar types are `string`, `bool`, signed and unsigned integer widths,
-`number`, `f32`, and `f64`. Types compose as `list<T>`, typed string-keyed
-`map<T>`, named references, string literals, and unions with `|`. Scalar
-constraints include `minimum`, `maximum`, `min_length`, `max_length`, `pattern`,
-and `format`.
+Initial scalar types are `string`, `bool`, `int`, `uint`, and `number`. `int`
+lowers to a JSON Schema integer, while `uint` adds `minimum: 0`. Types compose
+as `list<T>`, typed string-keyed `map<T>`, named references, string literals,
+and unions with `|`. Scalar constraints include `minimum`, `maximum`,
+`min_length`, `max_length`, `pattern`, and `format`.
 
 `field?: T` means the field may be absent. It does not permit `null`. A nullable
 value must explicitly include `null` in its union. Struct models remain open to

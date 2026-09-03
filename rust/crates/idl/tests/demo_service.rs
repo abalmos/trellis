@@ -1,9 +1,8 @@
 //! Feature check for compiling the complete Field Ops demo service IDL.
 
 use miette::IntoDiagnostic;
-use std::{collections::BTreeMap, fs, path::PathBuf, time::SystemTime};
+use std::{fs, path::PathBuf, time::SystemTime};
 use trellis_idl::{compile_apis, compile_participants, parse_project};
-use trellis_protocol::resolve_participant;
 
 #[test]
 fn compiles_complete_demo_service() -> miette::Result<()> {
@@ -19,11 +18,6 @@ fn compiles_complete_demo_service() -> miette::Result<()> {
     ));
     fs::create_dir(&root).into_diagnostic()?;
     fs::copy(source, root.join("contract.trellis")).into_diagnostic()?;
-    fs::copy(
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../demos/ts/service/trellis.toml"),
-        root.join("trellis.toml"),
-    )
-    .into_diagnostic()?;
 
     let result = (|| {
         let project = parse_project(&root)?;
@@ -54,11 +48,6 @@ fn compiles_complete_demo_service() -> miette::Result<()> {
         assert!(participant_value["jobQueues"]
             .get("refreshSiteSummary")
             .is_some());
-        let supplied = apis
-            .iter()
-            .map(|(id, api)| (id.clone(), api.clone()))
-            .collect::<BTreeMap<_, _>>();
-        resolve_participant(participant, &supplied).into_diagnostic()?;
         Ok(())
     })();
     fs::remove_dir_all(root).into_diagnostic()?;

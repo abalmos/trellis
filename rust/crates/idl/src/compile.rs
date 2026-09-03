@@ -330,7 +330,7 @@ fn participant_value(
         return Err(at(
             project,
             declaration,
-            "Gate 1 service participants implement exactly one API",
+            "participant must implement exactly one API",
         ));
     }
     let api = apis.get(&implemented.value).ok_or_else(|| {
