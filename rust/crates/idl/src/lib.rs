@@ -4,6 +4,7 @@ mod ast;
 mod compile;
 mod lexer;
 mod parser;
+pub mod project;
 
 use ast::{Project, Source};
 use miette::{IntoDiagnostic, WrapErr};
@@ -13,6 +14,70 @@ use trellis_protocol::{ApiArtifact, ParticipantArtifact};
 /// A parsed Trellis IDL project whose source model remains private.
 #[derive(Debug)]
 pub struct ParsedProject(Project);
+
+/// Canonical artifacts compiled from one Trellis project and its direct API dependencies.
+#[derive(Debug)]
+pub struct CompiledProject {
+    /// APIs authored by the root project.
+    pub apis: BTreeMap<String, ApiArtifact>,
+    /// Participants authored by the root project.
+    pub participants: Vec<ParticipantArtifact>,
+    /// Exact APIs compiled from direct local dependency projects.
+    pub referenced_apis: BTreeMap<String, ApiArtifact>,
+}
+
+/// Compile one Trellis project from IDL source and direct local API dependencies.
+///
+/// Dependency projects contribute only their own APIs; their participants and
+/// manifests are not compiled recursively.
+///
+/// # Errors
+///
+/// Returns an error for invalid source, manifests, dependency versions, registry
+/// dependencies, or protocol artifacts and participant selections.
+pub fn compile_project(root: &Path) -> miette::Result<CompiledProject> {
+    let project = parse_project(root)?;
+    let apis = compile_apis(&project)?;
+    let manifest = project::read_manifest(&root.join("trellis.toml"))?;
+    let mut referenced_apis = BTreeMap::new();
+    for (id, dependency) in manifest.apis {
+        let path = dependency.path.ok_or_else(|| {
+            miette::miette!(
+                "API '{id}' is a registry dependency; direct IDL compilation supports local path dependencies only"
+            )
+        })?;
+        let dependency_project = parse_project(&root.join(path))?;
+        let mut dependency_apis = compile_apis(&dependency_project)?;
+        let api = dependency_apis
+            .remove(&id)
+            .ok_or_else(|| miette::miette!("dependency project does not declare API '{id}'"))?;
+        let requirement = semver::VersionReq::parse(&dependency.version).into_diagnostic()?;
+        let version = semver::Version::parse(api.version()).into_diagnostic()?;
+        if !requirement.matches(&version) {
+            return Err(miette::miette!(
+                "API '{id}' release {version} does not satisfy {}",
+                dependency.version
+            ));
+        }
+        if apis.contains_key(&id) {
+            return Err(miette::miette!(
+                "API '{id}' is both authored by this project and declared as a dependency"
+            ));
+        }
+        referenced_apis.insert(id, api);
+    }
+    let available = apis
+        .iter()
+        .chain(&referenced_apis)
+        .map(|(id, api)| (id.clone(), api.clone()))
+        .collect();
+    let participants = compile_participants(&project, &available)?;
+    Ok(CompiledProject {
+        apis,
+        participants,
+        referenced_apis,
+    })
+}
 
 /// Discover and parse the IDL source in a Trellis project root.
 ///

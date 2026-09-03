@@ -392,6 +392,70 @@ fn participant_value(
         "implements": {"self": implementation},
     });
     let object = value.as_object_mut().expect("participant is an object");
+    if !participant.uses.is_empty() {
+        let mut required_uses = Map::new();
+        let mut optional_uses = Map::new();
+        for (alias, declaration) in &participant.uses {
+            let used = &declaration.value;
+            let referenced = apis.get(&used.api.value).ok_or_else(|| {
+                at(
+                    project,
+                    &used.api,
+                    format!("unknown used API '{}'", used.api.value),
+                )
+            })?;
+            let mut use_value = json!({
+                "api": referenced.id(),
+                "apiDigest": referenced.digest().into_diagnostic()?,
+            });
+            let use_object = use_value.as_object_mut().expect("API use is an object");
+            for selection in &used.selections {
+                let selection = &selection.value;
+                let section = match selection.surface.as_str() {
+                    "rpc" => "rpc",
+                    "operation" => "operations",
+                    "event" => "events",
+                    "feed" => "feeds",
+                    "state" => "state",
+                    _ => unreachable!("parser validates selection surfaces"),
+                };
+                let section_value = use_object
+                    .entry(section)
+                    .or_insert_with(|| Value::Object(Map::new()));
+                let section_object = section_value
+                    .as_object_mut()
+                    .expect("selection section is an object");
+                if selection.action == "control" {
+                    section_object
+                        .entry("control")
+                        .or_insert_with(|| Value::Object(Map::new()))
+                        .as_object_mut()
+                        .expect("control selection is an object")
+                        .entry(&selection.name)
+                        .or_insert_with(|| Value::Array(Vec::new()))
+                        .as_array_mut()
+                        .expect("signal selection is an array")
+                        .push(json!(selection.signal));
+                } else {
+                    section_object
+                        .entry(&selection.action)
+                        .or_insert_with(|| Value::Array(Vec::new()))
+                        .as_array_mut()
+                        .expect("selection is an array")
+                        .push(json!(selection.name));
+                }
+            }
+            if used.required {
+                required_uses.insert(alias.clone(), use_value);
+            } else {
+                optional_uses.insert(alias.clone(), use_value);
+            }
+        }
+        let mut uses = Map::new();
+        insert_nonempty(&mut uses, "required", required_uses);
+        insert_nonempty(&mut uses, "optional", optional_uses);
+        object.insert("uses".to_owned(), Value::Object(uses));
+    }
     if let Some(docs) = api_value.get("docs") {
         object.insert("docs".to_owned(), docs.clone());
     }

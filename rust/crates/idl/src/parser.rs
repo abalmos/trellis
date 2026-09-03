@@ -1,7 +1,7 @@
 use crate::{
     ast::{
-        Api, Binding, Constraint, ConstraintValue, Docs, Field, Participant, Project, Resource,
-        SchemaDecl, Source, Spanned, Surface, Transfer, Type,
+        Api, ApiUse, Binding, Constraint, ConstraintValue, Docs, Field, Participant, Project,
+        Resource, SchemaDecl, Selection, Source, Spanned, Surface, Transfer, Type,
     },
     lexer::{lex, Token, TokenKind},
 };
@@ -324,6 +324,7 @@ impl Parser<'_> {
             id,
             kind,
             implements: Vec::new(),
+            uses: BTreeMap::new(),
             stores: BTreeMap::new(),
             kv: BTreeMap::new(),
             jobs: BTreeMap::new(),
@@ -332,6 +333,10 @@ impl Parser<'_> {
         while !self.at(TokenKind::RBrace) {
             match self.word_text()?.as_str() {
                 "implements" => participant.implements.push(self.string_statement()?),
+                "use" => {
+                    let (alias, api_use) = self.api_use()?;
+                    insert(&mut participant.uses, alias, api_use, self.source)?;
+                }
                 "store" => {
                     let (name, resource) = self.resource()?;
                     insert(&mut participant.stores, name, resource, self.source)?;
@@ -358,6 +363,69 @@ impl Parser<'_> {
         }
         let end = self.token(TokenKind::RBrace)?.end;
         Ok(self.spanned(participant, start..end))
+    }
+
+    fn api_use(&mut self) -> miette::Result<(Spanned<String>, Spanned<ApiUse>)> {
+        let requirement = self.ident()?;
+        let required = match requirement.value.as_str() {
+            "required" => true,
+            "optional" => false,
+            _ => return Err(self.error_at(&requirement, "expected 'required' or 'optional'")),
+        };
+        let alias = self.ident()?;
+        let start = requirement.span.start;
+        let api = self.string()?;
+        self.token(TokenKind::LBrace)?;
+        let mut selections = Vec::new();
+        while !self.at(TokenKind::RBrace) {
+            let action = self.ident()?;
+            let surface = self.ident()?;
+            if !matches!(
+                (action.value.as_str(), surface.value.as_str()),
+                ("call", "rpc")
+                    | ("invoke" | "observe" | "cancel" | "control", "operation")
+                    | ("publish" | "subscribe", "event")
+                    | ("subscribe", "feed")
+                    | ("read" | "write", "state")
+            ) {
+                return Err(self.error_at(
+                    &action,
+                    format!(
+                        "unsupported participant use selection '{} {}'",
+                        action.value, surface.value
+                    ),
+                ));
+            }
+            let name = self.string()?;
+            let signal = if action.value == "control" {
+                self.word("signal")?;
+                Some(self.string()?.value)
+            } else {
+                None
+            };
+            let end = self.token(TokenKind::Semi)?.end;
+            selections.push(self.spanned(
+                Selection {
+                    action: action.value,
+                    surface: surface.value,
+                    name: name.value,
+                    signal,
+                },
+                action.span.start..end,
+            ));
+        }
+        let end = self.token(TokenKind::RBrace)?.end;
+        Ok((
+            alias,
+            self.spanned(
+                ApiUse {
+                    required,
+                    api,
+                    selections,
+                },
+                start..end,
+            ),
+        ))
     }
 
     fn resource(&mut self) -> miette::Result<(Spanned<String>, Spanned<Resource>)> {

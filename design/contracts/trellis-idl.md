@@ -58,6 +58,11 @@ api "demo.service@v1" {
 participant "demo.service@v1" service {
     implements "demo.service@v1";
 
+    use required inventory "inventory@v1" {
+        call rpc "Sites.Get";
+        subscribe event "Sites.Changed";
+    }
+
     kv siteSummaries {
         purpose "Latest site summaries.";
         schema SiteSummary;
@@ -70,6 +75,31 @@ participant "demo.service@v1" service {
 The complete initial service syntax additionally supports operation progress and
 cancellation, send and receive transfers, events, feeds, object stores, job
 queues, documentation blocks, enums, string literals, and named unions.
+
+## Project Dependencies
+
+Local API dependencies are declared in `trellis.toml`. Their `path` is relative
+to the current project and names another Trellis project root, not a source file
+or generated artifact. Version requirements belong in the manifest rather than
+the IDL:
+
+```toml
+[apis."inventory@v1"]
+version = "^1.0"
+path = "../inventory"
+```
+
+A participant uses a dependency through a local alias and selects concrete
+symbolic actions with `use required` or `use optional`. Supported selections are
+RPC call; operation invoke, observe, cancel, and signal control; event publish
+and subscribe; feed subscribe; and state read and write. The compiler pins the
+selected API's exact digest and delegates selection validation and grant
+derivation to `trellis-protocol`.
+
+Dependency projects contribute only the requested API compiled from their own
+IDL source. Their participants and manifests are not compiled recursively.
+Therefore participants in sibling projects may depend on one another without a
+compilation order or cycle handling.
 
 ## Types
 
@@ -84,6 +114,11 @@ value must explicitly include `null` in its union. Struct models remain open to
 unknown future fields. A pure `map<T>` lowers to an object with schema-valued
 `additionalProperties`, because map keys are payload rather than future struct
 fields.
+
+These are semantic Trellis types. JSON Schema is the current lowering carried by
+`trellis.api.v1`, not the definition of the IDL type system. Other protocol
+schema representations may exist in the future without becoming raw schema
+authoring syntax or changing the Trellis source model.
 
 ## Protocol Boundary
 

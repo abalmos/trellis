@@ -2,7 +2,7 @@
 
 use miette::IntoDiagnostic;
 use std::{fs, path::PathBuf, time::SystemTime};
-use trellis_idl::{compile_apis, compile_participants, parse_project};
+use trellis_idl::compile_project;
 
 #[test]
 fn compiles_complete_demo_service() -> miette::Result<()> {
@@ -18,12 +18,15 @@ fn compiles_complete_demo_service() -> miette::Result<()> {
     ));
     fs::create_dir(&root).into_diagnostic()?;
     fs::copy(source, root.join("contract.trellis")).into_diagnostic()?;
+    fs::copy(
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../demos/ts/service/trellis.toml"),
+        root.join("trellis.toml"),
+    )
+    .into_diagnostic()?;
 
     let result = (|| {
-        let project = parse_project(&root)?;
-        assert_eq!(project.source_paths().count(), 1);
-        let apis = compile_apis(&project)?;
-        let api = &apis["demo.service@v1"];
+        let project = compile_project(&root)?;
+        let api = &project.apis["demo.service@v1"];
         let api_value = api.normalized_value().into_diagnostic()?;
         assert_eq!(api.version(), "1.0.0");
         assert!(api_value["rpc"].get("Sites.List").is_some());
@@ -34,9 +37,8 @@ fn compiles_complete_demo_service() -> miette::Result<()> {
         assert!(api_value["events"].get("Audit.Recorded").is_some());
         assert!(api_value["feeds"].get("Audit.Feed").is_some());
 
-        let participants = compile_participants(&project, &apis)?;
-        assert_eq!(participants.len(), 1);
-        let participant = &participants[0];
+        assert_eq!(project.participants.len(), 1);
+        let participant = &project.participants[0];
         let participant_value = participant.normalized_value().into_diagnostic()?;
         assert_eq!(participant.id(), "demo.service@v1");
         assert!(participant_value["resources"]["store"]

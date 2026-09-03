@@ -31,7 +31,7 @@ pub async fn add(format: OutputFormat, args: &AddArgs) -> Result<()> {
     let previous_lock = read_optional(&root.join("trellis.lock"))?;
     let mut manifest = read_manifest(&manifest_path)?;
     let source_path = Path::new(&args.source);
-    let (id, release, path, registry) = if root.join(source_path).is_file() {
+    let (id, release, path, registry) = if root.join(source_path).is_dir() {
         if source_path.is_absolute() {
             return Err(miette!(
                 "API paths in trellis.toml must be relative to the project root"
@@ -324,25 +324,39 @@ fn read_path_api(
     expected_id: &str,
     dependency_path: &str,
 ) -> Result<(String, Version, String)> {
-    let path = root.join(dependency_path);
-    let value: serde_json::Value = serde_json::from_slice(
-        &fs::read(&path)
-            .into_diagnostic()
-            .wrap_err_with(|| format!("failed to read API artifact {}", path.display()))?,
-    )
-    .into_diagnostic()
-    .wrap_err_with(|| format!("failed to parse API artifact {}", path.display()))?;
-    let api = trellis_protocol::parse_api(&value).map_err(|error| miette!(error.to_string()))?;
-    if !expected_id.is_empty() && api.id() != expected_id {
-        return Err(miette!(
-            "manifest API '{expected_id}' but path contains '{}'",
-            api.id()
-        ));
-    }
+    let api = compile_path_api(root, expected_id, dependency_path)?;
     let version = Version::parse(api.version())
         .map_err(|error| miette!("invalid release version for '{}': {error}", api.id()))?;
     let digest = api.digest().map_err(|error| miette!(error.to_string()))?;
     Ok((api.id().to_owned(), version, digest))
+}
+
+fn compile_path_api(
+    root: &Path,
+    expected_id: &str,
+    dependency_path: &str,
+) -> Result<trellis_protocol::ApiArtifact> {
+    let path = root.join(dependency_path);
+    let project = trellis_idl::parse_project(&path)
+        .wrap_err_with(|| format!("failed to parse API project {}", path.display()))?;
+    let mut apis = trellis_idl::compile_apis(&project)?;
+    let api = if expected_id.is_empty() {
+        if apis.len() != 1 {
+            return Err(miette!(
+                "API project {} must declare exactly one API when added by path",
+                path.display()
+            ));
+        }
+        apis.pop_first().expect("one API was checked").1
+    } else {
+        apis.remove(expected_id).ok_or_else(|| {
+            miette!(
+                "manifest API '{expected_id}' is not declared by project {}",
+                path.display()
+            )
+        })?
+    };
+    Ok(api)
 }
 
 async fn resolve_lock(root: &Path, manifest: &ProjectManifest) -> Result<ProjectLock> {
@@ -647,7 +661,17 @@ async fn stage_dependencies(
         let ts_out = has_ts.then(|| staged.join("generated/ts/packages").join(stem));
         let rust_out = has_rust.then(|| staged.join("generated/rust/packages").join(&package_stem));
         let source = if let Some(path) = &locked.path {
-            root.join(path)
+            let api = compile_path_api(root, &locked.id, path)?;
+            let source = staged.join("local").join(format!("{}.json", locked.id));
+            fs::create_dir_all(source.parent().expect("local source has a parent"))
+                .into_diagnostic()?;
+            fs::write(
+                &source,
+                api.canonical_json()
+                    .map_err(|error| miette!(error.to_string()))?,
+            )
+            .into_diagnostic()?;
+            source
         } else {
             let registry = locked
                 .registry
@@ -896,6 +920,26 @@ mod tests {
         Router,
     };
     use registry_testkit::{RegistryConfig as TestRegistryConfig, RegistryServer};
+
+    fn write_test_api(path: &Path, id: &str, version: &str, extra_field: bool) {
+        fs::create_dir_all(path).unwrap();
+        fs::write(
+            path.join("contract.trellis"),
+            format!(
+                r#"api "{id}" {{
+    version "{version}";
+    display_name "Fixture API";
+    description "Fixture API.";
+    model Empty {{}}
+    model Session {{ id: string; {} }}
+    rpc "Auth.Sessions.Me" {{ version "v1"; input Empty; output Session; }}
+}}
+"#,
+                if extra_field { "extra?: string;" } else { "" }
+            ),
+        )
+        .unwrap();
+    }
 
     #[derive(Clone)]
     struct PagingRegistry {
@@ -1255,8 +1299,8 @@ mod tests {
     #[tokio::test]
     async fn install_is_exact_and_preserves_previous_materialization_on_drift() {
         let root = tempfile::tempdir().unwrap();
-        let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("../runtime/trellis.api.json");
-        fs::copy(source, root.path().join("auth.json")).unwrap();
+        let api_path = root.path().join("auth");
+        write_test_api(&api_path, "trellis.auth@v1", "1.0.0", false);
         let manifest = ProjectManifest {
             format: 1,
             default_registry: None,
@@ -1265,7 +1309,7 @@ mod tests {
                 "trellis.auth@v1".to_owned(),
                 ApiDependency {
                     version: "^1.0".to_owned(),
-                    path: Some("auth.json".to_owned()),
+                    path: Some("auth".to_owned()),
                     registry: None,
                 },
             )]),
@@ -1277,28 +1321,14 @@ mod tests {
             .join(".trellis/apis/trellis.auth@v1/1.0.0/trellis.api.json");
         let previous = fs::read(&installed).unwrap();
 
-        let mut changed: serde_json::Value =
-            serde_json::from_slice(&fs::read(root.path().join("auth.json")).unwrap()).unwrap();
-        changed["version"] = serde_json::json!("1.0.1");
-        fs::write(
-            root.path().join("auth.json"),
-            serde_json::to_vec_pretty(&changed).unwrap(),
-        )
-        .unwrap();
+        write_test_api(&api_path, "trellis.auth@v1", "1.0.1", false);
         let error = install_root(root.path(), &manifest, &lock)
             .await
             .unwrap_err();
         assert!(error.to_string().contains("path now contains 1.0.1"));
         assert_eq!(fs::read(&installed).unwrap(), previous);
 
-        changed["version"] = serde_json::json!("1.0.0");
-        changed["schemas"]["AuthSessionsMeRequest"]["properties"]["extra"] =
-            serde_json::json!({ "type": "string" });
-        fs::write(
-            root.path().join("auth.json"),
-            serde_json::to_vec_pretty(&changed).unwrap(),
-        )
-        .unwrap();
+        write_test_api(&api_path, "trellis.auth@v1", "1.0.0", true);
         let error = install_root(root.path(), &manifest, &lock)
             .await
             .unwrap_err();
@@ -1314,20 +1344,13 @@ mod tests {
             "# project dependencies\nformat = 1\n\n[apis]\n# keep this explanation\n",
         )
         .unwrap();
-        let api_path = root.path().join("auth.json");
-        let mut api = serde_json::json!({
-            "format": "trellis.api.v1",
-            "id": "acme.auth@v1",
-            "version": "1.4.2",
-            "displayName": "Auth",
-            "description": "Fixture API"
-        });
-        fs::write(&api_path, serde_json::to_vec_pretty(&api).unwrap()).unwrap();
+        let api_path = root.path().join("auth");
+        write_test_api(&api_path, "acme.auth@v1", "1.4.2", false);
 
         add(
             OutputFormat::Text,
             &AddArgs {
-                source: "auth.json".to_owned(),
+                source: "auth".to_owned(),
                 version: None,
                 registry: None,
                 project: ProjectRootArgs {
@@ -1345,8 +1368,7 @@ mod tests {
         let initial_lock = crate::project::read_lock(&root.path().join("trellis.lock")).unwrap();
         assert_eq!(initial_lock.api[0].version, "1.4.2");
 
-        api["version"] = serde_json::json!("1.4.3");
-        fs::write(&api_path, serde_json::to_vec_pretty(&api).unwrap()).unwrap();
+        write_test_api(&api_path, "acme.auth@v1", "1.4.3", false);
         let project = ProjectRootArgs {
             root: root.path().to_path_buf(),
         };
@@ -1366,8 +1388,7 @@ mod tests {
             .join(".trellis/apis/acme.auth@v1/1.4.2")
             .exists());
 
-        api["version"] = serde_json::json!("2.0.0");
-        fs::write(&api_path, serde_json::to_vec_pretty(&api).unwrap()).unwrap();
+        write_test_api(&api_path, "acme.auth@v1", "2.0.0", false);
         assert!(update(OutputFormat::Text, &project)
             .await
             .unwrap_err()
@@ -1401,7 +1422,7 @@ mod tests {
             .api
             .is_empty());
         assert!(!root.path().join(".trellis/apis/acme.auth@v1").exists());
-        assert!(api_path.is_file());
+        assert!(api_path.is_dir());
 
         let empty_lock = crate::project::read_lock(&root.path().join("trellis.lock")).unwrap();
         fs::remove_file(root.path().join("trellis.lock")).unwrap();
@@ -1422,7 +1443,7 @@ mod tests {
             "acme.auth@v1".to_owned(),
             ApiDependency {
                 version: "^1.4".to_owned(),
-                path: Some("auth.json".to_owned()),
+                path: Some("auth".to_owned()),
                 registry: None,
             },
         );
@@ -1453,23 +1474,17 @@ mod tests {
             },
         )
         .unwrap();
-        fs::write(
-            root.path().join("orders.json"),
-            serde_json::to_vec_pretty(&serde_json::json!({
-                "format": "trellis.api.v1",
-                "id": "acme.orders@v1",
-                "version": "1.5.0-rc.1",
-                "displayName": "Orders",
-                "description": "Prerelease fixture API"
-            }))
-            .unwrap(),
-        )
-        .unwrap();
+        write_test_api(
+            &root.path().join("orders"),
+            "acme.orders@v1",
+            "1.5.0-rc.1",
+            false,
+        );
 
         add(
             OutputFormat::Text,
             &AddArgs {
-                source: "orders.json".to_owned(),
+                source: "orders".to_owned(),
                 version: Some("^1.5.0-rc.1".to_owned()),
                 registry: None,
                 project: ProjectRootArgs {
@@ -1503,33 +1518,8 @@ mod tests {
             .canonicalize()
             .unwrap();
         let root = tempfile::tempdir().unwrap();
-        let mut api = serde_json::json!({
-            "format": "trellis.api.v1",
-            "id": "acme.auth@v1",
-            "version": "1.0.0",
-            "displayName": "Auth",
-            "description": "Fixture API",
-            "schemas": {
-                "Empty": { "type": "object", "properties": {}, "required": [] },
-                "Session": {
-                    "type": "object",
-                    "properties": { "id": { "type": "string" } },
-                    "required": ["id"]
-                }
-            },
-            "rpc": {
-                "Auth.Sessions.Me": {
-                    "version": "v1",
-                    "input": { "schema": "Empty" },
-                    "output": { "schema": "Session" }
-                }
-            }
-        });
-        fs::write(
-            root.path().join("auth.json"),
-            serde_json::to_vec_pretty(&api).unwrap(),
-        )
-        .unwrap();
+        let api_path = root.path().join("auth");
+        write_test_api(&api_path, "acme.auth@v1", "1.0.0", false);
         fs::write(
             root.path().join("deno.json"),
             format!(
@@ -1576,7 +1566,7 @@ export default defineAppContract(() => ({
                 "acme.auth@v1".to_owned(),
                 ApiDependency {
                     version: "^1.0".to_owned(),
-                    path: Some("auth.json".to_owned()),
+                    path: Some("auth".to_owned()),
                     registry: None,
                 },
             )]),
@@ -1636,12 +1626,7 @@ export default defineAppContract(() => ({
         assert!(participant_path.is_file());
         assert!(owned_sdk_path.is_dir());
         let previous_participant = fs::read(&participant_path).unwrap();
-        api["version"] = serde_json::json!("1.0.1");
-        fs::write(
-            root.path().join("auth.json"),
-            serde_json::to_vec_pretty(&api).unwrap(),
-        )
-        .unwrap();
+        write_test_api(&api_path, "acme.auth@v1", "1.0.1", false);
         let next_lock = resolve_lock(root.path(), &manifest).await.unwrap();
         let source = fs::read_to_string(root.path().join("contract.ts")).unwrap();
         fs::write(
@@ -1663,12 +1648,7 @@ export default defineAppContract(() => ({
         assert_eq!(fs::read(&participant_path).unwrap(), previous_participant);
 
         fs::remove_file(root.path().join("contract.ts")).unwrap();
-        api["version"] = serde_json::json!("1.0.0");
-        fs::write(
-            root.path().join("auth.json"),
-            serde_json::to_vec_pretty(&api).unwrap(),
-        )
-        .unwrap();
+        write_test_api(&api_path, "acme.auth@v1", "1.0.0", false);
         install_root(root.path(), &manifest, &lock).await.unwrap();
         assert!(aggregate_export.is_file());
         assert!(!owned_api_path.exists());
@@ -1683,33 +1663,7 @@ export default defineAppContract(() => ({
             .canonicalize()
             .unwrap();
         let root = tempfile::tempdir().unwrap();
-        let api = serde_json::json!({
-            "format": "trellis.api.v1",
-            "id": "trellis.jobs@v1",
-            "version": "1.0.0",
-            "displayName": "Auth",
-            "description": "Fixture API",
-            "schemas": {
-                "Empty": { "type": "object", "properties": {}, "required": [] },
-                "Session": {
-                    "type": "object",
-                    "properties": { "id": { "type": "string" } },
-                    "required": ["id"]
-                }
-            },
-            "rpc": {
-                "Auth.Sessions.Me": {
-                    "version": "v1",
-                    "input": { "schema": "Empty" },
-                    "output": { "schema": "Session" }
-                }
-            }
-        });
-        fs::write(
-            root.path().join("auth.json"),
-            serde_json::to_vec_pretty(&api).unwrap(),
-        )
-        .unwrap();
+        write_test_api(&root.path().join("auth"), "trellis.jobs@v1", "1.0.0", false);
         fs::create_dir(root.path().join("contracts")).unwrap();
         fs::create_dir(root.path().join("src")).unwrap();
         fs::write(root.path().join("src/lib.rs"), "").unwrap();
@@ -1754,7 +1708,7 @@ pub fn contract_artifacts() -> Result<ContractArtifacts, ContractsError> {
                 "trellis.jobs@v1".to_owned(),
                 ApiDependency {
                     version: "^1.0".to_owned(),
-                    path: Some("auth.json".to_owned()),
+                    path: Some("auth".to_owned()),
                     registry: None,
                 },
             )]),

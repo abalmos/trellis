@@ -110,10 +110,26 @@ pub(crate) struct Participant {
     pub id: String,
     pub kind: String,
     pub implements: Vec<Spanned<String>>,
+    pub uses: BTreeMap<String, Spanned<ApiUse>>,
     pub stores: BTreeMap<String, Spanned<Resource>>,
     pub kv: BTreeMap<String, Spanned<Resource>>,
     pub jobs: BTreeMap<String, Spanned<Resource>>,
     pub bindings: BTreeMap<String, Spanned<Binding>>,
+}
+
+#[derive(Debug)]
+pub(crate) struct ApiUse {
+    pub required: bool,
+    pub api: Spanned<String>,
+    pub selections: Vec<Spanned<Selection>>,
+}
+
+#[derive(Debug)]
+pub(crate) struct Selection {
+    pub action: String,
+    pub surface: String,
+    pub name: String,
+    pub signal: Option<String>,
 }
 
 #[derive(Debug, Default)]

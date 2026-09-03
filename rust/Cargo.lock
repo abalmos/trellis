@@ -4980,6 +4980,7 @@ dependencies = [
  "trellis-codegen-ts",
  "trellis-contracts",
  "trellis-generation",
+ "trellis-idl",
  "trellis-local-bootstrap",
  "trellis-protocol",
  "trellis-rs",
@@ -5058,10 +5059,13 @@ dependencies = [
 name = "trellis-idl"
 version = "0.12.0"
 dependencies = [
+ "base64 0.22.1",
  "logos",
  "miette",
  "semver",
+ "serde",
  "serde_json",
+ "toml",
  "trellis-protocol",
 ]
 
