@@ -101,6 +101,24 @@ IDL source. Their participants and manifests are not compiled recursively.
 Therefore participants in sibling projects may depend on one another without a
 compilation order or cycle handling.
 
+Registry dependencies are acquired by the package manager. IDL compilation reads
+the exact version and digest from `trellis.lock` and validates the installed
+canonical artifact under `.trellis/apis`; it does not perform network
+resolution. Local path dependencies continue to compile directly from source.
+
+## Generation
+
+`trellis generate` compiles the project's declarative IDL, writes canonical API
+and participant artifacts, and invokes the existing generators for the Rust and
+TypeScript project markers present at the project root.
+
+`trellis generate --watch` (or `-w`) performs the same full generation once,
+then watches the project and every direct local dependency project recursively.
+Changes to `.trellis` source, `trellis.toml`, or `trellis.lock` trigger another
+full compilation and generation. Source errors are reported without replacing
+the previous successful artifacts, and the watcher remains active so a later
+valid edit can regenerate them.
+
 ## Types
 
 Initial scalar types are `string`, `bool`, `int`, `uint`, and `number`. `int`

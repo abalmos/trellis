@@ -84,6 +84,7 @@ jsonptr = { version = "0.7.1", default-features = false }
 jsonschema = { version = "0.47.0", default-features = false }
 miette = { version = "7.6.0", features = ["fancy"] }
 logos = "0.16.1"
+notify-debouncer-mini = "0.7"
 owo-colors = "4.3.0"
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter", "fmt", "json"] }

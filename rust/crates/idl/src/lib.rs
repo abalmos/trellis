@@ -39,18 +39,76 @@ pub fn compile_project(root: &Path) -> miette::Result<CompiledProject> {
     let project = parse_project(root)?;
     let apis = compile_apis(&project)?;
     let manifest = project::read_manifest(&root.join("trellis.toml"))?;
+    let registry_lock = if manifest
+        .apis
+        .values()
+        .any(|dependency| dependency.registry.is_some())
+    {
+        let lock_path = root.join("trellis.lock");
+        if !lock_path.is_file() {
+            return Err(miette::miette!(
+                "trellis.lock is missing; run `trellis update`"
+            ));
+        }
+        let lock = project::read_lock(&lock_path)?;
+        if lock.manifest_digest != manifest.digest()? {
+            return Err(miette::miette!(
+                "trellis.toml changed since trellis.lock; run `trellis update`"
+            ));
+        }
+        Some(lock)
+    } else {
+        None
+    };
     let mut referenced_apis = BTreeMap::new();
     for (id, dependency) in manifest.apis {
-        let path = dependency.path.ok_or_else(|| {
-            miette::miette!(
-                "API '{id}' is a registry dependency; direct IDL compilation supports local path dependencies only"
-            )
-        })?;
-        let dependency_project = parse_project(&root.join(path))?;
-        let mut dependency_apis = compile_apis(&dependency_project)?;
-        let api = dependency_apis
-            .remove(&id)
-            .ok_or_else(|| miette::miette!("dependency project does not declare API '{id}'"))?;
+        let api = if let Some(path) = dependency.path {
+            let dependency_project = parse_project(&root.join(path))?;
+            let mut dependency_apis = compile_apis(&dependency_project)?;
+            dependency_apis
+                .remove(&id)
+                .ok_or_else(|| miette::miette!("dependency project does not declare API '{id}'"))?
+        } else {
+            let registry = dependency
+                .registry
+                .as_deref()
+                .expect("validated dependency");
+            let locked = registry_lock
+                .as_ref()
+                .and_then(|lock| lock.api.iter().find(|api| api.id == id))
+                .ok_or_else(|| {
+                    miette::miette!("API '{id}' is absent from trellis.lock; run `trellis update`")
+                })?;
+            if locked.registry.as_deref() != Some(registry) || locked.path.is_some() {
+                return Err(miette::miette!(
+                    "API '{id}' source differs from trellis.lock; run `trellis update`"
+                ));
+            }
+            let installed = root
+                .join(".trellis/apis")
+                .join(&id)
+                .join(&locked.version)
+                .join("trellis.api.json");
+            if !installed.is_file() {
+                return Err(miette::miette!(
+                    "installed API '{id}' is missing; run `trellis install`"
+                ));
+            }
+            let value = serde_json::from_slice(&std::fs::read(&installed).into_diagnostic()?)
+                .into_diagnostic()
+                .wrap_err_with(|| format!("failed to parse {}", installed.display()))?;
+            let api = trellis_protocol::parse_api(&value)
+                .map_err(|error| miette::miette!(error.to_string()))?;
+            let digest = api
+                .digest()
+                .map_err(|error| miette::miette!(error.to_string()))?;
+            if api.id() != id || api.version() != locked.version || digest != locked.api_digest {
+                return Err(miette::miette!(
+                    "installed API '{id}' does not match trellis.lock; run `trellis install`"
+                ));
+            }
+            api
+        };
         let requirement = semver::VersionReq::parse(&dependency.version).into_diagnostic()?;
         let version = semver::Version::parse(api.version()).into_diagnostic()?;
         if !requirement.matches(&version) {

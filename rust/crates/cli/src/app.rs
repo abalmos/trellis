@@ -42,6 +42,7 @@ pub async fn run() -> miette::Result<()> {
         TopLevelCommand::Rm(args) => package::remove(format, &args).await?,
         TopLevelCommand::Update(args) => package::update(format, &args).await?,
         TopLevelCommand::Install(args) => package::install(format, &args).await?,
+        TopLevelCommand::Generate(args) => crate::generate::run(&args)?,
         TopLevelCommand::Publish(args) => package::publish(format, &args).await?,
         TopLevelCommand::Login(args) => auth::login(format, &args).await?,
         TopLevelCommand::Logout => auth::logout(format).await?,

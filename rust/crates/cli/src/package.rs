@@ -444,16 +444,8 @@ async fn install_root(
         }
     }
 
-    let discovered = trellis_generation::discovery::discover_contracts(root)?;
-    let has_ts = root.join("deno.json").is_file()
-        || root.join("deno.jsonc").is_file()
-        || discovered
-            .iter()
-            .any(|item| item.language == trellis_generation::discovery::SourceLanguage::TypeScript);
-    let has_rust = root.join("Cargo.toml").is_file()
-        || discovered
-            .iter()
-            .any(|item| item.language == trellis_generation::discovery::SourceLanguage::Rust);
+    let has_ts = root.join("deno.json").is_file() || root.join("deno.jsonc").is_file();
+    let has_rust = root.join("Cargo.toml").is_file();
     if has_ts && !lock.api.is_empty() {
         let config = [root.join("deno.json"), root.join("deno.jsonc")]
             .into_iter()
@@ -560,14 +552,7 @@ async fn install_root(
                         })
                 })));
     if dependencies_fresh {
-        let generated = trellis_generation::project::generate_project(
-            root,
-            &trellis_root,
-            lock.api
-                .iter()
-                .map(|api| (api.id.clone(), api.api_digest.clone()))
-                .collect(),
-        )?;
+        let generated = crate::generate::generate_once(root)?;
         return Ok(PackageResult {
             installed_apis: lock.api.len(),
             changed_dependencies: 0,
@@ -595,14 +580,7 @@ async fn install_root(
             &marker,
         )
         .await?;
-        let generated = trellis_generation::project::generate_project(
-            root,
-            &trellis_root,
-            lock.api
-                .iter()
-                .map(|api| (api.id.clone(), api.api_digest.clone()))
-                .collect(),
-        )?;
+        let generated = crate::generate::generate_once(root)?;
         Ok(PackageResult {
             installed_apis: lock.api.len(),
             changed_dependencies,

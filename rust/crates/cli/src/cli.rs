@@ -47,6 +47,8 @@ pub enum TopLevelCommand {
     Update(ProjectRootArgs),
     /// Recreate local generated artifacts from the exact lock.
     Install(ProjectRootArgs),
+    /// Generate project artifacts from Trellis IDL.
+    Generate(GenerateArgs),
     /// Publish every project-owned canonical API to OCI.
     Publish(PublishArgs),
     /// Start a detached portal login against a Trellis auth service.
@@ -89,9 +91,19 @@ pub struct ProjectRootArgs {
 }
 
 #[derive(Debug, clap::Args)]
-/// Add one local canonical API artifact or remote API ID.
+/// Generate project artifacts once or whenever IDL sources change.
+pub struct GenerateArgs {
+    #[arg(short = 'w', long)]
+    /// Watch the project and direct local dependencies for source changes.
+    pub watch: bool,
+    #[command(flatten)]
+    pub project: ProjectRootArgs,
+}
+
+#[derive(Debug, clap::Args)]
+/// Add one local Trellis project or remote API ID.
 pub struct AddArgs {
-    /// Relative artifact path or stable API ID such as `acme.orders@v1`.
+    /// Relative Trellis project path or stable API ID such as `acme.orders@v1`.
     pub source: String,
     #[arg(long)]
     /// Semantic Version requirement; defaults to a caret of the exact release.
