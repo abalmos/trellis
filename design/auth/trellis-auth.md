@@ -239,24 +239,29 @@ the standard authority proposal, and bind calls the shared session constructor.
 The server-owned consent proposal is part of the immutable browser-flow
 transcript and cannot change during a state transition.
 
-The built-in portal is compiled reproducibly from `ts/portals/login` and
-embedded in the Rust binary. A development-only `TRELLIS_BUILTIN_PORTAL_DIR`
-override may serve local assets.
+The built-in Portal and Console are one SvelteKit application under `web/`, with
+distinct route groups and participant contracts under `web/contracts/`. Its
+reproducible static artifact is embedded in the Rust binary. The shared web
+source and independent Portal or Console overrides may instead select a static
+directory or reverse-proxied HTTP source.
 
 Trellis records one durable bootstrap-administrator principal. Before that
 principal exists, startup creates one single-use `admin_account` flow; ordinary
 restarts reuse its unexpired pending flow without rotating or reprinting the
 secret. Local-password and configured OIDC completion create the principal,
-identity, and exact built-in administration participant authority in one
-transaction. That canonical authority is permanent and cannot be revoked or
-downgraded; additional administrators remain independently manageable.
+identity, and exact built-in CLI participant authority in one transaction. That
+initial authority is complete for the current CLI artifact. It then follows the
+ordinary identity-authority lifecycle and may be changed, expired, rejected, or
+revoked through normal authority operations. The durable bootstrap principal,
+not its CLI authority, remains the stable recovery target.
 
-`trellis server ... --reset-admin` atomically revokes any previous pending
+`trellis-server ... --reset-admin` atomically revokes any previous pending
 administrator-account flow and emits a new one-time URL. Before initial setup it
 creates the bootstrap administrator. Afterwards it edits the same principal's
-local username and password, restores its canonical authority, and revokes its
-existing sessions and authorization contexts. It never selects among accounts
-that later receive administrative authority.
+local username and password, restores complete accepted authority for the exact
+current CLI artifact and needs digest, and revokes its existing sessions and
+authorization contexts. It never selects among accounts that later receive
+administrative authority.
 
 ## NATS Auth Callout
 

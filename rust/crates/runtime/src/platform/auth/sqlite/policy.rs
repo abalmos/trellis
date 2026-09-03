@@ -10,7 +10,98 @@ use super::common::{decode_json, encode_json, map_write_error, sql_error};
 use super::outbox::{insert_sql_idempotency_and_actions, sqlite_idempotency_replay};
 use super::SqliteAuthorizationStore;
 
+pub(crate) const ADMIN_CAPABILITY_GROUP_CAPABILITIES: &[&str] = &[
+    "trellis.auth::admin",
+    "trellis.auth::authorities.mutate",
+    "trellis.auth::authorities.read",
+    "trellis.auth::capabilities.delegate",
+    "trellis.auth::capabilities.read",
+    "trellis.auth::connections.kick",
+    "trellis.auth::connections.read",
+    "trellis.auth::deployments.mutate",
+    "trellis.auth::deployments.read",
+    "trellis.auth::devices.mutate",
+    "trellis.auth::devices.read",
+    "trellis.auth::devices.review",
+    "trellis.auth::portals.mutate",
+    "trellis.auth::portals.read",
+    "trellis.auth::services.mutate",
+    "trellis.auth::services.read",
+    "trellis.auth::sessions.read",
+    "trellis.auth::sessions.revoke",
+    "trellis.auth::users.mutate",
+    "trellis.auth::users.read",
+];
+
 impl SqliteAuthorizationStore {
+    pub(crate) async fn ensure_admin_capability_group(
+        &self,
+        now: i64,
+    ) -> Result<(), AuthorizationStateError> {
+        let capabilities = ADMIN_CAPABILITY_GROUP_CAPABILITIES
+            .iter()
+            .map(|capability| (*capability).to_owned())
+            .collect();
+        self.run(move |connection| {
+            let transaction = connection.transaction().map_err(sql_error)?;
+            let current = load_capability_group(&transaction, "admin")?;
+            let group = CapabilityGroupRecord {
+                group_key: "admin".to_owned(),
+                display_name: "Administrator".to_owned(),
+                description:
+                    "Full authority required to administer Trellis accounts and capabilities."
+                        .to_owned(),
+                capabilities,
+                included_groups: Vec::new(),
+                created_at: current.as_ref().map_or(now, |group| group.created_at),
+                updated_at: now,
+                version: 1,
+            };
+            if current.as_ref().is_some_and(|current| {
+                current.version == 1
+                    && current.display_name == group.display_name
+                    && current.description == group.description
+                    && current.capabilities == group.capabilities
+                    && current.included_groups == group.included_groups
+            }) {
+                return Ok(());
+            }
+            let mut groups = load_capability_groups(&transaction)?
+                .into_iter()
+                .map(|record| (record.group_key.clone(), record))
+                .collect::<BTreeMap<_, _>>();
+            groups.insert(group.group_key.clone(), group.clone());
+            validate_capability_groups(&groups)?;
+            transaction
+                .execute(
+                    "INSERT INTO auth_capability_groups (
+                         group_key, display_name, description, capabilities_json,
+                         included_groups_json, created_at, updated_at, version
+                     ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+                     ON CONFLICT(group_key) DO UPDATE SET
+                         display_name = excluded.display_name,
+                         description = excluded.description,
+                         capabilities_json = excluded.capabilities_json,
+                         included_groups_json = excluded.included_groups_json,
+                         updated_at = excluded.updated_at,
+                         version = excluded.version",
+                    params![
+                        group.group_key,
+                        group.display_name,
+                        group.description,
+                        encode_json(&group.capabilities)?,
+                        encode_json(&group.included_groups)?,
+                        group.created_at,
+                        group.updated_at,
+                        group.version,
+                    ],
+                )
+                .map_err(map_write_error)?;
+            transaction.commit().map_err(sql_error)
+        })
+        .await
+    }
+
     pub(crate) async fn list_capability_groups(
         &self,
     ) -> Result<Vec<CapabilityGroupRecord>, AuthorizationStateError> {
@@ -33,6 +124,11 @@ impl SqliteAuthorizationStore {
         expected_version: Option<u64>,
         mut idempotency: IdempotencyResultRecord,
     ) -> Result<IdempotentOutcome<CapabilityGroupRecord>, AuthorizationStateError> {
+        if group.group_key == "admin" {
+            return Err(AuthorizationStateError::InvalidRecord(
+                "the built-in admin capability group is read-only".to_owned(),
+            ));
+        }
         self.run(move |connection| {
             let transaction = connection.transaction().map_err(sql_error)?;
             if let Some(result) = sqlite_idempotency_replay(&transaction, &idempotency)? {
@@ -91,6 +187,11 @@ impl SqliteAuthorizationStore {
         expected_version: u64,
         mut idempotency: IdempotencyResultRecord,
     ) -> Result<IdempotentOutcome<bool>, AuthorizationStateError> {
+        if group_key == "admin" {
+            return Err(AuthorizationStateError::InvalidRecord(
+                "the built-in admin capability group is read-only".to_owned(),
+            ));
+        }
         let group_key = group_key.to_owned();
         self.run(move |connection| {
             let transaction = connection.transaction().map_err(sql_error)?;
@@ -569,6 +670,70 @@ mod tests {
             .delete_capability_group("base", 1, idempotency("base-delete-referenced"))
             .await
             .is_err());
+    }
+
+    #[tokio::test]
+    async fn admin_group_reconciles_to_platform_definition() {
+        let store = SqliteAuthorizationStore::open_in_memory().unwrap();
+        store.ensure_admin_capability_group(1).await.unwrap();
+        let initial = store.get_capability_group("admin").await.unwrap().unwrap();
+        assert_eq!(initial.version, 1);
+        assert_eq!(
+            initial.capabilities,
+            ADMIN_CAPABILITY_GROUP_CAPABILITIES
+                .iter()
+                .map(|capability| (*capability).to_owned())
+                .collect::<Vec<_>>()
+        );
+
+        store.ensure_admin_capability_group(2).await.unwrap();
+        assert_eq!(
+            store
+                .get_capability_group("admin")
+                .await
+                .unwrap()
+                .unwrap()
+                .version,
+            1,
+            "no-op reconciliation must preserve version 1"
+        );
+
+        store
+            .run(|connection| {
+                connection
+                    .execute(
+                        "UPDATE auth_capability_groups
+                         SET display_name = 'Changed', capabilities_json = '[\"custom::admin\"]',
+                             version = 9007199254740990
+                         WHERE group_key = 'admin'",
+                        [],
+                    )
+                    .map_err(map_write_error)?;
+                Ok(())
+            })
+            .await
+            .unwrap();
+        store.ensure_admin_capability_group(3).await.unwrap();
+
+        let repaired = store.get_capability_group("admin").await.unwrap().unwrap();
+        assert_eq!(repaired.display_name, "Administrator");
+        assert_eq!(repaired.capabilities, initial.capabilities);
+        assert_eq!(
+            repaired.version, 1,
+            "stale development projection must be replaced at version 1"
+        );
+
+        store.ensure_admin_capability_group(4).await.unwrap();
+        assert_eq!(
+            store
+                .get_capability_group("admin")
+                .await
+                .unwrap()
+                .unwrap()
+                .version,
+            1,
+            "no-op reconciliation after repair must remain version 1"
+        );
     }
 
     #[tokio::test]

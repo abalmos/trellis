@@ -13,6 +13,11 @@ https://raw.githubusercontent.com/qlever-llc/trellis/main/docs/static/llms.txt
 
 ## Operating model
 
+Built-in clients are ordinary app participants: `trellis-app.cli@v1`,
+`trellis-app.console@v1`, and `trellis-app.portal@v1`. Privileged platform
+surfaces remain Trellis-owned `trellis.*` APIs, and authority stays bound to the
+exact participant artifact and needs digests.
+
 - `trellis.toml` declares local canonical API paths or named OCI registries and
   `trellis.lock` pins exact API ID, release, semantic digest, source, and OCI
   manifest digest for remote releases. Use `trellis add`,
@@ -74,11 +79,15 @@ https://raw.githubusercontent.com/qlever-llc/trellis/main/docs/static/llms.txt
   `minItems`, and every `anyOf` or `oneOf` branch proves the path and type.
   Required event consumers cannot depend on optional API uses.
 - Participants select exact actions, never named capabilities. A capability is
-  API-scoped (`trellis.jobs::read`, for example). The `trellis.*` API,
-  capability, participant, and deployment namespaces are reserved for
-  Trellis-owned artifacts; raw `admin` is not a capability.
-  presented as review evidence only when all of its permission atoms are in the
-  exact request; partial and uncovered permissions remain explicit, and
+  API-scoped (`trellis.jobs::read`, for example). Trellis-owned `trellis.*`
+  APIs/capabilities and explicitly reserved platform participants require exact
+  canonical artifacts. `trellis-app.cli@v1`, `trellis-app.console@v1`, and
+  `trellis-app.portal@v1` are ordinary app participants whose IDs grant nothing.
+  `admin` is a protected read-only policy bundle, not runtime authority.
+  `trellis.auth::admin` marks administrator identity; granular capabilities such
+  as `trellis.auth::capabilities.delegate` authorize machine actions.
+  Capability evidence is presented only when all of its permission atoms are in
+  the exact request; partial and uncovered permissions remain explicit, and
   capability evidence includes its defining API digest and never expands runtime
   grants.
 - Bootstrap presents canonical participant and referenced API artifacts through
@@ -120,6 +129,9 @@ https://raw.githubusercontent.com/qlever-llc/trellis/main/docs/static/llms.txt
   HTTP context registry, revocation, logout, or client-bootstrap API.
 - Built-in browser routes are `/login/*` with `/assets/login/*` and `/console/*`
   with `/console/assets/*`; auth APIs remain under `/auth/*`.
+- Built-in web routes use embedded assets by default. `[http].web_source`,
+  `portal_source`, and `console_source` select directory or HTTP(S) proxy sources;
+  surface sources override the shared source.
 - Feed subscriptions are connection-scoped. Closing or aborting a client feed
   propagates cancellation to the provider; watch feeds must not create a durable
   consumer per viewer.
@@ -138,10 +150,12 @@ https://raw.githubusercontent.com/qlever-llc/trellis/main/docs/static/llms.txt
   server-issued optional bundle ids. OIDC callbacks require a state-specific
   `HttpOnly` cookie and revalidate portal/provider registration policy. The full
   server-owned consent proposal is immutable across browser-flow transitions.
-- Trusted portal policy is exact to portal + participant. Base capabilities and
-  recursive capability-group macros plus verified provider-role mappings select
-  only proposal-defined authority. Successful trusted local registration applies
-  the same policy immediately as local or OIDC login. Policy reconciliation uses
+- Trusted portal policy is exact to portal + participant. Writing or removing it
+  requires the `trellis.auth::admin` marker because it can mint portal-bound
+  administrator authority. Base capabilities and recursive capability-group
+  macros plus verified provider-role mappings select only proposal-defined
+  authority. Successful trusted local registration applies the same policy
+  immediately as local or OIDC login. Policy reconciliation uses
   ordinary identity authority, context revocation, and exact connection kicks;
   removing a portal, provider allowance, or policy atomically clears verified-role
   provenance. Restoring configuration alone cannot resurrect authority; a fresh
@@ -349,7 +363,8 @@ Rules:
 - Rust native refresh atomically persists the complete server-issued session,
   JWT, authorization context, clock metadata, inbox prefix, and typed native
   transports. Restored clients use that binding rather than bootstrap routing,
-  and replace an active NATS connection when endpoints change.
+  while running clients retain their initial server list and require a new
+  connection when endpoints change.
 - Rust service repos should expose repository installation as `cargo xtask install`.
   Owner SDKs are vocabulary-only; services, apps, agents, and devices connect
   only through their materialized generated participant facade.
@@ -369,34 +384,33 @@ Rules:
   because fixed protocol subjects share that account. Keep one case per module.
   `trellis-test` runs NATS as a managed child process
   from pinned, checksum-verified nats-server and nsc binaries (cached under
-  `TRELLIS_TEST_CACHE_DIR`, default `~/.cache/trellis-test`; first use downloads them, requiring network; every reuse revalidates the cached archive sha256 against the pin and byte-checks the cached binary against a fresh extraction, so corrupted or replaced cache entries are reinstalled, and and `sh` must be on `PATH`); no container runtime is
+  `TRELLIS_TEST_CACHE_DIR`, default `~/.cache/trellis-test`; first use downloads them, requiring network; every reuse revalidates the cached archive sha256 against the pin and byte-checks the cached binary against a fresh extraction, so corrupted or replaced cache entries are reinstalled, and `sh` must be on `PATH`); no container runtime is
   required.
-- The `trellis` CLI runs the runtime with
-  `trellis server [mode] --config PATH [--nats URL | --nats-binary PATH]
-  [--nats-state-dir PATH] [--check]` (mode defaults to `all`; `--check`
-  validates configuration, trust, stores, streams, and NATS connectivity,
-  then exits). Add `--reset-admin` to rotate the one-time create/edit URL for
-  the permanent bootstrap administrator; completing it can change that
-  account's username and password and revokes its existing sessions. Managed
-  mode (no `--nats`) downloads the pinned nats-server
-  release, verifies its checksum, caches it under `TRELLIS_CACHE_DIR`
-  (default `~/.cache/trellis`), listens on 127.0.0.1 ports 4222 (NATS), 8222
-  (monitoring), and 8080 (websocket), and stops the server when the CLI
-  exits. `--nats URL` runs against an external server; `--nats-binary PATH`
-  manages an existing trusted nats-server binary without re-verifying it;
-  `--nats-state-dir PATH` keeps all mutable managed-NATS files (rendered
-  configs, pid file, resolver JWTs, JetStream data) outside a read-only
-  bundle.
+- `trellis-server [OPTIONS] [MODE]` owns the runtime process; mode defaults to
+  `all`. `trellis-server check [OPTIONS] [MODE]` validates configuration,
+  trust, stores, streams, and NATS connectivity, then exits. Add
+  `--reset-admin` to rotate the one-time create/edit URL for
+  the permanent bootstrap recovery principal; completing it can change that
+  account's username and password, restores exact current CLI authority, and
+  revokes its existing sessions. Ordinary authority lifecycle applies to CLI
+  authority. Plain
+  startup uses configured external NATS and never spawns or downloads it.
+  `--local-nats` uses PATH, `--local-nats=PATH` uses an exact trusted binary,
+  `--nats-download` explicitly uses the verified pin, and `--dev` means user
+  paths plus PATH NATS and verbose output. User defaults follow XDG; `--system`
+  selects FHS config, data, state, cache, runtime, and log roots. Optional
+  `[paths].data/state/cache/runtime/logs` values override those roots; relative
+  values remain config-relative. Omitted SQLite paths use the effective data
+  root, while an explicit per-store path wins.
 - The runtime OCI image bakes the `trellis` CLI and the pinned,
   checksum-verified nats-server at `/usr/local/bin/nats-server`; `nsc` is
   test-harness-only and not in the image. The entrypoint stays
   `trellis-server` for external-NATS deployments. For a managed single
   container, mount the generated bundle read-only from its own named volume
   and the writable state on a second volume
-  (`trellis-bundle:/etc/trellis:ro,Z`, `trellis-state:/var/lib/trellis:rw,Z`),
-  with the bundle's SQLite store paths rewritten to the state volume, and run
-  `trellis server ... --nats-binary /usr/local/bin/nats-server
-  --nats-state-dir /var/lib/trellis/nats`.
+  (`trellis-bundle:/etc/trellis:ro,Z`,
+  `trellis-state:/var/lib/trellis:rw,Z`), and run `trellis-server --system
+  --local-nats=/usr/local/bin/nats-server`.
   Migration authority plans should be allowed only in tests that intentionally
   cover migrations.
 - Deployment authority plans can be `superseded`; only `pending` plans targeting

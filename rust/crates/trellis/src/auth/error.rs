@@ -69,7 +69,7 @@ pub enum TrellisAuthError {
     OperationFailed(String),
 
     /// The authenticated user completed login successfully but lacks admin capability.
-    #[error("logged in user is not an admin")]
+    #[error("authenticated user lacks trellis.auth::admin capability")]
     NotAdmin,
 
     /// The current session belongs to a non-user participant.

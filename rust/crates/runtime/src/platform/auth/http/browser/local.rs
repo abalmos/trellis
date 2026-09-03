@@ -157,7 +157,7 @@ where
 }
 
 #[derive(Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(rename_all = "camelCase")]
 pub(crate) struct LocalLoginRequest {
     flow_id: String,
     username: String,
@@ -267,9 +267,8 @@ where
             user_id: p.principal_id,
             name: p.display_name,
             email: p.email,
-            active: principal.map_or(false, |pr| {
-                pr.state == super::super::super::domain::PrincipalState::Active
-            }),
+            active: principal
+                .is_some_and(|pr| pr.state == super::super::super::domain::PrincipalState::Active),
         })
     } else {
         None
@@ -341,7 +340,7 @@ mod tests {
 }
 
 #[derive(Deserialize, Serialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(rename_all = "camelCase")]
 pub(crate) struct AdminAccountRequest {
     username: Option<String>,
     password: String,
@@ -675,7 +674,7 @@ where
 }
 
 #[derive(Deserialize, Serialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(rename_all = "camelCase")]
 pub(crate) struct LocalRegistrationRequest {
     username: String,
     password: String,

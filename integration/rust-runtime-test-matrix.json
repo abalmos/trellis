@@ -516,8 +516,9 @@
           "the service authorization provider watches are ready"
         ],
         "when": [
-          "Trellis advertises endpoint B and endpoint A becomes unavailable",
-          "the service refreshes authorization and updates the existing client server pool before forcing reconnect"
+          "Trellis advertises endpoint B while endpoint A remains reachable",
+          "the service refreshes authorization and migrates the existing client to B",
+          "endpoint A is retired after migration"
         ],
         "then": [
           "the async-nats client lifecycle identity is unchanged",
@@ -1502,7 +1503,8 @@
         "then": [
           "session A cannot reconnect",
           "session B completes an authenticated RPC through the same file store",
-          "the pinned trust root and manifest floor are retained"
+          "the pinned trust root and manifest floor are retained",
+          "a delegated non-administrator cannot write trusted portal administrator policy while an administrator can"
         ]
       },
       "completion": {
@@ -1830,14 +1832,14 @@
       }
     },
     {
-      "id": "auth.capability-groups-and-last-admin-guard-are-enforced",
+      "id": "auth.capability-groups-validate-and-protect-builtins",
       "fixture": "auth",
-      "title": "Capability groups validate references and protect built-ins",
+      "title": "Capability groups validate references and protect the admin macro",
       "coverage": [
         "auth-protocol-matrix",
         "capability-permission-matrix"
       ],
-      "description": "Auth capability group CRUD preserves contract-owned capabilities, rejects unknown included groups, protects built-in groups, and deletes custom groups with optimistic version checks.",
+      "description": "Auth capability group CRUD preserves the built-in read-only admin macro, validates included-group references, and deletes custom groups with optimistic version checks.",
       "scenario": {
         "participants": [
           {
@@ -1850,12 +1852,13 @@
           "an authenticated local admin session exists"
         ],
         "when": [
-          "the admin manages custom and built-in capability groups"
+          "the admin reads the built-in admin group and manages custom capability groups"
         ],
         "then": [
+          "the admin group contains capability delegation authority and cannot be replaced or deleted",
           "custom groups preserve declared capabilities",
           "unknown included groups are rejected",
-          "built-in deletion fails while versioned custom deletion succeeds"
+          "versioned custom deletion succeeds"
         ]
       },
       "completion": {
@@ -2588,12 +2591,14 @@
     {
       "id": "control-plane.admin-bootstrap-creates-first-local-admin",
       "fixture": "control-plane",
-      "title": "Admin bootstrap creates the first local admin",
+      "title": "Admin bootstrap authority follows ordinary lifecycle and reset recovery",
       "coverage": [
         "auth",
-        "admin-bootstrap"
+        "admin-bootstrap",
+        "authority-revocation",
+        "admin-recovery"
       ],
-      "description": "Starts an empty Trellis control plane, completes first-admin local-password bootstrap, and verifies the resulting admin session.",
+      "description": "Bootstraps exact CLI authority, revokes it through the ordinary Auth API and observes context invalidation, then uses trellis-server --reset-admin to restore current exact authority for the same bootstrap principal.",
       "scenario": {
         "participants": [
           {
@@ -2611,10 +2616,14 @@
           "A fresh Trellis control plane has no local admin account."
         ],
         "when": [
-          "The bootstrap flow creates the first local admin account."
+          "The bootstrap flow creates the first local admin account.",
+          "The admin revokes its CLI authority through the ordinary authority API.",
+          "The same persisted control plane restarts with --reset-admin and completes recovery."
         ],
         "then": [
-          "The caller receives an authenticated admin-capable session."
+          "Initial authority is exact and carries capability delegation authority.",
+          "The revoked context becomes unusable.",
+          "Recovery restores accepted authority bound to the current CLI artifact and needs digest for the same principal."
         ]
       },
       "completion": {
@@ -2624,7 +2633,7 @@
       "implementations": {
         "rust": {
           "module": "auth",
-          "function": "admin_bootstrap_creates_exactly_one_first_administrator"
+          "function": "bootstrap_setup_seeds_cli_authority_and_reset_restores_revoked_authority"
         }
       }
     },
@@ -3984,14 +3993,15 @@
         "health-heartbeat-transport",
         "native-client"
       ],
-      "description": "A Rust service refresh replaces endpoint A with endpoint B, and its existing heartbeat task publishes through the replacement connection after endpoint A is retired.",
+      "description": "A Rust service refresh migrates from endpoint A to advertised endpoint B while A remains reachable, and its existing heartbeat task keeps publishing after A is retired.",
       "scenario": {
         "participants": [],
         "given": [
           "a Rust service connected and publishing health heartbeats through endpoint A"
         ],
         "when": [
-          "authorization refresh installs endpoint B and endpoint A is retired"
+          "Trellis advertises endpoint B while endpoint A remains reachable",
+          "authorization refresh migrates the connected service to B before A is retired"
         ],
         "then": [
           "the existing heartbeat task publishes through endpoint B without retaining endpoint A"
@@ -4080,28 +4090,28 @@
     {
       "id": "cli.server-managed-nats",
       "fixture": "cli",
-      "title": "Trellis server CLI manages an isolated local NATS server",
+      "title": "Trellis server manages an isolated local NATS server",
       "coverage": [
         "managed-nats",
-        "cli-server",
+        "server-process",
         "rust-runtime"
       ],
-      "description": "The trellis server CLI in managed mode generates a config bundle with init config, runs the full runtime against a CLI-managed local nats-server, stops it cleanly on SIGTERM, and reports a valid preflight result on a follow-up --check run.",
+      "description": "The trellis-server process generates a config bundle with init config, runs the full runtime against an explicitly downloaded local nats-server, stops it cleanly on SIGTERM, and reports a valid result from a follow-up check operation.",
       "scenario": {
         "participants": [],
         "given": [
           "a config bundle generated by trellis init config",
-          "a CLI-managed nats-server binary cache directory"
+          "an explicitly selected pinned nats-server download"
         ],
         "when": [
-          "trellis server all runs in managed mode and creates the runtime stores",
-          "the CLI process is terminated with SIGTERM",
-          "trellis server all --check runs in managed mode"
+          "trellis-server --nats-download runs in managed mode and creates the runtime stores",
+          "the server process is terminated with SIGTERM",
+          "trellis-server check --nats-download runs in managed mode"
         ],
         "then": [
           "the first run creates the runtime stores and shuts down cleanly",
           "the managed nats-server pid file is removed and the nats-server process exits",
-          "the --check run exits 0 with a valid JSON preflight report"
+          "the check run exits 0 with a valid JSON preflight report"
         ]
       },
       "completion": {

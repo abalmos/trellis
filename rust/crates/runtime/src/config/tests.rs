@@ -3,7 +3,10 @@ use std::path::PathBuf;
 
 use tempfile::tempdir;
 
-use super::{ConfigError, RuntimeConfig, SqliteStorageConfig, StorageBackend};
+use super::{
+    ConfigError, RuntimeConfig, RuntimePathDefaults, SqliteStorageConfig, StorageBackend,
+    WebSourceConfig,
+};
 use crate::RuntimeMode;
 
 const COMPLETE_CONFIG: &str = r#"
@@ -100,6 +103,166 @@ fn loads_toml_config_from_path() {
     );
 }
 
+fn path_defaults(root: &std::path::Path) -> RuntimePathDefaults {
+    RuntimePathDefaults {
+        data: root.join("default-data"),
+        state: root.join("default-state"),
+        cache: root.join("default-cache"),
+        runtime: root.join("default-runtime"),
+        logs: root.join("default-logs"),
+    }
+}
+
+#[test]
+fn resolves_every_path_root_override_against_profile_or_config() {
+    type Getter = fn(&RuntimePathDefaults) -> &std::path::Path;
+    let directory = tempdir().expect("create temp directory");
+    let config = directory.path().join("config.toml");
+    let defaults = path_defaults(directory.path());
+    let fields: [(&str, Getter); 5] = [
+        ("data", |paths| &paths.data),
+        ("state", |paths| &paths.state),
+        ("cache", |paths| &paths.cache),
+        ("runtime", |paths| &paths.runtime),
+        ("logs", |paths| &paths.logs),
+    ];
+
+    fs::write(&config, "").expect("write omitted config");
+    let (_, omitted) = RuntimeConfig::load_from_path_with_defaults(&config, defaults.clone())
+        .expect("load omitted paths");
+    assert_eq!(omitted, defaults);
+
+    for (field, get) in fields {
+        fs::write(
+            &config,
+            format!("[paths]\n{field} = \"relative/{field}\"\n"),
+        )
+        .expect("write relative config");
+        let (_, relative) = RuntimeConfig::load_from_path_with_defaults(&config, defaults.clone())
+            .expect("load relative path");
+        assert_eq!(
+            get(&relative),
+            directory.path().join("relative").join(field)
+        );
+
+        let absolute = directory.path().join("absolute").join(field);
+        fs::write(
+            &config,
+            format!("[paths]\n{field} = {:?}\n", absolute.display().to_string()),
+        )
+        .expect("write absolute config");
+        let (_, resolved) = RuntimeConfig::load_from_path_with_defaults(&config, defaults.clone())
+            .expect("load absolute path");
+        assert_eq!(get(&resolved), absolute);
+    }
+}
+
+#[test]
+fn resolves_only_directory_web_sources_against_config() {
+    let directory = tempdir().expect("create temp directory");
+    let config_path = directory.path().join("config.toml");
+    fs::write(
+        &config_path,
+        r#"
+[http]
+web_source = { directory = "./web" }
+portal_source = { proxy = "http://127.0.0.1:5173" }
+console_source = { directory = "./console" }
+"#,
+    )
+    .expect("write web source config");
+
+    let (config, _) =
+        RuntimeConfig::load_from_path_with_defaults(&config_path, path_defaults(directory.path()))
+            .expect("load web source config");
+    let http = config.http.expect("HTTP config");
+    assert_eq!(
+        http.web_source,
+        Some(WebSourceConfig::Directory(directory.path().join("web")))
+    );
+    assert_eq!(
+        http.portal_source,
+        Some(WebSourceConfig::Proxy("http://127.0.0.1:5173".to_owned()))
+    );
+    assert_eq!(
+        http.console_source,
+        Some(WebSourceConfig::Directory(directory.path().join("console")))
+    );
+}
+
+#[test]
+fn sqlite_paths_prefer_resource_then_data_root_then_profile() {
+    let directory = tempdir().expect("create temp directory");
+    let config_path = directory.path().join("config.toml");
+    let absolute_jobs = directory.path().join("absolute-jobs.sqlite");
+    fs::write(
+        &config_path,
+        format!(
+            r#"
+[paths]
+data = "./relocated"
+
+[platform.storage]
+kind = "sqlite"
+
+[jobs.storage]
+kind = "sqlite"
+path = {:?}
+
+[health.storage]
+kind = "sqlite"
+path = "./individual-health.sqlite"
+
+[eventlog.storage]
+kind = "sqlite"
+"#,
+            absolute_jobs.display().to_string()
+        ),
+    )
+    .expect("write config");
+
+    let (config, paths) =
+        RuntimeConfig::load_from_path_with_defaults(&config_path, path_defaults(directory.path()))
+            .expect("load config");
+    assert_eq!(paths.data, directory.path().join("relocated"));
+    assert_eq!(
+        config.platform_storage_backend().expect("platform"),
+        StorageBackend::Sqlite(SqliteStorageConfig {
+            path: paths.data.join("platform.sqlite"),
+            journal_mode: None,
+            busy_timeout_ms: None,
+            single_writer: None,
+        })
+    );
+    assert_eq!(
+        config.jobs_storage_backend().expect("jobs"),
+        StorageBackend::Sqlite(SqliteStorageConfig {
+            path: absolute_jobs,
+            journal_mode: None,
+            busy_timeout_ms: None,
+            single_writer: None,
+        })
+    );
+    assert_eq!(
+        config.health_storage_backend().expect("health"),
+        StorageBackend::Sqlite(SqliteStorageConfig {
+            path: directory.path().join("individual-health.sqlite"),
+            journal_mode: None,
+            busy_timeout_ms: None,
+            single_writer: None,
+        })
+    );
+    assert_eq!(
+        config.eventlog_storage_backend().expect("eventlog"),
+        StorageBackend::Sqlite(SqliteStorageConfig {
+            path: paths.data.join("eventlog.sqlite"),
+            journal_mode: None,
+            busy_timeout_ms: None,
+            single_writer: None,
+        })
+    );
+}
+
 #[test]
 fn rejects_shared_sqlite_paths_across_subsystems() {
     let source = COMPLETE_CONFIG.replace("./data/health.sqlite", "./data/platform.sqlite");
@@ -170,27 +333,29 @@ fn rejects_shared_sqlite_inode_and_dangling_symlink_aliases() {
 }
 
 #[test]
-fn rejects_unknown_runtime_config_fields_with_source_location() {
-    for (source, field) in [
-        ("unknown_top_level = true\n", "unknown_top_level"),
-        (
-            "[leases]\nreplicas = 1\nunknown_lease = true\n",
-            "unknown_lease",
-        ),
-        (
-            "[jobs.storage]\nkind = \"sqlite\"\npath = \"jobs.sqlite\"\nunknown_storage = true\n",
-            "unknown_storage",
-        ),
-        (
-            "[oauth.providers.example]\ntype = \"oidc\"\nunknown_provider = true\n",
-            "unknown_provider",
-        ),
-    ] {
-        let error = RuntimeConfig::from_toml_str(source).expect_err("reject unknown field");
-        let message = error.to_string();
-        assert!(message.contains(field), "{message}");
-        assert!(message.contains("line"), "{message}");
-    }
+fn accepts_unknown_runtime_config_fields() {
+    let directory = tempdir().expect("create temp directory");
+    let config = directory.path().join("config.toml");
+    fs::write(
+        &config,
+        r#"
+future_root_option = true
+
+[http]
+port = 39123
+future_http_option = "ignored"
+
+[leases]
+replicas = 1
+future_lease_option = { enabled = true }
+"#,
+    )
+    .expect("write config with unknown keys");
+    let (parsed, _) =
+        RuntimeConfig::load_from_path_with_defaults(&config, path_defaults(directory.path()))
+            .expect("unknown keys are tolerated");
+    assert_eq!(parsed.http.as_ref().and_then(|h| h.port), Some(39123));
+    assert_eq!(parsed.leases.as_ref().and_then(|l| l.replicas), Some(1));
 }
 
 #[test]
@@ -476,31 +641,6 @@ path = "./data/platform.sqlite"
 
 #[test]
 fn authorization_config_rejects_root_seed_and_invalid_policy() {
-    let unknown = RuntimeConfig::from_toml_str(
-        r#"
-[auth.authorization]
-trust_root_file = "root.json"
-issuer_manifest_file = "manifest.json"
-issuer_signing_seed_file = "issuer.seed"
-root_signing_seed_file = "root.seed"
-context_lifetime_seconds = 300
-refresh_lead_seconds = 60
-refresh_jitter_seconds = 15
-minimum_context_lifetime_seconds = 76
-maximum_bootstrap_jwt_lifetime_seconds = 3600
-cleanup_grace_seconds = 60
-allowed_clock_skew_seconds = 30
-maximum_context_bytes = 16384
-maximum_permissions = 4096
-maximum_capabilities = 256
-trust_bucket = "trust"
-context_bucket = "contexts"
-registry_replicas = 1
-"#,
-    )
-    .expect_err("root seed is not a runtime field");
-    assert!(unknown.to_string().contains("root_signing_seed_file"));
-
     let config = RuntimeConfig::from_toml_str(
         r#"
 [auth.authorization]

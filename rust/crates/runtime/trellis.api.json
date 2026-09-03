@@ -16145,15 +16145,6 @@
             "name": "Auth.DeviceUserAuthorities.List"
           },
           "action": "call"
-        },
-        {
-          "target": {
-            "kind": "apiSurface",
-            "api": "trellis.auth@v1",
-            "surface": "rpc",
-            "name": "Auth.DeviceUserAuthorities.Reviews.List"
-          },
-          "action": "call"
         }
       ]
     },
@@ -16221,37 +16212,10 @@
           "target": {
             "kind": "apiSurface",
             "api": "trellis.auth@v1",
-            "surface": "event",
-            "name": "Auth.DeviceUserAuthorities.ReviewRequested"
+            "surface": "rpc",
+            "name": "Auth.DeviceUserAuthorities.Reviews.List"
           },
-          "action": "subscribe"
-        },
-        {
-          "target": {
-            "kind": "apiSurface",
-            "api": "trellis.auth@v1",
-            "surface": "event",
-            "name": "Auth.DeviceUserAuthorities.Requested"
-          },
-          "action": "subscribe"
-        },
-        {
-          "target": {
-            "kind": "apiSurface",
-            "api": "trellis.auth@v1",
-            "surface": "event",
-            "name": "Auth.DeviceUserAuthorities.Approved"
-          },
-          "action": "subscribe"
-        },
-        {
-          "target": {
-            "kind": "apiSurface",
-            "api": "trellis.auth@v1",
-            "surface": "event",
-            "name": "Auth.DeviceUserAuthorities.Resolved"
-          },
-          "action": "subscribe"
+          "action": "call"
         }
       ]
     },

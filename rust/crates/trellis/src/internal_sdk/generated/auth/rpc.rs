@@ -1122,7 +1122,7 @@ impl RpcDescriptor for AuthDeviceUserAuthoritiesReviewsListRpc {
         super::schemas::AUTH_DEVICE_USER_AUTHORITIES_REVIEWS_LIST_OUTPUT_SCHEMA_JSON;
     const KEY: &'static str = "Auth.DeviceUserAuthorities.Reviews.List";
     const SUBJECT: &'static str = "rpc.v1.Auth.DeviceUserAuthorities.Reviews.List";
-    const CALLER_CAPABILITIES: &'static [&'static str] = &["trellis.auth::devices.read"];
+    const CALLER_CAPABILITIES: &'static [&'static str] = &["trellis.auth::devices.review"];
     const ERRORS: &'static [&'static str] = &["AuthError", "UnexpectedError", "ValidationError"];
 }
 /// Errors declared by `Auth.DeviceUserAuthorities.Reviews.List`.

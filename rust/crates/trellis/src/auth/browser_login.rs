@@ -19,27 +19,25 @@ use super::models::{
     BindResponseBound, BoundSession, StartAgentLoginOpts,
 };
 use super::TrellisAuthError;
-#[cfg(feature = "test-support")]
 use crate::client::MemoryAuthorizationContextStore;
 use crate::client::{
-    decode_trellis_http_error, AuthorizationInstallation, AuthorizationNativeTransport,
-    AuthorizationRoutingMaterial, AuthorizationRuntimeBinding, AuthorizationRuntimeTransports,
-    SessionAuth,
+    decode_trellis_http_error, AuthorizationContextStore, AuthorizationInstallation,
+    AuthorizationNativeTransport, AuthorizationRoutingMaterial, AuthorizationRuntimeBinding,
+    AuthorizationRuntimeTransports, SessionAuth,
 };
 use crate::internal_sdk::auth::AuthClient;
 
 pub(crate) const DETACHED_LOGIN_POLL_INTERVAL: Duration = Duration::from_secs(2);
 
-struct AdministrationParticipant {
+struct CliParticipant {
     id: String,
     digest: String,
     required_grants: trellis_protocol::GrantSet,
 }
 
-fn administration_participant() -> Result<AdministrationParticipant, TrellisAuthError> {
-    let participant_value: Value = serde_json::from_str(include_str!(
-        "../../artifacts/trellis.admin.participant.json"
-    ))?;
+fn cli_participant() -> Result<CliParticipant, TrellisAuthError> {
+    let participant_value: Value =
+        serde_json::from_str(include_str!("../../artifacts/trellis.cli.participant.json"))?;
     let participant = parse_participant(&participant_value)?;
     let mut apis = BTreeMap::new();
     for api_json in [
@@ -54,21 +52,21 @@ fn administration_participant() -> Result<AdministrationParticipant, TrellisAuth
         apis.insert(api.id().to_owned(), api);
     }
     let resolved = resolve_participant(&participant, &apis)?;
-    Ok(AdministrationParticipant {
+    Ok(CliParticipant {
         id: participant.id().to_owned(),
         digest: participant.digest()?,
         required_grants: resolved.proposal().required().grant_set().clone(),
     })
 }
 
-/// Return the exact built-in administration participant artifact digest.
-pub fn administration_participant_digest() -> Result<String, TrellisAuthError> {
-    Ok(administration_participant()?.digest)
+/// Return the exact built-in Trellis CLI participant artifact digest.
+pub fn cli_participant_digest() -> Result<String, TrellisAuthError> {
+    Ok(cli_participant()?.digest)
 }
 
-/// Return the exact required grants declared by the built-in administration participant.
-pub fn administration_participant_grants() -> Result<trellis_protocol::GrantSet, TrellisAuthError> {
-    Ok(administration_participant()?.required_grants)
+/// Return the exact required grants declared by the built-in Trellis CLI participant.
+pub fn cli_participant_grants() -> Result<trellis_protocol::GrantSet, TrellisAuthError> {
+    Ok(cli_participant()?.required_grants)
 }
 
 fn base64url_encode(bytes: &[u8]) -> String {
@@ -101,7 +99,7 @@ async fn start_auth_request(
     redirect_to: &str,
     auth: &SessionAuth,
 ) -> Result<AuthStartResponse, TrellisAuthError> {
-    let participant = administration_participant()?;
+    let participant = cli_participant()?;
     let request_id = ulid::Ulid::new().to_string();
     let issued_at = now_ms()?;
     let session_nkey = auth.nkey_pair()?.public_key();
@@ -392,26 +390,25 @@ impl AgentLoginChallenge {
             expires_at,
         };
 
-        let client = if let Some(store) = store {
-            connect_admin_client_with_context_store_async(
-                &state,
-                format!("test-admin:{}", state.trellis_url),
-                store,
-                Some(bound.installation),
-            )
-            .await?
-        } else {
-            let store = std::sync::Arc::new(crate::client::FileAuthorizationContextStore::new(
-                super::session_store::admin_authorization_context_state_path(),
-            ));
-            connect_admin_client_with_context_store_async(
-                &state,
-                format!("installation:{}", state.trellis_url),
-                store,
-                Some(bound.installation),
-            )
-            .await?
-        };
+        let (binding, target_store): (String, std::sync::Arc<dyn AuthorizationContextStore>) =
+            if let Some(store) = store {
+                (format!("test-admin:{}", state.trellis_url), store)
+            } else {
+                (
+                    format!("installation:{}", state.trellis_url),
+                    std::sync::Arc::new(crate::client::FileAuthorizationContextStore::new(
+                        super::session_store::admin_authorization_context_state_path(),
+                    )),
+                )
+            };
+        let temporary_store = std::sync::Arc::new(MemoryAuthorizationContextStore::default());
+        let client = connect_admin_client_with_context_store_async(
+            &state,
+            binding,
+            temporary_store.clone(),
+            Some(bound.installation),
+        )
+        .await?;
         let auth_client = AuthClient::new(&client);
         let response = auth_client
             .rpc()
@@ -422,13 +419,6 @@ impl AgentLoginChallenge {
         let user = response.user.ok_or_else(|| {
             TrellisAuthError::NotUserSession(response.session.participant_kind.as_str().to_owned())
         })?;
-        if !user
-            .get("capabilities")
-            .and_then(serde_json::Value::as_array)
-            .is_some_and(|capabilities| capabilities.iter().any(|value| value == "admin"))
-        {
-            return Err(TrellisAuthError::NotAdmin);
-        }
         let user = super::AuthenticatedUser {
             user_id: user
                 .get("userId")
@@ -468,6 +458,19 @@ impl AgentLoginChallenge {
                 .and_then(serde_json::Value::as_str)
                 .map(str::to_owned),
         };
+        if !user
+            .capabilities
+            .iter()
+            .any(|capability| capability == "trellis.auth::admin")
+        {
+            return Err(TrellisAuthError::NotAdmin);
+        }
+        let authorization_state = temporary_store.load()?.ok_or_else(|| {
+            TrellisAuthError::OperationFailed(
+                "admin authorization context was not installed".to_owned(),
+            )
+        })?;
+        target_store.commit(authorization_state)?;
 
         Ok(AdminLoginOutcome { state, user })
     }
@@ -486,7 +489,7 @@ pub async fn start_agent_login(
         detached_login_redirect_to()?.trim_start_matches('/')
     );
     let response = start_auth_request(opts.trellis_url, &redirect_to, &auth).await?;
-    let participant_digest = administration_participant()?.digest;
+    let participant_digest = cli_participant()?.digest;
 
     Ok(AgentLoginChallenge {
         flow_id: response.flow_id,
@@ -513,7 +516,7 @@ pub async fn start_admin_reauth(
         flow_id: response.flow_id,
         login_url: response.login_url,
         session_seed: state.session_seed.clone(),
-        participant_digest: administration_participant()?.digest,
+        participant_digest: cli_participant()?.digest,
         auth,
     })))
 }

@@ -21,8 +21,21 @@ surfaces, use the artifact and generated API docs. For exact HTTP shapes, use
 the Rust route DTOs.
 
 The paired runtime identity is `rust/crates/runtime/trellis.participant.json`.
-Administration uses the separate source-owned
-`rust/crates/runtime/trellis.admin.participant.json` artifact.
+The built-in Trellis CLI uses the separate ordinary app participant artifact
+`rust/crates/trellis/artifacts/trellis.cli.participant.json`, with participant
+ID `trellis-app.cli@v1` and display name `Trellis CLI`. It receives no namespace
+exception; first-admin authority remains bound to its exact artifact and needs
+digests like any other participant.
+
+`trellis.auth::admin` is the durable capability marker that classifies an
+effective identity authority as administrative. It does not replace granular
+action capabilities such as `trellis.auth::capabilities.delegate`,
+`trellis.auth::authorities.mutate`, or `trellis.auth::devices.review`. The
+protected `admin` capability group is a platform-owned, read-only policy bundle
+of the marker and canonical granular administrator capabilities. Startup
+reconciles its persisted projection from the hard-coded platform definition; the
+group name is never runtime authority and is not derived from CLI, Console, or
+Portal participant artifacts.
 
 ## Ownership
 
@@ -154,11 +167,13 @@ pending flow without rotating or reprinting its secret. Local and configured
 OIDC completion atomically create the initial account and exact administration
 authority; only one concurrent completion can succeed.
 
-`trellis server ... --reset-admin` revokes the prior pending token and emits a
+`trellis-server ... --reset-admin` revokes the prior pending token and emits a
 new URL. After setup, local completion atomically changes that same principal's
-username and password, preserves or restores its permanent canonical authority,
-and revokes existing sessions and contexts. Additional administrators do not
-affect which principal is recovered. Trellis never logs a default password.
+username and password, restores complete accepted authority for the exact
+current CLI artifact and needs digest, and revokes existing sessions and
+contexts. The initial CLI authority follows ordinary identity-authority
+lifecycle rules after bootstrap. Additional administrators do not affect which
+principal is recovered. Trellis never logs a default password.
 
 Service and device bootstrap may present one exact participant artifact plus all
 referenced API artifacts. The server parses, normalizes, resolves, and stores
@@ -227,11 +242,16 @@ dependency/resource evidence, then atomically replaces materialized authority.
 
 Deployment grant overrides, contract-era identity-grant objects, authored NATS
 ACLs, and session-owned authority are not API concepts.
-`Auth.CapabilityGroups.*` manages recursive administrative macros.
-`Auth.Portals.GrantOverrides.*` manages exact `portalId + participantId`
-trusted-login policy with base capabilities/groups and provider-scoped
-exact-role mappings. Both surfaces select only proposal-defined authority;
-neither creates a second runtime authorization object.
+`Auth.CapabilityGroups.*` manages recursive administrative macros. The built-in
+`admin` group is read-only and startup-reconciled to the hard-coded platform
+definition. `Auth.Portals.GrantOverrides.*` manages exact
+`portalId + participantId` trusted-login policy with base capabilities/groups
+and provider-scoped exact-role mappings. Trusted-login policy writes are
+administrative decisions that can mint portal-bound authorities carrying the
+administrator marker, so `GrantOverrides.Put` and `GrantOverrides.Remove`
+require the caller to hold `trellis.auth::admin`; portal logins and policy reads
+stay granular. Both surfaces select only proposal-defined authority; neither
+creates a second runtime authorization object.
 
 Physical resource bindings never imply access. Exact participant-resource atoms
 must be present in `GrantSet`; optional evidence contributes only currently

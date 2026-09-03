@@ -25,6 +25,13 @@ Authority decisions bind the participant id, artifact digest, and accepted needs
 digest. Changing that boundary requires a new proposal and decision rather than
 silently expanding an existing session.
 
+Built-in clients follow the same model: the CLI is `trellis-app.cli@v1`, Console
+is `trellis-app.console@v1`, and the login portal is `trellis-app.portal@v1`.
+They are ordinary app participants; privileged platform surfaces remain the
+Trellis-owned `trellis.*` APIs. A `trellis-app.*` ID grants no authority by
+itself; the app must present its exact participant artifact and have accepted
+authority like any other client.
+
 ## Session keys
 
 Every connection uses a local Ed25519 session key. Bootstrap or browser bind
@@ -62,10 +69,12 @@ Browser login routes through an auth-owned portal:
    session metadata, NATS endpoints, and the session-bound deny-all JWT.
 6. `TrellisClient.connect(...)` owns NATS proof creation and reconnect.
 
-The built-in portal source lives in `ts/portals/login`. Its reproducible static
-build is embedded in the Rust runtime, so first-admin login and device activation
-do not depend on another deployed service. `TRELLIS_BUILTIN_PORTAL_DIR` may point
-at an override directory during portal development.
+The built-in Portal and Console live in the unified `web/` SvelteKit project.
+Its reproducible static build is embedded in the Rust runtime, so first-admin
+login and device activation do not depend on another deployed service. A
+deployment can replace the shared source or independently override either
+surface with `[http].web_source`, `[http].portal_source`, and
+`[http].console_source`.
 
 ## Capabilities
 
@@ -82,7 +91,7 @@ Effective grants are the intersection of:
 
 Mutable capability groups, grant overrides, authored NATS ACLs, and session-owned
 authority were retired. Administrative bootstrap derives its mandatory grants
-from the exact built-in administration participant artifact.
+from the exact built-in CLI participant artifact.
 
 ## Devices
 

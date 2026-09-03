@@ -8,7 +8,6 @@ use crate::{RuntimeMode, SubsystemName};
 
 /// TOML runtime configuration for `trellis-server`.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(deny_unknown_fields)]
 pub struct RuntimeConfig {
     /// Human-readable Trellis instance name.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -19,6 +18,9 @@ pub struct RuntimeConfig {
     /// Authorization-context digest bound into Trellis-owned runtime event proofs.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub event_context_digest_file: Option<PathBuf>,
+    /// Host path-root overrides. Relative values resolve against this config file.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub paths: Option<RuntimePathsConfig>,
     /// HTTP listener configuration.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub http: Option<HttpConfig>,
@@ -58,6 +60,23 @@ impl RuntimeConfig {
     /// legacy runtime config formats are not supported by the Rust runtime.
     pub fn load_from_path(path: impl AsRef<Path>) -> Result<Self, ConfigError> {
         let path = path.as_ref();
+        let base_dir = path.parent().unwrap_or_else(|| Path::new("."));
+        let defaults = RuntimePathDefaults {
+            data: base_dir.to_path_buf(),
+            state: base_dir.to_path_buf(),
+            cache: base_dir.to_path_buf(),
+            runtime: base_dir.to_path_buf(),
+            logs: base_dir.join("log"),
+        };
+        Self::load_from_path_with_defaults(path, defaults).map(|(config, _)| config)
+    }
+
+    /// Loads a runtime configuration and applies host-selected defaults to omitted mutable paths.
+    pub fn load_from_path_with_defaults(
+        path: impl AsRef<Path>,
+        defaults: RuntimePathDefaults,
+    ) -> Result<(Self, RuntimePathDefaults), ConfigError> {
+        let path = path.as_ref();
         if path.extension().and_then(|extension| extension.to_str()) != Some("toml") {
             return Err(ConfigError::UnsupportedFormat {
                 path: path.to_path_buf(),
@@ -70,10 +89,11 @@ impl RuntimeConfig {
         })?;
 
         let mut config = Self::from_toml_str(&contents)?;
-        if let Some(base_dir) = path.parent() {
-            config.resolve_relative_paths(base_dir);
-        }
-        Ok(config)
+        let base_dir = path.parent().unwrap_or_else(|| Path::new("."));
+        let effective = config.resolve_path_defaults(base_dir, defaults);
+        config.apply_mutable_path_defaults(&effective);
+        config.resolve_relative_paths(base_dir);
+        Ok((config, effective))
     }
 
     /// Parses a runtime configuration from TOML source text.
@@ -244,7 +264,7 @@ impl RuntimeConfig {
 
     /// Resolves runtime NATS connection settings, optionally replacing the configured
     /// server list with `servers_override` (the managed local NATS server used by
-    /// `trellis server`). Everything else resolves identically to
+    /// `trellis-server`). Everything else resolves identically to
     /// [`RuntimeConfig::resolve_nats_runtime`].
     pub fn resolve_nats_runtime_with(
         &self,
@@ -363,6 +383,19 @@ impl RuntimeConfig {
                 resolve_path(base_dir, &mut auth_callout.xkey_seed_file);
             }
         }
+        if let Some(http) = &mut self.http {
+            for source in [
+                &mut http.web_source,
+                &mut http.portal_source,
+                &mut http.console_source,
+            ] {
+                if let Some(WebSourceConfig::Directory(path)) = source {
+                    if path.is_relative() {
+                        *path = base_dir.join(&*path);
+                    }
+                }
+            }
+        }
 
         for storage in [
             self.platform
@@ -399,11 +432,88 @@ impl RuntimeConfig {
             resolve_required_path(base_dir, &mut authorization.issuer_signing_seed_file);
         }
     }
+
+    fn resolve_path_defaults(
+        &mut self,
+        base_dir: &Path,
+        defaults: RuntimePathDefaults,
+    ) -> RuntimePathDefaults {
+        let paths = self.paths.get_or_insert_with(RuntimePathsConfig::default);
+        for path in [
+            &mut paths.data,
+            &mut paths.state,
+            &mut paths.cache,
+            &mut paths.runtime,
+            &mut paths.logs,
+        ] {
+            resolve_path(base_dir, path);
+        }
+        RuntimePathDefaults {
+            data: paths.data.clone().unwrap_or(defaults.data),
+            state: paths.state.clone().unwrap_or(defaults.state),
+            cache: paths.cache.clone().unwrap_or(defaults.cache),
+            runtime: paths.runtime.clone().unwrap_or(defaults.runtime),
+            logs: paths.logs.clone().unwrap_or(defaults.logs),
+        }
+    }
+
+    fn apply_mutable_path_defaults(&mut self, paths: &RuntimePathDefaults) {
+        if self.event_context_digest_file.is_none() {
+            self.event_context_digest_file = Some(paths.state.join("event-context.digest"));
+        }
+        for (name, subsystem) in [
+            ("platform", self.platform.as_mut()),
+            ("jobs", self.jobs.as_mut()),
+            ("health", self.health.as_mut()),
+            ("eventlog", self.eventlog.as_mut()),
+        ] {
+            let Some(storage) = subsystem.and_then(|subsystem| subsystem.storage.as_mut()) else {
+                continue;
+            };
+            if storage.kind.trim() == "sqlite" && storage.path.is_none() {
+                storage.path = Some(paths.data.join(format!("{name}.sqlite")));
+            }
+        }
+    }
+}
+
+/// Optional host path-root overrides from the `[paths]` config section.
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+pub struct RuntimePathsConfig {
+    /// Default root for subsystem databases and other durable data.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub data: Option<PathBuf>,
+    /// Default root for mutable runtime state.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub state: Option<PathBuf>,
+    /// Default root for downloaded and reusable cache entries.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cache: Option<PathBuf>,
+    /// Default root for process-lifetime files such as pid files.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub runtime: Option<PathBuf>,
+    /// Default root for server and managed-child logs.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub logs: Option<PathBuf>,
+}
+
+/// Effective mutable path roots selected by the host profile and runtime config.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RuntimePathDefaults {
+    /// Root for durable subsystem data.
+    pub data: PathBuf,
+    /// Root for mutable runtime state.
+    pub state: PathBuf,
+    /// Root for reusable cache entries.
+    pub cache: PathBuf,
+    /// Root for process-lifetime files.
+    pub runtime: PathBuf,
+    /// Root for log files.
+    pub logs: PathBuf,
 }
 
 /// HTTP listener configuration for the runtime.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(deny_unknown_fields)]
 pub struct HttpConfig {
     /// TCP port for the HTTP server.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -417,6 +527,15 @@ pub struct HttpConfig {
     /// Insecure origins allowed for local development.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub allow_insecure_origins: Option<Vec<String>>,
+    /// Shared source for built-in web surfaces. Absent uses embedded assets.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub web_source: Option<WebSourceConfig>,
+    /// Login Portal source overriding `web_source`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub portal_source: Option<WebSourceConfig>,
+    /// Console source overriding `web_source`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub console_source: Option<WebSourceConfig>,
     /// Maximum requests per rate-limit window.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub rate_limit_max: Option<u32>,
@@ -425,9 +544,18 @@ pub struct HttpConfig {
     pub rate_limit_window_ms: Option<u64>,
 }
 
+/// A filesystem or reverse-proxy source for a Trellis web surface.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WebSourceConfig {
+    /// Serve a static SvelteKit artifact directory.
+    Directory(PathBuf),
+    /// Reverse proxy requests to an HTTP or HTTPS upstream.
+    Proxy(String),
+}
+
 /// NATS configuration for runtime connections and auth callout material.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(deny_unknown_fields)]
 pub struct NatsConfig {
     /// NATS server URL or comma-separated URLs.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -442,7 +570,6 @@ pub struct NatsConfig {
 
 /// Generated NATS credential paths used by the runtime.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(deny_unknown_fields)]
 pub struct NatsRuntimeConfig {
     /// Auth-account runtime user creds path.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -457,7 +584,6 @@ pub struct NatsRuntimeConfig {
 
 /// NATS auth-callout signing and encryption material paths.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(deny_unknown_fields)]
 pub struct NatsAuthCalloutConfig {
     /// Auth issuer signing seed file.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -554,7 +680,6 @@ pub struct ResolvedNatsAuthCalloutConfig {
 
 /// Browser/client connection hints emitted by the runtime.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(deny_unknown_fields)]
 pub struct ClientConfig {
     /// WebSocket NATS server URLs for browser clients.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -566,7 +691,6 @@ pub struct ClientConfig {
 
 /// Runtime lease configuration.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(deny_unknown_fields)]
 pub struct LeasesConfig {
     /// NATS KV bucket used for runtime leases.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -637,7 +761,6 @@ pub struct ResolvedLeasesConfig {
 
 /// Runtime authentication configuration.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(deny_unknown_fields)]
 pub struct AuthConfig {
     /// Local username/password identity configuration.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -649,7 +772,6 @@ pub struct AuthConfig {
 
 /// File-backed authorization trust and context-runtime policy.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(deny_unknown_fields)]
 pub struct AuthorizationConfig {
     /// Public pinned authorization trust-root JSON file.
     pub trust_root_file: PathBuf,
@@ -794,7 +916,6 @@ impl AuthorizationConfig {
 
 /// Local identity provider configuration.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(deny_unknown_fields)]
 pub struct LocalIdentityConfig {
     /// Enables local identity authentication.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -806,7 +927,6 @@ pub struct LocalIdentityConfig {
 
 /// OAuth configuration.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(deny_unknown_fields)]
 pub struct OAuthConfig {
     /// Base URL for OAuth redirect callbacks.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -821,7 +941,6 @@ pub struct OAuthConfig {
 
 /// OAuth provider configuration.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(deny_unknown_fields)]
 pub struct OAuthProviderConfig {
     /// Provider type, currently expected to be `oidc`.
     #[serde(rename = "type")]
@@ -851,7 +970,6 @@ pub struct OAuthProviderConfig {
 
 /// Configuration for a built-in runtime subsystem.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(deny_unknown_fields)]
 pub struct SubsystemConfig {
     /// Storage configuration for the subsystem.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -875,7 +993,6 @@ pub struct SubsystemConfig {
 
 /// Platform TTL settings in milliseconds.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(deny_unknown_fields)]
 pub struct PlatformTtlConfig {
     /// Session TTL.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -899,7 +1016,6 @@ pub struct PlatformTtlConfig {
 
 /// Storage configuration for a built-in runtime subsystem.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(deny_unknown_fields)]
 pub struct StorageConfig {
     /// Storage backend kind. Only `sqlite` is implemented today.
     pub kind: String,

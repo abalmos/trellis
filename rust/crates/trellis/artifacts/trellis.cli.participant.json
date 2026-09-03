@@ -1,0 +1,131 @@
+{
+  "description": "Define the capabilities used by built-in Trellis CLI administration sessions.",
+  "displayName": "Trellis CLI",
+  "format": "trellis.participant.v1",
+  "id": "trellis-app.cli@v1",
+  "kind": "app",
+  "uses": {
+    "optional": {
+      "trellis.eventlog@v1": {
+        "api": "trellis.eventlog@v1",
+        "apiDigest": "YXwUBXSxRzix71_jemo6p0y_dxk5F-LOz1QsV3IT1OU",
+        "feeds": { "subscribe": ["EventLog.Watch"] },
+        "rpc": {
+          "call": [
+            "EventLog.Consumers.Inspect",
+            "EventLog.Consumers.Query",
+            "EventLog.Inspect",
+            "EventLog.Metrics",
+            "EventLog.Query"
+          ]
+        }
+      }
+    },
+    "required": {
+      "trellis.auth@v1": {
+        "api": "trellis.auth@v1",
+        "apiDigest": "jHBD-szHEWNdiEHnpbQ6CN3_DAoVq_GzBuy6d6kUUHo",
+        "rpc": {
+          "call": [
+            "Auth.Capabilities.List",
+            "Auth.CapabilityGroups.Delete",
+            "Auth.CapabilityGroups.Get",
+            "Auth.CapabilityGroups.List",
+            "Auth.CapabilityGroups.Put",
+            "Auth.Connections.Kick",
+            "Auth.Connections.List",
+            "Auth.DeploymentAuthority.AcceptMigration",
+            "Auth.DeploymentAuthority.AcceptUpdate",
+            "Auth.DeploymentAuthority.Get",
+            "Auth.DeploymentAuthority.List",
+            "Auth.DeploymentAuthority.Plan",
+            "Auth.DeploymentAuthority.Plans.Get",
+            "Auth.DeploymentAuthority.Plans.List",
+            "Auth.DeploymentAuthority.Reconcile",
+            "Auth.DeploymentAuthority.Reject",
+            "Auth.Deployments.Create",
+            "Auth.Deployments.Disable",
+            "Auth.Deployments.Enable",
+            "Auth.Deployments.List",
+            "Auth.Deployments.Remove",
+            "Auth.DeviceUserAuthorities.List",
+            "Auth.DeviceUserAuthorities.Reviews.Decide",
+            "Auth.DeviceUserAuthorities.Reviews.List",
+            "Auth.DeviceUserAuthorities.Revoke",
+            "Auth.Devices.Disable",
+            "Auth.Devices.Enable",
+            "Auth.Devices.List",
+            "Auth.Devices.Provision",
+            "Auth.Devices.Remove",
+            "Auth.IdentityAuthority.Get",
+            "Auth.IdentityAuthority.List",
+            "Auth.IdentityAuthority.Revoke",
+            "Auth.IdentityGrants.List",
+            "Auth.IdentityGrants.Revoke",
+            "Auth.Portals.Get",
+            "Auth.Portals.GrantOverrides.List",
+            "Auth.Portals.GrantOverrides.Put",
+            "Auth.Portals.GrantOverrides.Remove",
+            "Auth.Portals.List",
+            "Auth.Portals.LoginSettings.Get",
+            "Auth.Portals.LoginSettings.Update",
+            "Auth.Portals.Put",
+            "Auth.Portals.Remove",
+            "Auth.Portals.Routes.Put",
+            "Auth.Portals.Routes.Remove",
+            "Auth.ServiceInstances.Disable",
+            "Auth.ServiceInstances.Enable",
+            "Auth.ServiceInstances.List",
+            "Auth.ServiceInstances.Provision",
+            "Auth.ServiceInstances.Remove",
+            "Auth.Sessions.List",
+            "Auth.Sessions.Logout",
+            "Auth.Sessions.Me",
+            "Auth.Sessions.Revoke",
+            "Auth.UserIdentities.List",
+            "Auth.Users.Create",
+            "Auth.Users.Get",
+            "Auth.Users.IdentityLink.Create",
+            "Auth.Users.List",
+            "Auth.Users.Password.Change",
+            "Auth.Users.PasswordReset.Create",
+            "Auth.Users.Update"
+          ]
+        }
+      },
+      "trellis.health@v1": {
+        "api": "trellis.health@v1",
+        "apiDigest": "didAZZoUrnCyj4EF01tWRMkd2UlHrMvYnwWyGmBg5Uk",
+        "events": { "subscribe": ["Health.StatusChanged"] },
+        "feeds": { "subscribe": ["Health.Watch"] },
+        "rpc": { "call": ["Health.Inspect", "Health.Metrics", "Health.Query"] }
+      },
+      "trellis.jobs@v1": {
+        "api": "trellis.jobs@v1",
+        "apiDigest": "oANPL-s0S0c94R9YqkdoF1yRN0ER2wWqbRqUegqKXR8",
+        "feeds": { "subscribe": ["Jobs.Watch"] },
+        "rpc": {
+          "call": [
+            "Jobs.Cancel",
+            "Jobs.DismissDLQ",
+            "Jobs.GetKey",
+            "Jobs.Inspect",
+            "Jobs.ListDLQ",
+            "Jobs.ListServices",
+            "Jobs.Metrics",
+            "Jobs.Query",
+            "Jobs.ReplayDLQ",
+            "Jobs.Retry"
+          ]
+        }
+      },
+      "trellis.state@v1": {
+        "api": "trellis.state@v1",
+        "apiDigest": "hGgfotCC_9mlYwTUdaZtMTeia-KVGCGyqPop--LGa1w",
+        "rpc": {
+          "call": ["State.Admin.Delete", "State.Admin.Get", "State.Admin.List"]
+        }
+      }
+    }
+  }
+}

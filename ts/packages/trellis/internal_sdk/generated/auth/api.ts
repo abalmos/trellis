@@ -2,7 +2,7 @@
 
 export const API_ID = "trellis.auth@v1" as const;
 export const API_DIGEST =
-  "3QSyOlZqSZ0e25CGmf7N9xOZXjOeomA-GUi7bG9WxaQ" as const;
+  "jHBD-szHEWNdiEHnpbQ6CN3_DAoVq_GzBuy6d6kUUHo" as const;
 export const API = {
   "capabilities": {
     "trellis.auth::authorities.mutate": {
@@ -310,14 +310,6 @@ export const API = {
         "target": {
           "api": "trellis.auth@v1",
           "kind": "apiSurface",
-          "name": "Auth.DeviceUserAuthorities.Reviews.List",
-          "surface": "rpc",
-        },
-      }, {
-        "action": "call",
-        "target": {
-          "api": "trellis.auth@v1",
-          "kind": "apiSurface",
           "name": "Auth.Devices.ConnectInfo.Get",
           "surface": "rpc",
         },
@@ -333,43 +325,19 @@ export const API = {
     },
     "trellis.auth::devices.review": {
       "allows": [{
-        "action": "subscribe",
+        "action": "call",
         "target": {
           "api": "trellis.auth@v1",
           "kind": "apiSurface",
-          "name": "Auth.DeviceUserAuthorities.Approved",
-          "surface": "event",
-        },
-      }, {
-        "action": "subscribe",
-        "target": {
-          "api": "trellis.auth@v1",
-          "kind": "apiSurface",
-          "name": "Auth.DeviceUserAuthorities.Requested",
-          "surface": "event",
-        },
-      }, {
-        "action": "subscribe",
-        "target": {
-          "api": "trellis.auth@v1",
-          "kind": "apiSurface",
-          "name": "Auth.DeviceUserAuthorities.Resolved",
-          "surface": "event",
-        },
-      }, {
-        "action": "subscribe",
-        "target": {
-          "api": "trellis.auth@v1",
-          "kind": "apiSurface",
-          "name": "Auth.DeviceUserAuthorities.ReviewRequested",
-          "surface": "event",
+          "name": "Auth.DeviceUserAuthorities.Reviews.Decide",
+          "surface": "rpc",
         },
       }, {
         "action": "call",
         "target": {
           "api": "trellis.auth@v1",
           "kind": "apiSurface",
-          "name": "Auth.DeviceUserAuthorities.Reviews.Decide",
+          "name": "Auth.DeviceUserAuthorities.Reviews.List",
           "surface": "rpc",
         },
       }],

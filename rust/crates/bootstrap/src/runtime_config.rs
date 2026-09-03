@@ -29,31 +29,35 @@ pub fn render_trellis_config(options: &TrellisBootstrapOptions) -> String {
 pub fn trellis_runtime_config(options: &TrellisBootstrapOptions) -> RuntimeConfig {
     RuntimeConfig {
         instance_name: Some(options.runtime.name.clone()),
-        event_session_seed_file: Some(PathBuf::from("../session.seed")),
-        event_context_digest_file: Some(PathBuf::from("./data/session-context.digest")),
+        event_session_seed_file: Some(PathBuf::from("./session.seed")),
+        event_context_digest_file: None,
+        paths: None,
         http: Some(HttpConfig {
             port: Some(options.runtime.trellis_port),
             public_origin: Some(options.runtime.public_origin.clone()),
             origins: Some(vec![options.runtime.public_origin.clone()]),
             allow_insecure_origins: Some(vec![options.runtime.public_origin.clone()]),
+            web_source: None,
+            portal_source: None,
+            console_source: None,
             rate_limit_max: Some(60),
             rate_limit_window_ms: Some(60_000),
         }),
         nats: Some(NatsConfig {
             servers: Some(options.runtime.nats_server_url.clone()),
             runtime: Some(NatsRuntimeConfig {
-                auth_creds_path: Some(PathBuf::from("../nats/creds/auth-auth.creds")),
-                trellis_creds_path: Some(PathBuf::from("../nats/creds/trellis-auth.creds")),
-                system_creds_path: Some(PathBuf::from("../nats/creds/system.creds")),
+                auth_creds_path: Some(PathBuf::from("./nats/creds/auth-auth.creds")),
+                trellis_creds_path: Some(PathBuf::from("./nats/creds/trellis-auth.creds")),
+                system_creds_path: Some(PathBuf::from("./nats/creds/system.creds")),
             }),
             auth_callout: Some(NatsAuthCalloutConfig {
                 issuer_signing_seed_file: Some(PathBuf::from(
-                    "../nats/secrets/auth-issuer-signing.seed",
+                    "./nats/secrets/auth-issuer-signing.seed",
                 )),
                 target_signing_seed_file: Some(PathBuf::from(
-                    "../nats/secrets/auth-target-signing.seed",
+                    "./nats/secrets/auth-target-signing.seed",
                 )),
-                xkey_seed_file: Some(PathBuf::from("../nats/secrets/auth-sx.seed")),
+                xkey_seed_file: Some(PathBuf::from("./nats/secrets/auth-sx.seed")),
             }),
         }),
         client: Some(ClientConfig {
@@ -99,7 +103,7 @@ pub fn trellis_runtime_config(options: &TrellisBootstrapOptions) -> RuntimeConfi
             providers: BTreeMap::new(),
         }),
         platform: Some(SubsystemConfig {
-            storage: Some(sqlite_storage("./data/platform.sqlite")),
+            storage: Some(sqlite_storage()),
             history_retention_days: None,
             transport_retention_hours: None,
             transport_max_bytes: None,
@@ -114,7 +118,7 @@ pub fn trellis_runtime_config(options: &TrellisBootstrapOptions) -> RuntimeConfi
             }),
         }),
         jobs: Some(SubsystemConfig {
-            storage: Some(sqlite_storage("./data/jobs.sqlite")),
+            storage: Some(sqlite_storage()),
             history_retention_days: None,
             transport_retention_hours: None,
             transport_max_bytes: None,
@@ -122,7 +126,7 @@ pub fn trellis_runtime_config(options: &TrellisBootstrapOptions) -> RuntimeConfi
             ttl_ms: None,
         }),
         health: Some(SubsystemConfig {
-            storage: Some(sqlite_storage("./data/health.sqlite")),
+            storage: Some(sqlite_storage()),
             history_retention_days: Some(30),
             transport_retention_hours: Some(24),
             transport_max_bytes: Some(1_073_741_824),
@@ -130,7 +134,7 @@ pub fn trellis_runtime_config(options: &TrellisBootstrapOptions) -> RuntimeConfi
             ttl_ms: None,
         }),
         eventlog: Some(SubsystemConfig {
-            storage: Some(sqlite_storage("./data/eventlog.sqlite")),
+            storage: Some(sqlite_storage()),
             history_retention_days: None,
             transport_retention_hours: None,
             transport_max_bytes: None,
@@ -140,10 +144,10 @@ pub fn trellis_runtime_config(options: &TrellisBootstrapOptions) -> RuntimeConfi
     }
 }
 
-fn sqlite_storage(path: impl Into<PathBuf>) -> StorageConfig {
+fn sqlite_storage() -> StorageConfig {
     StorageConfig {
         kind: "sqlite".to_string(),
-        path: Some(path.into()),
+        path: None,
         url: None,
         journal_mode: Some("wal".to_string()),
         busy_timeout_ms: Some(5_000),

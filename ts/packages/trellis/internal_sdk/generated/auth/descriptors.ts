@@ -1267,7 +1267,7 @@ export const AuthDeviceUserAuthoritiesReviewsList = rpcAction(
     output: schema<Types.AuthDeviceUserAuthoritiesReviewsListOutput>(
       AuthDeviceUserAuthoritiesReviewsListResponseSchema,
     ),
-    callerCapabilities: ["trellis.auth::devices.read"] as const,
+    callerCapabilities: ["trellis.auth::devices.review"] as const,
     errors: ["AuthError", "UnexpectedError", "ValidationError"] as const,
     declaredErrorTypes: [
       "AuthError",
@@ -3405,10 +3405,7 @@ export const AuthDeviceUserAuthoritiesApproved = eventActions(
       AuthDeviceUserAuthoritiesApprovedEventSchema,
     ),
     publishCapabilities: [] as const,
-    subscribeCapabilities: [
-      "trellis.auth::devices.review",
-      "trellis.auth::events.stream",
-    ] as const,
+    subscribeCapabilities: ["trellis.auth::events.stream"] as const,
   },
   "AuthDeviceUserAuthoritiesApproved",
   false,
@@ -3439,10 +3436,7 @@ export const AuthDeviceUserAuthoritiesRequested = eventActions(
       AuthDeviceUserAuthoritiesRequestedEventSchema,
     ),
     publishCapabilities: [] as const,
-    subscribeCapabilities: [
-      "trellis.auth::devices.review",
-      "trellis.auth::events.stream",
-    ] as const,
+    subscribeCapabilities: ["trellis.auth::events.stream"] as const,
   },
   "AuthDeviceUserAuthoritiesRequested",
   false,
@@ -3473,10 +3467,7 @@ export const AuthDeviceUserAuthoritiesResolved = eventActions(
       AuthDeviceUserAuthoritiesResolvedEventSchema,
     ),
     publishCapabilities: [] as const,
-    subscribeCapabilities: [
-      "trellis.auth::devices.review",
-      "trellis.auth::events.stream",
-    ] as const,
+    subscribeCapabilities: ["trellis.auth::events.stream"] as const,
   },
   "AuthDeviceUserAuthoritiesResolved",
   false,
@@ -3507,10 +3498,7 @@ export const AuthDeviceUserAuthoritiesReviewRequested = eventActions(
       AuthDeviceUserAuthoritiesReviewRequestedEventSchema,
     ),
     publishCapabilities: [] as const,
-    subscribeCapabilities: [
-      "trellis.auth::devices.review",
-      "trellis.auth::events.stream",
-    ] as const,
+    subscribeCapabilities: ["trellis.auth::events.stream"] as const,
   },
   "AuthDeviceUserAuthoritiesReviewRequested",
   false,
