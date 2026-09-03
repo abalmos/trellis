@@ -55,6 +55,16 @@ fn watch_recovers_after_invalid_sibling_dependency_change() {
     fs::create_dir_all(&a).unwrap();
     fs::create_dir_all(&b).unwrap();
     fs::write(
+        temp.path().join("Cargo.toml"),
+        "[workspace]\nmembers = [\"a\"]\nresolver = \"2\"\n\n[workspace.package]\nversion = \"0.1.0\"\nedition = \"2021\"\n",
+    )
+    .unwrap();
+    fs::write(
+        a.join("Cargo.toml"),
+        "[package]\nname = \"a\"\nversion.workspace = true\nedition.workspace = true\n",
+    )
+    .unwrap();
+    fs::write(
         a.join("contract.trellis"),
         r#"api "example.a@v1" {
     version "1.0.0";
@@ -88,7 +98,29 @@ participant "example.a" service {
             .spawn()
             .unwrap(),
     );
-    let participant_path = a.join(".trellis/generated/protocol/participants/example.a.json");
+    let a_stem = trellis_generation::artifacts::sdk_output_stem("example.a@v1");
+    let b_stem = trellis_generation::artifacts::sdk_output_stem("example.b@v1");
+    let participant_stem = trellis_generation::artifacts::sdk_output_stem("example.a");
+    let participant_path = a.join(".trellis/artifacts/participants/example.a.json");
+    wait_for(&a.join(".trellis/artifacts/apis/example.a@v1.json"), |_| {
+        true
+    });
+    let a_sdk = a.join(".trellis/rust/apis").join(a_stem);
+    let b_sdk = a.join(".trellis/rust/apis").join(b_stem);
+    let facade = a.join(".trellis/rust/participants").join(participant_stem);
+    wait_for(&a_sdk.join("Cargo.toml"), |_| true);
+    wait_for(&b_sdk.join("Cargo.toml"), |_| true);
+    let facade_manifest = wait_for(&facade.join("Cargo.toml"), |_| true);
+    let facade_manifest: toml::Value =
+        toml::from_str(&String::from_utf8(facade_manifest).unwrap()).unwrap();
+    let b_crate = trellis_generation::artifacts::default_rust_crate_name_from_id("example.b@v1");
+    let b_path = facade_manifest["dependencies"][b_crate.as_str()]["path"]
+        .as_str()
+        .unwrap();
+    assert_eq!(
+        facade.join(b_path).canonicalize().unwrap(),
+        b_sdk.canonicalize().unwrap()
+    );
     let initial = wait_for(&participant_path, |_| true);
 
     fs::write(b.join("contract.trellis"), "temporarily invalid").unwrap();
@@ -103,4 +135,7 @@ participant "example.a" service {
         .digest()
         .unwrap();
     assert_eq!(participant["uses"]["required"]["b"]["apiDigest"], expected);
+    wait_for(&b_sdk.join("src/types.rs"), |contents| {
+        String::from_utf8_lossy(contents).contains("detail")
+    });
 }

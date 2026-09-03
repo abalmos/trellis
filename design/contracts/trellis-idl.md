@@ -112,6 +112,20 @@ resolution. Local path dependencies continue to compile directly from source.
 and participant artifacts, and invokes the existing generators for the Rust and
 TypeScript project markers present at the project root.
 
+Everything under `.trellis/` is Trellis-owned derived or installed state and may
+be discarded. Exact installed registry APIs live under
+`.trellis/apis/<API_ID>/<VERSION>/trellis.api.json`. Canonical artifacts owned
+by the project live under `.trellis/artifacts/apis` and
+`.trellis/artifacts/participants`.
+
+Rust projects generate every owned and referenced API SDK under
+`.trellis/rust/apis` and participant facades under `.trellis/rust/participants`.
+TypeScript projects generate every owned and referenced API SDK under
+`.trellis/ts/apis`. An API's source (current project, local dependency, or
+installed registry dependency) does not change its generated SDK location.
+Language trees are created only when the corresponding project marker is
+present.
+
 `trellis generate --watch` (or `-w`) performs the same full generation once,
 then watches the project and every direct local dependency project recursively.
 Changes to `.trellis` source, `trellis.toml`, or `trellis.lock` trigger another
