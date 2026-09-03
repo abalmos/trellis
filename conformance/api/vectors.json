@@ -1754,13 +1754,13 @@
     {
       "name": "reachable-schema-valued-additional-properties",
       "schemaValid": true,
-      "valid": false,
+      "valid": true,
       "input": {
         "format": "trellis.api.v1",
         "id": "wire-profile@v1",
         "version": "1.0.0",
         "displayName": "Wire Profile",
-        "description": "Rejects field-sensitive wire schemas.",
+        "description": "Allows pure typed map wire schemas.",
         "schemas": {
           "Wire": {
             "type": "object",

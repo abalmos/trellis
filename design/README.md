@@ -63,6 +63,7 @@ These headings are intentionally named for fast human and AI lookup.
 | `auth/rust-auth-service-ownership.md`   | You are changing external auth, bootstrap, session, or callout ownership | TypeScript inventory and permanent Rust cutover boundaries                          |
 | `auth/device-activation.md`             | You are changing device preregistration or device activation             | Known-device activation flow, connect info, profiles, online activation             |
 | `contracts/trellis-api-participants.md` | You are changing manifests, codegen inputs, or permission derivation     | Canonical contract format, `uses`, subject ownership, activation rules              |
+| `contracts/trellis-idl.md`              | You are changing declarative contract source or compilation              | IDL source layouts, syntax, types, and protocol lowering boundary                   |
 
 ## Subsystem Design Docs
 

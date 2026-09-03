@@ -1197,14 +1197,18 @@ mod tests {
     }
 
     #[test]
-    fn wire_schemas_reject_closed_object_keywords() {
+    fn wire_schemas_allow_typed_maps_but_reject_closed_object_keywords() {
         for (schema, expected_path) in [
             (
                 json!({ "type": "object", "additionalProperties": false }),
                 "/additionalProperties",
             ),
             (
-                json!({ "type": "object", "additionalProperties": { "type": "string" } }),
+                json!({
+                    "type": "object",
+                    "properties": { "known": { "type": "string" } },
+                    "additionalProperties": { "type": "string" }
+                }),
                 "/additionalProperties",
             ),
             (
@@ -1281,6 +1285,25 @@ mod tests {
             }
         });
         assert!(parse_api(&private).is_ok());
+
+        let typed_map = json!({
+            "format": API_FORMAT_V1,
+            "id": "example@v1",
+            "version": "1.0.0",
+            "displayName": "Example",
+            "description": "Example API.",
+            "schemas": {
+                "Map": { "type": "object", "additionalProperties": { "type": "string" } }
+            },
+            "rpc": {
+                "Example.Get": {
+                    "version": "v1",
+                    "input": { "schema": "Map" },
+                    "output": { "schema": "Map" }
+                }
+            }
+        });
+        assert!(parse_api(&typed_map).is_ok());
     }
 
     #[test]
