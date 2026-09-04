@@ -27,6 +27,9 @@ mod jobs;
 #[path = "integration/health.rs"]
 mod health;
 
+#[path = "integration/idl_demo.rs"]
+mod idl_demo;
+
 #[path = "integration/runtime_ownership.rs"]
 mod runtime_ownership;
 

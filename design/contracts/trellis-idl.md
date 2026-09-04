@@ -69,12 +69,23 @@ participant "demo.service@v1" service {
         history 1;
         ttl_ms 0;
     }
+
+    state selectedSite value {
+        schema SiteSummary;
+        state_version "selected-site.v1";
+        docs {
+            summary "Selected site state.";
+            markdown "Stores the active site selected by this participant.";
+        }
+    }
 }
 ```
 
-The complete initial service syntax additionally supports operation progress and
-cancellation, send and receive transfers, events, feeds, object stores, job
-queues, documentation blocks, enums, string literals, and named unions.
+Participant state supports `value` and `map`; every declaration has a schema,
+while `state_version` and documentation are optional. The complete initial
+service syntax additionally supports operation progress and cancellation, send
+and receive transfers, events, feeds, object stores, job queues, documentation
+blocks, enums, string literals, and named unions.
 
 ## Project Dependencies
 
@@ -121,10 +132,13 @@ by the project live under `.trellis/artifacts/apis` and
 Rust projects generate every owned and referenced API SDK under
 `.trellis/rust/apis` and participant facades under `.trellis/rust/participants`.
 TypeScript projects generate every owned and referenced API SDK under
-`.trellis/ts/apis`. An API's source (current project, local dependency, or
-installed registry dependency) does not change its generated SDK location.
-Language trees are created only when the corresponding project marker is
-present.
+`.trellis/ts/apis` and participant runtime modules under
+`.trellis/ts/participants`. Generated participant modules project canonical
+artifacts, exact digests, descriptors, resources, state, and transfers; they are
+runtime data, not another authoring mode. An API's source (current project,
+local dependency, or installed registry dependency) does not change its
+generated SDK location. Language trees are created only when the corresponding
+project marker is present.
 
 `trellis generate --watch` (or `-w`) performs the same full generation once,
 then watches the project and every direct local dependency project recursively.

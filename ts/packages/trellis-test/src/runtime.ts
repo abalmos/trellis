@@ -637,10 +637,7 @@ export class TrellisTestRuntime implements AsyncDisposable {
     const client = await TrellisClient.connect({
       ...args,
       trellisUrl: this.trellisUrl,
-      participant: {
-        id: key.participantId,
-        artifactDigest: key.participantArtifactDigest,
-      },
+      participant: args.contract,
       auth: auth.auth,
       onAuthRequired: auth.onAuthRequired,
     }).orThrow();

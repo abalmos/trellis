@@ -1,6 +1,7 @@
 import {
   type ClientAuthContinuation,
   type ClientAuthRequiredContext,
+  CONTRACT_RUNTIME,
   TrellisClient,
 } from "@qlever-llc/trellis";
 import Value from "typebox/value";
@@ -25,6 +26,7 @@ import {
 import { recordTrellisDuration } from "./admin/metrics.ts";
 import { isRecord, postAdminRpc, postJson } from "./admin/transport.ts";
 import { generateSessionSeed } from "./control_plane_config.ts";
+import { nativeProtocolPresentation } from "../../trellis/contract_support/protocol_artifacts.ts";
 import type {
   TrellisTestAuthorityPlanClassification,
   TrellisTestContractApproval,
@@ -33,6 +35,18 @@ import type {
 } from "./types.ts";
 
 export { adminMethods, type TrellisTestAdminRpcMethod };
+
+const adminPresentation = nativeProtocolPresentation(adminContract);
+const adminParticipant = {
+  ...adminContract,
+  id: adminContract.CONTRACT_ID,
+  digest: adminContract.CONTRACT_DIGEST,
+  artifact: adminPresentation.participant,
+  api: adminPresentation.api,
+  apiDigest: adminContract.API_DIGEST,
+  referencedApis: adminPresentation.referencedApis,
+  [CONTRACT_RUNTIME]: adminContract[CONTRACT_RUNTIME],
+} as const;
 
 type IntegrationAuthorityResetPort = {
   listUserIdentities(args: {
@@ -191,8 +205,7 @@ export class TrellisTestAdminAutomation {
           trellisUrl: this.#trellisUrl,
           name: "trellis-test-admin",
           timeout: 60_000,
-          contract: adminContract,
-          participant: ADMIN_PARTICIPANT,
+          participant: adminParticipant,
           auth: {
             mode: "session_key",
             authorizationContextEphemeral: true,

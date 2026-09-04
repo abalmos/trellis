@@ -532,7 +532,7 @@ export type TrellisServiceConnectOpts<
   TTrellisApi extends RuntimeApi | undefined = TOwnedApi,
 > = {
   trellisUrl: string;
-  contract: ServiceContract<TOwnedApi, TTrellisApi>;
+  participant: ServiceContract<TOwnedApi, TTrellisApi>;
   name: string;
   /** Immutable provisioned service identity and exact participant binding. */
   identity: {
@@ -1246,7 +1246,7 @@ export type TrellisServiceConnectArgs<
   >,
 > = {
   trellisUrl: string;
-  contract: TContract;
+  participant: TContract;
   name: string;
   /** Immutable provisioned service identity and exact participant binding. */
   identity: {
@@ -2771,9 +2771,9 @@ export function connectTrellisServiceWithRuntimeDeps<
       const bootstrap = await fetchServiceBootstrapInfo({
         trellisUrl: args.trellisUrl,
         serviceName: args.name,
-        contractId: args.contract.CONTRACT_ID,
-        contractDigest: args.contract.CONTRACT_DIGEST,
-        contract: args.contract,
+        contractId: args.participant.id,
+        contractDigest: args.participant.digest,
+        contract: args.participant,
         identityAuth,
         sessionAuth,
         identity: args.identity,
@@ -2871,8 +2871,8 @@ export function connectTrellisServiceWithRuntimeDeps<
           cause,
           context: {
             trellisUrl: args.trellisUrl,
-            contractId: args.contract.CONTRACT_ID,
-            contractDigest: args.contract.CONTRACT_DIGEST,
+            contractId: args.participant.id,
+            contractDigest: args.participant.digest,
           },
         });
       }
@@ -2888,7 +2888,7 @@ export function connectTrellisServiceWithRuntimeDeps<
       };
 
       try {
-        const contractRuntime = getContractRuntime(args.contract);
+        const contractRuntime = getContractRuntime(args.participant);
         const runtime = {
           ...(args.runtime ?? {}),
           api: contractRuntime.ownedApi as TOwnedApi,
@@ -2906,19 +2906,19 @@ export function connectTrellisServiceWithRuntimeDeps<
           nc,
           inboxPrefix,
           contextDigest: () => authorizationContexts.current().contextDigest,
-          contractId: args.contract.CONTRACT_ID,
-          contractDigest: args.contract.CONTRACT_DIGEST,
+          contractId: args.participant.id,
+          contractDigest: args.participant.digest,
           participantDigest: bootstrap.connectInfo.participantDigest,
           contractJobs:
-            (args.contract[CONTRACT_JOBS_METADATA] ?? {}) as ContractJobsOf<
+            (args.participant[CONTRACT_JOBS_METADATA] ?? {}) as ContractJobsOf<
               TContract
             >,
           contractKv:
-            (args.contract[CONTRACT_KV_METADATA] ?? {}) as ContractKvOf<
+            (args.participant[CONTRACT_KV_METADATA] ?? {}) as ContractKvOf<
               TContract
             >,
           contractEventConsumers:
-            args.contract[CONTRACT_EVENT_CONSUMERS_METADATA] ?? {},
+            args.participant[CONTRACT_EVENT_CONSUMERS_METADATA] ?? {},
           runtime,
           bindings: bootstrap.binding.resources,
           healthIdentity: {
@@ -2988,7 +2988,7 @@ export function connectTrellisServiceWithAuthorizationTestHook<
       connected.unwrapOrElse(() => {
         throw new Error("Connected service result narrowed incorrectly");
       }),
-      args.contract,
+      args.participant,
     ));
   })());
 }
@@ -3478,7 +3478,7 @@ export class TrellisServiceSession<
       const service = connected.unwrapOrElse(() => {
         throw new Error("Connected service result narrowed incorrectly");
       });
-      return Result.ok(createProviderRuntime(service, args.contract));
+      return Result.ok(createProviderRuntime(service, args.participant));
     })());
   }
 

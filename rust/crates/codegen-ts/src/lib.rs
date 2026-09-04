@@ -52,6 +52,19 @@ pub struct GenerateTsSdkOpts {
     pub runtime_deps: TsRuntimeDeps,
 }
 
+/// Options for generating one TypeScript participant runtime module.
+#[derive(Debug, Clone)]
+pub struct GenerateTsParticipantOpts {
+    /// Canonical participant artifact path.
+    pub participant_path: PathBuf,
+    /// Canonical artifact path for the implemented API.
+    pub owned_api_path: PathBuf,
+    /// Canonical artifact paths for referenced APIs.
+    pub referenced_api_paths: Vec<PathBuf>,
+    /// Generated participant package directory.
+    pub out_dir: PathBuf,
+}
+
 /// One generated TypeScript SDK source file.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GeneratedTsSource {
@@ -78,6 +91,18 @@ pub enum TsRuntimeSource {
 pub fn generate_ts_sdk(opts: &GenerateTsSdkOpts) -> Result<(), CodegenTsError> {
     let sources = collect_ts_sdk_sources(opts)?;
     write_ts_sdk_sources(&opts.out_dir, &sources)
+}
+
+/// Generate runtime data for one TypeScript participant.
+pub fn generate_ts_participant(opts: &GenerateTsParticipantOpts) -> Result<(), CodegenTsError> {
+    let source = render_ts_participant(opts)?;
+    write_ts_sdk_sources(
+        &opts.out_dir,
+        &[GeneratedTsSource {
+            path: PathBuf::from("mod.ts"),
+            contents: source,
+        }],
+    )
 }
 
 /// Atomically write a previously rendered TypeScript SDK package.
@@ -126,6 +151,301 @@ pub fn write_ts_sdk_sources(
         fs::remove_dir_all(backup)?;
     }
 
+    Ok(())
+}
+
+fn render_ts_participant(opts: &GenerateTsParticipantOpts) -> Result<String, CodegenTsError> {
+    let participant: trellis_protocol::ParticipantArtifact =
+        serde_json::from_slice(&fs::read(&opts.participant_path)?)?;
+    let participant_value =
+        participant
+            .normalized_value()
+            .map_err(|error| CodegenTsError::InvalidTypeScript {
+                path: opts.participant_path.clone(),
+                message: error.to_string(),
+            })?;
+    let participant_digest =
+        participant
+            .digest()
+            .map_err(|error| CodegenTsError::InvalidTypeScript {
+                path: opts.participant_path.clone(),
+                message: error.to_string(),
+            })?;
+    let owned = load_sdk_source(&opts.owned_api_path)?;
+    let mut apis = BTreeMap::from([(owned.render_model.id.clone(), owned.value.clone())]);
+    let referenced_ids = participant_value["implements"]
+        .as_object()
+        .into_iter()
+        .chain(participant_value["uses"]["required"].as_object())
+        .chain(participant_value["uses"]["optional"].as_object())
+        .flat_map(|entries| entries.values())
+        .filter_map(|entry| entry["api"].as_str())
+        .collect::<BTreeSet<_>>();
+    for path in &opts.referenced_api_paths {
+        let api = load_sdk_source(path)?;
+        if referenced_ids.contains(api.render_model.id.as_str()) {
+            apis.insert(api.render_model.id, api.value);
+        }
+    }
+    let aliases = apis
+        .keys()
+        .enumerate()
+        .map(|(index, id)| (id.clone(), format!("Api{index}")))
+        .collect::<BTreeMap<_, _>>();
+    let owned_alias = &aliases[&owned.render_model.id];
+    let mut lines = vec![
+        "// Generated from canonical Trellis participant artifacts.".to_owned(),
+        "import {".to_owned(),
+        "  CONTRACT_EVENT_CONSUMERS_METADATA,".to_owned(),
+        "  CONTRACT_JOBS_METADATA,".to_owned(),
+        "  CONTRACT_KV_METADATA,".to_owned(),
+        "  CONTRACT_RUNTIME,".to_owned(),
+        "  CONTRACT_STATE_METADATA,".to_owned(),
+        "  CONTRACT_STORE_METADATA,".to_owned(),
+        "  runtimeApiFromActions,".to_owned(),
+        "} from \"@qlever-llc/trellis\";".to_owned(),
+    ];
+    for (id, alias) in &aliases {
+        lines.push(format!(
+            "import * as {alias} from \"../../apis/{}/mod.ts\";",
+            sdk_output_stem(id)
+        ));
+    }
+    lines.push("const typeOnly = <T>(): T => undefined!;".to_owned());
+
+    let owned_actions = api_action_expressions(&owned.value, owned_alias);
+    let (required_actions, optional_actions) =
+        selected_action_expressions(&participant_value, &aliases);
+    let all_actions = owned_actions
+        .iter()
+        .chain(&required_actions)
+        .chain(&optional_actions)
+        .cloned()
+        .collect::<BTreeSet<_>>();
+    lines.push(String::new());
+    lines.push("export const participant = {".to_owned());
+    lines.push(format!("  id: {},", js_string(participant.id())));
+    lines.push(format!("  digest: {},", js_string(&participant_digest)));
+    lines.push(format!(
+        "  artifact: {} as const,",
+        serde_json::to_string(&participant_value)?
+    ));
+    lines.push(format!("  api: {owned_alias}.API,"));
+    lines.push(format!("  apiDigest: {owned_alias}.API_DIGEST,"));
+    lines.push(format!(
+        "  referencedApis: [{}] as const,",
+        aliases
+            .iter()
+            .filter(|(id, _)| *id != &owned.render_model.id)
+            .map(|(_, alias)| format!("{alias}.API"))
+            .collect::<Vec<_>>()
+            .join(", ")
+    ));
+    for expression in owned_surface_entries(&owned.value, owned_alias) {
+        lines.push(format!("  {expression},"));
+    }
+    lines.push("  [CONTRACT_RUNTIME]: {".to_owned());
+    lines.push(format!(
+        "    ownedApi: runtimeApiFromActions([{}]),",
+        owned_actions.iter().cloned().collect::<Vec<_>>().join(", ")
+    ));
+    lines.push(format!(
+        "    usedApi: runtimeApiFromActions([{}]),",
+        required_actions
+            .iter()
+            .chain(&optional_actions)
+            .cloned()
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .collect::<Vec<_>>()
+            .join(", ")
+    ));
+    lines.push(format!(
+        "    api: runtimeApiFromActions([{}]),",
+        all_actions.iter().cloned().collect::<Vec<_>>().join(", ")
+    ));
+    lines.push(format!(
+        "    actions: [{}],",
+        owned_actions
+            .iter()
+            .chain(&required_actions)
+            .map(|action| format!("{{ action: {action}, optional: false }}"))
+            .chain(
+                optional_actions
+                    .iter()
+                    .map(|action| format!("{{ action: {action}, optional: true }}"))
+            )
+            .collect::<Vec<_>>()
+            .join(", ")
+    ));
+    lines.push("  },".to_owned());
+    insert_participant_metadata(&mut lines, &participant_value, &owned)?;
+    lines.extend([
+        "} as const;".to_owned(),
+        String::new(),
+        "export default participant;".to_owned(),
+        String::new(),
+    ]);
+    Ok(lines.join("\n"))
+}
+
+fn sdk_output_stem(id: &str) -> String {
+    id.split('@').next().unwrap_or(id).replace('.', "-")
+}
+
+fn api_action_expressions(api: &Value, alias: &str) -> BTreeSet<String> {
+    let mut actions = BTreeSet::new();
+    for section in ["rpc", "operations", "feeds"] {
+        for name in api[section]
+            .as_object()
+            .into_iter()
+            .flat_map(|value| value.keys())
+        {
+            actions.insert(format!("{alias}.{}", key_to_pascal(name)));
+        }
+    }
+    for name in api["events"]
+        .as_object()
+        .into_iter()
+        .flat_map(|value| value.keys())
+    {
+        let symbol = key_to_pascal(name);
+        actions.insert(format!("{alias}.{symbol}.publish"));
+        actions.insert(format!("{alias}.{symbol}.subscribe"));
+    }
+    actions
+}
+
+fn owned_surface_entries(api: &Value, alias: &str) -> BTreeSet<String> {
+    ["rpc", "operations", "events", "feeds"]
+        .into_iter()
+        .flat_map(|section| {
+            api[section]
+                .as_object()
+                .into_iter()
+                .flat_map(|value| value.keys())
+        })
+        .map(|name| {
+            let symbol = key_to_pascal(name);
+            format!("{symbol}: {alias}.{symbol}")
+        })
+        .collect()
+}
+
+fn selected_action_expressions(
+    participant: &Value,
+    aliases: &BTreeMap<String, String>,
+) -> (BTreeSet<String>, BTreeSet<String>) {
+    let mut required = BTreeSet::new();
+    let mut optional = BTreeSet::new();
+    for (category, selected) in [("required", &mut required), ("optional", &mut optional)] {
+        for used in participant["uses"][category]
+            .as_object()
+            .into_iter()
+            .flat_map(|value| value.values())
+        {
+            let alias = &aliases[used["api"].as_str().expect("validated API use")];
+            for (section, suffix) in [("rpc", ""), ("operations", ""), ("feeds", "")] {
+                for actions in used[section]
+                    .as_object()
+                    .into_iter()
+                    .flat_map(|value| value.values())
+                {
+                    for name in actions
+                        .as_array()
+                        .into_iter()
+                        .flatten()
+                        .filter_map(Value::as_str)
+                    {
+                        selected.insert(format!("{alias}.{}{}", key_to_pascal(name), suffix));
+                    }
+                }
+            }
+            for (action, names) in used["events"]
+                .as_object()
+                .into_iter()
+                .flat_map(|value| value.iter())
+            {
+                for name in names
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter_map(Value::as_str)
+                {
+                    selected.insert(format!("{alias}.{}.{action}", key_to_pascal(name)));
+                }
+            }
+        }
+    }
+    (required, optional)
+}
+
+fn insert_participant_metadata(
+    lines: &mut Vec<String>,
+    participant: &Value,
+    owned: &LoadedApi,
+) -> Result<(), CodegenTsError> {
+    let schemas = participant["schemas"].as_object();
+    let aliases = Vec::new();
+    for (section, symbol) in [
+        ("state", "CONTRACT_STATE_METADATA"),
+        ("jobQueues", "CONTRACT_JOBS_METADATA"),
+    ] {
+        let Some(entries) = participant[section].as_object() else {
+            continue;
+        };
+        lines.push(format!("  [{symbol}]: {{"));
+        for (name, entry) in entries {
+            let schema_name = entry["schema"]["schema"]
+                .as_str()
+                .or_else(|| entry["payload"]["schema"].as_str())
+                .expect("validated participant schema reference");
+            let schema = &schemas.expect("participant schemas")[schema_name];
+            let ty =
+                schema_to_ts_with_aliases(resolve_schema_ref(owned, schema_name), &aliases, None);
+            if section == "state" {
+                lines.push(format!("    {}: {{ kind: {}, value: typeOnly<{ty}>(), schema: {} as const, stateVersion: {}, acceptedVersions: {{}} }},", js_string(name), js_string(entry["kind"].as_str().expect("state kind")), serde_json::to_string(schema)?, js_string(entry["stateVersion"].as_str().unwrap_or("v1"))));
+            } else {
+                lines.push(format!(
+                    "    {}: {{ payload: typeOnly<{ty}>(), result: typeOnly<unknown>() }},",
+                    js_string(name)
+                ));
+            }
+        }
+        lines.push("  },".to_owned());
+    }
+    if let Some(resources) = participant["resources"].as_object() {
+        for (section, symbol) in [
+            ("kv", "CONTRACT_KV_METADATA"),
+            ("store", "CONTRACT_STORE_METADATA"),
+        ] {
+            let Some(entries) = resources[section].as_object() else {
+                continue;
+            };
+            lines.push(format!("  [{symbol}]: {{"));
+            for (name, entry) in entries {
+                if section == "kv" {
+                    let schema_name = entry["schema"]["schema"].as_str().expect("KV schema");
+                    let schema = &schemas.expect("participant schemas")[schema_name];
+                    let ty = schema_to_ts_with_aliases(
+                        resolve_schema_ref(owned, schema_name),
+                        &aliases,
+                        None,
+                    );
+                    lines.push(format!("    {}: {{ required: true, value: typeOnly<{ty}>(), schema: {} as const }},", js_string(name), serde_json::to_string(schema)?));
+                } else {
+                    lines.push(format!("    {}: {{ required: true }},", js_string(name)));
+                }
+            }
+            lines.push("  },".to_owned());
+        }
+    }
+    if let Some(consumers) = participant["eventConsumers"].as_object() {
+        lines.push(format!(
+            "  [CONTRACT_EVENT_CONSUMERS_METADATA]: {} as const,",
+            serde_json::to_string(consumers)?
+        ));
+    }
     Ok(())
 }
 
@@ -467,6 +787,9 @@ fn render_wire_types_ts(opts: &GenerateTsSdkOpts, loaded: &LoadedApi) -> String 
         lines.push(String::new());
     }
 
+    if !lines.iter().any(|line| line.starts_with("export ")) {
+        lines.push("export {};".to_owned());
+    }
     format!("{}\n", lines.join("\n"))
 }
 
@@ -488,6 +811,9 @@ fn render_schemas_ts(opts: &GenerateTsSdkOpts, loaded: &LoadedApi) -> String {
         lines.push(String::new());
     }
 
+    if !lines.iter().any(|line| line.starts_with("export ")) {
+        lines.push("export {};".to_owned());
+    }
     format!(
         "{}
 ",
@@ -930,12 +1256,7 @@ fn render_descriptors_ts(opts: &GenerateTsSdkOpts, loaded: &LoadedApi) -> String
             "  subscribeCapabilities: {} as const,",
             serde_json::to_string(&subscribe).unwrap()
         ));
-        let delegated_publish = !publish.is_empty();
-        lines.push(format!(
-            "}}, {}, {}, ACTION_SOURCE);",
-            js_string(&base),
-            if delegated_publish { "true" } else { "false" }
-        ));
+        lines.push(format!("}}, {}, true, ACTION_SOURCE);", js_string(&base)));
     }
 
     for (key, feed) in &loaded.render_model.feeds {
@@ -1619,6 +1940,7 @@ fn is_safe_js_ident(value: &str) -> bool {
 
 fn render_mod_ts(_opts: &GenerateTsSdkOpts, _loaded: &LoadedApi) -> String {
     [
+        "export * from \"./api.ts\";",
         "export * from \"./descriptors.ts\";",
         "export * from \"./types.ts\";",
         "export * from \"./schemas.ts\";",

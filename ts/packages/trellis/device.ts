@@ -12,6 +12,7 @@ import {
   CONTRACT_STATE_METADATA,
   type ContractStateMetadata,
 } from "./contract_support/mod.ts";
+import type { NativeProtocolContract } from "./contract_support/protocol_artifacts.ts";
 import { resolveNativeProtocolPresentation } from "./contract_support/protocol_resolution.ts";
 
 import {
@@ -72,12 +73,7 @@ type DeviceContract<
     state?: Readonly<Record<string, unknown>>;
     schemas?: Readonly<Record<string, unknown>>;
   },
-> = ContractWithRuntime & {
-  readonly CONTRACT_ID: string;
-  readonly CONTRACT_DIGEST: string;
-  readonly API: Readonly<Record<string, unknown>>;
-  readonly API_DIGEST: string;
-  readonly PARTICIPANT: Readonly<Record<string, unknown>>;
+> = ContractWithRuntime & NativeProtocolContract & {
   readonly [CONTRACT_STATE_METADATA]?: ContractStateMetadata;
 };
 
@@ -186,7 +182,7 @@ export type TrellisDeviceActivationArgs<
   }>,
 > = {
   trellisUrl: string;
-  contract: TContract;
+  participant: TContract;
   rootSecret: Uint8Array | string;
   identity: TrellisDeviceProvisionedIdentity;
 };
@@ -225,7 +221,7 @@ export type TrellisDeviceConnectArgs<
   }>,
 > = {
   trellisUrl: string;
-  contract: TContract;
+  participant: TContract;
   rootSecret: Uint8Array | string;
   identity: TrellisDeviceProvisionedIdentity;
   log?: LoggerLike | false;
@@ -526,7 +522,7 @@ function createActivationSession<
   participantDigest: string;
   identity: Awaited<ReturnType<typeof deriveDeviceIdentity>>;
   provisioned: TrellisDeviceProvisionedIdentity;
-  contract: DeviceContract;
+  participant: DeviceContract;
   now: () => number;
   localState: TLocalState;
 }): TrellisDeviceActivationSession<TLocalState> {
@@ -591,13 +587,15 @@ async function fetchDeviceBootstrap(args: {
   trellisUrl: string;
   deviceIdentity: Awaited<ReturnType<typeof deriveDeviceIdentity>>;
   provisioned: TrellisDeviceProvisionedIdentity;
-  contract: DeviceContract;
+  participant: DeviceContract;
   now: () => number;
   offsetState: DeviceClockOffsetState;
   activationNonce?: string;
   signal?: AbortSignal;
 }): Promise<DeviceBootstrapResponse> {
-  const presentation = await resolveNativeProtocolPresentation(args.contract);
+  const presentation = await resolveNativeProtocolPresentation(
+    args.participant,
+  );
   const sessionAuth = await createAuth({
     sessionKeySeed: base64urlEncode(
       crypto.getRandomValues(new Uint8Array(32)),
@@ -620,9 +618,9 @@ async function fetchDeviceBootstrap(args: {
     await sha256(utf8(activationNonce)),
   );
   if (
-    args.provisioned.participantId !== args.contract.CONTRACT_ID ||
+    args.provisioned.participantId !== args.participant.id ||
     args.provisioned.participantArtifactDigest !==
-      args.contract.CONTRACT_DIGEST ||
+      args.participant.digest ||
     args.provisioned.participantNeedsDigest !==
       presentation.participantNeedsDigest
   ) {
@@ -643,7 +641,7 @@ async function fetchDeviceBootstrap(args: {
     newSessionPublicKey: sessionAuth.sessionKey,
     newSessionNkey: sessionAuth.sessionNkey,
     participantId: args.provisioned.participantId,
-    participantArtifactDigest: args.contract.CONTRACT_DIGEST,
+    participantArtifactDigest: args.participant.digest,
     participantNeedsDigest: presentation.participantNeedsDigest,
     participantArtifact: presentation.participant,
     referencedApiArtifacts: [
@@ -763,7 +761,7 @@ export async function startDeviceActivationWithDeps<
     trellisUrl: args.trellisUrl,
     deviceIdentity: identity,
     provisioned: args.identity,
-    contract: args.contract,
+    participant: args.participant,
     now: deps.now,
     offsetState: { serverClockOffsetMs: 0 },
     activationNonce: nonce,
@@ -778,14 +776,14 @@ export async function startDeviceActivationWithDeps<
   }
   return await createActivationSession({
     trellisUrl: args.trellisUrl,
-    participantDigest: args.contract.CONTRACT_DIGEST,
+    participantDigest: args.participant.digest,
     identity,
     provisioned: args.identity,
-    contract: args.contract,
+    participant: args.participant,
     now: deps.now,
     localState: {
       status: "pending",
-      participantDigest: args.contract.CONTRACT_DIGEST,
+      participantDigest: args.participant.digest,
       publicIdentityKey: identity.publicIdentityKey,
       instanceId: args.identity.instanceId,
       deploymentId: args.identity.deploymentId,
@@ -818,10 +816,10 @@ export async function resumeDeviceActivationWithDeps<
 
   return await createActivationSession({
     trellisUrl: args.trellisUrl,
-    participantDigest: args.contract.CONTRACT_DIGEST,
+    participantDigest: args.participant.digest,
     identity,
     provisioned: args.identity,
-    contract: args.contract,
+    participant: args.participant,
     now: deps.now,
     localState: args.localState,
   });
@@ -850,7 +848,7 @@ export async function connectDeviceWithDeps<
     trellisUrl: args.trellisUrl,
     deviceIdentity: identity,
     provisioned: args.identity,
-    contract: args.contract,
+    participant: args.participant,
     now: deps.now,
     offsetState,
   });
@@ -858,7 +856,7 @@ export async function connectDeviceWithDeps<
   if (bootstrap.status === "activation_required") {
     throw createActivationRequiredTransportError({
       publicIdentityKey: identity.publicIdentityKey,
-      contractId: args.contract.CONTRACT_ID,
+      contractId: args.participant.id,
     });
   }
 
@@ -874,7 +872,7 @@ export async function connectDeviceWithDeps<
 
   const connectInfo = bootstrap.connectInfo;
   assertBootstrapContractMatches({
-    participantId: args.contract.CONTRACT_ID,
+    participantId: args.participant.id,
     participantDigest: args.identity.participantArtifactDigest,
     connectInfo,
   });
@@ -938,7 +936,7 @@ export async function connectDeviceWithDeps<
       hint:
         "Retry the connection. If it keeps failing, check Trellis transport availability.",
       cause,
-      context: { participantId: args.contract.CONTRACT_ID },
+      context: { participantId: args.participant.id },
     });
   }
 
@@ -952,7 +950,7 @@ export async function connectDeviceWithDeps<
     log: false,
     lifecycleLog: {
       log,
-      context: { participantId: args.contract.CONTRACT_ID },
+      context: { participantId: args.participant.id },
     },
   });
   connection.subscribe((status) =>
@@ -964,9 +962,7 @@ export async function connectDeviceWithDeps<
     auth: bootstrap.sessionAuth,
     cache: authorizationContexts,
     onRefresh: () =>
-      connection.status.phase !== "connected"
-        ? nc.reconnect()
-        : undefined,
+      connection.status.phase !== "connected" ? nc.reconnect() : undefined,
     onTerminalFailure: async () => {
       if (!nc.isClosed()) await nc.drain();
     },
@@ -978,7 +974,7 @@ export async function connectDeviceWithDeps<
     "client",
     RuntimeStateStoresForContract<TContract>
   >(
-    args.contract.CONTRACT_ID,
+    args.participant.id,
     nc,
     {
       sessionKey: bootstrap.sessionAuth.sessionKey,
@@ -988,17 +984,17 @@ export async function connectDeviceWithDeps<
     },
     {
       log,
-      api: getContractRuntime(args.contract).api as RuntimeApi,
-      state: args.contract[CONTRACT_STATE_METADATA],
+      api: getContractRuntime(args.participant).api as RuntimeApi,
+      state: args.participant[CONTRACT_STATE_METADATA],
       connection,
     },
     connectInfo.transport.inboxPrefix,
   );
 
   const health = new ServiceHealthRuntime({
-    serviceName: typeof args.contract.PARTICIPANT.displayName === "string"
-      ? args.contract.PARTICIPANT.displayName
-      : args.contract.CONTRACT_ID,
+    serviceName: typeof args.participant.artifact.displayName === "string"
+      ? args.participant.artifact.displayName
+      : args.participant.id,
     kind: "device",
     instanceId: connectInfo.instanceId,
     contractId: connectInfo.participantId,
@@ -1055,7 +1051,9 @@ export async function connectDeviceWithDeps<
   }, health.publishIntervalMs);
   void nc.closed().finally(stopHeartbeat);
 
-  return Object.assign(createCallerRuntime(trellis, args.contract), { health });
+  return Object.assign(createCallerRuntime(trellis, args.participant), {
+    health,
+  });
 }
 
 export const TrellisDevice = {

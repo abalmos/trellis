@@ -250,8 +250,8 @@ async function fetchServiceBootstrapInfoOnce(args: {
   );
   const presentation = await resolveNativeProtocolPresentation(args.contract);
   if (
-    args.identity.participantId !== args.contract.CONTRACT_ID ||
-    args.identity.participantArtifactDigest !== args.contract.CONTRACT_DIGEST ||
+    args.identity.participantId !== args.contract.id ||
+    args.identity.participantArtifactDigest !== args.contract.digest ||
     args.identity.participantNeedsDigest !==
       presentation.participantNeedsDigest
   ) {
@@ -266,7 +266,7 @@ async function fetchServiceBootstrapInfoOnce(args: {
     newSessionPublicKey: args.sessionAuth.sessionKey,
     newSessionNkey: args.sessionAuth.sessionNkey,
     participantId: args.identity.participantId,
-    participantArtifactDigest: args.contract.CONTRACT_DIGEST,
+    participantArtifactDigest: args.contract.digest,
     participantNeedsDigest: presentation.participantNeedsDigest,
     participantArtifact: presentation.participant,
     referencedApiArtifacts: [presentation.api, ...presentation.referencedApis],

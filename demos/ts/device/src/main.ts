@@ -3,7 +3,7 @@ import { checkDeviceActivation } from "@qlever-llc/trellis/device/deno";
 import { TransportError } from "@qlever-llc/trellis/errors";
 import chalk from "chalk";
 import { ulid } from "ulid";
-import contract from "../contract.ts";
+import { participant } from "../.trellis/ts/participants/demo-device/mod.ts";
 import { renderCompactQr } from "../../shared/compact_qr.ts";
 
 const EVENT_WATCH_MS = 15_000;
@@ -42,7 +42,7 @@ async function main(): Promise<void> {
   };
 
   const activation = await checkDeviceActivation({
-    contract,
+    participant,
     identity,
     trellisUrl,
     rootSecret,
@@ -59,7 +59,7 @@ async function main(): Promise<void> {
 
   const device = await TrellisDevice.connect({
     authorizationContextEphemeral: true,
-    contract,
+    participant,
     identity,
     trellisUrl,
     rootSecret,
@@ -120,13 +120,13 @@ type Device = Awaited<ReturnType<typeof connectForTypes>>;
 async function connectForTypes() {
   return await TrellisDevice.connect({
     authorizationContextEphemeral: true,
-    contract,
+    participant,
     identity: {
       deploymentId: "types-only",
       instanceId: "types-only",
       principalId: "types-only",
-      participantId: contract.CONTRACT_ID,
-      participantArtifactDigest: contract.CONTRACT_DIGEST,
+      participantId: participant.id,
+      participantArtifactDigest: participant.digest,
       participantNeedsDigest: "types-only",
     },
     trellisUrl: "http://localhost:0",

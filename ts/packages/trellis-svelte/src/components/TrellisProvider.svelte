@@ -115,7 +115,6 @@
         const connected = await TrellisClient.connect({
           ...client,
           trellisUrl,
-          contract: trellisApp.contract,
           participant: trellisApp.participant,
           auth: connectAuth,
           onAuthRequired: onAuthRequired

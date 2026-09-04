@@ -1589,8 +1589,7 @@ async fn evidence_upload_start(
         let metadata = input.metadata.clone().unwrap_or_default();
         let file_name = metadata
             .get("fileName")
-            .and_then(serde_json::Value::as_str)
-            .map(ToString::to_string)
+            .cloned()
             .or_else(|| input.key.rsplit('/').next().map(ToString::to_string));
         let evidence_id = if let Some(existing) = state
             .evidence
@@ -1606,8 +1605,7 @@ async fn evidence_upload_start(
         } else {
             let evidence_id = metadata
                 .get("evidenceId")
-                .and_then(serde_json::Value::as_str)
-                .map(ToString::to_string)
+                .cloned()
                 .unwrap_or_else(|| allocate_evidence_id(&mut state));
             state.evidence.push(Evidence {
                 evidence_id: evidence_id.clone(),
@@ -1648,16 +1646,7 @@ async fn evidence_upload_start(
             chunk_bytes: TRANSFER_CHUNK_BYTES,
             max_bytes: Some(MAX_UPLOAD_BYTES as u64),
             content_type: input.content_type.as_deref(),
-            metadata: metadata
-                .into_iter()
-                .map(|(key, value)| {
-                    let value = value
-                        .as_str()
-                        .map(ToString::to_string)
-                        .unwrap_or_else(|| value.to_string());
-                    (key, value)
-                })
-                .collect(),
+            metadata,
         })?;
 
         let accepted = accepted_with_transfer_state(
@@ -2087,12 +2076,7 @@ fn download_transfer_to_response(grant: DownloadTransferGrant) -> EvidenceDownlo
             updated_at: grant.info.updated_at,
             digest: grant.info.digest,
             content_type: grant.info.content_type,
-            metadata: grant
-                .info
-                .metadata
-                .into_iter()
-                .map(|(key, value)| (key, serde_json::Value::String(value)))
-                .collect(),
+            metadata: grant.info.metadata,
         },
     }
 }

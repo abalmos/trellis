@@ -36,6 +36,16 @@ function checkedObject(value: Readonly<Record<string, unknown>>): JsonObject {
 }
 
 export type NativeProtocolContract = {
+  readonly id: string;
+  readonly digest: string;
+  readonly artifact: Readonly<Record<string, unknown>>;
+  readonly api: Readonly<Record<string, unknown>>;
+  readonly apiDigest: string;
+  readonly referencedApis: readonly Readonly<Record<string, unknown>>[];
+  readonly [CONTRACT_RUNTIME]: ContractRuntime;
+};
+
+type LegacyProtocolContract = {
   readonly CONTRACT_ID: string;
   readonly CONTRACT_DIGEST: string;
   readonly API: Readonly<Record<string, unknown>>;
@@ -44,18 +54,24 @@ export type NativeProtocolContract = {
   readonly [CONTRACT_RUNTIME]: ContractRuntime;
 };
 
-function nativeApi(contract: NativeProtocolContract): JsonObject {
-  if (!contract.API) {
+type ProtocolContract = NativeProtocolContract | LegacyProtocolContract;
+
+function nativeApi(contract: ProtocolContract): JsonObject {
+  const api = "PARTICIPANT" in contract ? contract.API : contract.api;
+  if (!api) {
     throw new Error("Defined contract is missing native API artifact");
   }
-  return checkedObject(contract.API);
+  return checkedObject(api);
 }
 
-function nativeParticipant(contract: NativeProtocolContract): JsonObject {
-  if (!contract.PARTICIPANT) {
+function nativeParticipant(contract: ProtocolContract): JsonObject {
+  const participant = "PARTICIPANT" in contract
+    ? contract.PARTICIPANT
+    : contract.artifact;
+  if (!participant) {
     throw new Error("Defined contract is missing native participant artifact");
   }
-  return checkedObject(contract.PARTICIPANT);
+  return checkedObject(participant);
 }
 
 function compileReferencedApi(
@@ -709,7 +725,7 @@ function compareProtocolStrings(left: string, right: string): number {
  * separate runtime concern.
  */
 export function nativeProtocolPresentation(
-  contract: NativeProtocolContract,
+  contract: ProtocolContract,
 ): NativeProtocolPresentation {
   const api = nativeApi(contract);
   const participant = nativeParticipant(contract);
@@ -730,10 +746,16 @@ export function nativeProtocolPresentation(
     throw new Error(`Conflicting API evidence for owned API '${ownedApiId}'`);
   }
   apis[ownedApiId] = api;
-  if (apiDigest(api) !== contract.API_DIGEST) {
+  const expectedApiDigest = "PARTICIPANT" in contract
+    ? contract.API_DIGEST
+    : contract.apiDigest;
+  const expectedParticipantDigest = "PARTICIPANT" in contract
+    ? contract.CONTRACT_DIGEST
+    : contract.digest;
+  if (apiDigest(api) !== expectedApiDigest) {
     throw new Error("Defined contract API digest does not match its artifact");
   }
-  if (participantDigest(participant) !== contract.CONTRACT_DIGEST) {
+  if (participantDigest(participant) !== expectedParticipantDigest) {
     throw new Error(
       "Defined contract participant digest does not match its artifact",
     );
@@ -741,9 +763,11 @@ export function nativeProtocolPresentation(
   return {
     api,
     participant,
-    referencedApis: Object.entries(apis)
-      .filter(([id]) => id !== ownedApiId)
-      .map(([, referencedApi]) => referencedApi),
+    referencedApis: "referencedApis" in contract
+      ? contract.referencedApis.map(checkedObject)
+      : Object.entries(apis)
+        .filter(([id]) => id !== ownedApiId)
+        .map(([, referencedApi]) => referencedApi),
   };
 }
 

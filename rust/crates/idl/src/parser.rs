@@ -1,7 +1,7 @@
 use crate::{
     ast::{
         Api, ApiUse, Binding, Constraint, ConstraintValue, Docs, Field, Participant, Project,
-        Resource, SchemaDecl, Selection, Source, Spanned, Surface, Transfer, Type,
+        Resource, SchemaDecl, Selection, Source, Spanned, State, Surface, Transfer, Type,
     },
     lexer::{lex, Token, TokenKind},
 };
@@ -325,6 +325,7 @@ impl Parser<'_> {
             kind,
             implements: Vec::new(),
             uses: BTreeMap::new(),
+            state: BTreeMap::new(),
             stores: BTreeMap::new(),
             kv: BTreeMap::new(),
             jobs: BTreeMap::new(),
@@ -336,6 +337,43 @@ impl Parser<'_> {
                 "use" => {
                     let (alias, api_use) = self.api_use()?;
                     insert(&mut participant.uses, alias, api_use, self.source)?;
+                }
+                "state" => {
+                    let name = self.ident()?;
+                    let kind = self.ident()?.value;
+                    let start = name.span.start;
+                    self.token(TokenKind::LBrace)?;
+                    let mut schema = None;
+                    let mut state_version = None;
+                    let mut docs = None;
+                    while !self.at(TokenKind::RBrace) {
+                        match self.word_text()?.as_str() {
+                            "schema" => schema = Some(self.ident_statement()?),
+                            "state_version" => state_version = Some(self.string_statement()?.value),
+                            "docs" => docs = Some(self.docs()?),
+                            other => {
+                                return Err(self
+                                    .error_previous(format!("unsupported state member '{other}'")))
+                            }
+                        }
+                    }
+                    let end = self.token(TokenKind::RBrace)?.end;
+                    let schema =
+                        schema.ok_or_else(|| self.error_here("state requires 'schema'"))?;
+                    insert(
+                        &mut participant.state,
+                        name,
+                        self.spanned(
+                            State {
+                                kind,
+                                schema,
+                                state_version,
+                                docs,
+                            },
+                            start..end,
+                        ),
+                        self.source,
+                    )?;
                 }
                 "store" => {
                     let (name, resource) = self.resource()?;

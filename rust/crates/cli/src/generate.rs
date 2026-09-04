@@ -13,7 +13,7 @@ use notify_debouncer_mini::{new_debouncer, notify::RecursiveMode};
 use trellis_codegen_rust::{
     GenerateRustParticipantFacadeOpts, GenerateRustSdkOpts, ParticipantAliasMapping,
 };
-use trellis_codegen_ts::GenerateTsSdkOpts;
+use trellis_codegen_ts::{GenerateTsParticipantOpts, GenerateTsSdkOpts};
 use trellis_idl::project::read_manifest;
 
 use crate::cli::GenerateArgs;
@@ -43,6 +43,7 @@ pub(crate) fn generate_once(root: &Path) -> Result<GenerationResult> {
     let rust_api_root = trellis_root.join("rust/apis");
     let rust_participant_root = trellis_root.join("rust/participants");
     let ts_api_root = trellis_root.join("ts/apis");
+    let ts_participant_root = trellis_root.join("ts/participants");
     let has_ts = root.join("deno.json").is_file() || root.join("deno.jsonc").is_file();
     let has_rust = root.join("Cargo.toml").is_file();
     let output_root = trellis_generation::artifacts::detect_output_root(&root);
@@ -134,6 +135,7 @@ pub(crate) fn generate_once(root: &Path) -> Result<GenerationResult> {
         .transpose()?;
     let mut participant_paths = BTreeSet::new();
     let mut facade_paths = BTreeSet::new();
+    let mut ts_participant_paths = BTreeSet::new();
     for participant in &compiled.participants {
         trellis_generation::planning::validate_output_identity("participant", participant.id())?;
         let participant_path = participant_root.join(format!("{}.json", participant.id()));
@@ -146,15 +148,38 @@ pub(crate) fn generate_once(root: &Path) -> Result<GenerationResult> {
             .as_bytes(),
         )?;
         participant_paths.insert(participant_path.clone());
+        let value = participant.normalized_value().map_err(protocol_error)?;
+        let implemented = value["implements"]
+            .as_object()
+            .and_then(|implements| implements.values().next())
+            .and_then(|implementation| implementation["api"].as_str())
+            .ok_or_else(|| miette!("participant '{}' has no implemented API", participant.id()))?;
+        if has_ts {
+            let out = ts_participant_root.join(trellis_generation::artifacts::sdk_output_stem(
+                participant.id(),
+            ));
+            trellis_codegen_ts::generate_ts_participant(&GenerateTsParticipantOpts {
+                participant_path: participant_path.clone(),
+                owned_api_path: if compiled.apis.contains_key(implemented) {
+                    api_root.join(format!("{implemented}.json"))
+                } else {
+                    referenced.path().join(format!("{implemented}.json"))
+                },
+                referenced_api_paths: compiled
+                    .referenced_apis
+                    .keys()
+                    .map(|id| referenced.path().join(format!("{id}.json")))
+                    .collect(),
+                out_dir: out.clone(),
+            })
+            .into_diagnostic()?;
+            trellis_generation::artifacts::format_generated_typescript_artifacts(
+                &out,
+                runtime_repo_root.as_deref(),
+            )?;
+            ts_participant_paths.insert(out);
+        }
         if has_rust {
-            let value = participant.normalized_value().map_err(protocol_error)?;
-            let implemented = value["implements"]
-                .as_object()
-                .and_then(|implements| implements.values().next())
-                .and_then(|implementation| implementation["api"].as_str())
-                .ok_or_else(|| {
-                    miette!("participant '{}' has no implemented API", participant.id())
-                })?;
             let aliases = ["required", "optional"]
                 .into_iter()
                 .filter_map(|kind| value["uses"][kind].as_object())
@@ -219,6 +244,7 @@ pub(crate) fn generate_once(root: &Path) -> Result<GenerationResult> {
         (&api_root, &api_paths),
         (&participant_root, &participant_paths),
         (&ts_api_root, &ts_api_paths),
+        (&ts_participant_root, &ts_participant_paths),
         (&rust_api_root, &rust_api_paths),
         (&rust_participant_root, &facade_paths),
     ] {

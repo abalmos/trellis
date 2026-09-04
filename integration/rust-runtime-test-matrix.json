@@ -4088,6 +4088,52 @@
       "classification": "shared"
     },
     {
+      "id": "idl-demo.field-ops-out-of-tree",
+      "fixture": "idl-demo",
+      "title": "Field Ops IDL demos work outside the Trellis checkout",
+      "coverage": [
+        "idl-generation",
+        "generated-participants",
+        "cross-runtime-rpc"
+      ],
+      "description": "Copied Field Ops projects use the Trellis CLI to generate TypeScript and Rust participants, pass their native language checks, and complete a live RPC through generated service and app participants.",
+      "scenario": {
+        "participants": [
+          {
+            "name": "client",
+            "kind": "app",
+            "contract": "demo.app@v1"
+          },
+          {
+            "name": "service",
+            "kind": "service",
+            "contract": "demo.service@v1"
+          }
+        ],
+        "given": [
+          "the Field Ops demo source is copied outside the Trellis checkout without generated state"
+        ],
+        "when": [
+          "the external Trellis CLI generates all five projects and the language toolchains check them",
+          "the generated service and app participants connect through the live runtime"
+        ],
+        "then": [
+          "the generated participants complete a Sites.List RPC"
+        ]
+      },
+      "completion": {
+        "rust": "implemented"
+      },
+      "classification": "isolated-process",
+      "isolationReason": "copies and builds five external demo projects with nested Cargo and Deno processes.",
+      "implementations": {
+        "rust": {
+          "module": "idl_demo",
+          "function": "field_ops_out_of_tree"
+        }
+      }
+    },
+    {
       "id": "cli.server-managed-nats",
       "fixture": "cli",
       "title": "Trellis server manages an isolated local NATS server",

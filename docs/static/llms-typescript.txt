@@ -20,9 +20,8 @@ exact participant artifact and needs digests.
 
 - Manage local or OCI canonical API dependencies with `trellis add`, `trellis rm`,
   `trellis update`, and lock-stable `trellis install`. Commit `trellis.toml` and
-  `trellis.lock`, ignore `.trellis/`, link
-  `.trellis/generated/ts/trellis-apis` in Deno, and import stable subpaths such
-  as `@trellis/apis/acme.orders`. Install verifies exact API ID, release, and
+  `trellis.lock`, ignore `.trellis/`, and import generated APIs and participants
+  from `.trellis/ts/apis` and `.trellis/ts/participants`. Install verifies exact API ID, release, and
   semantic digest, and remote OCI digest and never executes provider source.
 
 Recommended TypeScript service shape:
@@ -30,10 +29,7 @@ Recommended TypeScript service shape:
 ```text
 services/<name>/
 |-- deno.json or package.json
-|-- contract.ts              # Single-contract public entrypoint
-|-- contracts/*.ts           # Optional multi-contract modules
-|-- schemas/*.ts             # TypeBox wire schemas and exported model schemas
-|-- errors/*.ts              # Service-local transportable errors
+|-- contract.trellis         # Native API and participant source
 |-- rpc/*.ts                 # RPC handlers
 |-- events/*.ts              # Event listeners and publishers
 |-- operations/*.ts          # Operation providers
@@ -44,20 +40,12 @@ services/<name>/
 
 Rules:
 
-- single-contract services normally expose `contract.ts`; multi-contract services
-  may use `contracts/*.ts` and optionally re-export the primary default contract
-  from `contract.ts`
-- every TypeScript contract source loaded by Trellis generation should
-  default-export the `defineServiceContract(...)`, `defineAppContract(...)`,
-  `defineAgentContract(...)`, or `defineDeviceContract(...)` result
-- every `define*Contract` body requires `id` (stable participant identity),
-  `apiId` (owned API identity), and `apiVersion` (Semantic Version release
-  metadata), even when the identities are equal. Release version does not affect
-  the semantic API digest, participant evidence, permissions, or subjects.
-- import those normal contract helpers from the browser-safe
-  `@qlever-llc/trellis` root. Keep service runtime, device activation,
-  browser-auth, telemetry, generated SDK, and advanced contract tooling imports on
-  their explicit subpaths.
+- author APIs and participants in `contract.trellis`, or direct-child
+  `contracts/*.trellis` files; do not execute TypeScript to discover contracts
+- run `trellis generate` after IDL changes, or `trellis generate --watch` while
+  editing, and import the generated `participant` runtime object
+- pass generated participants to `TrellisService.connect(...)`,
+  `TrellisClient.connect(...)`, device helpers, and test runtime registration
 - Browser apps use `TrellisClient.connect(...)` as the sole auth lifecycle owner.
   Do not start or bind flows, persist auth state, or classify auth messages in UI
   wrappers. Browser bundles require `nats.transports.websocket`; service and Deno
@@ -72,15 +60,15 @@ Rules:
   explicit expired/replaced review, not a review to follow silently. Resolve
   cancellation is unsupported.
 - `deno.json` should expose locked API installation through `trellis install`
-- Contract resolution must be deterministic from tracked source. Undeclared
-  time, randomness, network, environment, and external-file inputs are unsupported.
+- IDL resolution is deterministic from tracked source and exact installed
+  canonical API artifacts.
 - service-boundary integration tests can use
   `@qlever-llc/trellis-test/integration` and
   `@qlever-llc/trellis-test/integration/runner`: define
   `trellis.integration.ts` with an explicit `runtime.trellis.command`,
   `denoTestArgs`, and case descriptors; use `trellisIntegrationTest(...)`,
-  `runtimeScopeForCase(CASE_ID)`, fixed authored contract ids/actions/subjects,
-  case-slugged physical names and state/resource keys, contract approval/provisioning,
+  `runtimeScopeForCase(CASE_ID)`, fixed authored participant ids/actions/subjects,
+  case-slugged physical names and state/resource keys, participant approval/provisioning,
   `TrellisService.connect(...)`, `runtime.connectClient(...)`, and
   `runtime.captureEvents(...)` when needed. Run isolated cases with `--config`;
   use shared mode with `--parallel --jobs 1`. Shared cases use one NATS account,

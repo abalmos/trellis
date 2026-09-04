@@ -1,0 +1,80 @@
+api "demo.service@v1" {
+    version "1.0.0";
+    display_name "Field Ops Demo Service";
+    description "Consolidated Field Ops demo service for Trellis concepts.";
+    docs { summary "Field operations demo APIs."; markdown "Provides assignments, site summaries, evidence transfer, report generation, and audit activity for the Field Ops demo."; }
+    type NonEmptyString = string(min_length = 1);
+    type NonWhitespaceString = string(min_length = 1, pattern = "\\S");
+    enum Priority { high; medium; low; }
+    model AuditRecordedEvent { activityId: NonEmptyString; kind: NonEmptyString; message: NonEmptyString; occurredAt: NonEmptyString; relatedSiteId?: NonEmptyString; relatedInspectionId?: NonEmptyString; }
+    model InspectionAssignment { inspectionId: NonEmptyString; siteId: NonEmptyString; siteName: NonEmptyString; assetName: NonEmptyString; checklistName: NonEmptyString; priority: Priority; scheduledFor: NonEmptyString; }
+    model AssignmentsListRequest { limit: uint(maximum = 500); offset?: uint; }
+    model AssignmentsListResponse { entries: list<InspectionAssignment>; count: uint; offset: uint; limit: uint; nextOffset?: uint; }
+    model SiteSummary { siteId: NonEmptyString; siteName: NonEmptyString; openInspections: uint; overdueInspections: uint; latestStatus: NonEmptyString; lastReportAt: NonEmptyString; }
+    model SitesListRequest { limit: uint(maximum = 500); offset?: uint; }
+    model SitesListResponse { entries: list<SiteSummary>; count: uint; offset: uint; limit: uint; nextOffset?: uint; }
+    model SitesGetRequest { siteId: NonEmptyString; }
+    model SitesGetResponse { site?: SiteSummary; }
+    model SitesRefreshRequest { siteId: NonEmptyString; }
+    model SitesRefreshProgress { stage: NonEmptyString; message: NonEmptyString; }
+    model SitesRefreshResponse { refreshId: NonEmptyString; site: SiteSummary; status: NonEmptyString; }
+    model SiteRefreshJobPayload { siteId: NonEmptyString; }
+    model SiteRefreshJobResult { refreshId: NonEmptyString; site: SiteSummary; status: NonEmptyString; }
+    model SitesRefreshedEvent { refreshId: NonEmptyString; site: SiteSummary; refreshedAt: NonEmptyString; }
+    model EvidenceUploadRequest { key: NonEmptyString; contentType?: NonEmptyString; evidenceType: NonEmptyString; metadata?: map<string>; }
+    model EvidenceUploadProgress { stage: NonEmptyString; message: NonEmptyString; }
+    model EvidenceUploadResponse { evidenceId: NonEmptyString; key: NonEmptyString; size: uint; contentType?: NonEmptyString; fileName?: NonEmptyString; disposition: NonEmptyString; }
+    model EvidenceRecord { evidenceId: NonEmptyString; key: NonEmptyString; size: uint; contentType?: NonEmptyString; evidenceType: NonEmptyString; fileName?: NonEmptyString; uploadedAt: NonEmptyString; }
+    model EvidenceListRequest { limit: uint(maximum = 500); offset?: uint; prefix?: NonEmptyString; }
+    model EvidenceListResponse { entries: list<EvidenceRecord>; count: uint; offset: uint; limit: uint; nextOffset?: uint; }
+    model EvidenceDownloadRequest { key: NonEmptyString; }
+    model EvidenceFileInfo { key: NonEmptyString; size: uint; updatedAt: NonEmptyString; digest?: NonEmptyString; contentType?: NonEmptyString; metadata: map<string>; }
+    model EvidenceDownloadInfo { key: NonEmptyString; size: uint; updatedAt: NonEmptyString; digest: NonEmptyString; contentType?: NonEmptyString; metadata: map<string>; }
+    model EvidenceDownloadGrant { type: "TransferGrant"; direction: "receive"; service: NonEmptyString; sessionKey: NonEmptyString; transferId: NonEmptyString; subject: NonEmptyString; expiresAt: NonEmptyString; chunkBytes: uint(minimum = 1); info: EvidenceDownloadInfo; }
+    model EvidenceDownloadResponse { transfer: EvidenceDownloadGrant; }
+    model EvidenceDeleteRequest { key: NonEmptyString; }
+    model EvidenceDeleteResponse { key: NonEmptyString; deleted: bool; }
+    type EvidenceUploadedEvent = EvidenceRecord;
+    model ReportsGenerateRequest { inspectionId: NonEmptyString; reportComment: NonWhitespaceString; }
+    model ReportsGenerateProgress { stage: NonEmptyString; message: NonEmptyString; }
+    model ReportsGenerateResponse { reportId: NonEmptyString; inspectionId: NonEmptyString; status: NonEmptyString; }
+    model ReportRecord { reportId: NonEmptyString; inspectionId: NonEmptyString; siteId?: NonEmptyString; siteName: NonEmptyString; assetName: NonEmptyString; status: NonEmptyString; publishedAt: NonEmptyString; reportComment: NonWhitespaceString; summary: NonEmptyString; readiness: NonEmptyString; evidenceStatus: NonEmptyString; }
+    model ReportsListRequest { limit: uint(maximum = 500); offset?: uint; }
+    model ReportsListResponse { entries: list<ReportRecord>; count: uint; offset: uint; limit: uint; nextOffset?: uint; }
+    model ReportsPublishedEvent { reportId: NonEmptyString; inspectionId: NonEmptyString; siteId?: NonEmptyString; publishedAt: NonEmptyString; }
+    model ActivityLiveFeedRequest {}
+    model AuditFeedItem { name: "Audit.Recorded"; event: AuditRecordedEvent; }
+    model ReportsFeedItem { name: "Reports.Published"; event: ReportsPublishedEvent; }
+    model EvidenceFeedItem { name: "Evidence.Uploaded"; event: EvidenceUploadedEvent; }
+    model SitesFeedItem { name: "Sites.Refreshed"; event: SitesRefreshedEvent; }
+    type ActivityLiveFeedEvent = AuditFeedItem | ReportsFeedItem | EvidenceFeedItem | SitesFeedItem;
+    export EvidenceRecord;
+    export InspectionAssignment;
+    export ReportRecord;
+    export SiteSummary;
+    error UnexpectedError;
+    error TransferError;
+    rpc "Assignments.List" { version "v1"; input AssignmentsListRequest; output AssignmentsListResponse; errors [UnexpectedError]; docs { summary "List assignments."; markdown "Returns inspection assignments available to the caller."; } }
+    rpc "Sites.List" { version "v1"; input SitesListRequest; output SitesListResponse; errors [UnexpectedError]; }
+    rpc "Sites.Get" { version "v1"; input SitesGetRequest; output SitesGetResponse; errors [UnexpectedError]; }
+    rpc "Evidence.List" { version "v1"; input EvidenceListRequest; output EvidenceListResponse; errors [UnexpectedError]; }
+    rpc "Evidence.Download" { version "v1"; input EvidenceDownloadRequest; output EvidenceDownloadResponse; errors [TransferError, UnexpectedError]; transfer receive; }
+    rpc "Evidence.Delete" { version "v1"; input EvidenceDeleteRequest; output EvidenceDeleteResponse; errors [UnexpectedError]; }
+    rpc "Reports.List" { version "v1"; input ReportsListRequest; output ReportsListResponse; errors [UnexpectedError]; }
+    operation "Sites.Refresh" { version "v1"; input SitesRefreshRequest; progress SitesRefreshProgress; output SitesRefreshResponse; docs { summary "Refresh site data."; markdown "Runs a caller-visible workflow that updates the site summary cache."; } }
+    operation "Reports.Generate" { version "v1"; input ReportsGenerateRequest; progress ReportsGenerateProgress; output ReportsGenerateResponse; cancellable; }
+    operation "Evidence.Upload" { version "v1"; input EvidenceUploadRequest; progress EvidenceUploadProgress; output EvidenceUploadResponse; transfer send; }
+    event "Audit.Recorded" { version "v1"; payload AuditRecordedEvent; }
+    event "Reports.Published" { version "v1"; payload ReportsPublishedEvent; }
+    event "Evidence.Uploaded" { version "v1"; payload EvidenceUploadedEvent; }
+    event "Sites.Refreshed" { version "v1"; payload SitesRefreshedEvent; }
+    feed "Audit.Feed" { version "v1"; input ActivityLiveFeedRequest; event ActivityLiveFeedEvent; docs { summary "Stream audit activity."; markdown "Subscribes to live activity records from audit, evidence, report, and site refresh events."; } }
+}
+
+participant "demo.service@v1" service {
+    implements "demo.service@v1";
+    store uploads { purpose "Persistent evidence locker files for the Field Ops demo."; ttl_ms 0; max_object_bytes 67108864; max_total_bytes 268435456; docs { summary "Evidence upload objects."; markdown "Persists uploaded evidence files before they are listed or downloaded."; } }
+    kv siteSummaries { purpose "Latest site summaries for the Field Ops demo."; schema SiteSummary; history 1; ttl_ms 0; docs { summary "Cached site summaries."; markdown "Stores the current site summary records served by the demo APIs."; } }
+    job refreshSiteSummary { payload SiteRefreshJobPayload; result SiteRefreshJobResult; docs { summary "Refresh a site summary."; markdown "Background work item that recomputes the latest summary for one site."; } }
+    bind operation "Evidence.Upload" { transfer { store uploads; key "/key"; content_type "/contentType"; metadata "/metadata"; expires_in_ms 60000; } }
+}

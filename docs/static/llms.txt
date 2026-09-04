@@ -292,11 +292,11 @@ commands.
 - Keep Trellis-wide AI guidance in this file or `llms-full.txt`; keep local paths,
   commands, secrets, and domain rules in the service repo's own `AGENTS.md`.
 - Put TypeScript service source next to a local `deno.json`, `deno.jsonc`, or
-  `package.json`. Single-contract services normally expose a top-level
-  `contract.ts`; multi-contract services use `contracts/*.ts`. Contract source
-  files should default-export the `define*Contract(...)` result.
-- Run `trellis install` after contract or dependency changes.
-- In TypeScript services, run `trellis install` after contract changes before
+  `package.json` and author its API and participant in `contract.trellis` (or
+  direct-child `contracts/*.trellis` files).
+- Run `trellis update` after dependency changes and `trellis generate` after IDL
+  changes. Use `trellis generate --watch` while editing.
+- In TypeScript services, generate after IDL changes before
   typing extracted handlers. Import generated SDK aliases such as
   `OrdersCreateHandler` for extracted RPC/event/feed/operation/job
   handlers. Inline `service.handle...` handlers still infer at the registration
@@ -310,7 +310,7 @@ commands.
   `trellis.integration.ts` with an explicit `runtime.trellis.command`,
   `denoTestArgs`, and case descriptors. Tests use
   `trellisIntegrationTest(...)`, `runtimeScopeForCase(CASE_ID)`, fixed authored
-  contract ids/actions/subjects, case-slugged physical names/resource keys, contract approval/provisioning,
+  participant ids/actions/subjects, case-slugged physical names/resource keys, participant approval/provisioning,
   `TrellisService.connect(...)`, and `runtime.connectClient(...)`. Serial runs
   call the runner with `--config`; shared runs add `--parallel --jobs 1`.
   Shared cases use one NATS account, Trellis process, and SQLite set; the harness

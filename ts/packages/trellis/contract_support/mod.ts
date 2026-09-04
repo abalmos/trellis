@@ -343,6 +343,9 @@ export const CONTRACT_EVENT_CONSUMERS_METADATA = Symbol.for(
 );
 /** Internal runtime metadata attached to defined contracts. */
 export { CONTRACT_RUNTIME } from "./contract_runtime.ts";
+export type { ContractRuntime } from "./contract_runtime.ts";
+export type { ActionDescriptor } from "./descriptors.ts";
+export type { RuntimeApi } from "./runtime.ts";
 const CONTRACT_ERROR_RUNTIME_METADATA = Symbol.for(
   "@qlever-llc/trellis/contracts/error-runtime",
 );

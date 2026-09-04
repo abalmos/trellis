@@ -1,0 +1,62 @@
+api "demo.device@v1" {
+    version "1.0.0";
+    display_name "Field Device Demo";
+    description "Activated Field Device TUI for the consolidated demo.";
+    docs {
+        summary "Activated field device demo.";
+        markdown "Declares the Field Device demo's service usage and local state for selected sites and draft inspections.";
+    }
+
+    model SelectedSiteState {
+        siteId: string;
+        siteName: string;
+        selectedAt: string;
+    }
+    model DraftInspectionState {
+        inspectionId: string;
+        siteId: string;
+        checklistName: string;
+        notes: string;
+        updatedAt: string;
+    }
+}
+
+participant "demo.device@v1" device {
+    implements "demo.device@v1";
+
+    use required fieldOps "demo.service@v1" {
+        call rpc "Assignments.List";
+        call rpc "Sites.List";
+        call rpc "Sites.Get";
+        call rpc "Evidence.List";
+        call rpc "Evidence.Download";
+        invoke operation "Sites.Refresh";
+        observe operation "Sites.Refresh";
+        invoke operation "Reports.Generate";
+        observe operation "Reports.Generate";
+        cancel operation "Reports.Generate";
+        invoke operation "Evidence.Upload";
+        observe operation "Evidence.Upload";
+        subscribe event "Audit.Recorded";
+        subscribe event "Reports.Published";
+        subscribe event "Evidence.Uploaded";
+        subscribe event "Sites.Refreshed";
+    }
+
+    state selectedSite value {
+        schema SelectedSiteState;
+        state_version "selected-site.v1";
+        docs {
+            summary "Selected site state.";
+            markdown "Stores the active site selected in the device TUI.";
+        }
+    }
+    state draftInspections map {
+        schema DraftInspectionState;
+        state_version "draft-inspection.v1";
+        docs {
+            summary "Draft inspection state.";
+            markdown "Stores editable inspection draft notes keyed by inspection id.";
+        }
+    }
+}

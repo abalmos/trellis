@@ -594,7 +594,7 @@ fn render_cargo_toml(
         ""
     };
     Ok(format!(
-        "[package]\nname = \"{}\"\nversion = \"{}\"\nedition = \"2021\"\nlicense = \"Apache-2.0\"\nrepository = \"https://github.com/qlever-llc/trellis\"\ndescription = \"{}\"\nreadme = \"README.md\"\n{}\n[dependencies]\nserde = {{ version = \"1.0\", features = [\"derive\"] }}\nserde_json = \"1.0\"\n{}\n",
+        "[package]\nname = \"{}\"\nversion = \"{}\"\nedition = \"2021\"\nlicense = \"Apache-2.0\"\nrepository = \"https://github.com/qlever-llc/trellis\"\ndescription = \"{}\"\nreadme = \"README.md\"\n{}\n[dependencies]\nserde = {{ version = \"1.0\", features = [\"derive\"] }}\nserde_json = \"1.0\"\n{}\n\n[workspace]\n",
         opts.crate_name,
         opts.crate_version,
         description,
@@ -608,10 +608,9 @@ fn runtime_dependency_lines(
     out_dir: &Path,
 ) -> Result<Vec<String>, CodegenRustError> {
     match runtime_deps.source {
-        RustRuntimeSource::Registry => Ok(vec![
-            format!("trellis-rs = \"{}\"", runtime_deps.version),
-            format!("trellis-contracts = \"{}\"", runtime_deps.version),
-        ]),
+        RustRuntimeSource::Registry => {
+            Ok(vec![format!("trellis-rs = \"{}\"", runtime_deps.version)])
+        }
         RustRuntimeSource::Local => {
             let repo_root = runtime_deps
                 .repo_root
@@ -619,19 +618,11 @@ fn runtime_dependency_lines(
                 .ok_or(CodegenRustError::MissingRuntimeRepoRoot)?;
             let repo_root = fs::canonicalize(repo_root).unwrap_or_else(|_| repo_root.clone());
             let trellis_path = workspace_package_dir(&repo_root, "trellis-rs")?;
-            let contracts_path = workspace_package_dir(&repo_root, "trellis-contracts")?;
             let trellis_path = relative_path(out_dir, &trellis_path);
-            let contracts_path = relative_path(out_dir, &contracts_path);
-            Ok(vec![
-                format!(
-                    "trellis-rs = {{ path = {} }}",
-                    string_literal(&trellis_path.display().to_string())
-                ),
-                format!(
-                    "trellis-contracts = {{ path = {} }}",
-                    string_literal(&contracts_path.display().to_string())
-                ),
-            ])
+            Ok(vec![format!(
+                "trellis-rs = {{ path = {} }}",
+                string_literal(&trellis_path.display().to_string())
+            )])
         }
     }
 }
@@ -1208,7 +1199,7 @@ fn render_participant_cargo_toml(
     dependency_lines.sort();
 
     Ok(format!(
-        "[package]\nname = \"{}\"\nversion = \"{}\"\nedition = \"2021\"\nlicense = \"Apache-2.0\"\npublish = false\n\n[dependencies]\nserde = {{ version = \"1.0\", features = [\"derive\"] }}\nserde_json = \"1.0\"\n{}\n",
+        "[package]\nname = \"{}\"\nversion = \"{}\"\nedition = \"2021\"\nlicense = \"Apache-2.0\"\npublish = false\n\n[dependencies]\nserde = {{ version = \"1.0\", features = [\"derive\"] }}\nserde_json = \"1.0\"\n{}\n\n[workspace]\n",
         opts.crate_name,
         opts.crate_version,
         dependency_lines.join("\n")

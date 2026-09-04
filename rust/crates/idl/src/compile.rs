@@ -459,6 +459,33 @@ fn participant_value(
     if let Some(docs) = api_value.get("docs") {
         object.insert("docs".to_owned(), docs.clone());
     }
+    let mut state = Map::new();
+    for (name, declaration) in &participant.state {
+        let declaration_value = &declaration.value;
+        if !matches!(declaration_value.kind.as_str(), "value" | "map") {
+            return Err(at(
+                project,
+                declaration,
+                format!("unknown state kind '{}'", declaration_value.kind),
+            ));
+        }
+        require_api_schema(project, &api_value, &declaration_value.schema)?;
+        let mut state_value = json!({
+            "kind": declaration_value.kind,
+            "schema": {"schema": declaration_value.schema.value},
+        });
+        let state_object = state_value.as_object_mut().expect("state is an object");
+        insert_option(
+            state_object,
+            "stateVersion",
+            &declaration_value.state_version,
+        );
+        insert_docs(state_object, &declaration_value.docs);
+        state.insert(name.clone(), state_value);
+    }
+    if !state.is_empty() {
+        object.insert("state".to_owned(), Value::Object(state));
+    }
     let mut resources = Map::new();
     let mut stores = Map::new();
     for (name, declaration) in &participant.stores {

@@ -111,10 +111,19 @@ pub(crate) struct Participant {
     pub kind: String,
     pub implements: Vec<Spanned<String>>,
     pub uses: BTreeMap<String, Spanned<ApiUse>>,
+    pub state: BTreeMap<String, Spanned<State>>,
     pub stores: BTreeMap<String, Spanned<Resource>>,
     pub kv: BTreeMap<String, Spanned<Resource>>,
     pub jobs: BTreeMap<String, Spanned<Resource>>,
     pub bindings: BTreeMap<String, Spanned<Binding>>,
+}
+
+#[derive(Debug)]
+pub(crate) struct State {
+    pub kind: String,
+    pub schema: Spanned<String>,
+    pub state_version: Option<String>,
+    pub docs: Option<Docs>,
 }
 
 #[derive(Debug)]

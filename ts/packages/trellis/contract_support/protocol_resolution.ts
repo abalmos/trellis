@@ -38,14 +38,6 @@ export async function resolveNativeProtocolPresentation(
       "Resolved owned API does not match the defined contract API",
     );
   }
-  if (resolved.apiDigests[ownedApiId] !== contract.API_DIGEST) {
-    throw new Error("Defined contract API digest does not match resolution");
-  }
-  if (resolved.participantDigest !== contract.CONTRACT_DIGEST) {
-    throw new Error(
-      "Defined contract participant digest does not match resolution",
-    );
-  }
   return {
     api: resolvedApi,
     participant: resolved.participant,

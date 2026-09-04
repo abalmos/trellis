@@ -54,6 +54,17 @@ export {
   store,
 } from "./contract.ts";
 export { operationAccess, optional } from "./contract_support/descriptors.ts";
+export {
+  CONTRACT_RUNTIME,
+  runtimeApiFromActions,
+} from "./contract_support/contract_runtime.ts";
+export {
+  CONTRACT_EVENT_CONSUMERS_METADATA,
+  CONTRACT_JOBS_METADATA,
+  CONTRACT_KV_METADATA,
+  CONTRACT_STATE_METADATA,
+  CONTRACT_STORE_METADATA,
+} from "./contract_support/mod.ts";
 export type { DefineContractInput } from "./contract.ts";
 export {
   AsyncResult,

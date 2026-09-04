@@ -16,18 +16,17 @@ exact participant artifact and needs digests.
 
 - Manage local or OCI canonical API dependencies with `trellis add`, `trellis rm`,
   `trellis update`, and lock-stable `trellis install`. Commit `trellis.toml` and
-  `trellis.lock`, ignore `.trellis/`, and add
-  `trellis-apis = { path = ".trellis/generated/rust/trellis-apis" }`. Imports
-  remain stable under `trellis_apis::<module>` across release updates. Install
+  `trellis.lock`, ignore `.trellis/`, and depend directly on generated crates in
+  `.trellis/rust/apis` and `.trellis/rust/participants`. Install
   verifies exact API ID, release, semantic digest, and remote OCI digest and never
   executes provider source.
-- Expose repository contract/artifact installation through `cargo xtask install`.
-- Commit the generated SDKs, participant facades, manifests, and package outputs
-  expected by the repository. Never edit generated files by hand.
+- Author APIs and participants in `contract.trellis`, run `trellis generate`,
+  and never edit generated files by hand.
 - Public contract object schemas are open by default. Omit
   `additionalProperties`; use `false` only for a documented proof/security
   boundary that must reject unknown fields.
-- Run `trellis install` after contract/schema changes. Generated owner and participant
+- Run `trellis generate` after IDL changes and `trellis update` after dependency
+  changes. Generated owner and participant
   Cargo crates are materialized source with relative local dependencies and no
   generator `build.rs`.
 

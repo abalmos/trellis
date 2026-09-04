@@ -1,9 +1,5 @@
-import { dirname, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
 import adapter from "@sveltejs/adapter-static";
 import { vitePreprocess } from "@sveltejs/vite-plugin-svelte";
-
-const rootDir = dirname(fileURLToPath(import.meta.url));
 
 const config = {
   preprocess: vitePreprocess(),
@@ -13,56 +9,6 @@ const config = {
       assets: "build",
       fallback: "index.html",
     }),
-    alias: {
-      "@qlever-llc/result": resolve(
-        rootDir,
-        "../../ts/packages/result/mod.ts",
-      ),
-      "@qlever-llc/trellis/auth/browser": resolve(
-        rootDir,
-        "../../ts/packages/trellis/auth/browser.ts",
-      ),
-      "@qlever-llc/trellis/auth": resolve(
-        rootDir,
-        "../../ts/packages/trellis/auth.ts",
-      ),
-      "@qlever-llc/trellis/browser": resolve(
-        rootDir,
-        "../../ts/packages/trellis/browser.ts",
-      ),
-      "@qlever-llc/trellis/contracts": resolve(
-        rootDir,
-        "../../ts/packages/trellis/contracts.ts",
-      ),
-      "@qlever-llc/trellis/device/deno": resolve(
-        rootDir,
-        "../../ts/packages/trellis/device/deno.ts",
-      ),
-      "@qlever-llc/trellis/errors": resolve(
-        rootDir,
-        "../../ts/packages/trellis/errors/index.ts",
-      ),
-      "@qlever-llc/trellis/service/deno": resolve(
-        rootDir,
-        "../../ts/packages/trellis/service/deno.ts",
-      ),
-      "@qlever-llc/trellis/service": resolve(
-        rootDir,
-        "../../ts/packages/trellis/service/mod.ts",
-      ),
-      "@qlever-llc/trellis-svelte": resolve(
-        rootDir,
-        "../../ts/packages/trellis-svelte/src/index.ts",
-      ),
-      "@qlever-llc/trellis": resolve(
-        rootDir,
-        "../../ts/packages/trellis/index.ts",
-      ),
-      "@trellis/apis/trellis.demo-service": resolve(
-        rootDir,
-        ".trellis/generated/ts/trellis-apis/trellis.demo-service.ts",
-      ),
-    },
   },
 };
 

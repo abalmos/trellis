@@ -365,17 +365,17 @@ Rules:
   transports. Restored clients use that binding rather than bootstrap routing,
   while running clients retain their initial server list and require a new
   connection when endpoints change.
-- Rust service repos should expose repository installation as `cargo xtask install`.
-  Owner SDKs are vocabulary-only; services, apps, agents, and devices connect
-  only through their materialized generated participant facade.
+- Service repos author APIs and participants in `contract.trellis`, run
+  `trellis update` for dependency changes and `trellis generate` for IDL changes,
+  and connect only through their materialized generated participant facade.
 - Deno-first TypeScript service repos can use
   `@qlever-llc/trellis-test/integration` and
   `@qlever-llc/trellis-test/integration/runner` for out-of-tree integration
   tests that need a real Trellis runtime. Add `trellis.integration.ts` with an
   explicit `runtime.trellis.command`, child `denoTestArgs`, and case descriptors.
   Test modules should use `trellisIntegrationTest(...)`,
-  `runtimeScopeForCase(CASE_ID)`, fixed authored contract ids/actions/subjects,
-  case-slugged physical names and state/resource keys, contract approval/provisioning,
+  `runtimeScopeForCase(CASE_ID)`, fixed authored participant ids/actions/subjects,
+  case-slugged physical names and state/resource keys, participant approval/provisioning,
   `TrellisService.connect(...)`, `runtime.connectClient(...)`, and
   `runtime.captureEvents(...)` when needed. Run serially with the generic runner
   and `--config`; use shared mode with `--parallel --jobs 1`. Shared cases use one

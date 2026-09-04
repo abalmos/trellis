@@ -3,7 +3,7 @@ import { TrellisService } from "@qlever-llc/trellis/service/deno";
 import { Command } from "@cliffy/command";
 import chalk from "chalk";
 import { getSiteSummary, SITE_SUMMARIES } from "../../shared/field_data.ts";
-import contract from "../contract.ts";
+import { participant } from "../.trellis/ts/participants/demo-service/mod.ts";
 import type { FieldOpsDeps } from "./deps.ts";
 import * as features from "./features/index.ts";
 
@@ -28,7 +28,7 @@ async function main(): Promise<void> {
   const service = await TrellisService.connect({
     authorizationContextEphemeral: true,
     trellisUrl,
-    contract,
+    participant,
     name: "field-ops-demo-service",
     identity: {
       seed,
