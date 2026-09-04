@@ -183,7 +183,11 @@ pub(crate) fn generate_once(root: &Path) -> Result<GenerationResult> {
             ));
             trellis_codegen_rust::generate_rust_participant_facade(
                 &GenerateRustParticipantFacadeOpts {
-                    api_path: api_root.join(format!("{implemented}.json")),
+                    api_path: if compiled.apis.contains_key(implemented) {
+                        api_root.join(format!("{implemented}.json"))
+                    } else {
+                        referenced.path().join(format!("{implemented}.json"))
+                    },
                     participant_path,
                     out_dir: out.clone(),
                     crate_name: format!(

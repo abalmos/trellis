@@ -463,17 +463,13 @@ async fn install_root(
     let dependencies_fresh = installed_api_paths(&trellis_root.join("apis"))
         .is_some_and(|paths| paths == expected_installed)
         && registry_apis.iter().all(|api| {
-            trellis_generation::artifacts::installed_api_is_fresh(
-                &api.id,
-                &api.version,
-                &api.api_digest,
+            installed_api_matches_lock(
                 &trellis_root
                     .join("apis")
                     .join(&api.id)
                     .join(&api.version)
                     .join("trellis.api.json"),
-                None,
-                None,
+                api,
             )
         });
     if dependencies_fresh {
@@ -520,6 +516,21 @@ fn installed_api_paths(root: &Path) -> Option<BTreeSet<std::path::PathBuf>> {
         }
     }
     Some(paths)
+}
+
+fn installed_api_matches_lock(path: &Path, locked: &LockedApi) -> bool {
+    let Ok(bytes) = fs::read(path) else {
+        return false;
+    };
+    let Ok(value) = serde_json::from_slice(&bytes) else {
+        return false;
+    };
+    let Ok(api) = trellis_protocol::parse_api(&value) else {
+        return false;
+    };
+    api.id() == locked.id
+        && api.version() == locked.version
+        && api.digest().ok().as_deref() == Some(locked.api_digest.as_str())
 }
 
 async fn stage_dependencies(
@@ -1022,6 +1033,22 @@ mod tests {
                 oci_digest: Some(oci_digest),
             }],
         };
+        let write_project = |root: &Path| {
+            fs::write(
+                root.join("contract.trellis"),
+                "api \"acme.consumer@v1\" { version \"1.0.0\"; display_name \"Consumer\"; description \"Consumer API.\"; }\n",
+            )
+            .unwrap();
+            write_manifest_and_lock(
+                &root.join("trellis.toml"),
+                &manifest,
+                None,
+                &root.join("trellis.lock"),
+                &lock,
+            )
+            .unwrap();
+        };
+        write_project(root.path());
 
         let first = install_root(root.path(), &manifest, &lock).await.unwrap();
         assert_eq!(first.installed_apis, 1);
@@ -1036,6 +1063,7 @@ mod tests {
             0
         );
         let second = tempfile::tempdir().unwrap();
+        write_project(second.path());
         assert_eq!(
             install_root(second.path(), &manifest, &lock)
                 .await
