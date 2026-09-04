@@ -58,12 +58,10 @@ Trellis by hand-building NATS subjects, envelopes, or JSON wire payloads.
 - Service code must bootstrap with `TrellisService.connect(...)`; do not fetch
   bindings manually, construct resource handles, or import low-level runtime
   internals for service startup.
-- Contract files should default-export the result of the matching
-  `defineServiceContract(...)`, `defineAppContract(...)`,
-  `defineAgentContract(...)`, or `defineDeviceContract(...)` helper.
-- Import normal contract helpers from `@qlever-llc/trellis`. Use explicit
-  subpaths only for runtime-specific helpers, generated SDKs, browser auth,
-  device activation, telemetry, or advanced contract tooling.
+- Author APIs and participants only in `contract.trellis` or
+  `contracts/*.trellis`; never construct protocol metadata in TypeScript.
+- Import generated SDKs and participant modules from the project-local
+  `.trellis/ts` tree.
 - Register RPC, feed, operation, job, event, and health handlers during startup.
 - Register service handlers with `service.handle`. Register event listeners with
   `service.event`, not inside handlers.

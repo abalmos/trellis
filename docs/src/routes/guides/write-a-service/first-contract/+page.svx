@@ -1,81 +1,32 @@
-<script lang="ts">
-  import LanguageTabs from "$lib/components/LanguageTabs.svelte";
-</script>
+# Declare an API and participant
 
-In Trellis, every service is defined by a **contract**. The contract is the authoritative description of what your service does: what databases it needs, what RPCs it handles, what events it emits or consumes, and who is allowed to call it. Trellis compares the contract boundary with deployment authority, records any required authority plan, and reconciles accepted resource changes before granting runtime access.
+`contract.trellis` is the source of truth for both the public API and the participant that implements it.
 
-Before writing a contract, you may want to read [Contracts](/guides/concepts/contracts) for the contract model and identity rules, and [Architecture](/guides/concepts/architecture) for the platform vs domain boundary.
+```trellis
+api acme.orders@v1 {
+  display_name = "Orders";
+  description = "Order management API.";
 
-Start with the smallest possible service contract:
+  model CreateOrderRequest {
+    customerId: string;
+  }
 
-<LanguageTabs>
-{#snippet ts()}
+  model CreateOrderResponse {
+    orderId: string;
+  }
 
-Let's start with the smallest possible contract. Create `contracts/orders_service.ts`:
-
-```ts
-import { defineServiceContract } from "@qlever-llc/trellis";
-
-export const ordersService = defineServiceContract({}, () => ({
-  id: "orders-service@v1",
-  apiId: "orders-service@v1",
-  apiVersion: "1.0.0",
-  displayName: "Orders Service",
-  description: "A simple service for managing orders.",
-  uses: {},
-  resources: {},
-  rpc: {},
-  events: {},
-}));
-
-export default ordersService;
-```
-
-This is a valid, if empty, contract. We will fill it in as we add capabilities. Export the contract object itself and let Trellis use that object for runtime bootstrap, API typing, and SDK generation.
-
-Inline handlers can infer their types from `service.handle...` registration. When
-you extract a handler into another module, run `trellis install` after
-the contract change and import the concrete handler alias from the generated SDK.
-
-{/snippet}
-{#snippet rust()}
-
-Create `contracts/service.rs`:
-
-```rust
-use serde_json::{json, Value};
-use trellis_contracts::{ContractArtifacts, ContractBuilder, ContractKind, ContractsError};
-
-fn empty_object_schema() -> Value {
-    json!({
-        "type": "object",
-        "properties": {}
-    })
+  rpc Orders.Create {
+    input = CreateOrderRequest;
+    output = CreateOrderResponse;
+    capability call = ["orders.create"];
+  }
 }
 
-pub fn contract_artifacts() -> Result<ContractArtifacts, ContractsError> {
-    ContractBuilder::authoring(
-        "orders-service@v1",
-        "orders-service@v1",
-        "1.0.0",
-        "Orders Service",
-        "A simple service for managing orders.",
-        ContractKind::Service,
-    )
-    .schema("Empty", empty_object_schema())
-    .build()
+participant acme.orders-service@v1 service {
+  display_name = "Orders Service";
+  description = "Owns the Orders API.";
+  implements acme.orders@v1;
 }
 ```
 
-This is a valid, nearly empty service contract. `ContractBuilder::authoring` receives the participant identity first and the independent API identity second. Generated participant facades expose the participant identity as `CONTRACT_ID`, while generated API SDKs expose the API identity as `API_ID`. Rust services should keep this Rust source as the authoring surface and treat generated native API/participant JSON and SDK crates as artifacts.
-
-Prepare the generated artifacts once so the SDK crate exists:
-
-```sh
-trellis install
-```
-
-That creates a project-local aggregate crate at `.trellis/generated/rust/trellis-apis`, imported as `trellis_apis`.
-
-{/snippet}
-</LanguageTabs>
+Run `trellis generate`. The canonical `trellis.api.v1` and `trellis.participant.v1` artifacts are emitted before language SDKs are replaced.

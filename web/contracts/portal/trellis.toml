@@ -2,4 +2,4 @@ format = 1
 
 [apis."trellis.auth@v1"]
 version = "^1.0"
-path = "../../../rust/crates/runtime/.trellis/generated/protocol/apis/trellis.auth@v1.json"
+path = "../../../rust/crates/runtime"

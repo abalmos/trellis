@@ -16,17 +16,17 @@ import {
   AuthorizationContextBundleSchema,
 } from "../../auth/authorization_context.ts";
 import { decodeTrellisHttpError } from "../../auth/http_error.ts";
-import { ContractResourceBindingsSchema } from "../../contracts.ts";
-import type { RuntimeApi } from "../../contract_support/runtime.ts";
-import { resolveNativeProtocolPresentation } from "../../contract_support/protocol_resolution.ts";
+import { ContractResourceBindingsSchema } from "../../participant.ts";
+import type { RuntimeApi } from "../../participant_runtime/api.ts";
+import { resolveParticipantPresentation } from "../../participant_runtime/resolution.ts";
 import { TransportError } from "../../errors/index.ts";
 import type { LoggerLike } from "../../globals.ts";
 import { loadDefaultRuntimeTransport } from "../../runtime_transport.ts";
 import { initTelemetry } from "../../telemetry/init.ts";
 import type { TrellisServiceRuntimeDeps } from "./runtime.ts";
 import type {
+  GeneratedServiceParticipant,
   ResourceBindings,
-  ServiceContract,
   TrellisServiceConnectOpts,
 } from "./service.ts";
 
@@ -232,7 +232,7 @@ async function fetchServiceBootstrapInfoOnce(args: {
   bootstrapUrl: URL;
   contractId: string;
   contractDigest: string;
-  contract: ServiceContract<RuntimeApi, RuntimeApi | undefined>;
+  contract: GeneratedServiceParticipant<RuntimeApi, RuntimeApi | undefined>;
   identityAuth: SessionAuth;
   sessionAuth: SessionAuth;
   identity: TrellisServiceConnectOpts["identity"];
@@ -248,7 +248,7 @@ async function fetchServiceBootstrapInfoOnce(args: {
   const provisionedIdentityKeyId = base64urlEncode(
     await sha256(base64urlDecode(args.identityAuth.sessionKey)),
   );
-  const presentation = await resolveNativeProtocolPresentation(args.contract);
+  const presentation = await resolveParticipantPresentation(args.contract);
   if (
     args.identity.participantId !== args.contract.id ||
     args.identity.participantArtifactDigest !== args.contract.digest ||
@@ -322,7 +322,7 @@ export async function fetchServiceBootstrapInfo(args: {
   serviceName: string;
   contractId: string;
   contractDigest: string;
-  contract: ServiceContract<RuntimeApi, RuntimeApi | undefined>;
+  contract: GeneratedServiceParticipant<RuntimeApi, RuntimeApi | undefined>;
   identityAuth: SessionAuth;
   sessionAuth: SessionAuth;
   identity: TrellisServiceConnectOpts["identity"];

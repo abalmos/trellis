@@ -1,8 +1,8 @@
-// Generated from ./rust/crates/eventlog-runtime/.trellis/generated/protocol/apis/trellis.eventlog@v1.json
+// Generated from ./rust/crates/eventlog-runtime/.trellis/artifacts/apis/trellis.eventlog@v1.json
 
 export const API_ID = "trellis.eventlog@v1" as const;
 export const API_DIGEST =
-  "YXwUBXSxRzix71_jemo6p0y_dxk5F-LOz1QsV3IT1OU" as const;
+  "0dHI0vCQ_7EhGPQY10aK_hc5cEnnwdPIZrSIjwo7Nwg" as const;
 export const API = {
   "capabilities": {
     "trellis.eventlog::read": {
@@ -60,26 +60,9 @@ export const API = {
       }],
     },
   },
-  "consent": {
-    "trellis.eventlog::read": {
-      "consequence": "",
-      "description": "View projected Trellis events and event consumer health.",
-      "title": "Read Event Log data",
-    },
-    "trellis.eventlog::stream": {
-      "consequence": "",
-      "description": "Subscribe to Event Log live invalidation frames.",
-      "title": "Stream Event Log changes",
-    },
-  },
   "description":
     "Read-only Event Log API for Trellis event stream observability.",
   "displayName": "Trellis Event Log",
-  "docs": {
-    "markdown":
-      "Provides read-only event, consumer-health, metrics, and live invalidation surfaces for Trellis events.",
-    "summary": "Event stream observability APIs.",
-  },
   "errors": {
     "NotFoundError": { "schema": { "schema": "NotFoundErrorData" } },
     "UnexpectedError": {},
@@ -87,11 +70,6 @@ export const API = {
   },
   "feeds": {
     "EventLog.Watch": {
-      "docs": {
-        "markdown":
-          "Streams ready and invalidation frames for Event Log clients.",
-        "summary": "Watch event changes.",
-      },
       "event": { "schema": "EventLogWatchFrame" },
       "input": { "schema": "EventLogWatchRequest" },
       "version": "v1",
@@ -142,9 +120,10 @@ export const API = {
         "filterSubjects": { "items": { "type": "string" }, "type": "array" },
         "group": { "type": "string" },
         "managedBy": {
-          "anyOf": [{ "const": "authority" }, { "const": "platform" }, {
-            "const": "external",
-          }],
+          "anyOf": [{ "const": "authority", "type": "string" }, {
+            "const": "platform",
+            "type": "string",
+          }, { "const": "external", "type": "string" }],
         },
         "maxDeliver": { "type": "integer" },
         "oldestPendingAt": { "type": "string" },
@@ -153,26 +132,26 @@ export const API = {
         "redelivered": { "type": "integer" },
         "status": {
           "anyOf": [
-            { "const": "current" },
-            { "const": "processing" },
-            { "const": "behind" },
-            { "const": "saturated" },
-            { "const": "inactive" },
-            { "const": "failing" },
-            { "const": "missing" },
-            { "const": "orphaned" },
+            { "const": "current", "type": "string" },
+            { "const": "processing", "type": "string" },
+            { "const": "behind", "type": "string" },
+            { "const": "saturated", "type": "string" },
+            { "const": "inactive", "type": "string" },
+            { "const": "failing", "type": "string" },
+            { "const": "missing", "type": "string" },
+            { "const": "orphaned", "type": "string" },
           ],
         },
         "stream": { "type": "string" },
         "waitingPulls": { "type": "integer" },
       },
       "required": [
-        "stream",
+        "ackPending",
         "consumerName",
         "filterSubjects",
-        "status",
         "pending",
-        "ackPending",
+        "status",
+        "stream",
         "waitingPulls",
       ],
       "type": "object",
@@ -185,10 +164,7 @@ export const API = {
       "required": ["consumerName"],
       "type": "object",
     },
-    "EventLogConsumersInspectResponse": {
-      "additionalProperties": true,
-      "type": "object",
-    },
+    "EventLogConsumersInspectResponse": { "properties": {}, "type": "object" },
     "EventLogConsumersQueryRequest": {
       "properties": {
         "contractId": { "type": "string" },
@@ -199,14 +175,14 @@ export const API = {
         "status": {
           "items": {
             "anyOf": [
-              { "const": "current" },
-              { "const": "processing" },
-              { "const": "behind" },
-              { "const": "saturated" },
-              { "const": "inactive" },
-              { "const": "failing" },
-              { "const": "missing" },
-              { "const": "orphaned" },
+              { "const": "current", "type": "string" },
+              { "const": "processing", "type": "string" },
+              { "const": "behind", "type": "string" },
+              { "const": "saturated", "type": "string" },
+              { "const": "inactive", "type": "string" },
+              { "const": "failing", "type": "string" },
+              { "const": "missing", "type": "string" },
+              { "const": "orphaned", "type": "string" },
             ],
           },
           "type": "array",
@@ -219,14 +195,62 @@ export const API = {
     "EventLogConsumersQueryResponse": {
       "properties": {
         "consumers": {
-          "items": { "schema": "EventConsumerStatusRow" },
+          "items": {
+            "properties": {
+              "ackPending": { "type": "integer" },
+              "ackWaitMs": { "type": "integer" },
+              "consumerName": { "type": "string" },
+              "contractId": { "type": "string" },
+              "deploymentId": { "type": "string" },
+              "filterSubjects": {
+                "items": { "type": "string" },
+                "type": "array",
+              },
+              "group": { "type": "string" },
+              "managedBy": {
+                "anyOf": [{ "const": "authority", "type": "string" }, {
+                  "const": "platform",
+                  "type": "string",
+                }, { "const": "external", "type": "string" }],
+              },
+              "maxDeliver": { "type": "integer" },
+              "oldestPendingAt": { "type": "string" },
+              "oldestPendingEventId": { "type": "string" },
+              "pending": { "type": "integer" },
+              "redelivered": { "type": "integer" },
+              "status": {
+                "anyOf": [
+                  { "const": "current", "type": "string" },
+                  { "const": "processing", "type": "string" },
+                  { "const": "behind", "type": "string" },
+                  { "const": "saturated", "type": "string" },
+                  { "const": "inactive", "type": "string" },
+                  { "const": "failing", "type": "string" },
+                  { "const": "missing", "type": "string" },
+                  { "const": "orphaned", "type": "string" },
+                ],
+              },
+              "stream": { "type": "string" },
+              "waitingPulls": { "type": "integer" },
+            },
+            "required": [
+              "ackPending",
+              "consumerName",
+              "filterSubjects",
+              "pending",
+              "status",
+              "stream",
+              "waitingPulls",
+            ],
+            "type": "object",
+          },
           "type": "array",
         },
         "limit": { "type": "integer" },
         "offset": { "type": "integer" },
         "total": { "type": "integer" },
       },
-      "required": ["consumers", "total", "offset", "limit"],
+      "required": ["consumers", "limit", "offset", "total"],
       "type": "object",
     },
     "EventLogInspectRequest": {
@@ -236,16 +260,17 @@ export const API = {
       },
       "type": "object",
     },
-    "EventLogInspectResponse": {
-      "additionalProperties": true,
-      "type": "object",
-    },
+    "EventLogInspectResponse": { "properties": {}, "type": "object" },
     "EventLogMetricsRequest": {
       "properties": {
         "window": {
-          "anyOf": [{ "const": "15m" }, { "const": "1h" }, { "const": "6h" }, {
-            "const": "24h",
-          }, { "const": "7d" }],
+          "anyOf": [
+            { "const": "15m", "type": "string" },
+            { "const": "1h", "type": "string" },
+            { "const": "6h", "type": "string" },
+            { "const": "24h", "type": "string" },
+            { "const": "7d", "type": "string" },
+          ],
         },
       },
       "type": "object",
@@ -281,12 +306,12 @@ export const API = {
               "total": { "type": "integer" },
             },
             "required": [
-              "start",
-              "total",
-              "payloadSizeBytes",
-              "integrityExceptions",
               "byResolution",
               "byVerificationStatus",
+              "integrityExceptions",
+              "payloadSizeBytes",
+              "start",
+              "total",
             ],
             "type": "object",
           },
@@ -321,7 +346,7 @@ export const API = {
                   "ownerContractId": { "type": "string" },
                   "ownerEventName": { "type": "string" },
                 },
-                "required": ["ownerContractId", "ownerEventName", "count"],
+                "required": ["count", "ownerContractId", "ownerEventName"],
                 "type": "object",
               },
               "type": "array",
@@ -332,18 +357,154 @@ export const API = {
             "uniqueSubjects": { "type": "integer" },
           },
           "required": [
-            "total",
-            "uniqueSubjects",
-            "payloadSizeBytes",
-            "integrityExceptions",
             "byResolution",
             "byVerificationStatus",
             "eventTypes",
+            "integrityExceptions",
+            "payloadSizeBytes",
+            "total",
+            "uniqueSubjects",
           ],
           "type": "object",
         },
       },
-      "required": ["summary", "buckets"],
+      "required": ["buckets", "summary"],
+      "type": "object",
+    },
+    "EventLogMetricsResponsebucketsItem": {
+      "properties": {
+        "byResolution": {
+          "properties": {
+            "malformed": { "type": "integer" },
+            "resolved": { "type": "integer" },
+            "unresolved": { "type": "integer" },
+          },
+          "type": "object",
+        },
+        "byVerificationStatus": {
+          "properties": {
+            "auth-unavailable": { "type": "integer" },
+            "invalid-signature": { "type": "integer" },
+            "missing-proof": { "type": "integer" },
+            "missing-session": { "type": "integer" },
+            "outside-session-window": { "type": "integer" },
+            "subject-denied": { "type": "integer" },
+            "verified": { "type": "integer" },
+          },
+          "type": "object",
+        },
+        "integrityExceptions": { "type": "integer" },
+        "payloadSizeBytes": { "type": "integer" },
+        "start": { "type": "string" },
+        "total": { "type": "integer" },
+      },
+      "required": [
+        "byResolution",
+        "byVerificationStatus",
+        "integrityExceptions",
+        "payloadSizeBytes",
+        "start",
+        "total",
+      ],
+      "type": "object",
+    },
+    "EventLogMetricsResponsebucketsItembyResolution": {
+      "properties": {
+        "malformed": { "type": "integer" },
+        "resolved": { "type": "integer" },
+        "unresolved": { "type": "integer" },
+      },
+      "type": "object",
+    },
+    "EventLogMetricsResponsebucketsItembyVerificationStatus": {
+      "properties": {
+        "auth-unavailable": { "type": "integer" },
+        "invalid-signature": { "type": "integer" },
+        "missing-proof": { "type": "integer" },
+        "missing-session": { "type": "integer" },
+        "outside-session-window": { "type": "integer" },
+        "subject-denied": { "type": "integer" },
+        "verified": { "type": "integer" },
+      },
+      "type": "object",
+    },
+    "EventLogMetricsResponsesummary": {
+      "properties": {
+        "byResolution": {
+          "properties": {
+            "malformed": { "type": "integer" },
+            "resolved": { "type": "integer" },
+            "unresolved": { "type": "integer" },
+          },
+          "type": "object",
+        },
+        "byVerificationStatus": {
+          "properties": {
+            "auth-unavailable": { "type": "integer" },
+            "invalid-signature": { "type": "integer" },
+            "missing-proof": { "type": "integer" },
+            "missing-session": { "type": "integer" },
+            "outside-session-window": { "type": "integer" },
+            "subject-denied": { "type": "integer" },
+            "verified": { "type": "integer" },
+          },
+          "type": "object",
+        },
+        "eventTypes": {
+          "items": {
+            "properties": {
+              "count": { "type": "integer" },
+              "ownerContractId": { "type": "string" },
+              "ownerEventName": { "type": "string" },
+            },
+            "required": ["count", "ownerContractId", "ownerEventName"],
+            "type": "object",
+          },
+          "type": "array",
+        },
+        "integrityExceptions": { "type": "integer" },
+        "payloadSizeBytes": { "type": "integer" },
+        "total": { "type": "integer" },
+        "uniqueSubjects": { "type": "integer" },
+      },
+      "required": [
+        "byResolution",
+        "byVerificationStatus",
+        "eventTypes",
+        "integrityExceptions",
+        "payloadSizeBytes",
+        "total",
+        "uniqueSubjects",
+      ],
+      "type": "object",
+    },
+    "EventLogMetricsResponsesummarybyResolution": {
+      "properties": {
+        "malformed": { "type": "integer" },
+        "resolved": { "type": "integer" },
+        "unresolved": { "type": "integer" },
+      },
+      "type": "object",
+    },
+    "EventLogMetricsResponsesummarybyVerificationStatus": {
+      "properties": {
+        "auth-unavailable": { "type": "integer" },
+        "invalid-signature": { "type": "integer" },
+        "missing-proof": { "type": "integer" },
+        "missing-session": { "type": "integer" },
+        "outside-session-window": { "type": "integer" },
+        "subject-denied": { "type": "integer" },
+        "verified": { "type": "integer" },
+      },
+      "type": "object",
+    },
+    "EventLogMetricsResponsesummaryeventTypesItem": {
+      "properties": {
+        "count": { "type": "integer" },
+        "ownerContractId": { "type": "string" },
+        "ownerEventName": { "type": "string" },
+      },
+      "required": ["count", "ownerContractId", "ownerEventName"],
       "type": "object",
     },
     "EventLogQueryRequest": {
@@ -381,36 +542,101 @@ export const API = {
         "publisherParticipantId": { "type": "string" },
         "resolution": {
           "items": {
-            "anyOf": [{ "const": "resolved" }, { "const": "unresolved" }, {
-              "const": "malformed",
-            }],
+            "anyOf": [{ "const": "resolved", "type": "string" }, {
+              "const": "unresolved",
+              "type": "string",
+            }, { "const": "malformed", "type": "string" }],
           },
           "type": "array",
         },
         "search": { "type": "string" },
-        "sort": { "additionalProperties": true, "type": "object" },
+        "sort": { "properties": {}, "type": "object" },
         "subject": { "type": "string" },
         "verificationStatus": {
-          "items": { "anyOf": [{ "const": "verified" }] },
+          "items": { "const": "verified", "type": "string" },
           "type": "array",
         },
         "window": {
-          "anyOf": [{ "const": "15m" }, { "const": "1h" }, { "const": "6h" }, {
-            "const": "24h",
-          }, { "const": "7d" }],
+          "anyOf": [
+            { "const": "15m", "type": "string" },
+            { "const": "1h", "type": "string" },
+            { "const": "6h", "type": "string" },
+            { "const": "24h", "type": "string" },
+            { "const": "7d", "type": "string" },
+          ],
         },
       },
       "required": ["limit"],
       "type": "object",
     },
+    "EventLogQueryRequestexcludeEventTypesItem": {
+      "properties": {
+        "ownerContractId": { "type": "string" },
+        "ownerEventName": { "type": "string" },
+      },
+      "required": ["ownerContractId", "ownerEventName"],
+      "type": "object",
+    },
+    "EventLogQueryRequestincludeEventTypesItem": {
+      "properties": {
+        "ownerContractId": { "type": "string" },
+        "ownerEventName": { "type": "string" },
+      },
+      "required": ["ownerContractId", "ownerEventName"],
+      "type": "object",
+    },
+    "EventLogQueryRequestsort": { "properties": {}, "type": "object" },
     "EventLogQueryResponse": {
       "properties": {
-        "events": { "items": { "schema": "EventLogRow" }, "type": "array" },
+        "events": {
+          "items": {
+            "properties": {
+              "eventId": { "type": "string" },
+              "eventTime": { "type": "string" },
+              "headerCount": { "type": "integer" },
+              "ownerContractId": { "type": "string" },
+              "ownerEventName": { "type": "string" },
+              "payloadSizeBytes": { "type": "integer" },
+              "publisherDeploymentId": { "type": "string" },
+              "publisherInstanceId": { "type": "string" },
+              "publisherKind": {
+                "anyOf": [{ "const": "service", "type": "string" }, {
+                  "const": "device",
+                  "type": "string",
+                }, { "const": "user", "type": "string" }],
+              },
+              "publisherParticipantDigest": { "type": "string" },
+              "publisherParticipantId": { "type": "string" },
+              "resolution": {
+                "anyOf": [{ "const": "resolved", "type": "string" }, {
+                  "const": "unresolved",
+                  "type": "string",
+                }, { "const": "malformed", "type": "string" }],
+              },
+              "streamSequence": { "type": "integer" },
+              "subject": { "type": "string" },
+              "traceId": { "type": "string" },
+              "verificationStatus": { "const": "verified", "type": "string" },
+            },
+            "required": [
+              "eventId",
+              "eventTime",
+              "headerCount",
+              "payloadSizeBytes",
+              "resolution",
+              "streamSequence",
+              "subject",
+              "verificationStatus",
+            ],
+            "type": "object",
+          },
+          "type": "array",
+        },
         "limit": { "type": "integer" },
         "offset": { "type": "integer" },
         "total": { "type": "integer" },
       },
-      "required": ["events", "total", "offset", "limit"],
+      "required": ["events", "limit", "offset", "total"],
       "type": "object",
     },
     "EventLogRow": {
@@ -424,47 +650,49 @@ export const API = {
         "publisherDeploymentId": { "type": "string" },
         "publisherInstanceId": { "type": "string" },
         "publisherKind": {
-          "anyOf": [{ "const": "service" }, { "const": "device" }, {
-            "const": "user",
-          }],
+          "anyOf": [{ "const": "service", "type": "string" }, {
+            "const": "device",
+            "type": "string",
+          }, { "const": "user", "type": "string" }],
         },
         "publisherParticipantDigest": { "type": "string" },
         "publisherParticipantId": { "type": "string" },
         "resolution": {
-          "anyOf": [{ "const": "resolved" }, { "const": "unresolved" }, {
-            "const": "malformed",
-          }],
+          "anyOf": [{ "const": "resolved", "type": "string" }, {
+            "const": "unresolved",
+            "type": "string",
+          }, { "const": "malformed", "type": "string" }],
         },
         "streamSequence": { "type": "integer" },
         "subject": { "type": "string" },
         "traceId": { "type": "string" },
-        "verificationStatus": { "anyOf": [{ "const": "verified" }] },
+        "verificationStatus": { "const": "verified", "type": "string" },
       },
       "required": [
         "eventId",
         "eventTime",
+        "headerCount",
+        "payloadSizeBytes",
+        "resolution",
         "streamSequence",
         "subject",
-        "resolution",
         "verificationStatus",
-        "payloadSizeBytes",
-        "headerCount",
       ],
       "type": "object",
     },
-    "EventLogWatchFrame": { "additionalProperties": true, "type": "object" },
-    "EventLogWatchRequest": { "additionalProperties": true, "type": "object" },
+    "EventLogWatchFrame": { "properties": {}, "type": "object" },
+    "EventLogWatchRequest": { "properties": {}, "type": "object" },
     "NotFoundErrorData": {
-      "additionalProperties": true,
       "properties": {
-        "context": { "additionalProperties": true, "type": "object" },
+        "context": { "properties": {}, "type": "object" },
         "id": { "type": "string" },
         "message": { "type": "string" },
-        "type": { "const": "NotFoundError" },
+        "type": { "const": "NotFoundError", "type": "string" },
       },
-      "required": ["type", "message", "id"],
+      "required": ["id", "message", "type"],
       "type": "object",
     },
+    "NotFoundErrorDatacontext": { "properties": {}, "type": "object" },
   },
   "version": "1.0.0",
 } as const;

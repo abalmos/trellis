@@ -1,6 +1,6 @@
 //! Typed RPC descriptors for `trellis.eventlog@v1`.
-use crate::generated::RpcDescriptor;
 use serde::{Deserialize, Serialize};
+use trellis_rs::generated::RpcDescriptor;
 /// Empty request or response payload used by zero-argument RPCs.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Empty {}
@@ -25,23 +25,23 @@ pub enum EventLogConsumersInspectError {
     /// `NotFoundError` error payload.
     NotFoundError(super::types::NotFoundErrorData),
     /// `UnexpectedError` error payload.
-    UnexpectedError(crate::generated::DeclaredErrorPayload),
+    UnexpectedError(trellis_rs::generated::DeclaredErrorPayload),
     /// `ValidationError` error payload.
-    ValidationError(crate::generated::DeclaredErrorPayload),
+    ValidationError(trellis_rs::generated::DeclaredErrorPayload),
 }
-impl crate::generated::DeclaredError for EventLogConsumersInspectError {
+impl trellis_rs::generated::DeclaredError for EventLogConsumersInspectError {
     fn decode(
-        payload: &crate::generated::RemoteErrorPayload,
+        payload: &trellis_rs::generated::RemoteErrorPayload,
     ) -> Result<Option<Self>, serde_json::Error> {
         match payload.error_type() {
             Some("NotFoundError") => payload
                 .decode_declared::<super::types::NotFoundErrorData>("NotFoundError")
                 .map(|value| value.map(Self::NotFoundError)),
             Some("UnexpectedError") => payload
-                .decode_declared::<crate::generated::DeclaredErrorPayload>("UnexpectedError")
+                .decode_declared::<trellis_rs::generated::DeclaredErrorPayload>("UnexpectedError")
                 .map(|value| value.map(Self::UnexpectedError)),
             Some("ValidationError") => payload
-                .decode_declared::<crate::generated::DeclaredErrorPayload>("ValidationError")
+                .decode_declared::<trellis_rs::generated::DeclaredErrorPayload>("ValidationError")
                 .map(|value| value.map(Self::ValidationError)),
             _ => Ok(None),
         }
@@ -65,20 +65,20 @@ impl RpcDescriptor for EventLogConsumersQueryRpc {
 #[derive(Debug, Clone, PartialEq)]
 pub enum EventLogConsumersQueryError {
     /// `UnexpectedError` error payload.
-    UnexpectedError(crate::generated::DeclaredErrorPayload),
+    UnexpectedError(trellis_rs::generated::DeclaredErrorPayload),
     /// `ValidationError` error payload.
-    ValidationError(crate::generated::DeclaredErrorPayload),
+    ValidationError(trellis_rs::generated::DeclaredErrorPayload),
 }
-impl crate::generated::DeclaredError for EventLogConsumersQueryError {
+impl trellis_rs::generated::DeclaredError for EventLogConsumersQueryError {
     fn decode(
-        payload: &crate::generated::RemoteErrorPayload,
+        payload: &trellis_rs::generated::RemoteErrorPayload,
     ) -> Result<Option<Self>, serde_json::Error> {
         match payload.error_type() {
             Some("UnexpectedError") => payload
-                .decode_declared::<crate::generated::DeclaredErrorPayload>("UnexpectedError")
+                .decode_declared::<trellis_rs::generated::DeclaredErrorPayload>("UnexpectedError")
                 .map(|value| value.map(Self::UnexpectedError)),
             Some("ValidationError") => payload
-                .decode_declared::<crate::generated::DeclaredErrorPayload>("ValidationError")
+                .decode_declared::<trellis_rs::generated::DeclaredErrorPayload>("ValidationError")
                 .map(|value| value.map(Self::ValidationError)),
             _ => Ok(None),
         }
@@ -103,23 +103,23 @@ pub enum EventLogInspectError {
     /// `NotFoundError` error payload.
     NotFoundError(super::types::NotFoundErrorData),
     /// `UnexpectedError` error payload.
-    UnexpectedError(crate::generated::DeclaredErrorPayload),
+    UnexpectedError(trellis_rs::generated::DeclaredErrorPayload),
     /// `ValidationError` error payload.
-    ValidationError(crate::generated::DeclaredErrorPayload),
+    ValidationError(trellis_rs::generated::DeclaredErrorPayload),
 }
-impl crate::generated::DeclaredError for EventLogInspectError {
+impl trellis_rs::generated::DeclaredError for EventLogInspectError {
     fn decode(
-        payload: &crate::generated::RemoteErrorPayload,
+        payload: &trellis_rs::generated::RemoteErrorPayload,
     ) -> Result<Option<Self>, serde_json::Error> {
         match payload.error_type() {
             Some("NotFoundError") => payload
                 .decode_declared::<super::types::NotFoundErrorData>("NotFoundError")
                 .map(|value| value.map(Self::NotFoundError)),
             Some("UnexpectedError") => payload
-                .decode_declared::<crate::generated::DeclaredErrorPayload>("UnexpectedError")
+                .decode_declared::<trellis_rs::generated::DeclaredErrorPayload>("UnexpectedError")
                 .map(|value| value.map(Self::UnexpectedError)),
             Some("ValidationError") => payload
-                .decode_declared::<crate::generated::DeclaredErrorPayload>("ValidationError")
+                .decode_declared::<trellis_rs::generated::DeclaredErrorPayload>("ValidationError")
                 .map(|value| value.map(Self::ValidationError)),
             _ => Ok(None),
         }
@@ -141,20 +141,20 @@ impl RpcDescriptor for EventLogMetricsRpc {
 #[derive(Debug, Clone, PartialEq)]
 pub enum EventLogMetricsError {
     /// `UnexpectedError` error payload.
-    UnexpectedError(crate::generated::DeclaredErrorPayload),
+    UnexpectedError(trellis_rs::generated::DeclaredErrorPayload),
     /// `ValidationError` error payload.
-    ValidationError(crate::generated::DeclaredErrorPayload),
+    ValidationError(trellis_rs::generated::DeclaredErrorPayload),
 }
-impl crate::generated::DeclaredError for EventLogMetricsError {
+impl trellis_rs::generated::DeclaredError for EventLogMetricsError {
     fn decode(
-        payload: &crate::generated::RemoteErrorPayload,
+        payload: &trellis_rs::generated::RemoteErrorPayload,
     ) -> Result<Option<Self>, serde_json::Error> {
         match payload.error_type() {
             Some("UnexpectedError") => payload
-                .decode_declared::<crate::generated::DeclaredErrorPayload>("UnexpectedError")
+                .decode_declared::<trellis_rs::generated::DeclaredErrorPayload>("UnexpectedError")
                 .map(|value| value.map(Self::UnexpectedError)),
             Some("ValidationError") => payload
-                .decode_declared::<crate::generated::DeclaredErrorPayload>("ValidationError")
+                .decode_declared::<trellis_rs::generated::DeclaredErrorPayload>("ValidationError")
                 .map(|value| value.map(Self::ValidationError)),
             _ => Ok(None),
         }
@@ -176,20 +176,20 @@ impl RpcDescriptor for EventLogQueryRpc {
 #[derive(Debug, Clone, PartialEq)]
 pub enum EventLogQueryError {
     /// `UnexpectedError` error payload.
-    UnexpectedError(crate::generated::DeclaredErrorPayload),
+    UnexpectedError(trellis_rs::generated::DeclaredErrorPayload),
     /// `ValidationError` error payload.
-    ValidationError(crate::generated::DeclaredErrorPayload),
+    ValidationError(trellis_rs::generated::DeclaredErrorPayload),
 }
-impl crate::generated::DeclaredError for EventLogQueryError {
+impl trellis_rs::generated::DeclaredError for EventLogQueryError {
     fn decode(
-        payload: &crate::generated::RemoteErrorPayload,
+        payload: &trellis_rs::generated::RemoteErrorPayload,
     ) -> Result<Option<Self>, serde_json::Error> {
         match payload.error_type() {
             Some("UnexpectedError") => payload
-                .decode_declared::<crate::generated::DeclaredErrorPayload>("UnexpectedError")
+                .decode_declared::<trellis_rs::generated::DeclaredErrorPayload>("UnexpectedError")
                 .map(|value| value.map(Self::UnexpectedError)),
             Some("ValidationError") => payload
-                .decode_declared::<crate::generated::DeclaredErrorPayload>("ValidationError")
+                .decode_declared::<trellis_rs::generated::DeclaredErrorPayload>("ValidationError")
                 .map(|value| value.map(Self::ValidationError)),
             _ => Ok(None),
         }

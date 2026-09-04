@@ -181,6 +181,9 @@ liveTrellisTest({
           throw new Error("generated client is missing sitesList");
         }
         const pending = Reflect.apply(sitesList, client, [{ limit: 1 }]);
+        if (typeof pending !== "object" || pending === null) {
+          throw new Error("generated RPC did not return an object");
+        }
         const orThrow = Reflect.get(pending, "orThrow");
         if (typeof orThrow !== "function") {
           throw new Error("generated RPC did not return a Result");
@@ -267,13 +270,6 @@ async function injectLocalTypeScriptPackages(
     "packages",
     "trellis",
     "telemetry.ts",
-  );
-  config.imports["@qlever-llc/trellis/contracts"] = join(
-    repo,
-    "ts",
-    "packages",
-    "trellis",
-    "contracts.ts",
   );
   config.imports["@qlever-llc/trellis/device/deno"] = join(
     repo,
@@ -387,7 +383,7 @@ async function installStateArtifact(root: string, repo: string): Promise<void> {
     join(root, "trellis.lock"),
     `format = 1\nmanifest-digest = ${
       JSON.stringify(digest)
-    }\n\n[[api]]\nid = "trellis.state@v1"\nversion = "1.0.0"\napi-digest = "qs1u5DVKbglPE25fTx77AadXTT-MDwSkmHVFJlCwE2A"\nregistry = "trellis"\noci-digest = "sha256:${
+    }\n\n[[api]]\nid = "trellis.state@v1"\nversion = "1.0.0"\napi-digest = "1WHxeF9WLJh3v-mmHiV5mql3a67tmPNpEUFxxUIF9-Y"\nregistry = "trellis"\noci-digest = "sha256:${
       "0".repeat(64)
     }"\n`,
   );
@@ -400,7 +396,14 @@ async function installStateArtifact(root: string, repo: string): Promise<void> {
   );
   await Deno.mkdir(artifactDir, { recursive: true });
   await Deno.copyFile(
-    join(repo, "conformance", "baselines", "trellis-state-3ef0aa94.api.json"),
+    join(
+      repo,
+      "rust",
+      "crates",
+      "runtime-apis",
+      "src",
+      "trellis.state@v1.json",
+    ),
     join(artifactDir, "trellis.api.json"),
   );
 }

@@ -1,11 +1,11 @@
 import type {
-  CallerContract,
+  CallerParticipant,
   CallerRuntime,
   ClientAuthContinuation,
   ClientAuthOptions,
   ClientAuthRequiredContext,
 } from "@qlever-llc/trellis";
-import type { NativeProtocolContract } from "@qlever-llc/trellis/contracts";
+import type { GeneratedParticipantEvidence } from "@qlever-llc/trellis/participant";
 
 import type {
   TrellisControlPlaneOAuthProvider,
@@ -14,17 +14,8 @@ import type {
 import type { LocalNatsBootstrapManifest } from "./nats_bootstrap.ts";
 import type { TrellisControlPlaneSqlite } from "./control_plane_sqlite.ts";
 
-/** Serializable contract descriptor accepted by test admin automation. */
-export type TrellisTestContractDescriptor = {
-  readonly CONTRACT_ID: string;
-  readonly CONTRACT_DIGEST: string;
-  readonly API: Readonly<Record<string, unknown>>;
-  readonly API_DIGEST: string;
-  readonly PARTICIPANT: Readonly<Record<string, unknown>>;
-};
-
 /** Native contract artifacts accepted by Trellis test admin automation. */
-export type TrellisTestContractLike = NativeProtocolContract;
+export type TrellisTestParticipantLike = GeneratedParticipantEvidence;
 
 /** Authority plan classifications the test runtime may approve automatically. */
 export type TrellisTestAuthorityPlanClassification =
@@ -143,7 +134,7 @@ export type TrellisTestClientAuth = {
 };
 
 /** Result returned when a contract authority plan is approved by the test runtime. */
-export type TrellisTestContractApproval = {
+export type TrellisTestParticipantApproval = {
   planId: string;
   classification: TrellisTestAuthorityPlanClassification;
   participantId: string;
@@ -153,10 +144,10 @@ export type TrellisTestContractApproval = {
 };
 
 /** Contract value accepted by the Trellis test runtime. */
-export type TrellisTestContract = TrellisTestContractLike;
+export type TrellisTestParticipant = TrellisTestParticipantLike;
 
 /** Contract value accepted by app/client helpers. */
-export type TrellisTestClientContract = CallerContract;
+export type TrellisTestClientParticipant = CallerParticipant;
 
 /** Connected app/client type returned by `TrellisTestRuntime.connectClient`. */
 export type TrellisTestConnectedClient<TContract> = CallerRuntime<TContract>;

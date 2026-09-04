@@ -52,6 +52,7 @@ api "demo.service@v1" {
     export InspectionAssignment;
     export ReportRecord;
     export SiteSummary;
+    export SiteRefreshJobPayload;
     error UnexpectedError;
     error TransferError;
     rpc "Assignments.List" { version "v1"; input AssignmentsListRequest; output AssignmentsListResponse; errors [UnexpectedError]; docs { summary "List assignments."; markdown "Returns inspection assignments available to the caller."; } }

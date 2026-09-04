@@ -1,12 +1,12 @@
 //! Thin typed client helpers for `trellis.health@v1`.
-use crate::generated::TrellisClientError;
+use trellis_rs::generated::TrellisClientError;
 /// Typed API wrapper for the `trellis.health@v1` contract.
 pub struct HealthClient<'a> {
-    inner: &'a crate::generated::Caller,
+    inner: &'a trellis_rs::generated::Caller,
 }
 impl<'a> HealthClient<'a> {
     /// Wrap an already connected low-level Trellis client.
-    pub fn new(inner: &'a crate::generated::Caller) -> Self {
+    pub fn new(inner: &'a trellis_rs::generated::Caller) -> Self {
         Self { inner }
     }
     /// Access typed RPC calls.
@@ -28,7 +28,7 @@ impl<'a> HealthClient<'a> {
 }
 /// Typed RPC surface.
 pub struct Rpc<'a> {
-    pub(crate) _inner: &'a crate::generated::Caller,
+    pub(crate) _inner: &'a trellis_rs::generated::Caller,
 }
 impl<'a> Rpc<'a> {
     /// Access the `health` RPC group.
@@ -38,7 +38,7 @@ impl<'a> Rpc<'a> {
 }
 /// Typed RPC methods in the `health` group.
 pub struct HealthRpc<'a> {
-    inner: &'a crate::generated::Caller,
+    inner: &'a trellis_rs::generated::Caller,
 }
 impl<'a> HealthRpc<'a> {
     /// Call `Health.Inspect`.
@@ -47,7 +47,7 @@ impl<'a> HealthRpc<'a> {
         input: &super::types::HealthInspectRequest,
     ) -> Result<
         super::types::HealthInspectResponse,
-        crate::generated::CallError<super::rpc::HealthInspectError>,
+        trellis_rs::generated::CallError<super::rpc::HealthInspectError>,
     > {
         self.inner
             .call_typed::<super::rpc::HealthInspectRpc, super::rpc::HealthInspectError>(input)
@@ -59,7 +59,7 @@ impl<'a> HealthRpc<'a> {
         input: &super::types::HealthMetricsRequest,
     ) -> Result<
         super::types::HealthMetricsResponse,
-        crate::generated::CallError<super::rpc::HealthMetricsError>,
+        trellis_rs::generated::CallError<super::rpc::HealthMetricsError>,
     > {
         self.inner
             .call_typed::<super::rpc::HealthMetricsRpc, super::rpc::HealthMetricsError>(input)
@@ -71,7 +71,7 @@ impl<'a> HealthRpc<'a> {
         input: &super::types::HealthQueryRequest,
     ) -> Result<
         super::types::HealthQueryResponse,
-        crate::generated::CallError<super::rpc::HealthQueryError>,
+        trellis_rs::generated::CallError<super::rpc::HealthQueryError>,
     > {
         self.inner
             .call_typed::<super::rpc::HealthQueryRpc, super::rpc::HealthQueryError>(input)
@@ -80,7 +80,7 @@ impl<'a> HealthRpc<'a> {
 }
 /// Typed event surface.
 pub struct Event<'a> {
-    pub(crate) _inner: &'a crate::generated::Caller,
+    pub(crate) _inner: &'a trellis_rs::generated::Caller,
 }
 impl<'a> Event<'a> {
     /// Access the `health` event group.
@@ -90,7 +90,7 @@ impl<'a> Event<'a> {
 }
 /// Typed events in the `health` group.
 pub struct HealthEvent<'a> {
-    inner: &'a crate::generated::Caller,
+    inner: &'a trellis_rs::generated::Caller,
 }
 impl<'a> HealthEvent<'a> {
     /// Access `Health.StatusChanged`.
@@ -100,7 +100,7 @@ impl<'a> HealthEvent<'a> {
 }
 /// Typed `Health.StatusChanged` event operations.
 pub struct HealthStatusChangedEvent<'a> {
-    inner: &'a crate::generated::Caller,
+    inner: &'a trellis_rs::generated::Caller,
 }
 impl<'a> HealthStatusChangedEvent<'a> {
     /// Publish `Health.StatusChanged`.
@@ -130,7 +130,7 @@ impl<'a> HealthStatusChangedEvent<'a> {
 }
 /// Typed feed surface.
 pub struct Feed<'a> {
-    pub(crate) _inner: &'a crate::generated::Caller,
+    pub(crate) _inner: &'a trellis_rs::generated::Caller,
 }
 impl<'a> Feed<'a> {
     /// Access the `health` feed group.
@@ -140,7 +140,7 @@ impl<'a> Feed<'a> {
 }
 /// Typed feeds in the `health` group.
 pub struct HealthFeed<'a> {
-    inner: &'a crate::generated::Caller,
+    inner: &'a trellis_rs::generated::Caller,
 }
 impl<'a> HealthFeed<'a> {
     /// Subscribe to `Health.Watch`.
@@ -161,6 +161,6 @@ impl<'a> HealthFeed<'a> {
 }
 /// Typed operation surface.
 pub struct Operation<'a> {
-    pub(crate) _inner: &'a crate::generated::Caller,
+    pub(crate) _inner: &'a trellis_rs::generated::Caller,
 }
 impl<'a> Operation<'a> {}

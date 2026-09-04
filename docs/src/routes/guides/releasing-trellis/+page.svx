@@ -39,39 +39,30 @@ Before committing or ending an implementation cycle, run the focused checks that
 deno run -A -c ts/deno.json integration/live_runner.ts
 ```
 
-Rust runs exact-test processes through a bounded machine-relative worker pool;
-`TRELLIS_TEST_JOBS` overrides that bound for local diagnosis or aggregate CI
-host load. Process-isolated cases use the same case-owned schedule and retain a
-matrix reason; feature-area skip lists are forbidden. The normal Check overlaps
-up to four independent semantic subsystem jobs with two case workers each; each
-uses the same prebuilt normal release executable bundle. Live jobs do not invoke
-Cargo.
+The standard runner starts real infrastructure, then executes the discovered
+Rust and Deno suites with their native test runners. Hidden skips and separate
+test registries are forbidden.
 
 If the full integration suites cannot be run, record the reason and the last focused checks that did run.
 
 ### Targeted integration loops
 
-`integration/client-test-matrix.json` is the cross-language client-interoperability contract. `integration/rust-runtime-test-matrix.json` owns Rust runtime correctness. Implemented Rust mappings must equal the compiled executable list and executed result IDs; source annotations and hidden skips cannot prove conformance.
+Executable Rust and Deno tests are the integration catalog. The standard live runner discovers and executes them directly.
 
-For focused local debugging, inspect `integration/client-test-matrix.json` and run the smallest matching fixture, case, or coverage slice. The TypeScript runner supports repeated `--fixture`, `--case`, and `--coverage` filters, and keeps matrix conformance enabled by default:
+For focused local debugging, run the smallest matching Rust test or Deno test file directly:
 
 ```sh
-deno task -c ts/deno.json test:integration -- --fixture rpc
-deno task -c ts/deno.json test:integration -- --case rpc.client-calls-service-success
-deno task -c ts/deno.json test:integration -- --coverage cross-runtime-rpc
-deno task -c ts/deno.json test:integration -- --fixture events --fixture feeds
+cargo test --manifest-path rust/Cargo.toml -p trellis-rs --test integration jobs::
+deno test -A -c ts/integration/deno.json ts/integration/idl/field_ops_demo.integration_test.ts
 ```
 
-The top-level live runner accepts TypeScript case or prefix selectors and a Rust `libtest` substring filter. It builds missing executables for local runs; `--prebuilt-only` forbids that fallback:
+The top-level live runner executes both discovered suites:
 
 ```sh
-deno run -A -c ts/deno.json integration/live_runner.ts --typescript-only --typescript-case rpc.client-calls-service-success
-deno run -A -c ts/deno.json integration/live_runner.ts --typescript-only --typescript-prefix operations.
-deno run -A -c ts/deno.json integration/live_runner.ts --rust-only --rust-filter jobs::
 deno run -A -c ts/deno.json integration/live_runner.ts
 ```
 
-For coverage-focused Rust diagnostics, map the coverage ID back to matrix cases and run the corresponding fixture or test filters. Cargo accepts one test-filter substring per invocation; run multiple commands for multi-fixture slices.
+For focused Rust diagnostics, pass a native test-filter substring to Cargo.
 
 ## Formatting policy
 
@@ -85,10 +76,9 @@ cargo fmt --manifest-path rust/Cargo.toml --package <crate>
 rustfmt --edition 2021 <changed .rs files>
 ```
 
-`rust/tools/generate` and `rust/xtask` are standalone Rust workspaces. When a change touches them, run their formatter checks directly:
+`rust/xtask` is a standalone Rust workspace. When a change touches it, run its formatter check directly:
 
 ```sh
-cargo fmt --manifest-path rust/tools/generate/Cargo.toml --check
 cargo fmt --manifest-path rust/xtask/Cargo.toml --check
 ```
 
@@ -262,7 +252,7 @@ cargo package --manifest-path rust/Cargo.toml --workspace --allow-dirty \
   --exclude trellis-local-nats --exclude trellis-jobs-runtime \
   --exclude trellis-eventlog-runtime --exclude trellis-test \
   --exclude trellis-protocol-wasm --exclude trellis-codegen-ts \
-  --exclude trellis-codegen-rust --exclude trellis-generation \
+  --exclude trellis-codegen-rust \
   --exclude trellis-cli --exclude trellis-runtime
 deno task -c ts/deno.json packages:build:npm:installed
 deno task -c ts/deno.json test:packaging:built

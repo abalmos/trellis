@@ -24,6 +24,7 @@ export {
 export {
   type ConnectedTrellisService,
   type FeedHandler,
+  type GeneratedServiceParticipant,
   type HealthCheckHandler,
   type HealthInfoHandler,
   type JobHandler,
@@ -32,7 +33,6 @@ export {
   type OperationHandler,
   type OperationRegistration,
   type RpcHandler,
-  type ServiceContract,
   type ServiceEventHandler,
   type SqlOutbox,
   type SqlOutboxEventEnqueueFacade,

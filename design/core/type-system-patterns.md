@@ -20,69 +20,40 @@ and error modeling.
 
 ## API Schema
 
-Each service owns a local contract definition that emits the canonical native
-`trellis.api.v1` and `trellis.participant.v1` artifact.
+Each service owns Trellis IDL that compiles to canonical `trellis.api.v1` and
+`trellis.participant.v1` artifacts.
 
-```ts
-import { defineError, defineServiceContract } from "@qlever-llc/trellis";
-import { TrellisCatalog } from "@trellis/apis/trellis.core";
-
-const schemas = {
-  FindUser: FindUserSchema,
-  User: UserSchema,
-  PartnerChanged: PartnerEventSchema,
-} as const;
-
-const NotFoundError = defineError({
-  type: "NotFoundError",
-  fields: {},
-  message: "Not found",
-});
-
-export const contract = defineServiceContract(
-  {
-    schemas,
-    errors: {
-      NotFoundError,
-    },
-  },
-  (ref) => ({
-    id: "graph@v1",
-    displayName: "Graph Service",
-    description: "Serve graph RPCs and publish partner change events.",
-    uses: [TrellisCatalog],
-    rpc: {
-      "User.Find": {
-        version: "v1",
-        input: ref.schema("FindUser"),
-        output: ref.schema("User"),
-        errors: [ref.error("NotFoundError")],
-        capabilities: { call: ["users.read"] },
-      },
-    },
-    events: {
-      "Partner.Changed": {
-        version: "v1",
-        params: ["/partner/id/origin", "/partner/id/id"],
-        event: ref.schema("PartnerChanged"),
-        capabilities: {
-          publish: ["partners.write"],
-          subscribe: ["partners.read"],
-        },
-      },
-    },
-  }),
-);
+```trellis
+api "graph@v1" {
+  version "1.0.0";
+  display_name "Graph Service";
+  description "Serve graph RPCs and publish partner change events.";
+  model FindUser { id: string; }
+  model User { id: string; }
+  model PartnerChanged { partnerId: string; }
+  error NotFoundError;
+  rpc "User.Find" {
+    version "v1";
+    input FindUser;
+    output User;
+    errors [NotFoundError];
+    call_capabilities ["users.read"];
+  }
+  event "Partner.Changed" {
+    version "v1";
+    schema PartnerChanged;
+    publish_capabilities ["partners.write"];
+    subscribe_capabilities ["partners.read"];
+  }
+}
 ```
 
 Rules:
 
-- the local contract source defines input/output types, allowed errors,
-  capabilities, and cross-contract dependencies
-- local contract source files should export the specialized helper result
-  directly and should usually use top-level `schemas` and optional `errors`
-  registries plus `ref.schema(...)` and `ref.error(...)` in the builder callback
-- the emitted manifest is the canonical cross-language artifact
+- the local IDL source defines input/output types, allowed errors, capabilities,
+  and cross-contract dependencies
+- generated API and participant modules are runtime inputs, not authoring inputs
+- canonical protocol artifacts are the cross-language boundary
 - for local TypeScript code, prefer exporting the defined contract object itself
   (`export default contract` or a named contract export) instead of manually
   rebuilding a parallel module-shaped object

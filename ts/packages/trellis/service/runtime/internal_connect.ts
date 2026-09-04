@@ -1,8 +1,8 @@
 import type { NatsConnection } from "@nats-io/nats-core";
 import { createAuth } from "../../auth.ts";
 
-import type { RuntimeApi } from "../../contract_support/runtime.ts";
-import type { ContractKvMetadata } from "../../contract_support/mod.ts";
+import type { RuntimeApi } from "../../participant_runtime/api.ts";
+import type { ParticipantKvMetadata } from "../../participant_runtime/metadata.ts";
 import {
   DEFAULT_RUNTIME_MAX_RECONNECT_ATTEMPTS,
   DEFAULT_SERVICE_RUNTIME_WAIT_ON_FIRST_CONNECT,
@@ -33,7 +33,7 @@ async function closeFailedServiceBootstrapConnection(
 export async function connectTrellisServiceInternal<
   TOwnedApi extends RuntimeApi = RuntimeApi,
   TTrellisApi extends RuntimeApi = TOwnedApi,
-  TKv extends ContractKvMetadata = {},
+  TKv extends ParticipantKvMetadata = {},
 >(
   name: string,
   opts: TrellisServiceInternalConnectArgs<TOwnedApi, TTrellisApi, TKv>,

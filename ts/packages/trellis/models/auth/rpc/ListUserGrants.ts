@@ -1,5 +1,5 @@
 import Type, { type Static } from "typebox";
-import { PageResponseSchema } from "../../../contract_support/protocol.ts";
+import { PageResponseSchema } from "../../../participant_runtime/schemas.ts";
 
 const DigestSchema = Type.String({ pattern: "^[A-Za-z0-9_-]+$" });
 const IsoDateStringSchema = Type.String({ format: "date-time" });

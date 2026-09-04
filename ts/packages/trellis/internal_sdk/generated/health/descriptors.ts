@@ -1,11 +1,11 @@
-// Generated from ./rust/crates/runtime/.trellis/generated/protocol/apis/trellis.health@v1.json
+// Generated from ./rust/crates/runtime/.trellis/artifacts/apis/trellis.health@v1.json
 import {
   eventActions,
   feedAction,
   operationAction,
   rpcAction,
   schema,
-} from "../../../contracts.ts";
+} from "@qlever-llc/trellis";
 import * as Types from "./types.ts";
 import {
   HealthInspectRequestSchema,
@@ -159,7 +159,7 @@ export const HealthStatusChanged = eventActions(
     subscribeCapabilities: ["trellis.health::read"] as const,
   },
   "HealthStatusChanged",
-  false,
+  true,
   ACTION_SOURCE,
 );
 
@@ -182,3 +182,11 @@ export const HealthWatch = feedAction(
   "HealthWatch",
   ACTION_SOURCE,
 );
+
+export const ACTIONS = {
+  "Health.Inspect": HealthInspect,
+  "Health.Metrics": HealthMetrics,
+  "Health.Query": HealthQuery,
+  "Health.StatusChanged": HealthStatusChanged,
+  "Health.Watch": HealthWatch,
+} as const;

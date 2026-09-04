@@ -45,29 +45,6 @@ const DEFAULT_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(10);
 const DEFAULT_RECONCILIATION_TIMEOUT: Duration = Duration::from_secs(5);
 const DEFAULT_ADMIN_RPC_TIMEOUT_MS: u64 = 5_000;
 const WORKDIR_OWNER_MARKER: &str = ".trellis-test-owner";
-const TRELLIS_TEST_METRICS_ENV: &str = "TRELLIS_TEST_METRICS_PATH";
-
-/// Records a process start in the active integration metrics stream.
-#[doc(hidden)]
-pub fn record_test_process_start(process: &str, detail: impl fmt::Display) -> io::Result<()> {
-    let Some(path) = std::env::var_os(TRELLIS_TEST_METRICS_ENV) else {
-        return Ok(());
-    };
-    let mut output = fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(path)?;
-    let line = format!(
-        "{}\n",
-        json!({
-            "event": "process-start",
-            "process": process,
-            "detail": detail.to_string(),
-            "pid": std::process::id(),
-        })
-    );
-    output.write_all(line.as_bytes())
-}
 const SHARED_RUNTIME_ENV: &str = "TRELLIS_TEST_SHARED_RUNTIME";
 const ADMIN_USERNAME: &str = "admin";
 
@@ -196,10 +173,6 @@ pub enum TrellisTestError {
     /// An exact integration-test control could not be configured or observed.
     #[error("integration test control failed: {0}")]
     IntegrationControl(String),
-
-    /// Contract manifest parsing or digesting failed.
-    #[error(transparent)]
-    Contract(#[from] trellis_rs::contracts::ContractsError),
 
     /// Protocol artifact or proof construction failed.
     #[error(transparent)]
@@ -2344,19 +2317,7 @@ impl TrellisTestAdmin {
         let participant_json = serde_json::to_string(&compiled_participant)?;
         let api_json = serde_json::to_string(&compiled_api)?;
         let api_digest = trellis_protocol::parse_api(&compiled_api)?.digest()?;
-        let mut referenced_apis = selected_referenced_apis(&compiled)?;
-        for api_id in contract_reference_ids(&compiled_participant) {
-            if let std::collections::btree_map::Entry::Vacant(entry) =
-                referenced_apis.entry(api_id.clone())
-            {
-                let artifact = self.api_artifacts.get(&api_id).ok_or_else(|| {
-                    TrellisTestError::UnexpectedResponse(format!(
-                        "API artifact '{api_id}' has not been approved"
-                    ))
-                })?;
-                entry.insert(trellis_rs::contracts::ApiBuilder::new(artifact.clone()).build()?);
-            }
-        }
+        let referenced_apis = selected_referenced_apis(&compiled)?;
         let referenced_api_artifacts = referenced_apis
             .values()
             .map(|artifact| {
@@ -3737,7 +3698,7 @@ impl TrellisTestClientReconnect {
     }
 }
 
-/// Authoring source and digest used by admin automation helpers.
+/// Canonical API and participant evidence used by admin automation helpers.
 #[derive(Clone, Debug, PartialEq)]
 pub struct TrellisTestContract {
     api: Value,
@@ -3749,62 +3710,28 @@ pub struct TrellisTestContract {
 }
 
 impl TrellisTestContract {
-    /// Build an explicitly identified self-implementing participant from one exact native API.
-    pub fn from_native_api_json(
-        participant_id: impl Into<String>,
-        api_json: &str,
-        kind: trellis_rs::contracts::ContractKind,
-    ) -> Result<Self, TrellisTestError> {
-        let api: Value = serde_json::from_str(api_json)?;
-        let artifacts =
-            trellis_rs::contracts::ContractBuilder::from_api(participant_id, api, kind)?.build()?;
-        Self::from_artifacts(artifacts)
-    }
-
-    /// Build a test contract from exact native API and participant JSON.
+    /// Build test evidence from exact canonical API and participant JSON.
     pub fn from_native_json(
         api_json: &str,
         participant_json: &str,
     ) -> Result<Self, TrellisTestError> {
-        let api = serde_json::from_str(api_json)?;
-        let participant = serde_json::from_str(participant_json)?;
-        let artifacts =
-            trellis_rs::contracts::ContractBuilder::from_native(api, participant).build()?;
-        Self::from_artifacts(artifacts)
-    }
-
-    /// Build a test contract from finalized native artifacts.
-    pub fn from_artifacts(
-        artifacts: trellis_rs::contracts::ContractArtifacts,
-    ) -> Result<Self, TrellisTestError> {
-        build_test_contract(artifacts, vec![])
-    }
-
-    /// Finalize a typed builder with exact API evidence from referenced contracts.
-    pub fn from_builder_with_referenced_contracts(
-        builder: trellis_rs::contracts::ContractBuilder,
-        referenced_contracts: &[&Self],
-    ) -> Result<Self, TrellisTestError> {
-        let mut referenced_apis = builtin_api_artifacts();
-        referenced_apis.extend(
-            referenced_contracts
-                .iter()
-                .map(|contract| (contract.id().to_owned(), contract.api.clone())),
-        );
-        let artifacts = builder.referenced_apis(referenced_apis).build()?;
-        Self::from_artifacts_with_referenced_contracts(artifacts, referenced_contracts)
-    }
-
-    /// Build a test contract with exact API evidence from other test contracts.
-    pub fn from_artifacts_with_referenced_contracts(
-        artifacts: trellis_rs::contracts::ContractArtifacts,
-        referenced_contracts: &[&Self],
-    ) -> Result<Self, TrellisTestError> {
-        let referenced_apis = referenced_contracts
-            .iter()
-            .map(|contract| contract.api.clone())
-            .collect::<Vec<_>>();
-        build_test_contract(artifacts, referenced_apis)
+        let api = trellis_protocol::parse_api(&serde_json::from_str(api_json)?)?;
+        let participant =
+            trellis_protocol::parse_participant(&serde_json::from_str(participant_json)?)?;
+        let api_value = api.normalized_value()?;
+        let participant_value = participant.normalized_value()?;
+        let resolved = trellis_protocol::resolve_participant(
+            &participant,
+            &std::iter::once((api.id().to_owned(), api.clone())).collect(),
+        )?;
+        Ok(Self {
+            api: api_value,
+            participant: participant_value,
+            referenced_apis: Vec::new(),
+            digest: participant.digest()?,
+            needs_digest: resolved.needs().digest()?,
+            api_digest: api.digest()?,
+        })
     }
 
     /// Return the exact native participant artifact represented by this test contract.
@@ -3865,21 +3792,56 @@ fn builtin_api_artifacts() -> std::collections::BTreeMap<String, Value> {
     apis
 }
 
+struct NativeTestArtifacts {
+    api: trellis_protocol::ApiArtifact,
+    participant: trellis_protocol::ParticipantArtifact,
+    apis: std::collections::BTreeMap<String, trellis_protocol::ApiArtifact>,
+    needs_digest: String,
+}
+
+impl NativeTestArtifacts {
+    fn api_value(&self) -> Result<Value, TrellisTestError> {
+        Ok(self.api.normalized_value()?)
+    }
+
+    fn participant_value(&self) -> Result<Value, TrellisTestError> {
+        Ok(self.participant.normalized_value()?)
+    }
+
+    fn participant_digest(&self) -> Result<String, TrellisTestError> {
+        Ok(self.participant.digest()?)
+    }
+
+    fn participant_needs_digest(&self) -> Result<String, TrellisTestError> {
+        Ok(self.needs_digest.clone())
+    }
+}
+
 fn build_test_artifacts(
     contract: &TrellisTestContract,
     apis: &mut std::collections::BTreeMap<String, Value>,
-) -> Result<trellis_rs::contracts::ContractArtifacts, TrellisTestError> {
-    add_referenced_test_apis(&contract.referenced_apis, apis)?;
+) -> Result<NativeTestArtifacts, TrellisTestError> {
+    for source in &contract.referenced_apis {
+        let api = trellis_protocol::parse_api(source)?;
+        apis.insert(api.id().to_owned(), api.normalized_value()?);
+    }
     for api_id in native_participant_reference_ids(contract.participant()) {
         ensure_builtin_api(&api_id, apis)?;
     }
-    let artifacts = trellis_rs::contracts::ContractBuilder::from_native(
-        contract.api.clone(),
-        contract.participant.clone(),
-    )
-    .referenced_apis(apis.clone())
-    .build()?;
-    Ok(artifacts)
+    let api = trellis_protocol::parse_api(&contract.api)?;
+    apis.insert(api.id().to_owned(), api.normalized_value()?);
+    let participant = trellis_protocol::parse_participant(&contract.participant)?;
+    let parsed_apis = apis
+        .iter()
+        .map(|(id, value)| Ok((id.clone(), trellis_protocol::parse_api(value)?)))
+        .collect::<Result<_, TrellisTestError>>()?;
+    let resolved = trellis_protocol::resolve_participant(&participant, &parsed_apis)?;
+    Ok(NativeTestArtifacts {
+        api,
+        participant,
+        apis: parsed_apis,
+        needs_digest: resolved.needs().digest()?,
+    })
 }
 
 fn native_participant_reference_ids(participant: &Value) -> Vec<String> {
@@ -3898,62 +3860,14 @@ fn native_participant_reference_ids(participant: &Value) -> Vec<String> {
 }
 
 fn selected_referenced_apis(
-    artifacts: &trellis_rs::contracts::ContractArtifacts,
-) -> Result<std::collections::BTreeMap<String, trellis_rs::contracts::ApiArtifact>, TrellisTestError>
-{
-    artifacts
-        .resolved()
-        .required_apis()
-        .iter()
-        .chain(artifacts.resolved().optional_apis())
-        .map(|api| api.api().to_owned())
-        .map(|id| {
-            artifacts
-                .referenced_apis()
-                .get(&id)
-                .cloned()
-                .map(|api| (id.clone(), api))
-                .ok_or_else(|| {
-                    TrellisTestError::UnexpectedResponse(format!(
-                        "API artifact '{id}' was not supplied"
-                    ))
-                })
-        })
-        .collect()
-}
-
-fn build_test_contract(
-    artifacts: trellis_rs::contracts::ContractArtifacts,
-    referenced_apis: Vec<Value>,
-) -> Result<TrellisTestContract, TrellisTestError> {
-    let digest = artifacts.participant_digest()?;
-    let needs_digest = artifacts.participant_needs_digest()?;
-    let api_digest = artifacts.api_digest()?;
-    Ok(TrellisTestContract {
-        api: artifacts.api_value()?,
-        participant: artifacts.participant_value()?,
-        referenced_apis,
-        digest,
-        needs_digest,
-        api_digest,
-    })
-}
-
-fn add_referenced_test_apis(
-    sources: &[Value],
-    apis: &mut std::collections::BTreeMap<String, Value>,
-) -> Result<(), TrellisTestError> {
-    for source in sources {
-        let api = trellis_rs::contracts::ApiBuilder::new(source.clone())
-            .build()?
-            .normalized_value()?;
-        let id = api["id"]
-            .as_str()
-            .expect("validated API has an id")
-            .to_owned();
-        apis.insert(id, api);
-    }
-    Ok(())
+    artifacts: &NativeTestArtifacts,
+) -> Result<std::collections::BTreeMap<String, trellis_protocol::ApiArtifact>, TrellisTestError> {
+    Ok(
+        native_participant_reference_ids(&artifacts.participant_value()?)
+            .into_iter()
+            .filter_map(|id| artifacts.apis.get(&id).cloned().map(|api| (id, api)))
+            .collect(),
+    )
 }
 
 fn ensure_builtin_api(
@@ -3985,18 +3899,6 @@ fn ensure_builtin_api(
     }
     apis.insert(api_id.to_owned(), artifact);
     Ok(())
-}
-
-fn contract_reference_ids(contract: &Value) -> Vec<String> {
-    ["required", "optional"]
-        .into_iter()
-        .filter_map(|group| contract.pointer(&format!("/uses/{group}")))
-        .filter_map(Value::as_object)
-        .flat_map(|uses| uses.values())
-        .filter_map(|used| used.get("contract"))
-        .filter_map(Value::as_str)
-        .map(str::to_owned)
-        .collect()
 }
 
 /// Deployment authority plan classifications supported by test automation.
@@ -4278,7 +4180,7 @@ async fn start_auth_request(
     trellis_url: &str,
     redirect_to: &str,
     auth: &SessionAuth,
-    compiled: &trellis_rs::contracts::ContractArtifacts,
+    compiled: &NativeTestArtifacts,
     referenced_api_artifacts: Vec<Value>,
 ) -> Result<AuthStartResponse, TrellisTestError> {
     let request_id = ulid::Ulid::new().to_string();
@@ -4642,7 +4544,9 @@ fn auth_deployments_create_request_shape(
         participant_id: None,
         portal_id: None,
         requires_device_delegation,
-        review_mode,
+        review_mode: review_mode
+            .map(|value| serde_json::from_value(Value::String(value)))
+            .transpose()?,
     })
 }
 
@@ -4785,7 +4689,6 @@ impl LocalNatsProcess {
                 mirror: false,
             })
             .start()?;
-        record_test_process_start("nats", "trellis-local-nats")?;
         Ok(Self { server })
     }
 
@@ -4852,7 +4755,6 @@ impl TrellisProcess {
             }
             return Err(error);
         }
-        record_test_process_start("trellis", process.child.id())?;
         Ok(process)
     }
 

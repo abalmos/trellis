@@ -5,6 +5,8 @@ api "demo.device@v1" {
     docs { summary "Activated field device demo."; markdown "Declares the Field Device demo's service usage and local state for selected sites and draft inspections."; }
     model SelectedSiteState { siteId: string; siteName: string; selectedAt: string; }
     model DraftInspectionState { inspectionId: string; siteId: string; checklistName: string; notes: string; updatedAt: string; }
+    export DraftInspectionState;
+    export SelectedSiteState;
 }
 
 participant "demo.device@v1" device {

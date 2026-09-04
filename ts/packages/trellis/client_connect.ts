@@ -47,14 +47,14 @@ import {
   observeNatsTrellisConnection,
   type TrellisConnection,
 } from "./connection.ts";
-import { getContractRuntime } from "./contract_support/contract_runtime.ts";
+import { getParticipantRuntime } from "./participant_runtime/participant.ts";
 import {
-  CONTRACT_STATE_METADATA,
-  type ContractStateMetadata,
-} from "./contract_support/mod.ts";
-import type { NativeProtocolContract } from "./contract_support/protocol_artifacts.ts";
-import { resolveNativeProtocolPresentation } from "./contract_support/protocol_resolution.ts";
-import type { RuntimeApi } from "./contract_support/runtime.ts";
+  PARTICIPANT_STATE_METADATA,
+  type ParticipantStateMetadata,
+} from "./participant_runtime/metadata.ts";
+import type { GeneratedParticipantEvidence } from "./participant_runtime/artifacts.ts";
+import { resolveParticipantPresentation } from "./participant_runtime/resolution.ts";
+import type { RuntimeApi } from "./participant_runtime/api.ts";
 import { TransportError } from "./errors/index.ts";
 import {
   DEFAULT_RUNTIME_MAX_RECONNECT_ATTEMPTS,
@@ -67,8 +67,8 @@ import {
 } from "./session.ts";
 import { recordTrellisDuration } from "./telemetry/mod.ts";
 
-type ClientContract = NativeProtocolContract & {
-  readonly [CONTRACT_STATE_METADATA]?: ContractStateMetadata;
+type ClientContract = GeneratedParticipantEvidence & {
+  readonly [PARTICIPANT_STATE_METADATA]?: ParticipantStateMetadata;
 };
 
 /** Browser caller runtime whose lifecycle owner can revoke and end its session. */
@@ -822,7 +822,7 @@ async function buildSessionKeyLoginUrl(args: {
   const startedAt = performance.now();
   const requestId = ulid();
   const issuedAt = Date.now();
-  const presentation = await resolveNativeProtocolPresentation(
+  const presentation = await resolveParticipantPresentation(
     args.participant,
   );
   const unsigned = {
@@ -1233,8 +1233,8 @@ export async function connectClientWithDeps<
   });
   void nc.closed().then(stopContextRefresh, stopContextRefresh);
 
-  const api = getContractRuntime(args.participant).usedApi as RuntimeApi;
-  const state = args.participant[CONTRACT_STATE_METADATA] as TrellisOpts<
+  const api = getParticipantRuntime(args.participant).usedApi as RuntimeApi;
+  const state = args.participant[PARTICIPANT_STATE_METADATA] as TrellisOpts<
     RuntimeApi
   >["state"];
 

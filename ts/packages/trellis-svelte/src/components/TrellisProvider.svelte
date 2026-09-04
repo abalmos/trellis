@@ -1,4 +1,4 @@
-<script lang="ts" generics="TContract extends TrellisContractLike">
+<script lang="ts" generics="TContract extends TrellisParticipantLike">
   import {
     classifyBrowserAuthError,
     ClientAuthHandledError,
@@ -8,7 +8,7 @@
   import { onMount } from "svelte";
   import type {
     TrellisClientFor,
-    TrellisContractLike,
+    TrellisParticipantLike,
   } from "../context.svelte.ts";
   import { resolveTrellisAppUrl } from "../context.svelte.ts";
   import TrellisContextProvider from "./TrellisContextProvider.svelte";

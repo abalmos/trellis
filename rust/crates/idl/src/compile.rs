@@ -83,7 +83,7 @@ fn api_value(project: &Project, declaration: &Spanned<Api>) -> miette::Result<Va
     for (name, schema) in &api.schemas {
         schemas.insert(
             name.clone(),
-            lower_schema(project, api, schema, &mut vec![name.clone()])?,
+            lower_schema(project, &api.schemas, schema, &mut vec![name.clone()])?,
         );
     }
 
@@ -105,16 +105,37 @@ fn api_value(project: &Project, declaration: &Spanned<Api>) -> miette::Result<Va
         object,
         "errors",
         api.errors
-            .keys()
-            .map(|name| (name.clone(), json!({})))
+            .iter()
+            .map(|(name, declaration)| {
+                let mut value = Map::new();
+                if let Some(code) = &declaration.value.code {
+                    value.insert("code".to_owned(), json!(code.value));
+                }
+                if let Some(schema) = &declaration.value.schema {
+                    value.insert("schema".to_owned(), json!({"schema": schema.value}));
+                }
+                (name.clone(), Value::Object(value))
+            })
             .collect(),
     );
-    let mut capabilities = BTreeMap::<String, Vec<Value>>::new();
-    insert_surfaces(project, api, &mut capabilities, object, "rpc", &api.rpcs)?;
+    for declaration in api.errors.values() {
+        if let Some(schema) = &declaration.value.schema {
+            require_schema(project, api, schema)?;
+        }
+    }
+    let mut capability_allows = BTreeMap::<String, Vec<Value>>::new();
     insert_surfaces(
         project,
         api,
-        &mut capabilities,
+        &mut capability_allows,
+        object,
+        "rpc",
+        &api.rpcs,
+    )?;
+    insert_surfaces(
+        project,
+        api,
+        &mut capability_allows,
         object,
         "operations",
         &api.operations,
@@ -122,20 +143,47 @@ fn api_value(project: &Project, declaration: &Spanned<Api>) -> miette::Result<Va
     insert_surfaces(
         project,
         api,
-        &mut capabilities,
+        &mut capability_allows,
         object,
         "events",
         &api.events,
     )?;
-    insert_surfaces(project, api, &mut capabilities, object, "feeds", &api.feeds)?;
-    insert_nonempty(
+    insert_surfaces(
+        project,
+        api,
+        &mut capability_allows,
         object,
-        "capabilities",
-        capabilities
-            .into_iter()
-            .map(|(name, allows)| (name, json!({"allows": allows})))
-            .collect(),
-    );
+        "feeds",
+        &api.feeds,
+    )?;
+    let mut capabilities = Map::new();
+    for (name, declaration) in &api.capabilities {
+        let capability = &declaration.value;
+        let mut value = Map::new();
+        insert_option(
+            &mut value,
+            "displayName",
+            &capability.display_name.as_ref().map(|v| v.value.clone()),
+        );
+        insert_option(
+            &mut value,
+            "description",
+            &capability.description.as_ref().map(|v| v.value.clone()),
+        );
+        insert_option(
+            &mut value,
+            "consequence",
+            &capability.consequence.as_ref().map(|v| v.value.clone()),
+        );
+        if let Some(allows) = capability_allows.remove(name) {
+            value.insert("allows".to_owned(), Value::Array(allows));
+        }
+        capabilities.insert(name.clone(), Value::Object(value));
+    }
+    for (name, allows) in capability_allows {
+        capabilities.insert(name, json!({"allows": allows}));
+    }
+    insert_nonempty(object, "capabilities", capabilities);
     Ok(value)
 }
 
@@ -172,6 +220,12 @@ fn surface_value(
     let version = required(project, declaration, surface.version.as_ref(), "version")?;
     let mut object = Map::new();
     object.insert("version".to_owned(), json!(version.value));
+    if let Some(subject) = &surface.subject {
+        object.insert("subject".to_owned(), json!(subject.value));
+    }
+    if let Some(class) = &surface.class {
+        object.insert("class".to_owned(), json!(class.value));
+    }
     match section {
         "rpc" => {
             insert_schema_ref(
@@ -229,6 +283,9 @@ fn surface_value(
                 "event",
                 &surface.event,
             )?;
+            if !surface.params.is_empty() {
+                object.insert("params".to_owned(), json!(surface.params));
+            }
         }
         "feeds" => {
             insert_schema_ref(
@@ -341,6 +398,25 @@ fn participant_value(
         )
     })?;
     let api_value = api.normalized_value().into_diagnostic()?;
+    let mut schemas = if participant.schemas.is_empty() {
+        api_value["schemas"]
+            .as_object()
+            .cloned()
+            .unwrap_or_default()
+    } else {
+        Map::new()
+    };
+    for (name, schema) in &participant.schemas {
+        schemas.insert(
+            name.clone(),
+            lower_schema(
+                project,
+                &participant.schemas,
+                schema,
+                &mut vec![name.clone()],
+            )?,
+        );
+    }
     let mut implementation = json!({"api": api.id(), "apiDigest": api.digest().into_diagnostic()?});
     if !participant.bindings.is_empty() {
         let mut transfers = Map::new();
@@ -388,7 +464,7 @@ fn participant_value(
         "displayName": display_name,
         "description": description,
         "kind": participant.kind,
-        "schemas": api_value["schemas"],
+        "schemas": schemas,
         "implements": {"self": implementation},
     });
     let object = value.as_object_mut().expect("participant is an object");
@@ -408,6 +484,7 @@ fn participant_value(
                 "api": referenced.id(),
                 "apiDigest": referenced.digest().into_diagnostic()?,
             });
+            let referenced_value = referenced.normalized_value().into_diagnostic()?;
             let use_object = use_value.as_object_mut().expect("API use is an object");
             for selection in &used.selections {
                 let selection = &selection.value;
@@ -425,13 +502,14 @@ fn participant_value(
                 let section_object = section_value
                     .as_object_mut()
                     .expect("selection section is an object");
+                let name = canonical_selection_name(&referenced_value, section, &selection.name);
                 if selection.action == "control" {
                     section_object
                         .entry("control")
                         .or_insert_with(|| Value::Object(Map::new()))
                         .as_object_mut()
                         .expect("control selection is an object")
-                        .entry(&selection.name)
+                        .entry(&name)
                         .or_insert_with(|| Value::Array(Vec::new()))
                         .as_array_mut()
                         .expect("signal selection is an array")
@@ -442,7 +520,7 @@ fn participant_value(
                         .or_insert_with(|| Value::Array(Vec::new()))
                         .as_array_mut()
                         .expect("selection is an array")
-                        .push(json!(selection.name));
+                        .push(json!(name));
                 }
             }
             if used.required {
@@ -469,10 +547,15 @@ fn participant_value(
                 format!("unknown state kind '{}'", declaration_value.kind),
             ));
         }
-        require_api_schema(project, &api_value, &declaration_value.schema)?;
+        let schema = if schemas.contains_key(&declaration_value.schema.value) {
+            declaration_value.schema.value.clone()
+        } else {
+            require_api_schema(project, &api_value, &declaration_value.schema)?;
+            canonical_selection_name(&api_value, "schemas", &declaration_value.schema.value)
+        };
         let mut state_value = json!({
             "kind": declaration_value.kind,
-            "schema": {"schema": declaration_value.schema.value},
+            "schema": {"schema": schema},
         });
         let state_object = state_value.as_object_mut().expect("state is an object");
         insert_option(
@@ -499,6 +582,7 @@ fn participant_value(
         insert_number(object, "ttlMs", resource.ttl_ms);
         insert_number(object, "maxObjectBytes", resource.max_object_bytes);
         insert_number(object, "maxTotalBytes", resource.max_total_bytes);
+        insert_number(object, "maxValueBytes", resource.max_value_bytes);
         insert_docs(object, &resource.docs);
         stores.insert(name.clone(), value);
     }
@@ -513,8 +597,13 @@ fn participant_value(
             .as_ref()
             .ok_or_else(|| at(project, declaration, "KV resource requires 'purpose'"))?;
         let schema = required(project, declaration, resource.schema.as_ref(), "schema")?;
-        require_api_schema(project, &api_value, schema)?;
-        let mut value = json!({"purpose": purpose, "schema": {"schema": schema.value}});
+        let schema = if schemas.contains_key(&schema.value) {
+            schema.value.clone()
+        } else {
+            require_api_schema(project, &api_value, schema)?;
+            canonical_selection_name(&api_value, "schemas", &schema.value)
+        };
+        let mut value = json!({"purpose": purpose, "schema": {"schema": schema}});
         let object = value.as_object_mut().expect("resource is an object");
         insert_number(object, "history", resource.history);
         insert_number(object, "ttlMs", resource.ttl_ms);
@@ -531,11 +620,21 @@ fn participant_value(
     for (name, declaration) in &participant.jobs {
         let resource = &declaration.value;
         let payload = required(project, declaration, resource.payload.as_ref(), "payload")?;
-        require_api_schema(project, &api_value, payload)?;
-        let mut value = json!({"payload": {"schema": payload.value}});
+        let payload_name = if schemas.contains_key(&payload.value) {
+            payload.value.clone()
+        } else {
+            require_api_schema(project, &api_value, payload)?;
+            canonical_selection_name(&api_value, "schemas", &payload.value)
+        };
+        let mut value = json!({"payload": {"schema": payload_name}});
         if let Some(result) = &resource.result {
-            require_api_schema(project, &api_value, result)?;
-            value["result"] = json!({"schema": result.value});
+            let result_name = if schemas.contains_key(&result.value) {
+                result.value.clone()
+            } else {
+                require_api_schema(project, &api_value, result)?;
+                canonical_selection_name(&api_value, "schemas", &result.value)
+            };
+            value["result"] = json!({"schema": result_name});
         }
         insert_docs(
             value.as_object_mut().expect("job is an object"),
@@ -549,9 +648,21 @@ fn participant_value(
     Ok(value)
 }
 
+fn canonical_selection_name(api: &Value, section: &str, authored: &str) -> String {
+    api[section]
+        .as_object()
+        .and_then(|entries| {
+            entries
+                .keys()
+                .find(|name| *name == authored || authored.ends_with(&format!(".{name}")))
+        })
+        .cloned()
+        .unwrap_or_else(|| authored.to_owned())
+}
+
 fn lower_schema(
     project: &Project,
-    api: &Api,
+    schemas: &BTreeMap<String, Spanned<SchemaDecl>>,
     declaration: &Spanned<SchemaDecl>,
     stack: &mut Vec<String>,
 ) -> miette::Result<Value> {
@@ -570,7 +681,7 @@ fn lower_schema(
                 }
                 properties.insert(
                     field.name.clone(),
-                    lower_type(project, api, &field.ty, stack)?,
+                    lower_type(project, schemas, &field.ty, stack)?,
                 );
                 if !field.optional {
                     required.push(Value::String(field.name.clone()));
@@ -584,7 +695,7 @@ fn lower_schema(
         }
         SchemaDecl::Alias(ty) => lower_type(
             project,
-            api,
+            schemas,
             &Spanned {
                 value: ty.clone(),
                 source: declaration.source,
@@ -600,11 +711,12 @@ fn lower_schema(
 
 fn lower_type(
     project: &Project,
-    api: &Api,
+    schemas: &BTreeMap<String, Spanned<SchemaDecl>>,
     ty: &Spanned<Type>,
     stack: &mut Vec<String>,
 ) -> miette::Result<Value> {
     match &ty.value {
+        Type::Json => Ok(json!({})),
         Type::Named(name) => {
             if stack.contains(name) {
                 return Err(at(
@@ -613,12 +725,11 @@ fn lower_type(
                     format!("recursive schema reference '{}' is not supported", name),
                 ));
             }
-            let declaration = api
-                .schemas
+            let declaration = schemas
                 .get(name)
                 .ok_or_else(|| at(project, ty, format!("unknown schema reference '{name}'")))?;
             stack.push(name.clone());
-            let value = lower_schema(project, api, declaration, stack);
+            let value = lower_schema(project, schemas, declaration, stack);
             stack.pop();
             value
         }
@@ -626,6 +737,7 @@ fn lower_type(
             constrained(json!({"type": "string"}), constraints, ty, project)
         }
         Type::Bool => Ok(json!({"type": "boolean"})),
+        Type::BoolLiteral(value) => Ok(json!({"type": "boolean", "const": value})),
         Type::Integer {
             unsigned,
             constraints,
@@ -639,17 +751,23 @@ fn lower_type(
         Type::Number(constraints) => {
             constrained(json!({"type": "number"}), constraints, ty, project)
         }
-        Type::List(member) => {
-            Ok(json!({"type": "array", "items": lower_type(project, api, member, stack)?}))
-        }
+        Type::List {
+            member,
+            constraints,
+        } => constrained(
+            json!({"type": "array", "items": lower_type(project, schemas, member, stack)?}),
+            constraints,
+            ty,
+            project,
+        ),
         Type::Map(member) => Ok(json!({
             "type": "object",
-            "additionalProperties": lower_type(project, api, member, stack)?
+            "additionalProperties": lower_type(project, schemas, member, stack)?
         })),
         Type::Literal(value) => Ok(json!({"type": "string", "const": value})),
         Type::Null => Ok(json!({"type": "null"})),
         Type::Union(members) => Ok(json!({
-            "anyOf": members.iter().map(|member| lower_type(project, api, member, stack)).collect::<miette::Result<Vec<_>>>()?
+            "anyOf": members.iter().map(|member| lower_type(project, schemas, member, stack)).collect::<miette::Result<Vec<_>>>()?
         })),
     }
 }
@@ -669,6 +787,8 @@ fn constrained(
             "max_length" => "maxLength",
             "pattern" => "pattern",
             "format" => "format",
+            "min_items" => "minItems",
+            "max_items" => "maxItems",
             other => return Err(at(project, ty, format!("unsupported constraint '{other}'"))),
         };
         object.insert(

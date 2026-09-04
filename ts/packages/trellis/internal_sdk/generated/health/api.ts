@@ -1,8 +1,8 @@
-// Generated from ./rust/crates/runtime/.trellis/generated/protocol/apis/trellis.health@v1.json
+// Generated from ./rust/crates/runtime/.trellis/artifacts/apis/trellis.health@v1.json
 
 export const API_ID = "trellis.health@v1" as const;
 export const API_DIGEST =
-  "didAZZoUrnCyj4EF01tWRMkd2UlHrMvYnwWyGmBg5Uk" as const;
+  "8GFaxY8gvKvagqRIF43iaRpUN_40ukCylk_nwmFaZkg" as const;
 export const API = {
   "capabilities": {
     "trellis.health::read": {
@@ -49,21 +49,9 @@ export const API = {
       }],
     },
   },
-  "consent": {
-    "trellis.health::read": {
-      "consequence": "",
-      "description": "View current and historical participant health state.",
-      "title": "Read participant health",
-    },
-  },
   "description":
     "Trellis-managed participant health projection and operational history.",
   "displayName": "Trellis Health",
-  "docs": {
-    "markdown":
-      "Provides current participant health, instance inspection, bounded metrics, invalidation feeds, and durable status transitions. Periodic heartbeat samples use a private runtime transport and are not contract events.",
-    "summary": "Participant health administration APIs.",
-  },
   "errors": {
     "NotFoundError": { "schema": { "schema": "NotFoundErrorData" } },
     "UnexpectedError": {},
@@ -71,11 +59,6 @@ export const API = {
   },
   "events": {
     "Health.StatusChanged": {
-      "docs": {
-        "markdown":
-          "Emitted only when an instance effective status changes; periodic heartbeat samples are not emitted as events.",
-        "summary": "Observe effective health transitions.",
-      },
       "event": { "schema": "HealthStatusChangedEvent" },
       "version": "v1",
     },
@@ -83,11 +66,6 @@ export const API = {
   "exports": { "schemas": ["HealthHeartbeatSample"] },
   "feeds": {
     "Health.Watch": {
-      "docs": {
-        "markdown":
-          "Streams projection revisions and affected participant identities so clients can refresh authoritative snapshots.",
-        "summary": "Watch health projection invalidations.",
-      },
       "event": { "schema": "HealthWatchFrame" },
       "input": { "schema": "HealthWatchRequest" },
       "version": "v1",
@@ -97,33 +75,18 @@ export const API = {
   "id": "trellis.health@v1",
   "rpc": {
     "Health.Inspect": {
-      "docs": {
-        "markdown":
-          "Returns latest instance samples and bounded status intervals for one participant contract.",
-        "summary": "Inspect participant health.",
-      },
       "errors": ["NotFoundError", "UnexpectedError", "ValidationError"],
       "input": { "schema": "HealthInspectRequest" },
       "output": { "schema": "HealthInspectResponse" },
       "version": "v1",
     },
     "Health.Metrics": {
-      "docs": {
-        "markdown":
-          "Returns time-bucketed availability, status duration, sample, check, and latency aggregates.",
-        "summary": "Read participant health metrics.",
-      },
       "errors": ["UnexpectedError", "ValidationError"],
       "input": { "schema": "HealthMetricsRequest" },
       "output": { "schema": "HealthMetricsResponse" },
       "version": "v1",
     },
     "Health.Query": {
-      "docs": {
-        "markdown":
-          "Returns a server-authoritative, paginated health summary grouped by participant contract.",
-        "summary": "Query participant health.",
-      },
       "errors": ["UnexpectedError", "ValidationError"],
       "input": { "schema": "HealthQueryRequest" },
       "output": { "schema": "HealthQueryResponse" },
@@ -137,17 +100,22 @@ export const API = {
           "items": {
             "properties": {
               "error": { "maxLength": 1024, "type": "string" },
-              "info": { "type": "object" },
+              "info": { "properties": {}, "type": "object" },
               "latencyMs": {
                 "maximum": 3600000,
                 "minimum": 0,
                 "type": "number",
               },
               "name": { "maxLength": 128, "minLength": 1, "type": "string" },
-              "status": { "enum": ["ok", "failed"], "type": "string" },
+              "status": {
+                "anyOf": [{ "const": "ok", "type": "string" }, {
+                  "const": "failed",
+                  "type": "string",
+                }],
+              },
               "summary": { "maxLength": 1024, "type": "string" },
             },
-            "required": ["name", "status", "latencyMs"],
+            "required": ["latencyMs", "name", "status"],
             "type": "object",
           },
           "maxItems": 64,
@@ -165,13 +133,18 @@ export const API = {
               "minLength": 1,
               "type": "string",
             },
-            "info": { "type": "object" },
+            "info": { "properties": {}, "type": "object" },
             "instanceId": {
               "maxLength": 128,
               "minLength": 1,
               "type": "string",
             },
-            "kind": { "enum": ["service", "device"], "type": "string" },
+            "kind": {
+              "anyOf": [{ "const": "service", "type": "string" }, {
+                "const": "device",
+                "type": "string",
+              }],
+            },
             "name": { "maxLength": 256, "minLength": 1, "type": "string" },
             "publishIntervalMs": {
               "maximum": 600000,
@@ -179,28 +152,34 @@ export const API = {
               "type": "integer",
             },
             "runtime": {
-              "enum": ["deno", "node", "rust", "unknown"],
-              "type": "string",
+              "anyOf": [
+                { "const": "deno", "type": "string" },
+                { "const": "node", "type": "string" },
+                { "const": "rust", "type": "string" },
+                { "const": "unknown", "type": "string" },
+              ],
             },
             "runtimeVersion": { "maxLength": 256, "type": "string" },
             "startedAt": { "format": "date-time", "type": "string" },
             "version": { "maxLength": 256, "type": "string" },
           },
           "required": [
-            "name",
-            "kind",
-            "instanceId",
-            "contractId",
             "contractDigest",
-            "startedAt",
+            "contractId",
+            "instanceId",
+            "kind",
+            "name",
             "publishIntervalMs",
             "runtime",
+            "startedAt",
           ],
           "type": "object",
         },
         "reportedStatus": {
-          "enum": ["healthy", "degraded", "unhealthy"],
-          "type": "string",
+          "anyOf": [{ "const": "healthy", "type": "string" }, {
+            "const": "degraded",
+            "type": "string",
+          }, { "const": "unhealthy", "type": "string" }],
         },
         "sample": {
           "properties": {
@@ -212,7 +191,86 @@ export const API = {
         },
         "summary": { "maxLength": 1024, "type": "string" },
       },
-      "required": ["sample", "participant", "reportedStatus", "checks"],
+      "required": ["checks", "participant", "reportedStatus", "sample"],
+      "type": "object",
+    },
+    "HealthHeartbeatSamplechecksItem": {
+      "properties": {
+        "error": { "maxLength": 1024, "type": "string" },
+        "info": { "properties": {}, "type": "object" },
+        "latencyMs": { "maximum": 3600000, "minimum": 0, "type": "number" },
+        "name": { "maxLength": 128, "minLength": 1, "type": "string" },
+        "status": {
+          "anyOf": [{ "const": "ok", "type": "string" }, {
+            "const": "failed",
+            "type": "string",
+          }],
+        },
+        "summary": { "maxLength": 1024, "type": "string" },
+      },
+      "required": ["latencyMs", "name", "status"],
+      "type": "object",
+    },
+    "HealthHeartbeatSamplechecksIteminfo": {
+      "properties": {},
+      "type": "object",
+    },
+    "HealthHeartbeatSampleparticipant": {
+      "properties": {
+        "contractDigest": {
+          "maxLength": 256,
+          "minLength": 1,
+          "type": "string",
+        },
+        "contractId": { "maxLength": 256, "minLength": 1, "type": "string" },
+        "info": { "properties": {}, "type": "object" },
+        "instanceId": { "maxLength": 128, "minLength": 1, "type": "string" },
+        "kind": {
+          "anyOf": [{ "const": "service", "type": "string" }, {
+            "const": "device",
+            "type": "string",
+          }],
+        },
+        "name": { "maxLength": 256, "minLength": 1, "type": "string" },
+        "publishIntervalMs": {
+          "maximum": 600000,
+          "minimum": 1000,
+          "type": "integer",
+        },
+        "runtime": {
+          "anyOf": [
+            { "const": "deno", "type": "string" },
+            { "const": "node", "type": "string" },
+            { "const": "rust", "type": "string" },
+            { "const": "unknown", "type": "string" },
+          ],
+        },
+        "runtimeVersion": { "maxLength": 256, "type": "string" },
+        "startedAt": { "format": "date-time", "type": "string" },
+        "version": { "maxLength": 256, "type": "string" },
+      },
+      "required": [
+        "contractDigest",
+        "contractId",
+        "instanceId",
+        "kind",
+        "name",
+        "publishIntervalMs",
+        "runtime",
+        "startedAt",
+      ],
+      "type": "object",
+    },
+    "HealthHeartbeatSampleparticipantinfo": {
+      "properties": {},
+      "type": "object",
+    },
+    "HealthHeartbeatSamplesample": {
+      "properties": {
+        "id": { "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$", "type": "string" },
+        "time": { "format": "date-time", "type": "string" },
+      },
+      "required": ["id", "time"],
       "type": "object",
     },
     "HealthInspectRequest": {
@@ -221,9 +279,14 @@ export const API = {
         "historyLimit": { "maximum": 500, "minimum": 1, "type": "integer" },
         "historySince": { "format": "date-time", "type": "string" },
         "instanceId": { "maxLength": 128, "minLength": 1, "type": "string" },
-        "participantKind": { "enum": ["service", "device"], "type": "string" },
+        "participantKind": {
+          "anyOf": [{ "const": "service", "type": "string" }, {
+            "const": "device",
+            "type": "string",
+          }],
+        },
       },
-      "required": ["participantKind", "contractId"],
+      "required": ["contractId", "participantKind"],
       "type": "object",
     },
     "HealthInspectResponse": {
@@ -236,7 +299,12 @@ export const API = {
                 "items": {
                   "properties": {
                     "name": { "type": "string" },
-                    "status": { "enum": ["ok", "failed"], "type": "string" },
+                    "status": {
+                      "anyOf": [{ "const": "ok", "type": "string" }, {
+                        "const": "failed",
+                        "type": "string",
+                      }],
+                    },
                   },
                   "required": ["name", "status"],
                   "type": "object",
@@ -244,35 +312,40 @@ export const API = {
                 "type": "array",
               },
               "effectiveStatus": {
-                "enum": ["healthy", "degraded", "unhealthy", "offline"],
-                "type": "string",
+                "anyOf": [
+                  { "const": "healthy", "type": "string" },
+                  { "const": "degraded", "type": "string" },
+                  { "const": "unhealthy", "type": "string" },
+                  { "const": "offline", "type": "string" },
+                ],
               },
               "endedAt": { "format": "date-time", "type": "string" },
               "instanceId": { "type": "string" },
               "intervalId": { "minimum": 1, "type": "integer" },
               "reason": {
-                "enum": [
-                  "first-sample",
-                  "heartbeat-change",
-                  "heartbeat-resumed",
-                  "deadline-expired",
+                "anyOf": [
+                  { "const": "first-sample", "type": "string" },
+                  { "const": "heartbeat-change", "type": "string" },
+                  { "const": "heartbeat-resumed", "type": "string" },
+                  { "const": "deadline-expired", "type": "string" },
                 ],
-                "type": "string",
               },
               "reportedStatus": {
-                "enum": ["healthy", "degraded", "unhealthy"],
-                "type": "string",
+                "anyOf": [{ "const": "healthy", "type": "string" }, {
+                  "const": "degraded",
+                  "type": "string",
+                }, { "const": "unhealthy", "type": "string" }],
               },
               "startedAt": { "format": "date-time", "type": "string" },
             },
             "required": [
-              "intervalId",
-              "instanceId",
-              "startedAt",
-              "reportedStatus",
-              "effectiveStatus",
               "checks",
+              "effectiveStatus",
+              "instanceId",
+              "intervalId",
               "reason",
+              "reportedStatus",
+              "startedAt",
             ],
             "type": "object",
           },
@@ -285,8 +358,12 @@ export const API = {
               "contractDigest": { "type": "string" },
               "deploymentId": { "type": "string" },
               "effectiveStatus": {
-                "enum": ["healthy", "degraded", "unhealthy", "offline"],
-                "type": "string",
+                "anyOf": [
+                  { "const": "healthy", "type": "string" },
+                  { "const": "degraded", "type": "string" },
+                  { "const": "unhealthy", "type": "string" },
+                  { "const": "offline", "type": "string" },
+                ],
               },
               "heartbeatDeadline": { "format": "date-time", "type": "string" },
               "instanceId": { "type": "string" },
@@ -296,7 +373,7 @@ export const API = {
                     "items": {
                       "properties": {
                         "error": { "maxLength": 1024, "type": "string" },
-                        "info": { "type": "object" },
+                        "info": { "properties": {}, "type": "object" },
                         "latencyMs": {
                           "maximum": 3600000,
                           "minimum": 0,
@@ -308,12 +385,14 @@ export const API = {
                           "type": "string",
                         },
                         "status": {
-                          "enum": ["ok", "failed"],
-                          "type": "string",
+                          "anyOf": [{ "const": "ok", "type": "string" }, {
+                            "const": "failed",
+                            "type": "string",
+                          }],
                         },
                         "summary": { "maxLength": 1024, "type": "string" },
                       },
-                      "required": ["name", "status", "latencyMs"],
+                      "required": ["latencyMs", "name", "status"],
                       "type": "object",
                     },
                     "maxItems": 64,
@@ -331,15 +410,17 @@ export const API = {
                         "minLength": 1,
                         "type": "string",
                       },
-                      "info": { "type": "object" },
+                      "info": { "properties": {}, "type": "object" },
                       "instanceId": {
                         "maxLength": 128,
                         "minLength": 1,
                         "type": "string",
                       },
                       "kind": {
-                        "enum": ["service", "device"],
-                        "type": "string",
+                        "anyOf": [{ "const": "service", "type": "string" }, {
+                          "const": "device",
+                          "type": "string",
+                        }],
                       },
                       "name": {
                         "maxLength": 256,
@@ -352,28 +433,34 @@ export const API = {
                         "type": "integer",
                       },
                       "runtime": {
-                        "enum": ["deno", "node", "rust", "unknown"],
-                        "type": "string",
+                        "anyOf": [
+                          { "const": "deno", "type": "string" },
+                          { "const": "node", "type": "string" },
+                          { "const": "rust", "type": "string" },
+                          { "const": "unknown", "type": "string" },
+                        ],
                       },
                       "runtimeVersion": { "maxLength": 256, "type": "string" },
                       "startedAt": { "format": "date-time", "type": "string" },
                       "version": { "maxLength": 256, "type": "string" },
                     },
                     "required": [
-                      "name",
-                      "kind",
-                      "instanceId",
-                      "contractId",
                       "contractDigest",
-                      "startedAt",
+                      "contractId",
+                      "instanceId",
+                      "kind",
+                      "name",
                       "publishIntervalMs",
                       "runtime",
+                      "startedAt",
                     ],
                     "type": "object",
                   },
                   "reportedStatus": {
-                    "enum": ["healthy", "degraded", "unhealthy"],
-                    "type": "string",
+                    "anyOf": [{ "const": "healthy", "type": "string" }, {
+                      "const": "degraded",
+                      "type": "string",
+                    }, { "const": "unhealthy", "type": "string" }],
                   },
                   "sample": {
                     "properties": {
@@ -389,31 +476,33 @@ export const API = {
                   "summary": { "maxLength": 1024, "type": "string" },
                 },
                 "required": [
-                  "sample",
+                  "checks",
                   "participant",
                   "reportedStatus",
-                  "checks",
+                  "sample",
                 ],
                 "type": "object",
               },
               "observedAt": { "format": "date-time", "type": "string" },
               "reportedStatus": {
-                "enum": ["healthy", "degraded", "unhealthy"],
-                "type": "string",
+                "anyOf": [{ "const": "healthy", "type": "string" }, {
+                  "const": "degraded",
+                  "type": "string",
+                }, { "const": "unhealthy", "type": "string" }],
               },
               "startedAt": { "format": "date-time", "type": "string" },
             },
             "required": [
-              "instanceId",
-              "deploymentId",
-              "contractDigest",
-              "reportedStatus",
-              "effectiveStatus",
-              "observedAt",
-              "heartbeatDeadline",
               "ageMs",
-              "startedAt",
+              "contractDigest",
+              "deploymentId",
+              "effectiveStatus",
+              "heartbeatDeadline",
+              "instanceId",
               "latestSample",
+              "observedAt",
+              "reportedStatus",
+              "startedAt",
             ],
             "type": "object",
           },
@@ -423,24 +512,30 @@ export const API = {
           "properties": {
             "contractId": { "type": "string" },
             "effectiveStatus": {
-              "enum": ["healthy", "degraded", "unhealthy", "offline"],
-              "type": "string",
+              "anyOf": [
+                { "const": "healthy", "type": "string" },
+                { "const": "degraded", "type": "string" },
+                { "const": "unhealthy", "type": "string" },
+                { "const": "offline", "type": "string" },
+              ],
             },
             "offlineInstances": { "minimum": 0, "type": "integer" },
             "onlineInstances": { "minimum": 0, "type": "integer" },
             "participantKind": {
-              "enum": ["service", "device"],
-              "type": "string",
+              "anyOf": [{ "const": "service", "type": "string" }, {
+                "const": "device",
+                "type": "string",
+              }],
             },
             "participantName": { "type": "string" },
           },
           "required": [
-            "participantKind",
             "contractId",
-            "participantName",
             "effectiveStatus",
-            "onlineInstances",
             "offlineInstances",
+            "onlineInstances",
+            "participantKind",
+            "participantName",
           ],
           "type": "object",
         },
@@ -452,11 +547,446 @@ export const API = {
             "retainedFrom": { "format": "date-time", "type": "string" },
             "revision": { "minimum": 0, "type": "integer" },
           },
-          "required": ["lastStreamSequence", "revision", "gapDetected"],
+          "required": ["gapDetected", "lastStreamSequence", "revision"],
           "type": "object",
         },
       },
-      "required": ["participant", "instances", "history", "asOf", "projection"],
+      "required": ["asOf", "history", "instances", "participant", "projection"],
+      "type": "object",
+    },
+    "HealthInspectResponsehistoryItem": {
+      "properties": {
+        "checks": {
+          "items": {
+            "properties": {
+              "name": { "type": "string" },
+              "status": {
+                "anyOf": [{ "const": "ok", "type": "string" }, {
+                  "const": "failed",
+                  "type": "string",
+                }],
+              },
+            },
+            "required": ["name", "status"],
+            "type": "object",
+          },
+          "type": "array",
+        },
+        "effectiveStatus": {
+          "anyOf": [
+            { "const": "healthy", "type": "string" },
+            { "const": "degraded", "type": "string" },
+            { "const": "unhealthy", "type": "string" },
+            { "const": "offline", "type": "string" },
+          ],
+        },
+        "endedAt": { "format": "date-time", "type": "string" },
+        "instanceId": { "type": "string" },
+        "intervalId": { "minimum": 1, "type": "integer" },
+        "reason": {
+          "anyOf": [
+            { "const": "first-sample", "type": "string" },
+            { "const": "heartbeat-change", "type": "string" },
+            { "const": "heartbeat-resumed", "type": "string" },
+            { "const": "deadline-expired", "type": "string" },
+          ],
+        },
+        "reportedStatus": {
+          "anyOf": [{ "const": "healthy", "type": "string" }, {
+            "const": "degraded",
+            "type": "string",
+          }, { "const": "unhealthy", "type": "string" }],
+        },
+        "startedAt": { "format": "date-time", "type": "string" },
+      },
+      "required": [
+        "checks",
+        "effectiveStatus",
+        "instanceId",
+        "intervalId",
+        "reason",
+        "reportedStatus",
+        "startedAt",
+      ],
+      "type": "object",
+    },
+    "HealthInspectResponsehistoryItemchecksItem": {
+      "properties": {
+        "name": { "type": "string" },
+        "status": {
+          "anyOf": [{ "const": "ok", "type": "string" }, {
+            "const": "failed",
+            "type": "string",
+          }],
+        },
+      },
+      "required": ["name", "status"],
+      "type": "object",
+    },
+    "HealthInspectResponseinstancesItem": {
+      "properties": {
+        "ageMs": { "minimum": 0, "type": "integer" },
+        "contractDigest": { "type": "string" },
+        "deploymentId": { "type": "string" },
+        "effectiveStatus": {
+          "anyOf": [
+            { "const": "healthy", "type": "string" },
+            { "const": "degraded", "type": "string" },
+            { "const": "unhealthy", "type": "string" },
+            { "const": "offline", "type": "string" },
+          ],
+        },
+        "heartbeatDeadline": { "format": "date-time", "type": "string" },
+        "instanceId": { "type": "string" },
+        "latestSample": {
+          "properties": {
+            "checks": {
+              "items": {
+                "properties": {
+                  "error": { "maxLength": 1024, "type": "string" },
+                  "info": { "properties": {}, "type": "object" },
+                  "latencyMs": {
+                    "maximum": 3600000,
+                    "minimum": 0,
+                    "type": "number",
+                  },
+                  "name": {
+                    "maxLength": 128,
+                    "minLength": 1,
+                    "type": "string",
+                  },
+                  "status": {
+                    "anyOf": [{ "const": "ok", "type": "string" }, {
+                      "const": "failed",
+                      "type": "string",
+                    }],
+                  },
+                  "summary": { "maxLength": 1024, "type": "string" },
+                },
+                "required": ["latencyMs", "name", "status"],
+                "type": "object",
+              },
+              "maxItems": 64,
+              "type": "array",
+            },
+            "participant": {
+              "properties": {
+                "contractDigest": {
+                  "maxLength": 256,
+                  "minLength": 1,
+                  "type": "string",
+                },
+                "contractId": {
+                  "maxLength": 256,
+                  "minLength": 1,
+                  "type": "string",
+                },
+                "info": { "properties": {}, "type": "object" },
+                "instanceId": {
+                  "maxLength": 128,
+                  "minLength": 1,
+                  "type": "string",
+                },
+                "kind": {
+                  "anyOf": [{ "const": "service", "type": "string" }, {
+                    "const": "device",
+                    "type": "string",
+                  }],
+                },
+                "name": { "maxLength": 256, "minLength": 1, "type": "string" },
+                "publishIntervalMs": {
+                  "maximum": 600000,
+                  "minimum": 1000,
+                  "type": "integer",
+                },
+                "runtime": {
+                  "anyOf": [
+                    { "const": "deno", "type": "string" },
+                    { "const": "node", "type": "string" },
+                    { "const": "rust", "type": "string" },
+                    { "const": "unknown", "type": "string" },
+                  ],
+                },
+                "runtimeVersion": { "maxLength": 256, "type": "string" },
+                "startedAt": { "format": "date-time", "type": "string" },
+                "version": { "maxLength": 256, "type": "string" },
+              },
+              "required": [
+                "contractDigest",
+                "contractId",
+                "instanceId",
+                "kind",
+                "name",
+                "publishIntervalMs",
+                "runtime",
+                "startedAt",
+              ],
+              "type": "object",
+            },
+            "reportedStatus": {
+              "anyOf": [{ "const": "healthy", "type": "string" }, {
+                "const": "degraded",
+                "type": "string",
+              }, { "const": "unhealthy", "type": "string" }],
+            },
+            "sample": {
+              "properties": {
+                "id": {
+                  "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$",
+                  "type": "string",
+                },
+                "time": { "format": "date-time", "type": "string" },
+              },
+              "required": ["id", "time"],
+              "type": "object",
+            },
+            "summary": { "maxLength": 1024, "type": "string" },
+          },
+          "required": ["checks", "participant", "reportedStatus", "sample"],
+          "type": "object",
+        },
+        "observedAt": { "format": "date-time", "type": "string" },
+        "reportedStatus": {
+          "anyOf": [{ "const": "healthy", "type": "string" }, {
+            "const": "degraded",
+            "type": "string",
+          }, { "const": "unhealthy", "type": "string" }],
+        },
+        "startedAt": { "format": "date-time", "type": "string" },
+      },
+      "required": [
+        "ageMs",
+        "contractDigest",
+        "deploymentId",
+        "effectiveStatus",
+        "heartbeatDeadline",
+        "instanceId",
+        "latestSample",
+        "observedAt",
+        "reportedStatus",
+        "startedAt",
+      ],
+      "type": "object",
+    },
+    "HealthInspectResponseinstancesItemlatestSample": {
+      "properties": {
+        "checks": {
+          "items": {
+            "properties": {
+              "error": { "maxLength": 1024, "type": "string" },
+              "info": { "properties": {}, "type": "object" },
+              "latencyMs": {
+                "maximum": 3600000,
+                "minimum": 0,
+                "type": "number",
+              },
+              "name": { "maxLength": 128, "minLength": 1, "type": "string" },
+              "status": {
+                "anyOf": [{ "const": "ok", "type": "string" }, {
+                  "const": "failed",
+                  "type": "string",
+                }],
+              },
+              "summary": { "maxLength": 1024, "type": "string" },
+            },
+            "required": ["latencyMs", "name", "status"],
+            "type": "object",
+          },
+          "maxItems": 64,
+          "type": "array",
+        },
+        "participant": {
+          "properties": {
+            "contractDigest": {
+              "maxLength": 256,
+              "minLength": 1,
+              "type": "string",
+            },
+            "contractId": {
+              "maxLength": 256,
+              "minLength": 1,
+              "type": "string",
+            },
+            "info": { "properties": {}, "type": "object" },
+            "instanceId": {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string",
+            },
+            "kind": {
+              "anyOf": [{ "const": "service", "type": "string" }, {
+                "const": "device",
+                "type": "string",
+              }],
+            },
+            "name": { "maxLength": 256, "minLength": 1, "type": "string" },
+            "publishIntervalMs": {
+              "maximum": 600000,
+              "minimum": 1000,
+              "type": "integer",
+            },
+            "runtime": {
+              "anyOf": [
+                { "const": "deno", "type": "string" },
+                { "const": "node", "type": "string" },
+                { "const": "rust", "type": "string" },
+                { "const": "unknown", "type": "string" },
+              ],
+            },
+            "runtimeVersion": { "maxLength": 256, "type": "string" },
+            "startedAt": { "format": "date-time", "type": "string" },
+            "version": { "maxLength": 256, "type": "string" },
+          },
+          "required": [
+            "contractDigest",
+            "contractId",
+            "instanceId",
+            "kind",
+            "name",
+            "publishIntervalMs",
+            "runtime",
+            "startedAt",
+          ],
+          "type": "object",
+        },
+        "reportedStatus": {
+          "anyOf": [{ "const": "healthy", "type": "string" }, {
+            "const": "degraded",
+            "type": "string",
+          }, { "const": "unhealthy", "type": "string" }],
+        },
+        "sample": {
+          "properties": {
+            "id": { "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$", "type": "string" },
+            "time": { "format": "date-time", "type": "string" },
+          },
+          "required": ["id", "time"],
+          "type": "object",
+        },
+        "summary": { "maxLength": 1024, "type": "string" },
+      },
+      "required": ["checks", "participant", "reportedStatus", "sample"],
+      "type": "object",
+    },
+    "HealthInspectResponseinstancesItemlatestSamplechecksItem": {
+      "properties": {
+        "error": { "maxLength": 1024, "type": "string" },
+        "info": { "properties": {}, "type": "object" },
+        "latencyMs": { "maximum": 3600000, "minimum": 0, "type": "number" },
+        "name": { "maxLength": 128, "minLength": 1, "type": "string" },
+        "status": {
+          "anyOf": [{ "const": "ok", "type": "string" }, {
+            "const": "failed",
+            "type": "string",
+          }],
+        },
+        "summary": { "maxLength": 1024, "type": "string" },
+      },
+      "required": ["latencyMs", "name", "status"],
+      "type": "object",
+    },
+    "HealthInspectResponseinstancesItemlatestSamplechecksIteminfo": {
+      "properties": {},
+      "type": "object",
+    },
+    "HealthInspectResponseinstancesItemlatestSampleparticipant": {
+      "properties": {
+        "contractDigest": {
+          "maxLength": 256,
+          "minLength": 1,
+          "type": "string",
+        },
+        "contractId": { "maxLength": 256, "minLength": 1, "type": "string" },
+        "info": { "properties": {}, "type": "object" },
+        "instanceId": { "maxLength": 128, "minLength": 1, "type": "string" },
+        "kind": {
+          "anyOf": [{ "const": "service", "type": "string" }, {
+            "const": "device",
+            "type": "string",
+          }],
+        },
+        "name": { "maxLength": 256, "minLength": 1, "type": "string" },
+        "publishIntervalMs": {
+          "maximum": 600000,
+          "minimum": 1000,
+          "type": "integer",
+        },
+        "runtime": {
+          "anyOf": [
+            { "const": "deno", "type": "string" },
+            { "const": "node", "type": "string" },
+            { "const": "rust", "type": "string" },
+            { "const": "unknown", "type": "string" },
+          ],
+        },
+        "runtimeVersion": { "maxLength": 256, "type": "string" },
+        "startedAt": { "format": "date-time", "type": "string" },
+        "version": { "maxLength": 256, "type": "string" },
+      },
+      "required": [
+        "contractDigest",
+        "contractId",
+        "instanceId",
+        "kind",
+        "name",
+        "publishIntervalMs",
+        "runtime",
+        "startedAt",
+      ],
+      "type": "object",
+    },
+    "HealthInspectResponseinstancesItemlatestSampleparticipantinfo": {
+      "properties": {},
+      "type": "object",
+    },
+    "HealthInspectResponseinstancesItemlatestSamplesample": {
+      "properties": {
+        "id": { "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$", "type": "string" },
+        "time": { "format": "date-time", "type": "string" },
+      },
+      "required": ["id", "time"],
+      "type": "object",
+    },
+    "HealthInspectResponseparticipant": {
+      "properties": {
+        "contractId": { "type": "string" },
+        "effectiveStatus": {
+          "anyOf": [
+            { "const": "healthy", "type": "string" },
+            { "const": "degraded", "type": "string" },
+            { "const": "unhealthy", "type": "string" },
+            { "const": "offline", "type": "string" },
+          ],
+        },
+        "offlineInstances": { "minimum": 0, "type": "integer" },
+        "onlineInstances": { "minimum": 0, "type": "integer" },
+        "participantKind": {
+          "anyOf": [{ "const": "service", "type": "string" }, {
+            "const": "device",
+            "type": "string",
+          }],
+        },
+        "participantName": { "type": "string" },
+      },
+      "required": [
+        "contractId",
+        "effectiveStatus",
+        "offlineInstances",
+        "onlineInstances",
+        "participantKind",
+        "participantName",
+      ],
+      "type": "object",
+    },
+    "HealthInspectResponseprojection": {
+      "properties": {
+        "completeSince": { "format": "date-time", "type": "string" },
+        "gapDetected": { "type": "boolean" },
+        "lastStreamSequence": { "minimum": 0, "type": "integer" },
+        "retainedFrom": { "format": "date-time", "type": "string" },
+        "revision": { "minimum": 0, "type": "integer" },
+      },
+      "required": ["gapDetected", "lastStreamSequence", "revision"],
       "type": "object",
     },
     "HealthMetricsRequest": {
@@ -465,7 +995,6 @@ export const API = {
           "items": { "maxLength": 128, "minLength": 1, "type": "string" },
           "maxItems": 64,
           "type": "array",
-          "uniqueItems": true,
         },
         "contractId": { "maxLength": 256, "minLength": 1, "type": "string" },
         "end": { "format": "date-time", "type": "string" },
@@ -473,13 +1002,17 @@ export const API = {
           "items": { "maxLength": 128, "minLength": 1, "type": "string" },
           "maxItems": 100,
           "type": "array",
-          "uniqueItems": true,
         },
-        "participantKind": { "enum": ["service", "device"], "type": "string" },
+        "participantKind": {
+          "anyOf": [{ "const": "service", "type": "string" }, {
+            "const": "device",
+            "type": "string",
+          }],
+        },
         "start": { "format": "date-time", "type": "string" },
         "stepMs": { "minimum": 300000, "type": "integer" },
       },
-      "required": ["start", "end", "stepMs", "participantKind", "contractId"],
+      "required": ["contractId", "end", "participantKind", "start", "stepMs"],
       "type": "object",
     },
     "HealthMetricsResponse": {
@@ -493,7 +1026,7 @@ export const API = {
             "retainedFrom": { "format": "date-time", "type": "string" },
             "revision": { "minimum": 0, "type": "integer" },
           },
-          "required": ["lastStreamSequence", "revision", "gapDetected"],
+          "required": ["gapDetected", "lastStreamSequence", "revision"],
           "type": "object",
         },
         "series": {
@@ -516,12 +1049,12 @@ export const API = {
                           "sampleCount": { "minimum": 0, "type": "integer" },
                         },
                         "required": [
-                          "name",
-                          "sampleCount",
-                          "okCount",
                           "failedCount",
                           "latencyAverageMs",
                           "latencyMaxMs",
+                          "name",
+                          "okCount",
+                          "sampleCount",
                         ],
                         "type": "object",
                       },
@@ -537,15 +1070,15 @@ export const API = {
                     "unhealthyMs": { "minimum": 0, "type": "integer" },
                   },
                   "required": [
-                    "start",
-                    "end",
-                    "observedMs",
-                    "sampleCount",
-                    "healthyMs",
-                    "degradedMs",
-                    "unhealthyMs",
-                    "offlineMs",
                     "checks",
+                    "degradedMs",
+                    "end",
+                    "healthyMs",
+                    "observedMs",
+                    "offlineMs",
+                    "sampleCount",
+                    "start",
+                    "unhealthyMs",
                   ],
                   "type": "object",
                 },
@@ -554,15 +1087,17 @@ export const API = {
               "contractId": { "type": "string" },
               "instanceId": { "type": "string" },
               "participantKind": {
-                "enum": ["service", "device"],
-                "type": "string",
+                "anyOf": [{ "const": "service", "type": "string" }, {
+                  "const": "device",
+                  "type": "string",
+                }],
               },
             },
             "required": [
-              "participantKind",
+              "buckets",
               "contractId",
               "instanceId",
-              "buckets",
+              "participantKind",
             ],
             "type": "object",
           },
@@ -580,7 +1115,157 @@ export const API = {
           "type": "object",
         },
       },
-      "required": ["series", "summary", "asOf", "projection"],
+      "required": ["asOf", "projection", "series", "summary"],
+      "type": "object",
+    },
+    "HealthMetricsResponseprojection": {
+      "properties": {
+        "completeSince": { "format": "date-time", "type": "string" },
+        "gapDetected": { "type": "boolean" },
+        "lastStreamSequence": { "minimum": 0, "type": "integer" },
+        "retainedFrom": { "format": "date-time", "type": "string" },
+        "revision": { "minimum": 0, "type": "integer" },
+      },
+      "required": ["gapDetected", "lastStreamSequence", "revision"],
+      "type": "object",
+    },
+    "HealthMetricsResponseseriesItem": {
+      "properties": {
+        "buckets": {
+          "items": {
+            "properties": {
+              "checks": {
+                "items": {
+                  "properties": {
+                    "failedCount": { "minimum": 0, "type": "integer" },
+                    "latencyAverageMs": { "minimum": 0, "type": "number" },
+                    "latencyMaxMs": { "minimum": 0, "type": "number" },
+                    "name": { "type": "string" },
+                    "okCount": { "minimum": 0, "type": "integer" },
+                    "sampleCount": { "minimum": 0, "type": "integer" },
+                  },
+                  "required": [
+                    "failedCount",
+                    "latencyAverageMs",
+                    "latencyMaxMs",
+                    "name",
+                    "okCount",
+                    "sampleCount",
+                  ],
+                  "type": "object",
+                },
+                "type": "array",
+              },
+              "degradedMs": { "minimum": 0, "type": "integer" },
+              "end": { "format": "date-time", "type": "string" },
+              "healthyMs": { "minimum": 0, "type": "integer" },
+              "observedMs": { "minimum": 0, "type": "integer" },
+              "offlineMs": { "minimum": 0, "type": "integer" },
+              "sampleCount": { "minimum": 0, "type": "integer" },
+              "start": { "format": "date-time", "type": "string" },
+              "unhealthyMs": { "minimum": 0, "type": "integer" },
+            },
+            "required": [
+              "checks",
+              "degradedMs",
+              "end",
+              "healthyMs",
+              "observedMs",
+              "offlineMs",
+              "sampleCount",
+              "start",
+              "unhealthyMs",
+            ],
+            "type": "object",
+          },
+          "type": "array",
+        },
+        "contractId": { "type": "string" },
+        "instanceId": { "type": "string" },
+        "participantKind": {
+          "anyOf": [{ "const": "service", "type": "string" }, {
+            "const": "device",
+            "type": "string",
+          }],
+        },
+      },
+      "required": ["buckets", "contractId", "instanceId", "participantKind"],
+      "type": "object",
+    },
+    "HealthMetricsResponseseriesItembucketsItem": {
+      "properties": {
+        "checks": {
+          "items": {
+            "properties": {
+              "failedCount": { "minimum": 0, "type": "integer" },
+              "latencyAverageMs": { "minimum": 0, "type": "number" },
+              "latencyMaxMs": { "minimum": 0, "type": "number" },
+              "name": { "type": "string" },
+              "okCount": { "minimum": 0, "type": "integer" },
+              "sampleCount": { "minimum": 0, "type": "integer" },
+            },
+            "required": [
+              "failedCount",
+              "latencyAverageMs",
+              "latencyMaxMs",
+              "name",
+              "okCount",
+              "sampleCount",
+            ],
+            "type": "object",
+          },
+          "type": "array",
+        },
+        "degradedMs": { "minimum": 0, "type": "integer" },
+        "end": { "format": "date-time", "type": "string" },
+        "healthyMs": { "minimum": 0, "type": "integer" },
+        "observedMs": { "minimum": 0, "type": "integer" },
+        "offlineMs": { "minimum": 0, "type": "integer" },
+        "sampleCount": { "minimum": 0, "type": "integer" },
+        "start": { "format": "date-time", "type": "string" },
+        "unhealthyMs": { "minimum": 0, "type": "integer" },
+      },
+      "required": [
+        "checks",
+        "degradedMs",
+        "end",
+        "healthyMs",
+        "observedMs",
+        "offlineMs",
+        "sampleCount",
+        "start",
+        "unhealthyMs",
+      ],
+      "type": "object",
+    },
+    "HealthMetricsResponseseriesItembucketsItemchecksItem": {
+      "properties": {
+        "failedCount": { "minimum": 0, "type": "integer" },
+        "latencyAverageMs": { "minimum": 0, "type": "number" },
+        "latencyMaxMs": { "minimum": 0, "type": "number" },
+        "name": { "type": "string" },
+        "okCount": { "minimum": 0, "type": "integer" },
+        "sampleCount": { "minimum": 0, "type": "integer" },
+      },
+      "required": [
+        "failedCount",
+        "latencyAverageMs",
+        "latencyMaxMs",
+        "name",
+        "okCount",
+        "sampleCount",
+      ],
+      "type": "object",
+    },
+    "HealthMetricsResponsesummary": {
+      "properties": {
+        "availability": { "maximum": 1, "minimum": 0, "type": "number" },
+        "observedMs": { "minimum": 0, "type": "integer" },
+        "onlineMs": { "minimum": 0, "type": "integer" },
+        "sampleCount": { "minimum": 0, "type": "integer" },
+        "transitions": { "minimum": 0, "type": "integer" },
+      },
+      "required": ["observedMs", "onlineMs", "sampleCount", "transitions"],
       "type": "object",
     },
     "HealthProjectionDiagnostics": {
@@ -591,7 +1276,7 @@ export const API = {
         "retainedFrom": { "format": "date-time", "type": "string" },
         "revision": { "minimum": 0, "type": "integer" },
       },
-      "required": ["lastStreamSequence", "revision", "gapDetected"],
+      "required": ["gapDetected", "lastStreamSequence", "revision"],
       "type": "object",
     },
     "HealthQueryRequest": {
@@ -600,31 +1285,36 @@ export const API = {
           "items": { "maxLength": 256, "minLength": 1, "type": "string" },
           "maxItems": 100,
           "type": "array",
-          "uniqueItems": true,
         },
         "deploymentIds": {
           "items": { "maxLength": 128, "minLength": 1, "type": "string" },
           "maxItems": 100,
           "type": "array",
-          "uniqueItems": true,
         },
         "limit": { "maximum": 200, "minimum": 1, "type": "integer" },
         "offset": { "minimum": 0, "type": "integer" },
         "participantKinds": {
-          "items": { "enum": ["service", "device"], "type": "string" },
+          "items": {
+            "anyOf": [{ "const": "service", "type": "string" }, {
+              "const": "device",
+              "type": "string",
+            }],
+          },
           "maxItems": 2,
           "type": "array",
-          "uniqueItems": true,
         },
         "search": { "maxLength": 256, "type": "string" },
         "statuses": {
           "items": {
-            "enum": ["healthy", "degraded", "unhealthy", "offline"],
-            "type": "string",
+            "anyOf": [
+              { "const": "healthy", "type": "string" },
+              { "const": "degraded", "type": "string" },
+              { "const": "unhealthy", "type": "string" },
+              { "const": "offline", "type": "string" },
+            ],
           },
           "maxItems": 4,
           "type": "array",
-          "uniqueItems": true,
         },
       },
       "type": "object",
@@ -639,41 +1329,45 @@ export const API = {
               "contractDigests": {
                 "items": { "maxLength": 128, "minLength": 1, "type": "string" },
                 "type": "array",
-                "uniqueItems": true,
               },
               "contractId": { "type": "string" },
               "deploymentIds": {
                 "items": { "maxLength": 128, "minLength": 1, "type": "string" },
                 "type": "array",
-                "uniqueItems": true,
               },
               "effectiveStatus": {
-                "enum": ["healthy", "degraded", "unhealthy", "offline"],
-                "type": "string",
+                "anyOf": [
+                  { "const": "healthy", "type": "string" },
+                  { "const": "degraded", "type": "string" },
+                  { "const": "unhealthy", "type": "string" },
+                  { "const": "offline", "type": "string" },
+                ],
               },
               "lastSeenAt": { "format": "date-time", "type": "string" },
               "offlineInstances": { "minimum": 0, "type": "integer" },
               "onlineInstances": { "minimum": 0, "type": "integer" },
               "participantKind": {
-                "enum": ["service", "device"],
-                "type": "string",
+                "anyOf": [{ "const": "service", "type": "string" }, {
+                  "const": "device",
+                  "type": "string",
+                }],
               },
               "participantName": { "type": "string" },
               "runtimes": { "items": { "type": "string" }, "type": "array" },
               "versions": { "items": { "type": "string" }, "type": "array" },
             },
             "required": [
-              "participantKind",
-              "contractId",
-              "participantName",
-              "effectiveStatus",
-              "deploymentIds",
               "contractDigests",
-              "onlineInstances",
-              "offlineInstances",
+              "contractId",
+              "deploymentIds",
+              "effectiveStatus",
               "lastSeenAt",
-              "versions",
+              "offlineInstances",
+              "onlineInstances",
+              "participantKind",
+              "participantName",
               "runtimes",
+              "versions",
             ],
             "type": "object",
           },
@@ -689,11 +1383,69 @@ export const API = {
             "retainedFrom": { "format": "date-time", "type": "string" },
             "revision": { "minimum": 0, "type": "integer" },
           },
-          "required": ["lastStreamSequence", "revision", "gapDetected"],
+          "required": ["gapDetected", "lastStreamSequence", "revision"],
           "type": "object",
         },
       },
-      "required": ["entries", "count", "limit", "offset", "asOf", "projection"],
+      "required": ["asOf", "count", "entries", "limit", "offset", "projection"],
+      "type": "object",
+    },
+    "HealthQueryResponseentriesItem": {
+      "properties": {
+        "contractDigests": {
+          "items": { "maxLength": 128, "minLength": 1, "type": "string" },
+          "type": "array",
+        },
+        "contractId": { "type": "string" },
+        "deploymentIds": {
+          "items": { "maxLength": 128, "minLength": 1, "type": "string" },
+          "type": "array",
+        },
+        "effectiveStatus": {
+          "anyOf": [
+            { "const": "healthy", "type": "string" },
+            { "const": "degraded", "type": "string" },
+            { "const": "unhealthy", "type": "string" },
+            { "const": "offline", "type": "string" },
+          ],
+        },
+        "lastSeenAt": { "format": "date-time", "type": "string" },
+        "offlineInstances": { "minimum": 0, "type": "integer" },
+        "onlineInstances": { "minimum": 0, "type": "integer" },
+        "participantKind": {
+          "anyOf": [{ "const": "service", "type": "string" }, {
+            "const": "device",
+            "type": "string",
+          }],
+        },
+        "participantName": { "type": "string" },
+        "runtimes": { "items": { "type": "string" }, "type": "array" },
+        "versions": { "items": { "type": "string" }, "type": "array" },
+      },
+      "required": [
+        "contractDigests",
+        "contractId",
+        "deploymentIds",
+        "effectiveStatus",
+        "lastSeenAt",
+        "offlineInstances",
+        "onlineInstances",
+        "participantKind",
+        "participantName",
+        "runtimes",
+        "versions",
+      ],
+      "type": "object",
+    },
+    "HealthQueryResponseprojection": {
+      "properties": {
+        "completeSince": { "format": "date-time", "type": "string" },
+        "gapDetected": { "type": "boolean" },
+        "lastStreamSequence": { "minimum": 0, "type": "integer" },
+        "retainedFrom": { "format": "date-time", "type": "string" },
+        "revision": { "minimum": 0, "type": "integer" },
+      },
+      "required": ["gapDetected", "lastStreamSequence", "revision"],
       "type": "object",
     },
     "HealthStatusChangedEvent": {
@@ -713,46 +1465,87 @@ export const API = {
             "contractId": { "type": "string" },
             "deploymentId": { "type": "string" },
             "instanceId": { "type": "string" },
-            "kind": { "enum": ["service", "device"], "type": "string" },
+            "kind": {
+              "anyOf": [{ "const": "service", "type": "string" }, {
+                "const": "device",
+                "type": "string",
+              }],
+            },
             "name": { "type": "string" },
           },
           "required": [
-            "kind",
             "contractId",
-            "instanceId",
             "deploymentId",
+            "instanceId",
+            "kind",
             "name",
           ],
           "type": "object",
         },
         "previousStatus": {
-          "enum": ["healthy", "degraded", "unhealthy", "offline"],
-          "type": "string",
+          "anyOf": [
+            { "const": "healthy", "type": "string" },
+            { "const": "degraded", "type": "string" },
+            { "const": "unhealthy", "type": "string" },
+            { "const": "offline", "type": "string" },
+          ],
         },
         "reason": {
-          "enum": ["heartbeat-change", "heartbeat-resumed", "deadline-expired"],
-          "type": "string",
+          "anyOf": [{ "const": "heartbeat-change", "type": "string" }, {
+            "const": "heartbeat-resumed",
+            "type": "string",
+          }, { "const": "deadline-expired", "type": "string" }],
         },
         "reportedStatus": {
-          "enum": ["healthy", "degraded", "unhealthy"],
-          "type": "string",
+          "anyOf": [{ "const": "healthy", "type": "string" }, {
+            "const": "degraded",
+            "type": "string",
+          }, { "const": "unhealthy", "type": "string" }],
         },
         "status": {
-          "enum": ["healthy", "degraded", "unhealthy", "offline"],
-          "type": "string",
+          "anyOf": [
+            { "const": "healthy", "type": "string" },
+            { "const": "degraded", "type": "string" },
+            { "const": "unhealthy", "type": "string" },
+            { "const": "offline", "type": "string" },
+          ],
         },
         "summary": { "maxLength": 1024, "type": "string" },
       },
       "required": [
+        "changedAt",
         "header",
+        "lastSeenAt",
         "participant",
         "previousStatus",
-        "status",
-        "reportedStatus",
         "reason",
-        "changedAt",
-        "lastSeenAt",
+        "reportedStatus",
+        "status",
       ],
+      "type": "object",
+    },
+    "HealthStatusChangedEventheader": {
+      "properties": {
+        "id": { "maxLength": 128, "minLength": 1, "type": "string" },
+        "time": { "format": "date-time", "type": "string" },
+      },
+      "required": ["id", "time"],
+      "type": "object",
+    },
+    "HealthStatusChangedEventparticipant": {
+      "properties": {
+        "contractId": { "type": "string" },
+        "deploymentId": { "type": "string" },
+        "instanceId": { "type": "string" },
+        "kind": {
+          "anyOf": [{ "const": "service", "type": "string" }, {
+            "const": "device",
+            "type": "string",
+          }],
+        },
+        "name": { "type": "string" },
+      },
+      "required": ["contractId", "deploymentId", "instanceId", "kind", "name"],
       "type": "object",
     },
     "HealthWatchFrame": {
@@ -761,7 +1554,7 @@ export const API = {
           "projectionRevision": { "minimum": 0, "type": "integer" },
           "type": { "const": "ready", "type": "string" },
         },
-        "required": ["type", "projectionRevision"],
+        "required": ["projectionRevision", "type"],
         "type": "object",
       }, {
         "properties": {
@@ -772,15 +1565,17 @@ export const API = {
                 "deploymentId": { "type": "string" },
                 "instanceId": { "type": "string" },
                 "participantKind": {
-                  "enum": ["service", "device"],
-                  "type": "string",
+                  "anyOf": [{ "const": "service", "type": "string" }, {
+                    "const": "device",
+                    "type": "string",
+                  }],
                 },
               },
               "required": [
-                "participantKind",
                 "contractId",
-                "instanceId",
                 "deploymentId",
+                "instanceId",
+                "participantKind",
               ],
               "type": "object",
             },
@@ -790,9 +1585,69 @@ export const API = {
           "projectionRevision": { "minimum": 0, "type": "integer" },
           "type": { "const": "healthInvalidated", "type": "string" },
         },
-        "required": ["type", "projectionRevision"],
+        "required": ["projectionRevision", "type"],
         "type": "object",
       }],
+    },
+    "HealthWatchFrameValue1": {
+      "properties": {
+        "projectionRevision": { "minimum": 0, "type": "integer" },
+        "type": { "const": "ready", "type": "string" },
+      },
+      "required": ["projectionRevision", "type"],
+      "type": "object",
+    },
+    "HealthWatchFrameValue2": {
+      "properties": {
+        "changes": {
+          "items": {
+            "properties": {
+              "contractId": { "type": "string" },
+              "deploymentId": { "type": "string" },
+              "instanceId": { "type": "string" },
+              "participantKind": {
+                "anyOf": [{ "const": "service", "type": "string" }, {
+                  "const": "device",
+                  "type": "string",
+                }],
+              },
+            },
+            "required": [
+              "contractId",
+              "deploymentId",
+              "instanceId",
+              "participantKind",
+            ],
+            "type": "object",
+          },
+          "maxItems": 100,
+          "type": "array",
+        },
+        "projectionRevision": { "minimum": 0, "type": "integer" },
+        "type": { "const": "healthInvalidated", "type": "string" },
+      },
+      "required": ["projectionRevision", "type"],
+      "type": "object",
+    },
+    "HealthWatchFrameValue2changesItem": {
+      "properties": {
+        "contractId": { "type": "string" },
+        "deploymentId": { "type": "string" },
+        "instanceId": { "type": "string" },
+        "participantKind": {
+          "anyOf": [{ "const": "service", "type": "string" }, {
+            "const": "device",
+            "type": "string",
+          }],
+        },
+      },
+      "required": [
+        "contractId",
+        "deploymentId",
+        "instanceId",
+        "participantKind",
+      ],
+      "type": "object",
     },
     "HealthWatchRequest": {
       "properties": {
@@ -800,41 +1655,43 @@ export const API = {
           "items": { "maxLength": 256, "minLength": 1, "type": "string" },
           "maxItems": 100,
           "type": "array",
-          "uniqueItems": true,
         },
         "deploymentIds": {
           "items": { "maxLength": 128, "minLength": 1, "type": "string" },
           "maxItems": 100,
           "type": "array",
-          "uniqueItems": true,
         },
         "instanceIds": {
           "items": { "maxLength": 128, "minLength": 1, "type": "string" },
           "maxItems": 100,
           "type": "array",
-          "uniqueItems": true,
         },
         "participantKinds": {
-          "items": { "enum": ["service", "device"], "type": "string" },
+          "items": {
+            "anyOf": [{ "const": "service", "type": "string" }, {
+              "const": "device",
+              "type": "string",
+            }],
+          },
           "maxItems": 2,
           "type": "array",
-          "uniqueItems": true,
         },
       },
       "type": "object",
     },
     "NotFoundErrorData": {
       "properties": {
-        "context": { "additionalProperties": true, "type": "object" },
+        "context": { "properties": {}, "type": "object" },
         "id": { "minLength": 1, "type": "string" },
         "message": { "type": "string" },
         "resource": { "minLength": 1, "type": "string" },
         "traceId": { "type": "string" },
         "type": { "const": "NotFoundError", "type": "string" },
       },
-      "required": ["type", "resource", "id", "message"],
+      "required": ["id", "message", "resource", "type"],
       "type": "object",
     },
+    "NotFoundErrorDatacontext": { "properties": {}, "type": "object" },
   },
   "version": "1.0.0",
 } as const;

@@ -1,6 +1,6 @@
-// Generated from ./rust/crates/runtime/.trellis/generated/protocol/apis/trellis.health@v1.json
-import type { SerializableErrorData } from "../../../contracts.ts";
-import { TrellisError } from "../../../errors/index.ts";
+// Generated from ./rust/crates/runtime/.trellis/artifacts/apis/trellis.health@v1.json
+import type { SerializableErrorData } from "@qlever-llc/trellis";
+import { TrellisError } from "@qlever-llc/trellis";
 import { NotFoundErrorDataSchema } from "./schemas.ts";
 
 export type HealthHeartbeatSample = {
@@ -149,9 +149,9 @@ export type HealthQueryInput = {
   deploymentIds?: Array<string>;
   limit?: number;
   offset?: number;
-  participantKinds?: Array<"service" | "device">;
+  participantKinds?: Array<("service" | "device")>;
   search?: string;
-  statuses?: Array<"healthy" | "degraded" | "unhealthy" | "offline">;
+  statuses?: Array<("healthy" | "degraded" | "unhealthy" | "offline")>;
 };
 export type HealthQueryOutput = {
   asOf: string;
@@ -204,7 +204,7 @@ export type HealthWatchInput = {
   contractIds?: Array<string>;
   deploymentIds?: Array<string>;
   instanceIds?: Array<string>;
-  participantKinds?: Array<"service" | "device">;
+  participantKinds?: Array<("service" | "device")>;
 };
 export type HealthWatchEvent = { projectionRevision: number; type: "ready" } | {
   changes?: Array<
@@ -222,7 +222,7 @@ export type HealthWatchEvent = { projectionRevision: number; type: "ready" } | {
 export type NotFoundErrorData =
   & SerializableErrorData
   & ({
-    context?: { [k: string]: unknown };
+    context?: {};
     id: string;
     message: string;
     resource: string;

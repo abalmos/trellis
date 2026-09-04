@@ -1,4 +1,4 @@
-// Generated from ./rust/crates/eventlog-runtime/.trellis/generated/protocol/apis/trellis.eventlog@v1.json
+// Generated from ./rust/crates/eventlog-runtime/.trellis/artifacts/apis/trellis.eventlog@v1.json
 export const EventLogConsumersInspectRequestSchema = {
   "properties": {
     "consumerName": { "type": "string" },
@@ -9,7 +9,7 @@ export const EventLogConsumersInspectRequestSchema = {
 } as const;
 
 export const EventLogConsumersInspectResponseSchema = {
-  "additionalProperties": true,
+  "properties": {},
   "type": "object",
 } as const;
 
@@ -23,14 +23,14 @@ export const EventLogConsumersQueryRequestSchema = {
     "status": {
       "items": {
         "anyOf": [
-          { "const": "current" },
-          { "const": "processing" },
-          { "const": "behind" },
-          { "const": "saturated" },
-          { "const": "inactive" },
-          { "const": "failing" },
-          { "const": "missing" },
-          { "const": "orphaned" },
+          { "const": "current", "type": "string" },
+          { "const": "processing", "type": "string" },
+          { "const": "behind", "type": "string" },
+          { "const": "saturated", "type": "string" },
+          { "const": "inactive", "type": "string" },
+          { "const": "failing", "type": "string" },
+          { "const": "missing", "type": "string" },
+          { "const": "orphaned", "type": "string" },
         ],
       },
       "type": "array",
@@ -44,14 +44,59 @@ export const EventLogConsumersQueryRequestSchema = {
 export const EventLogConsumersQueryResponseSchema = {
   "properties": {
     "consumers": {
-      "items": { "schema": "EventConsumerStatusRow" },
+      "items": {
+        "properties": {
+          "ackPending": { "type": "integer" },
+          "ackWaitMs": { "type": "integer" },
+          "consumerName": { "type": "string" },
+          "contractId": { "type": "string" },
+          "deploymentId": { "type": "string" },
+          "filterSubjects": { "items": { "type": "string" }, "type": "array" },
+          "group": { "type": "string" },
+          "managedBy": {
+            "anyOf": [{ "const": "authority", "type": "string" }, {
+              "const": "platform",
+              "type": "string",
+            }, { "const": "external", "type": "string" }],
+          },
+          "maxDeliver": { "type": "integer" },
+          "oldestPendingAt": { "type": "string" },
+          "oldestPendingEventId": { "type": "string" },
+          "pending": { "type": "integer" },
+          "redelivered": { "type": "integer" },
+          "status": {
+            "anyOf": [
+              { "const": "current", "type": "string" },
+              { "const": "processing", "type": "string" },
+              { "const": "behind", "type": "string" },
+              { "const": "saturated", "type": "string" },
+              { "const": "inactive", "type": "string" },
+              { "const": "failing", "type": "string" },
+              { "const": "missing", "type": "string" },
+              { "const": "orphaned", "type": "string" },
+            ],
+          },
+          "stream": { "type": "string" },
+          "waitingPulls": { "type": "integer" },
+        },
+        "required": [
+          "ackPending",
+          "consumerName",
+          "filterSubjects",
+          "pending",
+          "status",
+          "stream",
+          "waitingPulls",
+        ],
+        "type": "object",
+      },
       "type": "array",
     },
     "limit": { "type": "integer" },
     "offset": { "type": "integer" },
     "total": { "type": "integer" },
   },
-  "required": ["consumers", "total", "offset", "limit"],
+  "required": ["consumers", "limit", "offset", "total"],
   "type": "object",
 } as const;
 
@@ -64,16 +109,20 @@ export const EventLogInspectRequestSchema = {
 } as const;
 
 export const EventLogInspectResponseSchema = {
-  "additionalProperties": true,
+  "properties": {},
   "type": "object",
 } as const;
 
 export const EventLogMetricsRequestSchema = {
   "properties": {
     "window": {
-      "anyOf": [{ "const": "15m" }, { "const": "1h" }, { "const": "6h" }, {
-        "const": "24h",
-      }, { "const": "7d" }],
+      "anyOf": [
+        { "const": "15m", "type": "string" },
+        { "const": "1h", "type": "string" },
+        { "const": "6h", "type": "string" },
+        { "const": "24h", "type": "string" },
+        { "const": "7d", "type": "string" },
+      ],
     },
   },
   "type": "object",
@@ -110,12 +159,12 @@ export const EventLogMetricsResponseSchema = {
           "total": { "type": "integer" },
         },
         "required": [
-          "start",
-          "total",
-          "payloadSizeBytes",
-          "integrityExceptions",
           "byResolution",
           "byVerificationStatus",
+          "integrityExceptions",
+          "payloadSizeBytes",
+          "start",
+          "total",
         ],
         "type": "object",
       },
@@ -150,7 +199,7 @@ export const EventLogMetricsResponseSchema = {
               "ownerContractId": { "type": "string" },
               "ownerEventName": { "type": "string" },
             },
-            "required": ["ownerContractId", "ownerEventName", "count"],
+            "required": ["count", "ownerContractId", "ownerEventName"],
             "type": "object",
           },
           "type": "array",
@@ -161,18 +210,18 @@ export const EventLogMetricsResponseSchema = {
         "uniqueSubjects": { "type": "integer" },
       },
       "required": [
-        "total",
-        "uniqueSubjects",
-        "payloadSizeBytes",
-        "integrityExceptions",
         "byResolution",
         "byVerificationStatus",
         "eventTypes",
+        "integrityExceptions",
+        "payloadSizeBytes",
+        "total",
+        "uniqueSubjects",
       ],
       "type": "object",
     },
   },
-  "required": ["summary", "buckets"],
+  "required": ["buckets", "summary"],
   "type": "object",
 } as const;
 
@@ -211,23 +260,28 @@ export const EventLogQueryRequestSchema = {
     "publisherParticipantId": { "type": "string" },
     "resolution": {
       "items": {
-        "anyOf": [{ "const": "resolved" }, { "const": "unresolved" }, {
-          "const": "malformed",
-        }],
+        "anyOf": [{ "const": "resolved", "type": "string" }, {
+          "const": "unresolved",
+          "type": "string",
+        }, { "const": "malformed", "type": "string" }],
       },
       "type": "array",
     },
     "search": { "type": "string" },
-    "sort": { "additionalProperties": true, "type": "object" },
+    "sort": { "properties": {}, "type": "object" },
     "subject": { "type": "string" },
     "verificationStatus": {
-      "items": { "anyOf": [{ "const": "verified" }] },
+      "items": { "const": "verified", "type": "string" },
       "type": "array",
     },
     "window": {
-      "anyOf": [{ "const": "15m" }, { "const": "1h" }, { "const": "6h" }, {
-        "const": "24h",
-      }, { "const": "7d" }],
+      "anyOf": [
+        { "const": "15m", "type": "string" },
+        { "const": "1h", "type": "string" },
+        { "const": "6h", "type": "string" },
+        { "const": "24h", "type": "string" },
+        { "const": "7d", "type": "string" },
+      ],
     },
   },
   "required": ["limit"],
@@ -236,33 +290,75 @@ export const EventLogQueryRequestSchema = {
 
 export const EventLogQueryResponseSchema = {
   "properties": {
-    "events": { "items": { "schema": "EventLogRow" }, "type": "array" },
+    "events": {
+      "items": {
+        "properties": {
+          "eventId": { "type": "string" },
+          "eventTime": { "type": "string" },
+          "headerCount": { "type": "integer" },
+          "ownerContractId": { "type": "string" },
+          "ownerEventName": { "type": "string" },
+          "payloadSizeBytes": { "type": "integer" },
+          "publisherDeploymentId": { "type": "string" },
+          "publisherInstanceId": { "type": "string" },
+          "publisherKind": {
+            "anyOf": [{ "const": "service", "type": "string" }, {
+              "const": "device",
+              "type": "string",
+            }, { "const": "user", "type": "string" }],
+          },
+          "publisherParticipantDigest": { "type": "string" },
+          "publisherParticipantId": { "type": "string" },
+          "resolution": {
+            "anyOf": [{ "const": "resolved", "type": "string" }, {
+              "const": "unresolved",
+              "type": "string",
+            }, { "const": "malformed", "type": "string" }],
+          },
+          "streamSequence": { "type": "integer" },
+          "subject": { "type": "string" },
+          "traceId": { "type": "string" },
+          "verificationStatus": { "const": "verified", "type": "string" },
+        },
+        "required": [
+          "eventId",
+          "eventTime",
+          "headerCount",
+          "payloadSizeBytes",
+          "resolution",
+          "streamSequence",
+          "subject",
+          "verificationStatus",
+        ],
+        "type": "object",
+      },
+      "type": "array",
+    },
     "limit": { "type": "integer" },
     "offset": { "type": "integer" },
     "total": { "type": "integer" },
   },
-  "required": ["events", "total", "offset", "limit"],
+  "required": ["events", "limit", "offset", "total"],
   "type": "object",
 } as const;
 
 export const EventLogWatchFrameSchema = {
-  "additionalProperties": true,
+  "properties": {},
   "type": "object",
 } as const;
 
 export const EventLogWatchRequestSchema = {
-  "additionalProperties": true,
+  "properties": {},
   "type": "object",
 } as const;
 
 export const NotFoundErrorDataSchema = {
-  "additionalProperties": true,
   "properties": {
-    "context": { "additionalProperties": true, "type": "object" },
+    "context": { "properties": {}, "type": "object" },
     "id": { "type": "string" },
     "message": { "type": "string" },
-    "type": { "const": "NotFoundError" },
+    "type": { "const": "NotFoundError", "type": "string" },
   },
-  "required": ["type", "message", "id"],
+  "required": ["id", "message", "type"],
   "type": "object",
 } as const;

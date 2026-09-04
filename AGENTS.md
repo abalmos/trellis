@@ -78,12 +78,9 @@
   NATS, fake Hono, fake storage, fake runtime, fake auth, fake generated
   clients, or synthetic failure hooks when a real boundary can prove the
   invariant.
-- Live integration uses one shared NATS and Trellis host by default. Client
-  interoperability is tracked in `integration/client-test-matrix.json`; Rust
-  runtime correctness is tracked in `integration/rust-runtime-test-matrix.json`.
-  Implemented Rust rows must match the compiled executable and executed result
-  stream exactly. Hidden skips are forbidden, and process-isolated cases require
-  a recorded process-global reason.
+- Live integration uses real NATS and Trellis infrastructure. Executable Rust
+  and Deno tests are the catalog; separate matrices and inventory reconciliation
+  are not maintained. Hidden skips are forbidden.
 - The normal `Check` workflow owns correctness verification, including the full
   live suite. Release verification is limited to metadata, packages, archives,
   images, and publication inputs. Rust supports the current stable toolchain; no
@@ -130,8 +127,7 @@
 - Device activation: `design/auth/device-activation.md`
 - Operations design: `design/operations/trellis-operations.md`
 - Jobs design: `design/jobs/trellis-jobs.md`
-- TypeScript contract authoring:
-  `design/contracts/trellis-typescript-contract-authoring.md`
+- TypeScript contract authoring: `design/contracts/trellis-idl.md`
 - Rust contract generation/facades:
   `design/contracts/trellis-rust-contract-libraries.md`
 - Contract catalog, manifests, and permission derivation:

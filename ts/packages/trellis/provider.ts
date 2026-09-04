@@ -3,30 +3,30 @@ import type {
   ActionDescriptor,
   DescriptorForAction,
   EventActions,
-} from "./contract_support/descriptors.ts";
+} from "./participant_runtime/descriptors.ts";
 import {
-  type ContractWithRuntime,
-  getContractRuntime,
-} from "./contract_support/contract_runtime.ts";
+  type GeneratedParticipant,
+  getParticipantRuntime,
+} from "./participant_runtime/participant.ts";
 import type {
   EventDesc,
   FeedDesc,
   OperationDesc,
   RPCDesc,
-} from "./contract_support/runtime.ts";
+} from "./participant_runtime/api.ts";
 import { type CallerRuntime, createCallerRuntime } from "./caller.ts";
 import type {
-  CONTRACT_JOBS_METADATA,
-  CONTRACT_KV_METADATA,
-  CONTRACT_STORE_METADATA,
-} from "./contract_support/mod.ts";
+  PARTICIPANT_JOBS_METADATA,
+  PARTICIPANT_KV_METADATA,
+  PARTICIPANT_STORE_METADATA,
+} from "./participant_runtime/metadata.ts";
 import type { PreparedTrellisEvent } from "./session.ts";
 import {
   type ConnectedActionName,
   lowerCamelSurfaceName,
   type PascalActionName,
   pascalSurfaceName,
-} from "./contract_support/surface_names.ts";
+} from "./participant_runtime/surface_names.ts";
 
 export const PROVIDER_CALLER = Symbol("trellis.provider.caller");
 
@@ -42,7 +42,7 @@ type DirectAction<TContract> = TContract[keyof TContract] extends infer TValue
     ? TSubscribe | Exclude<TPublish, undefined>
   : never
   : never;
-type SelectedAction<TContract> = TContract extends ContractWithRuntime<
+type SelectedAction<TContract> = TContract extends GeneratedParticipant<
   infer TAction
 > ? TAction
   : never;
@@ -209,15 +209,15 @@ type ProviderBase<TService> = TService extends {
   : {};
 
 type ContractKv<TContract> = TContract extends {
-  readonly [CONTRACT_KV_METADATA]?: infer TMetadata;
+  readonly [PARTICIPANT_KV_METADATA]?: infer TMetadata;
 } ? NonNullable<TMetadata>
   : {};
 type ContractStore<TContract> = TContract extends {
-  readonly [CONTRACT_STORE_METADATA]?: infer TMetadata;
+  readonly [PARTICIPANT_STORE_METADATA]?: infer TMetadata;
 } ? NonNullable<TMetadata>
   : {};
 type ContractJobs<TContract> = TContract extends {
-  readonly [CONTRACT_JOBS_METADATA]?: infer TMetadata;
+  readonly [PARTICIPANT_JOBS_METADATA]?: infer TMetadata;
 } ? NonNullable<TMetadata>
   : {};
 type SelectedServiceProperty<TService, TKey extends PropertyKey, TMetadata> =
@@ -342,7 +342,7 @@ function surfacePath(name: string): readonly [string, string] {
 
 /** Projects a connected service into its flat provider and caller vocabulary. */
 export function createProviderRuntime<
-  TContract extends ContractWithRuntime,
+  TContract extends GeneratedParticipant,
   TService extends object,
 >(
   connectedService: TService,
@@ -382,7 +382,7 @@ export function createProviderRuntime<
   const caller = createCallerRuntime(service[PROVIDER_CALLER], contract) as
     & Record<string, unknown>
     & CallerRuntime<TContract>;
-  for (const { action } of getContractRuntime(contract).actions) {
+  for (const { action } of getParticipantRuntime(contract).actions) {
     const connected = caller[action.connectedName];
     if (action.kind === "event-subscribe") {
       provider[action.connectedName] = (
@@ -409,7 +409,9 @@ export function createProviderRuntime<
     }
   }
 
-  for (const name of Object.keys(getContractRuntime(contract).ownedApi.rpc)) {
+  for (
+    const name of Object.keys(getParticipantRuntime(contract).ownedApi.rpc)
+  ) {
     const [group, leaf] = surfacePath(name);
     const exportName = pascalSurfaceName(name);
     const register = service.handle.rpc![group]![leaf]!;
@@ -418,7 +420,9 @@ export function createProviderRuntime<
     ) => register((args) => handler({ ...args, client: provider }));
   }
   for (
-    const name of Object.keys(getContractRuntime(contract).ownedApi.operations)
+    const name of Object.keys(
+      getParticipantRuntime(contract).ownedApi.operations,
+    )
   ) {
     const [group, leaf] = surfacePath(name);
     const exportName = pascalSurfaceName(name);
@@ -432,7 +436,9 @@ export function createProviderRuntime<
     });
   }
   for (
-    const name of Object.keys(getContractRuntime(contract).ownedApi.feeds ?? {})
+    const name of Object.keys(
+      getParticipantRuntime(contract).ownedApi.feeds ?? {},
+    )
   ) {
     const [group, leaf] = surfacePath(name);
     const exportName = pascalSurfaceName(name);
@@ -442,7 +448,7 @@ export function createProviderRuntime<
     ) => register((args) => handler(args));
   }
   for (
-    const name of Object.keys(getContractRuntime(contract).ownedApi.events)
+    const name of Object.keys(getParticipantRuntime(contract).ownedApi.events)
   ) {
     const exportName = pascalSurfaceName(name);
     provider[`on${exportName}`] = (

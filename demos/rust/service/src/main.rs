@@ -377,8 +377,8 @@ async fn main() -> anyhow::Result<()> {
     if args.contract {
         println!(
             "{} {}",
-            trellis_participant_demo_service::contract::CONTRACT_ID,
-            trellis_participant_demo_service::contract::CONTRACT_DIGEST
+            trellis_participant_demo_service::participant::PARTICIPANT_ID,
+            trellis_participant_demo_service::participant::PARTICIPANT_DIGEST
         );
         return Ok(());
     }

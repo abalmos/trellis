@@ -17,7 +17,11 @@ fn compiles_complete_demo_service() -> miette::Result<()> {
             .as_nanos()
     ));
     fs::create_dir(&root).into_diagnostic()?;
-    fs::copy(source, root.join("contract.trellis")).into_diagnostic()?;
+    let source = fs::read_to_string(source).into_diagnostic()?.replace(
+        "event \"Audit.Recorded\" {",
+        "event \"Audit.Recorded\" {\n    params [\"/activityId\"];",
+    );
+    fs::write(root.join("contract.trellis"), source).into_diagnostic()?;
     fs::copy(
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../demos/ts/service/trellis.toml"),
         root.join("trellis.toml"),
@@ -35,6 +39,7 @@ fn compiles_complete_demo_service() -> miette::Result<()> {
             "send"
         );
         assert!(api_value["events"].get("Audit.Recorded").is_some());
+        assert_eq!(api_value["events"]["Audit.Recorded"]["params"][0], "/activityId");
         assert!(api_value["feeds"].get("Audit.Feed").is_some());
 
         assert_eq!(project.participants.len(), 1);

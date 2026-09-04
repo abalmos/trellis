@@ -1,4 +1,4 @@
-import contract from "../../contracts/console/contract.ts";
+import { participant } from "../../contracts/console/.trellis/ts/participants/app-console/mod.ts";
 import { APP_CONFIG } from "./config.ts";
 import {
   getConnection,
@@ -7,7 +7,7 @@ import {
 } from "./trellis-context.svelte.ts";
 export { getAuthenticatedUser } from "./trellis-context.svelte.ts";
 
-export { contract, getConnection, getTrellis };
+export { getConnection, getTrellis, participant };
 
 export type AppTrellis = TrellisConsoleClient;
 export type ConnectionStatus = ReturnType<typeof getConnection>["status"];

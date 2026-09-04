@@ -1,4 +1,4 @@
-// Generated from ./rust/crates/runtime/.trellis/generated/protocol/apis/trellis.state@v1.json
+// Generated from ./rust/crates/runtime/.trellis/artifacts/apis/trellis.state@v1.json
 export const StateAdminDeleteRequestSchema = {
   "anyOf": [{
     "properties": {
@@ -10,7 +10,7 @@ export const StateAdminDeleteRequestSchema = {
       "store": { "minLength": 1, "type": "string" },
       "userId": { "minLength": 1, "type": "string" },
     },
-    "required": ["scope", "contractId", "contractDigest", "store", "userId"],
+    "required": ["contractDigest", "contractId", "scope", "store", "userId"],
     "type": "object",
   }, {
     "properties": {
@@ -22,7 +22,7 @@ export const StateAdminDeleteRequestSchema = {
       "scope": { "const": "deviceApp", "type": "string" },
       "store": { "minLength": 1, "type": "string" },
     },
-    "required": ["scope", "contractId", "contractDigest", "store", "deviceId"],
+    "required": ["contractDigest", "contractId", "deviceId", "scope", "store"],
     "type": "object",
   }],
 } as const;
@@ -43,7 +43,7 @@ export const StateAdminGetRequestSchema = {
       "store": { "minLength": 1, "type": "string" },
       "userId": { "minLength": 1, "type": "string" },
     },
-    "required": ["scope", "contractId", "contractDigest", "store", "userId"],
+    "required": ["contractDigest", "contractId", "scope", "store", "userId"],
     "type": "object",
   }, {
     "properties": {
@@ -54,7 +54,7 @@ export const StateAdminGetRequestSchema = {
       "scope": { "const": "deviceApp", "type": "string" },
       "store": { "minLength": 1, "type": "string" },
     },
-    "required": ["scope", "contractId", "contractDigest", "store", "deviceId"],
+    "required": ["contractDigest", "contractId", "deviceId", "scope", "store"],
     "type": "object",
   }],
 } as const;
@@ -74,12 +74,12 @@ export const StateAdminGetResponseSchema = {
           "updatedAt": { "format": "date-time", "type": "string" },
           "value": {},
         },
-        "required": ["value", "revision", "updatedAt"],
+        "required": ["revision", "updatedAt", "value"],
         "type": "object",
       },
       "found": { "const": true, "type": "boolean" },
     },
-    "required": ["found", "entry"],
+    "required": ["entry", "found"],
     "type": "object",
   }, {
     "properties": {
@@ -92,7 +92,7 @@ export const StateAdminGetResponseSchema = {
           "updatedAt": { "format": "date-time", "type": "string" },
           "value": {},
         },
-        "required": ["value", "revision", "updatedAt"],
+        "required": ["revision", "updatedAt", "value"],
         "type": "object",
       },
       "migrationRequired": { "const": true, "type": "boolean" },
@@ -100,10 +100,10 @@ export const StateAdminGetResponseSchema = {
       "writerContractDigest": { "minLength": 1, "type": "string" },
     },
     "required": [
-      "migrationRequired",
-      "entry",
-      "stateVersion",
       "currentStateVersion",
+      "entry",
+      "migrationRequired",
+      "stateVersion",
       "writerContractDigest",
     ],
     "type": "object",
@@ -123,10 +123,10 @@ export const StateAdminListRequestSchema = {
       "userId": { "minLength": 1, "type": "string" },
     },
     "required": [
+      "contractDigest",
+      "contractId",
       "limit",
       "scope",
-      "contractId",
-      "contractDigest",
       "store",
       "userId",
     ],
@@ -143,12 +143,12 @@ export const StateAdminListRequestSchema = {
       "store": { "minLength": 1, "type": "string" },
     },
     "required": [
+      "contractDigest",
+      "contractId",
+      "deviceId",
       "limit",
       "scope",
-      "contractId",
-      "contractDigest",
       "store",
-      "deviceId",
     ],
     "type": "object",
   }],
@@ -158,7 +158,6 @@ export const StateAdminListResponseSchema = {
   "properties": {
     "count": { "minimum": 0, "type": "integer" },
     "entries": {
-      "default": [],
       "items": {
         "anyOf": [{
           "properties": {
@@ -168,7 +167,7 @@ export const StateAdminListResponseSchema = {
             "updatedAt": { "format": "date-time", "type": "string" },
             "value": {},
           },
-          "required": ["value", "revision", "updatedAt"],
+          "required": ["revision", "updatedAt", "value"],
           "type": "object",
         }, {
           "properties": {
@@ -181,7 +180,7 @@ export const StateAdminListResponseSchema = {
                 "updatedAt": { "format": "date-time", "type": "string" },
                 "value": {},
               },
-              "required": ["value", "revision", "updatedAt"],
+              "required": ["revision", "updatedAt", "value"],
               "type": "object",
             },
             "migrationRequired": { "const": true, "type": "boolean" },
@@ -189,10 +188,10 @@ export const StateAdminListResponseSchema = {
             "writerContractDigest": { "minLength": 1, "type": "string" },
           },
           "required": [
-            "migrationRequired",
-            "entry",
-            "stateVersion",
             "currentStateVersion",
+            "entry",
+            "migrationRequired",
+            "stateVersion",
             "writerContractDigest",
           ],
           "type": "object",
@@ -204,7 +203,7 @@ export const StateAdminListResponseSchema = {
     "nextOffset": { "minimum": 0, "type": "integer" },
     "offset": { "minimum": 0, "type": "integer" },
   },
-  "required": ["entries", "count", "offset", "limit"],
+  "required": ["count", "entries", "limit", "offset"],
   "type": "object",
 } as const;
 
@@ -248,12 +247,12 @@ export const StateGetResponseSchema = {
           "updatedAt": { "format": "date-time", "type": "string" },
           "value": {},
         },
-        "required": ["value", "revision", "updatedAt"],
+        "required": ["revision", "updatedAt", "value"],
         "type": "object",
       },
       "found": { "const": true, "type": "boolean" },
     },
-    "required": ["found", "entry"],
+    "required": ["entry", "found"],
     "type": "object",
   }, {
     "properties": {
@@ -266,7 +265,7 @@ export const StateGetResponseSchema = {
           "updatedAt": { "format": "date-time", "type": "string" },
           "value": {},
         },
-        "required": ["value", "revision", "updatedAt"],
+        "required": ["revision", "updatedAt", "value"],
         "type": "object",
       },
       "migrationRequired": { "const": true, "type": "boolean" },
@@ -274,10 +273,10 @@ export const StateGetResponseSchema = {
       "writerContractDigest": { "minLength": 1, "type": "string" },
     },
     "required": [
-      "migrationRequired",
-      "entry",
-      "stateVersion",
       "currentStateVersion",
+      "entry",
+      "migrationRequired",
+      "stateVersion",
       "writerContractDigest",
     ],
     "type": "object",
@@ -299,7 +298,6 @@ export const StateListResponseSchema = {
   "properties": {
     "count": { "minimum": 0, "type": "integer" },
     "entries": {
-      "default": [],
       "items": {
         "anyOf": [{
           "properties": {
@@ -309,7 +307,7 @@ export const StateListResponseSchema = {
             "updatedAt": { "format": "date-time", "type": "string" },
             "value": {},
           },
-          "required": ["value", "revision", "updatedAt"],
+          "required": ["revision", "updatedAt", "value"],
           "type": "object",
         }, {
           "properties": {
@@ -322,7 +320,7 @@ export const StateListResponseSchema = {
                 "updatedAt": { "format": "date-time", "type": "string" },
                 "value": {},
               },
-              "required": ["value", "revision", "updatedAt"],
+              "required": ["revision", "updatedAt", "value"],
               "type": "object",
             },
             "migrationRequired": { "const": true, "type": "boolean" },
@@ -330,10 +328,10 @@ export const StateListResponseSchema = {
             "writerContractDigest": { "minLength": 1, "type": "string" },
           },
           "required": [
-            "migrationRequired",
-            "entry",
-            "stateVersion",
             "currentStateVersion",
+            "entry",
+            "migrationRequired",
+            "stateVersion",
             "writerContractDigest",
           ],
           "type": "object",
@@ -345,7 +343,7 @@ export const StateListResponseSchema = {
     "nextOffset": { "minimum": 0, "type": "integer" },
     "offset": { "minimum": 0, "type": "integer" },
   },
-  "required": ["entries", "count", "offset", "limit"],
+  "required": ["count", "entries", "limit", "offset"],
   "type": "object",
 } as const;
 
@@ -375,7 +373,7 @@ export const StatePutResponseSchema = {
           "updatedAt": { "format": "date-time", "type": "string" },
           "value": {},
         },
-        "required": ["value", "revision", "updatedAt"],
+        "required": ["revision", "updatedAt", "value"],
         "type": "object",
       },
     },
@@ -393,7 +391,7 @@ export const StatePutResponseSchema = {
             "updatedAt": { "format": "date-time", "type": "string" },
             "value": {},
           },
-          "required": ["value", "revision", "updatedAt"],
+          "required": ["revision", "updatedAt", "value"],
           "type": "object",
         }, {
           "properties": {
@@ -406,7 +404,7 @@ export const StatePutResponseSchema = {
                 "updatedAt": { "format": "date-time", "type": "string" },
                 "value": {},
               },
-              "required": ["value", "revision", "updatedAt"],
+              "required": ["revision", "updatedAt", "value"],
               "type": "object",
             },
             "migrationRequired": { "const": true, "type": "boolean" },
@@ -414,10 +412,10 @@ export const StatePutResponseSchema = {
             "writerContractDigest": { "minLength": 1, "type": "string" },
           },
           "required": [
-            "migrationRequired",
-            "entry",
-            "stateVersion",
             "currentStateVersion",
+            "entry",
+            "migrationRequired",
+            "stateVersion",
             "writerContractDigest",
           ],
           "type": "object",

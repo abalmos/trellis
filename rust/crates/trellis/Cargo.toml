@@ -8,8 +8,13 @@ description = "Curated public Rust facade for Trellis clients and services."
 readme = "../../README.md"
 
 [features]
+live-integration = []
 runtime-internals = []
 test-support = []
+
+[[test]]
+name = "integration"
+required-features = ["live-integration"]
 
 [dependencies]
 async-nats.workspace = true
@@ -32,14 +37,12 @@ jsonschema.workspace = true
 thiserror.workspace = true
 time.workspace = true
 tokio = { workspace = true, features = ["io-util", "net", "sync"] }
-trellis-contracts = { path = "../contracts", version = "0.12.0" }
 trellis-protocol = { path = "../protocol", version = "0.12.0" }
 tracing.workspace = true
 ulid = "1.2.1"
 url = "2.5.8"
 
 [dev-dependencies]
-trellis-runtime-apis = { path = "../runtime-apis" }
 trellis-test = { path = "../trellis-test" }
 trellis-local-nats = { path = "../local-nats" }
 

@@ -67,13 +67,13 @@ These headings are intentionally named for fast human and AI lookup.
 
 ## Subsystem Design Docs
 
-| Document                                             | Read When                                                           | Why                                                                               |
-| ---------------------------------------------------- | ------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
-| `operations/trellis-operations.md`                   | You are designing caller-visible async workflows                    | Operations model, auth model, internal control protocol, watch semantics          |
-| `jobs/trellis-jobs.md`                               | You are designing service-private background execution              | Jobs model, stream/SQL projection, retries, worker lifecycle, admin model         |
-| `contracts/trellis-typescript-contract-authoring.md` | You are changing TypeScript contract architecture                   | TS contract-driven model, specialized contract helpers, `uses`, derived API views |
-| `contracts/trellis-rust-contract-libraries.md`       | You are changing Rust contract architecture                         | Rust participant facades, alias model, generation rules                           |
-| `tooling/trellis-cli.md`                             | You are changing Trellis CLI behavior or contract tooling workflows | CLI command architecture, install and upgrade flows, contract generation          |
+| Document                                       | Read When                                                           | Why                                                                       |
+| ---------------------------------------------- | ------------------------------------------------------------------- | ------------------------------------------------------------------------- |
+| `operations/trellis-operations.md`             | You are designing caller-visible async workflows                    | Operations model, auth model, internal control protocol, watch semantics  |
+| `jobs/trellis-jobs.md`                         | You are designing service-private background execution              | Jobs model, stream/SQL projection, retries, worker lifecycle, admin model |
+| `contracts/trellis-idl.md`                     | You are changing Trellis authoring or compilation                   | IDL syntax, semantic types, dependencies, and protocol lowering           |
+| `contracts/trellis-rust-contract-libraries.md` | You are changing generated Rust libraries                           | Rust participant facades, alias model, generation rules                   |
+| `tooling/trellis-cli.md`                       | You are changing Trellis CLI behavior or contract tooling workflows | CLI command architecture, install and upgrade flows, contract generation  |
 
 ## Cross-Cutting Pattern Docs
 
@@ -86,7 +86,7 @@ These headings are intentionally named for fast human and AI lookup.
 | `core/store-resource-patterns.md`  | You are changing service-owned blob store resources                | Store resource shape, runtime semantics, and auth boundaries                                  |
 | `core/type-system-patterns.md`     | You are changing schemas, Result, or error modeling                | Shared type-system and validation rules                                                       |
 | `core/service-development.md`      | You are implementing service code or service runtime ergonomics    | Service layout, lifecycle, jobs vs operations                                                 |
-| `core/testing-patterns.md`         | You are adding, moving, or deleting tests for Trellis behavior     | Smallest real test boundaries, live integration coverage, and matrix parity                   |
+| `core/testing-patterns.md`         | You are adding, moving, or deleting tests for Trellis behavior     | Smallest real test boundaries, live integration discovery, and infrastructure                 |
 | `core/observability-patterns.md`   | You are changing telemetry, correlation, health, or docs guidance  | Observability and request-correlation rules                                                   |
 | `core/frontend-svelte-patterns.md` | You are changing Svelte frontend conventions                       | Trellis frontend state patterns                                                               |
 | `core/capability-patterns.md`      | You are changing capability naming or deployment-role guidance     | Capability taxonomy and assignment guidance                                                   |
@@ -97,19 +97,19 @@ These documents define the public protocol, API, and runtime-facing surfaces.
 Read them when you are implementing or reviewing library/runtime/codegen
 ergonomics.
 
-| Document                                             | Surface                     | Read When                                                                                                |
-| ---------------------------------------------------- | --------------------------- | -------------------------------------------------------------------------------------------------------- |
-| `auth/auth-protocol.md`                              | Auth protocol surface       | Implementing auth callout, proofs, reply validation, or auth state model                                 |
-| `auth/auth-api.md`                                   | Auth public wire API        | Implementing `/auth/*`, `operations.v1.Auth.*`, `rpc.v1.Auth.*`, or auth events                          |
-| `auth/trellis-auth.md`                               | Auth system/runtime design  | Implementing auth helper semantics, sessions, identity authority, deployment authority, or runtime auth  |
-| `auth/device-activation.md`                          | Device activation design    | Implementing known-device activation, connect info, or activation review flows                           |
-| `operations/trellis-operations.md`                   | Operations design           | Implementing caller-visible async workflows in TypeScript or Rust                                        |
-| `jobs/trellis-jobs.md`                               | Jobs design                 | Implementing service-private background execution or jobs admin surfaces                                 |
-| `contracts/trellis-typescript-contract-authoring.md` | TypeScript contract design  | Implementing TS contract authoring or TS contract-driven runtime ergonomics                              |
-| `contracts/trellis-rust-contract-libraries.md`       | Rust contract design        | Implementing Rust generated SDKs, facades, descriptors, or runtime ergonomics                            |
-| `core/state-patterns.md`                             | State design                | Implementing contract-owned state declarations, runtime state semantics, or migrations                   |
-| `core/files-transfer-patterns.md`                    | Files and transfer design   | Implementing service-owned files APIs and operation-native transfer behavior                             |
-| `/api` in the guides site                            | Generated language API docs | Looking up exact TypeScript signatures, Rustdoc links, pending Rustdoc crates, or generated SDK surfaces |
+| Document                                       | Surface                     | Read When                                                                                                |
+| ---------------------------------------------- | --------------------------- | -------------------------------------------------------------------------------------------------------- |
+| `auth/auth-protocol.md`                        | Auth protocol surface       | Implementing auth callout, proofs, reply validation, or auth state model                                 |
+| `auth/auth-api.md`                             | Auth public wire API        | Implementing `/auth/*`, `operations.v1.Auth.*`, `rpc.v1.Auth.*`, or auth events                          |
+| `auth/trellis-auth.md`                         | Auth system/runtime design  | Implementing auth helper semantics, sessions, identity authority, deployment authority, or runtime auth  |
+| `auth/device-activation.md`                    | Device activation design    | Implementing known-device activation, connect info, or activation review flows                           |
+| `operations/trellis-operations.md`             | Operations design           | Implementing caller-visible async workflows in TypeScript or Rust                                        |
+| `jobs/trellis-jobs.md`                         | Jobs design                 | Implementing service-private background execution or jobs admin surfaces                                 |
+| `contracts/trellis-idl.md`                     | Trellis IDL                 | Implementing IDL authoring, compilation, or generated TypeScript runtime ergonomics                      |
+| `contracts/trellis-rust-contract-libraries.md` | Generated Rust libraries    | Implementing Rust generated SDKs, facades, descriptors, or runtime ergonomics                            |
+| `core/state-patterns.md`                       | State design                | Implementing contract-owned state declarations, runtime state semantics, or migrations                   |
+| `core/files-transfer-patterns.md`              | Files and transfer design   | Implementing service-owned files APIs and operation-native transfer behavior                             |
+| `/api` in the guides site                      | Generated language API docs | Looking up exact TypeScript signatures, Rustdoc links, pending Rustdoc crates, or generated SDK surfaces |
 
 ## Suggested Read Paths
 
@@ -178,8 +178,7 @@ For ordinary app/service library usage, prefer `/guides/libraries/typescript`,
 
 1. `core/state-patterns.md`
 2. `contracts/trellis-api-participants.md`
-3. `contracts/trellis-typescript-contract-authoring.md` when changing TS
-   authoring
+3. `contracts/trellis-idl.md` when changing TS authoring
 4. `/api` for exact TypeScript state helper signatures
 
 ### Work on files or transfer
@@ -197,7 +196,7 @@ For ordinary app/service library usage, prefer `/guides/libraries/typescript`,
 ### Implement an installable service in TypeScript
 
 1. `core/service-development.md`
-2. `contracts/trellis-typescript-contract-authoring.md`
+2. `contracts/trellis-idl.md`
 3. `contracts/trellis-api-participants.md`
 4. `core/platform-libraries.md`
 5. `/api` for exact TypeScript signatures
@@ -206,7 +205,7 @@ For ordinary app/service library usage, prefer `/guides/libraries/typescript`,
 
 1. `auth/device-activation.md`
 2. `auth/trellis-auth.md`
-3. `contracts/trellis-typescript-contract-authoring.md`
+3. `contracts/trellis-idl.md`
 4. `contracts/trellis-api-participants.md`
 5. `core/platform-libraries.md`
 6. `/api` for exact TypeScript signatures
@@ -225,18 +224,17 @@ For ordinary app/service library usage, prefer `/guides/libraries/typescript`,
 ### Change manifests, codegen, or discovery
 
 1. `contracts/trellis-api-participants.md`
-2. `contracts/trellis-typescript-contract-authoring.md` or
-   `contracts/trellis-rust-contract-libraries.md`
+2. `contracts/trellis-idl.md` or `contracts/trellis-rust-contract-libraries.md`
 3. relevant subsystem design doc
 4. `/api` for exact generated SDK or runtime APIs
 
-### Implement TypeScript contract/runtime surfaces
+### Implement TypeScript participant/runtime surfaces
 
-1. `contracts/trellis-typescript-contract-authoring.md`
+1. `contracts/trellis-idl.md`
 2. `contracts/trellis-api-participants.md`
 3. `/api` for exact TypeScript signatures
 
-### Implement Rust contract/runtime surfaces
+### Implement Rust participant/runtime surfaces
 
 1. `contracts/trellis-rust-contract-libraries.md`
 2. `contracts/trellis-api-participants.md`

@@ -1,8 +1,8 @@
-// Generated from ./rust/crates/runtime/.trellis/generated/protocol/apis/trellis.state@v1.json
+// Generated from ./rust/crates/runtime/.trellis/artifacts/apis/trellis.state@v1.json
 
 export const API_ID = "trellis.state@v1" as const;
 export const API_DIGEST =
-  "hGgfotCC_9mlYwTUdaZtMTeia-KVGCGyqPop--LGa1w" as const;
+  "1WHxeF9WLJh3v-mmHiV5mql3a67tmPNpEUFxxUIF9-Y" as const;
 export const API = {
   "capabilities": {
     "trellis.state::mutate": {
@@ -36,101 +36,50 @@ export const API = {
       }],
     },
   },
-  "consent": {
-    "trellis.state::mutate": {
-      "consequence": "Can delete participant state.",
-      "description": "Delete state entries across participants.",
-      "title": "Mutate participant state",
-    },
-    "trellis.state::read": {
-      "consequence": "",
-      "description": "Inspect state entries across participants.",
-      "title": "Read participant state",
-    },
-  },
   "description":
     "Trellis-managed app state for authenticated app and device participants.",
   "displayName": "Trellis State",
-  "docs": {
-    "markdown":
-      "Provides authenticated read, write, list, delete, and admin inspection APIs for Trellis-managed participant state.",
-    "summary": "Participant state storage APIs.",
-  },
   "errors": { "AuthError": {}, "UnexpectedError": {}, "ValidationError": {} },
   "format": "trellis.api.v1",
   "id": "trellis.state@v1",
   "rpc": {
     "State.Admin.Delete": {
-      "docs": {
-        "markdown":
-          "Deletes one state value across participants for authorized administrators.",
-        "summary": "Admin delete a state value.",
-      },
       "errors": ["AuthError", "UnexpectedError", "ValidationError"],
       "input": { "schema": "StateAdminDeleteRequest" },
       "output": { "schema": "StateAdminDeleteResponse" },
       "version": "v1",
     },
     "State.Admin.Get": {
-      "docs": {
-        "markdown":
-          "Returns one state value across participants for authorized administrators.",
-        "summary": "Admin read a state value.",
-      },
       "errors": ["AuthError", "UnexpectedError", "ValidationError"],
       "input": { "schema": "StateAdminGetRequest" },
       "output": { "schema": "StateAdminGetResponse" },
       "version": "v1",
     },
     "State.Admin.List": {
-      "docs": {
-        "markdown":
-          "Lists state values across participants for authorized administrators.",
-        "summary": "Admin list state values.",
-      },
       "errors": ["AuthError", "UnexpectedError", "ValidationError"],
       "input": { "schema": "StateAdminListRequest" },
       "output": { "schema": "StateAdminListResponse" },
       "version": "v1",
     },
     "State.Delete": {
-      "docs": {
-        "markdown":
-          "Deletes one state value from the caller's authorized scope.",
-        "summary": "Delete a state value.",
-      },
       "errors": ["AuthError", "UnexpectedError", "ValidationError"],
       "input": { "schema": "StateDeleteRequest" },
       "output": { "schema": "StateDeleteResponse" },
       "version": "v1",
     },
     "State.Get": {
-      "docs": {
-        "markdown": "Returns one state value in the caller's authorized scope.",
-        "summary": "Read a state value.",
-      },
       "errors": ["AuthError", "UnexpectedError", "ValidationError"],
       "input": { "schema": "StateGetRequest" },
       "output": { "schema": "StateGetResponse" },
       "version": "v1",
     },
     "State.List": {
-      "docs": {
-        "markdown":
-          "Lists state values visible to the caller for the requested scope and prefix.",
-        "summary": "List state values.",
-      },
       "errors": ["AuthError", "UnexpectedError", "ValidationError"],
       "input": { "schema": "StateListRequest" },
       "output": { "schema": "StateListResponse" },
       "version": "v1",
     },
     "State.Put": {
-      "docs": {
-        "markdown":
-          "Creates or replaces one state value in an authorized scope.",
-        "summary": "Write a state value.",
-      },
       "errors": ["AuthError", "UnexpectedError", "ValidationError"],
       "input": { "schema": "StatePutRequest" },
       "output": { "schema": "StatePutResponse" },
@@ -151,9 +100,9 @@ export const API = {
           "userId": { "minLength": 1, "type": "string" },
         },
         "required": [
-          "scope",
-          "contractId",
           "contractDigest",
+          "contractId",
+          "scope",
           "store",
           "userId",
         ],
@@ -169,14 +118,46 @@ export const API = {
           "store": { "minLength": 1, "type": "string" },
         },
         "required": [
-          "scope",
-          "contractId",
           "contractDigest",
-          "store",
+          "contractId",
           "deviceId",
+          "scope",
+          "store",
         ],
         "type": "object",
       }],
+    },
+    "StateAdminDeleteRequestValue1": {
+      "properties": {
+        "contractDigest": { "minLength": 1, "type": "string" },
+        "contractId": { "minLength": 1, "type": "string" },
+        "expectedRevision": { "minLength": 1, "type": "string" },
+        "key": { "minLength": 1, "type": "string" },
+        "scope": { "const": "userApp", "type": "string" },
+        "store": { "minLength": 1, "type": "string" },
+        "userId": { "minLength": 1, "type": "string" },
+      },
+      "required": ["contractDigest", "contractId", "scope", "store", "userId"],
+      "type": "object",
+    },
+    "StateAdminDeleteRequestValue2": {
+      "properties": {
+        "contractDigest": { "minLength": 1, "type": "string" },
+        "contractId": { "minLength": 1, "type": "string" },
+        "deviceId": { "minLength": 1, "type": "string" },
+        "expectedRevision": { "minLength": 1, "type": "string" },
+        "key": { "minLength": 1, "type": "string" },
+        "scope": { "const": "deviceApp", "type": "string" },
+        "store": { "minLength": 1, "type": "string" },
+      },
+      "required": [
+        "contractDigest",
+        "contractId",
+        "deviceId",
+        "scope",
+        "store",
+      ],
+      "type": "object",
     },
     "StateAdminDeleteResponse": {
       "properties": { "deleted": { "type": "boolean" } },
@@ -194,9 +175,9 @@ export const API = {
           "userId": { "minLength": 1, "type": "string" },
         },
         "required": [
-          "scope",
-          "contractId",
           "contractDigest",
+          "contractId",
+          "scope",
           "store",
           "userId",
         ],
@@ -211,14 +192,44 @@ export const API = {
           "store": { "minLength": 1, "type": "string" },
         },
         "required": [
-          "scope",
-          "contractId",
           "contractDigest",
-          "store",
+          "contractId",
           "deviceId",
+          "scope",
+          "store",
         ],
         "type": "object",
       }],
+    },
+    "StateAdminGetRequestValue1": {
+      "properties": {
+        "contractDigest": { "minLength": 1, "type": "string" },
+        "contractId": { "minLength": 1, "type": "string" },
+        "key": { "minLength": 1, "type": "string" },
+        "scope": { "const": "userApp", "type": "string" },
+        "store": { "minLength": 1, "type": "string" },
+        "userId": { "minLength": 1, "type": "string" },
+      },
+      "required": ["contractDigest", "contractId", "scope", "store", "userId"],
+      "type": "object",
+    },
+    "StateAdminGetRequestValue2": {
+      "properties": {
+        "contractDigest": { "minLength": 1, "type": "string" },
+        "contractId": { "minLength": 1, "type": "string" },
+        "deviceId": { "minLength": 1, "type": "string" },
+        "key": { "minLength": 1, "type": "string" },
+        "scope": { "const": "deviceApp", "type": "string" },
+        "store": { "minLength": 1, "type": "string" },
+      },
+      "required": [
+        "contractDigest",
+        "contractId",
+        "deviceId",
+        "scope",
+        "store",
+      ],
+      "type": "object",
     },
     "StateAdminGetResponse": {
       "anyOf": [{
@@ -235,12 +246,12 @@ export const API = {
               "updatedAt": { "format": "date-time", "type": "string" },
               "value": {},
             },
-            "required": ["value", "revision", "updatedAt"],
+            "required": ["revision", "updatedAt", "value"],
             "type": "object",
           },
           "found": { "const": true, "type": "boolean" },
         },
-        "required": ["found", "entry"],
+        "required": ["entry", "found"],
         "type": "object",
       }, {
         "properties": {
@@ -253,7 +264,7 @@ export const API = {
               "updatedAt": { "format": "date-time", "type": "string" },
               "value": {},
             },
-            "required": ["value", "revision", "updatedAt"],
+            "required": ["revision", "updatedAt", "value"],
             "type": "object",
           },
           "migrationRequired": { "const": true, "type": "boolean" },
@@ -261,14 +272,86 @@ export const API = {
           "writerContractDigest": { "minLength": 1, "type": "string" },
         },
         "required": [
-          "migrationRequired",
-          "entry",
-          "stateVersion",
           "currentStateVersion",
+          "entry",
+          "migrationRequired",
+          "stateVersion",
           "writerContractDigest",
         ],
         "type": "object",
       }],
+    },
+    "StateAdminGetResponseValue1": {
+      "properties": { "found": { "const": false, "type": "boolean" } },
+      "required": ["found"],
+      "type": "object",
+    },
+    "StateAdminGetResponseValue2": {
+      "properties": {
+        "entry": {
+          "properties": {
+            "expiresAt": { "format": "date-time", "type": "string" },
+            "key": { "minLength": 1, "type": "string" },
+            "revision": { "minLength": 1, "type": "string" },
+            "updatedAt": { "format": "date-time", "type": "string" },
+            "value": {},
+          },
+          "required": ["revision", "updatedAt", "value"],
+          "type": "object",
+        },
+        "found": { "const": true, "type": "boolean" },
+      },
+      "required": ["entry", "found"],
+      "type": "object",
+    },
+    "StateAdminGetResponseValue2entry": {
+      "properties": {
+        "expiresAt": { "format": "date-time", "type": "string" },
+        "key": { "minLength": 1, "type": "string" },
+        "revision": { "minLength": 1, "type": "string" },
+        "updatedAt": { "format": "date-time", "type": "string" },
+        "value": {},
+      },
+      "required": ["revision", "updatedAt", "value"],
+      "type": "object",
+    },
+    "StateAdminGetResponseValue3": {
+      "properties": {
+        "currentStateVersion": { "minLength": 1, "type": "string" },
+        "entry": {
+          "properties": {
+            "expiresAt": { "format": "date-time", "type": "string" },
+            "key": { "minLength": 1, "type": "string" },
+            "revision": { "minLength": 1, "type": "string" },
+            "updatedAt": { "format": "date-time", "type": "string" },
+            "value": {},
+          },
+          "required": ["revision", "updatedAt", "value"],
+          "type": "object",
+        },
+        "migrationRequired": { "const": true, "type": "boolean" },
+        "stateVersion": { "minLength": 1, "type": "string" },
+        "writerContractDigest": { "minLength": 1, "type": "string" },
+      },
+      "required": [
+        "currentStateVersion",
+        "entry",
+        "migrationRequired",
+        "stateVersion",
+        "writerContractDigest",
+      ],
+      "type": "object",
+    },
+    "StateAdminGetResponseValue3entry": {
+      "properties": {
+        "expiresAt": { "format": "date-time", "type": "string" },
+        "key": { "minLength": 1, "type": "string" },
+        "revision": { "minLength": 1, "type": "string" },
+        "updatedAt": { "format": "date-time", "type": "string" },
+        "value": {},
+      },
+      "required": ["revision", "updatedAt", "value"],
+      "type": "object",
     },
     "StateAdminListRequest": {
       "anyOf": [{
@@ -283,10 +366,10 @@ export const API = {
           "userId": { "minLength": 1, "type": "string" },
         },
         "required": [
+          "contractDigest",
+          "contractId",
           "limit",
           "scope",
-          "contractId",
-          "contractDigest",
           "store",
           "userId",
         ],
@@ -303,21 +386,62 @@ export const API = {
           "store": { "minLength": 1, "type": "string" },
         },
         "required": [
+          "contractDigest",
+          "contractId",
+          "deviceId",
           "limit",
           "scope",
-          "contractId",
-          "contractDigest",
           "store",
-          "deviceId",
         ],
         "type": "object",
       }],
+    },
+    "StateAdminListRequestValue1": {
+      "properties": {
+        "contractDigest": { "minLength": 1, "type": "string" },
+        "contractId": { "minLength": 1, "type": "string" },
+        "limit": { "minimum": 0, "type": "integer" },
+        "offset": { "minimum": 0, "type": "integer" },
+        "prefix": { "minLength": 1, "type": "string" },
+        "scope": { "const": "userApp", "type": "string" },
+        "store": { "minLength": 1, "type": "string" },
+        "userId": { "minLength": 1, "type": "string" },
+      },
+      "required": [
+        "contractDigest",
+        "contractId",
+        "limit",
+        "scope",
+        "store",
+        "userId",
+      ],
+      "type": "object",
+    },
+    "StateAdminListRequestValue2": {
+      "properties": {
+        "contractDigest": { "minLength": 1, "type": "string" },
+        "contractId": { "minLength": 1, "type": "string" },
+        "deviceId": { "minLength": 1, "type": "string" },
+        "limit": { "minimum": 0, "type": "integer" },
+        "offset": { "minimum": 0, "type": "integer" },
+        "prefix": { "minLength": 1, "type": "string" },
+        "scope": { "const": "deviceApp", "type": "string" },
+        "store": { "minLength": 1, "type": "string" },
+      },
+      "required": [
+        "contractDigest",
+        "contractId",
+        "deviceId",
+        "limit",
+        "scope",
+        "store",
+      ],
+      "type": "object",
     },
     "StateAdminListResponse": {
       "properties": {
         "count": { "minimum": 0, "type": "integer" },
         "entries": {
-          "default": [],
           "items": {
             "anyOf": [{
               "properties": {
@@ -327,7 +451,7 @@ export const API = {
                 "updatedAt": { "format": "date-time", "type": "string" },
                 "value": {},
               },
-              "required": ["value", "revision", "updatedAt"],
+              "required": ["revision", "updatedAt", "value"],
               "type": "object",
             }, {
               "properties": {
@@ -340,7 +464,7 @@ export const API = {
                     "updatedAt": { "format": "date-time", "type": "string" },
                     "value": {},
                   },
-                  "required": ["value", "revision", "updatedAt"],
+                  "required": ["revision", "updatedAt", "value"],
                   "type": "object",
                 },
                 "migrationRequired": { "const": true, "type": "boolean" },
@@ -348,10 +472,10 @@ export const API = {
                 "writerContractDigest": { "minLength": 1, "type": "string" },
               },
               "required": [
-                "migrationRequired",
-                "entry",
-                "stateVersion",
                 "currentStateVersion",
+                "entry",
+                "migrationRequired",
+                "stateVersion",
                 "writerContractDigest",
               ],
               "type": "object",
@@ -363,7 +487,56 @@ export const API = {
         "nextOffset": { "minimum": 0, "type": "integer" },
         "offset": { "minimum": 0, "type": "integer" },
       },
-      "required": ["entries", "count", "offset", "limit"],
+      "required": ["count", "entries", "limit", "offset"],
+      "type": "object",
+    },
+    "StateAdminListResponseentriesItem1": {
+      "properties": {
+        "expiresAt": { "format": "date-time", "type": "string" },
+        "key": { "minLength": 1, "type": "string" },
+        "revision": { "minLength": 1, "type": "string" },
+        "updatedAt": { "format": "date-time", "type": "string" },
+        "value": {},
+      },
+      "required": ["revision", "updatedAt", "value"],
+      "type": "object",
+    },
+    "StateAdminListResponseentriesItem2": {
+      "properties": {
+        "currentStateVersion": { "minLength": 1, "type": "string" },
+        "entry": {
+          "properties": {
+            "expiresAt": { "format": "date-time", "type": "string" },
+            "key": { "minLength": 1, "type": "string" },
+            "revision": { "minLength": 1, "type": "string" },
+            "updatedAt": { "format": "date-time", "type": "string" },
+            "value": {},
+          },
+          "required": ["revision", "updatedAt", "value"],
+          "type": "object",
+        },
+        "migrationRequired": { "const": true, "type": "boolean" },
+        "stateVersion": { "minLength": 1, "type": "string" },
+        "writerContractDigest": { "minLength": 1, "type": "string" },
+      },
+      "required": [
+        "currentStateVersion",
+        "entry",
+        "migrationRequired",
+        "stateVersion",
+        "writerContractDigest",
+      ],
+      "type": "object",
+    },
+    "StateAdminListResponseentriesItem2entry": {
+      "properties": {
+        "expiresAt": { "format": "date-time", "type": "string" },
+        "key": { "minLength": 1, "type": "string" },
+        "revision": { "minLength": 1, "type": "string" },
+        "updatedAt": { "format": "date-time", "type": "string" },
+        "value": {},
+      },
+      "required": ["revision", "updatedAt", "value"],
       "type": "object",
     },
     "StateDeleteRequest": {
@@ -388,7 +561,7 @@ export const API = {
         "updatedAt": { "format": "date-time", "type": "string" },
         "value": {},
       },
-      "required": ["value", "revision", "updatedAt"],
+      "required": ["revision", "updatedAt", "value"],
       "type": "object",
     },
     "StateGetRequest": {
@@ -414,12 +587,12 @@ export const API = {
               "updatedAt": { "format": "date-time", "type": "string" },
               "value": {},
             },
-            "required": ["value", "revision", "updatedAt"],
+            "required": ["revision", "updatedAt", "value"],
             "type": "object",
           },
           "found": { "const": true, "type": "boolean" },
         },
-        "required": ["found", "entry"],
+        "required": ["entry", "found"],
         "type": "object",
       }, {
         "properties": {
@@ -432,7 +605,7 @@ export const API = {
               "updatedAt": { "format": "date-time", "type": "string" },
               "value": {},
             },
-            "required": ["value", "revision", "updatedAt"],
+            "required": ["revision", "updatedAt", "value"],
             "type": "object",
           },
           "migrationRequired": { "const": true, "type": "boolean" },
@@ -440,14 +613,86 @@ export const API = {
           "writerContractDigest": { "minLength": 1, "type": "string" },
         },
         "required": [
-          "migrationRequired",
-          "entry",
-          "stateVersion",
           "currentStateVersion",
+          "entry",
+          "migrationRequired",
+          "stateVersion",
           "writerContractDigest",
         ],
         "type": "object",
       }],
+    },
+    "StateGetResponseValue1": {
+      "properties": { "found": { "const": false, "type": "boolean" } },
+      "required": ["found"],
+      "type": "object",
+    },
+    "StateGetResponseValue2": {
+      "properties": {
+        "entry": {
+          "properties": {
+            "expiresAt": { "format": "date-time", "type": "string" },
+            "key": { "minLength": 1, "type": "string" },
+            "revision": { "minLength": 1, "type": "string" },
+            "updatedAt": { "format": "date-time", "type": "string" },
+            "value": {},
+          },
+          "required": ["revision", "updatedAt", "value"],
+          "type": "object",
+        },
+        "found": { "const": true, "type": "boolean" },
+      },
+      "required": ["entry", "found"],
+      "type": "object",
+    },
+    "StateGetResponseValue2entry": {
+      "properties": {
+        "expiresAt": { "format": "date-time", "type": "string" },
+        "key": { "minLength": 1, "type": "string" },
+        "revision": { "minLength": 1, "type": "string" },
+        "updatedAt": { "format": "date-time", "type": "string" },
+        "value": {},
+      },
+      "required": ["revision", "updatedAt", "value"],
+      "type": "object",
+    },
+    "StateGetResponseValue3": {
+      "properties": {
+        "currentStateVersion": { "minLength": 1, "type": "string" },
+        "entry": {
+          "properties": {
+            "expiresAt": { "format": "date-time", "type": "string" },
+            "key": { "minLength": 1, "type": "string" },
+            "revision": { "minLength": 1, "type": "string" },
+            "updatedAt": { "format": "date-time", "type": "string" },
+            "value": {},
+          },
+          "required": ["revision", "updatedAt", "value"],
+          "type": "object",
+        },
+        "migrationRequired": { "const": true, "type": "boolean" },
+        "stateVersion": { "minLength": 1, "type": "string" },
+        "writerContractDigest": { "minLength": 1, "type": "string" },
+      },
+      "required": [
+        "currentStateVersion",
+        "entry",
+        "migrationRequired",
+        "stateVersion",
+        "writerContractDigest",
+      ],
+      "type": "object",
+    },
+    "StateGetResponseValue3entry": {
+      "properties": {
+        "expiresAt": { "format": "date-time", "type": "string" },
+        "key": { "minLength": 1, "type": "string" },
+        "revision": { "minLength": 1, "type": "string" },
+        "updatedAt": { "format": "date-time", "type": "string" },
+        "value": {},
+      },
+      "required": ["revision", "updatedAt", "value"],
+      "type": "object",
     },
     "StateListRequest": {
       "properties": {
@@ -463,7 +708,6 @@ export const API = {
       "properties": {
         "count": { "minimum": 0, "type": "integer" },
         "entries": {
-          "default": [],
           "items": {
             "anyOf": [{
               "properties": {
@@ -473,7 +717,7 @@ export const API = {
                 "updatedAt": { "format": "date-time", "type": "string" },
                 "value": {},
               },
-              "required": ["value", "revision", "updatedAt"],
+              "required": ["revision", "updatedAt", "value"],
               "type": "object",
             }, {
               "properties": {
@@ -486,7 +730,7 @@ export const API = {
                     "updatedAt": { "format": "date-time", "type": "string" },
                     "value": {},
                   },
-                  "required": ["value", "revision", "updatedAt"],
+                  "required": ["revision", "updatedAt", "value"],
                   "type": "object",
                 },
                 "migrationRequired": { "const": true, "type": "boolean" },
@@ -494,10 +738,10 @@ export const API = {
                 "writerContractDigest": { "minLength": 1, "type": "string" },
               },
               "required": [
-                "migrationRequired",
-                "entry",
-                "stateVersion",
                 "currentStateVersion",
+                "entry",
+                "migrationRequired",
+                "stateVersion",
                 "writerContractDigest",
               ],
               "type": "object",
@@ -509,7 +753,56 @@ export const API = {
         "nextOffset": { "minimum": 0, "type": "integer" },
         "offset": { "minimum": 0, "type": "integer" },
       },
-      "required": ["entries", "count", "offset", "limit"],
+      "required": ["count", "entries", "limit", "offset"],
+      "type": "object",
+    },
+    "StateListResponseentriesItem1": {
+      "properties": {
+        "expiresAt": { "format": "date-time", "type": "string" },
+        "key": { "minLength": 1, "type": "string" },
+        "revision": { "minLength": 1, "type": "string" },
+        "updatedAt": { "format": "date-time", "type": "string" },
+        "value": {},
+      },
+      "required": ["revision", "updatedAt", "value"],
+      "type": "object",
+    },
+    "StateListResponseentriesItem2": {
+      "properties": {
+        "currentStateVersion": { "minLength": 1, "type": "string" },
+        "entry": {
+          "properties": {
+            "expiresAt": { "format": "date-time", "type": "string" },
+            "key": { "minLength": 1, "type": "string" },
+            "revision": { "minLength": 1, "type": "string" },
+            "updatedAt": { "format": "date-time", "type": "string" },
+            "value": {},
+          },
+          "required": ["revision", "updatedAt", "value"],
+          "type": "object",
+        },
+        "migrationRequired": { "const": true, "type": "boolean" },
+        "stateVersion": { "minLength": 1, "type": "string" },
+        "writerContractDigest": { "minLength": 1, "type": "string" },
+      },
+      "required": [
+        "currentStateVersion",
+        "entry",
+        "migrationRequired",
+        "stateVersion",
+        "writerContractDigest",
+      ],
+      "type": "object",
+    },
+    "StateListResponseentriesItem2entry": {
+      "properties": {
+        "expiresAt": { "format": "date-time", "type": "string" },
+        "key": { "minLength": 1, "type": "string" },
+        "revision": { "minLength": 1, "type": "string" },
+        "updatedAt": { "format": "date-time", "type": "string" },
+        "value": {},
+      },
+      "required": ["revision", "updatedAt", "value"],
       "type": "object",
     },
     "StateMigrationRequired": {
@@ -523,7 +816,7 @@ export const API = {
             "updatedAt": { "format": "date-time", "type": "string" },
             "value": {},
           },
-          "required": ["value", "revision", "updatedAt"],
+          "required": ["revision", "updatedAt", "value"],
           "type": "object",
         },
         "migrationRequired": { "const": true, "type": "boolean" },
@@ -531,12 +824,23 @@ export const API = {
         "writerContractDigest": { "minLength": 1, "type": "string" },
       },
       "required": [
-        "migrationRequired",
-        "entry",
-        "stateVersion",
         "currentStateVersion",
+        "entry",
+        "migrationRequired",
+        "stateVersion",
         "writerContractDigest",
       ],
+      "type": "object",
+    },
+    "StateMigrationRequiredentry": {
+      "properties": {
+        "expiresAt": { "format": "date-time", "type": "string" },
+        "key": { "minLength": 1, "type": "string" },
+        "revision": { "minLength": 1, "type": "string" },
+        "updatedAt": { "format": "date-time", "type": "string" },
+        "value": {},
+      },
+      "required": ["revision", "updatedAt", "value"],
       "type": "object",
     },
     "StatePutRequest": {
@@ -564,7 +868,7 @@ export const API = {
               "updatedAt": { "format": "date-time", "type": "string" },
               "value": {},
             },
-            "required": ["value", "revision", "updatedAt"],
+            "required": ["revision", "updatedAt", "value"],
             "type": "object",
           },
         },
@@ -582,7 +886,7 @@ export const API = {
                 "updatedAt": { "format": "date-time", "type": "string" },
                 "value": {},
               },
-              "required": ["value", "revision", "updatedAt"],
+              "required": ["revision", "updatedAt", "value"],
               "type": "object",
             }, {
               "properties": {
@@ -595,7 +899,7 @@ export const API = {
                     "updatedAt": { "format": "date-time", "type": "string" },
                     "value": {},
                   },
-                  "required": ["value", "revision", "updatedAt"],
+                  "required": ["revision", "updatedAt", "value"],
                   "type": "object",
                 },
                 "migrationRequired": { "const": true, "type": "boolean" },
@@ -603,10 +907,10 @@ export const API = {
                 "writerContractDigest": { "minLength": 1, "type": "string" },
               },
               "required": [
-                "migrationRequired",
-                "entry",
-                "stateVersion",
                 "currentStateVersion",
+                "entry",
+                "migrationRequired",
+                "stateVersion",
                 "writerContractDigest",
               ],
               "type": "object",
@@ -617,6 +921,131 @@ export const API = {
         "required": ["applied", "found"],
         "type": "object",
       }],
+    },
+    "StatePutResponseValue1": {
+      "properties": {
+        "applied": { "const": true, "type": "boolean" },
+        "entry": {
+          "properties": {
+            "expiresAt": { "format": "date-time", "type": "string" },
+            "key": { "minLength": 1, "type": "string" },
+            "revision": { "minLength": 1, "type": "string" },
+            "updatedAt": { "format": "date-time", "type": "string" },
+            "value": {},
+          },
+          "required": ["revision", "updatedAt", "value"],
+          "type": "object",
+        },
+      },
+      "required": ["applied", "entry"],
+      "type": "object",
+    },
+    "StatePutResponseValue1entry": {
+      "properties": {
+        "expiresAt": { "format": "date-time", "type": "string" },
+        "key": { "minLength": 1, "type": "string" },
+        "revision": { "minLength": 1, "type": "string" },
+        "updatedAt": { "format": "date-time", "type": "string" },
+        "value": {},
+      },
+      "required": ["revision", "updatedAt", "value"],
+      "type": "object",
+    },
+    "StatePutResponseValue2": {
+      "properties": {
+        "applied": { "const": false, "type": "boolean" },
+        "entry": {
+          "anyOf": [{
+            "properties": {
+              "expiresAt": { "format": "date-time", "type": "string" },
+              "key": { "minLength": 1, "type": "string" },
+              "revision": { "minLength": 1, "type": "string" },
+              "updatedAt": { "format": "date-time", "type": "string" },
+              "value": {},
+            },
+            "required": ["revision", "updatedAt", "value"],
+            "type": "object",
+          }, {
+            "properties": {
+              "currentStateVersion": { "minLength": 1, "type": "string" },
+              "entry": {
+                "properties": {
+                  "expiresAt": { "format": "date-time", "type": "string" },
+                  "key": { "minLength": 1, "type": "string" },
+                  "revision": { "minLength": 1, "type": "string" },
+                  "updatedAt": { "format": "date-time", "type": "string" },
+                  "value": {},
+                },
+                "required": ["revision", "updatedAt", "value"],
+                "type": "object",
+              },
+              "migrationRequired": { "const": true, "type": "boolean" },
+              "stateVersion": { "minLength": 1, "type": "string" },
+              "writerContractDigest": { "minLength": 1, "type": "string" },
+            },
+            "required": [
+              "currentStateVersion",
+              "entry",
+              "migrationRequired",
+              "stateVersion",
+              "writerContractDigest",
+            ],
+            "type": "object",
+          }],
+        },
+        "found": { "type": "boolean" },
+      },
+      "required": ["applied", "found"],
+      "type": "object",
+    },
+    "StatePutResponseValue2entry1": {
+      "properties": {
+        "expiresAt": { "format": "date-time", "type": "string" },
+        "key": { "minLength": 1, "type": "string" },
+        "revision": { "minLength": 1, "type": "string" },
+        "updatedAt": { "format": "date-time", "type": "string" },
+        "value": {},
+      },
+      "required": ["revision", "updatedAt", "value"],
+      "type": "object",
+    },
+    "StatePutResponseValue2entry2": {
+      "properties": {
+        "currentStateVersion": { "minLength": 1, "type": "string" },
+        "entry": {
+          "properties": {
+            "expiresAt": { "format": "date-time", "type": "string" },
+            "key": { "minLength": 1, "type": "string" },
+            "revision": { "minLength": 1, "type": "string" },
+            "updatedAt": { "format": "date-time", "type": "string" },
+            "value": {},
+          },
+          "required": ["revision", "updatedAt", "value"],
+          "type": "object",
+        },
+        "migrationRequired": { "const": true, "type": "boolean" },
+        "stateVersion": { "minLength": 1, "type": "string" },
+        "writerContractDigest": { "minLength": 1, "type": "string" },
+      },
+      "required": [
+        "currentStateVersion",
+        "entry",
+        "migrationRequired",
+        "stateVersion",
+        "writerContractDigest",
+      ],
+      "type": "object",
+    },
+    "StatePutResponseValue2entry2entry": {
+      "properties": {
+        "expiresAt": { "format": "date-time", "type": "string" },
+        "key": { "minLength": 1, "type": "string" },
+        "revision": { "minLength": 1, "type": "string" },
+        "updatedAt": { "format": "date-time", "type": "string" },
+        "value": {},
+      },
+      "required": ["revision", "updatedAt", "value"],
+      "type": "object",
     },
   },
   "version": "1.0.0",

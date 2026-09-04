@@ -391,10 +391,9 @@ idempotent.
   (`trellis-bundle:/etc/trellis:ro,Z`,
   `trellis-state:/var/lib/trellis:rw,Z`), and run `trellis-server --system
   --local-nats=/usr/local/bin/nats-server`.
-- Register client interoperability in `integration/client-test-matrix.json` and
-  Rust runtime correctness in `integration/rust-runtime-test-matrix.json`.
-  Implemented Rust mappings must match compiled and executed test IDs exactly;
-  hidden skips are forbidden.
+- Add live interoperability and runtime coverage as ordinary discovered Rust or
+  Deno tests. Run them through `integration/live_runner.ts`; separate test
+  inventories and hidden skips are forbidden.
 - Format changed Rust files and use focused checks in the inner loop. The release
   gate runs Clippy, curated pure tests, workspace Rustdoc with warnings denied,
   workspace doctests exactly once, and verifies lint-policy participation for

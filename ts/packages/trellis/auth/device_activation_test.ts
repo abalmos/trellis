@@ -27,7 +27,7 @@ import {
   verifyDeviceConfirmationCode,
   waitForDeviceActivation,
 } from "./device_activation.ts";
-const CONTRACT_DIGEST = "A".repeat(43);
+const PARTICIPANT_DIGEST = "A".repeat(43);
 
 function unsupportedActivationOperationControl() {
   return AsyncResult.err(
@@ -80,8 +80,8 @@ function bootstrapWaitArgs(
     instanceId: "dev_123",
     principalId: "device_123",
     participantId: "acme.reader@v1",
-    participantArtifactDigest: CONTRACT_DIGEST,
-    participantNeedsDigest: CONTRACT_DIGEST,
+    participantArtifactDigest: PARTICIPANT_DIGEST,
+    participantNeedsDigest: PARTICIPANT_DIGEST,
     nonce: "nonce_123",
   };
 }

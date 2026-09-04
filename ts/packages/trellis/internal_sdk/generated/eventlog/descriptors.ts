@@ -1,11 +1,11 @@
-// Generated from ./rust/crates/eventlog-runtime/.trellis/generated/protocol/apis/trellis.eventlog@v1.json
+// Generated from ./rust/crates/eventlog-runtime/.trellis/artifacts/apis/trellis.eventlog@v1.json
 import {
   eventActions,
   feedAction,
   operationAction,
   rpcAction,
   schema,
-} from "../../../contracts.ts";
+} from "@qlever-llc/trellis";
 import * as Types from "./types.ts";
 import {
   EventLogConsumersInspectRequestSchema,
@@ -236,3 +236,12 @@ export const EventLogWatch = feedAction(
   "EventLogWatch",
   ACTION_SOURCE,
 );
+
+export const ACTIONS = {
+  "EventLog.Consumers.Inspect": EventLogConsumersInspect,
+  "EventLog.Consumers.Query": EventLogConsumersQuery,
+  "EventLog.Inspect": EventLogInspect,
+  "EventLog.Metrics": EventLogMetrics,
+  "EventLog.Query": EventLogQuery,
+  "EventLog.Watch": EventLogWatch,
+} as const;

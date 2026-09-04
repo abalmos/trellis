@@ -36,6 +36,7 @@ pub(super) use http::{
 mod issuance;
 mod materializer;
 mod model;
+
 mod policy;
 mod portal_reconciliation;
 mod reconciliation;
@@ -52,8 +53,6 @@ pub(super) use resources::{
 pub(super) use transport::compile_test_transport_permissions;
 pub(super) use transport::{compile_transport_permissions, TransportPermissions};
 
-#[cfg(test)]
-mod artifact_tests;
 #[cfg(test)]
 mod tests;
 

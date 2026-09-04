@@ -1,7 +1,7 @@
-import { ContractResourceBindingsSchema } from "../contracts.ts";
+import { ContractResourceBindingsSchema } from "../participant.ts";
 import type { StaticDecode } from "typebox";
 import { Type } from "typebox";
-import { PageResponseSchema } from "../contract_support/protocol.ts";
+import { PageResponseSchema } from "../participant_runtime/schemas.ts";
 import {
   ClientTransportsSchema,
   ContractApprovalCapabilitySchema,

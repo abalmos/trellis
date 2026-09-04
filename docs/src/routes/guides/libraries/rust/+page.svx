@@ -1,10 +1,10 @@
 The Rust libraries give services, apps, CLIs, devices, and agents a typed async
-interface to Trellis. Prepare generates two kinds of Cargo artifact:
+interface to Trellis. Native generation emits two kinds of Cargo artifact:
 
-- an owner SDK containing one contract's types, schemas, descriptors, and thin
+- an owner SDK containing one API's types, schemas, descriptors, and thin
   inbound/outbound adapters
 - a participant facade containing exactly the owned and used surfaces selected
-  by one local participant contract
+  by one local participant
 
 Application code connects through the participant facade. Owner SDKs are typed
 vocabulary, not runnable clients or services.
@@ -14,8 +14,8 @@ the generated crate source and the Rustdoc links on the [API Reference](/api).
 
 ## Generated crates
 
-Installation writes dependency SDKs under `.trellis/generated/rust/` and participant
-facades under `.trellis/generated/packages/cargo-participants/`. Both are ordinary,
+Generation writes API SDKs under `.trellis/rust/apis/` and participant facades
+under `.trellis/rust/participants/`. Both are ordinary,
 materialized Cargo crates with relative local dependencies. They do not run a
 Trellis generator from `build.rs`.
 
@@ -24,8 +24,8 @@ A participant facade normally exposes:
 - `connect(...)` and one participant-kind-specific `ConnectOptions`
 - `ConnectedService` for services or `ConnectedClient` for apps, CLIs, devices,
   and agents
-- `client()` for contract-filtered outbound calls
-- `service()` for a service's contract-filtered outbound calls
+- `client()` for participant-filtered outbound calls
+- `service()` for a service's participant-filtered outbound calls
 - `handle()` for owned RPC, feed, and operation provider registration
 - generated modules for owned APIs, dependency aliases, state, resources, jobs,
   and event-consumer groups when declared

@@ -243,7 +243,6 @@ jobs:
         run: |
           cargo package --manifest-path rust/Cargo.toml --allow-dirty \
             -p trellis-protocol \
-            -p trellis-contracts \
             -p trellis-rs
 
   package-js:
@@ -830,7 +829,6 @@ jobs:
 
           publish_workspace_crate trellis-protocol
           # run_publish waits for protocol to enter the index before this contracts dry-run.
-          publish_workspace_crate trellis-contracts
           publish_workspace_crate trellis-rs
 
           echo "Published ${#published[@]} crate(s)"

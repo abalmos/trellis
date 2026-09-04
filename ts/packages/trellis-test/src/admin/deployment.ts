@@ -1,15 +1,15 @@
 import { createAuth } from "@qlever-llc/trellis";
 import {
-  type NativeProtocolPresentation,
-  nativeProtocolPresentation,
-} from "@qlever-llc/trellis/contracts";
+  type ParticipantPresentation,
+  participantPresentation,
+} from "@qlever-llc/trellis/participant";
 import { ulid } from "ulid";
 
 import { generateSessionSeed } from "../control_plane_config.ts";
 import type {
   TrellisTestAuthorityPlanClassification,
-  TrellisTestContractApproval,
-  TrellisTestContractLike,
+  TrellisTestParticipantApproval,
+  TrellisTestParticipantLike,
   TrellisTestServiceKey,
 } from "../types.ts";
 import { waitFor } from "../wait.ts";
@@ -32,7 +32,7 @@ export type AdminDeploymentContext = {
   createdDeployments: Map<string, Promise<void>>;
   deploymentIds: Map<string, string>;
   authorityIds: Map<string, string>;
-  protocolApis: Map<string, NativeProtocolPresentation["api"]>;
+  protocolApis: Map<string, ParticipantPresentation["api"]>;
   rpc: AdminDeploymentRpc;
 };
 
@@ -92,11 +92,11 @@ export async function approveContract(
   context: AdminDeploymentContext,
   args: {
     deployment?: string;
-    contract: TrellisTestContractLike;
+    contract: TrellisTestParticipantLike;
     allowPlanClassifications?:
       readonly TrellisTestAuthorityPlanClassification[];
   },
-): Promise<TrellisTestContractApproval> {
+): Promise<TrellisTestParticipantApproval> {
   const totalStartedAt = performance.now();
   const deployment = args.deployment ?? context.defaultDeployment;
   await createDeployment(context, { deployment });
@@ -104,7 +104,7 @@ export async function approveContract(
   if (!deploymentId) {
     throw new Error(`Trellis deployment '${deployment}' was not created`);
   }
-  const artifacts = nativeProtocolPresentation(args.contract);
+  const artifacts = participantPresentation(args.contract);
   const referencedApis = new Map(context.protocolApis);
   for (const api of artifacts.referencedApis) {
     referencedApis.set(String(api.id), api);
@@ -299,7 +299,7 @@ export async function provisionServiceInstance(
   context: AdminDeploymentContext,
   args: {
     deployment?: string;
-    contract: TrellisTestContractLike;
+    contract: TrellisTestParticipantLike;
     sessionKeySeed?: string;
   },
 ): Promise<TrellisTestServiceKey> {
@@ -344,7 +344,7 @@ export async function registerService(
   context: AdminDeploymentContext,
   args: {
     deployment?: string;
-    contract: TrellisTestContractLike;
+    contract: TrellisTestParticipantLike;
     sessionKeySeed?: string;
   },
 ): Promise<TrellisTestServiceKey> {

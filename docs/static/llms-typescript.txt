@@ -604,55 +604,6 @@ Use `NatsKvOutboxRepository` and `NatsKvInboxRepository` for services that do no
 have SQL state. They are durable helpers, but they are not atomic with unrelated
 database transactions.
 
-## Durable event consumers
-
-Direct `uses.events.subscribe` grants only live or ephemeral listening. A service
-that needs replay, ordered processing, or a durable cursor must declare a
-top-level `eventConsumers` group in its contract and register the startup
-listener with that group. `eventConsumers.<group>.uses` selects dependency events
-by top-level `uses.required` or `uses.optional` alias;
-`eventConsumers.<group>.self` selects events owned by the same contract.
-
-```ts
-const contract = defineServiceContract({ schemas }, () => ({
-  id: "shipment-projection@v1",
-  apiId: "shipment-projection@v1",
-  apiVersion: "1.0.0",
-  displayName: "Shipment Projection",
-  description: "Projects shipment events into local state.",
-  uses: {
-    required: {
-      orders: orders.use({
-        events: { subscribe: ["Orders.Shipped"] },
-      }),
-    },
-  },
-  eventConsumers: {
-    shipmentProjection: {
-      uses: {
-        orders: ["Orders.Shipped"],
-      },
-      replay: "new",
-      ordering: "strict",
-    },
-  },
-}));
-
-await service.event.orders.shipped.listen(handleShipment, {}, {
-  group: "shipmentProjection",
-}).orThrow();
-```
-
-Strict groups are globally single-in-flight. For independent messages, declare
-`ordering: "parallel"` and pass a positive per-instance `concurrency` to every
-listener registration in that group. Registrations in one group must agree.
-
-Dependency durable consumption remains authority-backed by the top-level `uses`
-subscription. For durable self-consumption of events owned by the same service,
-use `self: ["Entity.Observation"]`. Runtime durable consumers are
-Trellis-provisioned only; service code should not create or name arbitrary
-JetStream durable consumers.
-
 ## Verification
 
 Use the format, typecheck, lint, test, run, and migration commands configured by

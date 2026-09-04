@@ -13,6 +13,8 @@ api "demo.app@v1" {
         updatedBy: string;
         updatedAt: string;
     }
+
+    export InspectionContextState;
 }
 
 participant "demo.app@v1" app {

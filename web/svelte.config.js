@@ -36,14 +36,6 @@ const config = {
         rootDir,
         "../ts/packages/trellis/browser.ts",
       ),
-      "@qlever-llc/trellis/contracts": resolve(
-        rootDir,
-        "../ts/packages/trellis/contracts.ts",
-      ),
-      "@qlever-llc/trellis/errors": resolve(
-        rootDir,
-        "../ts/packages/trellis/errors/index.ts",
-      ),
       "@qlever-llc/trellis/device/deno": resolve(
         rootDir,
         "../ts/packages/trellis/device/deno.ts",
@@ -58,27 +50,27 @@ const config = {
       ),
       "@trellis/apis/trellis.auth": resolve(
         rootDir,
-        "contracts/console/.trellis/generated/ts/trellis-apis/trellis.auth.ts",
+        "contracts/console/.trellis/ts/apis/auth/mod.ts",
       ),
       "@trellis/apis/trellis.core": resolve(
         rootDir,
-        "contracts/console/.trellis/generated/ts/trellis-apis/trellis.core.ts",
+        "contracts/console/.trellis/ts/apis/trellis-core/mod.ts",
       ),
       "@trellis/apis/trellis.eventlog": resolve(
         rootDir,
-        "contracts/console/.trellis/generated/ts/trellis-apis/trellis.eventlog.ts",
+        "contracts/console/.trellis/ts/apis/eventlog/mod.ts",
       ),
       "@trellis/apis/trellis.health": resolve(
         rootDir,
-        "contracts/console/.trellis/generated/ts/trellis-apis/trellis.health.ts",
+        "contracts/console/.trellis/ts/apis/health/mod.ts",
       ),
       "@trellis/apis/trellis.jobs": resolve(
         rootDir,
-        "contracts/console/.trellis/generated/ts/trellis-apis/trellis.jobs.ts",
+        "contracts/console/.trellis/ts/apis/jobs/mod.ts",
       ),
       "@trellis/apis/trellis.state": resolve(
         rootDir,
-        "contracts/console/.trellis/generated/ts/trellis-apis/trellis.state.ts",
+        "contracts/console/.trellis/ts/apis/state/mod.ts",
       ),
       "@qlever-llc/trellis/service/deno": resolve(
         rootDir,

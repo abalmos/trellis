@@ -2,7 +2,7 @@ import Type, { type Static } from "typebox";
 
 import {
   EventConsumerResourceBindingSchema,
-  InstalledServiceContractSchema,
+  InstalledGeneratedServiceParticipantSchema,
 } from "../ContractResources.ts";
 
 export const TrellisBindingsGetRequestSchema = Type.Object({
@@ -15,7 +15,7 @@ export type TrellisBindingsGetRequest = Static<
 >;
 
 export const TrellisBindingsGetResponseSchema = Type.Object({
-  binding: Type.Optional(InstalledServiceContractSchema),
+  binding: Type.Optional(InstalledGeneratedServiceParticipantSchema),
   eventConsumers: Type.Optional(
     Type.Record(
       Type.String({ minLength: 1 }),

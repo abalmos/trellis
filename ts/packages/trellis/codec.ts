@@ -2,7 +2,7 @@ import {
   type InferSchemaType,
   type SchemaLike,
   unwrapSchema,
-} from "./contracts.ts";
+} from "./participant.ts";
 import { Result } from "@qlever-llc/result";
 import type { StaticDecode, TSchema } from "typebox";
 import { EncodeError, ParseError, Value } from "typebox/value";
@@ -16,7 +16,7 @@ import type { TLocalizedValidationError } from "typebox/error";
 import type {
   TrellisValidationExtension,
   TrellisValidationIssueHint,
-} from "./contract_support/mod.ts";
+} from "./participant_runtime/metadata.ts";
 
 export type JsonValue =
   | string

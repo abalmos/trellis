@@ -1,5 +1,5 @@
 //! Typed event descriptors for `trellis.health@v1`.
-use crate::generated::EventDescriptor;
+use trellis_rs::generated::EventDescriptor;
 /// Descriptor for `Health.StatusChanged`.
 pub struct HealthStatusChangedEventDescriptor;
 impl EventDescriptor for HealthStatusChangedEventDescriptor {

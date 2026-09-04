@@ -1,0 +1,1727 @@
+api "trellis.jobs@v1" {
+  version "1.0.0";
+  display_name "Trellis Jobs";
+  description "Trellis-managed background job administration API.";
+  model Empty {
+  }
+  model Job {
+    completedAt?: string(format="date-time");
+    concurrency?: Jobconcurrency;
+    context: Jobcontext;
+    createdAt: string(format="date-time");
+    deadline?: string(format="date-time");
+    errorDetail?: JoberrorDetail;
+    id: string(min_length=1);
+    lastError?: string;
+    lineage?: Joblineage;
+    logs?: list<JoblogsItem>;
+    maxTries: int(minimum=1);
+    payload: json;
+    progress?: Jobprogress;
+    queuePolicy?: JobqueuePolicy;
+    result?: json;
+    service: string(min_length=1);
+    startedAt?: string(format="date-time");
+    state: "pending" | "active" | "retry" | "completed" | "failed" | "cancelled" | "skipped" | "stale" | "expired" | "dead" | "dismissed";
+    tries: uint;
+    trigger?: Jobtrigger;
+    type: string(min_length=1);
+    updatedAt: string(format="date-time");
+    waitingOn?: list<JobwaitingOnItem>;
+  }
+  model JobConcurrencyMetadata {
+    heartbeatAt?: string(format="date-time");
+    key: string(min_length=1);
+    keyHash: string(min_length=1);
+    leaseExpiresAt?: string(format="date-time");
+    staleTakeoverCount?: uint;
+  }
+  model JobContext {
+    requestId: string(min_length=1);
+    traceId: string(pattern="^[0-9a-f]{32}$");
+    traceparent: string(pattern="^[0-9a-f]{2}-[0-9a-f]{32}-[0-9a-f]{16}-[0-9a-f]{2}$");
+    tracestate?: string(min_length=1);
+  }
+  model JobErrorDetail {
+    causes?: list<JobErrorDetailcausesItem>;
+    fingerprint: string(min_length=1);
+    firstSeen?: string(format="date-time");
+    message: string;
+    occurrenceCount?: uint;
+    stack?: string;
+    type?: string;
+    worker?: JobErrorDetailworker;
+  }
+  model JobLineage {
+    operationId?: string;
+    parentJobId?: string;
+    relatedKeys?: list<string>;
+    rootJobId?: string;
+  }
+  model JobLogEntry {
+    level: "info" | "warn" | "error";
+    message: string;
+    timestamp: string(format="date-time");
+  }
+  model JobProgress {
+    current?: uint;
+    message?: string;
+    step?: string;
+    total?: uint;
+  }
+  model JobQueuePolicyMetadata {
+    existingJobId?: string(min_length=1);
+    outcome: string(min_length=1);
+    reason?: string(min_length=1);
+    replacedJobId?: string(min_length=1);
+  }
+  type JobState = "pending" | "active" | "retry" | "completed" | "failed" | "cancelled" | "skipped" | "stale" | "expired" | "dead" | "dismissed";
+  model JobTimelineEvent {
+    error?: string;
+    errorDetail?: JobTimelineEventerrorDetail;
+    logs?: list<JobTimelineEventlogsItem>;
+    message?: string;
+    previousState?: "pending" | "active" | "retry" | "completed" | "failed" | "cancelled" | "skipped" | "stale" | "expired" | "dead" | "dismissed";
+    progress?: JobTimelineEventprogress;
+    projected?: bool;
+    rawEvent?: json;
+    reason?: string;
+    sequence: uint;
+    state: "pending" | "active" | "retry" | "completed" | "failed" | "cancelled" | "skipped" | "stale" | "expired" | "dead" | "dismissed";
+    timestamp: string(format="date-time");
+    tries?: uint;
+    type: string(min_length=1);
+    waitEdge?: JobTimelineEventwaitEdge;
+    workerInstanceId?: string;
+  }
+  model JobTrigger {
+    id?: string;
+    kind: "schedule" | "operation" | "rpc" | "event" | "manualReplay" | "serviceCode" | "parentJob";
+    operationId?: string;
+    parentJobId?: string;
+    requestId?: string;
+    subject?: string;
+    traceId?: string;
+  }
+  model JobWaitEdge {
+    id: string(min_length=1);
+    label?: string(min_length=1);
+    startedAt: string(format="date-time");
+    target: JobWaitEdgetarget;
+  }
+  model JobWaitTarget {
+    id?: string(min_length=1);
+    key?: string(min_length=1);
+    kind: "job" | "operation" | "external";
+    label?: string(min_length=1);
+    operation?: string(min_length=1);
+    operationId?: string(min_length=1);
+    service?: string(min_length=1);
+    system?: string(min_length=1);
+    type?: string(min_length=1);
+  }
+  model JobsCancelRequest {
+    id: string(min_length=1);
+    reason?: string(min_length=1);
+  }
+  model JobsCancelResponse {
+    job: JobsCancelResponsejob;
+  }
+  model JobsDismissDLQRequest {
+    id: string(min_length=1);
+    reason?: string(min_length=1);
+  }
+  model JobsDismissDLQResponse {
+    job: JobsDismissDLQResponsejob;
+  }
+  model JobsGetKeyRequest {
+    key: string(min_length=1);
+    service: string(min_length=1);
+    type: string(min_length=1);
+  }
+  model JobsGetKeyResponse {
+    active: list<JobsGetKeyResponseactiveItem>;
+    key: string(min_length=1);
+    keyHash: string(min_length=1);
+    latestPolicyReason?: string(min_length=1);
+    queued: list<JobsGetKeyResponsequeuedItem>;
+    queuedDepth: uint;
+    service: string(min_length=1);
+    staleTakeoverCount: uint;
+    type: string(min_length=1);
+  }
+  model JobsInspectRequest {
+    id: string(min_length=1);
+  }
+  model JobsInspectResponse {
+    attempts: list<JobsInspectResponseattemptsItem>;
+    errors: list<JobsInspectResponseerrorsItem>;
+    job: JobsInspectResponsejob;
+    lineage?: JobsInspectResponselineage;
+    related: list<JobsInspectResponserelatedItem>;
+    timeline: list<JobsInspectResponsetimelineItem>;
+    trigger?: JobsInspectResponsetrigger;
+  }
+  model JobsListDLQRequest {
+    limit: int(minimum=1);
+    offset?: uint;
+    service?: string(min_length=1);
+    since?: string(format="date-time");
+    type?: string(min_length=1);
+  }
+  model JobsListDLQResponse {
+    count: uint;
+    entries: list<JobsListDLQResponseentriesItem>;
+    limit: int(minimum=1);
+    nextOffset?: uint;
+    offset: uint;
+  }
+  model JobsListServicesRequest {
+    limit: int(minimum=1);
+    offset?: uint;
+  }
+  model JobsListServicesResponse {
+    count: uint;
+    entries: list<JobsListServicesResponseentriesItem>;
+    limit: int(minimum=1);
+    nextOffset?: uint;
+    offset: uint;
+  }
+  model JobsMetricsBucket {
+    end: string(format="date-time");
+    groups: list<JobsMetricsBucketgroupsItem>;
+    start: string(format="date-time");
+  }
+  model JobsMetricsBucketGroup {
+    cancelled: uint;
+    completed: uint;
+    dead: uint;
+    dismissed: uint;
+    failed: uint;
+    key: string;
+    label: string;
+    queueWait: JobsMetricsBucketGroupqueueWait;
+    retried: uint;
+    runtime: JobsMetricsBucketGroupruntime;
+    started: uint;
+    submitted: uint;
+  }
+  model JobsMetricsLatency {
+    count: uint;
+    maxMs?: uint;
+    p50Ms?: uint;
+    p95Ms?: uint;
+  }
+  model JobsMetricsRequest {
+    groupBy: "type" | "service" | "queueKey" | "state" | "trigger";
+    queueKey?: string;
+    service?: string(min_length=1);
+    state?: list<"pending" | "active" | "retry" | "completed" | "failed" | "cancelled" | "skipped" | "stale" | "expired" | "dead" | "dismissed">;
+    step: "1m" | "5m" | "15m" | "1h" | "6h" | "1d";
+    trigger?: string;
+    type?: string(min_length=1);
+    window: "15m" | "1h" | "6h" | "24h" | "7d";
+  }
+  model JobsMetricsResponse {
+    buckets: list<JobsMetricsResponsebucketsItem>;
+    generatedAt: string(format="date-time");
+    groupBy: string;
+    step: string;
+    summary: list<JobsMetricsResponsesummaryItem>;
+    window: string;
+  }
+  model JobsMetricsSummaryGroup {
+    byState: map<uint>;
+    dead?: uint;
+    failed?: uint;
+    failureRate?: number(minimum=0);
+    key: string;
+    label: string;
+    latestUpdatedAt?: string(format="date-time");
+    oldestCreatedAt?: string(format="date-time");
+    queueWait: JobsMetricsSummaryGroupqueueWait;
+    queued?: uint;
+    running?: uint;
+    runtime: JobsMetricsSummaryGroupruntime;
+    slow?: uint;
+    total: uint;
+  }
+  model JobsQueryRequest {
+    groupBy?: "service" | "type" | "state" | "queueKey" | "trigger" | "runtimeBand";
+    limit: int(minimum=1);
+    offset?: uint;
+    queueKey?: string;
+    runtimeBand?: "queued" | "running" | "slow" | "terminal";
+    search?: string;
+    service?: string(min_length=1);
+    sort?: JobsQueryRequestsort;
+    state?: list<"pending" | "active" | "retry" | "completed" | "failed" | "cancelled" | "skipped" | "stale" | "expired" | "dead" | "dismissed">;
+    trigger?: string;
+    type?: string(min_length=1);
+    window?: "1h" | "24h" | "7d";
+  }
+  model JobsQueryResponse {
+    count: uint;
+    entries: list<JobsQueryResponseentriesItem>;
+    groups: list<JobsQueryResponsegroupsItem>;
+    limit: int(minimum=1);
+    nextOffset?: uint;
+    offset: uint;
+    stats: JobsQueryResponsestats;
+  }
+  model JobsReplayDLQRequest {
+    id: string(min_length=1);
+    reason?: string(min_length=1);
+  }
+  model JobsReplayDLQResponse {
+    job: JobsReplayDLQResponsejob;
+  }
+  model JobsRetryRequest {
+    id: string(min_length=1);
+    reason?: string(min_length=1);
+  }
+  model JobsRetryResponse {
+    job: JobsRetryResponsejob;
+  }
+  type JobsWatchFrame = JobsWatchFrameValue1 | JobsWatchFrameValue2 | JobsWatchFrameValue3 | JobsWatchFrameValue4;
+  model JobsWatchRequest {
+    includeInitial?: bool;
+    jobId?: string(min_length=1);
+    query?: JobsWatchRequestquery;
+  }
+  model JobsWorkbenchGroup {
+    count: uint;
+    depth?: uint;
+    failureRate?: number(minimum=0);
+    key: string;
+    label: string;
+    latestUpdatedAt?: string(format="date-time");
+    oldestCreatedAt?: string(format="date-time");
+    state?: "pending" | "active" | "retry" | "completed" | "failed" | "cancelled" | "skipped" | "stale" | "expired" | "dead" | "dismissed";
+  }
+  model JobsWorkbenchJobRow {
+    completedAt?: string(format="date-time");
+    context?: JobsWorkbenchJobRowcontext;
+    createdAt: string(format="date-time");
+    errorFingerprint?: string;
+    id: string(min_length=1);
+    lastError?: string;
+    lineage?: JobsWorkbenchJobRowlineage;
+    maxTries: int(minimum=1);
+    progress?: JobsWorkbenchJobRowprogress;
+    queueAgeMs?: uint;
+    queueKey?: string;
+    runtimeBand?: string;
+    runtimeMs?: uint;
+    service: string(min_length=1);
+    startedAt?: string(format="date-time");
+    state: "pending" | "active" | "retry" | "completed" | "failed" | "cancelled" | "skipped" | "stale" | "expired" | "dead" | "dismissed";
+    tries: uint;
+    trigger?: JobsWorkbenchJobRowtrigger;
+    type: string(min_length=1);
+    updatedAt: string(format="date-time");
+    waitingOn?: list<JobsWorkbenchJobRowwaitingOnItem>;
+  }
+  model JobsWorkbenchStats {
+    byState: map<uint>;
+    dead?: uint;
+    failed?: uint;
+    queued?: uint;
+    running?: uint;
+    slow?: uint;
+    total: uint;
+  }
+  model NotFoundErrorData {
+    context?: NotFoundErrorDatacontext;
+    id: string(min_length=1);
+    jobId?: string(min_length=1);
+    message: string;
+    resource: string(min_length=1);
+    traceId?: string;
+    type: "NotFoundError";
+  }
+  model Jobconcurrency {
+    heartbeatAt?: string(format="date-time");
+    key: string(min_length=1);
+    keyHash: string(min_length=1);
+    leaseExpiresAt?: string(format="date-time");
+    staleTakeoverCount?: uint;
+  }
+  model Jobcontext {
+    requestId: string(min_length=1);
+    traceId: string(pattern="^[0-9a-f]{32}$");
+    traceparent: string(pattern="^[0-9a-f]{2}-[0-9a-f]{32}-[0-9a-f]{16}-[0-9a-f]{2}$");
+    tracestate?: string(min_length=1);
+  }
+  model JoberrorDetail {
+    causes?: list<JoberrorDetailcausesItem>;
+    fingerprint: string(min_length=1);
+    firstSeen?: string(format="date-time");
+    message: string;
+    occurrenceCount?: uint;
+    stack?: string;
+    type?: string;
+    worker?: JoberrorDetailworker;
+  }
+  model Joblineage {
+    operationId?: string;
+    parentJobId?: string;
+    relatedKeys?: list<string>;
+    rootJobId?: string;
+  }
+  model JoblogsItem {
+    level: "info" | "warn" | "error";
+    message: string;
+    timestamp: string(format="date-time");
+  }
+  model Jobprogress {
+    current?: uint;
+    message?: string;
+    step?: string;
+    total?: uint;
+  }
+  model JobqueuePolicy {
+    existingJobId?: string(min_length=1);
+    outcome: string(min_length=1);
+    reason?: string(min_length=1);
+    replacedJobId?: string(min_length=1);
+  }
+  model Jobtrigger {
+    id?: string;
+    kind: "schedule" | "operation" | "rpc" | "event" | "manualReplay" | "serviceCode" | "parentJob";
+    operationId?: string;
+    parentJobId?: string;
+    requestId?: string;
+    subject?: string;
+    traceId?: string;
+  }
+  model JobwaitingOnItem {
+    id: string(min_length=1);
+    label?: string(min_length=1);
+    startedAt: string(format="date-time");
+    target: JobwaitingOnItemtarget;
+  }
+  model JobErrorDetailcausesItem {
+  }
+  model JobErrorDetailworker {
+    instanceId?: string;
+    runtime?: string;
+    service?: string;
+    version?: string;
+  }
+  model JobTimelineEventerrorDetail {
+    causes?: list<JobTimelineEventerrorDetailcausesItem>;
+    fingerprint: string(min_length=1);
+    firstSeen?: string(format="date-time");
+    message: string;
+    occurrenceCount?: uint;
+    stack?: string;
+    type?: string;
+    worker?: JobTimelineEventerrorDetailworker;
+  }
+  model JobTimelineEventlogsItem {
+    level: "info" | "warn" | "error";
+    message: string;
+    timestamp: string(format="date-time");
+  }
+  model JobTimelineEventprogress {
+    current?: uint;
+    message?: string;
+    step?: string;
+    total?: uint;
+  }
+  model JobTimelineEventwaitEdge {
+    id: string(min_length=1);
+    label?: string(min_length=1);
+    startedAt: string(format="date-time");
+    target: JobTimelineEventwaitEdgetarget;
+  }
+  model JobWaitEdgetarget {
+    id?: string(min_length=1);
+    key?: string(min_length=1);
+    kind: "job" | "operation" | "external";
+    label?: string(min_length=1);
+    operation?: string(min_length=1);
+    operationId?: string(min_length=1);
+    service?: string(min_length=1);
+    system?: string(min_length=1);
+    type?: string(min_length=1);
+  }
+  model JobsCancelResponsejob {
+    completedAt?: string(format="date-time");
+    concurrency?: JobsCancelResponsejobconcurrency;
+    context: JobsCancelResponsejobcontext;
+    createdAt: string(format="date-time");
+    deadline?: string(format="date-time");
+    errorDetail?: JobsCancelResponsejoberrorDetail;
+    id: string(min_length=1);
+    lastError?: string;
+    lineage?: JobsCancelResponsejoblineage;
+    logs?: list<JobsCancelResponsejoblogsItem>;
+    maxTries: int(minimum=1);
+    payload: json;
+    progress?: JobsCancelResponsejobprogress;
+    queuePolicy?: JobsCancelResponsejobqueuePolicy;
+    result?: json;
+    service: string(min_length=1);
+    startedAt?: string(format="date-time");
+    state: "pending" | "active" | "retry" | "completed" | "failed" | "cancelled" | "skipped" | "stale" | "expired" | "dead" | "dismissed";
+    tries: uint;
+    trigger?: JobsCancelResponsejobtrigger;
+    type: string(min_length=1);
+    updatedAt: string(format="date-time");
+    waitingOn?: list<JobsCancelResponsejobwaitingOnItem>;
+  }
+  model JobsDismissDLQResponsejob {
+    completedAt?: string(format="date-time");
+    concurrency?: JobsDismissDLQResponsejobconcurrency;
+    context: JobsDismissDLQResponsejobcontext;
+    createdAt: string(format="date-time");
+    deadline?: string(format="date-time");
+    errorDetail?: JobsDismissDLQResponsejoberrorDetail;
+    id: string(min_length=1);
+    lastError?: string;
+    lineage?: JobsDismissDLQResponsejoblineage;
+    logs?: list<JobsDismissDLQResponsejoblogsItem>;
+    maxTries: int(minimum=1);
+    payload: json;
+    progress?: JobsDismissDLQResponsejobprogress;
+    queuePolicy?: JobsDismissDLQResponsejobqueuePolicy;
+    result?: json;
+    service: string(min_length=1);
+    startedAt?: string(format="date-time");
+    state: "pending" | "active" | "retry" | "completed" | "failed" | "cancelled" | "skipped" | "stale" | "expired" | "dead" | "dismissed";
+    tries: uint;
+    trigger?: JobsDismissDLQResponsejobtrigger;
+    type: string(min_length=1);
+    updatedAt: string(format="date-time");
+    waitingOn?: list<JobsDismissDLQResponsejobwaitingOnItem>;
+  }
+  model JobsGetKeyResponseactiveItem {
+    heartbeatAgeMs: uint;
+    heartbeatAt: string(format="date-time");
+    instanceId: string;
+    jobId: string(min_length=1);
+    leaseExpiresAt: string(format="date-time");
+    startedAt: string(format="date-time");
+  }
+  model JobsGetKeyResponsequeuedItem {
+    createdAt: string(format="date-time");
+    jobId: string(min_length=1);
+  }
+  model JobsInspectResponseattemptsItem {
+    endedAt?: string(format="date-time");
+    error?: JobsInspectResponseattemptsItemerror;
+    startedAt: string(format="date-time");
+    state?: "pending" | "active" | "retry" | "completed" | "failed" | "cancelled" | "skipped" | "stale" | "expired" | "dead" | "dismissed";
+    try: uint;
+  }
+  model JobsInspectResponseerrorsItem {
+    causes?: list<JobsInspectResponseerrorsItemcausesItem>;
+    fingerprint: string(min_length=1);
+    firstSeen?: string(format="date-time");
+    message: string;
+    occurrenceCount?: uint;
+    stack?: string;
+    type?: string;
+    worker?: JobsInspectResponseerrorsItemworker;
+  }
+  model JobsInspectResponsejob {
+    completedAt?: string(format="date-time");
+    concurrency?: JobsInspectResponsejobconcurrency;
+    context: JobsInspectResponsejobcontext;
+    createdAt: string(format="date-time");
+    deadline?: string(format="date-time");
+    errorDetail?: JobsInspectResponsejoberrorDetail;
+    id: string(min_length=1);
+    lastError?: string;
+    lineage?: JobsInspectResponsejoblineage;
+    logs?: list<JobsInspectResponsejoblogsItem>;
+    maxTries: int(minimum=1);
+    payload: json;
+    progress?: JobsInspectResponsejobprogress;
+    queuePolicy?: JobsInspectResponsejobqueuePolicy;
+    result?: json;
+    service: string(min_length=1);
+    startedAt?: string(format="date-time");
+    state: "pending" | "active" | "retry" | "completed" | "failed" | "cancelled" | "skipped" | "stale" | "expired" | "dead" | "dismissed";
+    tries: uint;
+    trigger?: JobsInspectResponsejobtrigger;
+    type: string(min_length=1);
+    updatedAt: string(format="date-time");
+    waitingOn?: list<JobsInspectResponsejobwaitingOnItem>;
+  }
+  model JobsInspectResponselineage {
+    operationId?: string;
+    parentJobId?: string;
+    relatedKeys?: list<string>;
+    rootJobId?: string;
+  }
+  model JobsInspectResponserelatedItem {
+    completedAt?: string(format="date-time");
+    context?: JobsInspectResponserelatedItemcontext;
+    createdAt: string(format="date-time");
+    errorFingerprint?: string;
+    id: string(min_length=1);
+    lastError?: string;
+    lineage?: JobsInspectResponserelatedItemlineage;
+    matchedBy?: "trace" | "parent" | "root" | "operation" | "concurrency" | "wait";
+    maxTries: int(minimum=1);
+    progress?: JobsInspectResponserelatedItemprogress;
+    queueAgeMs?: uint;
+    queueKey?: string;
+    runtimeBand?: string;
+    runtimeMs?: uint;
+    service: string(min_length=1);
+    startedAt?: string(format="date-time");
+    state: "pending" | "active" | "retry" | "completed" | "failed" | "cancelled" | "skipped" | "stale" | "expired" | "dead" | "dismissed";
+    tries: uint;
+    trigger?: JobsInspectResponserelatedItemtrigger;
+    type: string(min_length=1);
+    updatedAt: string(format="date-time");
+    waitingOn?: list<JobsInspectResponserelatedItemwaitingOnItem>;
+  }
+  model JobsInspectResponsetimelineItem {
+    error?: string;
+    errorDetail?: JobsInspectResponsetimelineItemerrorDetail;
+    logs?: list<JobsInspectResponsetimelineItemlogsItem>;
+    message?: string;
+    previousState?: "pending" | "active" | "retry" | "completed" | "failed" | "cancelled" | "skipped" | "stale" | "expired" | "dead" | "dismissed";
+    progress?: JobsInspectResponsetimelineItemprogress;
+    projected?: bool;
+    rawEvent?: json;
+    reason?: string;
+    sequence: uint;
+    state: "pending" | "active" | "retry" | "completed" | "failed" | "cancelled" | "skipped" | "stale" | "expired" | "dead" | "dismissed";
+    timestamp: string(format="date-time");
+    tries?: uint;
+    type: string(min_length=1);
+    waitEdge?: JobsInspectResponsetimelineItemwaitEdge;
+    workerInstanceId?: string;
+  }
+  model JobsInspectResponsetrigger {
+    id?: string;
+    kind: "schedule" | "operation" | "rpc" | "event" | "manualReplay" | "serviceCode" | "parentJob";
+    operationId?: string;
+    parentJobId?: string;
+    requestId?: string;
+    subject?: string;
+    traceId?: string;
+  }
+  model JobsListDLQResponseentriesItem {
+    completedAt?: string(format="date-time");
+    concurrency?: JobsListDLQResponseentriesItemconcurrency;
+    context: JobsListDLQResponseentriesItemcontext;
+    createdAt: string(format="date-time");
+    deadline?: string(format="date-time");
+    errorDetail?: JobsListDLQResponseentriesItemerrorDetail;
+    id: string(min_length=1);
+    lastError?: string;
+    lineage?: JobsListDLQResponseentriesItemlineage;
+    logs?: list<JobsListDLQResponseentriesItemlogsItem>;
+    maxTries: int(minimum=1);
+    payload: json;
+    progress?: JobsListDLQResponseentriesItemprogress;
+    queuePolicy?: JobsListDLQResponseentriesItemqueuePolicy;
+    result?: json;
+    service: string(min_length=1);
+    startedAt?: string(format="date-time");
+    state: "pending" | "active" | "retry" | "completed" | "failed" | "cancelled" | "skipped" | "stale" | "expired" | "dead" | "dismissed";
+    tries: uint;
+    trigger?: JobsListDLQResponseentriesItemtrigger;
+    type: string(min_length=1);
+    updatedAt: string(format="date-time");
+    waitingOn?: list<JobsListDLQResponseentriesItemwaitingOnItem>;
+  }
+  model JobsListServicesResponseentriesItem {
+    healthy: bool;
+    name: string(min_length=1);
+    workers: list<JobsListServicesResponseentriesItemworkersItem>;
+  }
+  model JobsMetricsBucketgroupsItem {
+    cancelled: uint;
+    completed: uint;
+    dead: uint;
+    dismissed: uint;
+    failed: uint;
+    key: string;
+    label: string;
+    queueWait: JobsMetricsBucketgroupsItemqueueWait;
+    retried: uint;
+    runtime: JobsMetricsBucketgroupsItemruntime;
+    started: uint;
+    submitted: uint;
+  }
+  model JobsMetricsBucketGroupqueueWait {
+    count: uint;
+    maxMs?: uint;
+    p50Ms?: uint;
+    p95Ms?: uint;
+  }
+  model JobsMetricsBucketGroupruntime {
+    count: uint;
+    maxMs?: uint;
+    p50Ms?: uint;
+    p95Ms?: uint;
+  }
+  model JobsMetricsResponsebucketsItem {
+    end: string(format="date-time");
+    groups: list<JobsMetricsResponsebucketsItemgroupsItem>;
+    start: string(format="date-time");
+  }
+  model JobsMetricsResponsesummaryItem {
+    byState: map<uint>;
+    dead?: uint;
+    failed?: uint;
+    failureRate?: number(minimum=0);
+    key: string;
+    label: string;
+    latestUpdatedAt?: string(format="date-time");
+    oldestCreatedAt?: string(format="date-time");
+    queueWait: JobsMetricsResponsesummaryItemqueueWait;
+    queued?: uint;
+    running?: uint;
+    runtime: JobsMetricsResponsesummaryItemruntime;
+    slow?: uint;
+    total: uint;
+  }
+  model JobsMetricsSummaryGroupqueueWait {
+    count: uint;
+    maxMs?: uint;
+    p50Ms?: uint;
+    p95Ms?: uint;
+  }
+  model JobsMetricsSummaryGroupruntime {
+    count: uint;
+    maxMs?: uint;
+    p50Ms?: uint;
+    p95Ms?: uint;
+  }
+  model JobsQueryRequestsort {
+    direction?: "asc" | "desc";
+    field: "updatedAt" | "queueAge" | "runtime" | "failureRate" | "retries" | "depth";
+  }
+  model JobsQueryResponseentriesItem {
+    completedAt?: string(format="date-time");
+    context?: JobsQueryResponseentriesItemcontext;
+    createdAt: string(format="date-time");
+    errorFingerprint?: string;
+    id: string(min_length=1);
+    lastError?: string;
+    lineage?: JobsQueryResponseentriesItemlineage;
+    maxTries: int(minimum=1);
+    progress?: JobsQueryResponseentriesItemprogress;
+    queueAgeMs?: uint;
+    queueKey?: string;
+    runtimeBand?: string;
+    runtimeMs?: uint;
+    service: string(min_length=1);
+    startedAt?: string(format="date-time");
+    state: "pending" | "active" | "retry" | "completed" | "failed" | "cancelled" | "skipped" | "stale" | "expired" | "dead" | "dismissed";
+    tries: uint;
+    trigger?: JobsQueryResponseentriesItemtrigger;
+    type: string(min_length=1);
+    updatedAt: string(format="date-time");
+    waitingOn?: list<JobsQueryResponseentriesItemwaitingOnItem>;
+  }
+  model JobsQueryResponsegroupsItem {
+    count: uint;
+    depth?: uint;
+    failureRate?: number(minimum=0);
+    key: string;
+    label: string;
+    latestUpdatedAt?: string(format="date-time");
+    oldestCreatedAt?: string(format="date-time");
+    state?: "pending" | "active" | "retry" | "completed" | "failed" | "cancelled" | "skipped" | "stale" | "expired" | "dead" | "dismissed";
+  }
+  model JobsQueryResponsestats {
+    byState: map<uint>;
+    dead?: uint;
+    failed?: uint;
+    queued?: uint;
+    running?: uint;
+    slow?: uint;
+    total: uint;
+  }
+  model JobsReplayDLQResponsejob {
+    completedAt?: string(format="date-time");
+    concurrency?: JobsReplayDLQResponsejobconcurrency;
+    context: JobsReplayDLQResponsejobcontext;
+    createdAt: string(format="date-time");
+    deadline?: string(format="date-time");
+    errorDetail?: JobsReplayDLQResponsejoberrorDetail;
+    id: string(min_length=1);
+    lastError?: string;
+    lineage?: JobsReplayDLQResponsejoblineage;
+    logs?: list<JobsReplayDLQResponsejoblogsItem>;
+    maxTries: int(minimum=1);
+    payload: json;
+    progress?: JobsReplayDLQResponsejobprogress;
+    queuePolicy?: JobsReplayDLQResponsejobqueuePolicy;
+    result?: json;
+    service: string(min_length=1);
+    startedAt?: string(format="date-time");
+    state: "pending" | "active" | "retry" | "completed" | "failed" | "cancelled" | "skipped" | "stale" | "expired" | "dead" | "dismissed";
+    tries: uint;
+    trigger?: JobsReplayDLQResponsejobtrigger;
+    type: string(min_length=1);
+    updatedAt: string(format="date-time");
+    waitingOn?: list<JobsReplayDLQResponsejobwaitingOnItem>;
+  }
+  model JobsRetryResponsejob {
+    completedAt?: string(format="date-time");
+    concurrency?: JobsRetryResponsejobconcurrency;
+    context: JobsRetryResponsejobcontext;
+    createdAt: string(format="date-time");
+    deadline?: string(format="date-time");
+    errorDetail?: JobsRetryResponsejoberrorDetail;
+    id: string(min_length=1);
+    lastError?: string;
+    lineage?: JobsRetryResponsejoblineage;
+    logs?: list<JobsRetryResponsejoblogsItem>;
+    maxTries: int(minimum=1);
+    payload: json;
+    progress?: JobsRetryResponsejobprogress;
+    queuePolicy?: JobsRetryResponsejobqueuePolicy;
+    result?: json;
+    service: string(min_length=1);
+    startedAt?: string(format="date-time");
+    state: "pending" | "active" | "retry" | "completed" | "failed" | "cancelled" | "skipped" | "stale" | "expired" | "dead" | "dismissed";
+    tries: uint;
+    trigger?: JobsRetryResponsejobtrigger;
+    type: string(min_length=1);
+    updatedAt: string(format="date-time");
+    waitingOn?: list<JobsRetryResponsejobwaitingOnItem>;
+  }
+  model JobsWatchFrameValue1 {
+    kind: "ready";
+    timestamp: string(format="date-time");
+  }
+  model JobsWatchFrameValue2 {
+    id: string(min_length=1);
+    kind: "jobChanged";
+    service: string(min_length=1);
+    state: "pending" | "active" | "retry" | "completed" | "failed" | "cancelled" | "skipped" | "stale" | "expired" | "dead" | "dismissed";
+    type: string(min_length=1);
+    updatedAt: string(format="date-time");
+  }
+  model JobsWatchFrameValue3 {
+    kind: "queryInvalidated";
+    reason: "matched-job-changed" | "unknown-match";
+    timestamp: string(format="date-time");
+  }
+  model JobsWatchFrameValue4 {
+    id: string(min_length=1);
+    kind: "jobInspectChanged";
+    timestamp: string(format="date-time");
+  }
+  model JobsWatchRequestquery {
+    groupBy?: "service" | "type" | "state" | "queueKey" | "trigger" | "runtimeBand";
+    limit: int(minimum=1);
+    offset?: uint;
+    queueKey?: string;
+    runtimeBand?: "queued" | "running" | "slow" | "terminal";
+    search?: string;
+    service?: string(min_length=1);
+    sort?: JobsWatchRequestquerysort;
+    state?: list<"pending" | "active" | "retry" | "completed" | "failed" | "cancelled" | "skipped" | "stale" | "expired" | "dead" | "dismissed">;
+    trigger?: string;
+    type?: string(min_length=1);
+    window?: "1h" | "24h" | "7d";
+  }
+  model JobsWorkbenchJobRowcontext {
+    requestId: string(min_length=1);
+    traceId: string(pattern="^[0-9a-f]{32}$");
+    traceparent: string(pattern="^[0-9a-f]{2}-[0-9a-f]{32}-[0-9a-f]{16}-[0-9a-f]{2}$");
+    tracestate?: string(min_length=1);
+  }
+  model JobsWorkbenchJobRowlineage {
+    operationId?: string;
+    parentJobId?: string;
+    relatedKeys?: list<string>;
+    rootJobId?: string;
+  }
+  model JobsWorkbenchJobRowprogress {
+    current?: uint;
+    message?: string;
+    step?: string;
+    total?: uint;
+  }
+  model JobsWorkbenchJobRowtrigger {
+    id?: string;
+    kind: "schedule" | "operation" | "rpc" | "event" | "manualReplay" | "serviceCode" | "parentJob";
+    operationId?: string;
+    parentJobId?: string;
+    requestId?: string;
+    subject?: string;
+    traceId?: string;
+  }
+  model JobsWorkbenchJobRowwaitingOnItem {
+    id: string(min_length=1);
+    label?: string(min_length=1);
+    startedAt: string(format="date-time");
+    target: JobsWorkbenchJobRowwaitingOnItemtarget;
+  }
+  model NotFoundErrorDatacontext {
+  }
+  model JoberrorDetailcausesItem {
+  }
+  model JoberrorDetailworker {
+    instanceId?: string;
+    runtime?: string;
+    service?: string;
+    version?: string;
+  }
+  model JobwaitingOnItemtarget {
+    id?: string(min_length=1);
+    key?: string(min_length=1);
+    kind: "job" | "operation" | "external";
+    label?: string(min_length=1);
+    operation?: string(min_length=1);
+    operationId?: string(min_length=1);
+    service?: string(min_length=1);
+    system?: string(min_length=1);
+    type?: string(min_length=1);
+  }
+  model JobTimelineEventerrorDetailcausesItem {
+  }
+  model JobTimelineEventerrorDetailworker {
+    instanceId?: string;
+    runtime?: string;
+    service?: string;
+    version?: string;
+  }
+  model JobTimelineEventwaitEdgetarget {
+    id?: string(min_length=1);
+    key?: string(min_length=1);
+    kind: "job" | "operation" | "external";
+    label?: string(min_length=1);
+    operation?: string(min_length=1);
+    operationId?: string(min_length=1);
+    service?: string(min_length=1);
+    system?: string(min_length=1);
+    type?: string(min_length=1);
+  }
+  model JobsCancelResponsejobconcurrency {
+    heartbeatAt?: string(format="date-time");
+    key: string(min_length=1);
+    keyHash: string(min_length=1);
+    leaseExpiresAt?: string(format="date-time");
+    staleTakeoverCount?: uint;
+  }
+  model JobsCancelResponsejobcontext {
+    requestId: string(min_length=1);
+    traceId: string(pattern="^[0-9a-f]{32}$");
+    traceparent: string(pattern="^[0-9a-f]{2}-[0-9a-f]{32}-[0-9a-f]{16}-[0-9a-f]{2}$");
+    tracestate?: string(min_length=1);
+  }
+  model JobsCancelResponsejoberrorDetail {
+    causes?: list<JobsCancelResponsejoberrorDetailcausesItem>;
+    fingerprint: string(min_length=1);
+    firstSeen?: string(format="date-time");
+    message: string;
+    occurrenceCount?: uint;
+    stack?: string;
+    type?: string;
+    worker?: JobsCancelResponsejoberrorDetailworker;
+  }
+  model JobsCancelResponsejoblineage {
+    operationId?: string;
+    parentJobId?: string;
+    relatedKeys?: list<string>;
+    rootJobId?: string;
+  }
+  model JobsCancelResponsejoblogsItem {
+    level: "info" | "warn" | "error";
+    message: string;
+    timestamp: string(format="date-time");
+  }
+  model JobsCancelResponsejobprogress {
+    current?: uint;
+    message?: string;
+    step?: string;
+    total?: uint;
+  }
+  model JobsCancelResponsejobqueuePolicy {
+    existingJobId?: string(min_length=1);
+    outcome: string(min_length=1);
+    reason?: string(min_length=1);
+    replacedJobId?: string(min_length=1);
+  }
+  model JobsCancelResponsejobtrigger {
+    id?: string;
+    kind: "schedule" | "operation" | "rpc" | "event" | "manualReplay" | "serviceCode" | "parentJob";
+    operationId?: string;
+    parentJobId?: string;
+    requestId?: string;
+    subject?: string;
+    traceId?: string;
+  }
+  model JobsCancelResponsejobwaitingOnItem {
+    id: string(min_length=1);
+    label?: string(min_length=1);
+    startedAt: string(format="date-time");
+    target: JobsCancelResponsejobwaitingOnItemtarget;
+  }
+  model JobsDismissDLQResponsejobconcurrency {
+    heartbeatAt?: string(format="date-time");
+    key: string(min_length=1);
+    keyHash: string(min_length=1);
+    leaseExpiresAt?: string(format="date-time");
+    staleTakeoverCount?: uint;
+  }
+  model JobsDismissDLQResponsejobcontext {
+    requestId: string(min_length=1);
+    traceId: string(pattern="^[0-9a-f]{32}$");
+    traceparent: string(pattern="^[0-9a-f]{2}-[0-9a-f]{32}-[0-9a-f]{16}-[0-9a-f]{2}$");
+    tracestate?: string(min_length=1);
+  }
+  model JobsDismissDLQResponsejoberrorDetail {
+    causes?: list<JobsDismissDLQResponsejoberrorDetailcausesItem>;
+    fingerprint: string(min_length=1);
+    firstSeen?: string(format="date-time");
+    message: string;
+    occurrenceCount?: uint;
+    stack?: string;
+    type?: string;
+    worker?: JobsDismissDLQResponsejoberrorDetailworker;
+  }
+  model JobsDismissDLQResponsejoblineage {
+    operationId?: string;
+    parentJobId?: string;
+    relatedKeys?: list<string>;
+    rootJobId?: string;
+  }
+  model JobsDismissDLQResponsejoblogsItem {
+    level: "info" | "warn" | "error";
+    message: string;
+    timestamp: string(format="date-time");
+  }
+  model JobsDismissDLQResponsejobprogress {
+    current?: uint;
+    message?: string;
+    step?: string;
+    total?: uint;
+  }
+  model JobsDismissDLQResponsejobqueuePolicy {
+    existingJobId?: string(min_length=1);
+    outcome: string(min_length=1);
+    reason?: string(min_length=1);
+    replacedJobId?: string(min_length=1);
+  }
+  model JobsDismissDLQResponsejobtrigger {
+    id?: string;
+    kind: "schedule" | "operation" | "rpc" | "event" | "manualReplay" | "serviceCode" | "parentJob";
+    operationId?: string;
+    parentJobId?: string;
+    requestId?: string;
+    subject?: string;
+    traceId?: string;
+  }
+  model JobsDismissDLQResponsejobwaitingOnItem {
+    id: string(min_length=1);
+    label?: string(min_length=1);
+    startedAt: string(format="date-time");
+    target: JobsDismissDLQResponsejobwaitingOnItemtarget;
+  }
+  model JobsInspectResponseattemptsItemerror {
+    causes?: list<JobsInspectResponseattemptsItemerrorcausesItem>;
+    fingerprint: string(min_length=1);
+    firstSeen?: string(format="date-time");
+    message: string;
+    occurrenceCount?: uint;
+    stack?: string;
+    type?: string;
+    worker?: JobsInspectResponseattemptsItemerrorworker;
+  }
+  model JobsInspectResponseerrorsItemcausesItem {
+  }
+  model JobsInspectResponseerrorsItemworker {
+    instanceId?: string;
+    runtime?: string;
+    service?: string;
+    version?: string;
+  }
+  model JobsInspectResponsejobconcurrency {
+    heartbeatAt?: string(format="date-time");
+    key: string(min_length=1);
+    keyHash: string(min_length=1);
+    leaseExpiresAt?: string(format="date-time");
+    staleTakeoverCount?: uint;
+  }
+  model JobsInspectResponsejobcontext {
+    requestId: string(min_length=1);
+    traceId: string(pattern="^[0-9a-f]{32}$");
+    traceparent: string(pattern="^[0-9a-f]{2}-[0-9a-f]{32}-[0-9a-f]{16}-[0-9a-f]{2}$");
+    tracestate?: string(min_length=1);
+  }
+  model JobsInspectResponsejoberrorDetail {
+    causes?: list<JobsInspectResponsejoberrorDetailcausesItem>;
+    fingerprint: string(min_length=1);
+    firstSeen?: string(format="date-time");
+    message: string;
+    occurrenceCount?: uint;
+    stack?: string;
+    type?: string;
+    worker?: JobsInspectResponsejoberrorDetailworker;
+  }
+  model JobsInspectResponsejoblineage {
+    operationId?: string;
+    parentJobId?: string;
+    relatedKeys?: list<string>;
+    rootJobId?: string;
+  }
+  model JobsInspectResponsejoblogsItem {
+    level: "info" | "warn" | "error";
+    message: string;
+    timestamp: string(format="date-time");
+  }
+  model JobsInspectResponsejobprogress {
+    current?: uint;
+    message?: string;
+    step?: string;
+    total?: uint;
+  }
+  model JobsInspectResponsejobqueuePolicy {
+    existingJobId?: string(min_length=1);
+    outcome: string(min_length=1);
+    reason?: string(min_length=1);
+    replacedJobId?: string(min_length=1);
+  }
+  model JobsInspectResponsejobtrigger {
+    id?: string;
+    kind: "schedule" | "operation" | "rpc" | "event" | "manualReplay" | "serviceCode" | "parentJob";
+    operationId?: string;
+    parentJobId?: string;
+    requestId?: string;
+    subject?: string;
+    traceId?: string;
+  }
+  model JobsInspectResponsejobwaitingOnItem {
+    id: string(min_length=1);
+    label?: string(min_length=1);
+    startedAt: string(format="date-time");
+    target: JobsInspectResponsejobwaitingOnItemtarget;
+  }
+  model JobsInspectResponserelatedItemcontext {
+    requestId: string(min_length=1);
+    traceId: string(pattern="^[0-9a-f]{32}$");
+    traceparent: string(pattern="^[0-9a-f]{2}-[0-9a-f]{32}-[0-9a-f]{16}-[0-9a-f]{2}$");
+    tracestate?: string(min_length=1);
+  }
+  model JobsInspectResponserelatedItemlineage {
+    operationId?: string;
+    parentJobId?: string;
+    relatedKeys?: list<string>;
+    rootJobId?: string;
+  }
+  model JobsInspectResponserelatedItemprogress {
+    current?: uint;
+    message?: string;
+    step?: string;
+    total?: uint;
+  }
+  model JobsInspectResponserelatedItemtrigger {
+    id?: string;
+    kind: "schedule" | "operation" | "rpc" | "event" | "manualReplay" | "serviceCode" | "parentJob";
+    operationId?: string;
+    parentJobId?: string;
+    requestId?: string;
+    subject?: string;
+    traceId?: string;
+  }
+  model JobsInspectResponserelatedItemwaitingOnItem {
+    id: string(min_length=1);
+    label?: string(min_length=1);
+    startedAt: string(format="date-time");
+    target: JobsInspectResponserelatedItemwaitingOnItemtarget;
+  }
+  model JobsInspectResponsetimelineItemerrorDetail {
+    causes?: list<JobsInspectResponsetimelineItemerrorDetailcausesItem>;
+    fingerprint: string(min_length=1);
+    firstSeen?: string(format="date-time");
+    message: string;
+    occurrenceCount?: uint;
+    stack?: string;
+    type?: string;
+    worker?: JobsInspectResponsetimelineItemerrorDetailworker;
+  }
+  model JobsInspectResponsetimelineItemlogsItem {
+    level: "info" | "warn" | "error";
+    message: string;
+    timestamp: string(format="date-time");
+  }
+  model JobsInspectResponsetimelineItemprogress {
+    current?: uint;
+    message?: string;
+    step?: string;
+    total?: uint;
+  }
+  model JobsInspectResponsetimelineItemwaitEdge {
+    id: string(min_length=1);
+    label?: string(min_length=1);
+    startedAt: string(format="date-time");
+    target: JobsInspectResponsetimelineItemwaitEdgetarget;
+  }
+  model JobsListDLQResponseentriesItemconcurrency {
+    heartbeatAt?: string(format="date-time");
+    key: string(min_length=1);
+    keyHash: string(min_length=1);
+    leaseExpiresAt?: string(format="date-time");
+    staleTakeoverCount?: uint;
+  }
+  model JobsListDLQResponseentriesItemcontext {
+    requestId: string(min_length=1);
+    traceId: string(pattern="^[0-9a-f]{32}$");
+    traceparent: string(pattern="^[0-9a-f]{2}-[0-9a-f]{32}-[0-9a-f]{16}-[0-9a-f]{2}$");
+    tracestate?: string(min_length=1);
+  }
+  model JobsListDLQResponseentriesItemerrorDetail {
+    causes?: list<JobsListDLQResponseentriesItemerrorDetailcausesItem>;
+    fingerprint: string(min_length=1);
+    firstSeen?: string(format="date-time");
+    message: string;
+    occurrenceCount?: uint;
+    stack?: string;
+    type?: string;
+    worker?: JobsListDLQResponseentriesItemerrorDetailworker;
+  }
+  model JobsListDLQResponseentriesItemlineage {
+    operationId?: string;
+    parentJobId?: string;
+    relatedKeys?: list<string>;
+    rootJobId?: string;
+  }
+  model JobsListDLQResponseentriesItemlogsItem {
+    level: "info" | "warn" | "error";
+    message: string;
+    timestamp: string(format="date-time");
+  }
+  model JobsListDLQResponseentriesItemprogress {
+    current?: uint;
+    message?: string;
+    step?: string;
+    total?: uint;
+  }
+  model JobsListDLQResponseentriesItemqueuePolicy {
+    existingJobId?: string(min_length=1);
+    outcome: string(min_length=1);
+    reason?: string(min_length=1);
+    replacedJobId?: string(min_length=1);
+  }
+  model JobsListDLQResponseentriesItemtrigger {
+    id?: string;
+    kind: "schedule" | "operation" | "rpc" | "event" | "manualReplay" | "serviceCode" | "parentJob";
+    operationId?: string;
+    parentJobId?: string;
+    requestId?: string;
+    subject?: string;
+    traceId?: string;
+  }
+  model JobsListDLQResponseentriesItemwaitingOnItem {
+    id: string(min_length=1);
+    label?: string(min_length=1);
+    startedAt: string(format="date-time");
+    target: JobsListDLQResponseentriesItemwaitingOnItemtarget;
+  }
+  model JobsListServicesResponseentriesItemworkersItem {
+    concurrency?: int(minimum=1);
+    instanceId: string(min_length=1);
+    jobType: string(min_length=1);
+    service: string(min_length=1);
+    timestamp: string(format="date-time");
+    version?: string(min_length=1);
+  }
+  model JobsMetricsBucketgroupsItemqueueWait {
+    count: uint;
+    maxMs?: uint;
+    p50Ms?: uint;
+    p95Ms?: uint;
+  }
+  model JobsMetricsBucketgroupsItemruntime {
+    count: uint;
+    maxMs?: uint;
+    p50Ms?: uint;
+    p95Ms?: uint;
+  }
+  model JobsMetricsResponsebucketsItemgroupsItem {
+    cancelled: uint;
+    completed: uint;
+    dead: uint;
+    dismissed: uint;
+    failed: uint;
+    key: string;
+    label: string;
+    queueWait: JobsMetricsResponsebucketsItemgroupsItemqueueWait;
+    retried: uint;
+    runtime: JobsMetricsResponsebucketsItemgroupsItemruntime;
+    started: uint;
+    submitted: uint;
+  }
+  model JobsMetricsResponsesummaryItemqueueWait {
+    count: uint;
+    maxMs?: uint;
+    p50Ms?: uint;
+    p95Ms?: uint;
+  }
+  model JobsMetricsResponsesummaryItemruntime {
+    count: uint;
+    maxMs?: uint;
+    p50Ms?: uint;
+    p95Ms?: uint;
+  }
+  model JobsQueryResponseentriesItemcontext {
+    requestId: string(min_length=1);
+    traceId: string(pattern="^[0-9a-f]{32}$");
+    traceparent: string(pattern="^[0-9a-f]{2}-[0-9a-f]{32}-[0-9a-f]{16}-[0-9a-f]{2}$");
+    tracestate?: string(min_length=1);
+  }
+  model JobsQueryResponseentriesItemlineage {
+    operationId?: string;
+    parentJobId?: string;
+    relatedKeys?: list<string>;
+    rootJobId?: string;
+  }
+  model JobsQueryResponseentriesItemprogress {
+    current?: uint;
+    message?: string;
+    step?: string;
+    total?: uint;
+  }
+  model JobsQueryResponseentriesItemtrigger {
+    id?: string;
+    kind: "schedule" | "operation" | "rpc" | "event" | "manualReplay" | "serviceCode" | "parentJob";
+    operationId?: string;
+    parentJobId?: string;
+    requestId?: string;
+    subject?: string;
+    traceId?: string;
+  }
+  model JobsQueryResponseentriesItemwaitingOnItem {
+    id: string(min_length=1);
+    label?: string(min_length=1);
+    startedAt: string(format="date-time");
+    target: JobsQueryResponseentriesItemwaitingOnItemtarget;
+  }
+  model JobsReplayDLQResponsejobconcurrency {
+    heartbeatAt?: string(format="date-time");
+    key: string(min_length=1);
+    keyHash: string(min_length=1);
+    leaseExpiresAt?: string(format="date-time");
+    staleTakeoverCount?: uint;
+  }
+  model JobsReplayDLQResponsejobcontext {
+    requestId: string(min_length=1);
+    traceId: string(pattern="^[0-9a-f]{32}$");
+    traceparent: string(pattern="^[0-9a-f]{2}-[0-9a-f]{32}-[0-9a-f]{16}-[0-9a-f]{2}$");
+    tracestate?: string(min_length=1);
+  }
+  model JobsReplayDLQResponsejoberrorDetail {
+    causes?: list<JobsReplayDLQResponsejoberrorDetailcausesItem>;
+    fingerprint: string(min_length=1);
+    firstSeen?: string(format="date-time");
+    message: string;
+    occurrenceCount?: uint;
+    stack?: string;
+    type?: string;
+    worker?: JobsReplayDLQResponsejoberrorDetailworker;
+  }
+  model JobsReplayDLQResponsejoblineage {
+    operationId?: string;
+    parentJobId?: string;
+    relatedKeys?: list<string>;
+    rootJobId?: string;
+  }
+  model JobsReplayDLQResponsejoblogsItem {
+    level: "info" | "warn" | "error";
+    message: string;
+    timestamp: string(format="date-time");
+  }
+  model JobsReplayDLQResponsejobprogress {
+    current?: uint;
+    message?: string;
+    step?: string;
+    total?: uint;
+  }
+  model JobsReplayDLQResponsejobqueuePolicy {
+    existingJobId?: string(min_length=1);
+    outcome: string(min_length=1);
+    reason?: string(min_length=1);
+    replacedJobId?: string(min_length=1);
+  }
+  model JobsReplayDLQResponsejobtrigger {
+    id?: string;
+    kind: "schedule" | "operation" | "rpc" | "event" | "manualReplay" | "serviceCode" | "parentJob";
+    operationId?: string;
+    parentJobId?: string;
+    requestId?: string;
+    subject?: string;
+    traceId?: string;
+  }
+  model JobsReplayDLQResponsejobwaitingOnItem {
+    id: string(min_length=1);
+    label?: string(min_length=1);
+    startedAt: string(format="date-time");
+    target: JobsReplayDLQResponsejobwaitingOnItemtarget;
+  }
+  model JobsRetryResponsejobconcurrency {
+    heartbeatAt?: string(format="date-time");
+    key: string(min_length=1);
+    keyHash: string(min_length=1);
+    leaseExpiresAt?: string(format="date-time");
+    staleTakeoverCount?: uint;
+  }
+  model JobsRetryResponsejobcontext {
+    requestId: string(min_length=1);
+    traceId: string(pattern="^[0-9a-f]{32}$");
+    traceparent: string(pattern="^[0-9a-f]{2}-[0-9a-f]{32}-[0-9a-f]{16}-[0-9a-f]{2}$");
+    tracestate?: string(min_length=1);
+  }
+  model JobsRetryResponsejoberrorDetail {
+    causes?: list<JobsRetryResponsejoberrorDetailcausesItem>;
+    fingerprint: string(min_length=1);
+    firstSeen?: string(format="date-time");
+    message: string;
+    occurrenceCount?: uint;
+    stack?: string;
+    type?: string;
+    worker?: JobsRetryResponsejoberrorDetailworker;
+  }
+  model JobsRetryResponsejoblineage {
+    operationId?: string;
+    parentJobId?: string;
+    relatedKeys?: list<string>;
+    rootJobId?: string;
+  }
+  model JobsRetryResponsejoblogsItem {
+    level: "info" | "warn" | "error";
+    message: string;
+    timestamp: string(format="date-time");
+  }
+  model JobsRetryResponsejobprogress {
+    current?: uint;
+    message?: string;
+    step?: string;
+    total?: uint;
+  }
+  model JobsRetryResponsejobqueuePolicy {
+    existingJobId?: string(min_length=1);
+    outcome: string(min_length=1);
+    reason?: string(min_length=1);
+    replacedJobId?: string(min_length=1);
+  }
+  model JobsRetryResponsejobtrigger {
+    id?: string;
+    kind: "schedule" | "operation" | "rpc" | "event" | "manualReplay" | "serviceCode" | "parentJob";
+    operationId?: string;
+    parentJobId?: string;
+    requestId?: string;
+    subject?: string;
+    traceId?: string;
+  }
+  model JobsRetryResponsejobwaitingOnItem {
+    id: string(min_length=1);
+    label?: string(min_length=1);
+    startedAt: string(format="date-time");
+    target: JobsRetryResponsejobwaitingOnItemtarget;
+  }
+  model JobsWatchRequestquerysort {
+    direction?: "asc" | "desc";
+    field: "updatedAt" | "queueAge" | "runtime" | "failureRate" | "retries" | "depth";
+  }
+  model JobsWorkbenchJobRowwaitingOnItemtarget {
+    id?: string(min_length=1);
+    key?: string(min_length=1);
+    kind: "job" | "operation" | "external";
+    label?: string(min_length=1);
+    operation?: string(min_length=1);
+    operationId?: string(min_length=1);
+    service?: string(min_length=1);
+    system?: string(min_length=1);
+    type?: string(min_length=1);
+  }
+  model JobsCancelResponsejoberrorDetailcausesItem {
+  }
+  model JobsCancelResponsejoberrorDetailworker {
+    instanceId?: string;
+    runtime?: string;
+    service?: string;
+    version?: string;
+  }
+  model JobsCancelResponsejobwaitingOnItemtarget {
+    id?: string(min_length=1);
+    key?: string(min_length=1);
+    kind: "job" | "operation" | "external";
+    label?: string(min_length=1);
+    operation?: string(min_length=1);
+    operationId?: string(min_length=1);
+    service?: string(min_length=1);
+    system?: string(min_length=1);
+    type?: string(min_length=1);
+  }
+  model JobsDismissDLQResponsejoberrorDetailcausesItem {
+  }
+  model JobsDismissDLQResponsejoberrorDetailworker {
+    instanceId?: string;
+    runtime?: string;
+    service?: string;
+    version?: string;
+  }
+  model JobsDismissDLQResponsejobwaitingOnItemtarget {
+    id?: string(min_length=1);
+    key?: string(min_length=1);
+    kind: "job" | "operation" | "external";
+    label?: string(min_length=1);
+    operation?: string(min_length=1);
+    operationId?: string(min_length=1);
+    service?: string(min_length=1);
+    system?: string(min_length=1);
+    type?: string(min_length=1);
+  }
+  model JobsInspectResponseattemptsItemerrorcausesItem {
+  }
+  model JobsInspectResponseattemptsItemerrorworker {
+    instanceId?: string;
+    runtime?: string;
+    service?: string;
+    version?: string;
+  }
+  model JobsInspectResponsejoberrorDetailcausesItem {
+  }
+  model JobsInspectResponsejoberrorDetailworker {
+    instanceId?: string;
+    runtime?: string;
+    service?: string;
+    version?: string;
+  }
+  model JobsInspectResponsejobwaitingOnItemtarget {
+    id?: string(min_length=1);
+    key?: string(min_length=1);
+    kind: "job" | "operation" | "external";
+    label?: string(min_length=1);
+    operation?: string(min_length=1);
+    operationId?: string(min_length=1);
+    service?: string(min_length=1);
+    system?: string(min_length=1);
+    type?: string(min_length=1);
+  }
+  model JobsInspectResponserelatedItemwaitingOnItemtarget {
+    id?: string(min_length=1);
+    key?: string(min_length=1);
+    kind: "job" | "operation" | "external";
+    label?: string(min_length=1);
+    operation?: string(min_length=1);
+    operationId?: string(min_length=1);
+    service?: string(min_length=1);
+    system?: string(min_length=1);
+    type?: string(min_length=1);
+  }
+  model JobsInspectResponsetimelineItemerrorDetailcausesItem {
+  }
+  model JobsInspectResponsetimelineItemerrorDetailworker {
+    instanceId?: string;
+    runtime?: string;
+    service?: string;
+    version?: string;
+  }
+  model JobsInspectResponsetimelineItemwaitEdgetarget {
+    id?: string(min_length=1);
+    key?: string(min_length=1);
+    kind: "job" | "operation" | "external";
+    label?: string(min_length=1);
+    operation?: string(min_length=1);
+    operationId?: string(min_length=1);
+    service?: string(min_length=1);
+    system?: string(min_length=1);
+    type?: string(min_length=1);
+  }
+  model JobsListDLQResponseentriesItemerrorDetailcausesItem {
+  }
+  model JobsListDLQResponseentriesItemerrorDetailworker {
+    instanceId?: string;
+    runtime?: string;
+    service?: string;
+    version?: string;
+  }
+  model JobsListDLQResponseentriesItemwaitingOnItemtarget {
+    id?: string(min_length=1);
+    key?: string(min_length=1);
+    kind: "job" | "operation" | "external";
+    label?: string(min_length=1);
+    operation?: string(min_length=1);
+    operationId?: string(min_length=1);
+    service?: string(min_length=1);
+    system?: string(min_length=1);
+    type?: string(min_length=1);
+  }
+  model JobsMetricsResponsebucketsItemgroupsItemqueueWait {
+    count: uint;
+    maxMs?: uint;
+    p50Ms?: uint;
+    p95Ms?: uint;
+  }
+  model JobsMetricsResponsebucketsItemgroupsItemruntime {
+    count: uint;
+    maxMs?: uint;
+    p50Ms?: uint;
+    p95Ms?: uint;
+  }
+  model JobsQueryResponseentriesItemwaitingOnItemtarget {
+    id?: string(min_length=1);
+    key?: string(min_length=1);
+    kind: "job" | "operation" | "external";
+    label?: string(min_length=1);
+    operation?: string(min_length=1);
+    operationId?: string(min_length=1);
+    service?: string(min_length=1);
+    system?: string(min_length=1);
+    type?: string(min_length=1);
+  }
+  model JobsReplayDLQResponsejoberrorDetailcausesItem {
+  }
+  model JobsReplayDLQResponsejoberrorDetailworker {
+    instanceId?: string;
+    runtime?: string;
+    service?: string;
+    version?: string;
+  }
+  model JobsReplayDLQResponsejobwaitingOnItemtarget {
+    id?: string(min_length=1);
+    key?: string(min_length=1);
+    kind: "job" | "operation" | "external";
+    label?: string(min_length=1);
+    operation?: string(min_length=1);
+    operationId?: string(min_length=1);
+    service?: string(min_length=1);
+    system?: string(min_length=1);
+    type?: string(min_length=1);
+  }
+  model JobsRetryResponsejoberrorDetailcausesItem {
+  }
+  model JobsRetryResponsejoberrorDetailworker {
+    instanceId?: string;
+    runtime?: string;
+    service?: string;
+    version?: string;
+  }
+  model JobsRetryResponsejobwaitingOnItemtarget {
+    id?: string(min_length=1);
+    key?: string(min_length=1);
+    kind: "job" | "operation" | "external";
+    label?: string(min_length=1);
+    operation?: string(min_length=1);
+    operationId?: string(min_length=1);
+    service?: string(min_length=1);
+    system?: string(min_length=1);
+    type?: string(min_length=1);
+  }
+  error NotFoundError {
+    schema NotFoundErrorData;
+  }
+  error UnexpectedError;
+  error ValidationError;
+  capability "trellis.jobs::mutate" {
+  }
+  capability "trellis.jobs::read" {
+  }
+  capability "trellis.jobs::stream" {
+  }
+  rpc "Jobs.Cancel" {
+    version "v1";
+    input JobsCancelRequest;
+    output JobsCancelResponse;
+    errors [NotFoundError, UnexpectedError, ValidationError];
+    capabilities {
+      call ["trellis.jobs::mutate"];
+    }
+  }
+  rpc "Jobs.DismissDLQ" {
+    version "v1";
+    input JobsDismissDLQRequest;
+    output JobsDismissDLQResponse;
+    errors [NotFoundError, UnexpectedError, ValidationError];
+    capabilities {
+      call ["trellis.jobs::mutate"];
+    }
+  }
+  rpc "Jobs.GetKey" {
+    version "v1";
+    input JobsGetKeyRequest;
+    output JobsGetKeyResponse;
+    errors [NotFoundError, UnexpectedError, ValidationError];
+    capabilities {
+      call ["trellis.jobs::read"];
+    }
+  }
+  rpc "Jobs.Inspect" {
+    version "v1";
+    input JobsInspectRequest;
+    output JobsInspectResponse;
+    errors [NotFoundError, UnexpectedError, ValidationError];
+    capabilities {
+      call ["trellis.jobs::read"];
+    }
+  }
+  rpc "Jobs.ListDLQ" {
+    version "v1";
+    input JobsListDLQRequest;
+    output JobsListDLQResponse;
+    errors [UnexpectedError, ValidationError];
+    capabilities {
+      call ["trellis.jobs::read"];
+    }
+  }
+  rpc "Jobs.ListServices" {
+    version "v1";
+    input JobsListServicesRequest;
+    output JobsListServicesResponse;
+    errors [UnexpectedError, ValidationError];
+    capabilities {
+      call ["trellis.jobs::read"];
+    }
+  }
+  rpc "Jobs.Metrics" {
+    version "v1";
+    input JobsMetricsRequest;
+    output JobsMetricsResponse;
+    errors [UnexpectedError, ValidationError];
+    capabilities {
+      call ["trellis.jobs::read"];
+    }
+  }
+  rpc "Jobs.Query" {
+    version "v1";
+    input JobsQueryRequest;
+    output JobsQueryResponse;
+    errors [UnexpectedError, ValidationError];
+    capabilities {
+      call ["trellis.jobs::read"];
+    }
+  }
+  rpc "Jobs.ReplayDLQ" {
+    version "v1";
+    input JobsReplayDLQRequest;
+    output JobsReplayDLQResponse;
+    errors [NotFoundError, UnexpectedError, ValidationError];
+    capabilities {
+      call ["trellis.jobs::mutate"];
+    }
+  }
+  rpc "Jobs.Retry" {
+    version "v1";
+    input JobsRetryRequest;
+    output JobsRetryResponse;
+    errors [NotFoundError, UnexpectedError, ValidationError];
+    capabilities {
+      call ["trellis.jobs::mutate"];
+    }
+  }
+  feed "Jobs.Watch" {
+    version "v1";
+    input JobsWatchRequest;
+    event JobsWatchFrame;
+    capabilities {
+      subscribe ["trellis.jobs::stream"];
+    }
+  }
+}

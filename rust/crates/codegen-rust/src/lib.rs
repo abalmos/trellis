@@ -7,20 +7,24 @@ use std::process::Command;
 
 use serde::Deserialize;
 use serde_json::Value;
-use trellis_contracts::{
-    canonicalize_json, load_participant_source as load_native_participant, load_sdk_source,
-    ContractBuilder, ContractKind, ContractsError, LoadedApi, LoadedParticipant,
-    ParticipantUseRenderModel,
+use trellis_protocol::{canonicalize_json, parse_api, parse_participant};
+
+mod projection;
+use projection::{
+    ApiInput, ApiProjection, ParticipantInput, ParticipantKind, ParticipantUse, StateKind,
 };
 
 /// Errors returned while generating a Rust SDK crate.
 #[derive(thiserror::Error, Debug)]
 pub enum CodegenRustError {
-    #[error("contracts error: {0}")]
-    Contracts(#[from] trellis_contracts::ContractsError),
+    #[error("protocol error: {0}")]
+    Protocol(#[from] trellis_protocol::ProtocolError),
 
     #[error("io error: {0}")]
     Io(#[from] std::io::Error),
+
+    #[error("json error: {0}")]
+    Json(#[from] serde_json::Error),
 
     #[error("toml parse error: {0}")]
     Toml(#[from] toml::de::Error),
@@ -31,11 +35,11 @@ pub enum CodegenRustError {
     #[error("participant mapping alias '{alias}' is not declared in the participant uses")]
     UnknownParticipantMappingAlias { alias: String },
 
-    #[error("participant uses alias '{alias}' for contract '{contract}' requires an explicit alias mapping")]
+    #[error("participant uses alias '{alias}' for API '{contract}' requires an explicit alias mapping")]
     MissingParticipantMappingAlias { alias: String, contract: String },
 
-    #[error("participant mapping alias '{alias}' targets contract '{actual_contract}', expected '{expected_contract}'")]
-    InvalidParticipantMappingContract {
+    #[error("participant mapping alias '{alias}' targets API '{actual_contract}', expected '{expected_contract}'")]
+    InvalidParticipantMappingApi {
         alias: String,
         expected_contract: String,
         actual_contract: String,
@@ -82,6 +86,40 @@ pub enum CodegenRustError {
 
     #[error("participant contract '{contract}' owns public surfaces but has no generated owner SDK mapping")]
     MissingOwnedSdk { contract: String },
+}
+
+fn load_sdk_source(path: impl AsRef<Path>) -> Result<ApiInput, CodegenRustError> {
+    let path = path.as_ref().to_path_buf();
+    let source = fs::read_to_string(&path)?;
+    let value: Value = serde_json::from_str(&source)?;
+    let api = parse_api(&value)?;
+    let value = api.normalized_value()?;
+    let mut render_model = serde_json::from_value::<ApiProjection>(value.clone())?;
+    for (name, error) in &mut render_model.errors {
+        error.error_type.clone_from(name);
+    }
+    Ok(ApiInput {
+        path,
+        render_model,
+        subjects: api.derived_subjects()?,
+        canonical: api.canonical_json()?,
+        digest: api.digest()?,
+        api,
+        value,
+    })
+}
+
+fn load_native_participant(path: impl AsRef<Path>) -> Result<ParticipantInput, CodegenRustError> {
+    let source = fs::read_to_string(path)?;
+    let value: Value = serde_json::from_str(&source)?;
+    let participant = parse_participant(&value)?;
+    let value = participant.normalized_value()?;
+    Ok(ParticipantInput {
+        render_model: serde_json::from_value(value.clone())?,
+        canonical: participant.canonical_json()?,
+        digest: participant.digest()?,
+        participant,
+    })
 }
 
 /// Options for generating one Rust SDK crate.
@@ -274,8 +312,6 @@ fn generate_rust_sdk_into(opts: &GenerateRustSdkOpts) -> Result<(), CodegenRustE
         &opts.out_dir.join("src").join("api.rs"),
         &render_api_rs(opts, &loaded, &artifact_canonical, &artifact_digest),
     )?;
-    remove_if_exists(&opts.out_dir.join("src").join("contract.rs"))?;
-    remove_if_exists(&opts.out_dir.join("contract.json"))?;
     write_rust_if_changed(
         &opts.out_dir.join("src").join("types.rs"),
         &render_types_rs(&loaded),
@@ -336,7 +372,7 @@ pub fn rust_sdk_cargo_manifest_is_valid(
 
     package.get("name").and_then(toml::Value::as_str) == Some(crate_name)
         && package.get("version").and_then(toml::Value::as_str) == Some(crate_version)
-        && ["serde", "serde_json", "trellis-rs", "trellis-contracts"]
+        && ["serde", "serde_json", "trellis-rs"]
             .into_iter()
             .all(|dependency| dependencies.contains_key(dependency))
 }
@@ -443,7 +479,6 @@ fn generate_rust_participant_facade_into(
         });
     }
     let mappings = validate_participant_mappings(&participant, &opts.alias_mappings)?;
-    let native_artifacts = build_participant_artifacts(&api, &participant, &mappings)?;
     let apis_dir = opts.out_dir.join("apis");
     if apis_dir.exists() {
         fs::remove_dir_all(&apis_dir)?;
@@ -478,30 +513,12 @@ fn generate_rust_participant_facade_into(
         &render_participant_connect_rs(&participant, &mappings),
     )?;
     write_rust_if_changed(
-        &opts.out_dir.join("src/contract.rs"),
-        &render_participant_contract_rs(&participant, &native_artifacts)?,
+        &opts.out_dir.join("src/participant.rs"),
+        &render_participant_metadata_rs(&api, &participant, &mappings)?,
     )?;
     generate_rust_participant_generated_sources(opts)?;
 
     Ok(())
-}
-
-fn build_participant_artifacts(
-    api: &LoadedApi,
-    participant: &LoadedParticipant,
-    mappings: &[ValidatedParticipantAlias],
-) -> Result<trellis_contracts::ContractArtifacts, CodegenRustError> {
-    let mut referenced_apis = std::collections::BTreeMap::new();
-    for mapping in mappings {
-        let value = mapping.manifest.value.clone();
-        let id = value["id"].as_str().expect("validated API id");
-        referenced_apis.insert(id.to_owned(), value);
-    }
-    Ok(
-        ContractBuilder::from_native(api.value.clone(), participant.value.clone())
-            .referenced_apis(referenced_apis)
-            .build()?,
-    )
 }
 
 /// Build the canonical participant artifact for a generated participant facade.
@@ -510,22 +527,18 @@ pub fn native_participant_artifact(
     participant_path: &Path,
     alias_mappings: &[ParticipantAliasMapping],
 ) -> Result<(String, String), CodegenRustError> {
-    let api = load_sdk_source(api_path)?;
+    let _api = load_sdk_source(api_path)?;
     let participant = load_participant_source(participant_path)?;
     let mappings = validate_participant_mappings(&participant, alias_mappings)?;
-    let artifacts = build_participant_artifacts(&api, &participant, &mappings)?;
-    let participant = artifacts.participant_value()?;
-    Ok((
-        canonicalize_json(&participant)?,
-        artifacts.participant_digest()?,
-    ))
+    let _ = mappings;
+    Ok((participant.canonical, participant.digest))
 }
 
-fn load_participant_source(participant_path: &Path) -> Result<LoadedParticipant, ContractsError> {
+fn load_participant_source(participant_path: &Path) -> Result<ParticipantInput, CodegenRustError> {
     load_native_participant(participant_path)
 }
 
-fn participant_requires_owned_sdk(api: &LoadedApi, participant: &LoadedParticipant) -> bool {
+fn participant_requires_owned_sdk(api: &ApiInput, participant: &ParticipantInput) -> bool {
     !api.render_model.rpc.is_empty()
         || !api.render_model.operations.is_empty()
         || !api.render_model.events.is_empty()
@@ -605,7 +618,7 @@ fn render_cargo_toml(
 
 fn runtime_dependency_lines(
     runtime_deps: &RustRuntimeDeps,
-    out_dir: &Path,
+    _out_dir: &Path,
 ) -> Result<Vec<String>, CodegenRustError> {
     match runtime_deps.source {
         RustRuntimeSource::Registry => {
@@ -618,7 +631,6 @@ fn runtime_dependency_lines(
                 .ok_or(CodegenRustError::MissingRuntimeRepoRoot)?;
             let repo_root = fs::canonicalize(repo_root).unwrap_or_else(|_| repo_root.clone());
             let trellis_path = workspace_package_dir(&repo_root, "trellis-rs")?;
-            let trellis_path = relative_path(out_dir, &trellis_path);
             Ok(vec![format!(
                 "trellis-rs = {{ path = {} }}",
                 string_literal(&trellis_path.display().to_string())
@@ -627,7 +639,7 @@ fn runtime_dependency_lines(
     }
 }
 
-fn render_rust_sdk_trellis_md(opts: &GenerateRustSdkOpts, loaded: &LoadedApi) -> String {
+fn render_rust_sdk_trellis_md(opts: &GenerateRustSdkOpts, loaded: &ApiInput) -> String {
     let mut lines = vec![
         format!(
             "# Trellis API Guide: {}", loaded.render_model.id
@@ -660,8 +672,8 @@ fn render_rust_sdk_trellis_md(opts: &GenerateRustSdkOpts, loaded: &LoadedApi) ->
 
 fn render_rust_participant_trellis_md(
     opts: &GenerateRustParticipantFacadeOpts,
-    api: &LoadedApi,
-    participant: &LoadedParticipant,
+    api: &ApiInput,
+    participant: &ParticipantInput,
     mappings: &[ValidatedParticipantAlias],
 ) -> String {
     let mut lines = vec![
@@ -703,7 +715,7 @@ fn render_rust_participant_trellis_md(
 
 fn push_rust_owned_surfaces(
     lines: &mut Vec<String>,
-    loaded: &LoadedApi,
+    loaded: &ApiInput,
     crate_prefix: &str,
     include_service_handlers: bool,
 ) {
@@ -757,11 +769,7 @@ fn push_rust_used_mapping_surfaces(lines: &mut Vec<String>, mapping: &ValidatedP
     push_rust_use_ref_lines(lines, &mapping.use_ref, &mapping.crate_ident);
 }
 
-fn push_rust_use_ref_lines(
-    lines: &mut Vec<String>,
-    use_ref: &ParticipantUseRenderModel,
-    crate_prefix: &str,
-) {
+fn push_rust_use_ref_lines(lines: &mut Vec<String>, use_ref: &ParticipantUse, crate_prefix: &str) {
     if let Some(rpc) = &use_ref.rpc {
         for key in rpc.call.as_deref().unwrap_or(&[]) {
             let base = key_to_pascal(key);
@@ -819,12 +827,12 @@ struct ValidatedParticipantAlias {
     crate_path: PathBuf,
     cargo_dependency: Option<String>,
     contract_id: String,
-    manifest: trellis_contracts::LoadedApi,
-    use_ref: ParticipantUseRenderModel,
+    manifest: ApiInput,
+    use_ref: ParticipantUse,
 }
 
 fn validate_participant_mappings(
-    local: &LoadedParticipant,
+    local: &ParticipantInput,
     mappings: &[ParticipantAliasMapping],
 ) -> Result<Vec<ValidatedParticipantAlias>, CodegenRustError> {
     let mut validated = Vec::new();
@@ -843,7 +851,7 @@ fn validate_participant_mappings(
         })?;
         let manifest = load_sdk_source(&mapping.api_path)?;
         if manifest.render_model.id != use_ref.api {
-            return Err(CodegenRustError::InvalidParticipantMappingContract {
+            return Err(CodegenRustError::InvalidParticipantMappingApi {
                 alias: mapping.alias.clone(),
                 expected_contract: use_ref.api.clone(),
                 actual_contract: manifest.render_model.id.clone(),
@@ -954,9 +962,7 @@ fn validate_participant_mappings(
     Ok(validated)
 }
 
-fn validate_generated_identifiers(
-    loaded: &trellis_contracts::LoadedApi,
-) -> Result<(), CodegenRustError> {
+fn validate_generated_identifiers(loaded: &ApiInput) -> Result<(), CodegenRustError> {
     for (scope, keys) in [
         (
             "RPC types",
@@ -1051,9 +1057,7 @@ fn reject_identifier_collisions(
     Ok(())
 }
 
-fn validate_supported_schemas(
-    loaded: &trellis_contracts::LoadedApi,
-) -> Result<(), CodegenRustError> {
+fn validate_supported_schemas(loaded: &ApiInput) -> Result<(), CodegenRustError> {
     for (name, schema) in &loaded.render_model.schemas {
         validate_supported_schema(schema, &format!("schemas.{name}"))?;
     }
@@ -1104,18 +1108,18 @@ fn validate_supported_schema(
 }
 
 /// Return whether a participant `uses` alias requires an explicit local SDK mapping.
-pub fn participant_use_requires_mapping(
-    local: &LoadedParticipant,
+pub(crate) fn participant_use_requires_mapping(
+    local: &ParticipantInput,
     alias: &str,
-    use_ref: &ParticipantUseRenderModel,
+    use_ref: &ParticipantUse,
 ) -> bool {
     !is_runtime_owned_baseline_use(local, alias, use_ref)
 }
 
 fn is_runtime_owned_baseline_use(
-    local: &LoadedParticipant,
+    local: &ParticipantInput,
     alias: &str,
-    use_ref: &ParticipantUseRenderModel,
+    use_ref: &ParticipantUse,
 ) -> bool {
     if alias == "state"
         && use_ref.api == "trellis.state@v1"
@@ -1177,7 +1181,7 @@ fn render_participant_cargo_toml(
         dependency_lines.push("tokio = { version = \"1\", features = [\"io-util\"] }".to_string());
     }
     if let (Some(crate_name), Some(path)) = (&opts.owned_sdk_crate_name, &opts.owned_sdk_path) {
-        let path = relative_path(&opts.out_dir, path);
+        let path = fs::canonicalize(path).unwrap_or_else(|_| path.clone());
         dependency_lines.push(format!(
             "{} = {{ path = {} }}",
             crate_name,
@@ -1189,7 +1193,8 @@ fn render_participant_cargo_toml(
             dependency_lines.push(format!("{} = {dependency}", mapping.crate_name));
             continue;
         }
-        let path = relative_path(&opts.out_dir, &mapping.crate_path);
+        let path =
+            fs::canonicalize(&mapping.crate_path).unwrap_or_else(|_| mapping.crate_path.clone());
         dependency_lines.push(format!(
             "{} = {{ path = {} }}",
             mapping.crate_name,
@@ -1213,27 +1218,7 @@ fn participant_runtime_dependency_lines(
     runtime_dependency_lines(runtime_deps, out_dir)
 }
 
-fn relative_path(from_dir: &Path, target: &Path) -> PathBuf {
-    let from_dir = fs::canonicalize(from_dir).unwrap_or_else(|_| from_dir.to_path_buf());
-    let target = fs::canonicalize(target).unwrap_or_else(|_| target.to_path_buf());
-    let from = from_dir.components().collect::<Vec<_>>();
-    let to = target.components().collect::<Vec<_>>();
-    let common = from
-        .iter()
-        .zip(&to)
-        .take_while(|(left, right)| left == right)
-        .count();
-    let mut path = PathBuf::new();
-    for _ in common..from.len() {
-        path.push("..");
-    }
-    for component in &to[common..] {
-        path.push(component.as_os_str());
-    }
-    path
-}
-
-fn render_participant_shim_lib_rs(loaded: &LoadedParticipant) -> String {
+fn render_participant_shim_lib_rs(loaded: &ParticipantInput) -> String {
     let jobs_module = if loaded.render_model.jobs.is_empty() {
         ""
     } else {
@@ -1245,23 +1230,23 @@ fn render_participant_shim_lib_rs(loaded: &LoadedParticipant) -> String {
         "pub mod event_consumers;\n"
     };
     let exports = match loaded.render_model.kind {
-        ContractKind::Service => {
-            "pub use connect::{connect, ConnectedService, Contract, ServiceConnectOptions};\npub use trellis_rs::service::{GeneratedServiceContract, ServiceHandlerContext, ServiceRuntimeError};"
+        ParticipantKind::Service => {
+            "pub use connect::{connect, ConnectedService, Participant, ServiceConnectOptions};\npub use trellis_rs::service::{GeneratedServiceParticipant, ServiceHandlerContext, ServiceRuntimeError};"
         }
-        ContractKind::App | ContractKind::Agent => {
+        ParticipantKind::App | ParticipantKind::Agent => {
             "pub use connect::{connect, ConnectOptions, ConnectedClient};"
         }
-        ContractKind::Device => {
-            "pub use connect::{connect, ConnectOptions, ConnectedClient, Contract};"
+        ParticipantKind::Device => {
+            "pub use connect::{connect, ConnectOptions, ConnectedClient, Participant};"
         }
     };
     format!(
-        "//! Generated Rust participant facade crate.\n\nconst _: () = trellis_rs::generated::assert_abi(1);\n\npub mod connect;\npub mod contract;\n{event_consumers_module}{jobs_module}include!(\"facade.rs\");\n{exports}\n"
+        "//! Generated Rust participant facade crate.\n\nconst _: () = trellis_rs::generated::assert_abi(1);\n\npub mod connect;\npub mod participant;\n{event_consumers_module}{jobs_module}include!(\"facade.rs\");\n{exports}\n"
     )
 }
 
 fn render_participant_event_consumers_rs(
-    loaded: &LoadedParticipant,
+    loaded: &ParticipantInput,
     mappings: &[ValidatedParticipantAlias],
     owned_sdk_crate_name: Option<&str>,
 ) -> String {
@@ -1343,7 +1328,7 @@ fn render_event_consumer_method(
     format!("    /// Register a typed `{base}` event handler.\n    pub async fn {method}<F, Fut>(&self, handler: F) -> Result<trellis_rs::service::ServiceEventListenerHandle, crate::ServiceRuntimeError> where F: Fn({sdk}::{base}Event, trellis_rs::service::ServiceEventListenerContext) -> Fut + Send + Sync + 'static, Fut: std::future::Future<Output = Result<(), trellis_rs::service::ServerError>> + Send + 'static {{ self.service.inner.listen_event_with_api_id::<{sdk}::events::{base}EventDescriptor, _, _>({api_identity}, handler, trellis_rs::service::ServiceEventListenOptions {{ group: Some({group:?}.to_string()), ..Default::default() }}).await }}")
 }
 
-fn render_participant_jobs_facade_rs(loaded: &LoadedParticipant) -> String {
+fn render_participant_jobs_facade_rs(loaded: &ParticipantInput) -> String {
     let mut lines = vec![
         "// Generated service-private jobs facade.".to_string(),
         String::new(),
@@ -1413,13 +1398,15 @@ fn render_participant_jobs_facade_rs(loaded: &LoadedParticipant) -> String {
 }
 
 fn render_participant_connect_rs(
-    loaded: &LoadedParticipant,
+    loaded: &ParticipantInput,
     mappings: &[ValidatedParticipantAlias],
 ) -> String {
     match loaded.render_model.kind {
-        ContractKind::Service => render_service_participant_connect_rs(mappings),
-        ContractKind::App | ContractKind::Agent => render_user_participant_connect_rs(mappings),
-        ContractKind::Device => render_device_participant_connect_rs(mappings),
+        ParticipantKind::Service => render_service_participant_connect_rs(mappings),
+        ParticipantKind::App | ParticipantKind::Agent => {
+            render_user_participant_connect_rs(mappings)
+        }
+        ParticipantKind::Device => render_device_participant_connect_rs(mappings),
     }
 }
 
@@ -1428,31 +1415,31 @@ fn render_service_participant_connect_rs(mappings: &[ValidatedParticipantAlias])
 
 use crate::Service;
 
-/// Runtime and credential options; contract evidence comes from [`Contract`].
+/// Runtime and credential options; participant evidence comes from [`Participant`].
 pub use trellis_rs::service::ServiceConnectOptions;
 
 /// Exact generated participant and API evidence used for service bootstrap.
-pub struct Contract;
+pub struct Participant;
 
-impl trellis_rs::service::GeneratedServiceContract for Contract {
-    const PARTICIPANT_ID: &'static str = crate::contract::CONTRACT_ID;
-    const CONTRACT_DIGEST: &'static str = crate::contract::CONTRACT_DIGEST;
-    const PARTICIPANT_NEEDS_DIGEST: &'static str = crate::contract::PARTICIPANT_NEEDS_DIGEST;
-    const PARTICIPANT_JSON: &'static str = crate::contract::PARTICIPANT;
-    const API_JSON: &'static str = crate::contract::API_JSON;
-    const API_DIGEST: &'static str = crate::contract::API_DIGEST;
-    const REFERENCED_API_ARTIFACTS: &'static [(&'static str, &'static str)] = crate::contract::REFERENCED_API_ARTIFACTS;
+impl trellis_rs::service::GeneratedServiceParticipant for Participant {
+    const PARTICIPANT_ID: &'static str = crate::participant::PARTICIPANT_ID;
+    const PARTICIPANT_DIGEST: &'static str = crate::participant::PARTICIPANT_DIGEST;
+    const PARTICIPANT_NEEDS_DIGEST: &'static str = crate::participant::PARTICIPANT_NEEDS_DIGEST;
+    const PARTICIPANT_JSON: &'static str = crate::participant::PARTICIPANT;
+    const API_JSON: &'static str = crate::participant::API_JSON;
+    const API_DIGEST: &'static str = crate::participant::API_DIGEST;
+    const REFERENCED_API_ARTIFACTS: &'static [(&'static str, &'static str)] = crate::participant::REFERENCED_API_ARTIFACTS;
 }
 
 /// Connected service runtime for this participant contract.
 pub struct ConnectedService {
-    pub(crate) inner: trellis_rs::service::ConnectedServiceRuntime<Contract>,
+    pub(crate) inner: trellis_rs::service::ConnectedServiceRuntime<Participant>,
 }
 
 impl ConnectedService {
     /// Connect this service through Trellis bootstrap.
     pub async fn connect(opts: ServiceConnectOptions<'_>) -> Result<Self, trellis_rs::service::ServiceRuntimeError> {
-        Ok(Self { inner: trellis_rs::service::ConnectedServiceRuntime::<Contract>::connect(opts).await? })
+        Ok(Self { inner: trellis_rs::service::ConnectedServiceRuntime::<Participant>::connect(opts).await? })
     }
 
     /// Access contract-shaped owned and used surfaces.
@@ -1461,7 +1448,7 @@ impl ConnectedService {
     /// Clone the service handle for providers that need resolved runtime resources.
     pub fn generated_handle(&self) -> trellis_rs::service::ServiceHandle { self.inner.generated_handle() }
 
-    pub(crate) fn runtime_mut(&mut self) -> &mut trellis_rs::service::ConnectedServiceRuntime<Contract> { &mut self.inner }
+    pub(crate) fn runtime_mut(&mut self) -> &mut trellis_rs::service::ConnectedServiceRuntime<Participant> { &mut self.inner }
 
     /// Run all registered providers and service-private workers until shutdown.
     pub async fn run(self) -> Result<(), trellis_rs::service::ServiceRuntimeError> { self.inner.run().await }
@@ -1527,8 +1514,8 @@ pub async fn connect(opts: ConnectOptions<'_>) -> Result<ConnectedClient, Trelli
                 binding: format!(
                     "installation:{}:{}:{}",
                     origin,
-                    crate::contract::CONTRACT_ID,
-                    crate::contract::CONTRACT_DIGEST,
+                    crate::participant::PARTICIPANT_ID,
+                    crate::participant::PARTICIPANT_DIGEST,
                 ),
                 store: opts.authorization_context_store,
             },
@@ -1553,16 +1540,16 @@ use trellis_rs::generated::{AuthorizationContextStore, Caller, DeviceConnectOpti
 use crate::Client;
 
 /// Exact generated participant and API evidence used for device bootstrap.
-pub struct Contract;
+pub struct Participant;
 
-impl trellis_rs::service::GeneratedServiceContract for Contract {
-    const PARTICIPANT_ID: &'static str = crate::contract::CONTRACT_ID;
-    const CONTRACT_DIGEST: &'static str = crate::contract::CONTRACT_DIGEST;
-    const PARTICIPANT_NEEDS_DIGEST: &'static str = crate::contract::PARTICIPANT_NEEDS_DIGEST;
-    const PARTICIPANT_JSON: &'static str = crate::contract::PARTICIPANT;
-    const API_JSON: &'static str = crate::contract::API_JSON;
-    const API_DIGEST: &'static str = crate::contract::API_DIGEST;
-    const REFERENCED_API_ARTIFACTS: &'static [(&'static str, &'static str)] = crate::contract::REFERENCED_API_ARTIFACTS;
+impl trellis_rs::service::GeneratedServiceParticipant for Participant {
+    const PARTICIPANT_ID: &'static str = crate::participant::PARTICIPANT_ID;
+    const PARTICIPANT_DIGEST: &'static str = crate::participant::PARTICIPANT_DIGEST;
+    const PARTICIPANT_NEEDS_DIGEST: &'static str = crate::participant::PARTICIPANT_NEEDS_DIGEST;
+    const PARTICIPANT_JSON: &'static str = crate::participant::PARTICIPANT;
+    const API_JSON: &'static str = crate::participant::API_JSON;
+    const API_DIGEST: &'static str = crate::participant::API_DIGEST;
+    const REFERENCED_API_ARTIFACTS: &'static [(&'static str, &'static str)] = crate::participant::REFERENCED_API_ARTIFACTS;
 }
 
 /// Activated-device participant connection options.
@@ -1592,7 +1579,7 @@ impl ConnectedClient {
 
     /// Connect using the exact ready bootstrap evidence returned by device activation.
     pub async fn connect_activated(
-        options: trellis_rs::auth::DeviceActivationOptions<'_, Contract>,
+        options: trellis_rs::auth::DeviceActivationOptions<'_, Participant>,
         session: trellis_rs::auth::DeviceActivationSession,
     ) -> Result<Self, trellis_rs::auth::DeviceActivationError> {
         Ok(Self {
@@ -1604,7 +1591,7 @@ impl ConnectedClient {
 /// Connect this activated device.
 pub async fn connect(opts: ConnectOptions<'_>) -> Result<ConnectedClient, TrellisClientError> {
     Ok(ConnectedClient {
-        inner: Caller::connect_device(DeviceConnectOptions::<Contract>::new(
+        inner: Caller::connect_device(DeviceConnectOptions::<Participant>::new(
             opts.trellis_url,
             opts.deployment_id,
             opts.instance_id,
@@ -1639,49 +1626,40 @@ fn render_connected_alias_methods(mappings: &[ValidatedParticipantAlias], servic
     methods
 }
 
-fn render_participant_contract_rs(
-    loaded: &LoadedParticipant,
-    artifacts: &trellis_contracts::ContractArtifacts,
+fn render_participant_metadata_rs(
+    api: &ApiInput,
+    loaded: &ParticipantInput,
+    mappings: &[ValidatedParticipantAlias],
 ) -> Result<String, CodegenRustError> {
-    let participant_json = artifacts.participant_value()?;
-    let api_json = artifacts.api_value()?;
+    let mut apis = std::collections::BTreeMap::from([(api.api.id().to_owned(), api.api.clone())]);
     let mut referenced = Vec::new();
-    for api in artifacts.referenced_apis().values() {
-        let value = api
-            .normalized_value()
-            .map_err(trellis_contracts::ContractsError::from)?;
-        let json =
-            serde_json::to_string(&value).map_err(trellis_contracts::ContractsError::from)?;
-        let digest = api
-            .digest()
-            .map_err(trellis_contracts::ContractsError::from)?;
+    for mapping in mappings {
+        let referenced_api = &mapping.manifest.api;
+        let json = referenced_api.canonical_json()?;
+        let digest = referenced_api.digest()?;
         referenced.push(format!(
             "    ({}, {}),",
             string_literal(&json),
             string_literal(&digest),
         ));
+        apis.insert(referenced_api.id().to_owned(), referenced_api.clone());
     }
+    let resolved = trellis_protocol::resolve_participant(&loaded.participant, &apis)?;
     Ok(format!(
-        "//! Native participant metadata for `{}`.\n\n/// Participant contract id.\npub const CONTRACT_ID: &str = {};\n\n/// Semantic participant artifact digest.\npub const CONTRACT_DIGEST: &str = {};\n\n/// Canonical participant artifact JSON.\npub const PARTICIPANT: &str = {};\n\n/// Authoritative participant-needs digest.\npub const PARTICIPANT_NEEDS_DIGEST: &str = {};\n\n/// Canonical owned API artifact JSON.\npub const API_JSON: &str = {};\n\n/// Semantic owned API digest.\npub const API_DIGEST: &str = {};\n\n/// Exact referenced API JSON and digest evidence.\npub const REFERENCED_API_ARTIFACTS: &[(&str, &str)] = &[\n{}];\n",
+        "//! Native participant metadata for `{}`.\n\n/// Participant id.\npub const PARTICIPANT_ID: &str = {};\n\n/// Semantic participant artifact digest.\npub const PARTICIPANT_DIGEST: &str = {};\n\n/// Canonical participant artifact JSON.\npub const PARTICIPANT: &str = {};\n\n/// Authoritative participant-needs digest.\npub const PARTICIPANT_NEEDS_DIGEST: &str = {};\n\n/// Canonical owned API artifact JSON.\npub const API_JSON: &str = {};\n\n/// Semantic owned API digest.\npub const API_DIGEST: &str = {};\n\n/// Exact referenced API JSON and digest evidence.\npub const REFERENCED_API_ARTIFACTS: &[(&str, &str)] = &[\n{}];\n",
         loaded.render_model.id,
         string_literal(&loaded.render_model.id),
-         string_literal(&artifacts.participant_digest()?),
-         string_literal(
-             &serde_json::to_string(&participant_json)
-                 .map_err(trellis_contracts::ContractsError::from)?,
-         ),
-         string_literal(&artifacts.participant_needs_digest()?),
-        string_literal(
-            &serde_json::to_string(&api_json)
-                .map_err(trellis_contracts::ContractsError::from)?,
-        ),
-        string_literal(&artifacts.api_digest()?),
+         string_literal(&loaded.digest),
+         string_literal(&loaded.canonical),
+         string_literal(&resolved.needs().digest()?),
+        string_literal(&api.canonical),
+        string_literal(&api.digest),
         referenced.join("\n"),
     ))
 }
 
 fn render_participant_facade_rs(
-    _loaded: &LoadedParticipant,
+    _loaded: &ParticipantInput,
     mappings: &[ValidatedParticipantAlias],
 ) -> String {
     let mut lines = vec![
@@ -1695,7 +1673,7 @@ fn render_participant_facade_rs(
     ];
     lines.extend([
         String::new(),
-        "/// Contract-shaped outbound facade for this participant.".to_string(),
+        "/// API-shaped outbound facade for this participant.".to_string(),
         "pub struct Client<'a> {".to_string(),
         "    inner: &'a trellis_rs::generated::Caller,".to_string(),
         "}".to_string(),
@@ -1757,8 +1735,8 @@ fn render_participant_facade_rs(
 }
 
 fn render_participant_owned_rs(
-    loaded: &trellis_contracts::LoadedApi,
-    participant: &LoadedParticipant,
+    loaded: &ApiInput,
+    participant: &ParticipantInput,
     owned_sdk_crate_name: Option<&str>,
     referenced_apis: std::collections::BTreeMap<String, serde_json::Value>,
 ) -> Result<String, CodegenRustError> {
@@ -1771,22 +1749,23 @@ fn render_participant_owned_rs(
         && participant.render_model.resources.kv.is_empty()
         && participant.render_model.resources.store.is_empty()
     {
-        let artifacts =
-            ContractBuilder::from_native(loaded.value.clone(), participant.value.clone())
-                .referenced_apis(referenced_apis)
-                .build()?;
+        let mut apis =
+            std::collections::BTreeMap::from([(loaded.api.id().to_owned(), loaded.api.clone())]);
+        for value in referenced_apis.values() {
+            let api = parse_api(value)?;
+            apis.insert(api.id().to_owned(), api);
+        }
+        let resolved = trellis_protocol::resolve_participant(&participant.participant, &apis)?;
         return Ok(format!(
-            "/// Owned facade for `{}`.\n/// Reusable native participant vocabulary for this participant.\npub struct OwnedContract;\n\nimpl OwnedContract {{\n    pub const PARTICIPANT_ID: &'static str = {};\n    pub const CONTRACT_DIGEST: &'static str = {};\n    pub const PARTICIPANT_NEEDS_DIGEST: &'static str = {};\n    pub const PARTICIPANT_JSON: &'static str = {};\n    pub const API_JSON: &'static str = {};\n    pub const API_DIGEST: &'static str = {};\n}}\n\npub struct Client<'a> {{ _inner: &'a trellis_rs::generated::Caller }}\nimpl<'a> Client<'a> {{ pub fn new(inner: &'a trellis_rs::generated::Caller) -> Self {{ Self {{ _inner: inner }} }} }}\n\npub struct Service<'a> {{ _inner: &'a trellis_rs::generated::Caller }}\nimpl<'a> Service<'a> {{ pub fn new(inner: &'a trellis_rs::generated::Caller) -> Self {{ Self {{ _inner: inner }} }} }}\n",
+            "/// Owned facade for `{}`.\n/// Reusable native participant vocabulary for this participant.\npub struct OwnedParticipant;\n\nimpl OwnedParticipant {{\n    pub const PARTICIPANT_ID: &'static str = {};\n    pub const PARTICIPANT_DIGEST: &'static str = {};\n    pub const PARTICIPANT_NEEDS_DIGEST: &'static str = {};\n    pub const PARTICIPANT_JSON: &'static str = {};\n    pub const API_JSON: &'static str = {};\n    pub const API_DIGEST: &'static str = {};\n}}\n\npub struct Client<'a> {{ _inner: &'a trellis_rs::generated::Caller }}\nimpl<'a> Client<'a> {{ pub fn new(inner: &'a trellis_rs::generated::Caller) -> Self {{ Self {{ _inner: inner }} }} }}\n\npub struct Service<'a> {{ _inner: &'a trellis_rs::generated::Caller }}\nimpl<'a> Service<'a> {{ pub fn new(inner: &'a trellis_rs::generated::Caller) -> Self {{ Self {{ _inner: inner }} }} }}\n",
             participant.render_model.id,
-            string_literal(artifacts.participant().id()),
-            string_literal(&artifacts.participant_digest()?),
-            string_literal(&artifacts.participant_needs_digest()?),
-            string_literal(&canonicalize_json(&artifacts.participant_value()?)?),
-            string_literal(&canonicalize_json(&artifacts.api_value()?)?),
-            string_literal(&artifacts.api_digest()?),
-        )
-        .replace("PARTICIPANT_ID", "CONTRACT_ID")
-        .replace("PARTICIPANT_JSON", "PARTICIPANT"));
+            string_literal(participant.participant.id()),
+            string_literal(&participant.digest),
+            string_literal(&resolved.needs().digest()?),
+            string_literal(&participant.canonical),
+            string_literal(&loaded.canonical),
+            string_literal(&loaded.digest),
+        ));
     }
 
     let owned_sdk_crate_name = owned_sdk_crate_name.expect("owned sdk crate required");
@@ -1797,14 +1776,14 @@ fn render_participant_owned_rs(
         String::new(),
         format!("use {} as sdk;", owned_crate_ident),
         String::new(),
-        "/// Reusable owned contract vocabulary for this participant.".to_string(),
-        "pub struct OwnedContract;".to_string(),
+        "/// Reusable owned participant vocabulary.".to_string(),
+        "pub struct OwnedParticipant;".to_string(),
         String::new(),
-        "impl OwnedContract {".to_string(),
-        "    pub const CONTRACT_ID: &'static str = crate::contract::CONTRACT_ID;".to_string(),
-        "    pub const CONTRACT_DIGEST: &'static str = crate::contract::CONTRACT_DIGEST;".to_string(),
-        "    pub const PARTICIPANT: &'static str = crate::contract::PARTICIPANT;".to_string(),
-        "    pub const PARTICIPANT_NEEDS_DIGEST: &'static str = crate::contract::PARTICIPANT_NEEDS_DIGEST;".to_string(),
+        "impl OwnedParticipant {".to_string(),
+        "    pub const PARTICIPANT_ID: &'static str = crate::participant::PARTICIPANT_ID;".to_string(),
+        "    pub const PARTICIPANT_DIGEST: &'static str = crate::participant::PARTICIPANT_DIGEST;".to_string(),
+        "    pub const PARTICIPANT: &'static str = crate::participant::PARTICIPANT;".to_string(),
+        "    pub const PARTICIPANT_NEEDS_DIGEST: &'static str = crate::participant::PARTICIPANT_NEEDS_DIGEST;".to_string(),
         "    pub const API_JSON: &'static str = sdk::API_JSON;".to_string(),
         "    pub const API_DIGEST: &'static str = sdk::API_DIGEST;".to_string(),
         "}".to_string(),
@@ -1873,7 +1852,7 @@ fn render_participant_owned_rs(
     }
     lines.push("}".to_string());
     lines.push(String::new());
-    if participant.render_model.kind == ContractKind::Service
+    if participant.render_model.kind == ParticipantKind::Service
         && !loaded.render_model.events.is_empty()
     {
         lines.push("/// Cloneable typed publisher for events owned by this service.".to_string());
@@ -1893,7 +1872,7 @@ fn render_participant_owned_rs(
         lines.push("}".to_string());
         lines.push(String::new());
     }
-    if participant.render_model.kind == ContractKind::Service
+    if participant.render_model.kind == ParticipantKind::Service
         && (!public_rpc_keys(loaded).is_empty()
             || !loaded.render_model.operations.is_empty()
             || !loaded.render_model.events.is_empty()
@@ -1946,16 +1925,16 @@ fn render_participant_owned_rs(
         lines.push("}".to_string());
         lines.push(String::new());
     }
-    if participant.render_model.kind == ContractKind::Service {
+    if participant.render_model.kind == ParticipantKind::Service {
         render_participant_resource_surfaces(participant, &mut lines);
     }
     Ok(format!("{}\n", lines.join("\n")))
 }
 
-fn render_participant_resource_surfaces(loaded: &LoadedParticipant, lines: &mut Vec<String>) {
+fn render_participant_resource_surfaces(loaded: &ParticipantInput, lines: &mut Vec<String>) {
     if !loaded.render_model.resources.kv.is_empty() {
         lines.extend([
-            "/// Contract-declared key-value resources.".to_string(),
+            "/// Participant-declared key-value resources.".to_string(),
             "pub struct Kv<'a> { service: &'a crate::ConnectedService }".to_string(),
             "impl crate::ConnectedService {".to_string(),
             "    /// Access contract-declared key-value resources.".to_string(),
@@ -1973,7 +1952,7 @@ fn render_participant_resource_surfaces(loaded: &LoadedParticipant, lines: &mut 
 
     if !loaded.render_model.resources.store.is_empty() {
         lines.extend([
-            "/// Contract-declared object-store resources.".to_string(),
+            "/// Participant-declared object-store resources.".to_string(),
             "pub struct Store<'a> { service: &'a crate::ConnectedService }".to_string(),
             "impl crate::ConnectedService {".to_string(),
             "    /// Access contract-declared object-store resources.".to_string(),
@@ -1990,10 +1969,7 @@ fn render_participant_resource_surfaces(loaded: &LoadedParticipant, lines: &mut 
     }
 }
 
-fn render_participant_owned_provider_surface(
-    loaded: &trellis_contracts::LoadedApi,
-    lines: &mut Vec<String>,
-) {
+fn render_participant_owned_provider_surface(loaded: &ApiInput, lines: &mut Vec<String>) {
     lines.extend([
         "impl crate::ConnectedService {".to_string(),
         "    pub fn handle(&mut self) -> ServiceHandle<'_> { ServiceHandle { service: self } }"
@@ -2114,7 +2090,7 @@ fn render_participant_owned_provider_surface(
     }
 }
 
-fn render_participant_state_rs(loaded: &LoadedParticipant) -> String {
+fn render_participant_state_rs(loaded: &ParticipantInput) -> String {
     let mut renderer = TypeRenderer::default();
     let mut stores = loaded.render_model.state.iter().collect::<Vec<_>>();
     stores.sort_by(|left, right| left.0.cmp(right.0));
@@ -2194,7 +2170,7 @@ fn render_participant_state_rs(loaded: &LoadedParticipant) -> String {
             .get(&store.schema.schema)
             .expect("state schema type name");
         match &store.kind {
-            trellis_contracts::ContractStateKind::Value => {
+            StateKind::Value => {
                 lines.push(format!("    /// Access the `{name}` value state store."));
                 lines.push(format!("    pub fn {method_name}(&self) -> trellis_rs::generated::ValueStateStore<'a, trellis_rs::generated::Caller, {ty}> {{"));
                 lines.push(format!(
@@ -2203,7 +2179,7 @@ fn render_participant_state_rs(loaded: &LoadedParticipant) -> String {
                 ));
                 lines.push("    }".to_string());
             }
-            trellis_contracts::ContractStateKind::Map => {
+            StateKind::Map => {
                 lines.push(format!("    /// Access the `{name}` map state store."));
                 lines.push(format!("    pub fn {method_name}(&self) -> trellis_rs::generated::MapStateStore<'a, trellis_rs::generated::Caller, {ty}> {{"));
                 lines.push(format!(
@@ -2398,7 +2374,7 @@ fn render_participant_use_alias_rs(mapping: &ValidatedParticipantAlias) -> Strin
 
 fn render_api_rs(
     opts: &GenerateRustSdkOpts,
-    loaded: &trellis_contracts::LoadedApi,
+    loaded: &ApiInput,
     artifact_canonical: &str,
     artifact_digest: &str,
 ) -> String {
@@ -2460,7 +2436,7 @@ fn normalize_relative_path_string(path: String) -> String {
     format!("./{path}")
 }
 
-fn render_types_rs(loaded: &trellis_contracts::LoadedApi) -> String {
+fn render_types_rs(loaded: &ApiInput) -> String {
     let mut renderer = TypeRenderer::default();
     let mut lines = vec![format!(
         "//! Shared request and response types for `{}`.",
@@ -2581,7 +2557,7 @@ fn render_types_rs(loaded: &trellis_contracts::LoadedApi) -> String {
     format!("{}\n", lines.join("\n"))
 }
 
-fn render_rpc_rs(loaded: &trellis_contracts::LoadedApi) -> String {
+fn render_rpc_rs(loaded: &ApiInput) -> String {
     let mut lines = vec![
         format!(
             "//! Typed RPC descriptors for `{}`.",
@@ -2713,7 +2689,7 @@ fn render_rpc_rs(loaded: &trellis_contracts::LoadedApi) -> String {
     format!("{}\n", lines.join("\n"))
 }
 
-fn render_events_rs(loaded: &trellis_contracts::LoadedApi) -> String {
+fn render_events_rs(loaded: &ApiInput) -> String {
     let mut lines = vec![
         format!(
             "//! Typed event descriptors for `{}`.",
@@ -2771,7 +2747,7 @@ fn render_events_rs(loaded: &trellis_contracts::LoadedApi) -> String {
     format!("{}\n", lines.join("\n"))
 }
 
-fn render_feeds_rs(loaded: &trellis_contracts::LoadedApi) -> String {
+fn render_feeds_rs(loaded: &ApiInput) -> String {
     let mut lines = vec![
         format!(
             "//! Typed feed descriptors for `{}`.",
@@ -2827,7 +2803,7 @@ fn render_feeds_rs(loaded: &trellis_contracts::LoadedApi) -> String {
     format!("{}\n", lines.join("\n"))
 }
 
-fn render_operations_rs(loaded: &trellis_contracts::LoadedApi) -> String {
+fn render_operations_rs(loaded: &ApiInput) -> String {
     let mut lines = vec![format!(
         "//! Typed operation descriptors for `{}`.",
         loaded.render_model.id
@@ -3089,7 +3065,7 @@ fn render_operations_rs(loaded: &trellis_contracts::LoadedApi) -> String {
     format!("{}\n", lines.join("\n"))
 }
 
-fn render_participant_job_descriptors_rs(loaded: &LoadedParticipant) -> String {
+fn render_participant_job_descriptors_rs(loaded: &ParticipantInput) -> String {
     let mut lines = vec![
         format!(
             "//! Typed jobs descriptors for `{}`.",
@@ -3244,7 +3220,7 @@ fn render_participant_job_descriptors_rs(loaded: &LoadedParticipant) -> String {
     format!("{}\n", lines.join("\n"))
 }
 
-fn render_client_rs(loaded: &trellis_contracts::LoadedApi) -> String {
+fn render_client_rs(loaded: &ApiInput) -> String {
     let client_name = format!("{}Client", sdk_stem_pascal(loaded));
     let mut lines = vec![
         format!(
@@ -3332,7 +3308,7 @@ fn grouped_keys<'a, T>(
     groups
 }
 
-fn public_rpc_keys(loaded: &trellis_contracts::LoadedApi) -> Vec<&str> {
+fn public_rpc_keys(loaded: &ApiInput) -> Vec<&str> {
     loaded
         .render_model
         .rpc
@@ -3341,9 +3317,7 @@ fn public_rpc_keys(loaded: &trellis_contracts::LoadedApi) -> Vec<&str> {
         .collect()
 }
 
-fn grouped_public_rpc_keys(
-    loaded: &trellis_contracts::LoadedApi,
-) -> std::collections::BTreeMap<String, Vec<&str>> {
+fn grouped_public_rpc_keys(loaded: &ApiInput) -> std::collections::BTreeMap<String, Vec<&str>> {
     let mut groups = std::collections::BTreeMap::<String, Vec<&str>>::new();
     for key in public_rpc_keys(loaded) {
         groups
@@ -3354,7 +3328,7 @@ fn grouped_public_rpc_keys(
     groups
 }
 
-fn render_client_rpc_surface(loaded: &trellis_contracts::LoadedApi, lines: &mut Vec<String>) {
+fn render_client_rpc_surface(loaded: &ApiInput, lines: &mut Vec<String>) {
     lines.extend([
         "/// Typed RPC surface.".to_string(),
         "pub struct Rpc<'a> { pub(crate) _inner: &'a trellis_rs::generated::Caller }".to_string(),
@@ -3424,7 +3398,7 @@ fn render_client_rpc_surface(loaded: &trellis_contracts::LoadedApi, lines: &mut 
     }
 }
 
-fn render_client_event_surface(loaded: &trellis_contracts::LoadedApi, lines: &mut Vec<String>) {
+fn render_client_event_surface(loaded: &ApiInput, lines: &mut Vec<String>) {
     lines.extend([
         "/// Typed event surface.".to_string(),
         "pub struct Event<'a> { pub(crate) _inner: &'a trellis_rs::generated::Caller }".to_string(),
@@ -3490,7 +3464,7 @@ fn render_client_event_surface(loaded: &trellis_contracts::LoadedApi, lines: &mu
     }
 }
 
-fn render_client_feed_surface(loaded: &trellis_contracts::LoadedApi, lines: &mut Vec<String>) {
+fn render_client_feed_surface(loaded: &ApiInput, lines: &mut Vec<String>) {
     lines.extend([
         "/// Typed feed surface.".to_string(),
         "pub struct Feed<'a> { pub(crate) _inner: &'a trellis_rs::generated::Caller }".to_string(),
@@ -3533,7 +3507,7 @@ fn render_client_feed_surface(loaded: &trellis_contracts::LoadedApi, lines: &mut
     }
 }
 
-fn render_client_operation_surface(loaded: &trellis_contracts::LoadedApi, lines: &mut Vec<String>) {
+fn render_client_operation_surface(loaded: &ApiInput, lines: &mut Vec<String>) {
     lines.extend([
         "/// Typed operation surface.".to_string(),
         "pub struct Operation<'a> { pub(crate) _inner: &'a trellis_rs::generated::Caller }"
@@ -4109,7 +4083,11 @@ fn string_enum_values(schema: &serde_json::Value) -> Option<Vec<&str>> {
         if is_null_schema(variant) {
             continue;
         }
-        values.extend(string_enum_values(variant)?);
+        for value in string_enum_values(variant)? {
+            if !values.contains(&value) {
+                values.push(value);
+            }
+        }
     }
     (!values.is_empty()).then_some(values)
 }
@@ -4308,11 +4286,11 @@ fn string_literal(value: &str) -> String {
     serde_json::to_string(value).expect("string literal")
 }
 
-fn manifest_display_name(loaded: &trellis_contracts::LoadedApi) -> String {
+fn manifest_display_name(loaded: &ApiInput) -> String {
     loaded.render_model.display_name.clone()
 }
 
-fn sdk_stem_pascal(loaded: &trellis_contracts::LoadedApi) -> String {
+fn sdk_stem_pascal(loaded: &ApiInput) -> String {
     sdk_stem_from_contract_id_pascal(&loaded.render_model.id)
 }
 
@@ -4328,10 +4306,7 @@ fn crate_ident(crate_name: &str) -> String {
     crate_name.replace('-', "_")
 }
 
-fn resolve_schema_ref<'a>(
-    loaded: &'a trellis_contracts::LoadedApi,
-    schema_name: &str,
-) -> &'a serde_json::Value {
+fn resolve_schema_ref<'a>(loaded: &'a ApiInput, schema_name: &str) -> &'a serde_json::Value {
     loaded
         .render_model
         .schemas
@@ -4339,10 +4314,7 @@ fn resolve_schema_ref<'a>(
         .unwrap_or_else(|| panic!("missing schema '{schema_name}' in manifest"))
 }
 
-fn schema_value_matches_types(
-    loaded: &trellis_contracts::LoadedApi,
-    schema_name: &str,
-) -> serde_json::Value {
+fn schema_value_matches_types(loaded: &ApiInput, schema_name: &str) -> serde_json::Value {
     let mut schema = resolve_schema_ref(loaded, schema_name).clone();
     inline_local_schema_refs(&mut schema, &loaded.render_model.schemas);
     schema
@@ -4378,7 +4350,7 @@ fn inline_local_schema_refs(
     }
 }
 
-fn declared_error_payload_type(loaded: &trellis_contracts::LoadedApi, error_type: &str) -> String {
+fn declared_error_payload_type(loaded: &ApiInput, error_type: &str) -> String {
     if error_type == "AuthError" {
         return "trellis_rs::generated::AuthErrorPayload".to_string();
     }
@@ -4392,7 +4364,7 @@ fn declared_error_payload_type(loaded: &trellis_contracts::LoadedApi, error_type
         .unwrap_or_else(|| "trellis_rs::generated::DeclaredErrorPayload".to_string())
 }
 
-fn rpc_call_error_type(loaded: &trellis_contracts::LoadedApi, key: &str, module: &str) -> String {
+fn rpc_call_error_type(loaded: &ApiInput, key: &str, module: &str) -> String {
     if loaded.render_model.rpc[key]
         .errors
         .as_ref()
@@ -4424,7 +4396,7 @@ fn is_empty_object_schema(schema: &serde_json::Value) -> bool {
     properties_empty && required_empty
 }
 
-fn render_lib_rs(loaded: &trellis_contracts::LoadedApi) -> String {
+fn render_lib_rs(loaded: &ApiInput) -> String {
     let client_name = format!("{}Client", sdk_stem_pascal(loaded));
     let operations_reexport = if loaded.render_model.operations.is_empty() {
         String::new()
@@ -4455,7 +4427,7 @@ fn key_to_schema_constant_base(key: &str) -> String {
     key_to_snake(key).to_uppercase()
 }
 
-fn render_schemas_rs(loaded: &trellis_contracts::LoadedApi) -> String {
+fn render_schemas_rs(loaded: &ApiInput) -> String {
     use serde_json::Value;
 
     let mut lines = vec![
@@ -4646,8 +4618,6 @@ mod tests {
 
         assert!(out_dir.join("api.json").is_file());
         assert!(out_dir.join("src/api.rs").is_file());
-        assert!(!out_dir.join("contract.json").exists());
-        assert!(!out_dir.join("src/contract.rs").exists());
         let api = fs::read_to_string(out_dir.join("src/api.rs")).unwrap();
         assert!(api.contains("pub const API_ID"));
         fs::remove_dir_all(out_dir).unwrap();
@@ -4698,52 +4668,32 @@ mod tests {
         )
         .unwrap();
 
-        let manifest = trellis_contracts::ApiBuilder::new(manifest)
-            .build()
-            .unwrap()
-            .normalized_value()
-            .unwrap();
-        fs::write(
-            &manifest_path,
-            trellis_contracts::canonicalize_json(&manifest).unwrap(),
-        )
-        .unwrap();
+        let manifest = parse_api(&manifest).unwrap().normalized_value().unwrap();
+        fs::write(&manifest_path, canonicalize_json(&manifest).unwrap()).unwrap();
         manifest_path
     }
 
     fn write_remote_manifest(root: &Path, file_name: &str, manifest: serde_json::Value) -> PathBuf {
         let manifest_path = root.join(file_name);
-        let manifest = trellis_contracts::ApiBuilder::new(manifest)
-            .build()
-            .unwrap()
-            .normalized_value()
-            .unwrap();
-        fs::write(
-            &manifest_path,
-            trellis_contracts::canonicalize_json(&manifest).unwrap(),
-        )
-        .unwrap();
+        let manifest = parse_api(&manifest).unwrap().normalized_value().unwrap();
+        fs::write(&manifest_path, canonicalize_json(&manifest).unwrap()).unwrap();
         manifest_path
     }
 
     fn write_participant(root: &Path, file_name: &str, participant: serde_json::Value) -> PathBuf {
         let path = root.join(file_name);
-        fs::write(
-            &path,
-            trellis_contracts::canonicalize_json(&participant).unwrap(),
-        )
-        .unwrap();
-        trellis_contracts::load_participant_source(&path).unwrap();
+        fs::write(&path, canonicalize_json(&participant).unwrap()).unwrap();
+        load_participant_source(&path).unwrap();
         path
     }
 
     fn self_participant_value(api_path: &Path, kind: &str) -> serde_json::Value {
-        let api = trellis_contracts::load_sdk_source(api_path).unwrap();
+        let api = load_sdk_source(api_path).unwrap();
         let mut participant = json!({
             "format": "trellis.participant.v1",
             "id": api.render_model.id,
             "displayName": api.render_model.display_name,
-            "description": api.render_model.description,
+            "description": api.value["description"],
             "kind": kind,
             "implements": {
                 "self": {"api": api.render_model.id, "apiDigest": api.digest}
@@ -4772,7 +4722,7 @@ mod tests {
         api_path: &Path,
         selections: serde_json::Value,
     ) {
-        let api = trellis_contracts::load_sdk_source(api_path).unwrap();
+        let api = load_sdk_source(api_path).unwrap();
         let mut used = selections.as_object().cloned().unwrap();
         used.insert("api".to_string(), json!(api.render_model.id));
         used.insert("apiDigest".to_string(), json!(api.digest));
@@ -4826,7 +4776,6 @@ mod tests {
         assert!(cargo.contains("description = \"Generated Rust SDK crate for trellis-sdk-core.\""));
         assert!(cargo.contains("repository = \"https://github.com/qlever-llc/trellis\""));
         assert!(cargo.contains("trellis-rs = \"0.1.0\""));
-        assert!(cargo.contains("trellis-contracts = \"0.1.0\""));
         assert!(cargo.contains("publish = false"));
         assert!(!cargo.contains("trellis-service"));
         assert!(!cargo.contains("path ="));
@@ -4836,7 +4785,6 @@ mod tests {
     fn cargo_toml_uses_workspace_member_paths_for_local_runtime_deps() {
         let repo_root = unique_temp_dir("workspace-runtime-paths");
         fs::create_dir_all(repo_root.join("rust/crates/runtime-client")).unwrap();
-        fs::create_dir_all(repo_root.join("rust/crates/runtime-contracts")).unwrap();
         fs::create_dir_all(repo_root.join("rust/crates/runtime-service")).unwrap();
         fs::create_dir_all(repo_root.join("rust/crates/sdk-generator")).unwrap();
         fs::write(
@@ -4845,7 +4793,6 @@ mod tests {
                 "[workspace]\n",
                 "members = [\n",
                 "  \"crates/runtime-client\",\n",
-                "  \"crates/runtime-contracts\",\n",
                 "  \"crates/runtime-service\",\n",
                 "  \"crates/sdk-generator\",\n",
                 "]\n",
@@ -4855,11 +4802,6 @@ mod tests {
         fs::write(
             repo_root.join("rust/crates/runtime-client/Cargo.toml"),
             "[package]\nname = \"trellis-rs\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
-        )
-        .unwrap();
-        fs::write(
-            repo_root.join("rust/crates/runtime-contracts/Cargo.toml"),
-            "[package]\nname = \"trellis-contracts\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
         )
         .unwrap();
         fs::write(
@@ -4893,12 +4835,6 @@ mod tests {
         assert!(cargo.contains(
             &repo_root
                 .join("rust/crates/runtime-client")
-                .display()
-                .to_string()
-        ));
-        assert!(cargo.contains(
-            &repo_root
-                .join("rust/crates/runtime-contracts")
                 .display()
                 .to_string()
         ));
@@ -5018,7 +4954,7 @@ mod tests {
     }
 
     #[test]
-    fn generated_sdk_uses_contract_modules_shape() {
+    fn generated_sdk_uses_api_modules_shape() {
         let out_dir = unique_temp_dir("sdk-shape");
         fs::create_dir_all(&out_dir).unwrap();
         let manifest_path = write_sample_manifest(&out_dir);
@@ -5346,8 +5282,8 @@ mod tests {
                 "schemas": {
                     "CatalogInput": {"type":"object","properties":{},"required":[]},
                     "CatalogOutput": {"type":"object","properties":{},"required":[]},
-                    "ContractGetInput": {"type":"object","properties":{"digest":{"type":"string"}},"required":["digest"]},
-                    "ContractGetOutput": {"type":"object","properties":{},"required":[]}
+                    "FixtureGetInput": {"type":"object","properties":{"digest":{"type":"string"}},"required":["digest"]},
+                    "FixtureGetOutput": {"type":"object","properties":{},"required":[]}
                 },
                 "rpc": {
                     "Core.Info": {
@@ -5358,8 +5294,8 @@ mod tests {
                     },
                     "Core.Api.Get": {
                         "version":"v1",
-                        "input":{"schema":"ContractGetInput"},
-                        "output":{"schema":"ContractGetOutput"}
+                        "input":{"schema":"FixtureGetInput"},
+                        "output":{"schema":"FixtureGetOutput"}
                     }
                 }
             }),
@@ -5469,14 +5405,13 @@ mod tests {
         let trellis_md = fs::read_to_string(out_dir.join("facade/TRELLIS.md")).unwrap();
         let lib_rs = fs::read_to_string(out_dir.join("facade/src/lib.rs")).unwrap();
         let connect_rs = fs::read_to_string(out_dir.join("facade/src/connect.rs")).unwrap();
-        let contract_rs = fs::read_to_string(out_dir.join("facade/src/contract.rs")).unwrap();
+        let participant_rs = fs::read_to_string(out_dir.join("facade/src/participant.rs")).unwrap();
         let owned_rs = fs::read_to_string(out_dir.join("facade/src/owned.rs")).unwrap();
 
         assert!(!cargo_toml.contains("build = \"build.rs\""));
         assert!(!cargo_toml.contains("\ntrellis-codegen-rust ="));
         assert!(cargo_toml.contains("serde = { version = \"1.0\", features = [\"derive\"] }"));
         assert!(cargo_toml.contains("trellis-rs = { path = "));
-        assert!(cargo_toml.contains("trellis-contracts = { path = "));
         assert!(!cargo_toml.contains("trellis-service"));
         assert!(cargo_toml.contains("futures-util = \"0.3\""));
         assert!(cargo_toml.contains("tokio = { version = \"1\", features = [\"io-util\"] }"));
@@ -5491,14 +5426,13 @@ mod tests {
         assert!(lib_rs.contains("ConnectedService"));
         assert!(lib_rs.contains("ServiceConnectOptions"));
         assert!(lib_rs.contains("ServiceRuntimeError"));
-        assert!(connect_rs.contains("pub struct Contract"));
-        assert!(
-            connect_rs.contains("impl trellis_rs::service::GeneratedServiceContract for Contract")
-        );
+        assert!(connect_rs.contains("pub struct Participant"));
         assert!(connect_rs
-            .contains("const PARTICIPANT_ID: &'static str = crate::contract::CONTRACT_ID",));
+            .contains("impl trellis_rs::service::GeneratedServiceParticipant for Participant"));
+        assert!(connect_rs
+            .contains("const PARTICIPANT_ID: &'static str = crate::participant::PARTICIPANT_ID",));
         assert!(connect_rs.contains("pub struct ConnectedService"));
-        assert!(connect_rs.contains("trellis_rs::service::ConnectedServiceRuntime<Contract>"));
+        assert!(connect_rs.contains("trellis_rs::service::ConnectedServiceRuntime<Participant>"));
         assert!(connect_rs.contains("pub fn generated_handle(&self)"));
         assert!(!connect_rs.contains("pub(crate) fn runtime(&self)"));
         assert!(!connect_rs
@@ -5508,7 +5442,7 @@ mod tests {
             !connect_rs.contains("pub fn new(inner: trellis_rs::service::ConnectedServiceRuntime")
         );
         assert!(connect_rs.contains("pub use trellis_rs::service::ServiceConnectOptions"));
-        assert!(connect_rs.contains("contract evidence comes from [`Contract`]"));
+        assert!(connect_rs.contains("participant evidence comes from [`Participant`]"));
         assert!(!connect_rs.contains("opts.participant_"));
         assert!(!connect_rs.contains("opts.api_"));
         assert!(!connect_rs.contains("opts.referenced_api_artifacts"));
@@ -5517,9 +5451,9 @@ mod tests {
         assert!(connect_rs
             .contains("Result<ConnectedService, trellis_rs::service::ServiceRuntimeError>"));
         assert!(!connect_rs.contains("connect_user"));
-        assert!(contract_rs.contains("pub const CONTRACT_DIGEST: &str = "));
-        assert!(contract_rs.contains("pub const PARTICIPANT: &str = "));
-        assert!(contract_rs.contains("pub const API_JSON: &str = "));
+        assert!(participant_rs.contains("pub const PARTICIPANT_DIGEST: &str = "));
+        assert!(participant_rs.contains("pub const PARTICIPANT: &str = "));
+        assert!(participant_rs.contains("pub const API_JSON: &str = "));
         assert!(owned_rs.contains("impl crate::ConnectedService"));
         assert!(owned_rs.contains("pub fn handle(&mut self) -> ServiceHandle<'_>"));
         assert!(owned_rs.contains("pub fn rpc(&mut self) -> ProviderRpc<'_>"));
@@ -5796,21 +5730,22 @@ where
             assert!(!connect.contains("connect_service"));
             if kind == "device" {
                 let lib = fs::read_to_string(facade.join("src/lib.rs")).unwrap();
-                assert!(lib.contains("ConnectedClient, Contract"));
+                assert!(lib.contains("ConnectedClient, Participant"));
                 assert!(connect.contains(
                     "/// Exact generated participant and API evidence used for device bootstrap."
                 ));
-                assert!(connect
-                    .contains("impl trellis_rs::service::GeneratedServiceContract for Contract"));
-                assert!(connect.contains("DeviceConnectOptions::<Contract>::new"));
-                assert!(connect.contains("DeviceActivationOptions<'_, Contract>"));
+                assert!(connect.contains(
+                    "impl trellis_rs::service::GeneratedServiceParticipant for Participant"
+                ));
+                assert!(connect.contains("DeviceConnectOptions::<Participant>::new"));
+                assert!(connect.contains("DeviceActivationOptions<'_, Participant>"));
                 assert!(connect.contains("options.into_connect_options(session)?"));
                 assert!(!connect.contains("opts.participant_needs_digest"));
                 assert!(!connect.contains("session_key_seed_base64url"));
             } else if matches!(kind, "app" | "agent") {
                 assert!(connect.contains("\"installation:{}:{}:{}\""));
-                assert!(connect.contains("crate::contract::CONTRACT_ID"));
-                assert!(connect.contains("crate::contract::CONTRACT_DIGEST"));
+                assert!(connect.contains("crate::participant::PARTICIPANT_ID"));
+                assert!(connect.contains("crate::participant::PARTICIPANT_DIGEST"));
                 assert!(connect.contains("canonical_trellis_origin(opts.trellis_url)"));
             }
 

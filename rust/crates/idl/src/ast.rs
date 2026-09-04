@@ -29,7 +29,8 @@ pub(crate) struct Api {
     pub docs: Option<Docs>,
     pub schemas: BTreeMap<String, Spanned<SchemaDecl>>,
     pub exports: Vec<Spanned<String>>,
-    pub errors: BTreeMap<String, Spanned<()>>,
+    pub capabilities: BTreeMap<String, Spanned<Capability>>,
+    pub errors: BTreeMap<String, Spanned<ErrorDecl>>,
     pub rpcs: BTreeMap<String, Spanned<Surface>>,
     pub operations: BTreeMap<String, Spanned<Surface>>,
     pub events: BTreeMap<String, Spanned<Surface>>,
@@ -58,19 +59,37 @@ pub(crate) struct Field {
 
 #[derive(Clone, Debug)]
 pub(crate) enum Type {
+    Json,
     Named(String),
     String(Vec<Constraint>),
     Bool,
+    BoolLiteral(bool),
     Integer {
         unsigned: bool,
         constraints: Vec<Constraint>,
     },
     Number(Vec<Constraint>),
-    List(Box<Spanned<Type>>),
+    List {
+        member: Box<Spanned<Type>>,
+        constraints: Vec<Constraint>,
+    },
     Map(Box<Spanned<Type>>),
     Literal(String),
     Null,
     Union(Vec<Spanned<Type>>),
+}
+
+#[derive(Debug, Default)]
+pub(crate) struct Capability {
+    pub display_name: Option<Spanned<String>>,
+    pub description: Option<Spanned<String>>,
+    pub consequence: Option<Spanned<String>>,
+}
+
+#[derive(Debug, Default)]
+pub(crate) struct ErrorDecl {
+    pub code: Option<Spanned<String>>,
+    pub schema: Option<Spanned<String>>,
 }
 
 #[derive(Clone, Debug)]
@@ -92,10 +111,13 @@ pub(crate) struct Surface {
     pub output: Option<Spanned<String>>,
     pub progress: Option<Spanned<String>>,
     pub event: Option<Spanned<String>>,
+    pub params: Vec<String>,
     pub errors: Vec<Spanned<String>>,
     pub transfer: Option<Transfer>,
     pub cancellable: bool,
     pub capabilities: BTreeMap<String, Vec<String>>,
+    pub subject: Option<Spanned<String>>,
+    pub class: Option<Spanned<String>>,
     pub docs: Option<Docs>,
 }
 
@@ -111,6 +133,7 @@ pub(crate) struct Participant {
     pub kind: String,
     pub implements: Vec<Spanned<String>>,
     pub uses: BTreeMap<String, Spanned<ApiUse>>,
+    pub schemas: BTreeMap<String, Spanned<SchemaDecl>>,
     pub state: BTreeMap<String, Spanned<State>>,
     pub stores: BTreeMap<String, Spanned<Resource>>,
     pub kv: BTreeMap<String, Spanned<Resource>>,
@@ -151,6 +174,7 @@ pub(crate) struct Resource {
     pub ttl_ms: Option<u64>,
     pub max_object_bytes: Option<u64>,
     pub max_total_bytes: Option<u64>,
+    pub max_value_bytes: Option<u64>,
     pub docs: Option<Docs>,
 }
 

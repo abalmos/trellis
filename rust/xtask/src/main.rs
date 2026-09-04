@@ -104,29 +104,129 @@ const TRELLIS_PROJECTS: &[&str] = &[
     "rust/crates/eventlog-runtime",
     "rust/crates/jobs-runtime",
     "rust/crates/runtime",
-    "ts/packages/trellis",
+    "ts/packages/trellis-test",
     "web/contracts/console",
     "web/contracts/portal",
-    "ts/packages/trellis-test",
-    "ts/packages/trellis-svelte",
-    "ts/integration",
-    "ts/browser",
-    "demos/ts/service",
-    "demos/ts/device",
-    "demos/app",
-    "demos/rust",
 ];
 
 fn run_install() -> Result<()> {
     let root = repo_root()?;
     let runtime = tokio::runtime::Runtime::new().into_diagnostic()?;
     for project in TRELLIS_PROJECTS {
-        runtime.block_on(trellis_cli::package::install(
-            trellis_cli::cli::OutputFormat::Text,
-            &trellis_cli::cli::ProjectRootArgs {
-                root: root.join(project),
+        let project = root.join(project);
+        if project.join("trellis.lock").is_file() {
+            runtime.block_on(trellis_cli::package::install(
+                trellis_cli::cli::OutputFormat::Text,
+                &trellis_cli::cli::ProjectRootArgs { root: project },
+            ))?;
+        } else {
+            trellis_cli::generate::generate_project(&project)?;
+        }
+    }
+    for (project, stem, module) in [
+        ("rust/crates/runtime", "auth", "auth"),
+        ("rust/crates/eventlog-runtime", "eventlog", "eventlog"),
+        ("rust/crates/runtime", "health", "health"),
+        ("rust/crates/jobs-runtime", "jobs", "jobs"),
+        ("rust/crates/runtime", "state", "state"),
+    ] {
+        let source = root
+            .join(project)
+            .join(".trellis/rust/apis")
+            .join(stem)
+            .join("src");
+        let target = root
+            .join("rust/crates/trellis/src/internal_sdk/generated")
+            .join(module);
+        if target.exists() {
+            std::fs::remove_dir_all(&target).into_diagnostic()?;
+        }
+        copy_tree(&source, &target)?;
+        for entry in std::fs::read_dir(&target).into_diagnostic()? {
+            let path = entry.into_diagnostic()?.path();
+            if path.extension().and_then(|extension| extension.to_str()) != Some("rs") {
+                continue;
+            }
+            let source = std::fs::read_to_string(&path).into_diagnostic()?;
+            let embedded = source
+                .replace("crate::types", "super::types")
+                .replace("crate::schemas", "super::schemas")
+                .replace("crate::rpc", "super::rpc")
+                .replace("crate::operations", "super::operations")
+                .replace("crate::events", "super::events")
+                .replace("crate::feeds", "super::feeds");
+            std::fs::write(path, embedded).into_diagnostic()?;
+        }
+    }
+    for (project, api_id, module) in [
+        ("rust/crates/runtime", "trellis.auth@v1", "auth"),
+        (
+            "rust/crates/eventlog-runtime",
+            "trellis.eventlog@v1",
+            "eventlog",
+        ),
+        ("rust/crates/runtime", "trellis.health@v1", "health"),
+        ("rust/crates/jobs-runtime", "trellis.jobs@v1", "jobs"),
+        ("rust/crates/runtime", "trellis.state@v1", "state"),
+    ] {
+        let out_dir = root
+            .join("ts/packages/trellis/internal_sdk/generated")
+            .join(module);
+        if out_dir.exists() {
+            std::fs::remove_dir_all(&out_dir).into_diagnostic()?;
+        }
+        trellis_codegen_ts::generate_ts_sdk(&trellis_codegen_ts::GenerateTsSdkOpts {
+            api_path: root
+                .join(project)
+                .join(".trellis/artifacts/apis")
+                .join(format!("{api_id}.json")),
+            out_dir: out_dir.clone(),
+            package_name: format!("@qlever-llc/trellis-internal-{module}"),
+            package_version: env!("CARGO_PKG_VERSION").to_owned(),
+            runtime_deps: trellis_codegen_ts::TsRuntimeDeps {
+                source: trellis_codegen_ts::TsRuntimeSource::Local,
+                version: env!("CARGO_PKG_VERSION").to_owned(),
+                repo_root: Some(root.to_path_buf()),
             },
-        ))?;
+        })
+        .map_err(|error| miette::miette!(error.to_string()))?;
+        let status = Command::new("deno")
+            .current_dir(&root)
+            .args(["fmt", "-c", "ts/deno.json"])
+            .arg(&out_dir)
+            .status()
+            .into_diagnostic()
+            .wrap_err("failed to format generated internal TypeScript SDK")?;
+        if !status.success() {
+            return Err(miette::miette!(
+                "failed to format generated internal TypeScript SDK {}",
+                out_dir.display()
+            ));
+        }
+    }
+    std::fs::copy(
+        root.join("rust/crates/runtime/.trellis/artifacts/participants/trellis.auth-runtime.json"),
+        root.join("rust/crates/runtime-apis/src/trellis.auth-runtime.json"),
+    )
+    .into_diagnostic()?;
+    std::fs::copy(
+        root.join("rust/crates/runtime/.trellis/artifacts/apis/trellis.state@v1.json"),
+        root.join("rust/crates/runtime-apis/src/trellis.state@v1.json"),
+    )
+    .into_diagnostic()?;
+    Ok(())
+}
+
+fn copy_tree(source: &Path, target: &Path) -> Result<()> {
+    std::fs::create_dir_all(target).into_diagnostic()?;
+    for entry in std::fs::read_dir(source).into_diagnostic()? {
+        let entry = entry.into_diagnostic()?;
+        let destination = target.join(entry.file_name());
+        if entry.file_type().into_diagnostic()?.is_dir() {
+            copy_tree(&entry.path(), &destination)?;
+        } else {
+            std::fs::copy(entry.path(), destination).into_diagnostic()?;
+        }
     }
     Ok(())
 }
@@ -253,7 +353,7 @@ fn run_build(args: &[String]) -> Result<()> {
 fn repo_root() -> Result<PathBuf> {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     for ancestor in manifest_dir.ancestors() {
-        if ancestor.join("rust/tools/generate/Cargo.toml").exists()
+        if ancestor.join("rust/crates/idl/Cargo.toml").exists()
             && ancestor.join("ts/deno.json").exists()
         {
             return Ok(ancestor.to_path_buf());

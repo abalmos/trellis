@@ -102,11 +102,173 @@ pub struct EventLogConsumersQueryRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub subject: Option<String>,
 }
+/// Generated schema type `EventLogConsumersQueryResponseConsumersItemManagedBy`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum EventLogConsumersQueryResponseConsumersItemManagedBy {
+    /// The `authority` wire value.
+    #[serde(rename = "authority")]
+    Authority,
+    /// The `platform` wire value.
+    #[serde(rename = "platform")]
+    Platform,
+    /// The `external` wire value.
+    #[serde(rename = "external")]
+    External,
+}
+impl EventLogConsumersQueryResponseConsumersItemManagedBy {
+    /// Return the contract wire value.
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::Authority => "authority",
+            Self::Platform => "platform",
+            Self::External => "external",
+        }
+    }
+}
+impl AsRef<str> for EventLogConsumersQueryResponseConsumersItemManagedBy {
+    fn as_ref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl std::fmt::Display for EventLogConsumersQueryResponseConsumersItemManagedBy {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(self.as_str())
+    }
+}
+impl PartialEq<&str> for EventLogConsumersQueryResponseConsumersItemManagedBy {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+impl PartialEq<EventLogConsumersQueryResponseConsumersItemManagedBy> for &str {
+    fn eq(&self, other: &EventLogConsumersQueryResponseConsumersItemManagedBy) -> bool {
+        *self == other.as_str()
+    }
+}
+/// Generated schema type `EventLogConsumersQueryResponseConsumersItemStatus`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum EventLogConsumersQueryResponseConsumersItemStatus {
+    /// The `current` wire value.
+    #[serde(rename = "current")]
+    Current,
+    /// The `processing` wire value.
+    #[serde(rename = "processing")]
+    Processing,
+    /// The `behind` wire value.
+    #[serde(rename = "behind")]
+    Behind,
+    /// The `saturated` wire value.
+    #[serde(rename = "saturated")]
+    Saturated,
+    /// The `inactive` wire value.
+    #[serde(rename = "inactive")]
+    Inactive,
+    /// The `failing` wire value.
+    #[serde(rename = "failing")]
+    Failing,
+    /// The `missing` wire value.
+    #[serde(rename = "missing")]
+    Missing,
+    /// The `orphaned` wire value.
+    #[serde(rename = "orphaned")]
+    Orphaned,
+}
+impl EventLogConsumersQueryResponseConsumersItemStatus {
+    /// Return the contract wire value.
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::Current => "current",
+            Self::Processing => "processing",
+            Self::Behind => "behind",
+            Self::Saturated => "saturated",
+            Self::Inactive => "inactive",
+            Self::Failing => "failing",
+            Self::Missing => "missing",
+            Self::Orphaned => "orphaned",
+        }
+    }
+}
+impl AsRef<str> for EventLogConsumersQueryResponseConsumersItemStatus {
+    fn as_ref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl std::fmt::Display for EventLogConsumersQueryResponseConsumersItemStatus {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(self.as_str())
+    }
+}
+impl PartialEq<&str> for EventLogConsumersQueryResponseConsumersItemStatus {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+impl PartialEq<EventLogConsumersQueryResponseConsumersItemStatus> for &str {
+    fn eq(&self, other: &EventLogConsumersQueryResponseConsumersItemStatus) -> bool {
+        *self == other.as_str()
+    }
+}
+/// Generated schema type `EventLogConsumersQueryResponseConsumersItem`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct EventLogConsumersQueryResponseConsumersItem {
+    /// The `ackPending` wire field.
+    #[serde(rename = "ackPending")]
+    pub ack_pending: i64,
+    /// The `ackWaitMs` wire field.
+    #[serde(rename = "ackWaitMs")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ack_wait_ms: Option<i64>,
+    /// The `consumerName` wire field.
+    #[serde(rename = "consumerName")]
+    pub consumer_name: String,
+    /// The `contractId` wire field.
+    #[serde(rename = "contractId")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub contract_id: Option<String>,
+    /// The `deploymentId` wire field.
+    #[serde(rename = "deploymentId")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub deployment_id: Option<String>,
+    /// The `filterSubjects` wire field.
+    #[serde(rename = "filterSubjects")]
+    pub filter_subjects: Vec<String>,
+    /// The `group` wire field.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub group: Option<String>,
+    /// The `managedBy` wire field.
+    #[serde(rename = "managedBy")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub managed_by: Option<EventLogConsumersQueryResponseConsumersItemManagedBy>,
+    /// The `maxDeliver` wire field.
+    #[serde(rename = "maxDeliver")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_deliver: Option<i64>,
+    /// The `oldestPendingAt` wire field.
+    #[serde(rename = "oldestPendingAt")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub oldest_pending_at: Option<String>,
+    /// The `oldestPendingEventId` wire field.
+    #[serde(rename = "oldestPendingEventId")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub oldest_pending_event_id: Option<String>,
+    /// The `pending` wire field.
+    pub pending: i64,
+    /// The `redelivered` wire field.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub redelivered: Option<i64>,
+    /// The `status` wire field.
+    pub status: EventLogConsumersQueryResponseConsumersItemStatus,
+    /// The `stream` wire field.
+    pub stream: String,
+    /// The `waitingPulls` wire field.
+    #[serde(rename = "waitingPulls")]
+    pub waiting_pulls: i64,
+}
 /// Generated schema type `EventLogConsumersQueryResponse`.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct EventLogConsumersQueryResponse {
     /// The `consumers` wire field.
-    pub consumers: Vec<Value>,
+    pub consumers: Vec<EventLogConsumersQueryResponseConsumersItem>,
     /// The `limit` wire field.
     pub limit: i64,
     /// The `offset` wire field.
@@ -549,11 +711,190 @@ pub struct EventLogQueryRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub window: Option<EventLogQueryRequestWindow>,
 }
+/// Generated schema type `EventLogQueryResponseEventsItemPublisherKind`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum EventLogQueryResponseEventsItemPublisherKind {
+    /// The `service` wire value.
+    #[serde(rename = "service")]
+    Service,
+    /// The `device` wire value.
+    #[serde(rename = "device")]
+    Device,
+    /// The `user` wire value.
+    #[serde(rename = "user")]
+    User,
+}
+impl EventLogQueryResponseEventsItemPublisherKind {
+    /// Return the contract wire value.
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::Service => "service",
+            Self::Device => "device",
+            Self::User => "user",
+        }
+    }
+}
+impl AsRef<str> for EventLogQueryResponseEventsItemPublisherKind {
+    fn as_ref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl std::fmt::Display for EventLogQueryResponseEventsItemPublisherKind {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(self.as_str())
+    }
+}
+impl PartialEq<&str> for EventLogQueryResponseEventsItemPublisherKind {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+impl PartialEq<EventLogQueryResponseEventsItemPublisherKind> for &str {
+    fn eq(&self, other: &EventLogQueryResponseEventsItemPublisherKind) -> bool {
+        *self == other.as_str()
+    }
+}
+/// Generated schema type `EventLogQueryResponseEventsItemResolution`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum EventLogQueryResponseEventsItemResolution {
+    /// The `resolved` wire value.
+    #[serde(rename = "resolved")]
+    Resolved,
+    /// The `unresolved` wire value.
+    #[serde(rename = "unresolved")]
+    Unresolved,
+    /// The `malformed` wire value.
+    #[serde(rename = "malformed")]
+    Malformed,
+}
+impl EventLogQueryResponseEventsItemResolution {
+    /// Return the contract wire value.
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::Resolved => "resolved",
+            Self::Unresolved => "unresolved",
+            Self::Malformed => "malformed",
+        }
+    }
+}
+impl AsRef<str> for EventLogQueryResponseEventsItemResolution {
+    fn as_ref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl std::fmt::Display for EventLogQueryResponseEventsItemResolution {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(self.as_str())
+    }
+}
+impl PartialEq<&str> for EventLogQueryResponseEventsItemResolution {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+impl PartialEq<EventLogQueryResponseEventsItemResolution> for &str {
+    fn eq(&self, other: &EventLogQueryResponseEventsItemResolution) -> bool {
+        *self == other.as_str()
+    }
+}
+/// Generated schema type `EventLogQueryResponseEventsItemVerificationStatus`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum EventLogQueryResponseEventsItemVerificationStatus {
+    /// The `verified` wire value.
+    #[serde(rename = "verified")]
+    Verified,
+}
+impl EventLogQueryResponseEventsItemVerificationStatus {
+    /// Return the contract wire value.
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::Verified => "verified",
+        }
+    }
+}
+impl AsRef<str> for EventLogQueryResponseEventsItemVerificationStatus {
+    fn as_ref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl std::fmt::Display for EventLogQueryResponseEventsItemVerificationStatus {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(self.as_str())
+    }
+}
+impl PartialEq<&str> for EventLogQueryResponseEventsItemVerificationStatus {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+impl PartialEq<EventLogQueryResponseEventsItemVerificationStatus> for &str {
+    fn eq(&self, other: &EventLogQueryResponseEventsItemVerificationStatus) -> bool {
+        *self == other.as_str()
+    }
+}
+/// Generated schema type `EventLogQueryResponseEventsItem`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct EventLogQueryResponseEventsItem {
+    /// The `eventId` wire field.
+    #[serde(rename = "eventId")]
+    pub event_id: String,
+    /// The `eventTime` wire field.
+    #[serde(rename = "eventTime")]
+    pub event_time: String,
+    /// The `headerCount` wire field.
+    #[serde(rename = "headerCount")]
+    pub header_count: i64,
+    /// The `ownerContractId` wire field.
+    #[serde(rename = "ownerContractId")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub owner_contract_id: Option<String>,
+    /// The `ownerEventName` wire field.
+    #[serde(rename = "ownerEventName")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub owner_event_name: Option<String>,
+    /// The `payloadSizeBytes` wire field.
+    #[serde(rename = "payloadSizeBytes")]
+    pub payload_size_bytes: i64,
+    /// The `publisherDeploymentId` wire field.
+    #[serde(rename = "publisherDeploymentId")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub publisher_deployment_id: Option<String>,
+    /// The `publisherInstanceId` wire field.
+    #[serde(rename = "publisherInstanceId")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub publisher_instance_id: Option<String>,
+    /// The `publisherKind` wire field.
+    #[serde(rename = "publisherKind")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub publisher_kind: Option<EventLogQueryResponseEventsItemPublisherKind>,
+    /// The `publisherParticipantDigest` wire field.
+    #[serde(rename = "publisherParticipantDigest")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub publisher_participant_digest: Option<String>,
+    /// The `publisherParticipantId` wire field.
+    #[serde(rename = "publisherParticipantId")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub publisher_participant_id: Option<String>,
+    /// The `resolution` wire field.
+    pub resolution: EventLogQueryResponseEventsItemResolution,
+    /// The `streamSequence` wire field.
+    #[serde(rename = "streamSequence")]
+    pub stream_sequence: i64,
+    /// The `subject` wire field.
+    pub subject: String,
+    /// The `traceId` wire field.
+    #[serde(rename = "traceId")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub trace_id: Option<String>,
+    /// The `verificationStatus` wire field.
+    #[serde(rename = "verificationStatus")]
+    pub verification_status: EventLogQueryResponseEventsItemVerificationStatus,
+}
 /// Generated schema type `EventLogQueryResponse`.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct EventLogQueryResponse {
     /// The `events` wire field.
-    pub events: Vec<Value>,
+    pub events: Vec<EventLogQueryResponseEventsItem>,
     /// The `limit` wire field.
     pub limit: i64,
     /// The `offset` wire field.

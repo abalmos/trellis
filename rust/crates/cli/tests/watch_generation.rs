@@ -98,9 +98,9 @@ participant "example.a" service {
             .spawn()
             .unwrap(),
     );
-    let a_stem = trellis_generation::artifacts::sdk_output_stem("example.a@v1");
-    let b_stem = trellis_generation::artifacts::sdk_output_stem("example.b@v1");
-    let participant_stem = trellis_generation::artifacts::sdk_output_stem("example.a");
+    let a_stem = trellis_codegen_rust::default_sdk_stem("example.a@v1");
+    let b_stem = trellis_codegen_rust::default_sdk_stem("example.b@v1");
+    let participant_stem = trellis_codegen_rust::default_sdk_stem("example.a");
     let participant_path = a.join(".trellis/artifacts/participants/example.a.json");
     wait_for(&a.join(".trellis/artifacts/apis/example.a@v1.json"), |_| {
         true
@@ -113,7 +113,7 @@ participant "example.a" service {
     let facade_manifest = wait_for(&facade.join("Cargo.toml"), |_| true);
     let facade_manifest: toml::Value =
         toml::from_str(&String::from_utf8(facade_manifest).unwrap()).unwrap();
-    let b_crate = trellis_generation::artifacts::default_rust_crate_name_from_id("example.b@v1");
+    let b_crate = trellis_codegen_rust::default_sdk_crate_name("example.b@v1");
     let b_path = facade_manifest["dependencies"][b_crate.as_str()]["path"]
         .as_str()
         .unwrap();

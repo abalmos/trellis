@@ -1,4 +1,4 @@
-This guide covers creating and running a service from a published OCI image. You do not need the service source tree — the contract artifact is embedded in the image.
+This guide covers creating and running a service from a published OCI image. You need the canonical API and participant artifacts distributed with that image, but not its source tree.
 
 If you are developing a service locally and have the source checked out, see [Install a service from source](/guides/install-service-from-source) instead.
 
@@ -25,15 +25,17 @@ Confirm the session is active:
 trellis whoami
 ```
 
-## 2. Create the deployment from the image
+## 2. Create the deployment from canonical artifacts
 
 ```sh
 trellis svc my-service create
-trellis svc my-service apply --image ghcr.io/my-org/my-service:1.2.3
+trellis svc my-service apply \
+  --api ./trellis.api.json \
+  --participant ./trellis.participant.json
 trellis svc my-service provision
 ```
 
-The CLI creates the service deployment, submits the image contract boundary as a deployment authority proposal, then generates a service instance key and provisions an instance. The artifact lives at the path declared by the `io.trellis.contract.path` label, or `/trellis/contract.json` by default.
+The CLI creates the service deployment, submits the canonical participant boundary as a deployment authority proposal, then generates a service instance key and provisions an instance. Image distribution and execution remain the responsibility of your container platform.
 
 The CLI will:
 
@@ -114,14 +116,12 @@ Trellis derives service access from:
 ## Practical deploy loop
 
 1. `trellis login http://localhost:3000` and follow the printed portal URL or QR code
-2. `trellis svc my-service create && trellis svc my-service apply --image ghcr.io/my-org/my-service:1.2.3 && trellis svc my-service provision`
+2. create the service, apply its canonical API and participant artifacts, and provision an instance
 3. review and accept or reject pending service authority in Console; `mutable-dev` migrations may already be accepted history
 4. store the seed
 5. start the container with the right env after reconciliation has materialized required bindings
 6. confirm the expected RPCs, events, and bindings work
 
-Authority acceptance and instance provisioning should happen before the container starts serving traffic. Service resource provisioning happens during authority reconciliation; after the accepted boundary is current in materialized authority on an enabled deployment, runtime auth can grant presented evidence that fits deployment authority even before an instance connects. Service bootstrap validates that the presented contract evidence fits current materialized authority and consumes the persisted bindings; it does not activate a catalog entry.
+Authority acceptance and instance provisioning should happen before the container starts serving traffic. Service resource provisioning happens during authority reconciliation; after the accepted boundary is current in materialized authority on an enabled deployment, runtime auth can grant presented evidence that fits deployment authority even before an instance connects. Service bootstrap validates that the presented participant evidence fits current materialized authority and consumes the persisted bindings; it does not activate a catalog entry.
 
-If a restarted container presents a new digest for the same contract id, Trellis checks it against the service instance's current digest. In `strict` mode, incompatible same-contract changes create a pending migration plan and the service waits or retries until the plan is accepted or rejected. In `mutable-dev` mode, Trellis records and auto-accepts that migration plan so local development can iterate without creating a production compatibility promise.
-
-If you are building service images, include the generated contract artifact at `/trellis/contract.json`. If the image uses a different path, add an OCI label such as `io.trellis.contract.path=/path/to/contract.json` so the CLI can discover it automatically.
+If a restarted container presents a new digest for the same participant id, Trellis checks it against the service instance's current digest. In `strict` mode, incompatible changes create a pending migration plan and the service waits or retries until the plan is accepted or rejected. In `mutable-dev` mode, Trellis records and auto-accepts that migration plan so local development can iterate without creating a production compatibility promise.

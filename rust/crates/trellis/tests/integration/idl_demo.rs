@@ -3,13 +3,8 @@
 use std::path::Path;
 use std::process::Command;
 
-use crate::support::assertions::assert_runtime_case_registered;
-
-const CASE_ID: &str = "idl-demo.field-ops-out-of-tree";
-
 #[test]
 fn field_ops_out_of_tree() {
-    assert_runtime_case_registered(CASE_ID, "idl-demo", "idl_demo");
     let repo = Path::new(env!("CARGO_MANIFEST_DIR"))
         .ancestors()
         .nth(3)

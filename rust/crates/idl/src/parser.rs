@@ -1,7 +1,8 @@
 use crate::{
     ast::{
-        Api, ApiUse, Binding, Constraint, ConstraintValue, Docs, Field, Participant, Project,
-        Resource, SchemaDecl, Selection, Source, Spanned, State, Surface, Transfer, Type,
+        Api, ApiUse, Binding, Capability, Constraint, ConstraintValue, Docs, ErrorDecl, Field,
+        Participant, Project, Resource, SchemaDecl, Selection, Source, Spanned, State, Surface,
+        Transfer, Type,
     },
     lexer::{lex, Token, TokenKind},
 };
@@ -57,6 +58,7 @@ impl Parser<'_> {
             docs: None,
             schemas: BTreeMap::new(),
             exports: Vec::new(),
+            capabilities: BTreeMap::new(),
             errors: BTreeMap::new(),
             rpcs: BTreeMap::new(),
             operations: BTreeMap::new(),
@@ -84,13 +86,32 @@ impl Parser<'_> {
                 "export" => {
                     api.exports.push(self.ident_statement()?);
                 }
+                "capability" => {
+                    let (name, capability) = self.capability()?;
+                    insert(&mut api.capabilities, name, capability, self.source)?;
+                }
                 "error" => {
-                    let name = self.ident_statement()?;
-                    let declaration = Spanned {
-                        value: (),
-                        source: name.source,
-                        span: name.span.clone(),
+                    let name = self.ident()?;
+                    let start = name.span.start;
+                    let mut value = ErrorDecl::default();
+                    let end = if self.eat(TokenKind::Semi) {
+                        self.previous_span().end
+                    } else {
+                        self.token(TokenKind::LBrace)?;
+                        while !self.at(TokenKind::RBrace) {
+                            match self.word_text()?.as_str() {
+                                "code" => value.code = Some(self.string_statement()?),
+                                "schema" => value.schema = Some(self.ident_statement()?),
+                                other => {
+                                    return Err(self.error_previous(format!(
+                                        "unsupported error member '{other}'"
+                                    )))
+                                }
+                            }
+                        }
+                        self.token(TokenKind::RBrace)?.end
                     };
+                    let declaration = self.spanned(value, start..end);
                     insert(&mut api.errors, name, declaration, self.source)?;
                 }
                 "rpc" => {
@@ -120,13 +141,42 @@ impl Parser<'_> {
         Ok(self.spanned(api, start..end))
     }
 
+    fn capability(&mut self) -> miette::Result<(Spanned<String>, Spanned<Capability>)> {
+        let name = self.string()?;
+        let start = name.span.start;
+        if self.at(TokenKind::Semi) {
+            let end = self.token(TokenKind::Semi)?.end;
+            return Ok((name, self.spanned(Capability::default(), start..end)));
+        }
+        self.token(TokenKind::LBrace)?;
+        let mut capability = Capability::default();
+        while !self.at(TokenKind::RBrace) {
+            match self.word_text()?.as_str() {
+                "display_name" => capability.display_name = Some(self.string_statement()?),
+                "description" => capability.description = Some(self.string_statement()?),
+                "consequence" => capability.consequence = Some(self.string_statement()?),
+                other => {
+                    return Err(
+                        self.error_previous(format!("unsupported capability member '{other}'"))
+                    )
+                }
+            }
+        }
+        let end = self.token(TokenKind::RBrace)?.end;
+        Ok((name, self.spanned(capability, start..end)))
+    }
+
     fn model(&mut self) -> miette::Result<(Spanned<String>, Spanned<SchemaDecl>)> {
         let name = self.ident()?;
         let start = name.span.start;
         self.token(TokenKind::LBrace)?;
         let mut fields = Vec::new();
         while !self.at(TokenKind::RBrace) {
-            let field = self.ident()?;
+            let field = if self.at(TokenKind::String) {
+                self.string()?
+            } else {
+                self.ident()?
+            };
             let optional = self.eat(TokenKind::Question);
             self.token(TokenKind::Colon)?;
             let ty = self.ty()?;
@@ -190,8 +240,11 @@ impl Parser<'_> {
         let name = self.ident()?;
         let start = name.span.start;
         let ty = match name.value.as_str() {
+            "json" => Type::Json,
             "string" => Type::String(self.constraints()?),
             "bool" => Type::Bool,
+            "true" => Type::BoolLiteral(true),
+            "false" => Type::BoolLiteral(false),
             "uint" => Type::Integer {
                 unsigned: true,
                 constraints: self.constraints()?,
@@ -204,11 +257,19 @@ impl Parser<'_> {
             "list" | "map" => {
                 self.token(TokenKind::LAngle)?;
                 let member = self.ty()?;
-                let end = self.token(TokenKind::RAngle)?.end;
+                self.token(TokenKind::RAngle)?;
+                let constraints = self.constraints()?;
+                let end = self.previous_span().end;
                 return Ok(self.spanned(
                     if name.value == "list" {
-                        Type::List(Box::new(member))
+                        Type::List {
+                            member: Box::new(member),
+                            constraints,
+                        }
                     } else {
+                        if !constraints.is_empty() {
+                            return Err(self.error_at(&name, "map constraints are not supported"));
+                        }
                         Type::Map(Box::new(member))
                     },
                     start..end,
@@ -262,6 +323,7 @@ impl Parser<'_> {
                 "output" => surface.output = Some(self.ident_statement()?),
                 "progress" => surface.progress = Some(self.ident_statement()?),
                 "payload" | "event" => surface.event = Some(self.ident_statement()?),
+                "params" => surface.params = self.string_list_statement()?,
                 "errors" => surface.errors = self.ident_list_statement()?,
                 "transfer" => {
                     let direction = self.ident()?;
@@ -277,6 +339,8 @@ impl Parser<'_> {
                     self.token(TokenKind::Semi)?;
                 }
                 "capabilities" => surface.capabilities = self.capabilities()?,
+                "subject" => surface.subject = Some(self.string_statement()?),
+                "class" => surface.class = Some(self.ident_statement()?),
                 "docs" => surface.docs = Some(self.docs()?),
                 other => {
                     return Err(self.error_previous(format!("unsupported surface member '{other}'")))
@@ -325,6 +389,7 @@ impl Parser<'_> {
             kind,
             implements: Vec::new(),
             uses: BTreeMap::new(),
+            schemas: BTreeMap::new(),
             state: BTreeMap::new(),
             stores: BTreeMap::new(),
             kv: BTreeMap::new(),
@@ -337,6 +402,18 @@ impl Parser<'_> {
                 "use" => {
                     let (alias, api_use) = self.api_use()?;
                     insert(&mut participant.uses, alias, api_use, self.source)?;
+                }
+                "model" => {
+                    let (name, schema) = self.model()?;
+                    insert(&mut participant.schemas, name, schema, self.source)?;
+                }
+                "type" => {
+                    let (name, schema) = self.alias()?;
+                    insert(&mut participant.schemas, name, schema, self.source)?;
+                }
+                "enum" => {
+                    let (name, schema) = self.enum_decl()?;
+                    insert(&mut participant.schemas, name, schema, self.source)?;
                 }
                 "state" => {
                     let name = self.ident()?;
@@ -481,6 +558,7 @@ impl Parser<'_> {
                 "ttl_ms" => resource.ttl_ms = Some(self.number_statement()?),
                 "max_object_bytes" => resource.max_object_bytes = Some(self.number_statement()?),
                 "max_total_bytes" => resource.max_total_bytes = Some(self.number_statement()?),
+                "max_value_bytes" => resource.max_value_bytes = Some(self.number_statement()?),
                 "docs" => resource.docs = Some(self.docs()?),
                 other => {
                     return Err(

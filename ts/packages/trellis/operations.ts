@@ -1,7 +1,7 @@
 import { AsyncResult, err, isErr, ok, type Result } from "@qlever-llc/result";
 
 import { type JsonValue, parseUnknownSchema } from "./codec.ts";
-import type { InferSchemaType } from "./contracts.ts";
+import type { InferSchemaType } from "./participant.ts";
 import {
   getBuiltinRpcError,
   OperationAlreadyTerminalError,

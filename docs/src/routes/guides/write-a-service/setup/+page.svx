@@ -1,77 +1,18 @@
-<script lang="ts">
-  import LanguageTabs from "$lib/components/LanguageTabs.svelte";
-</script>
+# Set up the project
 
-Your service lives in its own repository, completely separate from the Trellis core. Create a standalone `orders-service` project in your language runtime:
-
-<LanguageTabs>
-{#snippet ts()}
-
-Create a new Deno project:
-
-```sh
-mkdir orders-service && cd orders-service
-deno init
-```
-
-Add the Trellis SDK and TypeBox, our schema library, as dependencies:
-
-```sh
-deno add npm:@qlever-llc/trellis npm:@sinclair/typebox
-```
-
-If you are using Node.js instead, use `npm`:
-
-```sh
-npm install @qlever-llc/trellis @sinclair/typebox
-```
-
-Add an install task for generated SDKs and contract artifacts:
-
-```json
-{
-  "links": [".trellis/generated/ts/trellis-apis"],
-  "tasks": {
-    "install": "trellis install"
-  }
-}
-```
-
-{/snippet}
-{#snippet rust()}
-
-Create a new Cargo binary project:
-
-```sh
-cargo new orders-service --bin
-cd orders-service
-mkdir contracts
-```
-
-Add the runtime, contract, and generated-SDK dependencies. Use the current Trellis release version for the Trellis crates:
+Create `trellis.toml`, a native IDL source, and a language manifest.
 
 ```toml
-[dependencies]
-anyhow = "1"
-async-nats = "0.41"
-bytes = "1"
-clap = { version = "4", features = ["derive", "env"] }
-futures-util = "0.3"
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-time = { version = "0.3", features = ["formatting"] }
-tokio = { version = "1", features = ["macros", "rt-multi-thread", "signal"] }
-tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-ulid = "1.2"
-
-trellis-contracts = "0.10"
-trellis-rs = "0.10"
-
-trellis-apis = { path = ".trellis/generated/rust/trellis-apis" }
+[project]
+name = "orders-service"
 ```
 
-In the Trellis monorepo, these dependencies are workspace dependencies instead of published versions. Standalone services should use the published crate versions or a `[patch]` that points at a local Trellis checkout during development.
+```text
+orders-service/
+├── contract.trellis
+├── trellis.toml
+├── deno.json
+└── src/
+```
 
-{/snippet}
-</LanguageTabs>
+Run `trellis update` after changing dependencies and `trellis generate` after changing IDL. Generated files live under `.trellis/artifacts`, `.trellis/ts`, and `.trellis/rust`; do not edit them.

@@ -29,29 +29,19 @@ deno init
 deno add npm:@qlever-llc/trellis
 ```
 
-## 2. Define the device contract
+## 2. Declare the device participant
 
-Create `contracts/my_device.ts`. Devices declare only non-baseline Trellis
-surfaces they need after connecting. The common auth session RPCs are available
-automatically for device contracts.
+Create `contract.trellis`. Devices declare the APIs they use after connecting.
 
-```ts
-import { defineDeviceContract } from "@qlever-llc/trellis";
-
-export const myDevice = defineDeviceContract(() => ({
-  id: "my-device@v1",
-  apiId: "my-device@v1",
-  apiVersion: "1.0.0",
-  displayName: "My Device",
-  description: "An activated device that connects to Trellis after activation.",
-}));
-
-export default myDevice;
+```trellis
+participant acme.my-device@v1 device {
+  display_name = "My Device";
+  description = "Activated field device.";
+}
 ```
 
-Activated devices may not use contract `resources`.
-
-The resulting contract object carries the manifest metadata and API views that `TrellisDevice.connect(...)` expects.
+Run `trellis generate`; `TrellisDevice.connect(...)` consumes the generated
+participant. Activated devices may not declare service resources.
 
 ## 3. Write the device startup code
 

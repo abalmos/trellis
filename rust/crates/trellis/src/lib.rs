@@ -54,16 +54,6 @@ pub mod generated;
 /// High-level service runtime and service-authoring support types.
 pub mod service;
 
-/// Native API and participant artifact helper types.
-pub mod contracts {
-    pub use trellis_contracts::{
-        canonicalize_json, digest_json, event, schema_ref, sha256_base64url, state, use_contract,
-        ApiArtifact, ApiBuilder, ContractArtifacts, ContractBuilder, ContractCapabilityMetadata,
-        ContractEventConsumerGroup, ContractEventConsumerOrdering, ContractEventConsumerReplay,
-        ContractKind, ContractStateKind, ContractsError, PageRequest, PageResponse,
-    };
-}
-
 #[doc(hidden)]
 pub mod auth;
 
@@ -78,13 +68,15 @@ pub mod jobs;
 )]
 pub(crate) mod internal_sdk;
 
+extern crate self as trellis_rs;
+
 #[cfg(test)]
 mod tests {
     use std::fs;
 
     #[test]
     fn exposes_core_facade_modules() {
-        let _request = crate::contracts::PageRequest {
+        let _request = crate::client::PageRequest {
             offset: None,
             limit: 25,
         };

@@ -6,15 +6,14 @@ export {
   isJsonValue,
   schema,
   unwrapSchema,
-} from "./contracts.ts";
+} from "./participant.ts";
 export {
   TrellisSurfaceStatusRequestSchema,
   TrellisSurfaceStatusResponseSchema,
 } from "./models/trellis/rpc/TrellisSurfaceStatus.ts";
-export type { InferSchemaType, JsonValue } from "./contracts.ts";
+export type { InferSchemaType, JsonValue } from "./participant.ts";
 export { TrellisConnection } from "./connection.ts";
 export type { TrellisConnectionStatus } from "./connection.ts";
-export { defineError, withTrellisValidation } from "./contract_support/mod.ts";
 export {
   buildCursorPage,
   buildPageResponse,
@@ -25,14 +24,13 @@ export {
   normalizePageQuery,
   PageRequestSchema,
   PageResponseSchema,
-} from "./contract_support/mod.ts";
+} from "./participant.ts";
 export type {
   CursorPage,
   CursorPageInfo,
   CursorPageResponseSchema,
   CursorQuery,
   CursorQueryOptions,
-  ErrorClass,
   InferRuntimeRpcError,
   NormalizedCursorQuery,
   PageRequest,
@@ -42,30 +40,26 @@ export type {
   SerializableErrorData,
   TrellisValidationExtension,
   TrellisValidationIssueHint,
-} from "./contract_support/mod.ts";
+} from "./participant.ts";
 export {
-  defineAgentContract,
-  defineAppContract,
-  defineDeviceContract,
-  defineServiceContract,
-  jobs,
-  kv,
-  state,
-  store,
-} from "./contract.ts";
-export { operationAccess, optional } from "./contract_support/descriptors.ts";
+  eventActions,
+  feedAction,
+  operationAccess,
+  operationAction,
+  optional,
+  rpcAction,
+} from "./participant_runtime/descriptors.ts";
 export {
-  CONTRACT_RUNTIME,
+  PARTICIPANT_RUNTIME,
   runtimeApiFromActions,
-} from "./contract_support/contract_runtime.ts";
+} from "./participant_runtime/participant.ts";
 export {
-  CONTRACT_EVENT_CONSUMERS_METADATA,
-  CONTRACT_JOBS_METADATA,
-  CONTRACT_KV_METADATA,
-  CONTRACT_STATE_METADATA,
-  CONTRACT_STORE_METADATA,
-} from "./contract_support/mod.ts";
-export type { DefineContractInput } from "./contract.ts";
+  PARTICIPANT_EVENT_CONSUMERS_METADATA,
+  PARTICIPANT_JOBS_METADATA,
+  PARTICIPANT_KV_METADATA,
+  PARTICIPANT_STATE_METADATA,
+  PARTICIPANT_STORE_METADATA,
+} from "./participant_runtime/metadata.ts";
 export {
   AsyncResult,
   BaseError,
@@ -77,7 +71,7 @@ export {
 } from "@qlever-llc/result";
 export type { MaybeAsync } from "@qlever-llc/result";
 export type { ClientOpts } from "./client.ts";
-export type { CallerContract, CallerRuntime } from "./caller.ts";
+export type { CallerParticipant, CallerRuntime } from "./caller.ts";
 export type {
   ClientAuthContinuation,
   ClientAuthOptions,

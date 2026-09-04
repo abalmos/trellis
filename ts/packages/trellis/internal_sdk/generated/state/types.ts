@@ -1,6 +1,6 @@
-// Generated from ./rust/crates/runtime/.trellis/generated/protocol/apis/trellis.state@v1.json
-import type { SerializableErrorData } from "../../../contracts.ts";
-import { TrellisError } from "../../../errors/index.ts";
+// Generated from ./rust/crates/runtime/.trellis/artifacts/apis/trellis.state@v1.json
+import type { SerializableErrorData } from "@qlever-llc/trellis";
+import { TrellisError } from "@qlever-llc/trellis";
 
 export type StateAdminDeleteInput = {
   contractDigest: string;

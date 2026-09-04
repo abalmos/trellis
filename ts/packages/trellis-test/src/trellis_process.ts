@@ -1,7 +1,6 @@
 import { dirname, join } from "@std/path";
 
 import type { ReservedPort } from "./control_plane_config.ts";
-import { recordTrellisTestProcessStart } from "./integration/metrics.ts";
 import type { TrellisTestRuntimeStartOptions } from "./types.ts";
 
 const DEFAULT_OUTPUT_TAIL_CHARS = 8_192;
@@ -430,7 +429,6 @@ export async function startTrellisProcess(
     stderrLog.close();
     throw error;
   }
-  await recordTrellisTestProcessStart("trellis", String(child.pid));
   const status = child.status;
 
   let handle: StartedTrellisProcess;

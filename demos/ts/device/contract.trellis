@@ -19,6 +19,9 @@ api "demo.device@v1" {
         notes: string;
         updatedAt: string;
     }
+
+    export DraftInspectionState;
+    export SelectedSiteState;
 }
 
 participant "demo.device@v1" device {

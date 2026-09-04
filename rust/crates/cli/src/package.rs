@@ -415,7 +415,7 @@ async fn install_root(
         ));
     }
     for locked in &lock.api {
-        trellis_generation::planning::validate_output_identity("API", &locked.id)?;
+        crate::generate::validate_output_identity("API", &locked.id)?;
         let dependency = manifest
             .apis
             .get(&locked.id)
@@ -710,6 +710,14 @@ mod tests {
         .unwrap();
     }
 
+    fn write_test_project(root: &Path) {
+        fs::write(
+            root.join("contract.trellis"),
+            "api \"test.project@v1\" { version \"1.0.0\"; display_name \"Test Project\"; description \"Package test project.\"; }\n",
+        )
+        .unwrap();
+    }
+
     #[derive(Clone)]
     struct PagingRegistry {
         backend: String,
@@ -842,6 +850,7 @@ mod tests {
         crate::oci::publish(&registry, &latest).await.unwrap();
 
         let root = tempfile::tempdir().unwrap();
+        write_test_project(root.path());
         crate::project::write_manifest(
             &root.path().join("trellis.toml"),
             &ProjectManifest {
@@ -911,60 +920,6 @@ mod tests {
         assert!(error.to_string().contains("previous release 1.2.0"));
         proxy.abort();
         unsafe { std::env::remove_var("TRELLIS_CACHE") };
-    }
-
-    #[tokio::test]
-    async fn publish_prunes_stale_owned_api_output_after_source_removal() {
-        let root = tempfile::tempdir().unwrap();
-        let manifest = ProjectManifest {
-            format: 1,
-            default_registry: Some("unused".into()),
-            registries: BTreeMap::from([(
-                "unused".into(),
-                crate::project::RegistryConfig {
-                    prefix: "registry.invalid".into(),
-                },
-            )]),
-            apis: BTreeMap::new(),
-        };
-        crate::project::write_manifest(&root.path().join("trellis.toml"), &manifest).unwrap();
-        let lock = ProjectLock {
-            format: 1,
-            manifest_digest: manifest.digest().unwrap(),
-            api: Vec::new(),
-        };
-        crate::project::write_lock(&root.path().join("trellis.lock"), &lock).unwrap();
-        install_root(root.path(), &manifest, &lock).await.unwrap();
-        let stale = root
-            .path()
-            .join(".trellis/generated/protocol/apis/acme.a@v1.json");
-        fs::create_dir_all(stale.parent().unwrap()).unwrap();
-        fs::write(
-            &stale,
-            serde_json::to_vec(&serde_json::json!({
-                "format": "trellis.api.v1",
-                "id": "acme.a@v1",
-                "version": "1.0.0",
-                "displayName": "A",
-                "description": "Deleted contract"
-            }))
-            .unwrap(),
-        )
-        .unwrap();
-
-        let error = publish(
-            OutputFormat::Text,
-            &PublishArgs {
-                registry: None,
-                project: ProjectRootArgs {
-                    root: root.path().to_path_buf(),
-                },
-            },
-        )
-        .await
-        .unwrap_err();
-        assert!(error.to_string().contains("no owned canonical APIs"));
-        assert!(!stale.exists());
     }
 
     #[test]
@@ -1085,6 +1040,7 @@ mod tests {
     #[tokio::test]
     async fn install_is_exact_and_preserves_previous_materialization_on_drift() {
         let root = tempfile::tempdir().unwrap();
+        write_test_project(root.path());
         let api_path = root.path().join("auth");
         write_test_api(&api_path, "trellis.auth@v1", "1.0.0", false);
         let manifest = ProjectManifest {
@@ -1101,30 +1057,33 @@ mod tests {
             )]),
         };
         let lock = resolve_lock(root.path(), &manifest).await.unwrap();
+        crate::project::write_manifest(&root.path().join("trellis.toml"), &manifest).unwrap();
+        crate::project::write_lock(&root.path().join("trellis.lock"), &lock).unwrap();
         install_root(root.path(), &manifest, &lock).await.unwrap();
-        let installed = root
+        let generated = root
             .path()
-            .join(".trellis/apis/trellis.auth@v1/1.0.0/trellis.api.json");
-        let previous = fs::read(&installed).unwrap();
+            .join(".trellis/artifacts/apis/test.project@v1.json");
+        let previous = fs::read(&generated).unwrap();
 
         write_test_api(&api_path, "trellis.auth@v1", "1.0.1", false);
         let error = install_root(root.path(), &manifest, &lock)
             .await
             .unwrap_err();
         assert!(error.to_string().contains("path now contains 1.0.1"));
-        assert_eq!(fs::read(&installed).unwrap(), previous);
+        assert_eq!(fs::read(&generated).unwrap(), previous);
 
         write_test_api(&api_path, "trellis.auth@v1", "1.0.0", true);
         let error = install_root(root.path(), &manifest, &lock)
             .await
             .unwrap_err();
         assert!(error.to_string().contains("digest does not match"));
-        assert_eq!(fs::read(installed).unwrap(), previous);
+        assert_eq!(fs::read(generated).unwrap(), previous);
     }
 
     #[tokio::test]
     async fn add_update_and_remove_share_the_locked_installer() {
         let root = tempfile::tempdir().unwrap();
+        write_test_project(root.path());
         fs::write(
             root.path().join("trellis.toml"),
             "# project dependencies\nformat = 1\n\n[apis]\n# keep this explanation\n",
@@ -1165,15 +1124,6 @@ mod tests {
             updated_lock.api[0].api_digest,
             initial_lock.api[0].api_digest
         );
-        assert!(root
-            .path()
-            .join(".trellis/apis/acme.auth@v1/1.4.3/trellis.api.json")
-            .is_file());
-        assert!(!root
-            .path()
-            .join(".trellis/apis/acme.auth@v1/1.4.2")
-            .exists());
-
         write_test_api(&api_path, "acme.auth@v1", "2.0.0", false);
         assert!(update(OutputFormat::Text, &project)
             .await
@@ -1207,7 +1157,6 @@ mod tests {
             .unwrap()
             .api
             .is_empty());
-        assert!(!root.path().join(".trellis/apis/acme.auth@v1").exists());
         assert!(api_path.is_dir());
 
         let empty_lock = crate::project::read_lock(&root.path().join("trellis.lock")).unwrap();
@@ -1248,8 +1197,9 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn add_installs_a_prerelease_api() {
+    async fn add_locks_a_prerelease_path_api() {
         let root = tempfile::tempdir().unwrap();
+        write_test_project(root.path());
         crate::project::write_manifest(
             &root.path().join("trellis.toml"),
             &ProjectManifest {
@@ -1283,10 +1233,6 @@ mod tests {
 
         let lock = crate::project::read_lock(&root.path().join("trellis.lock")).unwrap();
         assert_eq!(lock.api[0].version, "1.5.0-rc.1");
-        assert!(root
-            .path()
-            .join(".trellis/apis/acme.orders@v1/1.5.0-rc.1/trellis.api.json")
-            .is_file());
         install(
             OutputFormat::Text,
             &ProjectRootArgs {
@@ -1295,281 +1241,5 @@ mod tests {
         )
         .await
         .unwrap();
-    }
-
-    #[tokio::test]
-    async fn install_bootstraps_typescript_dependency_before_participant() {
-        let repo = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../..")
-            .canonicalize()
-            .unwrap();
-        let root = tempfile::tempdir().unwrap();
-        let api_path = root.path().join("auth");
-        write_test_api(&api_path, "acme.auth@v1", "1.0.0", false);
-        fs::write(
-            root.path().join("deno.json"),
-            format!(
-                r#"{{
-  "links": [".trellis/generated/ts/trellis-apis"],
-  "imports": {{
-    "@qlever-llc/trellis": "file://{0}/ts/packages/trellis/index.ts",
-    "@qlever-llc/trellis/": "file://{0}/ts/packages/trellis/",
-    "@qlever-llc/trellis/contracts": "file://{0}/ts/packages/trellis/contracts.ts",
-    "@trellis/apis/acme.auth": "./.trellis/generated/ts/trellis-apis/acme.auth.ts"
-  }}
-}}
-"#,
-                repo.display()
-            ),
-        )
-        .unwrap();
-        fs::write(
-            root.path().join("package.json"),
-            "{\"name\":\"consumer\",\"version\":\"1.0.0\"}\n",
-        )
-        .unwrap();
-        fs::write(
-            root.path().join("contract.ts"),
-            r#"import { defineAppContract } from "@qlever-llc/trellis";
-import { AuthSessionsMe } from "@trellis/apis/acme.auth";
-
-export default defineAppContract(() => ({
-  id: "acme.consumer@v1",
-  apiId: "acme.consumer-api@v1",
-  apiVersion: "1.0.0",
-  displayName: "Consumer",
-  description: "Consumer fixture",
-  uses: [AuthSessionsMe],
-}));
-"#,
-        )
-        .unwrap();
-        let manifest = ProjectManifest {
-            format: 1,
-            default_registry: None,
-            registries: BTreeMap::new(),
-            apis: BTreeMap::from([(
-                "acme.auth@v1".to_owned(),
-                ApiDependency {
-                    version: "^1.0".to_owned(),
-                    path: Some("auth".to_owned()),
-                    registry: None,
-                },
-            )]),
-        };
-        let lock = resolve_lock(root.path(), &manifest).await.unwrap();
-
-        install_root(root.path(), &manifest, &lock).await.unwrap();
-        let participant: serde_json::Value = serde_json::from_slice(
-            &fs::read(
-                root.path()
-                    .join(".trellis/generated/protocol/participants/acme.consumer@v1.json"),
-            )
-            .unwrap(),
-        )
-        .unwrap();
-        let used = participant["uses"]["required"]
-            .as_object()
-            .unwrap()
-            .values()
-            .next()
-            .unwrap();
-        assert_eq!(used["api"], "acme.auth@v1");
-        assert_eq!(used["apiDigest"], lock.api[0].api_digest);
-
-        let warm = install_root(root.path(), &manifest, &lock).await.unwrap();
-        assert_eq!(warm.changed_dependencies, 0);
-        assert_eq!(warm.generated_projects, 0);
-
-        let aggregate_export = root
-            .path()
-            .join(".trellis/generated/ts/trellis-apis/acme.auth.ts");
-        fs::remove_file(&aggregate_export).unwrap();
-        let repaired = install_root(root.path(), &manifest, &lock).await.unwrap();
-        assert!(repaired.changed_dependencies > 0);
-        assert!(aggregate_export.is_file());
-        let api_export = root
-            .path()
-            .join(".trellis/generated/ts/trellis-apis/acme.auth.api.ts");
-        fs::remove_file(&api_export).unwrap();
-        let repaired = install_root(root.path(), &manifest, &lock).await.unwrap();
-        assert!(repaired.changed_dependencies > 0);
-        assert!(api_export.is_file());
-        let warm = install_root(root.path(), &manifest, &lock).await.unwrap();
-        assert_eq!(warm.changed_dependencies, 0);
-        assert_eq!(warm.generated_projects, 0);
-
-        let participant_path = root
-            .path()
-            .join(".trellis/generated/protocol/participants/acme.consumer@v1.json");
-        let owned_api_path = root
-            .path()
-            .join(".trellis/generated/protocol/apis/acme.consumer-api@v1.json");
-        let owned_sdk_path = root
-            .path()
-            .join(".trellis/generated/packages/jsr/acme-consumer-api");
-        assert!(owned_api_path.is_file());
-        assert!(participant_path.is_file());
-        assert!(owned_sdk_path.is_dir());
-        let previous_participant = fs::read(&participant_path).unwrap();
-        write_test_api(&api_path, "acme.auth@v1", "1.0.1", false);
-        let next_lock = resolve_lock(root.path(), &manifest).await.unwrap();
-        let source = fs::read_to_string(root.path().join("contract.ts")).unwrap();
-        fs::write(
-            root.path().join("contract.ts"),
-            format!("throw new Error(\"fixture failure\");\n{source}"),
-        )
-        .unwrap();
-        assert!(install_root(root.path(), &manifest, &next_lock)
-            .await
-            .is_err());
-        assert!(root
-            .path()
-            .join(".trellis/apis/acme.auth@v1/1.0.0/trellis.api.json")
-            .is_file());
-        assert!(!root
-            .path()
-            .join(".trellis/apis/acme.auth@v1/1.0.1")
-            .exists());
-        assert_eq!(fs::read(&participant_path).unwrap(), previous_participant);
-
-        fs::remove_file(root.path().join("contract.ts")).unwrap();
-        write_test_api(&api_path, "acme.auth@v1", "1.0.0", false);
-        install_root(root.path(), &manifest, &lock).await.unwrap();
-        assert!(aggregate_export.is_file());
-        assert!(!owned_api_path.exists());
-        assert!(!participant_path.exists());
-        assert!(!owned_sdk_path.exists());
-    }
-
-    #[tokio::test]
-    async fn install_bootstraps_rust_dependency_before_participant() {
-        let repo = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../..")
-            .canonicalize()
-            .unwrap();
-        let root = tempfile::tempdir().unwrap();
-        write_test_api(&root.path().join("auth"), "trellis.jobs@v1", "1.0.0", false);
-        fs::create_dir(root.path().join("contracts")).unwrap();
-        fs::create_dir(root.path().join("src")).unwrap();
-        fs::write(root.path().join("src/lib.rs"), "").unwrap();
-        fs::write(
-            root.path().join("Cargo.toml"),
-            format!(
-                "[package]\nname = \"consumer\"\nversion = \"0.4.0\"\nedition = \"2021\"\n\n[dependencies]\nserde_json = \"1\"\ntrellis-contracts = {{ path = \"{}/rust/crates/contracts\" }}\ntrellis-apis = {{ path = \".trellis/generated/rust/trellis-apis\" }}\n",
-                repo.display()
-            ),
-        )
-        .unwrap();
-        fs::write(
-            root.path().join("contracts/consumer.rs"),
-            r#"use trellis_apis::jobs::{api::API_JSON, rpc::AuthSessionsMeRpc, API_ID};
-use trellis_contracts::{use_contract, ApiArtifact, ApiBuilder, ContractArtifacts, ContractBuilder, ContractKind, ContractsError};
-
-pub fn api_artifact() -> Result<ApiArtifact, ContractsError> {
-    ApiBuilder::new(serde_json::json!({
-        "format": "trellis.api.v1",
-        "id": "acme.consumer-api@v1",
-        "version": "2.3.4",
-        "displayName": "Consumer",
-        "description": "Consumer fixture"
-    })).build()
-}
-
-pub fn contract_artifacts() -> Result<ContractArtifacts, ContractsError> {
-    let _ = std::any::TypeId::of::<AuthSessionsMeRpc>();
-    ContractBuilder::authoring("acme.consumer@v1", "acme.consumer-api@v1", "2.3.4", "Consumer", "Consumer fixture", ContractKind::App)
-        .use_ref("jobs", use_contract(API_ID).with_rpc_call(["Auth.Sessions.Me"]))
-        .referenced_api(API_ID, serde_json::from_str(API_JSON)?)
-        .build()
-}
-"#,
-        )
-        .unwrap();
-        let manifest = ProjectManifest {
-            format: 1,
-            default_registry: None,
-            registries: BTreeMap::new(),
-            apis: BTreeMap::from([(
-                "trellis.jobs@v1".to_owned(),
-                ApiDependency {
-                    version: "^1.0".to_owned(),
-                    path: Some("auth".to_owned()),
-                    registry: None,
-                },
-            )]),
-        };
-        let lock = resolve_lock(root.path(), &manifest).await.unwrap();
-
-        install_root(root.path(), &manifest, &lock).await.unwrap();
-        let participant: serde_json::Value = serde_json::from_slice(
-            &fs::read(
-                root.path()
-                    .join(".trellis/generated/protocol/participants/acme.consumer@v1.json"),
-            )
-            .unwrap(),
-        )
-        .unwrap();
-        assert_eq!(
-            participant["uses"]["required"]["jobs"]["api"],
-            "trellis.jobs@v1"
-        );
-        assert_eq!(
-            participant["uses"]["required"]["jobs"]["apiDigest"],
-            lock.api[0].api_digest
-        );
-        assert!(root
-            .path()
-            .join(".trellis/generated/rust/trellis-apis/src/lib.rs")
-            .is_file());
-        let own_sdk_path = root
-            .path()
-            .join(".trellis/generated/packages/cargo/acme-consumer-api/Cargo.toml");
-        let own_sdk = fs::read_to_string(&own_sdk_path).unwrap();
-        assert!(own_sdk.contains("version = \"2.3.4\""));
-        assert!(own_sdk.contains(&format!(
-            "trellis-rs = \"{}\"",
-            trellis_generation::artifacts::trellis_package_version()
-        )));
-        let participant_facade_path = root
-            .path()
-            .join(".trellis/generated/packages/cargo-participants/acme-consumer/Cargo.toml");
-        let participant_facade = fs::read_to_string(&participant_facade_path).unwrap();
-        assert!(participant_facade.contains("version = \"0.4.0\""));
-        assert!(participant_facade.contains(&format!(
-            "trellis-rs = \"{}\"",
-            trellis_generation::artifacts::trellis_package_version()
-        )));
-
-        let cargo_manifest = root.path().join("Cargo.toml");
-        fs::write(
-            &cargo_manifest,
-            fs::read_to_string(&cargo_manifest).unwrap().replacen(
-                "version = \"0.4.0\"",
-                "version = \"0.5.0\"",
-                1,
-            ),
-        )
-        .unwrap();
-        install_root(root.path(), &manifest, &lock).await.unwrap();
-        assert_eq!(fs::read_to_string(&own_sdk_path).unwrap(), own_sdk);
-        let updated_participant_facade = fs::read_to_string(&participant_facade_path).unwrap();
-        assert!(updated_participant_facade.contains("version = \"0.5.0\""));
-        assert_ne!(updated_participant_facade, participant_facade);
-
-        let aggregate_lib = root
-            .path()
-            .join(".trellis/generated/rust/trellis-apis/src/lib.rs");
-        fs::remove_file(&aggregate_lib).unwrap();
-        let repaired = install_root(root.path(), &manifest, &lock).await.unwrap();
-        assert!(repaired.changed_dependencies > 0);
-        assert!(aggregate_lib.is_file());
-        let warm = install_root(root.path(), &manifest, &lock).await.unwrap();
-        assert_eq!(warm.changed_dependencies, 0);
-        assert_eq!(warm.generated_projects, 0);
-
-        fs::remove_file(root.path().join("contracts/consumer.rs")).unwrap();
-        install_root(root.path(), &manifest, &lock).await.unwrap();
-        assert!(aggregate_lib.is_file());
     }
 }

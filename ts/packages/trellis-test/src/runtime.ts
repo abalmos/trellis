@@ -8,7 +8,7 @@ import {
   createAuth,
   TrellisClient,
 } from "@qlever-llc/trellis";
-import { recordTrellisDuration as recordOpenTelemetryDuration } from "@qlever-llc/trellis/telemetry";
+import { recordTrellisDuration } from "@qlever-llc/trellis/telemetry";
 import { dirname, join } from "@std/path";
 
 import { TrellisTestAdminAutomation } from "./admin_client.ts";
@@ -25,24 +25,7 @@ import {
   writeTrellisConfig,
 } from "./control_plane_config.ts";
 import { TrellisControlPlaneSqlite } from "./control_plane_sqlite.ts";
-import {
-  startTrellisTestEventCapture,
-  type TrellisTestEventAction,
-  type TrellisTestEventCapture,
-  type TrellisTestEventCaptureOptions,
-  type TrellisTestEventSourceContract,
-} from "./event_capture.ts";
 import { NatsTestContainer } from "./nats_container.ts";
-import { recordTrellisTestDuration } from "./integration/metrics.ts";
-
-function recordTrellisDuration(
-  name: Parameters<typeof recordOpenTelemetryDuration>[0],
-  durationMs: number,
-  attributes?: Parameters<typeof recordOpenTelemetryDuration>[2],
-): void {
-  recordOpenTelemetryDuration(name, durationMs, attributes);
-  void recordTrellisTestDuration(name, durationMs, attributes);
-}
 import type {
   JetStreamAckObserver,
   NatsMessageObserver,
@@ -55,12 +38,12 @@ import {
 import type {
   TrellisTestAuthorityPlanClassification,
   TrellisTestClientAuth,
-  TrellisTestClientContract,
   TrellisTestClientKey,
+  TrellisTestClientParticipant,
   TrellisTestConnectedClient,
-  TrellisTestContractApproval,
-  TrellisTestContractLike,
   TrellisTestControlPlane,
+  TrellisTestParticipantApproval,
+  TrellisTestParticipantLike,
   TrellisTestRawAuthConnectionPresence,
   TrellisTestRawStateEntry,
   TrellisTestRuntimeStartOptions,
@@ -70,7 +53,6 @@ import type {
 import { waitFor as waitForHelper } from "./wait.ts";
 
 type ConnectedClient = { connection: { close(): Promise<void> } };
-type EventCapture = { stop(): Promise<void> };
 type RuntimeTimeouts = {
   startupMs: number;
   reconciliationMs: number;
@@ -168,17 +150,17 @@ export class TrellisTestRuntime implements AsyncDisposable {
     approve(
       args: {
         deployment?: string;
-        contract: TrellisTestContractLike;
+        contract: TrellisTestParticipantLike;
         allowPlanClassifications?:
           readonly TrellisTestAuthorityPlanClassification[];
       },
-    ): Promise<TrellisTestContractApproval>;
+    ): Promise<TrellisTestParticipantApproval>;
   };
   readonly services: {
     createInstance(args: {
       deployment?: string;
       name: string;
-      contract: TrellisTestContractLike;
+      contract: TrellisTestParticipantLike;
       sessionKeySeed?: string;
     }): Promise<TrellisTestServiceKey>;
     provisionInstanceOnly(args: {
@@ -188,21 +170,24 @@ export class TrellisTestRuntime implements AsyncDisposable {
   };
   readonly devices: {
     provision(
-      input: import("@trellis/apis/trellis.auth").AuthDevicesProvisionInput,
+      input:
+        import("../.trellis/ts/apis/auth/mod.ts").AuthDevicesProvisionInput,
     ): Promise<
-      import("@trellis/apis/trellis.auth").AuthDevicesProvisionOutput
+      import("../.trellis/ts/apis/auth/mod.ts").AuthDevicesProvisionOutput
     >;
   };
   readonly state: {
     adminGet(
-      input: import("@trellis/apis/trellis.state").StateAdminGetInput,
-    ): Promise<import("@trellis/apis/trellis.state").StateAdminGetOutput>;
+      input: import("../.trellis/ts/apis/state/mod.ts").StateAdminGetInput,
+    ): Promise<import("../.trellis/ts/apis/state/mod.ts").StateAdminGetOutput>;
     adminList(
-      input: import("@trellis/apis/trellis.state").StateAdminListInput,
-    ): Promise<import("@trellis/apis/trellis.state").StateAdminListOutput>;
+      input: import("../.trellis/ts/apis/state/mod.ts").StateAdminListInput,
+    ): Promise<import("../.trellis/ts/apis/state/mod.ts").StateAdminListOutput>;
     adminDelete(
-      input: import("@trellis/apis/trellis.state").StateAdminDeleteInput,
-    ): Promise<import("@trellis/apis/trellis.state").StateAdminDeleteOutput>;
+      input: import("../.trellis/ts/apis/state/mod.ts").StateAdminDeleteInput,
+    ): Promise<
+      import("../.trellis/ts/apis/state/mod.ts").StateAdminDeleteOutput
+    >;
   };
   readonly authority: {
     readonly plans: {
@@ -238,7 +223,6 @@ export class TrellisTestRuntime implements AsyncDisposable {
   #deployment: string;
   #timeouts: RuntimeTimeouts;
   #clients = new Set<ConnectedClient>();
-  #captures = new Set<EventCapture>();
   #stopped = false;
 
   private constructor(args: {
@@ -562,7 +546,7 @@ export class TrellisTestRuntime implements AsyncDisposable {
   /** Registers a service contract and creates a service instance key. */
   async registerService(args: {
     name: string;
-    contract: TrellisTestContractLike;
+    contract: TrellisTestParticipantLike;
     deployment?: string;
     sessionKeySeed?: string;
   }): Promise<TrellisTestServiceKey> {
@@ -576,7 +560,7 @@ export class TrellisTestRuntime implements AsyncDisposable {
   /** Creates app/client session-key material for public `TrellisClient.connect` calls. */
   async registerClient(args: {
     name: string;
-    contract: TrellisTestClientContract;
+    contract: TrellisTestClientParticipant;
     sessionKeySeed?: string;
   }): Promise<TrellisTestClientKey> {
     const approved = await this.#admin.approveContract({
@@ -623,7 +607,7 @@ export class TrellisTestRuntime implements AsyncDisposable {
 
   /** Connects an app/client participant through the public generated client surface. */
   async connectClient<
-    TContract extends TrellisTestClientContract,
+    TContract extends TrellisTestClientParticipant,
   >(
     args: ClientOpts & {
       name: string;
@@ -648,31 +632,6 @@ export class TrellisTestRuntime implements AsyncDisposable {
       { participantKind: "client", phase: "total" },
     );
     return client as TrellisTestConnectedClient<TContract>;
-  }
-
-  /**
-   * Captures live decoded contract events through a synthetic app participant.
-   *
-   * The capture subscribes with generated event facade listeners in ephemeral mode
-   * and uses normal `uses.events.subscribe` authority for the selected source
-   * contract events.
-   */
-  async captureEvents<
-    TContract extends TrellisTestEventSourceContract,
-    const TEvents extends readonly TrellisTestEventAction[],
-  >(
-    args: TrellisTestEventCaptureOptions<TContract, TEvents>,
-  ): Promise<TrellisTestEventCapture<TEvents[number]>> {
-    const capture = await startTrellisTestEventCapture({
-      runtime: this,
-      options: args,
-      onStop: (client, stoppedCapture) => {
-        this.#clients.delete(client);
-        this.#captures.delete(stoppedCapture);
-      },
-    });
-    this.#captures.add(capture);
-    return capture;
   }
 
   /** Polls until `fn` returns a truthy value. */
@@ -852,13 +811,6 @@ export class TrellisTestRuntime implements AsyncDisposable {
     if (this.#stopped) return;
     this.#stopped = true;
     const failures: unknown[] = [];
-    for (const capture of [...this.#captures]) {
-      try {
-        await capture.stop();
-      } catch (error) {
-        failures.push(error);
-      }
-    }
     for (const client of this.#clients) {
       try {
         await client.connection.close();

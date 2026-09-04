@@ -146,11 +146,20 @@ jobs:
         with:
           name: check-generated
 
+      - name: Download embedded browser apps
+        uses: actions/download-artifact@v4
+        with:
+          name: check-portal
+          path: rust/crates/runtime/generated
+
       - name: Download protocol WASM
         uses: actions/download-artifact@v4
         with:
           name: check-protocol-wasm
           path: ts/packages/trellis/auth/protocol_wasm
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
 
       - name: Set up Deno
         uses: denoland/setup-deno@v2
@@ -229,8 +238,6 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - name: generation
-            workspace: rust/tools/generate
           - name: install
             workspace: rust/xtask
           - name: release
@@ -298,12 +305,6 @@ jobs:
           integration/live_runner.ts
           rust/crates/trellis-test/integration_runner.ts
 
-      - name: Test live runners
-        run: >-
-          deno test -A -c ts/deno.json
-          integration/live_runner_test.ts
-          rust/crates/trellis-test/integration_runner_test.ts
-
   live-build:
     name: Build live executables
     needs: [install, wasm, portal]
@@ -364,61 +365,10 @@ jobs:
           retention-days: 1
 
   live:
-    name: Live ${{ matrix.name }}
-    needs: [live-build]
+    name: Live integration
+    needs: [install, wasm, portal]
     runs-on: [self-hosted, Linux, X64]
     timeout-minutes: 20
-    env:
-      TRELLIS_INTEGRATION_JOBS: ${{ vars.TRELLIS_INTEGRATION_JOBS }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - name: auth
-            rust: "auth::"
-            typescript: "authorization-registry."
-          - name: state
-            rust: "state::"
-            typescript: "state."
-          - name: operations
-            rust: "operations::"
-            typescript: "operations."
-          - name: jobs
-            rust: "jobs::"
-            typescript: ""
-          - name: event-consumers
-            rust: "event_consumers::"
-            typescript: ""
-          - name: rpc
-            rust: "rpc::"
-            typescript: "rpc."
-          - name: feeds
-            rust: "feeds::"
-            typescript: "feeds."
-          - name: runtime-ownership
-            rust: "runtime_ownership::"
-            typescript: ""
-          - name: resources
-            rust: "resources::"
-            typescript: "resources."
-          - name: health
-            rust: "health::"
-            typescript: ""
-          - name: events
-            rust: "events::"
-            typescript: "events."
-          - name: transfer
-            rust: "transfer::"
-            typescript: "transfer."
-          - name: authority-plan
-            rust: "authority_plan::"
-            typescript: ""
-          - name: prepared-events
-            rust: "prepared_events::"
-            typescript: "outbox."
-          - name: cli
-            rust: "cli::"
-            typescript: ""
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -428,17 +378,20 @@ jobs:
         with:
           name: check-generated
 
+      - name: Download embedded browser apps
+        uses: actions/download-artifact@v4
+        with:
+          name: check-portal
+          path: rust/crates/runtime/generated
+
       - name: Download protocol WASM
         uses: actions/download-artifact@v4
         with:
           name: check-protocol-wasm
           path: ts/packages/trellis/auth/protocol_wasm
 
-      - name: Download live executables
-        uses: actions/download-artifact@v4
-        with:
-          name: check-live-executables
-          path: dist/integration-runtime
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
 
       - name: Set up Deno
         uses: denoland/setup-deno@v2
@@ -446,18 +399,7 @@ jobs:
           deno-version: ${{ env.DENO_VERSION }}
 
       - name: Run live integration suite
-        env:
-          RUST_FILTER: ${{ matrix.rust }}
-          TYPESCRIPT_PREFIX: ${{ matrix.typescript }}
-        shell: bash
-        run: |
-          args=(--prebuilt-only --rust-filter "$RUST_FILTER")
-          if [[ -n "$TYPESCRIPT_PREFIX" ]]; then
-            args+=(--typescript-prefix "$TYPESCRIPT_PREFIX")
-          else
-            args+=(--rust-only)
-          fi
-          deno run -A -c ts/deno.json integration/live_runner.ts "${args[@]}"
+        run: deno run -A -c ts/deno.json integration/live_runner.ts
 
   ui-hosting:
     name: Built-in UI hosting
@@ -498,45 +440,3 @@ jobs:
         run: |
           chmod +x "$TRELLIS_TEST_SERVER_BIN"
           deno task test:browser:ui-hosting
-
-  external-smoke:
-    name: External repository smoke
-    needs: [install, wasm, live-build]
-    runs-on: [self-hosted, Linux, X64]
-    timeout-minutes: 20
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
-
-      - name: Download generated artifacts
-        uses: actions/download-artifact@v4
-        with:
-          name: check-generated
-
-      - name: Download protocol WASM
-        uses: actions/download-artifact@v4
-        with:
-          name: check-protocol-wasm
-          path: ts/packages/trellis/auth/protocol_wasm
-
-      - name: Download live executables
-        uses: actions/download-artifact@v4
-        with:
-          name: check-live-executables
-          path: dist/integration-runtime
-
-      - name: Set up Deno
-        uses: denoland/setup-deno@v2
-        with:
-          deno-version: ${{ env.DENO_VERSION }}
-
-      - name: Run external repository smoke
-        env:
-          TRELLIS_TEST_SERVER_BIN: ${{ github.workspace }}/dist/integration-runtime/trellis-server
-        run: >-
-          chmod +x dist/integration-runtime/trellis-server &&
-          deno run -A -c ts/deno.json
-          ts/packages/trellis-test/src/integration/runner.ts
-          --config
-          ts/packages/trellis-test/tests/fixtures/external-service-repo/trellis.integration.ts
-          --case external.rpc-smoke

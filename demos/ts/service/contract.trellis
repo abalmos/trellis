@@ -204,6 +204,7 @@ api "demo.service@v1" {
     export EvidenceRecord;
     export InspectionAssignment;
     export ReportRecord;
+    export SiteRefreshJobPayload;
     export SiteSummary;
 
     error UnexpectedError;

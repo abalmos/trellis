@@ -663,8 +663,6 @@ path = "{}"
 }
 
 fn runtime_command(mode: &str, config_path: &Path, check: bool) -> Command {
-    trellis_test::record_test_process_start("trellis", mode)
-        .expect("record Rust runtime process start");
     let rust_dir = Path::new(env!("CARGO_MANIFEST_DIR"))
         .ancestors()
         .nth(2)

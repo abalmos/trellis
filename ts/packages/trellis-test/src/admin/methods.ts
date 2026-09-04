@@ -1,8 +1,4 @@
-import { type CallerRuntime, defineAppContract } from "@qlever-llc/trellis";
-import {
-  CONTRACT_RUNTIME,
-  participantDigest,
-} from "@qlever-llc/trellis/contracts";
+import type { CallerRuntime } from "@qlever-llc/trellis";
 import {
   AuthCapabilityGroupsPut,
   AuthCapabilityGroupsPutRequestSchema,
@@ -70,10 +66,10 @@ import {
   AuthSessionsRevokeRequestSchema,
   AuthSessionsRevokeResponseSchema,
   AuthUserIdentitiesList,
-} from "@trellis/apis/trellis.auth";
-import { EventLogQuery } from "@trellis/apis/trellis.eventlog";
-import { HealthQuery } from "@trellis/apis/trellis.health";
-import { JobsQuery } from "@trellis/apis/trellis.jobs";
+} from "../../.trellis/ts/apis/auth/mod.ts";
+import { EventLogQuery } from "../../.trellis/ts/apis/eventlog/mod.ts";
+import { HealthQuery } from "../../.trellis/ts/apis/health/mod.ts";
+import { JobsQuery } from "../../.trellis/ts/apis/jobs/mod.ts";
 import {
   StateAdminDelete,
   StateAdminDeleteRequestSchema,
@@ -84,88 +80,19 @@ import {
   StateAdminList,
   StateAdminListRequestSchema,
   StateAdminListResponseSchema,
-} from "@trellis/apis/trellis.state";
+} from "../../.trellis/ts/apis/state/mod.ts";
 import type { Static, TSchema } from "typebox";
 
-import cliParticipantSource from "../../../../../rust/crates/trellis/artifacts/trellis.cli.participant.json" with {
-  type: "json",
-};
+import { participant as adminParticipant } from "../../.trellis/ts/participants/test-admin/mod.ts";
+export { adminParticipant };
 
 export const ADMIN_USERNAME = "admin";
-const adminDescriptors = defineAppContract(() => ({
-  id: "test.admin@v1",
-  apiId: "test.admin@v1",
-  apiVersion: "1.0.0",
-  displayName: "Trellis Test Admin",
-  description:
-    "Automates Trellis test runtime administration through Auth RPCs.",
-  uses: [
-    AuthDeploymentAuthorityAcceptMigration,
-    AuthDeploymentAuthorityAcceptUpdate,
-    AuthDeploymentAuthorityGet,
-    AuthDeploymentAuthorityList,
-    AuthDeploymentAuthorityPlan,
-    AuthDeploymentAuthorityReject,
-    AuthDeploymentAuthorityPlansList,
-    AuthDeploymentAuthorityReconcile,
-    AuthDeploymentsCreate,
-    AuthDevicesProvision,
-    AuthIdentityAuthorityList,
-    AuthIdentityAuthorityRevoke,
-    AuthConnectionsList,
-    AuthCapabilityGroupsPut,
-    AuthPortalsList,
-    AuthPortalsGrantOverridesPut,
-    AuthPortalsGet,
-    AuthPortalsGrantOverridesRemove,
-    AuthPortalsLoginSettingsUpdate,
-    AuthPortalsPut,
-    AuthPortalsRoutesPut,
-    AuthServiceInstancesProvision,
-    AuthSessionsRevoke,
-    AuthUserIdentitiesList,
-    StateAdminDelete,
-    StateAdminGet,
-    StateAdminList,
-    JobsQuery,
-    EventLogQuery,
-    HealthQuery,
-  ],
-}));
-
-const cliParticipant = structuredClone(cliParticipantSource);
-const cliParticipantDigest = participantDigest(cliParticipant);
-
-export const adminContract = Object.defineProperty(
-  {
-    ...adminDescriptors,
-    CONTRACT_ID: cliParticipant.id,
-    CONTRACT_DIGEST: cliParticipantDigest,
-    PARTICIPANT: cliParticipant,
-  },
-  CONTRACT_RUNTIME,
-  {
-    value: adminDescriptors[CONTRACT_RUNTIME],
-  },
-) as
-  & Omit<
-    typeof adminDescriptors,
-    | "CONTRACT_ID"
-    | "CONTRACT_DIGEST"
-    | "PARTICIPANT"
-  >
-  & {
-    readonly CONTRACT_ID: "trellis-app.cli@v1";
-    readonly CONTRACT_DIGEST: string;
-    readonly PARTICIPANT: typeof cliParticipant;
-  };
-
 export const ADMIN_PARTICIPANT = {
-  id: adminContract.CONTRACT_ID,
-  artifactDigest: adminContract.CONTRACT_DIGEST,
+  id: adminParticipant.id,
+  artifactDigest: adminParticipant.digest,
 } as const;
 
-export type AdminClient = CallerRuntime<typeof adminContract>;
+export type AdminClient = CallerRuntime<typeof adminParticipant>;
 
 function adminMethod<const I extends TSchema, const O extends TSchema>(
   input: I,

@@ -15,9 +15,6 @@ use trellis_local_nats::{
 };
 use ulid::Ulid;
 
-use crate::support::assertions::assert_runtime_case_registered;
-
-const CASE_ID: &str = "cli.server-managed-nats";
 /// NATS client port of the server-managed nats-server.
 const NATS_PORT: u16 = 4222;
 /// All three ports the managed config listens on: NATS, HTTP monitor, websocket.
@@ -40,8 +37,6 @@ fn repo_root() -> &'static Path {
 }
 
 fn cli_command() -> Command {
-    trellis_test::record_test_process_start("trellis", "cli server managed-nats")
-        .expect("record CLI server process start");
     let mut command = if let Some(binary) = std::env::var_os("TRELLIS_TEST_CLI_BIN") {
         Command::new(binary)
     } else {
@@ -67,8 +62,6 @@ fn cli_command() -> Command {
 }
 
 fn server_command(workdir: &Path) -> Command {
-    trellis_test::record_test_process_start("trellis-server", "server managed-nats")
-        .expect("record server process start");
     let mut command = if let Some(binary) = std::env::var_os("TRELLIS_TEST_SERVER_BIN") {
         Command::new(binary)
     } else {
@@ -282,7 +275,6 @@ where
 
 #[tokio::test]
 async fn cli_server_managed_nats() {
-    assert_runtime_case_registered(CASE_ID, "cli", "cli");
     let workdir = WorkdirGuard::new();
     let bundle = workdir.0.join("bundle");
     let effective_root = workdir.0.join("effective");

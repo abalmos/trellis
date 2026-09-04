@@ -1,6 +1,6 @@
 //! Typed RPC descriptors for `trellis.state@v1`.
-use crate::generated::RpcDescriptor;
 use serde::{Deserialize, Serialize};
+use trellis_rs::generated::RpcDescriptor;
 /// Empty request or response payload used by zero-argument RPCs.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Empty {}
@@ -20,25 +20,25 @@ impl RpcDescriptor for StateAdminDeleteRpc {
 #[derive(Debug, Clone, PartialEq)]
 pub enum StateAdminDeleteError {
     /// `AuthError` error payload.
-    AuthError(crate::generated::AuthErrorPayload),
+    AuthError(trellis_rs::generated::AuthErrorPayload),
     /// `UnexpectedError` error payload.
-    UnexpectedError(crate::generated::DeclaredErrorPayload),
+    UnexpectedError(trellis_rs::generated::DeclaredErrorPayload),
     /// `ValidationError` error payload.
-    ValidationError(crate::generated::DeclaredErrorPayload),
+    ValidationError(trellis_rs::generated::DeclaredErrorPayload),
 }
-impl crate::generated::DeclaredError for StateAdminDeleteError {
+impl trellis_rs::generated::DeclaredError for StateAdminDeleteError {
     fn decode(
-        payload: &crate::generated::RemoteErrorPayload,
+        payload: &trellis_rs::generated::RemoteErrorPayload,
     ) -> Result<Option<Self>, serde_json::Error> {
         match payload.error_type() {
             Some("AuthError") => payload
-                .decode_declared::<crate::generated::AuthErrorPayload>("AuthError")
+                .decode_declared::<trellis_rs::generated::AuthErrorPayload>("AuthError")
                 .map(|value| value.map(Self::AuthError)),
             Some("UnexpectedError") => payload
-                .decode_declared::<crate::generated::DeclaredErrorPayload>("UnexpectedError")
+                .decode_declared::<trellis_rs::generated::DeclaredErrorPayload>("UnexpectedError")
                 .map(|value| value.map(Self::UnexpectedError)),
             Some("ValidationError") => payload
-                .decode_declared::<crate::generated::DeclaredErrorPayload>("ValidationError")
+                .decode_declared::<trellis_rs::generated::DeclaredErrorPayload>("ValidationError")
                 .map(|value| value.map(Self::ValidationError)),
             _ => Ok(None),
         }
@@ -66,25 +66,25 @@ impl RpcDescriptor for StateAdminGetRpc {
 #[derive(Debug, Clone, PartialEq)]
 pub enum StateAdminGetError {
     /// `AuthError` error payload.
-    AuthError(crate::generated::AuthErrorPayload),
+    AuthError(trellis_rs::generated::AuthErrorPayload),
     /// `UnexpectedError` error payload.
-    UnexpectedError(crate::generated::DeclaredErrorPayload),
+    UnexpectedError(trellis_rs::generated::DeclaredErrorPayload),
     /// `ValidationError` error payload.
-    ValidationError(crate::generated::DeclaredErrorPayload),
+    ValidationError(trellis_rs::generated::DeclaredErrorPayload),
 }
-impl crate::generated::DeclaredError for StateAdminGetError {
+impl trellis_rs::generated::DeclaredError for StateAdminGetError {
     fn decode(
-        payload: &crate::generated::RemoteErrorPayload,
+        payload: &trellis_rs::generated::RemoteErrorPayload,
     ) -> Result<Option<Self>, serde_json::Error> {
         match payload.error_type() {
             Some("AuthError") => payload
-                .decode_declared::<crate::generated::AuthErrorPayload>("AuthError")
+                .decode_declared::<trellis_rs::generated::AuthErrorPayload>("AuthError")
                 .map(|value| value.map(Self::AuthError)),
             Some("UnexpectedError") => payload
-                .decode_declared::<crate::generated::DeclaredErrorPayload>("UnexpectedError")
+                .decode_declared::<trellis_rs::generated::DeclaredErrorPayload>("UnexpectedError")
                 .map(|value| value.map(Self::UnexpectedError)),
             Some("ValidationError") => payload
-                .decode_declared::<crate::generated::DeclaredErrorPayload>("ValidationError")
+                .decode_declared::<trellis_rs::generated::DeclaredErrorPayload>("ValidationError")
                 .map(|value| value.map(Self::ValidationError)),
             _ => Ok(None),
         }
@@ -112,25 +112,25 @@ impl RpcDescriptor for StateAdminListRpc {
 #[derive(Debug, Clone, PartialEq)]
 pub enum StateAdminListError {
     /// `AuthError` error payload.
-    AuthError(crate::generated::AuthErrorPayload),
+    AuthError(trellis_rs::generated::AuthErrorPayload),
     /// `UnexpectedError` error payload.
-    UnexpectedError(crate::generated::DeclaredErrorPayload),
+    UnexpectedError(trellis_rs::generated::DeclaredErrorPayload),
     /// `ValidationError` error payload.
-    ValidationError(crate::generated::DeclaredErrorPayload),
+    ValidationError(trellis_rs::generated::DeclaredErrorPayload),
 }
-impl crate::generated::DeclaredError for StateAdminListError {
+impl trellis_rs::generated::DeclaredError for StateAdminListError {
     fn decode(
-        payload: &crate::generated::RemoteErrorPayload,
+        payload: &trellis_rs::generated::RemoteErrorPayload,
     ) -> Result<Option<Self>, serde_json::Error> {
         match payload.error_type() {
             Some("AuthError") => payload
-                .decode_declared::<crate::generated::AuthErrorPayload>("AuthError")
+                .decode_declared::<trellis_rs::generated::AuthErrorPayload>("AuthError")
                 .map(|value| value.map(Self::AuthError)),
             Some("UnexpectedError") => payload
-                .decode_declared::<crate::generated::DeclaredErrorPayload>("UnexpectedError")
+                .decode_declared::<trellis_rs::generated::DeclaredErrorPayload>("UnexpectedError")
                 .map(|value| value.map(Self::UnexpectedError)),
             Some("ValidationError") => payload
-                .decode_declared::<crate::generated::DeclaredErrorPayload>("ValidationError")
+                .decode_declared::<trellis_rs::generated::DeclaredErrorPayload>("ValidationError")
                 .map(|value| value.map(Self::ValidationError)),
             _ => Ok(None),
         }
@@ -158,25 +158,25 @@ impl RpcDescriptor for StateDeleteRpc {
 #[derive(Debug, Clone, PartialEq)]
 pub enum StateDeleteError {
     /// `AuthError` error payload.
-    AuthError(crate::generated::AuthErrorPayload),
+    AuthError(trellis_rs::generated::AuthErrorPayload),
     /// `UnexpectedError` error payload.
-    UnexpectedError(crate::generated::DeclaredErrorPayload),
+    UnexpectedError(trellis_rs::generated::DeclaredErrorPayload),
     /// `ValidationError` error payload.
-    ValidationError(crate::generated::DeclaredErrorPayload),
+    ValidationError(trellis_rs::generated::DeclaredErrorPayload),
 }
-impl crate::generated::DeclaredError for StateDeleteError {
+impl trellis_rs::generated::DeclaredError for StateDeleteError {
     fn decode(
-        payload: &crate::generated::RemoteErrorPayload,
+        payload: &trellis_rs::generated::RemoteErrorPayload,
     ) -> Result<Option<Self>, serde_json::Error> {
         match payload.error_type() {
             Some("AuthError") => payload
-                .decode_declared::<crate::generated::AuthErrorPayload>("AuthError")
+                .decode_declared::<trellis_rs::generated::AuthErrorPayload>("AuthError")
                 .map(|value| value.map(Self::AuthError)),
             Some("UnexpectedError") => payload
-                .decode_declared::<crate::generated::DeclaredErrorPayload>("UnexpectedError")
+                .decode_declared::<trellis_rs::generated::DeclaredErrorPayload>("UnexpectedError")
                 .map(|value| value.map(Self::UnexpectedError)),
             Some("ValidationError") => payload
-                .decode_declared::<crate::generated::DeclaredErrorPayload>("ValidationError")
+                .decode_declared::<trellis_rs::generated::DeclaredErrorPayload>("ValidationError")
                 .map(|value| value.map(Self::ValidationError)),
             _ => Ok(None),
         }
@@ -204,25 +204,25 @@ impl RpcDescriptor for StateGetRpc {
 #[derive(Debug, Clone, PartialEq)]
 pub enum StateGetError {
     /// `AuthError` error payload.
-    AuthError(crate::generated::AuthErrorPayload),
+    AuthError(trellis_rs::generated::AuthErrorPayload),
     /// `UnexpectedError` error payload.
-    UnexpectedError(crate::generated::DeclaredErrorPayload),
+    UnexpectedError(trellis_rs::generated::DeclaredErrorPayload),
     /// `ValidationError` error payload.
-    ValidationError(crate::generated::DeclaredErrorPayload),
+    ValidationError(trellis_rs::generated::DeclaredErrorPayload),
 }
-impl crate::generated::DeclaredError for StateGetError {
+impl trellis_rs::generated::DeclaredError for StateGetError {
     fn decode(
-        payload: &crate::generated::RemoteErrorPayload,
+        payload: &trellis_rs::generated::RemoteErrorPayload,
     ) -> Result<Option<Self>, serde_json::Error> {
         match payload.error_type() {
             Some("AuthError") => payload
-                .decode_declared::<crate::generated::AuthErrorPayload>("AuthError")
+                .decode_declared::<trellis_rs::generated::AuthErrorPayload>("AuthError")
                 .map(|value| value.map(Self::AuthError)),
             Some("UnexpectedError") => payload
-                .decode_declared::<crate::generated::DeclaredErrorPayload>("UnexpectedError")
+                .decode_declared::<trellis_rs::generated::DeclaredErrorPayload>("UnexpectedError")
                 .map(|value| value.map(Self::UnexpectedError)),
             Some("ValidationError") => payload
-                .decode_declared::<crate::generated::DeclaredErrorPayload>("ValidationError")
+                .decode_declared::<trellis_rs::generated::DeclaredErrorPayload>("ValidationError")
                 .map(|value| value.map(Self::ValidationError)),
             _ => Ok(None),
         }
@@ -250,25 +250,25 @@ impl RpcDescriptor for StateListRpc {
 #[derive(Debug, Clone, PartialEq)]
 pub enum StateListError {
     /// `AuthError` error payload.
-    AuthError(crate::generated::AuthErrorPayload),
+    AuthError(trellis_rs::generated::AuthErrorPayload),
     /// `UnexpectedError` error payload.
-    UnexpectedError(crate::generated::DeclaredErrorPayload),
+    UnexpectedError(trellis_rs::generated::DeclaredErrorPayload),
     /// `ValidationError` error payload.
-    ValidationError(crate::generated::DeclaredErrorPayload),
+    ValidationError(trellis_rs::generated::DeclaredErrorPayload),
 }
-impl crate::generated::DeclaredError for StateListError {
+impl trellis_rs::generated::DeclaredError for StateListError {
     fn decode(
-        payload: &crate::generated::RemoteErrorPayload,
+        payload: &trellis_rs::generated::RemoteErrorPayload,
     ) -> Result<Option<Self>, serde_json::Error> {
         match payload.error_type() {
             Some("AuthError") => payload
-                .decode_declared::<crate::generated::AuthErrorPayload>("AuthError")
+                .decode_declared::<trellis_rs::generated::AuthErrorPayload>("AuthError")
                 .map(|value| value.map(Self::AuthError)),
             Some("UnexpectedError") => payload
-                .decode_declared::<crate::generated::DeclaredErrorPayload>("UnexpectedError")
+                .decode_declared::<trellis_rs::generated::DeclaredErrorPayload>("UnexpectedError")
                 .map(|value| value.map(Self::UnexpectedError)),
             Some("ValidationError") => payload
-                .decode_declared::<crate::generated::DeclaredErrorPayload>("ValidationError")
+                .decode_declared::<trellis_rs::generated::DeclaredErrorPayload>("ValidationError")
                 .map(|value| value.map(Self::ValidationError)),
             _ => Ok(None),
         }
@@ -296,25 +296,25 @@ impl RpcDescriptor for StatePutRpc {
 #[derive(Debug, Clone, PartialEq)]
 pub enum StatePutError {
     /// `AuthError` error payload.
-    AuthError(crate::generated::AuthErrorPayload),
+    AuthError(trellis_rs::generated::AuthErrorPayload),
     /// `UnexpectedError` error payload.
-    UnexpectedError(crate::generated::DeclaredErrorPayload),
+    UnexpectedError(trellis_rs::generated::DeclaredErrorPayload),
     /// `ValidationError` error payload.
-    ValidationError(crate::generated::DeclaredErrorPayload),
+    ValidationError(trellis_rs::generated::DeclaredErrorPayload),
 }
-impl crate::generated::DeclaredError for StatePutError {
+impl trellis_rs::generated::DeclaredError for StatePutError {
     fn decode(
-        payload: &crate::generated::RemoteErrorPayload,
+        payload: &trellis_rs::generated::RemoteErrorPayload,
     ) -> Result<Option<Self>, serde_json::Error> {
         match payload.error_type() {
             Some("AuthError") => payload
-                .decode_declared::<crate::generated::AuthErrorPayload>("AuthError")
+                .decode_declared::<trellis_rs::generated::AuthErrorPayload>("AuthError")
                 .map(|value| value.map(Self::AuthError)),
             Some("UnexpectedError") => payload
-                .decode_declared::<crate::generated::DeclaredErrorPayload>("UnexpectedError")
+                .decode_declared::<trellis_rs::generated::DeclaredErrorPayload>("UnexpectedError")
                 .map(|value| value.map(Self::UnexpectedError)),
             Some("ValidationError") => payload
-                .decode_declared::<crate::generated::DeclaredErrorPayload>("ValidationError")
+                .decode_declared::<trellis_rs::generated::DeclaredErrorPayload>("ValidationError")
                 .map(|value| value.map(Self::ValidationError)),
             _ => Ok(None),
         }

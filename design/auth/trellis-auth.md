@@ -43,9 +43,9 @@ owner; there is no in-process reacquisition by a stale owner.
 ## Canonical Artifacts
 
 `trellis.api.v1` and `trellis.participant.v1` are protocol-owned runtime
-artifacts. The source-owned Auth pair lives in `rust/crates/runtime/`. Normal
-TypeScript contracts are compiled to those formats before bootstrap. The Rust
-runtime does not maintain a legacy contract-manifest authority parser.
+artifacts. The source-owned Auth pair lives in `rust/crates/runtime/` as Trellis
+IDL and is compiled before bootstrap. The Rust runtime accepts only canonical
+protocol artifacts.
 
 Every authority and session binding pins:
 

@@ -1,160 +1,20 @@
-<script lang="ts">
-  import LanguageTabs from "$lib/components/LanguageTabs.svelte";
-</script>
+# Generate SDKs and artifacts
 
-Now that your service is live, how do other teams call it, and how do operators roll it out? Trellis distributes one canonical, language-neutral API artifact. Each consumer generates the local SDK language it needs, while operators use the participant and API artifacts for deployment authority.
-
-Generated SDK packages include typed request/response definitions, schema constants, concrete client facades, and exact API identity evidence. Consumer projects generate them from locked canonical APIs rather than executing provider source.
-
-Operators also need a contract artifact they can submit as a service deployment authority proposal before, or during, rollout.
-
-## Generated artifact layout
-
-`.trellis/` is disposable project-local output. It is ignored by git and recreated by `trellis install`.
-
-For TypeScript contract sources, installation resolves either a top-level `contract.ts` or `contract.js` for single-contract projects, or `contracts/*.ts` for multi-contract layouts, from the file's default export. Authors do not need to add named `CONTRACT` exports just for generation. For TypeScript authoring, schema and error registries belong in the first `define*Contract(...)` argument, while contract-owned capability metadata belongs in the returned contract body beside `id`, `apiId`, `displayName`, and `description`. `id` is the stable participant identity; `apiId` is the owned API identity. They must both be supplied even when their values are equal.
-
-You can also add docs metadata to the contract or to owned surfaces when generated docs need more than the short `displayName` and `description` copy:
-
-```ts
-export const ordersService = defineServiceContract({ schemas }, (ref) => ({
-  id: "orders-service@v1",
-  apiId: "orders-service@v1",
-  apiVersion: "1.0.0",
-  displayName: "Orders Service",
-  description: "A simple service for managing orders.",
-  docs: {
-    summary: "Order management APIs.",
-    markdown: "# Orders Service\n\nCreates and retrieves order records.",
-  },
-  rpc: {
-    "Orders.Create": {
-      version: "v1",
-      input: ref.schema("CreateOrderRequest"),
-      output: ref.schema("CreateOrderResponse"),
-      docs: {
-        markdown: "Creates one order and returns its generated order id.",
-      },
-    },
-  },
-}));
-```
-
-Docs-only edits still require artifact regeneration so manifests and generated documentation stay current. They do not change the contract digest identity, because `docs` is normalized metadata and not part of the runtime digest projection. Keep approval and authority meaning in capability metadata; use `docs` for authored reference material.
-
-Outputs include:
-
-- normalized APIs and participants under `.trellis/generated/protocol/`
-- private TypeScript SDKs under `.trellis/generated/ts/`
-- private Rust SDKs under `.trellis/generated/rust/`
-
-Generated participant facades expose `CONTRACT_ID`, while generated API SDKs expose `API_ID`. Participant JSON and facade paths use the participant `id`; API JSON and SDK paths use `apiId`.
-
-## Install API dependencies
-
-A consumer project records local canonical API artifacts or named OCI registries in `trellis.toml`:
-
-```toml
-format = 1
-
-[apis."acme.orders@v1"]
-version = "^1.4"
-path = "../orders/.trellis/generated/protocol/apis/acme.orders@v1.json"
-```
-
-For a published API, configure a registry prefix and dependency source:
-
-```toml
-format = 1
-default-registry = "qlever"
-
-[registries.qlever]
-prefix = "ghcr.io/qlever-llc/trellis-apis"
-
-[apis."acme.orders@v1"]
-version = "^1.4"
-registry = "qlever"
-```
-
-Use the top-level package commands from the directory containing that file:
+Run:
 
 ```sh
-trellis add ../orders/.trellis/generated/protocol/apis/acme.orders@v1.json
-trellis add acme.orders@v1 --version '^1.4'
 trellis update
-trellis install
-trellis rm acme.orders@v1
+trellis generate
 ```
 
-`add`, `rm`, and `update` write an exact `trellis.lock`; commit both project files. `install` never updates them. Local entries pin the path, API ID, release, and semantic digest. Remote entries additionally pin the exact OCI manifest digest and install by that digest, not by a mutable tag. Docker-compatible registry credentials, including configured credential helpers, are reused automatically.
-
-Installed canonical APIs and consumer-generated SDKs live under disposable `.trellis/`. Add `.trellis/` to `.gitignore`. TypeScript projects link `.trellis/generated/ts/trellis-apis` from the root Deno `links` array and import stable subpaths such as `@trellis/apis/acme.orders`. Rust projects add `trellis-apis = { path = ".trellis/generated/rust/trellis-apis" }` and import stable modules such as `trellis_apis::orders`.
-
-The API release version and OCI digest are distribution metadata. The stable API ID remains the protocol and security identity, and the semantic digest remains the exact machine identity recorded in participant evidence. Installation never executes provider contract source.
-
-Producers configure the same registry prefix and run `trellis publish` after a lock-stable install. Trellis publishes only canonical APIs; consumers generate their own SDKs. Release tags are immutable, and each newer release under the same API ID must pass Trellis structural compatibility. A breaking API uses a new stable identity such as `@v2`.
-
-When a participant owns State or another implemented surface, authoring pins its owned API under `participant.implements.self` with the exact API digest. A participant may implement additional APIs under other aliases, but Trellis State resolves owned declarations only through `self`; a missing `self` is rejected rather than falling back to participant identity or store-name matching.
-
-Run `trellis install` in a service repository after contract or dependency changes.
-In this repository, `cargo xtask install` runs every project in dependency order,
-and `cargo xtask build` installs before building. A warm unchanged install checks
-the lock and generated fingerprints without evaluating contract source or
-rewriting output.
-
-Contract resolution must be deterministic from tracked source. Pin package and
-API dependencies; time, randomness, network responses, and ambient environment
-variables are unsupported authoring inputs.
-
-<LanguageTabs>
-{#snippet ts()}
-
-A typical service repo ends up with a shape like this:
-
-```text
-orders-service/
-  contracts/orders_service.ts
-  schemas.ts
-  main.ts
-  dist/contracts/
-  trellis.toml
-  trellis.lock
-  .trellis/
-```
-
-Keep the source contract with the service, and generate artifacts from the project root:
-
-```sh
-trellis install
-```
-
-Regenerate these artifacts whenever the contract changes. For TypeScript services,
-run install before typing extracted handlers so aliases such as
-`OrdersCreateHandler` match the current contract. If only handler
-implementation changed, you usually do not need an install run.
-
-{/snippet}
-{#snippet rust()}
-
-Every Rust contract change should regenerate artifacts:
-
-```sh
-trellis install
-```
-
-This writes:
+The project-local output is:
 
 ```text
 .trellis/
-  generated/protocol/apis/orders-service@v1.json
-  generated/rust/trellis-apis/
+├── apis/       # lock-verified installed dependency artifacts
+├── artifacts/  # owned canonical API and participant artifacts
+├── rust/       # private generated Rust SDKs and facades
+└── ts/         # private generated TypeScript SDKs and participants
 ```
 
-Each consumer declares the API in its own `trellis.toml`, commits its exact
-`trellis.lock`, and generates only its local Rust or TypeScript SDK projection
-with `trellis install`.
-
-Rust code should treat source as authoritative for exact runtime APIs and Rustdoc as the public API reference. If a generated SDK helper or descriptor name differs from the examples here, prefer the generated item under `.trellis/generated/rust/`.
-
-{/snippet}
-</LanguageTabs>
+`trellis generate` is offline. Local dependencies compile from source; registry dependencies use exact installed artifacts from `trellis.lock`. A failed compile leaves the previous successful outputs untouched.

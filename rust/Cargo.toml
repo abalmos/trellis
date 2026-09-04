@@ -8,7 +8,6 @@ members = [
   "crates/jobs-runtime",
   "crates/eventlog-runtime",
   "crates/trellis-test",
-  "crates/contracts",
   "crates/idl",
   "crates/protocol",
   "crates/protocol-wasm",
@@ -17,7 +16,6 @@ members = [
   "crates/cli",
   "crates/server",
   "crates/runtime",
-  "tools/generate",
   "xtask",
 ]
 default-members = [
@@ -29,20 +27,17 @@ default-members = [
   "crates/jobs-runtime",
   "crates/eventlog-runtime",
   "crates/trellis-test",
-  "crates/contracts",
   "crates/protocol",
   "crates/codegen-ts",
   "crates/codegen-rust",
   "crates/cli",
   "crates/server",
   "crates/runtime",
-  "tools/generate",
   "xtask",
 ]
 resolver = "2"
 
 [patch.crates-io]
-trellis-contracts = { path = "crates/contracts" }
 trellis-rs = { path = "crates/trellis" }
 
 [workspace.package]

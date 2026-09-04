@@ -29,7 +29,7 @@ import type { PermissionAtom } from "./protocol_wasm.ts";
 import { createAuth } from "./session_auth.ts";
 import { base64urlEncode, sha256, utf8 } from "./utils.ts";
 import { type VerifiedCaller, verifyLocalAuthorization } from "../session.ts";
-import type { PermissionAtom as DescriptorPermissionAtom } from "../contract_support/runtime.ts";
+import type { PermissionAtom as DescriptorPermissionAtom } from "../participant_runtime/api.ts";
 
 function contextBundle(): AuthorizationContextBundle {
   const chain = vectors.completeChain;

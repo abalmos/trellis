@@ -25,7 +25,10 @@ export function recordReport(report: ReportRecord): void {
 export function listReports(): ReportRecord[] {
   const currentReports: ReportRecord[] = [];
   for (const [reportId, report] of reports) {
-    if (typeof report.reportComment !== "string" || report.reportComment.trim().length === 0) {
+    if (
+      typeof report.reportComment !== "string" ||
+      report.reportComment.trim().length === 0
+    ) {
       reports.delete(reportId);
       continue;
     }

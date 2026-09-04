@@ -355,9 +355,9 @@ mod tests {
 
     struct TestContract;
 
-    impl crate::service::GeneratedServiceContract for TestContract {
+    impl crate::service::GeneratedServiceParticipant for TestContract {
         const PARTICIPANT_ID: &'static str = "test.device@v1";
-        const CONTRACT_DIGEST: &'static str = "contract-digest";
+        const PARTICIPANT_DIGEST: &'static str = "contract-digest";
         const PARTICIPANT_NEEDS_DIGEST: &'static str = "needs-digest";
         const PARTICIPANT_JSON: &'static str = "participant-json";
         const API_JSON: &'static str = "api-json";

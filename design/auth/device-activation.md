@@ -564,19 +564,11 @@ Implementation status:
 ```ts
 import { isErr, TrellisDevice } from "@qlever-llc/trellis";
 import { checkDeviceActivation } from "@qlever-llc/trellis/device/deno";
-import { defineDeviceContract } from "@qlever-llc/trellis";
-
-export const device = defineDeviceContract(() => ({
-  id: "acme.demo-device@v1",
-  displayName: "Demo Device",
-  description: "A small activated device used for local Trellis demos.",
-}));
-
-export default device;
+import { participant } from "../.trellis/ts/participants/acme.demo-device@v1.ts";
 
 const authority = await checkDeviceActivation({
   trellisUrl,
-  contract: device,
+  participant,
   rootSecret,
 });
 

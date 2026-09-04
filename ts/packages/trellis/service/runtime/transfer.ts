@@ -14,7 +14,7 @@ import { ulid } from "ulid";
 import { sha256 } from "@noble/hashes/sha256";
 import { base64urlEncode } from "../../auth/utils.ts";
 
-import type { PermissionAtom } from "../../contract_support/runtime.ts";
+import type { PermissionAtom } from "../../participant_runtime/api.ts";
 import {
   type OperationTransferHandle,
   type RuntimeOperationTransferProgress,

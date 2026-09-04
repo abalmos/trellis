@@ -5068,8 +5068,6 @@ dependencies = [
  "trellis-bootstrap",
  "trellis-codegen-rust",
  "trellis-codegen-ts",
- "trellis-contracts",
- "trellis-generation",
  "trellis-idl",
  "trellis-local-bootstrap",
  "trellis-protocol",
@@ -5088,7 +5086,7 @@ dependencies = [
  "syn",
  "thiserror 2.0.18",
  "toml",
- "trellis-contracts",
+ "trellis-protocol",
 ]
 
 [[package]]
@@ -5098,16 +5096,6 @@ dependencies = [
  "oxc_allocator",
  "oxc_parser",
  "oxc_span",
- "serde_json",
- "thiserror 2.0.18",
- "trellis-contracts",
- "trellis-protocol",
-]
-
-[[package]]
-name = "trellis-contracts"
-version = "0.12.0"
-dependencies = [
  "serde",
  "serde_json",
  "thiserror 2.0.18",
@@ -5127,23 +5115,6 @@ dependencies = [
  "tokio",
  "tracing",
  "trellis-rs",
-]
-
-[[package]]
-name = "trellis-generation"
-version = "0.12.0"
-dependencies = [
- "miette",
- "owo-colors",
- "serde",
- "serde_json",
- "sha2 0.11.0",
- "syn",
- "tempfile",
- "toml",
- "trellis-codegen-rust",
- "trellis-codegen-ts",
- "trellis-contracts",
 ]
 
 [[package]]
@@ -5173,7 +5144,6 @@ dependencies = [
  "time",
  "tokio",
  "tracing",
- "trellis-contracts",
  "trellis-rs",
  "trellis-runtime-apis",
 ]
@@ -5263,10 +5233,8 @@ dependencies = [
  "time",
  "tokio",
  "tracing",
- "trellis-contracts",
  "trellis-local-nats",
  "trellis-protocol",
- "trellis-runtime-apis",
  "trellis-test",
  "ulid",
  "url",
@@ -6209,6 +6177,7 @@ dependencies = [
  "serde_json",
  "tokio",
  "trellis-cli",
+ "trellis-codegen-ts",
  "wasm-bindgen-cli-support",
 ]
 

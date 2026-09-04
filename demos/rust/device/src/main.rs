@@ -91,7 +91,7 @@ async fn connect_device_if_configured(args: &Args) -> anyhow::Result<Option<Conn
     )?;
     let identity = derive_device_identity(&root_secret)?;
     let activation = DeviceActivationOptions::new(
-        trellis_rs::client::DeviceConnectOptions::<trellis_participant_demo_device::Contract>::new(
+        trellis_rs::client::DeviceConnectOptions::<trellis_participant_demo_device::Participant>::new(
             trellis_url,
             deployment_id,
             instance_id,

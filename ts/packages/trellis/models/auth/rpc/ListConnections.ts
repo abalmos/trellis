@@ -1,5 +1,5 @@
 import Type, { type Static } from "typebox";
-import { PageResponseSchema } from "../../../contract_support/protocol.ts";
+import { PageResponseSchema } from "../../../participant_runtime/schemas.ts";
 
 const UserPrincipalSchema = Type.Object({
   type: Type.Literal("user"),

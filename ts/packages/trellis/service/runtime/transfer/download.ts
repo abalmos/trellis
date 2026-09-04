@@ -1,7 +1,7 @@
 import { sha256 } from "@noble/hashes/sha256";
 import type { Subscription } from "@nats-io/nats-core";
 
-import type { PermissionAtom } from "../../../contract_support/runtime.ts";
+import type { PermissionAtom } from "../../../participant_runtime/api.ts";
 import type { TypedStore } from "../../../store.ts";
 import type { FileInfo } from "../../../transfer.ts";
 

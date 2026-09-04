@@ -250,11 +250,10 @@ fn build_router(store: HealthStore, invalidations: broadcast::Sender<Invalidatio
                         }
                         Err(broadcast::error::RecvError::Lagged(_)) => {
                             return Some((
-                                Ok(HealthWatchEvent::HealthInvalidated {
-                                    changes: None,
-                                    projection_revision: current_revision(&store)
-                                        .unwrap_or_default(),
-                                }),
+                                health_invalidated_event(
+                                    current_revision(&store).unwrap_or_default(),
+                                    None,
+                                ),
                                 (receiver, input, store),
                             ));
                         }

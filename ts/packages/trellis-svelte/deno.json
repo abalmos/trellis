@@ -3,9 +3,6 @@
   "name": "@qlever-llc/trellis-svelte",
   "version": "0.12.0",
   "exports": "./src/index.ts",
-  "imports": {
-    "@trellis/apis/trellis.auth": "./.trellis/generated/ts/trellis-apis/trellis.auth.ts"
-  },
   "tasks": {
     "build:npm": "deno run -A ./scripts/build_npm.ts"
   },

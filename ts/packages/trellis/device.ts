@@ -7,13 +7,13 @@ import {
 } from "@qlever-llc/result";
 import { ulid } from "ulid";
 import { decodeTrellisHttpError } from "./auth/http_error.ts";
-import { ContractResourceBindingsSchema } from "./contracts.ts";
+import { ContractResourceBindingsSchema } from "./participant.ts";
 import {
-  CONTRACT_STATE_METADATA,
-  type ContractStateMetadata,
-} from "./contract_support/mod.ts";
-import type { NativeProtocolContract } from "./contract_support/protocol_artifacts.ts";
-import { resolveNativeProtocolPresentation } from "./contract_support/protocol_resolution.ts";
+  PARTICIPANT_STATE_METADATA,
+  type ParticipantStateMetadata,
+} from "./participant_runtime/metadata.ts";
+import type { GeneratedParticipantEvidence } from "./participant_runtime/artifacts.ts";
+import { resolveParticipantPresentation } from "./participant_runtime/resolution.ts";
 
 import {
   deriveDeviceConfirmationCode,
@@ -33,7 +33,7 @@ import {
   SESSION_PROOF_FORMAT_V1,
   sessionProofRequestDigest,
 } from "./auth/session_proof.ts";
-import type { RuntimeApi } from "./contract_support/runtime.ts";
+import type { RuntimeApi } from "./participant_runtime/api.ts";
 import {
   DEFAULT_RUNTIME_MAX_RECONNECT_ATTEMPTS,
   loadDefaultRuntimeTransport,
@@ -61,9 +61,9 @@ import {
 } from "./auth/authorization_context.ts";
 import { type CallerRuntime, createCallerRuntime } from "./caller.ts";
 import {
-  type ContractWithRuntime,
-  getContractRuntime,
-} from "./contract_support/contract_runtime.ts";
+  type GeneratedParticipant,
+  getParticipantRuntime,
+} from "./participant_runtime/participant.ts";
 
 type DeviceContract<
   TContract extends {
@@ -73,8 +73,8 @@ type DeviceContract<
     state?: Readonly<Record<string, unknown>>;
     schemas?: Readonly<Record<string, unknown>>;
   },
-> = ContractWithRuntime & NativeProtocolContract & {
-  readonly [CONTRACT_STATE_METADATA]?: ContractStateMetadata;
+> = GeneratedParticipant & GeneratedParticipantEvidence & {
+  readonly [PARTICIPANT_STATE_METADATA]?: ParticipantStateMetadata;
 };
 
 type RuntimeStateShape = Record<
@@ -593,7 +593,7 @@ async function fetchDeviceBootstrap(args: {
   activationNonce?: string;
   signal?: AbortSignal;
 }): Promise<DeviceBootstrapResponse> {
-  const presentation = await resolveNativeProtocolPresentation(
+  const presentation = await resolveParticipantPresentation(
     args.participant,
   );
   const sessionAuth = await createAuth({
@@ -984,8 +984,8 @@ export async function connectDeviceWithDeps<
     },
     {
       log,
-      api: getContractRuntime(args.participant).api as RuntimeApi,
-      state: args.participant[CONTRACT_STATE_METADATA],
+      api: getParticipantRuntime(args.participant).api as RuntimeApi,
+      state: args.participant[PARTICIPANT_STATE_METADATA],
       connection,
     },
     connectInfo.transport.inboxPrefix,

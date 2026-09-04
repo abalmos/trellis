@@ -1,6 +1,6 @@
-// Generated from ./rust/crates/runtime/.trellis/generated/protocol/apis/trellis.auth@v1.json
-import type { SerializableErrorData } from "../../../contracts.ts";
-import { TrellisError } from "../../../errors/index.ts";
+// Generated from ./rust/crates/runtime/.trellis/artifacts/apis/trellis.auth@v1.json
+import type { SerializableErrorData } from "@qlever-llc/trellis";
+import { TrellisError } from "@qlever-llc/trellis";
 import { AuthErrorDetailsSchema } from "./schemas.ts";
 
 export type AuthCapabilitiesListInput = {
@@ -1113,7 +1113,7 @@ export type AuthDeploymentsCreateInput = {
   participantId: string | null;
   portalId: string | null;
   requiresDeviceDelegation: boolean;
-  reviewMode: "none" | "required" | null;
+  reviewMode: "none" | "required" | null | "none" | "required" | null;
 };
 export type AuthDeploymentsCreateOutput = {
   deployment: {
@@ -1126,7 +1126,7 @@ export type AuthDeploymentsCreateOutput = {
     participantId: string | null;
     portalId: string | null;
     requiresDeviceDelegation: boolean;
-    reviewMode: "none" | "required" | null;
+    reviewMode: "none" | "required" | null | "none" | "required" | null;
     revokedAt: number | null;
     state: "active" | "disabled" | "revoked";
     updatedAt: number;
@@ -1151,7 +1151,7 @@ export type AuthDeploymentsDisableOutput = {
     participantId: string | null;
     portalId: string | null;
     requiresDeviceDelegation: boolean;
-    reviewMode: "none" | "required" | null;
+    reviewMode: "none" | "required" | null | "none" | "required" | null;
     revokedAt: number | null;
     state: "active" | "disabled" | "revoked";
     updatedAt: number;
@@ -1182,7 +1182,7 @@ export type AuthDeploymentsEnableOutput = {
     participantId: string | null;
     portalId: string | null;
     requiresDeviceDelegation: boolean;
-    reviewMode: "none" | "required" | null;
+    reviewMode: "none" | "required" | null | "none" | "required" | null;
     revokedAt: number | null;
     state: "active" | "disabled" | "revoked";
     updatedAt: number;
@@ -1214,7 +1214,7 @@ export type AuthDeploymentsListOutput = {
       participantId: string | null;
       portalId: string | null;
       requiresDeviceDelegation: boolean;
-      reviewMode: "none" | "required" | null;
+      reviewMode: "none" | "required" | null | "none" | "required" | null;
       revokedAt: number | null;
       state: "active" | "disabled" | "revoked";
       updatedAt: number;
@@ -1241,7 +1241,7 @@ export type AuthDeploymentsRemoveOutput = {
     participantId: string | null;
     portalId: string | null;
     requiresDeviceDelegation: boolean;
-    reviewMode: "none" | "required" | null;
+    reviewMode: "none" | "required" | null | "none" | "required" | null;
     revokedAt: number | null;
     state: "active" | "disabled" | "revoked";
     updatedAt: number;

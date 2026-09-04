@@ -1,11 +1,11 @@
-// Generated from ./rust/crates/jobs-runtime/.trellis/generated/protocol/apis/trellis.jobs@v1.json
+// Generated from ./rust/crates/jobs-runtime/.trellis/artifacts/apis/trellis.jobs@v1.json
 import {
   eventActions,
   feedAction,
   operationAction,
   rpcAction,
   schema,
-} from "../../../contracts.ts";
+} from "@qlever-llc/trellis";
 import * as Types from "./types.ts";
 import {
   JobsCancelRequestSchema,
@@ -436,3 +436,17 @@ export const JobsWatch = feedAction(
   "JobsWatch",
   ACTION_SOURCE,
 );
+
+export const ACTIONS = {
+  "Jobs.Cancel": JobsCancel,
+  "Jobs.DismissDLQ": JobsDismissDLQ,
+  "Jobs.GetKey": JobsGetKey,
+  "Jobs.Inspect": JobsInspect,
+  "Jobs.ListDLQ": JobsListDLQ,
+  "Jobs.ListServices": JobsListServices,
+  "Jobs.Metrics": JobsMetrics,
+  "Jobs.Query": JobsQuery,
+  "Jobs.ReplayDLQ": JobsReplayDLQ,
+  "Jobs.Retry": JobsRetry,
+  "Jobs.Watch": JobsWatch,
+} as const;

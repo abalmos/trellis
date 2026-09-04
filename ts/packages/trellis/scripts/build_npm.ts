@@ -251,7 +251,6 @@ await buildDntPackage({
     "./ts/packages/trellis/auth/browser.ts",
     "./ts/packages/trellis/auth/file.ts",
     "./ts/packages/trellis/browser.ts",
-    "./ts/packages/trellis/contracts.ts",
     "./ts/packages/trellis/device.ts",
     "./ts/packages/trellis/device/deno.ts",
     "./ts/packages/trellis/errors/index.ts",
@@ -262,7 +261,7 @@ await buildDntPackage({
     "./ts/packages/trellis/telemetry.ts",
   ],
   description:
-    "Client-side Trellis runtime, models, and contract helpers for TypeScript applications.",
+    "Client-side Trellis runtime, models, and participant helpers for TypeScript applications.",
   dependencies: {
     "@opentelemetry/api": "^1.9.0",
     "@opentelemetry/exporter-metrics-otlp-proto": "^0.56.0",

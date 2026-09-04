@@ -75,7 +75,7 @@ pub use resources::{
 pub use router::{RequestContext, RoutePermission, Router};
 #[doc(hidden)]
 pub use runtime_facade::{
-    ConnectedServiceRuntime, CoreBootstrapBinding, GeneratedServiceContract, ServiceHandle,
+    ConnectedServiceRuntime, CoreBootstrapBinding, GeneratedServiceParticipant, ServiceHandle,
 };
 pub use runtime_facade::{
     ServiceConnectOptions, ServiceEventListenOptions, ServiceEventListenerContext,
