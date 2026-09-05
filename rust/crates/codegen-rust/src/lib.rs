@@ -7,7 +7,7 @@ use std::process::Command;
 
 use serde::Deserialize;
 use serde_json::Value;
-use trellis_protocol::{canonicalize_json, parse_api, parse_participant};
+use trellis_protocol::{canonicalize_json, ApiArtifact, ParticipantArtifact};
 
 mod projection;
 use projection::{
@@ -90,45 +90,37 @@ pub enum CodegenRustError {
     MissingOwnedSdk { contract: String },
 }
 
-fn load_sdk_source(path: impl AsRef<Path>) -> Result<ApiInput, CodegenRustError> {
-    let path = path.as_ref().to_path_buf();
-    let source = fs::read_to_string(&path)?;
-    let value: Value = serde_json::from_str(&source)?;
-    let api = parse_api(&value)?;
+fn project_api(api: &ApiArtifact) -> Result<ApiInput, CodegenRustError> {
     let value = api.normalized_value()?;
     let mut render_model = serde_json::from_value::<ApiProjection>(value.clone())?;
     for (name, error) in &mut render_model.errors {
         error.error_type.clone_from(name);
     }
     Ok(ApiInput {
-        path,
         render_model,
         subjects: api.derived_subjects()?,
         canonical: api.canonical_json()?,
         digest: api.digest()?,
-        api,
+        api: api.clone(),
         value,
     })
 }
 
-fn load_native_participant(path: impl AsRef<Path>) -> Result<ParticipantInput, CodegenRustError> {
-    let source = fs::read_to_string(path)?;
-    let value: Value = serde_json::from_str(&source)?;
-    let participant = parse_participant(&value)?;
+fn project_participant(
+    participant: &ParticipantArtifact,
+) -> Result<ParticipantInput, CodegenRustError> {
     let value = participant.normalized_value()?;
     Ok(ParticipantInput {
         render_model: serde_json::from_value(value.clone())?,
         canonical: participant.canonical_json()?,
         digest: participant.digest()?,
-        participant,
+        participant: participant.clone(),
     })
 }
 
 /// Options for generating one Rust SDK crate.
 #[derive(Debug, Clone)]
 pub struct GenerateRustSdkOpts {
-    /// Canonical native API to load.
-    pub api_path: PathBuf,
     /// Directory where the crate will be written.
     pub out_dir: PathBuf,
     /// Cargo crate name for the generated SDK.
@@ -141,32 +133,20 @@ pub struct GenerateRustSdkOpts {
 
 /// One explicit `uses` alias mapping for participant-facade generation.
 #[derive(Debug, Clone)]
-pub struct ParticipantAliasMapping {
+pub struct ParticipantAliasMapping<'a> {
     /// Local `uses` alias from the participant manifest.
     pub alias: String,
     /// Crate name that satisfies the alias at compile time.
     pub crate_name: String,
     /// Native dependency API; used to validate exposed RPCs/events.
-    pub api_path: PathBuf,
-    /// Optional local crate path override.
-    ///
-    /// When omitted, the generator assumes the dependency crate lives next to
-    /// the provided API path.
-    pub crate_path: Option<PathBuf>,
-    /// Optional Cargo dependency value copied from the participant's manifest.
-    ///
-    /// Local generated SDK mappings use `crate_path`; independently published
-    /// SDKs use this exact dependency value instead.
-    pub cargo_dependency: Option<String>,
+    pub api: &'a ApiArtifact,
+    /// Path to this API's private generated SDK crate.
+    pub crate_path: PathBuf,
 }
 
 /// Options for generating one local Rust participant facade crate.
 #[derive(Debug, Clone)]
-pub struct GenerateRustParticipantFacadeOpts {
-    /// Native API artifact implemented by the participant.
-    pub api_path: PathBuf,
-    /// Native participant artifact that owns the facade.
-    pub participant_path: PathBuf,
+pub struct GenerateRustParticipantFacadeOpts<'a> {
     /// Output directory for the generated crate.
     pub out_dir: PathBuf,
     /// Cargo crate name for the facade crate.
@@ -180,7 +160,7 @@ pub struct GenerateRustParticipantFacadeOpts {
     /// Optional path to the owned SDK crate used during local generation.
     pub owned_sdk_path: Option<PathBuf>,
     /// Explicit mappings for locally resolvable `uses` aliases declared by the participant.
-    pub alias_mappings: Vec<ParticipantAliasMapping>,
+    pub alias_mappings: Vec<ParticipantAliasMapping<'a>>,
 }
 
 /// Runtime dependency configuration for generated Rust SDKs.
@@ -266,18 +246,13 @@ pub fn default_sdk_stem(contract_id: &str) -> String {
     stem.strip_prefix("trellis-").unwrap_or(&stem).to_string()
 }
 
-/// Generate a Rust SDK crate for one manifest.
-pub fn generate_rust_sdk(opts: &GenerateRustSdkOpts) -> Result<(), CodegenRustError> {
-    replace_generated_dir(&opts.out_dir, |staging_dir| {
-        let mut staged = opts.clone();
-        staged.out_dir = staging_dir.to_path_buf();
-        generate_rust_sdk_into(&staged)?;
-        format_generated_rust_files(staging_dir)
-    })
-}
-
-fn generate_rust_sdk_into(opts: &GenerateRustSdkOpts) -> Result<(), CodegenRustError> {
-    let loaded = load_sdk_source(&opts.api_path)?;
+/// Render a validated API into an empty caller-owned staging directory.
+/// Publish the directory only after this function succeeds.
+pub fn generate_rust_sdk(
+    api: &ApiArtifact,
+    opts: &GenerateRustSdkOpts,
+) -> Result<(), CodegenRustError> {
+    let loaded = project_api(api)?;
     let artifact_canonical = loaded.canonical.clone();
     let artifact_digest = loaded.digest.clone();
     validate_generated_identifiers(&loaded)?;
@@ -312,7 +287,7 @@ fn generate_rust_sdk_into(opts: &GenerateRustSdkOpts) -> Result<(), CodegenRustE
     )?;
     write_rust_if_changed(
         &opts.out_dir.join("src").join("api.rs"),
-        &render_api_rs(opts, &loaded, &artifact_canonical, &artifact_digest),
+        &render_api_rs(&loaded, &artifact_canonical, &artifact_digest),
     )?;
     write_rust_if_changed(
         &opts.out_dir.join("src").join("types.rs"),
@@ -326,7 +301,6 @@ fn generate_rust_sdk_into(opts: &GenerateRustSdkOpts) -> Result<(), CodegenRustE
         &opts.out_dir.join("src").join("operations.rs"),
         &render_operations_rs(&loaded),
     )?;
-    remove_if_exists(&opts.out_dir.join("src").join("jobs.rs"))?;
     write_rust_if_changed(
         &opts.out_dir.join("src").join("events.rs"),
         &render_events_rs(&loaded),
@@ -343,104 +317,71 @@ fn generate_rust_sdk_into(opts: &GenerateRustSdkOpts) -> Result<(), CodegenRustE
         &opts.out_dir.join("src").join("client.rs"),
         &render_client_rs(&loaded),
     )?;
-    remove_if_exists(&opts.out_dir.join("src").join("connect.rs"))?;
-    remove_if_exists(&opts.out_dir.join("src").join("server.rs"))?;
     write_rust_if_changed(
         &opts.out_dir.join("src").join("lib.rs"),
         &render_lib_rs(&loaded),
     )?;
 
-    Ok(())
-}
-
-/// Validate the minimal generated Rust SDK manifest invariants used by freshness checks.
-pub fn rust_sdk_cargo_manifest_is_valid(
-    cargo_toml_path: &Path,
-    crate_name: &str,
-    crate_version: &str,
-) -> bool {
-    let Ok(contents) = fs::read_to_string(cargo_toml_path) else {
-        return false;
-    };
-    let Ok(manifest) = contents.parse::<toml::Table>() else {
-        return false;
-    };
-    let Some(package) = manifest.get("package").and_then(toml::Value::as_table) else {
-        return false;
-    };
-    let Some(dependencies) = manifest.get("dependencies").and_then(toml::Value::as_table) else {
-        return false;
-    };
-
-    package.get("name").and_then(toml::Value::as_str) == Some(crate_name)
-        && package.get("version").and_then(toml::Value::as_str) == Some(crate_version)
-        && ["serde", "serde_json", "trellis-rs"]
-            .into_iter()
-            .all(|dependency| dependencies.contains_key(dependency))
+    format_generated_rust_files(&opts.out_dir)
 }
 
 fn generate_rust_participant_generated_sources(
     opts: &GenerateRustParticipantFacadeOpts,
+    api: &ApiInput,
+    participant: &ParticipantInput,
+    mappings: &[ValidatedParticipantAlias],
 ) -> Result<(), CodegenRustError> {
-    let api = load_sdk_source(&opts.api_path)?;
-    let participant = load_participant_source(&opts.participant_path)?;
-    let mappings = validate_participant_mappings(&participant, &opts.alias_mappings)?;
-
     fs::create_dir_all(opts.out_dir.join("src/uses"))?;
     write_rust_if_changed(
         &opts.out_dir.join("src/facade.rs"),
-        &render_participant_facade_rs(&participant, &mappings),
+        &render_participant_facade_rs(participant, mappings),
     )?;
     write_rust_if_changed(
         &opts.out_dir.join("src/owned.rs"),
         &render_participant_owned_rs(
-            &api,
-            &participant,
+            api,
+            participant,
             opts.owned_sdk_crate_name.as_deref(),
             mappings
                 .iter()
-                .map(|mapping| Ok((mapping.contract_id.clone(), mapping.manifest.value.clone())))
-                .collect::<Result<std::collections::BTreeMap<_, _>, CodegenRustError>>()?,
+                .map(|mapping| (mapping.contract_id.clone(), mapping.manifest.api.clone()))
+                .collect(),
         )?,
     )?;
     write_rust_if_changed(
         &opts.out_dir.join("src/schemas.rs"),
-        &render_schemas_rs(&api),
+        &render_schemas_rs(api),
     )?;
     write_rust_if_changed(
         &opts.out_dir.join("src/state.rs"),
-        &render_participant_state_rs(&participant),
+        &render_participant_state_rs(participant),
     )?;
-    if participant.render_model.jobs.is_empty() {
-        remove_if_exists(&opts.out_dir.join("src/jobs.rs"))?;
-    } else {
+    if !participant.render_model.jobs.is_empty() {
         write_rust_if_changed(
             &opts.out_dir.join("src/jobs.rs"),
             &format!(
                 "{}\n{}",
-                render_participant_job_descriptors_rs(&participant),
-                render_participant_jobs_facade_rs(&participant),
+                render_participant_job_descriptors_rs(participant),
+                render_participant_jobs_facade_rs(participant),
             ),
         )?;
     }
-    if participant.render_model.event_consumers.is_empty() {
-        remove_if_exists(&opts.out_dir.join("src/event_consumers.rs"))?;
-    } else {
+    if !participant.render_model.event_consumers.is_empty() {
         write_rust_if_changed(
             &opts.out_dir.join("src/event_consumers.rs"),
             &render_participant_event_consumers_rs(
-                &participant,
-                &mappings,
+                participant,
+                mappings,
                 opts.owned_sdk_crate_name.as_deref(),
             ),
         )?;
     }
     write_rust_if_changed(
         &opts.out_dir.join("src/uses/mod.rs"),
-        &render_participant_uses_mod_rs(&mappings),
+        &render_participant_uses_mod_rs(mappings),
     )?;
 
-    for mapping in &mappings {
+    for mapping in mappings {
         write_rust_if_changed(
             &opts
                 .out_dir
@@ -453,26 +394,15 @@ fn generate_rust_participant_generated_sources(
     Ok(())
 }
 
-/// Generate a complete local Rust participant-facade crate.
-///
-/// The facade crate wraps one owned participant contract plus explicit `uses`
-/// alias mappings so local development can type-check the full integration.
+/// Render a validated participant into an empty caller-owned staging directory.
+/// Publish the directory only after this function succeeds.
 pub fn generate_rust_participant_facade(
+    api: &ApiArtifact,
+    participant: &ParticipantArtifact,
     opts: &GenerateRustParticipantFacadeOpts,
 ) -> Result<(), CodegenRustError> {
-    replace_generated_dir(&opts.out_dir, |staging_dir| {
-        let mut staged = opts.clone();
-        staged.out_dir = staging_dir.to_path_buf();
-        generate_rust_participant_facade_into(&staged)?;
-        format_generated_rust_files(staging_dir)
-    })
-}
-
-fn generate_rust_participant_facade_into(
-    opts: &GenerateRustParticipantFacadeOpts,
-) -> Result<(), CodegenRustError> {
-    let api = load_sdk_source(&opts.api_path)?;
-    let participant = load_participant_source(&opts.participant_path)?;
+    let api = project_api(api)?;
+    let participant = project_participant(participant)?;
     if participant_requires_owned_sdk(&api, &participant)
         && (opts.owned_sdk_crate_name.is_none() || opts.owned_sdk_path.is_none())
     {
@@ -481,16 +411,7 @@ fn generate_rust_participant_facade_into(
         });
     }
     let mappings = validate_participant_mappings(&participant, &opts.alias_mappings)?;
-    let apis_dir = opts.out_dir.join("apis");
-    if apis_dir.exists() {
-        fs::remove_dir_all(&apis_dir)?;
-    }
-    let legacy_contracts_dir = opts.out_dir.join("contracts");
-    if legacy_contracts_dir.exists() {
-        fs::remove_dir_all(legacy_contracts_dir)?;
-    }
     fs::create_dir_all(opts.out_dir.join("src"))?;
-    fs::create_dir_all(&apis_dir)?;
     write_if_changed(
         &opts.out_dir.join("Cargo.toml"),
         &render_participant_cargo_toml(opts, &mappings, !api.render_model.feeds.is_empty())?,
@@ -499,13 +420,6 @@ fn generate_rust_participant_facade_into(
         &opts.out_dir.join("TRELLIS.md"),
         &render_rust_participant_trellis_md(opts, &api, &participant, &mappings),
     )?;
-    for mapping in &mappings {
-        fs::copy(
-            &mapping.manifest.path,
-            apis_dir.join(format!("{}.json", mapping.alias_ident)),
-        )?;
-    }
-    remove_if_exists(&opts.out_dir.join("build.rs"))?;
     write_rust_if_changed(
         &opts.out_dir.join("src/lib.rs"),
         &render_participant_shim_lib_rs(&participant),
@@ -518,26 +432,8 @@ fn generate_rust_participant_facade_into(
         &opts.out_dir.join("src/participant.rs"),
         &render_participant_metadata_rs(&api, &participant, &mappings)?,
     )?;
-    generate_rust_participant_generated_sources(opts)?;
-
-    Ok(())
-}
-
-/// Build the canonical participant artifact for a generated participant facade.
-pub fn native_participant_artifact(
-    api_path: &Path,
-    participant_path: &Path,
-    alias_mappings: &[ParticipantAliasMapping],
-) -> Result<(String, String), CodegenRustError> {
-    let _api = load_sdk_source(api_path)?;
-    let participant = load_participant_source(participant_path)?;
-    let mappings = validate_participant_mappings(&participant, alias_mappings)?;
-    let _ = mappings;
-    Ok((participant.canonical, participant.digest))
-}
-
-fn load_participant_source(participant_path: &Path) -> Result<ParticipantInput, CodegenRustError> {
-    load_native_participant(participant_path)
+    generate_rust_participant_generated_sources(opts, &api, &participant, &mappings)?;
+    format_generated_rust_files(&opts.out_dir)
 }
 
 fn participant_requires_owned_sdk(api: &ApiInput, participant: &ParticipantInput) -> bool {
@@ -546,50 +442,6 @@ fn participant_requires_owned_sdk(api: &ApiInput, participant: &ParticipantInput
         || !api.render_model.events.is_empty()
         || !api.render_model.feeds.is_empty()
         || !participant.render_model.jobs.is_empty()
-}
-
-fn replace_generated_dir(
-    out_dir: &Path,
-    generate: impl FnOnce(&Path) -> Result<(), CodegenRustError>,
-) -> Result<(), CodegenRustError> {
-    let parent = out_dir.parent().unwrap_or_else(|| Path::new("."));
-    fs::create_dir_all(parent)?;
-    let name = out_dir
-        .file_name()
-        .and_then(|value| value.to_str())
-        .unwrap_or("generated");
-    let nonce = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_nanos();
-    let staging = parent.join(format!(".{name}.staging-{}-{nonce}", std::process::id()));
-    let backup = parent.join(format!(".{name}.backup-{}-{nonce}", std::process::id()));
-    remove_dir_if_exists(&staging)?;
-    remove_dir_if_exists(&backup)?;
-
-    if let Err(error) = generate(&staging) {
-        remove_dir_if_exists(&staging)?;
-        return Err(error);
-    }
-
-    if out_dir.exists() {
-        fs::rename(out_dir, &backup)?;
-    }
-    if let Err(error) = fs::rename(&staging, out_dir) {
-        if backup.exists() {
-            fs::rename(&backup, out_dir)?;
-        }
-        return Err(CodegenRustError::Io(error));
-    }
-    remove_dir_if_exists(&backup)?;
-    Ok(())
-}
-
-fn remove_dir_if_exists(path: &Path) -> Result<(), CodegenRustError> {
-    if path.exists() {
-        fs::remove_dir_all(path)?;
-    }
-    Ok(())
 }
 
 fn render_cargo_toml(
@@ -841,7 +693,6 @@ struct ValidatedParticipantAlias {
     crate_name: String,
     crate_ident: String,
     crate_path: PathBuf,
-    cargo_dependency: Option<String>,
     contract_id: String,
     manifest: ApiInput,
     use_ref: ParticipantUse,
@@ -865,7 +716,7 @@ fn validate_participant_mappings(
                 alias: mapping.alias.clone(),
             }
         })?;
-        let manifest = load_sdk_source(&mapping.api_path)?;
+        let manifest = project_api(mapping.api)?;
         if manifest.render_model.id != use_ref.api {
             return Err(CodegenRustError::InvalidParticipantMappingApi {
                 alias: mapping.alias.clone(),
@@ -937,14 +788,7 @@ fn validate_participant_mappings(
             alias_ident: rust_ident(&key_to_snake(&mapping.alias)),
             crate_name: mapping.crate_name.clone(),
             crate_ident: crate_ident(&mapping.crate_name),
-            crate_path: mapping.crate_path.clone().unwrap_or_else(|| {
-                mapping
-                    .api_path
-                    .parent()
-                    .unwrap_or(Path::new("."))
-                    .to_path_buf()
-            }),
-            cargo_dependency: mapping.cargo_dependency.clone(),
+            crate_path: mapping.crate_path.clone(),
             contract_id: manifest.render_model.id.clone(),
             manifest,
             use_ref: use_ref.clone(),
@@ -1205,10 +1049,6 @@ fn render_participant_cargo_toml(
         ));
     }
     for mapping in mappings {
-        if let Some(dependency) = &mapping.cargo_dependency {
-            dependency_lines.push(format!("{} = {dependency}", mapping.crate_name));
-            continue;
-        }
         let path = cargo_dependency_path(&mapping.crate_path, &opts.out_dir)?;
         dependency_lines.push(format!(
             "{} = {{ path = {} }}",
@@ -1297,24 +1137,16 @@ fn render_participant_event_consumers_rs(
             "pub struct {group_type}<'a> {{ service: &'a crate::ConnectedService }}"
         ));
         lines.push(format!("impl {group_type}<'_> {{"));
-        for key in &spec.self_events {
-            let base = key_to_pascal(key);
-            let method = rust_ident(&key_to_snake(key));
-            let sdk = crate_ident(owned_sdk_crate_name.expect("self event requires owner SDK"));
-            lines.push(render_event_consumer_method(
-                group,
-                &method,
-                &sdk,
-                &base,
-                &format!("{sdk}::API_ID"),
-            ));
-        }
-        for (alias, keys) in &spec.uses {
-            let mapping = mappings
-                .iter()
-                .find(|mapping| mapping.alias == *alias)
-                .expect("validated event consumer alias mapping");
-            let sdk = crate_ident(&mapping.crate_name);
+        for (alias, keys) in &spec.events {
+            let sdk = if loaded.render_model.implements.contains_key(alias) {
+                crate_ident(owned_sdk_crate_name.expect("owned event requires owner SDK"))
+            } else {
+                let mapping = mappings
+                    .iter()
+                    .find(|mapping| mapping.alias == *alias)
+                    .expect("validated event consumer alias mapping");
+                crate_ident(&mapping.crate_name)
+            };
             for key in keys {
                 let base = key_to_pascal(key);
                 let method = rust_ident(&key_to_snake(key));
@@ -1764,7 +1596,7 @@ fn render_participant_owned_rs(
     loaded: &ApiInput,
     participant: &ParticipantInput,
     owned_sdk_crate_name: Option<&str>,
-    referenced_apis: std::collections::BTreeMap<String, serde_json::Value>,
+    referenced_apis: std::collections::BTreeMap<String, ApiArtifact>,
 ) -> Result<String, CodegenRustError> {
     if public_rpc_keys(loaded).is_empty()
         && loaded.render_model.operations.is_empty()
@@ -1777,8 +1609,7 @@ fn render_participant_owned_rs(
     {
         let mut apis =
             std::collections::BTreeMap::from([(loaded.api.id().to_owned(), loaded.api.clone())]);
-        for value in referenced_apis.values() {
-            let api = parse_api(value)?;
+        for api in referenced_apis.into_values() {
             apis.insert(api.id().to_owned(), api);
         }
         let resolved = trellis_protocol::resolve_participant(&participant.participant, &apis)?;
@@ -2395,15 +2226,9 @@ fn render_participant_use_alias_rs(mapping: &ValidatedParticipantAlias) -> Strin
     format!("{}\n", lines.join("\n"))
 }
 
-fn render_api_rs(
-    opts: &GenerateRustSdkOpts,
-    loaded: &ApiInput,
-    artifact_canonical: &str,
-    artifact_digest: &str,
-) -> String {
+fn render_api_rs(loaded: &ApiInput, artifact_canonical: &str, artifact_digest: &str) -> String {
     let api_name = manifest_display_name(loaded);
-    let source_reference =
-        api_source_reference(&opts.api_path, opts.runtime_deps.repo_root.as_deref());
+    let source_reference = &loaded.render_model.id;
     let rpc_metadata = loaded
         .render_model
         .rpc
@@ -2432,31 +2257,6 @@ fn render_api_rs(
          string_literal(artifact_canonical),
         rpc_metadata,
     )
-}
-
-fn api_source_reference(api_path: &Path, repo_root: Option<&Path>) -> String {
-    let api_path = api_path
-        .canonicalize()
-        .unwrap_or_else(|_| api_path.to_path_buf());
-
-    if let Some(repo_root) = repo_root {
-        let repo_root = repo_root
-            .canonicalize()
-            .unwrap_or_else(|_| repo_root.to_path_buf());
-        if let Ok(relative) = api_path.strip_prefix(&repo_root) {
-            return normalize_relative_path_string(relative.to_string_lossy().replace('\\', "/"));
-        }
-    }
-
-    normalize_relative_path_string(api_path.to_string_lossy().replace('\\', "/"))
-}
-
-fn normalize_relative_path_string(path: String) -> String {
-    if path.is_empty() || path.starts_with("../") || path.starts_with("./") || path.starts_with('/')
-    {
-        return path;
-    }
-    format!("./{path}")
 }
 
 fn render_types_rs(loaded: &ApiInput) -> String {
@@ -3590,14 +3390,6 @@ fn write_if_changed(path: &Path, contents: &str) -> Result<(), CodegenRustError>
     Ok(())
 }
 
-fn remove_if_exists(path: &Path) -> Result<(), CodegenRustError> {
-    match fs::remove_file(path) {
-        Ok(()) => Ok(()),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(error) => Err(error.into()),
-    }
-}
-
 fn write_rust_if_changed(path: &Path, contents: &str) -> Result<(), CodegenRustError> {
     let contents = format_generated_rust_source(path, contents)?;
     write_if_changed(path, &contents)
@@ -4608,6 +4400,7 @@ mod tests {
     use super::*;
     use serde_json::json;
     use std::time::{SystemTime, UNIX_EPOCH};
+    use trellis_protocol::{parse_api, parse_participant};
 
     fn unique_temp_dir(label: &str) -> PathBuf {
         let nanos = SystemTime::now()
@@ -4625,109 +4418,35 @@ mod tests {
         );
     }
 
-    fn write_sample_manifest(root: &Path) -> PathBuf {
-        let manifest_path = root.join("trellis.core@v1.json");
-        let manifest: serde_json::Value = serde_json::from_str(
-            r#"{
-                "format": "trellis.api.v1",
-                "id": "trellis.core@v1",
-                "version": "1.0.0",
-                "displayName": "Trellis Core",
-                "description": "Trellis core runtime surface.",
-                "schemas": {
-                    "InfoInput": {"type":"object","properties":{},"required":[]},
-                    "InfoOutput": {"type":"object","properties":{"status":{"type":"string"}},"required":["status"]},
-                    "ProcessInput": {"type":"object","properties":{"amount":{"type":"string"}},"required":["amount"]},
-                    "ProcessProgress": {"type":"object","properties":{"step":{"type":"string"}},"required":["step"]},
-                    "ProcessUpdate": {"type":"object","properties":{"message":{"type":"string"}},"required":["message"]},
-                    "ProcessOutput": {"type":"object","properties":{"done":{"type":"boolean"}},"required":["done"]},
-                    "AuthChangedEvent": {"type":"object","properties":{"status":{"type":"string"}},"required":["status"]},
-                    "AuditFeedInput": {"type":"object","properties":{"since":{"type":"string"}},"required":["since"]},
-                    "AuditFeedEvent": {"type":"object","properties":{"message":{"type":"string"}},"required":["message"]},
-                    "ExternalCheckpoint": {"type":"object","properties":{"cursor":{"type":"string"}},"required":["cursor"]}
-                },
-                "capabilities": {
-                    "auth.event.publish": {"allows":[{"action":"publish","target":{"kind":"apiSurface","api":"trellis.core@v1","surface":"event","name":"Auth.Changed"}}]},
-                    "auth.event.subscribe": {"allows":[{"action":"subscribe","target":{"kind":"apiSurface","api":"trellis.core@v1","surface":"event","name":"Auth.Changed"}}]},
-                    "audit.feed.subscribe": {"allows":[{"action":"subscribe","target":{"kind":"apiSurface","api":"trellis.core@v1","surface":"feed","name":"Audit.Feed"}}]}
-                },
-                "exports": {"schemas": ["ExternalCheckpoint"]},
-                "rpc": {
-                    "Trellis.Bindings.Get": {"version":"v1","input":{"schema":"ProcessInput"},"output":{"schema":"ProcessOutput"},"internal":true},
-                    "Trellis.Info": {"version":"v1","input":{"schema":"InfoInput"},"output":{"schema":"InfoOutput"}}
-                },
-                "operations": {
-                    "Trellis.Process": {"version":"v1","input":{"schema":"ProcessInput"},"progress":{"schema":"ProcessProgress"},"update":{"schema":"ProcessUpdate"},"output":{"schema":"ProcessOutput"},"transfer":{"direction":"send"},"cancel":true},
-                    "Trellis.Audit": {"version":"v1","input":{"schema":"ProcessInput"},"progress":{"schema":"ProcessProgress"},"output":{"schema":"ProcessOutput"}}
-                },
-                "events": {
-                    "Auth.Changed": {"version":"v1","event":{"schema":"AuthChangedEvent"}}
-                },
-                "feeds": {
-                    "Audit.Feed": {"version":"v1","input":{"schema":"AuditFeedInput"},"event":{"schema":"AuditFeedEvent"}}
-                }
-            }"#,
-        )
-        .unwrap();
-
-        let manifest = parse_api(&manifest).unwrap().normalized_value().unwrap();
-        fs::write(&manifest_path, canonicalize_json(&manifest).unwrap()).unwrap();
-        manifest_path
-    }
-
-    fn write_remote_manifest(root: &Path, file_name: &str, manifest: serde_json::Value) -> PathBuf {
-        let manifest_path = root.join(file_name);
-        let manifest = parse_api(&manifest).unwrap().normalized_value().unwrap();
-        fs::write(&manifest_path, canonicalize_json(&manifest).unwrap()).unwrap();
-        manifest_path
-    }
-
-    fn write_participant(root: &Path, file_name: &str, participant: serde_json::Value) -> PathBuf {
-        let path = root.join(file_name);
-        fs::write(&path, canonicalize_json(&participant).unwrap()).unwrap();
-        load_participant_source(&path).unwrap();
-        path
-    }
-
-    fn self_participant_value(api_path: &Path, kind: &str) -> serde_json::Value {
-        let api = load_sdk_source(api_path).unwrap();
+    fn self_participant_value(api: &ApiArtifact, kind: &str) -> serde_json::Value {
+        let value = api.normalized_value().unwrap();
         let mut participant = json!({
             "format": "trellis.participant.v1",
-            "id": api.render_model.id,
-            "displayName": api.render_model.display_name,
-            "description": api.value["description"],
+            "id": api.id(),
+            "displayName": value["displayName"],
+            "description": value["description"],
             "kind": kind,
             "implements": {
-                "self": {"api": api.render_model.id, "apiDigest": api.digest}
+                "self": {"api": api.id(), "apiDigest": api.digest().unwrap()}
             }
         });
         for field in ["schemas", "state"] {
-            if let Some(value) = api.value.get(field) {
+            if let Some(value) = value.get(field) {
                 participant[field] = value.clone();
             }
         }
         participant
     }
 
-    fn write_self_participant(
-        root: &Path,
-        file_name: &str,
-        api_path: &Path,
-        kind: &str,
-    ) -> PathBuf {
-        write_participant(root, file_name, self_participant_value(api_path, kind))
-    }
-
     fn add_required_use(
         participant: &mut serde_json::Value,
         alias: &str,
-        api_path: &Path,
+        api: &ApiArtifact,
         selections: serde_json::Value,
     ) {
-        let api = load_sdk_source(api_path).unwrap();
         let mut used = selections.as_object().cloned().unwrap();
-        used.insert("api".to_string(), json!(api.render_model.id));
-        used.insert("apiDigest".to_string(), json!(api.digest));
+        used.insert("api".to_string(), json!(api.id()));
+        used.insert("apiDigest".to_string(), json!(api.digest().unwrap()));
         participant["uses"]["required"][alias] = serde_json::Value::Object(used);
     }
 
@@ -4757,7 +4476,6 @@ mod tests {
     fn cargo_toml_uses_registry_dependencies() {
         let cargo = render_cargo_toml(
             &GenerateRustSdkOpts {
-                api_path: PathBuf::from(".trellis/apis/trellis.core@v1/1.0.0/trellis.api.json"),
                 out_dir: PathBuf::from(".trellis/rust/apis/core"),
                 crate_name: "trellis-sdk-core".to_string(),
                 crate_version: "0.1.0".to_string(),
@@ -4806,7 +4524,6 @@ mod tests {
 
         let cargo = render_cargo_toml(
             &GenerateRustSdkOpts {
-                api_path: PathBuf::from(".trellis/apis/trellis.core@v1/1.0.0/trellis.api.json"),
                 out_dir: repo_root.join(".trellis/rust/apis/core"),
                 crate_name: "trellis-sdk-core".to_string(),
                 crate_version: "0.1.0".to_string(),
@@ -4834,62 +4551,6 @@ mod tests {
             fs::canonicalize(moved_root.join("rust/crates/runtime-client")).unwrap(),
         );
         fs::remove_dir_all(moved_root).unwrap();
-    }
-
-    #[test]
-    fn cargo_toml_integrity_check_accepts_generated_sdk_manifest() {
-        let out_dir = unique_temp_dir("sdk-cargo-integrity-valid");
-        fs::create_dir_all(&out_dir).unwrap();
-        let manifest_path = write_sample_manifest(&out_dir);
-        let sdk_out = out_dir.join("generated");
-
-        generate_rust_sdk(&GenerateRustSdkOpts {
-            api_path: manifest_path,
-            out_dir: sdk_out.clone(),
-            crate_name: "trellis-sdk-core".to_string(),
-            crate_version: "0.1.0".to_string(),
-            runtime_deps: RustRuntimeDeps {
-                source: RustRuntimeSource::Registry,
-                version: "0.1.0".to_string(),
-                repo_root: None,
-            },
-        })
-        .unwrap();
-
-        assert!(rust_sdk_cargo_manifest_is_valid(
-            &sdk_out.join("Cargo.toml"),
-            "trellis-sdk-core",
-            "0.1.0"
-        ));
-
-        fs::remove_dir_all(out_dir).unwrap();
-    }
-
-    #[test]
-    fn cargo_toml_integrity_check_rejects_missing_required_dependencies() {
-        let out_dir = unique_temp_dir("sdk-cargo-integrity-invalid");
-        fs::create_dir_all(&out_dir).unwrap();
-        let cargo_toml = out_dir.join("Cargo.toml");
-        fs::write(
-            &cargo_toml,
-            concat!(
-                "[package]\n",
-                "name = \"trellis-sdk-core\"\n",
-                "version = \"0.1.0\"\n",
-                "edition = \"2021\"\n\n",
-                "[dependencies]\n",
-                "trellis = \"0.1.0\"\n",
-            ),
-        )
-        .unwrap();
-
-        assert!(!rust_sdk_cargo_manifest_is_valid(
-            &cargo_toml,
-            "trellis-sdk-core",
-            "0.1.0"
-        ));
-
-        fs::remove_dir_all(out_dir).unwrap();
     }
 
     #[test]
@@ -4939,39 +4600,33 @@ mod tests {
         let out_dir = unique_temp_dir("participant-partial-aliases");
         fs::create_dir_all(&out_dir).unwrap();
 
-        let local_manifest = write_remote_manifest(
-            &out_dir,
-            "device@v1.json",
-            json!({
-                "format": "trellis.api.v1",
-                "id": "device@v1",
-                "version": "1.0.0",
-                "displayName": "Device",
-                "description": "Device.",
-            }),
-        );
-        let core_manifest = write_remote_manifest(
-            &out_dir,
-            "trellis.core@v1.json",
-            json!({
-                "format": "trellis.api.v1",
-                "id": "trellis.core@v1",
-                "version": "1.0.0",
-                "displayName": "Trellis Core",
-                "description": "Core.",
-                "schemas": {
-                    "CatalogInput": {"type":"object","properties":{},"required":[]},
-                    "CatalogOutput": {"type":"object","properties":{},"required":[]}
-                },
-                "rpc": {
-                    "Core.Info": {
-                        "version":"v1",
-                        "input":{"schema":"CatalogInput"},
-                        "output":{"schema":"CatalogOutput"}
-                    }
+        let local_manifest = parse_api(&json!({
+            "format": "trellis.api.v1",
+            "id": "device@v1",
+            "version": "1.0.0",
+            "displayName": "Device",
+            "description": "Device.",
+        }))
+        .unwrap();
+        let core_manifest = parse_api(&json!({
+            "format": "trellis.api.v1",
+            "id": "trellis.core@v1",
+            "version": "1.0.0",
+            "displayName": "Trellis Core",
+            "description": "Core.",
+            "schemas": {
+                "CatalogInput": {"type":"object","properties":{},"required":[]},
+                "CatalogOutput": {"type":"object","properties":{},"required":[]}
+            },
+            "rpc": {
+                "Core.Info": {
+                    "version":"v1",
+                    "input":{"schema":"CatalogInput"},
+                    "output":{"schema":"CatalogOutput"}
                 }
-            }),
-        );
+            }
+        }))
+        .unwrap();
         let mut participant = self_participant_value(&local_manifest, "device");
         add_required_use(
             &mut participant,
@@ -4985,27 +4640,28 @@ mod tests {
             "rpc": {"call": ["Auth.Sessions.Me"]}
         });
 
-        let error = generate_rust_participant_facade(&GenerateRustParticipantFacadeOpts {
-            api_path: local_manifest.clone(),
-            participant_path: write_participant(&out_dir, "device.participant.json", participant),
-            out_dir: out_dir.join("facade"),
-            crate_name: "device-participant".to_string(),
-            crate_version: "0.1.0".to_string(),
-            runtime_deps: RustRuntimeDeps {
-                source: RustRuntimeSource::Registry,
-                version: "0.1.0".to_string(),
-                repo_root: None,
+        let error = generate_rust_participant_facade(
+            &local_manifest,
+            &parse_participant(&participant).unwrap(),
+            &GenerateRustParticipantFacadeOpts {
+                out_dir: out_dir.join("facade"),
+                crate_name: "device-participant".to_string(),
+                crate_version: "0.1.0".to_string(),
+                runtime_deps: RustRuntimeDeps {
+                    source: RustRuntimeSource::Registry,
+                    version: "0.1.0".to_string(),
+                    repo_root: None,
+                },
+                owned_sdk_crate_name: None,
+                owned_sdk_path: None,
+                alias_mappings: vec![ParticipantAliasMapping {
+                    alias: "core".to_string(),
+                    crate_name: "trellis-sdk-core".to_string(),
+                    api: &core_manifest,
+                    crate_path: out_dir.join("core-sdk"),
+                }],
             },
-            owned_sdk_crate_name: None,
-            owned_sdk_path: None,
-            alias_mappings: vec![ParticipantAliasMapping {
-                alias: "core".to_string(),
-                crate_name: "trellis-sdk-core".to_string(),
-                api_path: core_manifest,
-                crate_path: None,
-                cargo_dependency: None,
-            }],
-        })
+        )
         .unwrap_err();
 
         assert!(matches!(
@@ -5022,71 +4678,67 @@ mod tests {
         let out_dir = unique_temp_dir("participant-compile");
         fs::create_dir_all(&out_dir).unwrap();
 
-        let local_manifest = write_remote_manifest(
-            &out_dir,
-            "compile@v1.json",
-            json!({
-                "format": "trellis.api.v1",
-                "id": "compile@v1",
-                "version": "1.0.0",
-                "displayName": "Compile",
-                "description": "Compile-test service.",
-                "schemas": {
-                    "PingInput": {"type":"object","properties":{"value":{"type":"string"}},"required":["value"]},
-                    "PingOutput": {"type":"object","properties":{"value":{"type":"string"}},"required":["value"]},
-                    "FeedInput": {"type":"object","properties":{},"required":[]},
-                    "FeedEvent": {"type":"object","properties":{"id":{"type":"string"}},"required":["id"]},
-                    "WorkPayload": {"type":"object","properties":{"id":{"type":"string"}},"required":["id"]},
-                    "WorkResult": {"type":"object","properties":{"done":{"type":"boolean"}},"required":["done"]},
-                    "ChangedEvent": {"type":"object","properties":{"id":{"type":"string"}},"required":["id"]},
-                    "ProcessInput": {"type":"object","properties":{"id":{"type":"string"}},"required":["id"]},
-                    "ProcessProgress": {"type":"object","properties":{"step":{"type":"string"}},"required":["step"]},
-                    "ProcessOutput": {"type":"object","properties":{"ok":{"type":"boolean"}},"required":["ok"]},
-                    "ProcessErrorData": {"type":"object","properties":{"type":{"const":"ProcessError"},"message":{"type":"string"},"id":{"type":"string"}},"required":["type","message","id"]},
-                    "StateValue": {"type":"object","properties":{"requiredNullable":{"anyOf":[{"type":"string"},{"type":"null"}]},"optionalNullable":{"anyOf":[{"type":"string"},{"type":"null"}]}},"required":["requiredNullable"]},
-                    "OpenRecord": {"type":"object","properties":{"id":{"type":"string"}},"required":["id"]},
-                    "Proof": {"type":"object","properties":{"token":{"type":"string"}},"required":["token"],"additionalProperties":false}
-                },
-                "errors": {
-                    "ProcessError": {"schema":{"schema":"ProcessErrorData"}}
-                },
-                "rpc": {
-                    "Compile.Ping": {
-                        "version":"v1",
-                        "input":{"schema":"PingInput"},
-                        "output":{"schema":"PingOutput"},
-                        "errors":["ProcessError"]
-                    }
-                },
-                "feeds": {
-                    "Compile.Feed": {
-                        "version":"v1",
-                        "input":{"schema":"FeedInput"},
-                        "event":{"schema":"FeedEvent"}
-                    }
-                },
-                "operations": {
-                    "Compile.Process": {
-                        "version":"v1",
-                        "input":{"schema":"ProcessInput"},
-                        "progress":{"schema":"ProcessProgress"},
-                        "output":{"schema":"ProcessOutput"},
-                        "errors":["ProcessError"],
-                        "cancel":true
-                    }
-                },
-                "state": {
-                    "current": {"kind":"value","schema":{"schema":"StateValue"}},
-                    "records": {"kind":"map","schema":{"schema":"OpenRecord"}}
-                },
-                "events": {
-                    "Compile.Changed": {
-                        "version": "v1",
-                        "event": {"schema": "ChangedEvent"}
-                    }
+        let local_manifest = parse_api(&json!({
+            "format": "trellis.api.v1",
+            "id": "compile@v1",
+            "version": "1.0.0",
+            "displayName": "Compile",
+            "description": "Compile-test service.",
+            "schemas": {
+                "PingInput": {"type":"object","properties":{"value":{"type":"string"}},"required":["value"]},
+                "PingOutput": {"type":"object","properties":{"value":{"type":"string"}},"required":["value"]},
+                "FeedInput": {"type":"object","properties":{},"required":[]},
+                "FeedEvent": {"type":"object","properties":{"id":{"type":"string"}},"required":["id"]},
+                "WorkPayload": {"type":"object","properties":{"id":{"type":"string"}},"required":["id"]},
+                "WorkResult": {"type":"object","properties":{"done":{"type":"boolean"}},"required":["done"]},
+                "ChangedEvent": {"type":"object","properties":{"id":{"type":"string"}},"required":["id"]},
+                "ProcessInput": {"type":"object","properties":{"id":{"type":"string"}},"required":["id"]},
+                "ProcessProgress": {"type":"object","properties":{"step":{"type":"string"}},"required":["step"]},
+                "ProcessOutput": {"type":"object","properties":{"ok":{"type":"boolean"}},"required":["ok"]},
+                "ProcessErrorData": {"type":"object","properties":{"type":{"const":"ProcessError"},"message":{"type":"string"},"id":{"type":"string"}},"required":["type","message","id"]},
+                "StateValue": {"type":"object","properties":{"requiredNullable":{"anyOf":[{"type":"string"},{"type":"null"}]},"optionalNullable":{"anyOf":[{"type":"string"},{"type":"null"}]}},"required":["requiredNullable"]},
+                "OpenRecord": {"type":"object","properties":{"id":{"type":"string"}},"required":["id"]},
+                "Proof": {"type":"object","properties":{"token":{"type":"string"}},"required":["token"],"additionalProperties":false}
+            },
+            "errors": {
+                "ProcessError": {"schema":{"schema":"ProcessErrorData"}}
+            },
+            "rpc": {
+                "Compile.Ping": {
+                    "version":"v1",
+                    "input":{"schema":"PingInput"},
+                    "output":{"schema":"PingOutput"},
+                    "errors":["ProcessError"]
                 }
-            }),
-        );
+            },
+            "feeds": {
+                "Compile.Feed": {
+                    "version":"v1",
+                    "input":{"schema":"FeedInput"},
+                    "event":{"schema":"FeedEvent"}
+                }
+            },
+            "operations": {
+                "Compile.Process": {
+                    "version":"v1",
+                    "input":{"schema":"ProcessInput"},
+                    "progress":{"schema":"ProcessProgress"},
+                    "output":{"schema":"ProcessOutput"},
+                    "errors":["ProcessError"],
+                    "cancel":true
+                }
+            },
+            "state": {
+                "current": {"kind":"value","schema":{"schema":"StateValue"}},
+                "records": {"kind":"map","schema":{"schema":"OpenRecord"}}
+            },
+            "events": {
+                "Compile.Changed": {
+                    "version": "v1",
+                    "event": {"schema": "ChangedEvent"}
+                }
+            }
+        })).unwrap();
         let owned_sdk_dir = out_dir.join("owned-sdk");
 
         let runtime_deps = RustRuntimeDeps {
@@ -5095,30 +4747,29 @@ mod tests {
             repo_root: Some(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../..")),
         };
 
-        generate_rust_sdk(&GenerateRustSdkOpts {
-            api_path: local_manifest.clone(),
-            out_dir: owned_sdk_dir.clone(),
-            crate_name: "compile-sdk".to_string(),
-            crate_version: "0.1.0".to_string(),
-            runtime_deps: runtime_deps.clone(),
-        })
+        generate_rust_sdk(
+            &local_manifest,
+            &GenerateRustSdkOpts {
+                out_dir: owned_sdk_dir.clone(),
+                crate_name: "compile-sdk".to_string(),
+                crate_version: "0.1.0".to_string(),
+                runtime_deps: runtime_deps.clone(),
+            },
+        )
         .unwrap();
-        generate_rust_participant_facade(&GenerateRustParticipantFacadeOpts {
-            api_path: local_manifest.clone(),
-            participant_path: write_self_participant(
-                &out_dir,
-                "compile.participant.json",
-                &local_manifest,
-                "service",
-            ),
-            out_dir: out_dir.join("facade"),
-            crate_name: "compile-participant".to_string(),
-            crate_version: "0.1.0".to_string(),
-            runtime_deps,
-            owned_sdk_crate_name: Some("compile-sdk".to_string()),
-            owned_sdk_path: Some(owned_sdk_dir),
-            alias_mappings: vec![],
-        })
+        generate_rust_participant_facade(
+            &local_manifest,
+            &parse_participant(&self_participant_value(&local_manifest, "service")).unwrap(),
+            &GenerateRustParticipantFacadeOpts {
+                out_dir: out_dir.join("facade"),
+                crate_name: "compile-participant".to_string(),
+                crate_version: "0.1.0".to_string(),
+                runtime_deps,
+                owned_sdk_crate_name: Some("compile-sdk".to_string()),
+                owned_sdk_path: Some(owned_sdk_dir),
+                alias_mappings: vec![],
+            },
+        )
         .unwrap();
 
         cargo_check(&out_dir.join("facade/Cargo.toml"));
@@ -5131,26 +4782,22 @@ mod tests {
         for kind in ["app", "agent", "device"] {
             let out_dir = unique_temp_dir(&format!("participant-{kind}-compile"));
             fs::create_dir_all(&out_dir).unwrap();
-            let manifest = write_remote_manifest(
-                &out_dir,
-                &format!("{kind}@v1.json"),
-                json!({
-                    "format": "trellis.api.v1",
-                    "id": format!("fixture.{kind}@v1"),
-                    "version": "1.0.0",
-                    "displayName": format!("Fixture {kind}"),
-                    "description": "Compile fixture.",
-                    "schemas": {
-                        "ChangedEvent": {"type":"object","properties":{"id":{"type":"string"}},"required":["id"]}
-                    },
-                    "events": {
-                        "Fixture.Changed": {
-                            "version":"v1",
-                            "event":{"schema":"ChangedEvent"}
-                        }
+            let manifest = parse_api(&json!({
+                "format": "trellis.api.v1",
+                "id": format!("fixture.{kind}@v1"),
+                "version": "1.0.0",
+                "displayName": format!("Fixture {kind}"),
+                "description": "Compile fixture.",
+                "schemas": {
+                    "ChangedEvent": {"type":"object","properties":{"id":{"type":"string"}},"required":["id"]}
+                },
+                "events": {
+                    "Fixture.Changed": {
+                        "version":"v1",
+                        "event":{"schema":"ChangedEvent"}
                     }
-                }),
-            );
+                }
+            })).unwrap();
             let facade = out_dir.join("facade");
             let owned_sdk = out_dir.join("owned-sdk");
             let runtime_deps = RustRuntimeDeps {
@@ -5158,30 +4805,29 @@ mod tests {
                 version: "0.1.0".to_string(),
                 repo_root: Some(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../..")),
             };
-            generate_rust_sdk(&GenerateRustSdkOpts {
-                api_path: manifest.clone(),
-                out_dir: owned_sdk.clone(),
-                crate_name: format!("fixture-{kind}-sdk"),
-                crate_version: "0.1.0".to_string(),
-                runtime_deps: runtime_deps.clone(),
-            })
+            generate_rust_sdk(
+                &manifest,
+                &GenerateRustSdkOpts {
+                    out_dir: owned_sdk.clone(),
+                    crate_name: format!("fixture-{kind}-sdk"),
+                    crate_version: "0.1.0".to_string(),
+                    runtime_deps: runtime_deps.clone(),
+                },
+            )
             .unwrap();
-            generate_rust_participant_facade(&GenerateRustParticipantFacadeOpts {
-                api_path: manifest.clone(),
-                participant_path: write_self_participant(
-                    &out_dir,
-                    &format!("{kind}.participant.json"),
-                    &manifest,
-                    kind,
-                ),
-                out_dir: facade.clone(),
-                crate_name: format!("fixture-{kind}-participant"),
-                crate_version: "0.1.0".to_string(),
-                runtime_deps,
-                owned_sdk_crate_name: Some(format!("fixture-{kind}-sdk")),
-                owned_sdk_path: Some(owned_sdk),
-                alias_mappings: vec![],
-            })
+            generate_rust_participant_facade(
+                &manifest,
+                &parse_participant(&self_participant_value(&manifest, kind)).unwrap(),
+                &GenerateRustParticipantFacadeOpts {
+                    out_dir: facade.clone(),
+                    crate_name: format!("fixture-{kind}-participant"),
+                    crate_version: "0.1.0".to_string(),
+                    runtime_deps,
+                    owned_sdk_crate_name: Some(format!("fixture-{kind}-sdk")),
+                    owned_sdk_path: Some(owned_sdk),
+                    alias_mappings: vec![],
+                },
+            )
             .unwrap();
 
             cargo_check(&facade.join("Cargo.toml"));
@@ -5194,29 +4840,23 @@ mod tests {
         let out_dir = unique_temp_dir("participant-missing-feed");
         fs::create_dir_all(&out_dir).unwrap();
 
-        let local_manifest = write_remote_manifest(
-            &out_dir,
-            "participant@v1.json",
-            json!({
-                "format": "trellis.api.v1",
-                "id": "participant@v1",
-                "version": "1.0.0",
-                "displayName": "Participant",
-                "description": "Participant.",
-            }),
-        );
-        let evidence_manifest = write_remote_manifest(
-            &out_dir,
-            "evidence@v1.json",
-            json!({
-                "format": "trellis.api.v1",
-                "id": "evidence@v1",
-                "version": "1.0.0",
-                "displayName": "Evidence",
-                "description": "Evidence.",
-                "feeds": {}
-            }),
-        );
+        let local_manifest = parse_api(&json!({
+            "format": "trellis.api.v1",
+            "id": "participant@v1",
+            "version": "1.0.0",
+            "displayName": "Participant",
+            "description": "Participant.",
+        }))
+        .unwrap();
+        let evidence_manifest = parse_api(&json!({
+            "format": "trellis.api.v1",
+            "id": "evidence@v1",
+            "version": "1.0.0",
+            "displayName": "Evidence",
+            "description": "Evidence.",
+            "feeds": {}
+        }))
+        .unwrap();
         let mut participant = self_participant_value(&local_manifest, "service");
         add_required_use(
             &mut participant,
@@ -5225,14 +4865,10 @@ mod tests {
             json!({"feeds": {"subscribe": ["Evidence.Stream"]}}),
         );
 
-        let error =
-            generate_rust_participant_generated_sources(&GenerateRustParticipantFacadeOpts {
-                api_path: local_manifest.clone(),
-                participant_path: write_participant(
-                    &out_dir,
-                    "missing-feed.participant.json",
-                    participant,
-                ),
+        let error = generate_rust_participant_facade(
+            &local_manifest,
+            &parse_participant(&participant).unwrap(),
+            &GenerateRustParticipantFacadeOpts {
                 out_dir: out_dir.join("generated"),
                 crate_name: "participant".to_string(),
                 crate_version: "0.1.0".to_string(),
@@ -5246,12 +4882,12 @@ mod tests {
                 alias_mappings: vec![ParticipantAliasMapping {
                     alias: "evidence".to_string(),
                     crate_name: "evidence-sdk".to_string(),
-                    api_path: evidence_manifest,
-                    crate_path: None,
-                    cargo_dependency: None,
+                    api: &evidence_manifest,
+                    crate_path: out_dir.join("evidence-sdk"),
                 }],
-            })
-            .unwrap_err();
+            },
+        )
+        .unwrap_err();
 
         assert!(matches!(
             error,
@@ -5267,57 +4903,55 @@ mod tests {
         let out_dir = unique_temp_dir("operation-descriptor-errors");
         fs::create_dir_all(&out_dir).unwrap();
 
-        let manifest_path = write_remote_manifest(
-            &out_dir,
-            "ops@v1.json",
-            json!({
-                "format": "trellis.api.v1",
-                "id": "ops@v1",
-                "version": "1.0.0",
-                "displayName": "Ops With Errors",
-                "description": "Operation with declared errors.",
-                "schemas": {
-                    "Input": {"type":"object","properties":{"id":{"type":"string"}},"required":["id"]},
-                    "Progress": {"type":"object","properties":{"step":{"type":"string"}},"required":["step"]},
-                    "Output": {"type":"object","properties":{"ok":{"type":"boolean"}},"required":["ok"]},
-                    "NotFoundData": {
-                        "type":"object",
-                        "properties":{
-                            "type":{"const":"NotFoundError"},
-                            "message":{"type":"string"},
-                            "id":{"type":"string"}
-                        },
-                        "required":["type","message","id"]
-                    }
-                },
-                "errors": {
-                    "NotFoundError": {
-                        "schema": { "schema": "NotFoundData" }
-                    }
-                },
-                "operations": {
-                    "Example.Process": {
-                        "version": "v1",
-                        "input": { "schema": "Input" },
-                        "progress": { "schema": "Progress" },
-                        "output": { "schema": "Output" },
-                        "errors": ["NotFoundError"]
-                    }
+        let manifest_path = parse_api(&json!({
+            "format": "trellis.api.v1",
+            "id": "ops@v1",
+            "version": "1.0.0",
+            "displayName": "Ops With Errors",
+            "description": "Operation with declared errors.",
+            "schemas": {
+                "Input": {"type":"object","properties":{"id":{"type":"string"}},"required":["id"]},
+                "Progress": {"type":"object","properties":{"step":{"type":"string"}},"required":["step"]},
+                "Output": {"type":"object","properties":{"ok":{"type":"boolean"}},"required":["ok"]},
+                "NotFoundData": {
+                    "type":"object",
+                    "properties":{
+                        "type":{"const":"NotFoundError"},
+                        "message":{"type":"string"},
+                        "id":{"type":"string"}
+                    },
+                    "required":["type","message","id"]
                 }
-            }),
-        );
-
-        generate_rust_sdk(&GenerateRustSdkOpts {
-            api_path: manifest_path.clone(),
-            out_dir: out_dir.join("generated"),
-            crate_name: "ops-sdk".to_string(),
-            crate_version: "0.1.0".to_string(),
-            runtime_deps: RustRuntimeDeps {
-                source: RustRuntimeSource::Local,
-                version: "0.1.0".to_string(),
-                repo_root: Some(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../..")),
             },
-        })
+            "errors": {
+                "NotFoundError": {
+                    "schema": { "schema": "NotFoundData" }
+                }
+            },
+            "operations": {
+                "Example.Process": {
+                    "version": "v1",
+                    "input": { "schema": "Input" },
+                    "progress": { "schema": "Progress" },
+                    "output": { "schema": "Output" },
+                    "errors": ["NotFoundError"]
+                }
+            }
+        })).unwrap();
+
+        generate_rust_sdk(
+            &manifest_path,
+            &GenerateRustSdkOpts {
+                out_dir: out_dir.join("generated"),
+                crate_name: "ops-sdk".to_string(),
+                crate_version: "0.1.0".to_string(),
+                runtime_deps: RustRuntimeDeps {
+                    source: RustRuntimeSource::Local,
+                    version: "0.1.0".to_string(),
+                    repo_root: Some(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../..")),
+                },
+            },
+        )
         .unwrap();
 
         let consumer_dir = out_dir.join("consumer");

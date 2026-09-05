@@ -1,4 +1,4 @@
-// Generated from ./rust/crates/runtime/.trellis/artifacts/apis/trellis.health@v1.json
+// Generated from trellis.health@v1
 export const HealthHeartbeatSampleSchema = {
   "properties": {
     "checks": {

@@ -1,4 +1,4 @@
-// Generated from ./rust/crates/runtime/.trellis/artifacts/apis/trellis.auth@v1.json
+// Generated from trellis.auth@v1
 
 export const API_ID = "trellis.auth@v1" as const;
 export const API_DIGEST =

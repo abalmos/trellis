@@ -1,5 +1,5 @@
 //! API metadata for `trellis.eventlog@v1`.
-//! Generated from ./rust/crates/eventlog-runtime/.trellis/artifacts/apis/trellis.eventlog@v1.json
+//! Generated from trellis.eventlog@v1
 /// Canonical Trellis API id.
 pub const API_ID: &str = "trellis.eventlog@v1";
 /// Stable digest for the canonical API JSON.

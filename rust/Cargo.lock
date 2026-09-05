@@ -6162,6 +6162,7 @@ dependencies = [
  "tokio",
  "trellis-cli",
  "trellis-codegen-ts",
+ "trellis-protocol",
  "wasm-bindgen-cli-support",
 ]
 

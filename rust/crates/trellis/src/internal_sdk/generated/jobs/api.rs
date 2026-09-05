@@ -1,5 +1,5 @@
 //! API metadata for `trellis.jobs@v1`.
-//! Generated from ./rust/crates/jobs-runtime/.trellis/artifacts/apis/trellis.jobs@v1.json
+//! Generated from trellis.jobs@v1
 /// Canonical Trellis API id.
 pub const API_ID: &str = "trellis.jobs@v1";
 /// Stable digest for the canonical API JSON.

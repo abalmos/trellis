@@ -1,4 +1,4 @@
-// Generated from ./rust/crates/jobs-runtime/.trellis/artifacts/apis/trellis.jobs@v1.json
+// Generated from trellis.jobs@v1
 import {
   eventActions,
   feedAction,

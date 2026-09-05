@@ -1,4 +1,4 @@
-// Generated from ./rust/crates/eventlog-runtime/.trellis/artifacts/apis/trellis.eventlog@v1.json
+// Generated from trellis.eventlog@v1
 
 export const API_ID = "trellis.eventlog@v1" as const;
 export const API_DIGEST =

@@ -14,9 +14,7 @@ use trellis_codegen_rust::{
     GenerateRustParticipantFacadeOpts, GenerateRustSdkOpts, ParticipantAliasMapping,
     RustRuntimeDeps, RustRuntimeSource,
 };
-use trellis_codegen_ts::{
-    GenerateTsParticipantOpts, GenerateTsSdkOpts, TsRuntimeDeps, TsRuntimeSource,
-};
+use trellis_codegen_ts::{GenerateTsSdkOpts, TsRuntimeDeps, TsRuntimeSource};
 use trellis_idl::project::read_manifest;
 
 use crate::cli::GenerateArgs;
@@ -149,100 +147,116 @@ pub(crate) fn generate_once(root: &Path) -> Result<GenerationResult> {
     let root = root.canonicalize().into_diagnostic()?;
     let compiled = trellis_idl::compile_project(&root)?;
     let trellis_root = root.join(".trellis");
-    let api_root = trellis_root.join("artifacts/apis");
-    let participant_root = trellis_root.join("artifacts/participants");
-    let rust_api_root = trellis_root.join("rust/apis");
-    let rust_participant_root = trellis_root.join("rust/participants");
-    let ts_api_root = trellis_root.join("ts/apis");
-    let ts_participant_root = trellis_root.join("ts/participants");
     let has_ts = root.join("deno.json").is_file() || root.join("deno.jsonc").is_file();
     let has_rust = root.join("Cargo.toml").is_file();
     let output_root = detect_output_root(&root);
     let runtime_source = detect_runtime_source(&output_root);
     let runtime_repo_root = matches!(runtime_source, RuntimeSource::Local).then_some(output_root);
     let runtime_version = trellis_package_version();
-    let mut api_paths = BTreeSet::new();
-    let mut ts_api_paths = BTreeSet::new();
-    let mut rust_api_paths = BTreeSet::new();
+    let owner_version = (has_rust && !compiled.participants.is_empty())
+        .then(|| rust_project_version(&root))
+        .transpose()?;
+    let apis = compiled
+        .apis
+        .iter()
+        .chain(&compiled.referenced_apis)
+        .map(|(id, api)| (id.as_str(), api))
+        .collect::<BTreeMap<_, _>>();
     let mut sdk_stems = BTreeMap::new();
-    for id in compiled.apis.keys().chain(compiled.referenced_apis.keys()) {
+    for id in apis.keys() {
+        validate_output_identity("API", id)?;
         let stem = sdk_output_stem(id);
-        if let Some(existing) = sdk_stems.insert(stem.clone(), id) {
+        if let Some(existing) = sdk_stems
+            .insert(stem.clone(), id)
+            .filter(|_| has_ts || has_rust)
+        {
             return Err(miette!(
                 "API SDK path '{stem}' collides between '{existing}' and '{id}'"
             ));
         }
     }
+    let mut participant_stems = BTreeMap::new();
+    for participant in &compiled.participants {
+        validate_output_identity("participant", participant.id())?;
+        let stem = sdk_output_stem(participant.id());
+        if let Some(existing) = participant_stems
+            .insert(stem.clone(), participant.id())
+            .filter(|_| has_ts || has_rust)
+        {
+            let language = if has_ts { "ts" } else { "rust" };
+            return Err(miette!(
+                "participant SDK path '{}' collides between '{}' and '{}'",
+                trellis_root
+                    .join(language)
+                    .join("participants")
+                    .join(stem)
+                    .display(),
+                existing,
+                participant.id()
+            ));
+        }
+    }
+
+    // Sibling staging preserves relative Cargo/Deno paths after publication.
+    let staging = tempfile::Builder::new()
+        .prefix(".trellis-stage-")
+        .tempdir_in(&root)
+        .into_diagnostic()?;
+    let api_root = staging.path().join("artifacts/apis");
+    let participant_root = staging.path().join("artifacts/participants");
+    let rust_api_root = staging.path().join("rust/apis");
+    let rust_participant_root = staging.path().join("rust/participants");
+    let ts_api_root = staging.path().join("ts/apis");
+    let ts_participant_root = staging.path().join("ts/participants");
 
     for (id, api) in &compiled.apis {
         eprintln!("{id} {}", api.digest().into_diagnostic()?);
-        validate_output_identity("API", id)?;
         let api_path = api_root.join(format!("{id}.json"));
         write_if_changed(
             &api_path,
             format!("{}\n", api.canonical_json().map_err(protocol_error)?).as_bytes(),
         )?;
-        api_paths.insert(api_path.clone());
     }
 
-    let referenced = tempfile::tempdir().into_diagnostic()?;
-    for (id, api) in &compiled.referenced_apis {
-        validate_output_identity("API", id)?;
-        write_if_changed(
-            &referenced.path().join(format!("{id}.json")),
-            api.canonical_json().map_err(protocol_error)?.as_bytes(),
-        )?;
-    }
-
-    for (id, api) in compiled.apis.iter().chain(&compiled.referenced_apis) {
-        let api_path = if compiled.apis.contains_key(id) {
-            api_root.join(format!("{id}.json"))
-        } else {
-            referenced.path().join(format!("{id}.json"))
-        };
+    for (id, api) in &apis {
         let stem = sdk_output_stem(id);
         if has_ts {
             let out = ts_api_root.join(&stem);
-            trellis_codegen_ts::generate_ts_sdk(&GenerateTsSdkOpts {
-                api_path: api_path.clone(),
-                out_dir: out.clone(),
-                package_name: format!("@trellis-sdk/{}", id.split('@').next().unwrap_or(id)),
-                package_version: api.version().to_owned(),
-                runtime_deps: ts_runtime_deps(
-                    runtime_source,
-                    runtime_version.clone(),
-                    runtime_repo_root.clone(),
-                ),
-            })
+            trellis_codegen_ts::generate_ts_sdk(
+                api,
+                &GenerateTsSdkOpts {
+                    out_dir: out.clone(),
+                    package_name: format!("@trellis-sdk/{}", id.split('@').next().unwrap_or(id)),
+                    package_version: api.version().to_owned(),
+                    runtime_deps: ts_runtime_deps(
+                        runtime_source,
+                        runtime_version.clone(),
+                        runtime_repo_root.clone(),
+                    ),
+                },
+            )
             .into_diagnostic()?;
             format_generated_typescript_artifacts(&out, runtime_repo_root.as_deref())?;
-            ts_api_paths.insert(out);
         }
         if has_rust {
             let out = rust_api_root.join(&stem);
-            trellis_codegen_rust::generate_rust_sdk(&GenerateRustSdkOpts {
-                api_path,
-                out_dir: out.clone(),
-                crate_name: default_rust_crate_name_from_id(id),
-                crate_version: api.version().to_owned(),
-                runtime_deps: rust_runtime_deps(
-                    runtime_source,
-                    runtime_version.clone(),
-                    runtime_repo_root.clone(),
-                ),
-            })
+            trellis_codegen_rust::generate_rust_sdk(
+                api,
+                &GenerateRustSdkOpts {
+                    out_dir: out.clone(),
+                    crate_name: default_rust_crate_name_from_id(id),
+                    crate_version: api.version().to_owned(),
+                    runtime_deps: rust_runtime_deps(
+                        runtime_source,
+                        runtime_version.clone(),
+                        runtime_repo_root.clone(),
+                    ),
+                },
+            )
             .into_diagnostic()?;
-            rust_api_paths.insert(out);
         }
     }
-    let owner_version = (has_rust && !compiled.participants.is_empty())
-        .then(|| rust_project_version(&root))
-        .transpose()?;
-    let mut participant_paths = BTreeSet::new();
-    let mut facade_paths = BTreeSet::new();
-    let mut ts_participant_paths = BTreeSet::new();
     for participant in &compiled.participants {
-        validate_output_identity("participant", participant.id())?;
         let participant_path = participant_root.join(format!("{}.json", participant.id()));
         write_if_changed(
             &participant_path,
@@ -252,7 +266,6 @@ pub(crate) fn generate_once(root: &Path) -> Result<GenerationResult> {
             )
             .as_bytes(),
         )?;
-        participant_paths.insert(participant_path.clone());
         let value = participant.normalized_value().map_err(protocol_error)?;
         let implemented = value["implements"]
             .as_object()
@@ -261,24 +274,14 @@ pub(crate) fn generate_once(root: &Path) -> Result<GenerationResult> {
             .ok_or_else(|| miette!("participant '{}' has no implemented API", participant.id()))?;
         if has_ts {
             let out = ts_participant_root.join(sdk_output_stem(participant.id()));
-            trellis_codegen_ts::generate_ts_participant(&GenerateTsParticipantOpts {
-                participant_path: participant_path.clone(),
-                owned_api_path: if compiled.apis.contains_key(implemented) {
-                    api_root.join(format!("{implemented}.json"))
-                } else {
-                    referenced.path().join(format!("{implemented}.json"))
-                },
-                referenced_api_paths: compiled
-                    .referenced_apis
-                    .keys()
-                    .map(|id| referenced.path().join(format!("{id}.json")))
-                    .chain(api_paths.iter().cloned())
-                    .collect(),
-                out_dir: out.clone(),
-            })
+            trellis_codegen_ts::generate_ts_participant(
+                participant,
+                apis[implemented],
+                &apis,
+                &out,
+            )
             .into_diagnostic()?;
             format_generated_typescript_artifacts(&out, runtime_repo_root.as_deref())?;
-            ts_participant_paths.insert(out);
         }
         if has_rust {
             let aliases = ["required", "optional"]
@@ -290,25 +293,16 @@ pub(crate) fn generate_once(root: &Path) -> Result<GenerationResult> {
                     ParticipantAliasMapping {
                         alias: alias.clone(),
                         crate_name: default_rust_crate_name_from_id(id),
-                        api_path: if compiled.apis.contains_key(id) {
-                            api_root.join(format!("{id}.json"))
-                        } else {
-                            referenced.path().join(format!("{id}.json"))
-                        },
-                        crate_path: Some(rust_api_root.join(sdk_output_stem(id))),
-                        cargo_dependency: None,
+                        api: apis[id],
+                        crate_path: rust_api_root.join(sdk_output_stem(id)),
                     }
                 })
                 .collect();
             let out = rust_participant_root.join(sdk_output_stem(participant.id()));
             trellis_codegen_rust::generate_rust_participant_facade(
+                apis[implemented],
+                participant,
                 &GenerateRustParticipantFacadeOpts {
-                    api_path: if compiled.apis.contains_key(implemented) {
-                        api_root.join(format!("{implemented}.json"))
-                    } else {
-                        referenced.path().join(format!("{implemented}.json"))
-                    },
-                    participant_path,
                     out_dir: out.clone(),
                     crate_name: format!(
                         "trellis-participant-{}",
@@ -326,40 +320,61 @@ pub(crate) fn generate_once(root: &Path) -> Result<GenerationResult> {
                 },
             )
             .into_diagnostic()?;
-            facade_paths.insert(out);
         }
     }
 
-    for (directory, current) in [
-        (&api_root, &api_paths),
-        (&participant_root, &participant_paths),
-        (&ts_api_root, &ts_api_paths),
-        (&ts_participant_root, &ts_participant_paths),
-        (&rust_api_root, &rust_api_paths),
-        (&rust_participant_root, &facade_paths),
-    ] {
-        prune(directory, current)?;
-    }
-    for directory in [
-        trellis_root.join("artifacts"),
-        trellis_root.join("rust"),
-        trellis_root.join("ts"),
-    ] {
-        if directory.is_dir() && fs::read_dir(&directory).into_diagnostic()?.next().is_none() {
-            fs::remove_dir(directory).into_diagnostic()?;
+    fs::create_dir_all(&trellis_root).into_diagnostic()?;
+    let backup = tempfile::Builder::new()
+        .prefix(".trellis-backup-")
+        .tempdir_in(&root)
+        .into_diagnostic()?;
+    let mut saved = Vec::new();
+    let mut published = Vec::new();
+    let publication = (|| -> std::io::Result<()> {
+        for name in ["artifacts", "rust", "ts"] {
+            let target = trellis_root.join(name);
+            if target.exists() {
+                fs::rename(&target, backup.path().join(name))?;
+                saved.push(name);
+            }
+            if staging.path().join(name).exists() {
+                fs::rename(staging.path().join(name), &target)?;
+                published.push(name);
+            }
         }
-    }
-    let old_generated = trellis_root.join("generated");
-    if old_generated.is_dir() {
-        fs::remove_dir_all(old_generated).into_diagnostic()?;
-    } else if old_generated.exists() {
-        fs::remove_file(old_generated).into_diagnostic()?;
+        Ok(())
+    })();
+    if let Err(error) = publication {
+        let mut rollback_error = None;
+        for name in published.into_iter().rev() {
+            if let Err(error) = fs::rename(trellis_root.join(name), staging.path().join(name)) {
+                rollback_error.get_or_insert(error);
+            }
+        }
+        for name in saved.into_iter().rev() {
+            if let Err(error) = fs::rename(backup.path().join(name), trellis_root.join(name)) {
+                rollback_error.get_or_insert(error);
+            }
+        }
+        if let Some(rollback_error) = rollback_error {
+            let recovery = backup.keep();
+            return Err(miette!("generation publication failed: {error}; rollback failed: {rollback_error}; previous outputs retained at {}", recovery.display()));
+        }
+        return Err(error).into_diagnostic();
     }
     Ok(GenerationResult {
         generated: compiled.apis.len()
             + compiled.referenced_apis.len()
             + compiled.participants.len(),
-        owned_api_paths: api_paths.into_iter().collect(),
+        owned_api_paths: compiled
+            .apis
+            .keys()
+            .map(|id| {
+                trellis_root
+                    .join("artifacts/apis")
+                    .join(format!("{id}.json"))
+            })
+            .collect(),
     })
 }
 
@@ -475,26 +490,6 @@ fn write_if_changed(path: &Path, contents: &[u8]) -> Result<()> {
         fs::create_dir_all(parent).into_diagnostic()?;
     }
     fs::write(path, contents).into_diagnostic()
-}
-
-fn prune(directory: &Path, current: &BTreeSet<PathBuf>) -> Result<()> {
-    let Ok(entries) = fs::read_dir(directory) else {
-        return Ok(());
-    };
-    for entry in entries {
-        let path = entry.into_diagnostic()?.path();
-        if !current.contains(&path) {
-            if path.is_dir() {
-                fs::remove_dir_all(path).into_diagnostic()?;
-            } else {
-                fs::remove_file(path).into_diagnostic()?;
-            }
-        }
-    }
-    if current.is_empty() {
-        fs::remove_dir(directory).into_diagnostic()?;
-    }
-    Ok(())
 }
 
 fn protocol_error(error: trellis_protocol::ProtocolError) -> miette::Report {

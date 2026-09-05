@@ -178,23 +178,31 @@ fn run_install() -> Result<()> {
         let out_dir = root
             .join("ts/packages/trellis/internal_sdk/generated")
             .join(module);
+        let artifact = std::fs::read(
+            root.join(project)
+                .join(".trellis/artifacts/apis")
+                .join(format!("{api_id}.json")),
+        )
+        .into_diagnostic()?;
+        let api =
+            trellis_protocol::parse_api(&serde_json::from_slice(&artifact).into_diagnostic()?)
+                .map_err(|error| miette::miette!(error.to_string()))?;
         if out_dir.exists() {
             std::fs::remove_dir_all(&out_dir).into_diagnostic()?;
         }
-        trellis_codegen_ts::generate_ts_sdk(&trellis_codegen_ts::GenerateTsSdkOpts {
-            api_path: root
-                .join(project)
-                .join(".trellis/artifacts/apis")
-                .join(format!("{api_id}.json")),
-            out_dir: out_dir.clone(),
-            package_name: format!("@qlever-llc/trellis-internal-{module}"),
-            package_version: env!("CARGO_PKG_VERSION").to_owned(),
-            runtime_deps: trellis_codegen_ts::TsRuntimeDeps {
-                source: trellis_codegen_ts::TsRuntimeSource::Local,
-                version: env!("CARGO_PKG_VERSION").to_owned(),
-                repo_root: Some(root.to_path_buf()),
+        trellis_codegen_ts::generate_ts_sdk(
+            &api,
+            &trellis_codegen_ts::GenerateTsSdkOpts {
+                out_dir: out_dir.clone(),
+                package_name: format!("@qlever-llc/trellis-internal-{module}"),
+                package_version: env!("CARGO_PKG_VERSION").to_owned(),
+                runtime_deps: trellis_codegen_ts::TsRuntimeDeps {
+                    source: trellis_codegen_ts::TsRuntimeSource::Local,
+                    version: env!("CARGO_PKG_VERSION").to_owned(),
+                    repo_root: Some(root.to_path_buf()),
+                },
             },
-        })
+        )
         .map_err(|error| miette::miette!(error.to_string()))?;
         let status = Command::new("deno")
             .current_dir(&root)

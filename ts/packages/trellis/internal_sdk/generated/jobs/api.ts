@@ -1,4 +1,4 @@
-// Generated from ./rust/crates/jobs-runtime/.trellis/artifacts/apis/trellis.jobs@v1.json
+// Generated from trellis.jobs@v1
 
 export const API_ID = "trellis.jobs@v1" as const;
 export const API_DIGEST =

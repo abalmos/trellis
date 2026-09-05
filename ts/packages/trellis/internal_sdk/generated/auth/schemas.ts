@@ -1,4 +1,4 @@
-// Generated from ./rust/crates/runtime/.trellis/artifacts/apis/trellis.auth@v1.json
+// Generated from trellis.auth@v1
 export const AuthCapabilitiesListRequestSchema = {
   "properties": {
     "cursor": { "minLength": 1, "type": "string" },

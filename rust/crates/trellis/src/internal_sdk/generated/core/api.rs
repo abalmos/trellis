@@ -1,5 +1,5 @@
 //! API metadata for `trellis.core@v1`.
-//! Generated from ./rust/crates/runtime/.trellis/artifacts/apis/trellis.core@v1.json
+//! Generated from trellis.core@v1
 /// Canonical Trellis API id.
 pub const API_ID: &str = "trellis.core@v1";
 /// Stable digest for the canonical API JSON.

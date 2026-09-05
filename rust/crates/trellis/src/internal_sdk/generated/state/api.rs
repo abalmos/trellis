@@ -1,5 +1,5 @@
 //! API metadata for `trellis.state@v1`.
-//! Generated from ./rust/crates/runtime/.trellis/artifacts/apis/trellis.state@v1.json
+//! Generated from trellis.state@v1
 /// Canonical Trellis API id.
 pub const API_ID: &str = "trellis.state@v1";
 /// Stable digest for the canonical API JSON.

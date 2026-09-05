@@ -1,5 +1,5 @@
 //! API metadata for `trellis.health@v1`.
-//! Generated from ./rust/crates/runtime/.trellis/artifacts/apis/trellis.health@v1.json
+//! Generated from trellis.health@v1
 /// Canonical Trellis API id.
 pub const API_ID: &str = "trellis.health@v1";
 /// Stable digest for the canonical API JSON.
