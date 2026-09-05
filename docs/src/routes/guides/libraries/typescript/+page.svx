@@ -6,7 +6,26 @@ Application code imports runtime classes from `@qlever-llc/trellis` and generate
 import { TrellisClient } from "@qlever-llc/trellis";
 import { participant } from "../../.trellis/ts/participants/orders-app/mod.ts";
 
-const client = await TrellisClient.connect({ participant, auth });
+const client = await TrellisClient.connect({
+  participant,
+  trellisUrl: "https://trellis.example.com",
+  auth: "browser",
+}).orThrow();
 ```
 
 Do not construct API or participant metadata in TypeScript. Author it in native IDL, run `trellis generate`, and treat generated files as disposable build products.
+
+Use `@qlever-llc/trellis/service/deno` or `/service/node` for service bootstrap.
+Pass `participant` and the immutable provisioned `identity` to
+`TrellisService.connect(...)`, plus a durable authorization-context store. Use
+the connected service's generated handlers and `kv`, `store`, and `jobs` handles.
+The browser-safe root does not expose native filesystem helpers.
+
+Connected clients expose only the actions selected by their generated
+participant. RPCs return `Result`-style values; `.orThrow()` is convenient at an
+application boundary, while handlers should model expected failures explicitly.
+Do not import provider source to call a service: install its canonical API,
+select the required actions in native IDL, and generate your own local SDK.
+
+Find exact signatures through [/api](/api). Generate after every IDL change
+before checking extracted handler types.

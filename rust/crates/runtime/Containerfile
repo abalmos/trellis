@@ -22,7 +22,7 @@ RUN cargo build --locked --manifest-path rust/Cargo.toml --release \
     --package trellis-server --bin trellis-server \
     --package trellis-cli --bin trellis
 
-# Bake the pinned nats-server binary (conformance/nats-binaries.json) so the runtime
+# Bake the pinned nats-server binary (local-nats/nats-binaries.json) so the runtime
 # image never downloads it at container runtime. TARGETARCH is set by buildx
 # (amd64/arm64); it maps directly onto the pin's linux-<arch> keys. The release URL is
 # derived from the pinned version: the pin file stores version + per-platform sha256
@@ -39,10 +39,10 @@ RUN apt-get update \
     && apt-get install --yes --no-install-recommends curl jq ca-certificates \
     && rm -rf /var/lib/apt/lists/* \
     && asset="linux-${TARGETARCH}" \
-    && version="$(jq -r '.["nats-server"].version // empty' /src/conformance/nats-binaries.json)" \
-    && sha="$(jq -r --arg asset "$asset" '.["nats-server"].sha256[$asset] // empty' /src/conformance/nats-binaries.json)" \
+    && version="$(jq -r '.["nats-server"].version // empty' /src/rust/crates/local-nats/nats-binaries.json)" \
+    && sha="$(jq -r --arg asset "$asset" '.["nats-server"].sha256[$asset] // empty' /src/rust/crates/local-nats/nats-binaries.json)" \
     && if [ -z "$version" ] || [ -z "$sha" ]; then \
-         echo "nats-server pin for ${asset} is missing version or sha256 in conformance/nats-binaries.json" >&2; \
+          echo "nats-server pin for ${asset} is missing version or sha256 in local-nats/nats-binaries.json" >&2; \
          exit 1; \
        fi \
     && if ! printf '%s' "$sha" | grep -Eq '^[0-9a-f]{64}$'; then \

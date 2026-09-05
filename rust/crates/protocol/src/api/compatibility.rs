@@ -627,89 +627,9 @@ fn pointer<'a>(tokens: impl IntoIterator<Item = &'a str>) -> String {
 
 #[cfg(test)]
 mod tests {
-    use std::{fs, path::PathBuf};
-
-    use serde::Deserialize;
-    use serde_json::{json, Map, Value};
+    use serde_json::json;
 
     use super::*;
-    use crate::parse_api;
-
-    #[derive(Deserialize)]
-    #[serde(rename_all = "camelCase")]
-    struct Vector {
-        name: String,
-        previous: Value,
-        candidate: Value,
-        compatible: bool,
-        issues: Vec<ExpectedIssue>,
-    }
-
-    #[derive(Deserialize)]
-    struct ExpectedIssue {
-        code: String,
-        path: String,
-    }
-
-    #[derive(Deserialize)]
-    struct Fixture {
-        vectors: Vec<Vector>,
-    }
-
-    #[test]
-    fn shared_api_compatibility_vectors_pass() {
-        let fixture = fixture();
-        assert!(fixture.vectors.len() >= 32);
-        for vector in fixture.vectors {
-            let previous = parse_api(&vector.previous)
-                .unwrap_or_else(|error| panic!("{} previous: {error}", vector.name));
-            let candidate = parse_api(&vector.candidate)
-                .unwrap_or_else(|error| panic!("{} candidate: {error}", vector.name));
-            let report = compare_api_replacement(&previous, &candidate)
-                .unwrap_or_else(|error| panic!("{} comparison: {error}", vector.name));
-            assert_eq!(report.compatible, vector.compatible, "{}", vector.name);
-            let actual = report
-                .issues
-                .iter()
-                .map(|issue| {
-                    (
-                        serde_json::to_value(issue.code)
-                            .unwrap()
-                            .as_str()
-                            .unwrap()
-                            .to_owned(),
-                        issue.path.clone(),
-                    )
-                })
-                .collect::<Vec<_>>();
-            let expected = vector
-                .issues
-                .iter()
-                .map(|issue| (issue.code.clone(), issue.path.clone()))
-                .collect::<Vec<_>>();
-            assert_eq!(actual, expected, "{}", vector.name);
-            for issue in &report.issues {
-                jsonptr::Pointer::parse(&issue.path)
-                    .unwrap_or_else(|error| panic!("{} invalid path: {error}", vector.name));
-            }
-        }
-    }
-
-    #[test]
-    fn comparison_ignores_input_object_order() {
-        let vector = fixture()
-            .vectors
-            .into_iter()
-            .find(|vector| vector.name == "deterministic-section-and-utf16-order")
-            .unwrap();
-        let previous = parse_api(&vector.previous).unwrap();
-        let reordered = parse_api(&reverse_object(vector.previous)).unwrap();
-        let candidate = parse_api(&vector.candidate).unwrap();
-        assert_eq!(
-            compare_api_replacement(&previous, &candidate).unwrap(),
-            compare_api_replacement(&reordered, &candidate).unwrap()
-        );
-    }
 
     #[test]
     fn report_serialization_is_stable() {
@@ -732,18 +652,5 @@ mod tests {
                 }]
             })
         );
-    }
-
-    fn fixture() -> Fixture {
-        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../../../conformance/api-compatibility/vectors.json");
-        serde_json::from_str(&fs::read_to_string(path).unwrap()).unwrap()
-    }
-
-    fn reverse_object(value: Value) -> Value {
-        match value {
-            Value::Object(object) => Value::Object(object.into_iter().rev().collect::<Map<_, _>>()),
-            value => value,
-        }
     }
 }

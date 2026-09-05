@@ -69,18 +69,19 @@ Install locked API dependencies and regenerate project-local artifacts with:
 - `cargo xtask release prepare --tag v0.9.0-rc.1`
 
 Each contract project owns `trellis.toml`, commits `trellis.lock`, and consumes
-its generated SDK through `@trellis/apis/<lineage>` or `trellis_apis::<module>`.
+its private generated SDK through the configured TypeScript or Rust output.
 `cargo xtask build` installs the fixed repository project DAG before building
 the Rust workspace. Live client-library integration coverage is language-owned.
 Run these peer suites when you need that coverage:
 
 ```sh
 deno task -c ts/deno.json test:integration
-cargo test --manifest-path rust/Cargo.toml -p trellis-rs --test integration -- --nocapture
+cargo test --manifest-path rust/Cargo.toml -p trellis-rs --features live-integration --test integration -- --nocapture
 ```
 
-Both suites use ordinary Rust and Deno test discovery, the shared parity
-contract for supported client languages.
+Both suites use ordinary Rust and Deno discovery. Build the server and CLI once
+and pass their paths as documented in
+[integration/README.md](integration/README.md).
 
 ## Design documents
 

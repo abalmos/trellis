@@ -22,8 +22,7 @@ use sha2::{Digest as _, Sha256};
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use trellis_protocol::{
-    ApiSurfaceKind, GrantSet, PermissionAction, PermissionAtom,
-    PermissionTarget,
+    ApiSurfaceKind, GrantSet, PermissionAction, PermissionAtom, PermissionTarget,
 };
 
 const DIGEST: &str = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";

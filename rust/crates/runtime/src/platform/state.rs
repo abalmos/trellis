@@ -12,8 +12,8 @@ use serde_json::{json, Value};
 use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
 use trellis_protocol::{
-    parse_api, AuthorizationPrincipalKind, ParticipantKind, ParticipantResourceKind,
-    PermissionAction, PermissionAtom, PermissionTarget, StateKind,
+    AuthorizationPrincipalKind, ParticipantKind, ParticipantResourceKind, PermissionAction,
+    PermissionAtom, PermissionTarget, StateKind,
 };
 use trellis_rs::service::{
     internal::run_builtin_authenticated_router, DeclaredRpcError, RequestContext, Router,
@@ -789,37 +789,24 @@ fn declaration_from_binding(
     contract_id: String,
     store: &str,
 ) -> Result<Declaration, ServerError> {
-    let resolved = binding.resolve().map_err(unexpected)?;
-    let owned_api_id = resolved
-        .implemented_apis()
-        .iter()
-        .find(|implemented| implemented.alias() == "self")
-        .ok_or_else(|| {
-            validation(
-                "/store",
-                "participant does not implement its owned API under alias 'self'",
-            )
-        })?
-        .provided()
-        .api();
-    let api_values: BTreeMap<String, Value> =
-        serde_json::from_str(&binding.api_artifacts_json).map_err(unexpected)?;
-    let api = api_values
-        .get(owned_api_id)
-        .ok_or_else(|| validation("/store", "contract API artifact was not found"))?;
-    let api = parse_api(api).map_err(unexpected)?;
-    let definition = api
-        .state_definition(store)
+    binding.resolve().map_err(unexpected)?;
+    let participant: Value = serde_json::from_str(&binding.participant_json).map_err(unexpected)?;
+    let definition = participant["state"]
+        .get(store)
         .ok_or_else(|| validation("/store", "State store is not declared"))?;
-    let schema = api
-        .schema(definition.schema_name())
+    let definition: trellis_protocol::StateDefinition =
+        serde_json::from_value(definition.clone()).map_err(unexpected)?;
+    let schemas = &participant["schemas"];
+    let schema = schemas
+        .get(definition.schema_name())
         .cloned()
         .ok_or_else(|| unexpected("current State schema is missing"))?;
     let mut accepted_versions = BTreeMap::new();
     for (version, schema_name) in definition.accepted_versions() {
         accepted_versions.insert(
             version.to_owned(),
-            api.schema(schema_name)
+            schemas
+                .get(schema_name)
                 .cloned()
                 .ok_or_else(|| unexpected("accepted State schema is missing"))?,
         );
@@ -1161,6 +1148,7 @@ fn kv_error(error: impl std::fmt::Display) -> ServerError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use trellis_protocol::parse_api;
     use trellis_protocol::{parse_participant, resolve_participant};
 
     fn test_declaration(digest: &str) -> Declaration {
@@ -1253,7 +1241,7 @@ mod tests {
             "version": "1.0.0",
             "displayName": "Example Device",
             "description": "State test API",
-            "schemas": {"State": {"type": "string"}},
+            "schemas": {"State": {"type": "number"}},
             "state": {"preferences": {"kind": "value", "schema": {"schema": "State"}}}
         });
         let parsed_api = parse_api(&api).expect("API");
@@ -1275,6 +1263,8 @@ mod tests {
             "displayName": "Example Device",
             "description": "State test participant",
             "kind": "device",
+            "schemas": {"State": {"type": "string"}},
+            "state": {"preferences": {"kind": "value", "schema": {"schema": "State"}}},
             "implements": {
                 "shared": {"api": "example.shared@v1", "apiDigest": shared_api_digest},
                 "self": {"api": "example.device@v1", "apiDigest": api_digest}

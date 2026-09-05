@@ -8,24 +8,8 @@ use crate::{
 
 const DRAFT_2020_12: &str = "https://json-schema.org/draft/2020-12/schema";
 
-#[cfg(test)]
-pub(crate) fn validate_api_meta_schema() -> Result<(), ProtocolError> {
-    let schema: Value = serde_json::from_str(API_AUTHORING_SCHEMA_V1_JSON)?;
-    jsonschema::meta::options()
-        .validate(&schema)
-        .map_err(|error| api_error(error.instance_path().to_string(), error.to_string()))
-}
-
 pub(crate) fn lint_api_authoring(value: &Value) -> Result<(), ProtocolError> {
     validate_structure(API_AUTHORING_SCHEMA_V1_JSON, value, api_error)
-}
-
-#[cfg(test)]
-pub(crate) fn validate_participant_meta_schema() -> Result<(), ProtocolError> {
-    let schema: Value = serde_json::from_str(PARTICIPANT_AUTHORING_SCHEMA_V1_JSON)?;
-    jsonschema::meta::options()
-        .validate(&schema)
-        .map_err(|error| participant_error(error.instance_path().to_string(), error.to_string()))
 }
 
 pub(crate) fn lint_participant_authoring(value: &Value) -> Result<(), ProtocolError> {

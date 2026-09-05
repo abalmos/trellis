@@ -1,0 +1,15 @@
+[package]
+name = "trellis-runtime-acceptance"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[workspace]
+exclude = [".trellis"]
+
+[dependencies]
+trellis-participant-test-provider = { path = ".trellis/rust/participants/test-provider" }
+trellis-sdk-test-runtime = { path = ".trellis/rust/apis/test-runtime" }
+trellis-rs = { path = "../../../rust/crates/trellis" }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "signal"] }
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }

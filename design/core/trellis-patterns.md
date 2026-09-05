@@ -13,7 +13,9 @@ None.
 ## Context
 
 Trellis is a distributed system for aggregating, processing, and distributing
-organizational data. Services communicate exclusively over NATS.
+organizational data. Connected Trellis contract calls use NATS. Applications can
+also use external HTTP APIs, databases, or other systems; Trellis does not
+prescribe their entire communication architecture.
 
 This document establishes the top-level cross-cutting system patterns for:
 
@@ -37,8 +39,9 @@ guidance is split into companion documents.
 | Processing     | Transform, enrich, derive knowledge    | Classification     |
 | Egress         | Push data to external systems          | Laserfiche         |
 
-Categories describe primary responsibility. Any service may still subscribe to
-events for cache invalidation or local state.
+These are example application roles, not Trellis participant kinds or required
+service boundaries. Any service may subscribe to events for cache invalidation
+or local state.
 
 ### Platform Boundary
 
@@ -54,7 +57,7 @@ Rules:
 - `@qlever-llc/trellis` is a runtime library, not a central registry for every
   service API
 - service APIs are defined with the service that owns them and consumed through
-  contract packages
+  canonical API dependencies and consumer-local generated SDKs
 
 ### Communication Patterns
 

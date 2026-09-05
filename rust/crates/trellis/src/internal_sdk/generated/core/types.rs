@@ -222,6 +222,9 @@ pub enum TrellisSurfaceStatusResponseStatus {
     /// The `unknown_surface` variant.
     #[serde(rename = "unknown_surface")]
     UnknownSurface {
+        /// The `contractId` wire field.
+        #[serde(rename = "contractId")]
+        contract_id: String,
         /// The `kind` wire field.
         kind: String,
         /// The `surface` wire field.

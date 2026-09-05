@@ -22,8 +22,8 @@ use sha2::{Digest, Sha256};
 use thiserror::Error;
 
 /// Pinned nats-server version and per-platform checksums, shared with the TypeScript harness
-/// via `conformance/nats-binaries.json` at the repository root.
-const NATS_BINARIES_JSON: &str = include_str!("../../../../conformance/nats-binaries.json");
+/// via this crate's `nats-binaries.json`.
+const NATS_BINARIES_JSON: &str = include_str!("../nats-binaries.json");
 
 /// How long [`ManagedNatsServer::start`] waits for all ports to accept connections.
 const READINESS_TIMEOUT: Duration = Duration::from_secs(30);
@@ -124,7 +124,7 @@ pub enum LocalNatsError {
         actual: String,
     },
     /// The pinned manifest has no checksum for this platform asset.
-    #[error("no pinned sha256 for asset {asset} in conformance/nats-binaries.json")]
+    #[error("no pinned sha256 for asset {asset} in local-nats/nats-binaries.json")]
     MissingSha256 {
         /// Platform asset name.
         asset: String,
@@ -144,7 +144,7 @@ pub enum LocalNatsError {
         message: String,
     },
     /// The embedded pinned-binaries manifest is malformed.
-    #[error("invalid embedded conformance/nats-binaries.json: {0}")]
+    #[error("invalid embedded local-nats/nats-binaries.json: {0}")]
     InvalidPinnedManifest(#[from] serde_json::Error),
     /// Filesystem or process operation failed.
     #[error(transparent)]

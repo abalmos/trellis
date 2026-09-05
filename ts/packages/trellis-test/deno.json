@@ -3,10 +3,7 @@
   "name": "@qlever-llc/trellis-test",
   "version": "0.12.0",
   "license": "Apache-2.0",
-  "exports": {
-    ".": "./index.ts",
-    "./integration": "./integration.ts"
-  },
+  "exports": "./index.ts",
   "imports": {
     "@qlever-llc/trellis": "jsr:@qlever-llc/trellis@^0.12.0",
     "@qlever-llc/trellis/auth": "jsr:@qlever-llc/trellis@^0.12.0/auth",

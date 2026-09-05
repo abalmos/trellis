@@ -53,7 +53,7 @@ struct ServerArgs {
     /// Use Linux system/FHS paths instead of the default user profile.
     #[arg(long, conflicts_with = "dev", global = true)]
     system: bool,
-    /// Manage local NATS from PATH, or use an exact --local-nats=<PATH> executable.
+    /// Manage local NATS from PATH, or use an exact `--local-nats=<PATH>` executable.
     #[arg(
         short = 'n',
         long,

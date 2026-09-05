@@ -1,6 +1,5 @@
 //! Shared request and response types for `trellis.health@v1`.
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 use std::collections::BTreeMap;
 /// Generated schema type `HealthInspectRequestParticipantKind`.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -368,7 +367,7 @@ pub struct HealthInspectResponseInstancesItemLatestSampleChecksItem {
     pub error: Option<String>,
     /// The `info` wire field.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub info: Option<BTreeMap<String, Value>>,
+    pub info: Option<BTreeMap<String, serde_json::Value>>,
     /// The `latencyMs` wire field.
     #[serde(rename = "latencyMs")]
     pub latency_ms: f64,
@@ -477,7 +476,7 @@ pub struct HealthInspectResponseInstancesItemLatestSampleParticipant {
     pub contract_id: String,
     /// The `info` wire field.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub info: Option<BTreeMap<String, Value>>,
+    pub info: Option<BTreeMap<String, serde_json::Value>>,
     /// The `instanceId` wire field.
     #[serde(rename = "instanceId")]
     pub instance_id: String,
@@ -1725,7 +1724,7 @@ impl PartialEq<NotFoundErrorDataType> for &str {
 pub struct NotFoundErrorData {
     /// The `context` wire field.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub context: Option<BTreeMap<String, Value>>,
+    pub context: Option<BTreeMap<String, serde_json::Value>>,
     /// The `id` wire field.
     pub id: String,
     /// The `message` wire field.
@@ -1786,7 +1785,7 @@ pub struct HealthHeartbeatSampleChecksItem {
     pub error: Option<String>,
     /// The `info` wire field.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub info: Option<BTreeMap<String, Value>>,
+    pub info: Option<BTreeMap<String, serde_json::Value>>,
     /// The `latencyMs` wire field.
     #[serde(rename = "latencyMs")]
     pub latency_ms: f64,
@@ -1895,7 +1894,7 @@ pub struct HealthHeartbeatSampleParticipant {
     pub contract_id: String,
     /// The `info` wire field.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub info: Option<BTreeMap<String, Value>>,
+    pub info: Option<BTreeMap<String, serde_json::Value>>,
     /// The `instanceId` wire field.
     #[serde(rename = "instanceId")]
     pub instance_id: String,

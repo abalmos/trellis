@@ -1,0 +1,9 @@
+{
+  "workspace": [],
+  "tasks": {
+    "generate": "../../../rust/target/debug/trellis generate",
+    "check": "deno check -c ../../../ts/deno.json main.ts service_test.ts",
+    "test": "deno test -A -c ../../../ts/deno.json service_test.ts",
+    "start": "deno run -A -c ../../../ts/deno.json main.ts"
+  }
+}

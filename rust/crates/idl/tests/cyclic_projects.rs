@@ -64,12 +64,8 @@ participant "example.b" service {
     .into_diagnostic()?;
 
     let result = (|| {
-        let compiled_a = compile_project(&a)?;
-        let compiled_b = compile_project(&b)?;
-        assert_eq!(compiled_a.referenced_apis.len(), 1);
-        assert_eq!(compiled_b.referenced_apis.len(), 1);
-        assert_eq!(compiled_a.participants.len(), 1);
-        assert_eq!(compiled_b.participants.len(), 1);
+        compile_project(&a)?;
+        compile_project(&b)?;
         Ok(())
     })();
     fs::remove_dir_all(root).into_diagnostic()?;

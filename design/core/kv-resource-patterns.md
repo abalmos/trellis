@@ -102,8 +102,9 @@ Use `.` delimiters for wildcard support:
 Rules:
 
 - key segments must be NATS subject-safe
-- use base64url without padding for binary-derived segments
-- use ULIDs for identifiers unless there is a better reason not to
+- encode binary-derived segments into a subject-safe representation, such as
+  base64url without padding
+- identifier format is application-owned, subject to the key character rules
 
 Examples:
 

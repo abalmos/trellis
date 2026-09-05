@@ -61,14 +61,13 @@ cargo xtask build
 `cargo xtask
 build` installs first and then invokes the default Rust workspace
 build. Live client-library integration is language-owned and is run outside
-`cargo xtask build`: use
-`deno run -A -c ts/deno.json integration/live_runner.ts`. The runner discovers
-the ordinary Rust and Deno integration tests and provides their shared real
-infrastructure.
+`cargo xtask build`: use ordinary `cargo test` and `deno test` commands from
+`integration/README.md`. Tests own their real infrastructure directly; there is
+no shared runner.
 
 Installation:
 
-- resolve contract inputs from source modules, generated APIs, or OCI images
+- compile native IDL and resolve canonical API dependencies from paths or OCI
 - validate canonical native API artifacts against native `trellis.api.v1` and
   `trellis.participant.v1`
 - compute canonical JSON and digests

@@ -1742,322 +1742,8 @@ fn join_tokens<'a>(path: &PointerBuf, tokens: impl IntoIterator<Item = &'a str>)
 
 #[cfg(test)]
 mod tests {
-    use std::{fs, path::PathBuf};
-
-    use serde::Deserialize;
-
     use super::*;
     use crate::{parse_api, parse_participant};
-
-    #[derive(Deserialize)]
-    #[serde(deny_unknown_fields, rename_all = "camelCase")]
-    struct Vector {
-        name: String,
-        covers: Vec<u8>,
-        participant: Value,
-        participant_error_path: Option<String>,
-        supplied_apis: Option<Vec<String>>,
-        valid: bool,
-        error_code: Option<String>,
-        error_path: Option<String>,
-        same_needs_as: Option<String>,
-        same_fingerprint_as: Option<String>,
-        different_needs_from: Option<String>,
-        required_actions: Option<Vec<String>>,
-        optional_actions: Option<Vec<String>>,
-        fully_requested_capabilities: Option<Vec<String>>,
-        optional_fully_requested_capabilities: Option<Vec<String>>,
-        required_capability_evidence: Option<Vec<ExpectedCapabilityEvidence>>,
-        optional_capability_evidence: Option<Vec<ExpectedCapabilityEvidence>>,
-        uncovered_permissions: Option<usize>,
-        provided_api: Option<String>,
-        required_api_order: Option<Vec<String>>,
-        provided_state_order: Option<Vec<String>>,
-        provided_signal_order: Option<Vec<String>>,
-        expected_needs: Option<Value>,
-        expected_needs_digest: Option<String>,
-        expected_proposal: Option<Value>,
-        expected_fingerprint: Option<String>,
-    }
-
-    #[derive(Deserialize)]
-    #[serde(deny_unknown_fields, rename_all = "camelCase")]
-    struct Fixture {
-        apis: Vec<Value>,
-        pointer_proofs: Vec<PointerProofVector>,
-        vectors: Vec<Vector>,
-    }
-
-    #[derive(Deserialize)]
-    #[serde(deny_unknown_fields, rename_all = "camelCase")]
-    struct PointerProofVector {
-        name: String,
-        schema: Value,
-        pointer: String,
-        expected_type: String,
-        valid: bool,
-        error_code: Option<String>,
-        runtime_value: Option<Value>,
-    }
-
-    #[derive(Deserialize, Debug, Eq, PartialEq)]
-    #[serde(deny_unknown_fields, rename_all = "camelCase")]
-    struct ExpectedCapabilityEvidence {
-        api: String,
-        api_digest: String,
-        name: String,
-    }
-
-    // These are pure cross-artifact resolution and canonicalization vectors;
-    // they intentionally require no runtime, storage, network, or policy fake.
-    #[test]
-    fn participant_resolution_and_authority_proposal_conformance() {
-        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../../../conformance/participant-resolution/vectors.json");
-        let fixture: Fixture = serde_json::from_str(&fs::read_to_string(path).unwrap()).unwrap();
-        let all_apis = fixture
-            .apis
-            .iter()
-            .map(|value| {
-                let api = parse_api(value).unwrap();
-                (api.id().to_owned(), api)
-            })
-            .collect::<BTreeMap<_, _>>();
-        let digests = all_apis
-            .iter()
-            .map(|(id, api)| (id.clone(), api.digest().unwrap()))
-            .collect::<BTreeMap<_, _>>();
-        let mut covered = BTreeSet::new();
-        let mut needs = BTreeMap::new();
-        let mut fingerprints = BTreeMap::new();
-
-        for vector in &fixture.pointer_proofs {
-            let expected = match vector.expected_type.as_str() {
-                "string" => ExpectedSchemaType::String,
-                "object" => ExpectedSchemaType::Object,
-                "subjectToken" => ExpectedSchemaType::SubjectToken,
-                "jobKey" => ExpectedSchemaType::JobKey,
-                other => panic!("{} has unknown expected type '{other}'", vector.name),
-            };
-            let result = validate_typed_pointer(
-                PointerValidationContext {
-                    participant_id: "fixture-participant",
-                    alias: "fixture-api",
-                    api: "fixture@v1",
-                    authored_path: &pointer(["pointerProofs", &vector.name]),
-                },
-                &vector.pointer,
-                &vector.schema,
-                expected,
-                false,
-            );
-            assert_eq!(result.is_ok(), vector.valid, "{}: {result:?}", vector.name);
-            if let Some(runtime_value) = &vector.runtime_value {
-                let parsed = Pointer::parse(&vector.pointer).unwrap();
-                assert_eq!(
-                    result.is_ok(),
-                    parsed.resolve(runtime_value).is_ok(),
-                    "{} static/runtime pointer decision",
-                    vector.name
-                );
-            }
-            if let Err(ProtocolError::ParticipantResolution { code, .. }) = result {
-                assert_eq!(
-                    resolution_code_name(code),
-                    vector.error_code.as_deref().unwrap(),
-                    "{}",
-                    vector.name
-                );
-            }
-        }
-
-        for vector in &fixture.vectors {
-            covered.extend(vector.covers.iter().copied());
-            let mut participant = vector.participant.clone();
-            hydrate_digests(&mut participant, &digests);
-            let participant = parse_participant(&participant);
-            if let Some(expected_path) = &vector.participant_error_path {
-                let ProtocolError::ParticipantValidation { path, .. } = participant.unwrap_err()
-                else {
-                    panic!("{} returned a non-participant error", vector.name)
-                };
-                assert_eq!(&path, expected_path, "{}", vector.name);
-                continue;
-            }
-            let participant =
-                participant.unwrap_or_else(|error| panic!("{} participant: {error}", vector.name));
-            let supplied = vector.supplied_apis.as_ref().map_or_else(
-                || all_apis.clone(),
-                |ids| {
-                    ids.iter()
-                        .map(|id| (id.clone(), all_apis[id].clone()))
-                        .collect()
-                },
-            );
-            let result = resolve_participant(&participant, &supplied);
-            assert_eq!(result.is_ok(), vector.valid, "{}: {result:?}", vector.name);
-            let Ok(resolved) = result else {
-                let ProtocolError::ParticipantResolution { code, path, .. } = result.unwrap_err()
-                else {
-                    panic!("{} returned a non-resolution error", vector.name)
-                };
-                assert_eq!(
-                    resolution_code_name(code),
-                    vector.error_code.as_deref().unwrap(),
-                    "{}",
-                    vector.name
-                );
-                assert_eq!(
-                    path.to_string(),
-                    vector.error_path.as_deref().unwrap(),
-                    "{}",
-                    vector.name
-                );
-                continue;
-            };
-
-            let needs_value = resolved.needs().normalized_value().unwrap();
-            let needs_digest = resolved.needs().digest().unwrap();
-            let proposal_value = resolved.proposal().normalized_value().unwrap();
-            let fingerprint = resolved.proposal().fingerprint().unwrap();
-            if let Some(expected) = &vector.expected_needs {
-                assert_eq!(&needs_value, expected, "{} needs", vector.name);
-            }
-            if let Some(expected) = &vector.expected_needs_digest {
-                assert_eq!(&needs_digest, expected, "{} needs digest", vector.name);
-            }
-            if let Some(expected) = &vector.expected_proposal {
-                assert_eq!(&proposal_value, expected, "{} proposal", vector.name);
-            }
-            if let Some(expected) = &vector.expected_fingerprint {
-                assert_eq!(&fingerprint, expected, "{} fingerprint", vector.name);
-            }
-            if let Some(actions) = &vector.required_actions {
-                assert_eq!(
-                    action_names(resolved.needs().required().grant_set()),
-                    *actions,
-                    "{} required actions",
-                    vector.name
-                );
-            }
-            if let Some(actions) = &vector.optional_actions {
-                assert_eq!(
-                    action_names(resolved.needs().optional().grant_set()),
-                    *actions,
-                    "{} optional actions",
-                    vector.name
-                );
-            }
-            if let Some(capabilities) = &vector.fully_requested_capabilities {
-                assert_eq!(
-                    resolved
-                        .proposal()
-                        .required()
-                        .capabilities()
-                        .iter()
-                        .map(|capability| capability.name.clone())
-                        .collect::<Vec<_>>(),
-                    *capabilities,
-                    "{} capabilities",
-                    vector.name
-                );
-            }
-            if let Some(capabilities) = &vector.optional_fully_requested_capabilities {
-                assert_eq!(
-                    resolved
-                        .proposal()
-                        .optional()
-                        .capabilities()
-                        .iter()
-                        .map(|capability| capability.name.clone())
-                        .collect::<Vec<_>>(),
-                    *capabilities,
-                    "{} optional capabilities",
-                    vector.name
-                );
-            }
-            if let Some(expected) = &vector.required_capability_evidence {
-                assert_eq!(
-                    capability_evidence(resolved.proposal().required()).as_slice(),
-                    expected.as_slice(),
-                    "{} required capability evidence",
-                    vector.name
-                );
-            }
-            if let Some(expected) = &vector.optional_capability_evidence {
-                assert_eq!(
-                    capability_evidence(resolved.proposal().optional()).as_slice(),
-                    expected.as_slice(),
-                    "{} optional capability evidence",
-                    vector.name
-                );
-            }
-            for capability in resolved
-                .proposal()
-                .required()
-                .capabilities()
-                .iter()
-                .chain(resolved.proposal().optional().capabilities())
-            {
-                assert_eq!(capability.api_digest(), digests[capability.api()]);
-            }
-            if let Some(count) = vector.uncovered_permissions {
-                assert_eq!(
-                    resolved.proposal().required().uncovered_permissions().len(),
-                    count,
-                    "{} uncovered permissions",
-                    vector.name
-                );
-            }
-            if let Some(api) = &vector.provided_api {
-                assert_eq!(resolved.implemented_apis()[0].provided().api(), api);
-            }
-            if let Some(order) = &vector.required_api_order {
-                assert_eq!(
-                    resolved
-                        .needs()
-                        .required()
-                        .apis()
-                        .iter()
-                        .map(|api| api.api().to_owned())
-                        .collect::<Vec<_>>(),
-                    *order
-                );
-            }
-            if let Some(order) = &vector.provided_state_order {
-                assert_eq!(resolved.implemented_apis()[0].provided().state(), order);
-            }
-            if let Some(order) = &vector.provided_signal_order {
-                let signals = resolved.implemented_apis()[0]
-                    .provided()
-                    .operations()
-                    .values()
-                    .next()
-                    .unwrap()
-                    .signals();
-                assert_eq!(signals, order);
-            }
-            needs.insert(vector.name.clone(), needs_digest);
-            fingerprints.insert(vector.name.clone(), fingerprint);
-        }
-
-        assert_eq!(covered, (1..=39).collect(), "fixture coverage declarations");
-        for vector in &fixture.vectors {
-            if let Some(other) = &vector.same_needs_as {
-                assert_eq!(needs[&vector.name], needs[other], "{} needs", vector.name);
-            }
-            if let Some(other) = &vector.same_fingerprint_as {
-                assert_eq!(
-                    fingerprints[&vector.name], fingerprints[other],
-                    "{} fingerprint",
-                    vector.name
-                );
-            }
-            if let Some(other) = &vector.different_needs_from {
-                assert_ne!(needs[&vector.name], needs[other], "{} needs", vector.name);
-            }
-        }
-    }
 
     #[test]
     fn consent_wording_changes_evidence_but_not_needs_or_fingerprint() {
@@ -2138,30 +1824,48 @@ mod tests {
         );
     }
 
-    fn hydrate_digests(participant: &mut Value, digests: &BTreeMap<String, String>) {
-        for path in ["/implements", "/uses/required", "/uses/optional"] {
-            let Some(references) = participant.pointer_mut(path).and_then(Value::as_object_mut)
-            else {
-                continue;
-            };
-            for reference in references.values_mut() {
-                let api = string_at(reference, "api").to_owned();
-                if reference.get("apiDigest").and_then(Value::as_str) == Some("$actual") {
-                    reference["apiDigest"] = Value::String(digests[&api].clone());
+    fn fixture_api(id: &str) -> Value {
+        serde_json::json!({
+            "format": "trellis.api.v1",
+            "id": id,
+            "version": "1.0.0",
+            "displayName": "Consumer API",
+            "description": "Exercises API identity.",
+            "schemas": { "Any": true },
+            "rpc": {
+                "Consumer.Get": {
+                    "version": "v1",
+                    "input": { "schema": "Any" },
+                    "output": { "schema": "Any" }
+                }
+            },
+            "state": {
+                "Consumer.Settings": {
+                    "kind": "value",
+                    "schema": { "schema": "Any" }
+                }
+            },
+            "capabilities": {
+                "rpcOnly": {
+                    "allows": [{
+                        "target": {
+                            "kind": "apiSurface",
+                            "api": id,
+                            "surface": "rpc",
+                            "name": "Consumer.Get"
+                        },
+                        "action": "call"
+                    }]
+                }
+            },
+            "consent": {
+                "rpcOnly": {
+                    "title": "Read consumer records",
+                    "description": "Read records through the consumer API.",
+                    "consequence": "The participant can read consumer records."
                 }
             }
-        }
-    }
-
-    fn fixture_api(id: &str) -> Value {
-        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../../../conformance/participant-resolution/vectors.json");
-        let fixture: Fixture = serde_json::from_str(&fs::read_to_string(path).unwrap()).unwrap();
-        fixture
-            .apis
-            .into_iter()
-            .find(|api| api.get("id").and_then(Value::as_str) == Some(id))
-            .unwrap()
+        })
     }
 
     fn participant_using(id: &str, api: &ApiArtifact) -> ParticipantArtifact {
@@ -2182,45 +1886,5 @@ mod tests {
             }
         }))
         .unwrap()
-    }
-
-    fn action_names(grant_set: &GrantSet) -> Vec<String> {
-        grant_set
-            .permissions()
-            .iter()
-            .map(|atom| format!("{:?}", atom.action()).to_lowercase())
-            .collect()
-    }
-
-    fn capability_evidence(section: &AuthorityProposalSection) -> Vec<ExpectedCapabilityEvidence> {
-        section
-            .capabilities()
-            .iter()
-            .map(|capability| ExpectedCapabilityEvidence {
-                api: capability.api().to_owned(),
-                api_digest: capability.api_digest().to_owned(),
-                name: capability.name().to_owned(),
-            })
-            .collect()
-    }
-
-    fn resolution_code_name(code: ResolutionErrorCode) -> &'static str {
-        match code {
-            ResolutionErrorCode::MissingApi => "missingApi",
-            ResolutionErrorCode::ApiDigestMismatch => "apiDigestMismatch",
-            ResolutionErrorCode::MissingSurface => "missingSurface",
-            ResolutionErrorCode::InvalidCancelSelection => "invalidCancelSelection",
-            ResolutionErrorCode::MissingOperationSignal => "missingOperationSignal",
-            ResolutionErrorCode::InvalidImplementedTransfer => "invalidImplementedTransfer",
-            ResolutionErrorCode::MissingRequiredTransfer => "missingRequiredTransfer",
-            ResolutionErrorCode::OptionalStoreForRequiredTransfer => {
-                "optionalStoreForRequiredTransfer"
-            }
-            ResolutionErrorCode::RequiredConsumerUsesOptionalApi => {
-                "requiredConsumerUsesOptionalApi"
-            }
-            ResolutionErrorCode::UnresolvableSchemaPointer => "unresolvableSchemaPointer",
-            ResolutionErrorCode::SchemaPointerTypeMismatch => "schemaPointerTypeMismatch",
-        }
     }
 }

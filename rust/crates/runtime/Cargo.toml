@@ -60,4 +60,5 @@ ulid = "1.2.1"
 url.workspace = true
 
 [dev-dependencies]
+trellis-local-nats = { path = "../local-nats" }
 tempfile = "3.27.0"

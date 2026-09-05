@@ -51,8 +51,12 @@
 - Follow the type-system rules in `design/core/type-system-patterns.md`: no
   `@ts-nocheck`, no `as any`, no `as unknown as`; prefer stronger honest public
   types over misleading compatibility.
-- Use TypeBox for RPC, event, and operation wire schemas. Use Zod for
-  environment and config parsing.
+- Author RPC, event, operation, and other contract schemas in native Trellis
+  IDL. TypeScript and Rust consume generated types and descriptors; do not
+  introduce handwritten contract-authoring or wire-schema definitions. TypeBox
+  remains a generator/runtime implementation dependency.
+- Use Zod for environment and config parsing in Trellis-owned TypeScript code.
+  Downstream applications choose their own configuration and validation tools.
 - Expected public or RPC failures should use `Result`-style modeling rather than
   thrown exceptions.
 - Exported public functions, classes, and methods need JSDoc. See

@@ -7,9 +7,10 @@ Use this directory for values that should stay byte-for-byte identical across
 runtimes:
 
 - `canonical-json/` - canonical serialization and digest vectors
-- `auth-proof/` - session-key proof and domain-signature vectors
+- `session-proof/` - session-key proof and domain-signature vectors
 - `authorization-context/` - signed authorization trust chains, contexts, and
   request/event-proof v1 vectors
+- `transfer-v1-vectors.json` - transfer framing and digest vectors
 
 Authorization-context vectors are executable data rather than a case-name
 catalog. Every case names one public protocol operation, starts from the pinned

@@ -56,10 +56,10 @@ type ProviderCallerSurface<TContract> = Omit<
 
 type SurfaceGroup<TName extends string> = TName extends
   `${infer THead}.${string}` ? ConnectedActionName<THead>
-  : never;
+  : ConnectedActionName<TName>;
 type SurfaceLeaf<TName extends string> = TName extends
   `${string}.${infer TTail}` ? ConnectedActionName<TTail>
-  : never;
+  : ConnectedActionName<TName>;
 type HandlerKind<TAction extends ActionDescriptor> = TAction["kind"] extends
   "rpc" ? "rpc"
   : TAction["kind"] extends "operation" ? "operation"
@@ -336,7 +336,7 @@ function surfacePath(name: string): readonly [string, string] {
   const [head, ...tail] = name.split(".");
   return [
     lowerCamelSurfaceName(head!),
-    lowerCamelSurfaceName(tail.join(".")),
+    lowerCamelSurfaceName(tail.length === 0 ? name : tail.join(".")),
   ];
 }
 

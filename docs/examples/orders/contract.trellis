@@ -1,0 +1,29 @@
+api "acme.orders@v1" {
+    version "1.0.0";
+    display_name "Orders";
+    description "Minimal service walkthrough.";
+    model CreateOrderRequest { customerId: string; }
+    model CreateOrderResponse { orderId: string; customerId: string; }
+    rpc "Orders.Create" {
+        version "v1";
+        input CreateOrderRequest;
+        output CreateOrderResponse;
+    }
+}
+
+participant "acme.orders-service" service {
+    implements "acme.orders@v1";
+}
+
+api "acme.orders-caller@v1" {
+    version "1.0.0";
+    display_name "Orders caller";
+    description "Caller for the service walkthrough.";
+}
+
+participant "acme.orders-caller" app {
+    implements "acme.orders-caller@v1";
+    use required orders "acme.orders@v1" {
+        call rpc "Orders.Create";
+    }
+}

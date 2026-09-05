@@ -477,7 +477,7 @@ jobs:
 
           # 1. Baked nats-server matches the pinned version; both binaries run.
           nats_version="$(docker run --rm --entrypoint nats-server "${IMAGE}" --version)"
-          expected_nats_version="$(jq -r '.["nats-server"].version' conformance/nats-binaries.json)"
+          expected_nats_version="$(jq -r '.["nats-server"].version' rust/crates/local-nats/nats-binaries.json)"
           case "${nats_version}" in *"v${expected_nats_version}"*) ;; *)
             echo "nats-server version mismatch: got '${nats_version}', expected v${expected_nats_version}" >&2
             exit 1

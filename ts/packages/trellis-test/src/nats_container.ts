@@ -7,10 +7,11 @@
  * child in a pid file so crashed test runs can be cleaned up later.
  */
 import { jetstreamManager } from "@nats-io/jetstream";
-import type { ConsumerInfo, StreamConfig } from "@nats-io/jetstream";
-import type { Msg, NatsConnection, Subscription } from "@nats-io/nats-core";
+import type { StreamConfig } from "@nats-io/jetstream";
+import type { NatsConnection } from "@nats-io/nats-core";
 import { connect, credsAuthenticator } from "@nats-io/transport-deno";
 import { join } from "@std/path";
+
 import {
   formatPidFile,
   parsePidFile,
@@ -21,13 +22,12 @@ import {
   removeStalePidNamedResources,
 } from "./cleanup.ts";
 import { reserveLocalPort } from "./control_plane_config.ts";
+import { ensureNatsBinaries } from "./nats_binaries.ts";
 import {
   generateLocalNatsBootstrap,
-  generateLocalNatsBootstrapPool,
   type LocalNatsBootstrapManifest,
   type NatsBootstrapPorts,
 } from "./nats_bootstrap.ts";
-import { ensureNatsBinaries } from "./nats_binaries.ts";
 import {
   captureProcessOutput,
   type CommandStatus,
@@ -48,7 +48,6 @@ type StartedNatsContainer = {
   natsUrl: string;
   websocketUrl: string;
   manifest: LocalNatsBootstrapManifest;
-  manifests: Record<string, LocalNatsBootstrapManifest>;
   nc: NatsConnection;
   child?: Deno.ChildProcess;
   status?: Promise<CommandStatus>;
@@ -59,49 +58,6 @@ type StartedNatsContainer = {
 
 type StartNatsTestContainerOptions = {
   startupMs?: number;
-  tenantIds?: readonly string[];
-};
-
-/** A JetStream acknowledgement frame observed on a scratch runtime ACK subject. */
-export type JetStreamAckFrame = {
-  /** NATS subject that received the ACK frame. */
-  subject: string;
-  /** ACK frame payload, such as `+ACK`, `-NAK`, or `+TERM`. */
-  payload: string;
-};
-
-/** Temporary observer for JetStream ACK reply frames in scratch runtimes. */
-export type JetStreamAckObserver = {
-  /** NATS subject pattern used by this observer. */
-  readonly subject: string;
-  /** Returns the ACK frames captured so far. */
-  frames(): readonly JetStreamAckFrame[];
-  /** Returns subscription callback errors captured so far. */
-  errors(): readonly Error[];
-  /** Stops observing ACK frames and flushes the NATS subscription update. */
-  stop(): Promise<void>;
-};
-
-/** A raw NATS message observed on a scratch runtime subject. */
-export type NatsMessageFrame = {
-  /** NATS subject that received the message. */
-  subject: string;
-  /** Message payload decoded as UTF-8 text. */
-  payload: string;
-  /** Selected message headers captured by name. */
-  headers: Record<string, string | undefined>;
-};
-
-/** Temporary observer for raw NATS messages in scratch runtimes. */
-export type NatsMessageObserver = {
-  /** NATS subject pattern used by this observer. */
-  readonly subject: string;
-  /** Returns the messages captured so far. */
-  frames(): readonly NatsMessageFrame[];
-  /** Returns subscription callback errors captured so far. */
-  errors(): readonly Error[];
-  /** Stops observing messages and flushes the NATS subscription update. */
-  stop(): Promise<void>;
 };
 
 async function readRegularFileContent(
@@ -304,7 +260,6 @@ export class NatsTestContainer implements AsyncDisposable {
   readonly natsUrl: string;
   readonly websocketUrl: string;
   readonly manifest: LocalNatsBootstrapManifest;
-  readonly manifests: Readonly<Record<string, LocalNatsBootstrapManifest>>;
   readonly nc: NatsConnection;
   readonly #child: Deno.ChildProcess | undefined;
   readonly #status: Promise<CommandStatus> | undefined;
@@ -317,7 +272,6 @@ export class NatsTestContainer implements AsyncDisposable {
     this.natsUrl = started.natsUrl;
     this.websocketUrl = started.websocketUrl;
     this.manifest = started.manifest;
-    this.manifests = started.manifests;
     this.nc = started.nc;
     this.#child = started.child;
     this.#status = started.status;
@@ -364,20 +318,10 @@ export class NatsTestContainer implements AsyncDisposable {
         http: portLeases.http.port,
         websocket: portLeases.websocket.port,
       };
-      const tenantIds = options.tenantIds ?? ["default"];
-      const manifests = options.tenantIds === undefined
-        ? {
-          default: await generateLocalNatsBootstrap({
-            outDir: natsDir,
-            ports,
-          }),
-        }
-        : (await generateLocalNatsBootstrapPool({
-          outDir: natsDir,
-          tenantIds,
-          ports,
-        })).tenants;
-      const manifest = manifests[tenantIds[0]];
+      const manifest = await generateLocalNatsBootstrap({
+        outDir: natsDir,
+        ports,
+      });
       const stdoutLog = await Deno.open(join(natsDir, "nats.stdout.log"), {
         write: true,
         create: true,
@@ -480,7 +424,6 @@ export class NatsTestContainer implements AsyncDisposable {
           natsUrl,
           websocketUrl,
           manifest,
-          manifests,
           nc,
           child,
           status,
@@ -502,40 +445,6 @@ export class NatsTestContainer implements AsyncDisposable {
       }
     } finally {
       for (const lease of Object.values(portLeases)) lease.release();
-    }
-  }
-
-  /** Attaches test helpers to one tenant on an externally owned NATS server. */
-  static async attach(args: {
-    workdir: string;
-    natsUrl: string;
-    websocketUrl: string;
-    manifest: LocalNatsBootstrapManifest;
-  }): Promise<NatsTestContainer> {
-    const nc = await connect({
-      servers: args.natsUrl,
-      authenticator: credsAuthenticator(
-        await Deno.readFile(
-          join(
-            args.workdir,
-            "nats",
-            args.manifest.paths.creds.trellisService,
-          ),
-        ),
-      ),
-    });
-    try {
-      await ensureSharedStreams(nc);
-      return new NatsTestContainer({
-        natsUrl: args.natsUrl,
-        websocketUrl: args.websocketUrl,
-        manifest: args.manifest,
-        manifests: { default: args.manifest },
-        nc,
-      });
-    } catch (error) {
-      await nc.close().catch(() => undefined);
-      throw error;
     }
   }
 
@@ -564,94 +473,6 @@ export class NatsTestContainer implements AsyncDisposable {
       });
     }
     if (closeError) throw closeError;
-  }
-
-  /** Lists JetStream consumers on the Trellis event stream for tests. */
-  async listTrellisJetStreamConsumers(): Promise<ConsumerInfo[]> {
-    const jsm = await jetstreamManager(this.nc);
-    const consumers: ConsumerInfo[] = [];
-    for await (const consumer of jsm.consumers.list(TRELLIS_STREAM)) {
-      consumers.push(consumer);
-    }
-    return consumers;
-  }
-
-  /** Deletes a JetStream consumer by stream and durable/name for failure tests. */
-  async deleteJetStreamConsumer(
-    stream: string,
-    name: string,
-  ): Promise<boolean> {
-    const jsm = await jetstreamManager(this.nc);
-    return await jsm.consumers.delete(stream, name);
-  }
-
-  /** Observes JetStream ACK reply frames with a temporary subscription. */
-  async startJetStreamAckObserver(
-    subject = "$JS.ACK.>",
-  ): Promise<JetStreamAckObserver> {
-    const frames: JetStreamAckFrame[] = [];
-    const errors: Error[] = [];
-    let stopped = false;
-    const subscription: Subscription = this.nc.subscribe(subject, {
-      callback: (error: Error | null, msg: Msg) => {
-        if (error) {
-          errors.push(error);
-          return;
-        }
-        frames.push({ subject: msg.subject, payload: msg.string() });
-      },
-    });
-    await this.nc.flush();
-
-    return {
-      subject,
-      frames: () => [...frames],
-      errors: () => [...errors],
-      stop: async () => {
-        if (stopped) return;
-        stopped = true;
-        subscription.unsubscribe();
-        await this.nc.flush();
-      },
-    };
-  }
-
-  /** Observes raw NATS messages with selected headers on a temporary subscription. */
-  async startNatsMessageObserver(
-    subject: string,
-    headerNames: readonly string[] = [],
-  ): Promise<NatsMessageObserver> {
-    const frames: NatsMessageFrame[] = [];
-    const errors: Error[] = [];
-    let stopped = false;
-    const subscription: Subscription = this.nc.subscribe(subject, {
-      callback: (error: Error | null, msg: Msg) => {
-        if (error) {
-          errors.push(error);
-          return;
-        }
-        frames.push({
-          subject: msg.subject,
-          payload: msg.string(),
-          headers: Object.fromEntries(
-            headerNames.map((name) => [name, msg.headers?.get(name)]),
-          ),
-        });
-      },
-    });
-    await this.nc.flush();
-
-    return {
-      subject,
-      frames: () => [...frames],
-      errors: () => [...errors],
-      stop: async () => {
-        if (stopped) return;
-        stopped = true;
-        subscription.unsubscribe();
-        await this.nc.flush();
-      },
-    };
   }
 
   [Symbol.asyncDispose](): Promise<void> {

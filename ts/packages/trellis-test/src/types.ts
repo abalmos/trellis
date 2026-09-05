@@ -11,8 +11,6 @@ import type {
   TrellisControlPlaneOAuthProvider,
   TrellisControlPlaneWebSource,
 } from "./control_plane_config.ts";
-import type { LocalNatsBootstrapManifest } from "./nats_bootstrap.ts";
-import type { TrellisControlPlaneSqlite } from "./control_plane_sqlite.ts";
 
 /** Native contract artifacts accepted by Trellis test admin automation. */
 export type TrellisTestParticipantLike = GeneratedParticipantEvidence;
@@ -27,24 +25,6 @@ export type TrellisTestAuthorityPlanClassification =
 export type WaitForOptions = {
   timeoutMs?: number;
   intervalMs?: number;
-};
-
-/** Test-only handles for manipulating the isolated Trellis control plane. */
-export type TrellisTestControlPlane = {
-  /** Direct access to the runtime-owned control-plane SQLite database. */
-  readonly sqlite: TrellisControlPlaneSqlite;
-};
-
-/** Raw auth connection-presence entry seeded for malformed live-runtime tests. */
-export type TrellisTestRawAuthConnectionPresence = {
-  readonly key: string;
-  readonly value: Record<string, unknown>;
-};
-
-/** Raw state KV entry seeded for malformed live-runtime tests. */
-export type TrellisTestRawStateEntry = {
-  readonly key: string;
-  readonly value: Record<string, unknown>;
 };
 
 /** Local command override for the spawned Trellis control-plane process. */
@@ -62,16 +42,6 @@ export type TrellisTestRuntimeTrellisOptions = {
 
 /** Options for starting an isolated Trellis test runtime. */
 export type TrellisTestRuntimeStartOptions = {
-  nats?: "container" | {
-    /** Shared NATS bootstrap root containing the tenant credentials. */
-    workdir: string;
-    /** Shared native NATS endpoint. */
-    natsUrl: string;
-    /** Shared websocket NATS endpoint. */
-    websocketUrl: string;
-    /** Credentials and account keys for this runtime's isolated tenant. */
-    manifest: LocalNatsBootstrapManifest;
-  };
   keepWorkdir?: boolean;
   deployment?: string;
   /** Existing or desired local test-admin password. */

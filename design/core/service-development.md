@@ -18,9 +18,10 @@ order: 50
 
 ## Design
 
-Trellis services share a common development shape: a small bootstrap entrypoint,
-explicit contract ownership, and a clean separation between caller-visible
-operations and service-private jobs.
+This document describes Trellis participant bootstrap, lifecycle, and the
+operations/jobs boundary. File layout, configuration parsing, databases,
+dependency injection, and other application engineering choices are not Trellis
+requirements. Examples below illustrate one possible service structure.
 
 Before choosing a file layout, choose the participant kind and runtime helper.
 
@@ -66,10 +67,9 @@ services/<name>/
 └── <domain>.ts      # Business logic
 ```
 
-The full template above is common for installable services. Smaller repo-local
-participants such as demos or utilities may only need `main.ts`, `deno.json`,
-and `contract.trellis`. Projects with multiple source files use direct children
-of `contracts/*.trellis` instead.
+The layout above is optional. Smaller repo-local participants such as demos or
+utilities may only need `main.ts`, `deno.json`, and `contract.trellis`. Projects
+with multiple source files use direct children of `contracts/*.trellis` instead.
 
 ### Lifecycle
 
@@ -77,29 +77,19 @@ For `kind: "service"` participants:
 
 ```ts
 import { TrellisService } from "@qlever-llc/trellis/service/deno";
-import { participant } from "../.trellis/ts/participants/acme.service@v1.ts";
+import { participant } from "./.trellis/ts/participants/acme-service/mod.ts";
 
 const service = await TrellisService.connect({
   trellisUrl: config.trellisUrl,
   participant,
   name: "<name>",
-  sessionKeySeed: config.sessionKeySeed,
-  runtime: {},
-});
+  identity: config.identity,
+  authorizationContextStore,
+}).orThrow();
 
-const itemsKV = service.kv.items;
-const uploadsStore = (await service.store.uploads.open()).take();
-const stagedUpload = (await uploadsStore.waitFor("incoming/report.pdf", {
-  timeoutMs: 10_000,
-})).take();
-
-await service.handle.rpc.some.method(handler);
-await service.event.some.event.listen(eventHandler, {});
-
-const catalog = await service.rpc.trellis.catalog({});
-if (catalog.isErr()) {
-  throw catalog.error;
-}
+// Names come from this example's declared RPC and event.
+await service.handleSomeMethod(handler);
+await service.onSomeEvent(eventHandler).orThrow();
 
 const shutdown = async () => {
   try {
@@ -110,6 +100,7 @@ const shutdown = async () => {
 };
 
 Deno.addSignalListener("SIGTERM", shutdown);
+await service.wait();
 ```
 
 Rules:
@@ -120,28 +111,25 @@ Rules:
 - service code MUST NOT construct `TrellisService`, `StoreHandle`, or resource
   handles directly, and MUST NOT pass resolved binding or resource data into
   `Trellis` constructors
-- service shutdown handlers SHOULD release runtime resources, remove registered
-  signal listeners, and let successful shutdown terminate naturally so
-  `deno run --watch` can restart the program instead of exiting the watcher
-- failed or timed-out shutdown paths MAY call `Deno.exit(1)` after logging the
-  failure
-- if a service also owns an HTTP listener, its shutdown path SHOULD bound the
-  wait for listener drain before exiting rather than waiting indefinitely on
-  long-lived keep-alive or streaming connections
+- `service.wait()` supervises the Trellis lifecycle; `service.stop()` releases
+  its resources. The application decides how OS signals and its other resources
+  participate in shutdown. The Deno signal listener above is one example.
 
 ### Application dependencies
 
 Trellis does not inject application dependencies into handlers. Handler
 arguments contain only Trellis-owned runtime data. Application resources such as
 databases, loggers, repositories, schedulers, search indexes, and SQL outbox
-instances are supplied by normal JavaScript closure or factory patterns. Trellis
-runtime context remains separate from application dependencies — do not merge
-app dependencies into `context`, and do not pass dependency bags as handler
-registration options.
+instances can be supplied by JavaScript closures or factories, including those
+constructed by the application's own DI system. Trellis runtime context remains
+separate from application dependencies — do not merge app dependencies into
+`context`, and do not pass dependency bags as handler registration options.
 
 Example:
 
 ```ts
+type EntityListHandler = RpcHandler<typeof participant, "Entity.List">;
+
 type ServiceDeps = {
   db: Db;
   logger: Logger;
@@ -154,15 +142,15 @@ export function createEntityListHandler(deps: ServiceDeps): EntityListHandler {
   };
 }
 
-await service.handle.rpc.entity.list(createEntityListHandler(deps));
+await service.handleEntityList(createEntityListHandler(deps));
 ```
 
 ### Service-local storage
 
-Most services should keep durable domain storage behind their own service
-boundary and expose behavior through contract-owned RPCs, operations, events,
-and resource declarations. The Trellis control-plane service uses local SQLite
-for its own durable runtime records.
+Application storage is application-owned. Trellis does not open a service's
+database, select its identifier scheme, or require a repository pattern. The
+Trellis control-plane uses SQLite for its own durable runtime records; that
+implementation is not a constraint on consumers.
 
 Rules:
 
@@ -171,12 +159,6 @@ Rules:
 - each Trellis runtime subsystem owns a separate SQLite file configured through
   its `[platform|jobs|health|eventlog.storage]` section; runtime configuration
   rejects sharing one SQLite path across subsystem boundaries
-- Trellis service bootstrap owns opening the database, creating the schema, and
-  constructing concrete storage modules
-- prefer concrete storage modules for the service's actual record types rather
-  than generic repository abstractions
-- app-generated ULID row primary keys are used for SQL table identity; public
-  and domain identifiers remain separate columns
 - direct event publish remains the default; use SQL outbox only when event
   publication must be coupled to service-local SQL state
 - TypeScript services create a SQL outbox helper with
@@ -242,7 +224,7 @@ function createPartnerUpdateHandler(deps: ServiceDeps): PartnerUpdateHandler {
   };
 }
 
-await service.handle.rpc.partner.update(createPartnerUpdateHandler(deps));
+await service.handlePartnerUpdate(createPartnerUpdateHandler(deps));
 ```
 
 **With job creation:**
@@ -290,30 +272,29 @@ participant "acme.echo@v1" service {
 ```ts
 import { Result } from "@qlever-llc/trellis";
 import { TrellisService } from "@qlever-llc/trellis/service/deno";
-import { participant } from "../.trellis/ts/participants/acme.echo@v1.ts";
+import { participant } from "./.trellis/ts/participants/acme-echo-v1/mod.ts";
 
 const service = await TrellisService.connect({
   trellisUrl,
   participant,
   name: "echo",
-  sessionKeySeed,
-  runtime: {},
-});
+  identity, // Provisioned identity and accepted participant binding.
+  authorizationContextStore, // Durable store owned by this installation.
+}).orThrow();
 
-export async function ping({ input }) {
-  return Result.ok({ message: input.message });
-}
-
-await service.handle.rpc.echo.ping(ping);
+await service.handleEchoPing(({ input }) =>
+  Result.ok({ message: input.message })
+);
 
 service.health.setInfo({ version: "1.0.0" });
 service.health.add("readiness", () => ({ status: "ok" }));
+await service.wait(); // Call service.stop() from the application's shutdown path.
 ```
 
 Rules:
 
-- a minimal installable service should own at least one public surface such as
-  an RPC, operation, or event rather than existing only to call other services
+- this example owns an RPC so a reader can call it; a service's actual mix of
+  public surfaces and outbound dependencies is application-owned
 - installable service code uses `TrellisService.connect(...)` and mounts only
   names from its generated participant surface
 - service resource handles come from the connected runtime; do not call
@@ -340,28 +321,24 @@ Rules:
   change the offered digest
 - graceful `service.stop()` marks the accepted offer stale for the same short
   grace window used after unplanned disconnects
-- mounted RPC handlers should rely on Trellis-provided payload typing and
-  validation rather than re-parsing the mounted payload just to recover types
+- Trellis provides payload typing and wire validation; applications remain
+  responsible for business rules beyond those schemas
 - inline TypeScript handlers can infer from `service.handle...` registration;
-  extracted TypeScript service handler aliases should come from the generated
-  SDK package after `trellis install`, not from public generic runtime helpers
+  extracted handlers can use `RpcHandler<typeof participant, "Echo.Ping">` from
+  `@qlever-llc/trellis/service`
 - mounted RPC handlers may be synchronous when they do not need `await`
 - mounted RPC handlers may return declared local `TrellisError` subclasses
   directly when those errors are listed in the contract RPC `errors: [...]`
-- service-local transportable RPC errors should be declared in the contract's
-  top-level `errors` map through `defineError(...)` generated classes rather
-  than by overloading shared built-in errors for domain-specific failures
-- if the service later needs remote APIs, add SDK `use(...)` helper results
-  under `uses.required` or `uses.optional`; aliases directly under `uses` are
-  invalid, and services must not hand-write remote contract ids or raw method
-  strings
-- if the service needs durable event processing, declare an explicit
-  `eventConsumers` group. Use `eventConsumers.<group>.uses` to select subscribed
-  dependency events by top-level `uses.required` or `uses.optional` alias, and
-  use `eventConsumers.<group>.self` to select events owned by the same contract.
-  A bare `uses.events.subscribe` grant authorizes live/ephemeral listening only;
-  it does not create a durable cursor, but dependency durable consumption
-  remains authority-backed by the top-level `uses` declaration.
+- declare service-local transportable RPC errors with native IDL `error`
+  declarations and include them in the RPC's `errors` list
+- declare remote action selections in native IDL `use required` or
+  `use optional` blocks; regenerate rather than constructing SDK `use(...)`
+  results in application code
+- if the service needs durable event processing, declare an explicit event
+  consumer group in IDL with its `subscribe event` selections. A bare dependency
+  `subscribe event` grant authorizes live/ephemeral listening only; it does not
+  create a durable cursor, but dependency durable consumption remains
+  authority-backed by the top-level `uses` declaration.
 
 Behavior:
 
@@ -427,11 +404,11 @@ Behavior:
   and worker startup
 - when a contract declares `eventConsumers`, `TrellisService.connect(...)`
   receives the reconciled event-consumer bindings during bootstrap. Register
-  listeners during startup through
-  `service.event.<group>.<leaf>.listen(..., { group })`; handler-injected
-  clients are outbound-only and cannot register long-lived listeners. Service
-  code must not choose or create a JetStream `durableName` for contract event
-  processing; runtime durable consumers are Trellis-provisioned only.
+  listeners during startup through `service.onOrdersChanged(..., { group })`
+  (name follows the declared event); handler-injected clients are outbound-only
+  and cannot register long-lived listeners. Service code must not choose or
+  create a JetStream `durableName` for contract event processing; runtime
+  durable consumers are Trellis-provisioned only.
 - grouped durable event consumers start only after every event in the group has
   a registered handler, preserving the contract-declared group as the unit of
   ordering and replay.

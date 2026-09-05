@@ -3,7 +3,7 @@
  * the Trellis test harness.
  *
  * First use requires network access to the pinned GitHub release assets derived
- * from the canonical `conformance/nats-binaries.json` (version + per-platform
+ * from `rust/crates/local-nats/nats-binaries.json` (version + per-platform
  * sha256 only; the release URLs are derived from the version). Verified
  * archives and binaries are cached under
  * `TRELLIS_TEST_CACHE_DIR` (default `~/.cache/trellis-test`) and reused by
@@ -15,7 +15,7 @@
 import { dirname, join } from "@std/path";
 import { gunzipSync, unzipSync } from "fflate";
 import { ulid } from "ulid";
-import natsBinaries from "../../../../conformance/nats-binaries.json" with {
+import natsBinaries from "../../../../rust/crates/local-nats/nats-binaries.json" with {
   type: "json",
 };
 

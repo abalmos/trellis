@@ -173,8 +173,15 @@ export const ContractEventConsumersSchema = Type.Record(
   ContractEventConsumerGroupSchema,
 );
 
-export type ContractEventConsumers = Static<
-  typeof ContractEventConsumersSchema
+export type ContractEventConsumers = Readonly<
+  Record<
+    string,
+    Omit<ContractEventConsumerGroup, "self" | "uses" | "backoffMs"> & {
+      readonly self?: readonly string[];
+      readonly uses?: Readonly<Record<string, readonly string[]>>;
+      readonly backoffMs?: readonly number[];
+    }
+  >
 >;
 
 export const ContractResourcesSchema = Type.Object({

@@ -920,22 +920,6 @@ impl<C> ConnectedServiceRuntime<C> {
         }
     }
 
-    /// Build a connected runtime from a service client that already completed bootstrap.
-    #[cfg(feature = "test-support")]
-    pub(crate) fn from_connected_client(
-        service_name: impl Into<String>,
-        client: Arc<TrellisClient>,
-    ) -> Result<Self, ServiceRuntimeError> {
-        let binding = parse_bootstrap_binding(client.as_ref())?;
-        let service_name = service_name.into();
-        Ok(Self::from_parts(
-            service_name.clone(),
-            client,
-            binding,
-            service_name,
-        ))
-    }
-
     /// Return the internal Trellis client owned by this runtime.
     pub(crate) fn client(&self) -> &Arc<TrellisClient> {
         &self.client
@@ -1284,11 +1268,14 @@ impl<C: GeneratedServiceParticipant> ConnectedServiceRuntime<C> {
             })
             .await?;
         let binding = parse_bootstrap_binding(&client)?;
+        let api_value = serde_json::from_str(C::API_JSON).map_err(TrellisClientError::from)?;
+        let api = trellis_protocol::parse_api(&api_value)
+            .map_err(|error| TrellisClientError::Bootstrap(error.to_string()))?;
         Ok(Self::from_parts(
             options.name,
             Arc::new(client),
             binding,
-            C::PARTICIPANT_ID,
+            api.id(),
         ))
     }
 }

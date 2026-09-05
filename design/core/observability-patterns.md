@@ -15,8 +15,10 @@ order: 60
 
 ## Scope
 
-This document defines Trellis observability, documentation, tracing, and
-request-correlation patterns.
+This document defines Trellis runtime observability and contributor conventions
+for Trellis-owned code. Documentation style and general logging/tracing choices
+are not requirements for downstream applications. Trellis logger adapters and
+wire correlation fields still follow their public interfaces when used.
 
 Public API documentation explains behavior that signatures cannot: ownership,
 validation and commit points, cancellation and drop semantics, backpressure, and
@@ -26,20 +28,17 @@ must document the guarantees callers need to use it safely.
 
 ## Service Observability
 
-Every service exposes:
-
-- `<Service>.Health` RPC
-- baseline heartbeat sample publishing through the private Trellis health
-  transport
-- optional `<Service>.Stats` RPC
-- OpenTelemetry tracing
-- structured logging
+The service runtime publishes baseline heartbeat samples through the private
+Trellis health transport. Its logging and telemetry are configurable;
+application logging and tracing outside that runtime remain application-owned. A
+service can declare its own health or statistics RPCs if useful, but those
+domain surfaces are not automatically added to its API or required by Trellis.
 
 Activated devices publish through the same private health transport. Heartbeat
 publishing is a runtime protocol grant, not a contract dependency or event
 surface, so contract authors do not declare it.
 
-Health example:
+Example payload for an application-declared health RPC:
 
 ```ts
 const service = await TrellisService.connect({

@@ -346,7 +346,7 @@ mod tests {
 
     #[test]
     fn rewrite_cargo_manifest_for_release_updates_generated_sdk_dependencies() {
-        let original = "[workspace.package]\nversion = \"0.8.2\"\n\n[dependencies]\ntrellis-rs = { path = \"../trellis\", version = \"0.8.2\" }\ntrellis-sdk-state = { path = \"../generated/packages/cargo/state\", version = \"0.8.2\" }\n";
+        let original = "[workspace.package]\nversion = \"0.8.2\"\n\n[dependencies]\ntrellis-rs = { path = \"../trellis\", version = \"0.8.2\" }\ntrellis-sdk-state = { path = \"../.trellis/rust/apis/state\", version = \"0.8.2\" }\n";
         let updated = rewrite_cargo_manifest_versions_for_release(
             original,
             "0.8.2-rc.1",

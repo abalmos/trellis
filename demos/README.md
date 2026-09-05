@@ -39,8 +39,6 @@ The TypeScript demo is the full end-to-end runtime path today. It includes:
 - browser app sign-in and SDK calls
 - operations, operation progress, cancel, events, state, send transfers, receive
   transfer previews, and private jobs behind public operations
-- integration-harness coverage for prepared event outbox dispatch and inbox
-  duplicate suppression
 
 See `demos/ts/README.md` for the complete walkthrough.
 
@@ -49,8 +47,10 @@ See `demos/ts/README.md` for the complete walkthrough.
 Rust demo tasks:
 
 ```sh
+trellis update --root demos/rust/service
 trellis generate --root demos/rust/service
 trellis update --root demos/rust/device
+trellis generate --root demos/rust/device
 cargo check --manifest-path demos/rust/service/Cargo.toml
 cargo check --manifest-path demos/rust/device/Cargo.toml
 ```
@@ -71,10 +71,15 @@ and reusable public device persistence ergonomics beyond the demo-local file.
 See `demos/rust/README.md` for Rust-specific setup, supported modes, and current
 limitations.
 
-## Event Outbox/Inbox Coverage
+## Consumer Acceptance
 
-The demo contracts and integration harness now exercise prepared outbox/inbox
-behavior for both TypeScript and Rust. The Field Ops walkthrough still publishes
-its demo events directly for normal runtime flows; do not treat it as a
-production persisted-outbox example unless a specific service implementation
-adds that storage path.
+CI runs `trellis generate` in all five participant projects, `trellis update` in
+the dependent device/app projects, the TypeScript/app checks above, and the two
+Rust checks. Local path dependencies in `trellis.toml` and package overrides in
+the checked-in Deno configuration select current repository sources without
+rewriting the demos.
+
+Focused runtime tests live in `ts/integration/` with a separate small IDL
+fixture. Outbox commit/rollback atomicity is tested against real SQLite in the
+core SDK. The Field Ops walkthrough publishes events directly and is not a
+persisted outbox example.

@@ -9,7 +9,6 @@ node_modules
 # Output
 coverage/
 **/coverage/
-/dist/integration-runtime/
 .output
 .vercel
 .netlify
@@ -49,6 +48,8 @@ utils/arangodb/data/
 
 # Generated build artifacts
 generated/
+!rust/crates/trellis/src/internal_sdk/generated/
+!rust/crates/trellis/src/internal_sdk/generated/**
 ts/packages/trellis/auth/protocol_wasm/
 docs/static/api/typescript/
 **/npm/
@@ -58,13 +59,14 @@ ts/packages/trellis/**/*.d.ts
 *.tgz
 
 # Rust build artifacts
+integration/fixtures/**/target/
 xtask/target/
 rust/target/
 rust/**/target/
 demos/rust/target/
+demos/rust/**/target/
 xtask/Cargo.lock
 rust/xtask/Cargo.lock
-rust/tools/generate/Cargo.lock
 
 .trellis
 

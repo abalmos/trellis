@@ -13,7 +13,12 @@ order: 80
 
 ## Scope
 
-This document defines Trellis frontend guidance for Svelte applications.
+This document defines contributor conventions for Trellis-owned Svelte apps and
+components. Its state, layout, styling, and file-organization preferences are
+not requirements for applications that consume Trellis. Those applications
+choose their own frontend architecture; the optional
+`@qlever-llc/trellis-svelte` package's connection/context APIs are documented in
+the Svelte integration guide.
 
 ## Svelte 5 State Pattern
 

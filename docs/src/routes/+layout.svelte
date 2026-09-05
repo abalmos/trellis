@@ -85,7 +85,7 @@
           label: "Feeds",
         },
         {
-          href: "/guides/concepts/communication#cross-contract-dependencies-uses",
+          href: "/guides/concepts/communication#cross-api-dependencies",
           label: "Dependencies",
         },
         {

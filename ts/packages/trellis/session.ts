@@ -446,7 +446,13 @@ function classifyRequestTransportFailure(args: {
     ? args.cause.message
     : String(args.cause);
   const isNoResponders = message.includes("no responders");
-  const isNatsPermission = message.includes("Permissions Violation");
+  const isNatsPermission = args.cause instanceof Error &&
+    [
+      "PermissionViolationError",
+      "AuthorizationError",
+      "UserAuthenticationExpiredError",
+    ]
+      .includes(args.cause.name);
 
   return requestFailedTransportError({
     code: isNoResponders
@@ -5049,6 +5055,15 @@ export class Trellis<
     span?: Span;
   }): Promise<Result<Msg, TransportError>> {
     for (let retry = 0; retry <= this.#noResponderMaxRetries; retry++) {
+      if (this.#nats.isClosed()) {
+        return err(requestFailedTransportError({
+          code: "trellis.request.closed",
+          message: "The Trellis connection is closed.",
+          hint: "Connect to Trellis again before making another request.",
+          method: args.method,
+          subject: args.subject,
+        }));
+      }
       // Create the exact reply inbox before signing so the proof binds the
       // reply subject the response arrives on.
       const reply = createInbox(this.#inboxPrefix);
@@ -5065,14 +5080,49 @@ export class Trellis<
       headers.set("request-id", authHeaders.requestId);
       injectTraceContext(createNatsHeaderCarrier(headers), args.span);
 
-      const result = await AsyncResult.try(() =>
-        this.#nats.request(args.subject, args.payload, {
-          headers,
-          reply,
-          noMux: true,
+      const result = await AsyncResult.try(async () => {
+        const response = Promise.withResolvers<Msg>();
+        const subscription = this.#nats.subscribe(reply, {
+          max: 1,
           timeout: args.timeout,
-        })
-      );
+          callback: (error, message) => {
+            if (error) response.reject(error);
+            else if (
+              message.data.length === 0 && message.headers?.code === 503
+            ) {
+              response.reject(new Error("no responders"));
+            } else response.resolve(message);
+          },
+        });
+        // NATS noMux requests abandon their promise when connection closure
+        // cancels the subscription timer. Bind settlement to this subscription.
+        subscription.closed.then((error) => {
+          response.reject(
+            error ?? new Error("connection closed before RPC response"),
+          );
+        });
+        const initialStatus = this.connection.status;
+        const stopObserving = this.connection.subscribe((status) => {
+          // Publish denials arrive on the connection, not the reply inbox.
+          if (status === initialStatus) return;
+          const error = status.transport?.error;
+          if (
+            error instanceof Error &&
+            ((error.name === "PermissionViolationError" &&
+              Reflect.get(error, "operation") === "publish" &&
+              Reflect.get(error, "subject") === args.subject) ||
+              error.name === "AuthorizationError" ||
+              error.name === "UserAuthenticationExpiredError")
+          ) response.reject(error);
+        });
+        try {
+          this.#nats.publish(args.subject, args.payload, { headers, reply });
+          return await response.promise;
+        } finally {
+          stopObserving();
+          subscription.unsubscribe();
+        }
+      });
 
       if (result.isOk()) {
         return ok(result.take() as Msg);

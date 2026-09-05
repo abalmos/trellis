@@ -119,6 +119,10 @@ Deno.test("the unified web source is fully reverse proxied through Trellis", asy
         const page = await browser.newPage();
         const requests: string[] = [];
         const sockets: string[] = [];
+        page.on("pageerror", (error) => console.error(error));
+        page.on("console", (message) => {
+          if (message.type() === "error") console.error(message.text());
+        });
         page.on("request", (request) => requests.push(request.url()));
         page.on("websocket", (socket) => sockets.push(socket.url()));
 

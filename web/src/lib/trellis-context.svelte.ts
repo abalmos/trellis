@@ -2,7 +2,7 @@ import {
   createTrellisApp,
   type TrellisClientFor,
 } from "@qlever-llc/trellis-svelte";
-import { participant } from "../../contracts/console/.trellis/ts/participants/app-console/mod.ts";
+import { participant } from "../../.trellis/ts/participants/app-console/mod.ts";
 import { APP_CONFIG } from "./config.ts";
 
 export type TrellisConsoleClient = TrellisClientFor<typeof participant>;

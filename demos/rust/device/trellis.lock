@@ -1,0 +1,14 @@
+format = 1
+manifest-digest = "NiRDNcx3QH79snaC4b6HiPdE4GjirUtKrRlgWl64OjY"
+
+[[api]]
+id = "demo.service@v1"
+version = "1.0.0"
+api-digest = "qu_P04zYsryJycTKpriGBJIOAZ9N0xDwYZj8p9BR8eg"
+path = "../service"
+
+[[api]]
+id = "trellis.state@v1"
+version = "1.0.0"
+api-digest = "1WHxeF9WLJh3v-mmHiV5mql3a67tmPNpEUFxxUIF9-Y"
+path = "../../../rust/crates/runtime"

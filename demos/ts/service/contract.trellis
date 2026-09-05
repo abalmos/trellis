@@ -302,6 +302,8 @@ api "demo.service@v1" {
 participant "demo.service@v1" service {
     implements "demo.service@v1";
 
+    subscribe event "Sites.Refreshed";
+
     store uploads {
         purpose "Persistent evidence locker files for the Field Ops demo.";
         ttl_ms 0;

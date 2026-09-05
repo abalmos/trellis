@@ -23,7 +23,7 @@ import {
   type TrellisTestAdminRpcMethod,
 } from "./admin/methods.ts";
 import { recordTrellisDuration } from "./admin/metrics.ts";
-import { isRecord, postAdminRpc, postJson } from "./admin/transport.ts";
+import { isRecord, postJson } from "./admin/transport.ts";
 import { generateSessionSeed } from "./control_plane_config.ts";
 import type {
   TrellisTestAuthorityPlanClassification,
@@ -34,81 +34,6 @@ import type {
 
 export { adminMethods, type TrellisTestAdminRpcMethod };
 
-type IntegrationAuthorityResetPort = {
-  listUserIdentities(args: {
-    cursor?: string;
-    limit: number;
-  }): Promise<{
-    entries: readonly { principalId: string }[];
-    nextCursor: string | null;
-  }>;
-  listAcceptedAuthorities(args: {
-    principalId: string;
-    cursor?: string;
-    limit: number;
-  }): Promise<{
-    entries: readonly {
-      authorityId: string;
-      participantId: string;
-      version: number;
-    }[];
-    nextCursor: string | null;
-  }>;
-  revokeAuthority(args: {
-    authorityId: string;
-    expectedVersion: number;
-    reason: string;
-    idempotencyKey: string;
-  }): Promise<void>;
-};
-
-/** @internal Revokes accepted integration authority except the active administrator. */
-export async function revokeStaleIntegrationAuthorities(
-  port: IntegrationAuthorityResetPort,
-  adminParticipantId: string,
-): Promise<void> {
-  const principalIds = new Set<string>();
-  let cursor: string | undefined;
-  do {
-    const page = await port.listUserIdentities({
-      limit: 100,
-      ...(cursor === undefined ? {} : { cursor }),
-    });
-    for (const identity of page.entries) {
-      principalIds.add(identity.principalId);
-    }
-    cursor = page.nextCursor ?? undefined;
-  } while (cursor !== undefined);
-
-  const staleAuthorities = [];
-  for (const principalId of principalIds) {
-    cursor = undefined;
-    do {
-      const page = await port.listAcceptedAuthorities({
-        principalId,
-        limit: 100,
-        ...(cursor === undefined ? {} : { cursor }),
-      });
-      staleAuthorities.push(
-        ...page.entries.filter((authority) =>
-          authority.participantId !== adminParticipantId
-        ),
-      );
-      cursor = page.nextCursor ?? undefined;
-    } while (cursor !== undefined);
-  }
-
-  for (const authority of staleAuthorities) {
-    await port.revokeAuthority({
-      authorityId: authority.authorityId,
-      expectedVersion: authority.version,
-      reason: "Trellis shared integration runtime startup reset",
-      idempotencyKey:
-        `trellis-test-reset:${authority.authorityId}:${authority.version}`,
-    });
-  }
-}
-
 /** Internal public-surface admin automation used by `TrellisTestRuntime`. */
 export class TrellisTestAdminAutomation {
   readonly #trellisUrl: string;
@@ -117,7 +42,6 @@ export class TrellisTestAdminAutomation {
   #bootstrapComplete: Promise<void> | undefined;
   #adminClient: Promise<AdminClient> | undefined;
   #connectedAdminClient: AdminClient | undefined;
-  readonly #rpcProxy: { url: string; token: string } | undefined;
   readonly #deployment: adminDeployment.AdminDeploymentContext;
 
   /** Creates admin automation backed by the supplied bootstrap URL provider. */
@@ -129,12 +53,10 @@ export class TrellisTestAdminAutomation {
     autoAccept: readonly TrellisTestAuthorityPlanClassification[];
     getBootstrapUrl: () => Promise<string>;
     bootstrapComplete?: boolean;
-    rpcProxy?: { url: string; token: string };
   }) {
     this.#trellisUrl = args.trellisUrl.replace(/\/$/, "");
     this.#adminPassword = args.adminPassword;
     this.#getBootstrapUrl = args.getBootstrapUrl;
-    this.#rpcProxy = args.rpcProxy;
     this.#deployment = {
       defaultDeployment: args.defaultDeployment,
       reconciliationMs: args.reconciliationMs,
@@ -238,9 +160,7 @@ export class TrellisTestAdminAutomation {
         }`,
       );
     }
-    const output = this.#rpcProxy === undefined
-      ? await descriptor.call(await this.#client(), decodedInput)
-      : await postAdminRpc(this.#rpcProxy, rpcMethod, decodedInput);
+    const output = await descriptor.call(await this.#client(), decodedInput);
     try {
       return Value.Decode(descriptor.output, output);
     } catch (error) {
@@ -250,28 +170,6 @@ export class TrellisTestAdminAutomation {
         }`,
       );
     }
-  }
-
-  /** Revokes accepted authority left by earlier integration runs for this administrator. */
-  async resetAcceptedIntegrationAuthorities(): Promise<void> {
-    if (this.#rpcProxy) {
-      throw new Error("shared integration authority reset is startup-only");
-    }
-    const client = await this.#client();
-    await revokeStaleIntegrationAuthorities({
-      listUserIdentities: (args) =>
-        client.authUserIdentitiesList(args).orThrow(),
-      listAcceptedAuthorities: ({ principalId, cursor, limit }) =>
-        client.authIdentityAuthorityList({
-          principalId,
-          state: "accepted",
-          limit,
-          ...(cursor === undefined ? {} : { cursor }),
-        }).orThrow(),
-      revokeAuthority: async (args) => {
-        await client.authIdentityAuthorityRevoke(args).orThrow();
-      },
-    }, ADMIN_PARTICIPANT.id);
   }
 
   async #rpc<M extends TrellisTestAdminRpcMethod>(
@@ -321,22 +219,6 @@ export class TrellisTestAdminAutomation {
   async completeClientAuth(
     ctx: ClientAuthRequiredContext,
   ): Promise<ClientAuthContinuation> {
-    if (this.#rpcProxy !== undefined) {
-      const response = await postAdminRpc(
-        this.#rpcProxy,
-        "completeClientAuth",
-        ctx,
-      );
-      if (
-        !isRecord(response) || response.status !== "bound" ||
-        typeof response.flowId !== "string"
-      ) {
-        throw new Error(
-          "Trellis test auth adapter returned an invalid continuation",
-        );
-      }
-      return { status: "bound", flowId: response.flowId };
-    }
     const startedAt = performance.now();
     await this.#completeBootstrap();
     const flowId = flowIdFromUrl(ctx.loginUrl);

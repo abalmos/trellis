@@ -1,9 +1,6 @@
 {
-  "name": "@qlever-llc/trellis-integration",
-  "version": "0.0.0",
-  "exports": "./runner.ts",
   "extends": "../deno.json",
   "tasks": {
-    "check": "deno check ./_support/runtime.ts ./idl/*.ts"
+    "check": "deno check ./_support/*.ts ./*_test.ts"
   }
 }

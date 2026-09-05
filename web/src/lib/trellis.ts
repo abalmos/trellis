@@ -1,4 +1,4 @@
-import { participant } from "../../contracts/console/.trellis/ts/participants/app-console/mod.ts";
+import { participant } from "../../.trellis/ts/participants/app-console/mod.ts";
 import { APP_CONFIG } from "./config.ts";
 import {
   getConnection,

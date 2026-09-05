@@ -114,13 +114,6 @@ export function generateSessionSeed(): string {
 }
 
 const heldProcessLocks = new Set<string>();
-const HOST_SLOT_ACQUIRE_TIMEOUT_MS = 120_000;
-
-/** Lease for one host-wide live integration case slot. */
-export type TrellisTestHostSlot = {
-  /** Releases the slot for another live integration case. */
-  release(): void;
-};
 
 /** Owned localhost port reservation for a child process. */
 export type ReservedPort = {
@@ -131,68 +124,6 @@ export type ReservedPort = {
   /** Releases the socket and cooperative process lock. */
   release(): void;
 };
-
-/** Acquires an optional host-wide live integration case slot. */
-export async function reserveHostTestSlot(): Promise<
-  TrellisTestHostSlot | undefined
-> {
-  const configured = Deno.env.get("TRELLIS_TEST_HOST_JOBS")?.trim();
-  if (configured === undefined || configured === "") return undefined;
-  const limit = Number(configured);
-  if (!Number.isInteger(limit) || limit < 1) {
-    throw new Error("TRELLIS_TEST_HOST_JOBS must be a positive integer");
-  }
-  const lockRoot = Deno.env.get("TRELLIS_TEST_HOST_LOCK_DIR") ??
-    (Deno.build.os === "windows" ? Deno.env.get("TEMP") : "/tmp");
-  if (lockRoot === undefined) {
-    throw new Error("no temporary directory is configured");
-  }
-  const slotRoot = `${lockRoot}/trellis-test-host-slots`;
-  Deno.mkdirSync(slotRoot, { recursive: true });
-  const deadline = Date.now() + HOST_SLOT_ACQUIRE_TIMEOUT_MS;
-
-  while (true) {
-    for (let slot = 0; slot < limit; slot++) {
-      const lockPath = `${slotRoot}/${slot}.lock`;
-      const lockFile = tryAcquireProcessLock(lockPath);
-      if (lockFile !== undefined) {
-        let released = false;
-        return {
-          release() {
-            if (released) return;
-            released = true;
-            releaseProcessLock(lockPath, lockFile);
-          },
-        };
-      }
-    }
-    if (Date.now() >= deadline) {
-      const owners = Array.from(Deno.readDirSync(slotRoot))
-        .filter((entry) => entry.isFile && entry.name.endsWith(".lock"))
-        .sort((left, right) => left.name.localeCompare(right.name))
-        .map((entry) => {
-          try {
-            return `${entry.name}=${
-              Deno.readTextFileSync(
-                `${slotRoot}/${entry.name}`,
-              ).trim()
-            }`;
-          } catch (error) {
-            if (error instanceof Deno.errors.NotFound) {
-              return `${entry.name}=<missing>`;
-            }
-            throw error;
-          }
-        });
-      throw new Error(
-        `timed out acquiring a host test slot after ${HOST_SLOT_ACQUIRE_TIMEOUT_MS}ms: ${
-          owners.join(", ")
-        }`,
-      );
-    }
-    await new Promise((resolve) => setTimeout(resolve, 10));
-  }
-}
 
 /** Reserves a localhost TCP port until a child process is ready to bind it. */
 export function reserveLocalPort(port = 0): ReservedPort {

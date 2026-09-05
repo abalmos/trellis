@@ -1,6 +1,8 @@
 # Write a service
 
-Trellis projects are authored with `contract.trellis` or `contracts/*.trellis`. The compiler validates those sources, emits canonical API and participant artifacts, and generates private TypeScript or Rust SDKs.
+Trellis projects are authored with `contract.trellis` or `contracts/*.trellis`.
+The compiler validates those sources, emits canonical API and participant
+artifacts, and generates private TypeScript or Rust SDKs.
 
 1. [Set up the project](/guides/write-a-service/setup)
 2. [Declare the API and participant](/guides/write-a-service/first-contract)
@@ -8,4 +10,9 @@ Trellis projects are authored with `contract.trellis` or `contracts/*.trellis`. 
 4. [Generate SDKs and artifacts](/guides/write-a-service/contract-artifacts)
 5. [Use the development loop](/guides/write-a-service/development-loop)
 
-The [Trellis IDL reference](/guides/write-a-service/first-contract) covers RPCs, operations, events, feeds, state, jobs, and resources.
+6. [Call it in a real-runtime test](/guides/testing-trellis-services)
+
+This walkthrough implements one RPC end to end. The operations, jobs, State, and
+store guides expand those features independently; it is not a complete IDL
+grammar reference. Deno, environment variables, and UUIDs are demonstration
+choices, not Trellis requirements.

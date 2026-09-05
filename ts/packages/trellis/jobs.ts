@@ -1,4 +1,4 @@
-import { AsyncLocalStorage } from "node:async_hooks";
+import type { AsyncLocalStorage } from "node:async_hooks";
 import { AsyncResult, BaseError, Result } from "@qlever-llc/result";
 import { type StaticDecode, Type } from "typebox";
 
@@ -382,11 +382,14 @@ type ActiveJobContext = {
 let activeJobStorage: AsyncLocalStorage<ActiveJobContext> | undefined;
 
 /** @internal Runs work with the current active job available to child job creation and waits. */
-export function runWithActiveJobContext<T>(
+export async function runWithActiveJobContext<T>(
   context: ActiveJobContext,
   fn: () => Promise<T>,
 ): Promise<T> {
-  activeJobStorage ??= new AsyncLocalStorage<ActiveJobContext>();
+  if (activeJobStorage === undefined) {
+    const { AsyncLocalStorage } = await import("node:async_hooks");
+    activeJobStorage ??= new AsyncLocalStorage<ActiveJobContext>();
+  }
   return activeJobStorage.run(context, fn);
 }
 

@@ -1,401 +1,156 @@
 ---
 title: Type System Patterns
-description: Shared Trellis rules for schemas, validation, Result types, and error modeling.
+description: Trellis wire models, validation, generated types, and error semantics.
 order: 30
 ---
 
 # Design: Type System Patterns
 
-## Prerequisites
-
-- [trellis-patterns.md](./trellis-patterns.md) - Trellis architecture and
-  communication model
-- [../contracts/trellis-api-participants.md](./../contracts/trellis-api-participants.md) -
-  canonical contract model
-
 ## Scope
 
-This document defines Trellis-wide patterns for schemas, validation, `Result`,
-and error modeling.
+This document describes Trellis-owned wire semantics and generated runtime
+types. It does not prescribe validation libraries, identifier schemes, database
+schemas, or typing conventions for application-local code. Contributor rules for
+the Trellis repository live in its `AGENTS.md`.
 
 ## API Schema
 
-Each service owns Trellis IDL that compiles to canonical `trellis.api.v1` and
-`trellis.participant.v1` artifacts.
+Native IDL is the authoring source. The compiler emits canonical
+`trellis.api.v1` and `trellis.participant.v1` artifacts, and code generators
+produce language-specific types and runtime validation schemas.
 
 ```trellis
-api "graph@v1" {
+api "acme.users@v1" {
   version "1.0.0";
-  display_name "Graph Service";
-  description "Serve graph RPCs and publish partner change events.";
+  display_name "Users";
+  description "Example user lookup.";
   model FindUser { id: string; }
   model User { id: string; }
-  model PartnerChanged { partnerId: string; }
-  error NotFoundError;
-  rpc "User.Find" {
+  error UserNotFound;
+  rpc "Users.Find" {
     version "v1";
     input FindUser;
     output User;
-    errors [NotFoundError];
-    call_capabilities ["users.read"];
-  }
-  event "Partner.Changed" {
-    version "v1";
-    schema PartnerChanged;
-    publish_capabilities ["partners.write"];
-    subscribe_capabilities ["partners.read"];
+    errors [UserNotFound];
   }
 }
 ```
 
-Rules:
-
-- the local IDL source defines input/output types, allowed errors, capabilities,
-  and cross-contract dependencies
-- generated API and participant modules are runtime inputs, not authoring inputs
-- canonical protocol artifacts are the cross-language boundary
-- for local TypeScript code, prefer exporting the defined contract object itself
-  (`export default contract` or a named contract export) instead of manually
-  rebuilding a parallel module-shaped object
+Public runtime types follow those declarations. Editing generated TypeBox
+schemas, Rust structs, or canonical JSON is not an authoring workflow.
+Dependency selections belong to participant `use` blocks. See
+[native IDL](../contracts/trellis-idl.md) for compilation and dependency
+semantics.
 
 ## Schema Organization
 
-Platform-wide schemas live in the Trellis platform repo only when they are
-reused by Trellis-owned contracts or shared Trellis runtime libraries.
-Service-specific and domain-specific schemas live with the owning service or
-cloud package.
+The compiler discovers `contract.trellis` or direct-child `contracts/*.trellis`
+files. It resolves models within the owning API before generating SDKs. The
+application decides how to organize its other source files and local models.
+Trellis-owned schemas live in this repository; domain APIs live with their
+owner.
 
-Typical platform layout:
-
-```text
-libs/trellis/models/
-├── <domain>/
-│   ├── models/
-│   ├── rpc/
-│   └── events/
-└── index.ts
-```
-
-Naming:
-
-```ts
-export const UserSchema = Type.Object({
-  id: Type.String(),
-  active: Type.Boolean({ default: true }),
-});
-
-export type User = Static<typeof UserSchema>;
-```
-
-Rules:
-
-- one schema per file, named after the type
-- schema constants use `<Name>Schema`
-- TypeScript types use `<Name>` without a suffix
-- event schemas describe contract bodies only; Trellis runtime metadata such as
-  event id/time stays outside the body in prepared-event metadata and transport
-  headers
-- simple RPC schemas may pair input and response in one file
-- operation schemas typically split input, progress, and output
-- service-specific schemas stay with the owning service
+Event payload models contain application data. Event IDs, timestamps, proofs,
+and correlation metadata are supplied separately by the runtime. Duplicate
+fields in the body do not replace authenticated runtime metadata.
 
 ## List Pagination Schemas
 
-Trellis list RPCs use clean-break, standard page shapes unless a design doc
-explicitly excludes an endpoint from normal list semantics. Live offset
-pagination is the default for ordinary list RPCs. Cursor pagination is available
-for stable ID/keyset pages where callers should advance by an opaque cursor
-rather than a live row offset.
+Trellis-owned list endpoints and resource APIs document their page shapes and
+bounds. These are not a requirement for all application-owned list RPCs. An
+application can use the optional pagination helpers or declare another shape.
 
 ### Offset Pagination
 
-Request:
+The standard Trellis offset response contains `entries`, `count`, `offset`,
+`limit`, and optional `nextOffset`. The request requires `limit`; `offset`
+defaults to zero. `count` describes matching rows before the page bound.
+Concurrent mutations can change later pages: this is not a snapshot.
 
-```ts
-{
-  offset?: number;
-  limit: number;
-}
-```
-
-Response:
-
-```ts
-{
-  entries: T[];
-  count: number;
-  offset: number;
-  limit: number;
-  nextOffset?: number;
-}
-```
-
-Rules:
-
-- `limit` is required; `offset` is optional and defaults to `0`
-- responses use `entries` for the returned page, not domain-specific array names
-  such as `users`, `sessions`, or `reports`
-- `count` is the current matching-row count after filters and before the page
-  bound
-- `nextOffset` is present only when another bounded request can ask for the next
-  live offset
-- this is live offset pagination, not snapshot or cursor pagination; concurrent
-  inserts, updates, or deletes can change what appears at later offsets
-
-Trellis provides reusable TypeBox and handler helpers for this shape:
-
-- `PageRequestSchema`
-- `PageResponseSchema(entry)`
-- `normalizePageQuery(query, maxLimit?)`
-- `buildPageResponse(entries, totalCount, query, maxLimit?)`
+TypeScript exposes `PageRequestSchema`, `PageResponseSchema`,
+`normalizePageQuery`, and `buildPageResponse`. Endpoint-specific limits still
+apply when calling a Trellis endpoint.
 
 ### Cursor Pagination
 
-Use cursor pagination for stable ID/keyset pages where the service can produce a
-next cursor from the last returned key or another stable opaque position. Cursor
-pages do not expose total counts or live offsets.
+Cursor responses contain `items` and `page.nextCursor` when more data exists.
+The request accepts `cursor` and `limit`; a supplied cursor must be nonempty.
+The generic helper defaults to 100 items with a maximum of 500, but individual
+APIs can document different limits. Callers treat cursors as opaque positions.
 
-Request:
-
-```ts
-{
-  cursor?: string;
-  limit?: number;
-}
-```
-
-Response:
-
-```ts
-{
-  items: T[];
-  page: {
-    nextCursor?: string;
-  };
-}
-```
-
-Rules:
-
-- `limit` defaults to `100`
-- the default maximum `limit` is `500`, though endpoints may choose a narrower
-  or wider maximum when documented
-- `cursor` is optional, but when present it must be a non-empty string
-- responses use `items` for the returned page and `page.nextCursor` only when
-  another page is available
-- cursors are service-owned positions; callers should treat them as opaque
-
-Trellis provides reusable TypeBox and handler helpers for this shape:
-
-- `CursorQuerySchema`
-- `CursorPageInfoSchema`
-- `CursorPageSchema(item)`
-- `normalizeCursorQuery(query, options?)`
-- `buildCursorPage(items, nextCursor?)`
+TypeScript exposes `CursorQuerySchema`, `CursorPageInfoSchema`,
+`CursorPageSchema`, `normalizeCursorQuery`, and `buildCursorPage`.
 
 ## Schema Validation
 
-Use TypeBox and Zod for different strengths:
+Trellis validates declared wire payloads before handing them to application
+handlers. TypeBox is an implementation detail of the generated TypeScript
+validation surface, not a service configuration requirement. Applications may
+validate environment variables, files, forms, and local domain objects with any
+library or ordinary language code.
 
-| Library | Use case                                       | Rationale                                    |
-| ------- | ---------------------------------------------- | -------------------------------------------- |
-| TypeBox | RPC schemas, event payloads, operation schemas | type inference and JSON Schema compatibility |
-| Zod     | service config and ENV parsing                 | coercion, transforms, defaults               |
-
-TypeBox example:
-
-```ts
-import { type Static, Type } from "@sinclair/typebox";
-
-export const FindUserSchema = Type.Object({
-  userId: TrellisIDSchema,
-});
-export type FindUserInput = Static<typeof FindUserSchema>;
-```
-
-Zod example:
-
-```ts
-import { z } from "zod";
-
-const configSchema = z.object({
-  ARANGO_URL: z.string().url(),
-  LOG_LEVEL: z.enum(["debug", "info", "warn", "error"]).default("info"),
-});
-```
-
-Rules:
-
-- TypeBox for RPC, event, and operation wire schemas
-- public wire payload object schemas are open by default in every language
-- same-lineage Trellis rollouts rely on older runtimes accepting newer payloads
-  that add optional fields they do not know about yet
-- omit `additionalProperties` from ordinary public wire object schemas; use
-  `Type.Object({ ... })` without the option in TypeScript and omit the keyword
-  from raw JSON Schema authored in Rust
-- use `additionalProperties: false` only when a security-sensitive proof
-  boundary or another documented requirement must reject unknown fields
-- Zod for environment parsing and config loading
-- use one validation library per use case instead of stacking multiple libraries
-  on the same boundary
+Trellis-owned public wire objects tolerate additive unknown fields while still
+validating known members. Signed proof formats and authored source/configuration
+formats have stricter rules where ignoring unknown data would be unsafe. A
+proof-bearing request binds the complete payload, including unknown members,
+before any projection to known fields. These protocol guarantees are distinct
+from application database schema or migration policy.
 
 ### Annotated Validation Metadata
 
-Contract authors can attach UI-facing metadata to TypeBox schema nodes through
-the `x-trellis-validation` JSON Schema vendor extension key. This metadata
-surfaces in `SchemaValidationError` when a request fails pre-handler schema
-validation.
-
-The `withTrellisValidation(schema, extension)` helper from
-`@qlever-llc/trellis/contracts` attaches the extension without breaking TypeBox
-static inference:
-
-```ts
-import { withTrellisValidation } from "@qlever-llc/trellis/contracts";
-
-const InputSchema = Type.Object({
-  title: withTrellisValidation(Type.String({ minLength: 1 }), {
-    label: "Title",
-    issues: {
-      minLength: {
-        code: "documents.title.empty",
-        message: "Enter a title.",
-      },
-    },
-  }),
-});
-```
-
-Rules:
-
-- `x-trellis-validation` carries `label`, `note`, `uiPath`, and per-keyword
-  issue hints (`code`, `message`, `note`, `label`, `i18nKey`, `severity`)
-- the metadata is purely for UX and does not change validation behavior
-- when all validation failures are annotated, Trellis returns
-  `SchemaValidationError` instead of `ValidationError`
-- any structural or unannotated failure downgrades the entire response to
-  `ValidationError`
+The canonical schema representation supports `x-trellis-validation` metadata for
+field-level validation feedback. It is descriptive, not additional authority or
+a change to validation acceptance. Fully annotated failures can produce
+`SchemaValidationError`; structural or unannotated failures use
+`ValidationError`. The removed TypeScript contracts package and its
+`withTrellisValidation` helper are not current authoring APIs. Consult native
+IDL support before relying on a metadata feature in authored source.
 
 ## Storage Identity
 
-SQL-backed Trellis storage separates row identity from domain identity.
-
-Rules:
-
-- SQL tables use an app-generated ULID `id` primary key for row identity
-- public IDs, external IDs, contract IDs, digests, session keys, and other
-  domain identifiers remain separate semantic columns with their own constraints
-- repository and service code should query by the semantic identifier that
-  matches the operation rather than exposing row IDs as public API identifiers
-- schema names should make the distinction clear, for example `id` for row
-  identity and `contract_id`, `trellis_id`, or `deployment_id` for domain
-  identity
+Trellis runtime IDs, digests, session keys, and revision tokens have semantics
+defined by their owning APIs. Applications must preserve those meanings when
+calling Trellis. Trellis does not require application tables to use ULIDs,
+separate surrogate primary keys, or a particular repository abstraction.
 
 ## Result Type
 
-All Trellis public APIs and RPC handlers use `Result<T, E>`.
+Generated RPCs and many runtime operations return Result-style values so callers
+can distinguish declared business failures from validation and transport
+failures. This does not mean every public method returns a Result: lifecycle
+methods and registration methods have their own documented signatures.
 
-This keeps expected failures explicit as values rather than exceptions,
-preserves composable transforms via `map`, `mapErr`, and `andThen`, and supports
-predictable early-return and narrowing patterns.
-
-Rules:
-
-- expected failures use `Result`, not thrown exceptions
-- language-specific implementations should preserve the same semantics even if
-  the concrete type differs
+TypeScript supports `.orThrow()` where exception-based control flow is useful;
+Rust uses ordinary typed `Result`. Neither library dictates how an application
+models errors outside the Trellis boundary.
 
 ## TypeScript Typing Policy
 
-TypeScript code in Trellis should use the strongest typing the compiler can
-support.
-
-Rules:
-
-- do not use `// @ts-nocheck`
-- do not use `as unknown as ...`
-- prefer generic constraints, helper functions, and type guards over casts
-- use `// @ts-expect-error` only for a specific compiler limitation, with a
-  short reason
-- keep runtime validation and compile-time narrowing paired together
-- if a public type must change to stay honest, prefer the stronger type even if
-  it breaks consumers
+Generated participant types describe the selected actions. Inline registration
+infers a handler type; extracted handlers can use `RpcHandler` parameterized by
+the generated participant and action name. Runtime validation protects the wire
+boundary independently of TypeScript compilation. Changing or asserting an
+application type does not grant extra Trellis actions.
 
 ## Error Handling
 
-Trellis-shared errors come from Trellis packages. Service-specific errors may
-extend the same base locally.
+Declare expected RPC and operation errors in IDL. Generation creates the wire
+representation and the corresponding TypeScript error classes or Rust variants.
+Callers narrow those generated types rather than reconstructing unknown wire
+payloads as if they were declared errors.
 
-Built-in error roles:
+- `TransportError` reports runtime/transport failures, with a stable code and
+  actionable message or hint where available.
+- `ValidationError` reports malformed, structural, or unannotated invalid input.
+- `SchemaValidationError` reports fully annotated validation issues.
+- Unknown or undeclared remote errors remain distinguishable from generated
+  declared errors; their diagnostic data is not discarded.
 
-- `TransportError` covers Trellis transport and runtime boundary failures such
-  as malformed replies, unavailable routes, bind/bootstrap failures, and other
-  Trellis-owned protocol or connection problems. It should carry human-facing
-  Trellis-native `message`, `code`, and `hint` values.
-- `SchemaValidationError` is returned before handler dispatch when every schema
-  validation failure is annotated with `x-trellis-validation` metadata. It
-  carries an `issues[]` array with stable, field-level UX information (path,
-  keyword, code, message, label, note, severity, params). It is a Trellis
-  runtime error, not a declared service error.
-- `UnexpectedError` remains the bucket for true internal or otherwise unexpected
-  conditions, usually by wrapping an unplanned cause.
-
-```ts
-export class AuthError extends TrellisError<AuthErrorData> {
-  override readonly name = "AuthError" as const;
-  readonly reason: AuthErrorData["reason"];
-
-  constructor(options: ErrorOptions & { reason: AuthErrorData["reason"] }) {
-    super(options);
-    this.reason = options.reason;
-  }
-
-  override toSerializable(): AuthErrorData {
-    return { type: this.name, message: this.message, reason: this.reason };
-  }
-}
-```
-
-Each error defines or derives:
-
-- a unique discriminating wire `type`
-- a serializable data schema through `static schema`
-- runtime reconstruction logic
-- wire conversion
-
-RPC rule:
-
-- declared RPC errors may be service-local `TrellisError` subclasses owned by
-  the service contract
-- new TypeScript service-local RPC errors should normally use `defineError(...)`
-- generic TypeScript runtime helper typing for open serializable error payloads
-  should use `SerializableErrorData`
-- for TypeScript service contracts, local error `static schema` values may be
-  derived into emitted contract schemas automatically from local error runtime
-  metadata
-- callers receive declared remote errors as reconstructed runtime instances of
-  those classes
-- callers may also receive `TransportError` from the Trellis runtime when the
-  transport or runtime boundary fails before a declared remote error can be
-  reconstructed
-- `RemoteError` is a fallback for undeclared or unknown remote error payloads,
-  not the preferred shape for declared contract errors
-
-Operation rule:
-
-- declared operation errors follow the same rules as declared RPC errors;
-  local-or-builtin enforcement, wire open format, reconstructable class
-  instances
-
-Wire rule:
-
-- the on-wire error envelope stays open
-- shared runtimes must preserve unknown error payloads for diagnostics
-- typed packages may narrow only the error types they actually know
+The runtime's extensible error envelope is not permission to bypass a declared
+surface's error contract. Application-local error types remain
+application-owned.
 
 ### SchemaValidationError shape
-
-Serialized shape:
 
 ```json
 {
@@ -415,14 +170,6 @@ Serialized shape:
 }
 ```
 
-Rules:
-
-- `ValidationError` remains for structural failures (malformed JSON, wrong type,
-  unannotated constraint failures, union/composition errors) — the handler does
-  not run in either case
-- `SchemaValidationError` is returned only when every TypeBox issue maps to a
-  supported annotated keyword on the matching schema node
-- callers receive the error as a reconstructed `SchemaValidationError` instance
-  through the same built-in error machinery as `TransportError`
-- the error is not a service-declared error and must not be listed in the
-  contract's errors registry
+Consumers can display issue paths and messages without treating UX metadata as
+authentication or authority. Public exact signatures belong in generated API
+documentation; protocol/schema semantics belong in this design documentation.
