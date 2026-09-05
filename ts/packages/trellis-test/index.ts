@@ -1,5 +1,4 @@
 export { TrellisTestRuntime } from "./src/runtime.ts";
-export { TrellisControlPlaneSqlite } from "./src/control_plane_sqlite.ts";
 export {
   assertCapturedEventContext,
   assertEventCaptured,
@@ -39,26 +38,14 @@ export type {
   TrellisTestWaitForSource,
 } from "./src/assertions.ts";
 export type {
-  JetStreamAckFrame,
-  JetStreamAckObserver,
-  NatsMessageFrame,
-  NatsMessageObserver,
-} from "./src/nats_container.ts";
-export type {
-  TrellisControlPlaneSqliteExecuteResult,
-  TrellisControlPlaneSqliteRow,
-} from "./src/control_plane_sqlite.ts";
-export type {
   TrellisTestAuthorityPlanClassification,
   TrellisTestClientAuth,
   TrellisTestClientKey,
   TrellisTestClientParticipant,
   TrellisTestConnectedClient,
-  TrellisTestControlPlane,
   TrellisTestParticipant,
   TrellisTestParticipantApproval,
   TrellisTestParticipantLike,
-  TrellisTestRawAuthConnectionPresence,
   TrellisTestRuntimeStartOptions,
   TrellisTestServiceKey,
   WaitForOptions,

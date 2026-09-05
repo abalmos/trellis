@@ -5065,14 +5065,34 @@ export class Trellis<
       headers.set("request-id", authHeaders.requestId);
       injectTraceContext(createNatsHeaderCarrier(headers), args.span);
 
-      const result = await AsyncResult.try(() =>
-        this.#nats.request(args.subject, args.payload, {
-          headers,
-          reply,
-          noMux: true,
+      const result = await AsyncResult.try(async () => {
+        const response = Promise.withResolvers<Msg>();
+        const subscription = this.#nats.subscribe(reply, {
+          max: 1,
           timeout: args.timeout,
-        })
-      );
+          callback: (error, message) => {
+            if (error) response.reject(error);
+            else if (
+              message.data.length === 0 && message.headers?.code === 503
+            ) {
+              response.reject(new Error("no responders"));
+            } else response.resolve(message);
+          },
+        });
+        // NATS noMux requests abandon their promise when connection closure
+        // cancels the subscription timer. Bind settlement to this subscription.
+        subscription.closed.then((error) => {
+          response.reject(
+            error ?? new Error("connection closed before RPC response"),
+          );
+        });
+        try {
+          this.#nats.publish(args.subject, args.payload, { headers, reply });
+          return await response.promise;
+        } finally {
+          subscription.unsubscribe();
+        }
+      });
 
       if (result.isOk()) {
         return ok(result.take() as Msg);

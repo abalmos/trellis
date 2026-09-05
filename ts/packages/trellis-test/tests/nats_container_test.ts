@@ -13,8 +13,6 @@ import {
   removeOwnedPidFile,
 } from "../src/nats_container.ts";
 
-const RUN_LIVE_NATS_SMOKE = Deno.env.get("TRELLIS_TEST_LIVE_NATS") === "1";
-
 async function portAcceptsConnections(port: number): Promise<boolean> {
   try {
     const conn = await Deno.connect({ hostname: "127.0.0.1", port });
@@ -36,7 +34,6 @@ async function listPidFiles(natsDir: string): Promise<string[]> {
 Deno.test({
   name:
     "NatsTestContainer.start spawns a local nats-server with shared streams",
-  ignore: !RUN_LIVE_NATS_SMOKE,
   fn: async () => {
     const workdir = await Deno.makeTempDir({ prefix: "trellis-nats-smoke-" });
     const natsDir = join(workdir, "nats");
@@ -89,7 +86,6 @@ Deno.test({
 
 Deno.test({
   name: "concurrent NATS starts bind distinct owned port leases",
-  ignore: !RUN_LIVE_NATS_SMOKE,
   fn: async () => {
     const workdirs = await Promise.all(
       Array.from(

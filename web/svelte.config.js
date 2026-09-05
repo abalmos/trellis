@@ -50,27 +50,27 @@ const config = {
       ),
       "@trellis/apis/trellis.auth": resolve(
         rootDir,
-        "contracts/console/.trellis/ts/apis/auth/mod.ts",
+        ".trellis/ts/apis/auth/mod.ts",
       ),
       "@trellis/apis/trellis.core": resolve(
         rootDir,
-        "contracts/console/.trellis/ts/apis/trellis-core/mod.ts",
+        ".trellis/ts/apis/trellis-core/mod.ts",
       ),
       "@trellis/apis/trellis.eventlog": resolve(
         rootDir,
-        "contracts/console/.trellis/ts/apis/eventlog/mod.ts",
+        ".trellis/ts/apis/eventlog/mod.ts",
       ),
       "@trellis/apis/trellis.health": resolve(
         rootDir,
-        "contracts/console/.trellis/ts/apis/health/mod.ts",
+        ".trellis/ts/apis/health/mod.ts",
       ),
       "@trellis/apis/trellis.jobs": resolve(
         rootDir,
-        "contracts/console/.trellis/ts/apis/jobs/mod.ts",
+        ".trellis/ts/apis/jobs/mod.ts",
       ),
       "@trellis/apis/trellis.state": resolve(
         rootDir,
-        "contracts/console/.trellis/ts/apis/state/mod.ts",
+        ".trellis/ts/apis/state/mod.ts",
       ),
       "@qlever-llc/trellis/service/deno": resolve(
         rootDir,

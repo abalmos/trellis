@@ -3,11 +3,11 @@
 Declare private service queues on the participant:
 
 ```trellis
-participant acme.orders-service@v1 service {
-  implements acme.orders@v1;
-  job queue reconcile {
-    input = ReconcileInput;
-    output = ReconcileOutput;
+participant "acme.orders-service@v1" service {
+  implements "acme.orders@v1";
+  job reconcile {
+    payload ReconcileInput;
+    result ReconcileOutput;
   }
 }
 ```

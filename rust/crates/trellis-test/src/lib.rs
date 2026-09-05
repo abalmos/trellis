@@ -14,7 +14,7 @@ use std::io::{self, Seek, Write};
 use std::net::TcpListener;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -30,10 +30,8 @@ use serde_json::{json, Map, Number, Value};
 use tempfile::TempDir;
 use tokio::task::JoinHandle;
 use trellis_local_bootstrap::{
-    BootstrapAccounts, BootstrapPaths, BootstrapUsers,
-    ContainerRuntime as BootstrapContainerRuntime, LocalBootstrapError, LocalNatsBootstrapManifest,
-    LocalTrellisBootstrapManifest, LocalTrellisBootstrapOptions, LocalTrellisBootstrapPaths,
-    LocalTrellisBootstrapUrls, PublicAccount, PublicUser,
+    ContainerRuntime as BootstrapContainerRuntime, LocalBootstrapError,
+    LocalTrellisBootstrapManifest, LocalTrellisBootstrapOptions,
 };
 use trellis_local_nats::{LocalNats, NatsBinarySource, NatsOutput};
 use trellis_rs::client::{SessionAuth, TrellisClientError, UserConnectOptions};
@@ -45,87 +43,7 @@ const DEFAULT_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(10);
 const DEFAULT_RECONCILIATION_TIMEOUT: Duration = Duration::from_secs(5);
 const DEFAULT_ADMIN_RPC_TIMEOUT_MS: u64 = 5_000;
 const WORKDIR_OWNER_MARKER: &str = ".trellis-test-owner";
-const SHARED_RUNTIME_ENV: &str = "TRELLIS_TEST_SHARED_RUNTIME";
 const ADMIN_USERNAME: &str = "admin";
-
-#[derive(Clone, Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct SharedRuntimeManifest {
-    version: u8,
-    trellis_url: String,
-    nats_url: String,
-    websocket_url: String,
-    workdir: PathBuf,
-    control_plane_sqlite_path: PathBuf,
-    admin_password: String,
-    admin_rpc_url: String,
-    admin_rpc_token: String,
-    test_oidc_issuer: String,
-    tenants: BTreeMap<String, SharedTenantManifest>,
-    assignments: BTreeMap<String, SharedRuntimeAssignment>,
-}
-
-#[derive(Clone, Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct SharedRuntimeAssignment {
-    mode: String,
-    namespace: String,
-    tenant_id: String,
-}
-
-#[derive(Clone, Debug, Deserialize)]
-struct SharedTenantManifest {
-    accounts: SharedAccounts,
-    users: SharedUsers,
-    paths: SharedPaths,
-}
-
-#[derive(Clone, Debug, Deserialize)]
-struct SharedAccounts {
-    system: SharedIdentity,
-    auth: SharedIdentity,
-    trellis: SharedIdentity,
-}
-
-#[derive(Clone, Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct SharedUsers {
-    system: SharedIdentity,
-    auth_service: SharedIdentity,
-    trellis_service: SharedIdentity,
-}
-
-#[derive(Clone, Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct SharedIdentity {
-    name: String,
-    public_key: String,
-}
-
-#[derive(Clone, Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct SharedPaths {
-    nats_config: String,
-    jwt_config: String,
-    creds: SharedCredentialPaths,
-    secrets: SharedSecretPaths,
-}
-
-#[derive(Clone, Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct SharedCredentialPaths {
-    system_service: String,
-    auth_service: String,
-    trellis_service: String,
-}
-
-#[derive(Clone, Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct SharedSecretPaths {
-    auth_issuer_signing: String,
-    auth_target_signing: String,
-    auth_callout_x_key: String,
-}
 
 /// Error returned by Rust Trellis integration-test runtime helpers.
 #[derive(Debug, thiserror::Error)]
@@ -276,93 +194,6 @@ impl From<trellis_protocol::ProtocolError> for TrellisTestError {
     }
 }
 
-/// Send deliberately malformed RPC input through an authenticated test caller.
-pub async fn call_malformed_rpc(
-    caller: &Caller,
-    subject: &str,
-    input: &Value,
-) -> Result<Value, TrellisClientError> {
-    caller.test_request_json_value(subject, input).await
-}
-
-/// Download transfer bytes through an authenticated test caller.
-pub async fn download_transfer(
-    caller: &Caller,
-    grant: &trellis_rs::generated::DownloadTransferGrant,
-) -> Result<Vec<u8>, TrellisClientError> {
-    caller.download_transfer(grant).await
-}
-
-/// Connect an ad hoc service runtime through the normal authenticated bootstrap flow.
-pub async fn connect_service_runtime<C>(
-    trellis_url: &str,
-    key: &TrellisTestServiceKey,
-) -> Result<trellis_rs::service::ConnectedServiceRuntime<C>, trellis_rs::service::ServiceRuntimeError>
-{
-    let session_seed = random_session_seed();
-    let referenced_api_artifacts = key
-        .referenced_api_artifacts
-        .iter()
-        .map(|(json, digest)| (json.as_str(), digest.as_str()))
-        .collect::<Vec<_>>();
-    trellis_rs::generated::test_connect_service_runtime(
-        trellis_rs::client::ServiceConnectWithContractOptions {
-            trellis_url,
-            participant_id: &key.participant_id,
-            participant_digest: &key.participant_digest,
-            participant_json: &key.participant_json,
-            api_json: &key.api_json,
-            api_digest: &key.api_digest,
-            referenced_api_artifacts: &referenced_api_artifacts,
-            deployment_id: &key.deployment_id,
-            instance_id: &key.instance_id,
-            provisioned_identity_seed_base64url: &key.identity_seed,
-            participant_needs_digest: &key.participant_needs_digest,
-            session_key_seed_base64url: &session_seed,
-            timeout_ms: 30_000,
-            retry_delay_ms: trellis_rs::service::DEFAULT_RETRY_DELAY_MS,
-            authority_pending_timeout_ms: trellis_rs::service::DEFAULT_AUTHORITY_PENDING_TIMEOUT_MS,
-            authorization_context_store: std::sync::Arc::new(
-                trellis_rs::client::MemoryAuthorizationContextStore::default(),
-            ),
-        },
-    )
-    .await
-}
-
-/// Build device connection and activation options for a runtime-authored test contract.
-pub fn device_connect_options<'a>(
-    trellis_url: &'a str,
-    approval: &'a TrellisTestContractApproval,
-    deployment_id: &'a str,
-    instance_id: &'a str,
-    identity: &'a trellis_rs::auth::DeviceIdentity,
-    authorization_context_store: std::sync::Arc<dyn trellis_rs::client::AuthorizationContextStore>,
-) -> trellis_rs::client::DeviceConnectOptions<'a, trellis_rs::generated::DynamicDeviceContract> {
-    let contract = trellis_rs::client::DeviceContractEvidence::for_test(
-        &approval.participant_id,
-        &approval.participant_digest,
-        &approval.participant_needs_digest,
-        &approval.participant_json,
-        &approval.api_json,
-        &approval.api_digest,
-        &approval
-            .referenced_api_artifacts
-            .iter()
-            .map(|(json, digest)| (json.as_str(), digest.as_str()))
-            .collect::<Vec<_>>(),
-    );
-    trellis_rs::generated::test_device_connect_options(
-        trellis_url,
-        deployment_id,
-        instance_id,
-        contract,
-        &identity.public_identity_key,
-        &identity.identity_seed_base64url,
-        authorization_context_store,
-    )
-}
-
 impl<E: std::fmt::Debug> From<trellis_rs::client::CallError<E>> for TrellisTestError {
     fn from(error: trellis_rs::client::CallError<E>) -> Self {
         Self::GeneratedCall(format!("{error:?}"))
@@ -470,8 +301,6 @@ pub struct TrellisTestRuntimeOptions {
     pub oauth_providers: Map<String, Value>,
     /// Optional NATS user-JWT TTL injected into the platform config.
     pub nats_user_jwt_ttl_ms: Option<u64>,
-    /// Whether an isolated process should use the shared standards-based test OIDC provider.
-    pub use_shared_test_oidc_provider: bool,
     /// Advertise NATS through a rotatable real TCP proxy for reconnect tests.
     pub rotatable_nats_proxy: bool,
 }
@@ -492,7 +321,6 @@ impl TrellisTestRuntimeOptions {
             admin_password: None,
             oauth_providers: Map::new(),
             nats_user_jwt_ttl_ms: None,
-            use_shared_test_oidc_provider: false,
             rotatable_nats_proxy: false,
         }
     }
@@ -843,219 +671,10 @@ impl Drop for TrellisNatsMessageObserver {
     }
 }
 
-fn shared_runtime_assignment() -> Result<
-    Option<(
-        SharedRuntimeManifest,
-        SharedTenantManifest,
-        SharedRuntimeAssignment,
-    )>,
-    TrellisTestError,
-> {
-    let Some(path) = std::env::var_os(SHARED_RUNTIME_ENV) else {
-        return Ok(None);
-    };
-    let tenant_id = std::thread::current()
-        .name()
-        .map(str::to_string)
-        .ok_or_else(|| {
-            TrellisTestError::UnexpectedResponse(
-                "shared Rust integration runtime requires a named test thread".to_string(),
-            )
-        })?;
-    let manifest: SharedRuntimeManifest = serde_json::from_slice(&fs::read(path)?)?;
-    if manifest.version != 5 {
-        return Err(TrellisTestError::UnexpectedResponse(format!(
-            "unsupported shared Rust integration runtime manifest version {}",
-            manifest.version
-        )));
-    }
-    let assignment = manifest
-        .assignments
-        .get(&tenant_id)
-        .cloned()
-        .ok_or_else(|| {
-            TrellisTestError::UnexpectedResponse(format!(
-                "shared Rust integration runtime has no assignment for {tenant_id}"
-            ))
-        })?;
-    let tenant = manifest
-        .tenants
-        .get(&assignment.tenant_id)
-        .cloned()
-        .ok_or_else(|| {
-            TrellisTestError::UnexpectedResponse(format!(
-                "shared Rust integration runtime has no tenant {}",
-                assignment.tenant_id
-            ))
-        })?;
-    Ok(Some((manifest, tenant, assignment)))
-}
-
-fn materialize_shared_runtime(
-    workdir: &Path,
-    shared: &SharedRuntimeManifest,
-    tenant: &SharedTenantManifest,
-    options: &LocalTrellisBootstrapOptions,
-) -> Result<LocalTrellisBootstrapManifest, TrellisTestError> {
-    let shared_nats = shared.workdir.join("nats");
-    let local_nats = workdir.join("nats");
-    fs::create_dir_all(local_nats.join("creds"))?;
-    fs::create_dir_all(local_nats.join("secrets"))?;
-    fs::create_dir_all(workdir.join("trellis/data"))?;
-    trellis_local_bootstrap::generate_local_authorization_trust(
-        &workdir.join("trellis/auth"),
-        "trellis-test",
-    )?;
-
-    for (source, target) in [
-        (&tenant.paths.nats_config, "nats.conf"),
-        (&tenant.paths.jwt_config, "jwt.conf"),
-        (&tenant.paths.creds.system_service, "creds/system.creds"),
-        (&tenant.paths.creds.auth_service, "creds/auth-auth.creds"),
-        (
-            &tenant.paths.creds.trellis_service,
-            "creds/trellis-auth.creds",
-        ),
-        (
-            &tenant.paths.secrets.auth_issuer_signing,
-            "secrets/auth-issuer-signing.seed",
-        ),
-        (
-            &tenant.paths.secrets.auth_target_signing,
-            "secrets/auth-target-signing.seed",
-        ),
-        (
-            &tenant.paths.secrets.auth_callout_x_key,
-            "secrets/auth-sx.seed",
-        ),
-    ] {
-        fs::copy(shared_nats.join(source), local_nats.join(target))?;
-    }
-    fs::write(
-        workdir.join("trellis/session.seed"),
-        format!("{}\n", random_session_seed()),
-    )?;
-
-    let manifest = LocalTrellisBootstrapManifest {
-        version: 1,
-        nats: LocalNatsBootstrapManifest {
-            version: 1,
-            nats_box_image: String::new(),
-            operator_name: "Qlever".to_string(),
-            server_name: "trellis-test".to_string(),
-            accounts: BootstrapAccounts {
-                system: shared_account(&tenant.accounts.system),
-                auth: shared_account(&tenant.accounts.auth),
-                trellis: shared_account(&tenant.accounts.trellis),
-            },
-            users: BootstrapUsers {
-                system: shared_user(&tenant.users.system),
-                auth_service: shared_user(&tenant.users.auth_service),
-                trellis_service: shared_user(&tenant.users.trellis_service),
-            },
-            paths: BootstrapPaths {
-                nats_config: "nats.conf".to_string(),
-                jwt_config: "jwt.conf".to_string(),
-                account_jwts: BTreeMap::new(),
-                creds: BTreeMap::from([
-                    (
-                        "systemService".to_string(),
-                        "creds/system.creds".to_string(),
-                    ),
-                    (
-                        "authService".to_string(),
-                        "creds/auth-auth.creds".to_string(),
-                    ),
-                    (
-                        "trellisService".to_string(),
-                        "creds/trellis-auth.creds".to_string(),
-                    ),
-                ]),
-                secrets: BTreeMap::from([
-                    (
-                        "authIssuerSigning".to_string(),
-                        "secrets/auth-issuer-signing.seed".to_string(),
-                    ),
-                    (
-                        "authTargetSigning".to_string(),
-                        "secrets/auth-target-signing.seed".to_string(),
-                    ),
-                    (
-                        "authCalloutXKey".to_string(),
-                        "secrets/auth-sx.seed".to_string(),
-                    ),
-                ]),
-                auth_callout_env: "auth-callout.env".to_string(),
-            },
-        },
-        paths: LocalTrellisBootstrapPaths {
-            nats_manifest: "nats/manifest.json".to_string(),
-            trellis_config: "trellis/config.toml".to_string(),
-            session_seed: "trellis/session.seed".to_string(),
-            authorization_root_seed: "trust/authorization-root.seed".to_string(),
-            trellis_data: "trellis/data".to_string(),
-        },
-        urls: LocalTrellisBootstrapUrls {
-            public_origin: options.public_origin.clone(),
-            nats_server: shared.nats_url.clone(),
-            nats_websocket: shared.websocket_url.clone(),
-            oauth_redirect_base: format!("{}/auth/callback", options.public_origin),
-        },
-    };
-    fs::write(
-        workdir.join(&manifest.paths.nats_manifest),
-        serde_json::to_string_pretty(&manifest.nats)? + "\n",
-    )?;
-    Ok(manifest)
-}
-
-fn shared_account(identity: &SharedIdentity) -> PublicAccount {
-    PublicAccount {
-        name: identity.name.clone(),
-        public_key: identity.public_key.clone(),
-    }
-}
-
-fn shared_user(identity: &SharedIdentity) -> PublicUser {
-    PublicUser {
-        name: identity.name.clone(),
-        public_key: identity.public_key.clone(),
-    }
-}
-
 impl TrellisTestRuntime {
     /// Start an isolated NATS container and repo-local Trellis control plane.
-    pub async fn start(mut options: TrellisTestRuntimeOptions) -> Result<Self, TrellisTestError> {
+    pub async fn start(options: TrellisTestRuntimeOptions) -> Result<Self, TrellisTestError> {
         let workdir = IntegrationWorkdir::create(options.keep_workdir)?;
-        let shared_runtime = shared_runtime_assignment()?;
-        if options.use_shared_test_oidc_provider {
-            let issuer = shared_runtime
-                .as_ref()
-                .ok_or_else(|| {
-                    TrellisTestError::UnexpectedResponse(
-                        "shared test OIDC provider requires a shared runtime manifest".to_owned(),
-                    )
-                })?
-                .0
-                .test_oidc_issuer
-                .clone();
-            for provider_id in ["test-oidc", "other-oidc"] {
-                options.oauth_providers.insert(
-                    provider_id.to_owned(),
-                    json!({
-                        "type": "oidc",
-                        "issuer": issuer,
-                        "client_id": "trellis-test-client",
-                        "display_name": "Test OIDC",
-                        "role_claims": ["/roles"],
-                    }),
-                );
-            }
-        }
-        let test_control_rpc = shared_runtime.as_ref().map(|(shared, _, _)| AdminRpcProxy {
-            url: shared.admin_rpc_url.clone(),
-            token: shared.admin_rpc_token.clone(),
-        });
         let mut port_reservation = reserve_local_port()?;
         let port = port_reservation.port()?;
         let trellis_url = format!("http://127.0.0.1:{port}");
@@ -1064,70 +683,19 @@ impl TrellisTestRuntime {
         bootstrap_options.container_runtime = options.container_runtime.to_bootstrap();
         bootstrap_options.trellis_port = port;
         bootstrap_options.public_origin = trellis_url.clone();
-        if let Some((shared, _, _)) = &shared_runtime {
-            bootstrap_options
-                .nats_server_url
-                .clone_from(&shared.nats_url);
-            bootstrap_options
-                .nats_websocket_url
-                .clone_from(&shared.websocket_url);
-        }
-        let manifest = match &shared_runtime {
-            Some((shared, tenant, _)) => {
-                materialize_shared_runtime(workdir.path(), shared, tenant, &bootstrap_options)?
-            }
-            None => trellis_local_bootstrap::generate_local_trellis_bootstrap(&bootstrap_options)?,
-        };
+        let manifest =
+            trellis_local_bootstrap::generate_local_trellis_bootstrap(&bootstrap_options)?;
         fs::write(
             workdir.path().join(WORKDIR_OWNER_MARKER),
             format!("{}\n", std::process::id()),
         )?;
-
-        if let Some((shared, _, assignment)) = &shared_runtime {
-            if assignment.mode == "shared" {
-                return Ok(Self {
-                    workdir,
-                    _port_reservation: None,
-                    nats: None,
-                    nats_proxy: None,
-                    nats_websocket_proxy: None,
-                    retiring_nats_proxy: None,
-                    retiring_nats_websocket_proxy: None,
-                    trellis: None,
-                    trellis_url: shared.trellis_url.clone(),
-                    nats_url: shared.nats_url.clone(),
-                    nats_upstream_url: shared.nats_url.clone(),
-                    nats_websocket_url: shared.websocket_url.clone(),
-                    nats_websocket_upstream_url: shared.websocket_url.clone(),
-                    manifest,
-                    admin_password: shared.admin_password.clone(),
-                    default_deployment: format!("{}-deployment", assignment.namespace),
-                    default_mutable_dev: options.default_mutable_dev,
-                    reconciliation_timeout: options.reconciliation_timeout,
-                    startup_timeout: options.startup_timeout,
-                    shutdown_timeout: options.shutdown_timeout,
-                    trellis_command: options.trellis_command,
-                    admin_rpc: Some(AdminRpcProxy {
-                        url: shared.admin_rpc_url.clone(),
-                        token: shared.admin_rpc_token.clone(),
-                    }),
-                    test_control_rpc,
-                    attached: true,
-                    control_plane_path: shared.control_plane_sqlite_path.clone(),
-                });
-            }
-        }
 
         let mut nats = None;
         let mut nats_proxy = None;
         let mut nats_websocket_proxy = None;
         let mut trellis = None;
         let started = async {
-            let started_nats = if shared_runtime.is_some() {
-                None
-            } else {
-                Some(LocalNatsProcess::start(&workdir)?)
-            };
+            let started_nats = Some(LocalNatsProcess::start(&workdir)?);
             if let Some(started_nats) = &started_nats {
                 bootstrap_options.nats_server_url = started_nats.nats_url();
                 bootstrap_options.nats_websocket_url = started_nats.websocket_url();
@@ -1215,7 +783,7 @@ impl TrellisTestRuntime {
             shutdown_timeout: options.shutdown_timeout,
             trellis_command: options.trellis_command,
             admin_rpc: None,
-            test_control_rpc,
+            test_control_rpc: None,
             attached: false,
             control_plane_path,
         })
@@ -4852,21 +4420,6 @@ impl TrellisTestPortReservation {
     }
 }
 
-/// Host-wide lease for one running Trellis integration-test process.
-#[derive(Debug)]
-pub struct TrellisTestHostSlot {
-    _lock_file: Option<File>,
-    borrowed_case_slot: bool,
-}
-
-impl Drop for TrellisTestHostSlot {
-    fn drop(&mut self) {
-        if self.borrowed_case_slot {
-            BORROWED_CASE_SLOT.store(false, Ordering::Release);
-        }
-    }
-}
-
 /// Configures a test child to receive `SIGTERM` if its parent test process exits.
 pub fn terminate_on_parent_exit(command: &mut Command) {
     #[cfg(target_os = "linux")]
@@ -4889,81 +4442,6 @@ pub fn terminate_on_parent_exit(command: &mut Command) {
                 Ok(())
             });
         }
-    }
-}
-
-/// Acquires an optional host-wide Trellis process slot.
-pub async fn reserve_host_test_slot() -> Result<Option<TrellisTestHostSlot>, TrellisTestError> {
-    if std::env::var_os("TRELLIS_TEST_CASE_SLOT").is_some()
-        && BORROWED_CASE_SLOT
-            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
-            .is_ok()
-    {
-        return Ok(Some(TrellisTestHostSlot {
-            _lock_file: None,
-            borrowed_case_slot: true,
-        }));
-    }
-    reserve_additional_host_test_slot().await
-}
-
-static BORROWED_CASE_SLOT: AtomicBool = AtomicBool::new(false);
-const HOST_SLOT_ACQUIRE_TIMEOUT: Duration = Duration::from_secs(120);
-
-/// Acquires an optional additional host-wide Trellis process slot.
-pub async fn reserve_additional_host_test_slot(
-) -> Result<Option<TrellisTestHostSlot>, TrellisTestError> {
-    let Some(configured) = std::env::var_os("TRELLIS_TEST_HOST_JOBS") else {
-        return Ok(None);
-    };
-    let limit = configured
-        .to_string_lossy()
-        .parse::<usize>()
-        .ok()
-        .filter(|limit| *limit > 0)
-        .ok_or_else(|| {
-            TrellisTestError::UnexpectedResponse(
-                "TRELLIS_TEST_HOST_JOBS must be a positive integer".to_owned(),
-            )
-        })?;
-    let lock_root = std::env::var_os("TRELLIS_TEST_HOST_LOCK_DIR")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| {
-            if cfg!(windows) {
-                std::env::temp_dir()
-            } else {
-                PathBuf::from("/tmp")
-            }
-        })
-        .join("trellis-test-host-slots");
-    fs::create_dir_all(&lock_root)?;
-    let started = std::time::Instant::now();
-    loop {
-        for slot in 0..limit {
-            let lock_path = lock_root.join(format!("{slot}.lock"));
-            if let Some(lock_file) = try_acquire_file_lock(&lock_path)? {
-                return Ok(Some(TrellisTestHostSlot {
-                    _lock_file: Some(lock_file),
-                    borrowed_case_slot: false,
-                }));
-            }
-        }
-        if started.elapsed() >= HOST_SLOT_ACQUIRE_TIMEOUT {
-            let owners = (0..limit)
-                .map(|slot| {
-                    let lock_path = lock_root.join(format!("{slot}.lock"));
-                    let owner = fs::read_to_string(&lock_path)
-                        .map_or_else(|_| "<missing>".to_owned(), |value| value.trim().to_owned());
-                    format!("{}={owner}", lock_path.display())
-                })
-                .collect::<Vec<_>>()
-                .join(", ");
-            return Err(TrellisTestError::UnexpectedResponse(format!(
-                "timed out acquiring a host test slot after {}s: {owners}",
-                HOST_SLOT_ACQUIRE_TIMEOUT.as_secs()
-            )));
-        }
-        tokio::time::sleep(Duration::from_millis(10)).await;
     }
 }
 

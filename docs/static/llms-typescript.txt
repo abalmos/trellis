@@ -62,19 +62,11 @@ Rules:
 - `deno.json` should expose locked API installation through `trellis install`
 - IDL resolution is deterministic from tracked source and exact installed
   canonical API artifacts.
-- service-boundary integration tests can use
-  `@qlever-llc/trellis-test/integration` and
-  `@qlever-llc/trellis-test/integration/runner`: define
-  `trellis.integration.ts` with an explicit `runtime.trellis.command`,
-  `denoTestArgs`, and case descriptors; use `trellisIntegrationTest(...)`,
-  `runtimeScopeForCase(CASE_ID)`, fixed authored participant ids/actions/subjects,
-  case-slugged physical names and state/resource keys, participant approval/provisioning,
-  `TrellisService.connect(...)`, `runtime.connectClient(...)`, and
-  `runtime.captureEvents(...)` when needed. Run isolated cases with `--config`;
-  use shared mode with `--parallel --jobs 1`. Shared cases use one NATS account,
-  Trellis process, and SQLite set; the harness resets stale accepted authority
-  before attached authentication. Higher worker counts are rejected because
-  fixed protocol subjects share that account. `trellis-test` runs NATS as a managed child process from pinned,
+- Service-boundary integration tests start `TrellisTestRuntime` from
+  `@qlever-llc/trellis-test`, register generated service participants, connect
+  services through `TrellisService.connect(...)`, and connect generated callers
+  through `runtime.connectClient(...)`. Use ordinary `deno test` discovery and
+  let each test own and stop its runtime. `trellis-test` runs NATS as a managed child process from pinned,
   checksum-verified nats-server and nsc binaries (cached under
   `TRELLIS_TEST_CACHE_DIR`, default `~/.cache/trellis-test`; first use downloads them, requiring network; every reuse revalidates the cached archive sha256 against the pin and byte-checks the cached binary against a fresh extraction, so corrupted or replaced cache entries are reinstalled, and `sh` must be on `PATH`); no container runtime is
   required.
@@ -310,17 +302,10 @@ For user labels on records that already contain Trellis user ids, declare
 `Auth.Users.Resolve` and pass the explicit ids. Do not request `Auth.Users.List`
 or build app-local profile tables for basic display labels.
 
-For integration tests, prefer `@qlever-llc/trellis-test/integration` over raw
-NATS subjects or hand-built bootstrap responses. Serial runs isolate each
-selected test with the `runtime` option passed to `trellisIntegrationTest(...)`,
-usually imported from the same `trellis.integration.ts` module used by the runner
-config. Shared runs use one NATS account, Trellis runtime, and SQLite set with one
-worker. Keep authored contracts, actions, subjects, and participant identities
-fixed; case-scope only physical deployments, resource keys, durable names, and
-domain records. Configure runtime-wide authority-plan acceptance with the
-top-level `authority.autoAccept` option. Allow migration plans only in tests that
-intentionally cover migrations, using per-approval `allowPlanClassifications` or
-explicit authority-plan helpers.
+For integration tests, use generated participant modules and
+`TrellisTestRuntime` instead of raw NATS subjects or hand-built bootstrap
+responses. Each ordinary Deno test owns its runtime, registers and connects
+participants through public APIs, and stops the runtime in `finally`.
 
 RPC handler `context.afterReply(task)` is only for effects that must run after a
 successful response is published and flushed, such as disconnecting the caller.
@@ -437,8 +422,8 @@ from the generated SDK, for example `OrdersGetHandler`.
 
 ## Schemas and errors
 
-- Use TypeBox for contract wire schemas: RPC input/output, event payloads, feed
-  input/events, operation input/output/progress, and resource declarations.
+- Author contract wire schemas in native `.trellis` IDL. Use TypeBox only for
+  application-local runtime values that are not part of a Trellis contract.
 - Event subject `params` are JSON Pointers into the event payload. They must
   resolve to string, number, or integer-compatible schema nodes. For `anyOf` or
   `oneOf` event payload schemas, every branch must contain each routed pointer.
@@ -449,10 +434,6 @@ from the generated SDK, for example `OrdersGetHandler`.
   `buildPageResponse(...)`. Stable ID/keyset pagination uses `CursorQuerySchema`,
   `CursorPageSchema(item)`, `CursorPageResponseSchema<TItem>`,
   `normalizeCursorQuery(...)`, and `buildCursorPage(...)`.
-- Use `withTrellisValidation(schema, extension)` from
-  `@qlever-llc/trellis/contracts` to attach UI-facing `x-trellis-validation`
-  metadata to TypeBox schema nodes. The metadata is purely for UX and does not
-  change validation behavior.
 - When every pre-handler schema validation failure is annotated, Trellis returns
   `SchemaValidationError` instead of `ValidationError` — the handler does not
   run in either case. `SchemaValidationError` carries an `issues[]` array with

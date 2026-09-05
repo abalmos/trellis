@@ -8,7 +8,7 @@ const destination = join(
 );
 
 const build = new Deno.Command(Deno.execPath(), {
-  args: ["task", "build:static:prebuilt"],
+  args: ["task", "build"],
   cwd: webDir,
   env: {
     TRELLIS_WEB_BUILD_DIR: buildDir,

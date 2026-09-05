@@ -1,3 +1,17 @@
+api "trellis-app.portal@v1" {
+  version "1.0.0";
+  display_name "Trellis Device Activation";
+  description "Trellis built-in app for authenticated device activation over the Auth.DeviceUserAuthorities.Resolve operation.";
+}
+
+participant "trellis-app.portal@v1" app {
+  implements "trellis-app.portal@v1";
+  use required trellis_auth_v1 "trellis.auth@v1" {
+    invoke operation "Auth.DeviceUserAuthorities.Resolve";
+    observe operation "Auth.DeviceUserAuthorities.Resolve";
+  }
+}
+
 api "trellis-app.console@v1" {
   version "1.0.0";
   display_name "Trellis Console";

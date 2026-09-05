@@ -4,9 +4,9 @@ Declare the payload model and event on the owned API:
 
 ```trellis
 model OrderShippedEvent { orderId: string; }
-event Orders.Shipped {
-  event = OrderShippedEvent;
-  capability publish = ["orders.ship"];
+event "Orders.Shipped" {
+  version "v1";
+  payload OrderShippedEvent;
 }
 ```
 

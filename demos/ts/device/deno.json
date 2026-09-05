@@ -4,6 +4,8 @@
   "version": "0.0.0",
   "exports": "./src/main.ts",
   "tasks": {
+    "update": "../../../rust/target/debug/trellis update",
+    "generate": "../../../rust/target/debug/trellis generate",
     "check": "deno check src/main.ts",
     "start": "deno run --allow-env --allow-net --allow-read --allow-write --allow-sys src/main.ts"
   }

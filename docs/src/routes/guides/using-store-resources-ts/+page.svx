@@ -3,9 +3,14 @@
 Declare the store on the participant and generate the project:
 
 ```trellis
-participant acme.documents@v1 service {
-  implements acme.documents-api@v1;
-  store documents { optional = false; }
+participant "acme.documents@v1" service {
+  implements "acme.documents-api@v1";
+  store documents {
+    purpose "Document objects.";
+    ttl_ms 0;
+    max_object_bytes 1048576;
+    max_total_bytes 104857600;
+  }
 }
 ```
 

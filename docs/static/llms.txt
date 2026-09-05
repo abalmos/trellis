@@ -304,19 +304,10 @@ commands.
 - TypeScript handlers may return source `defineError(...)` instances when their
   serialized data matches the declared generated SDK error data; generated SDK
   aliases type those returns structurally on the handler side.
-- For Deno-first TypeScript service integration tests, prefer the public
-  `@qlever-llc/trellis-test/integration` helpers and
-  `/integration/runner`. External service repos provide
-  `trellis.integration.ts` with an explicit `runtime.trellis.command`,
-  `denoTestArgs`, and case descriptors. Tests use
-  `trellisIntegrationTest(...)`, `runtimeScopeForCase(CASE_ID)`, fixed authored
-  participant ids/actions/subjects, case-slugged physical names/resource keys, participant approval/provisioning,
-  `TrellisService.connect(...)`, and `runtime.connectClient(...)`. Serial runs
-  call the runner with `--config`; shared runs add `--parallel --jobs 1`.
-  Shared cases use one NATS account, Trellis process, and SQLite set; the harness
-  resets stale accepted authority before attached authentication. Higher worker
-  counts are rejected because fixed protocol subjects share that account. Keep
-  one case per module. `trellis-test` runs NATS as a managed child process
+- For Deno-first TypeScript service integration tests, use
+  `TrellisTestRuntime` from `@qlever-llc/trellis-test`. Ordinary Deno tests
+  register generated participants, connect through public service and client
+  APIs, and own and stop one runtime per test. `trellis-test` runs NATS as a managed child process
   from pinned, checksum-verified nats-server and nsc binaries (cached under
   `TRELLIS_TEST_CACHE_DIR`, default `~/.cache/trellis-test`; first use downloads them, requiring network; every reuse revalidates the cached archive sha256 against the pin and byte-checks the cached binary against a fresh extraction, so corrupted or replaced cache entries are reinstalled, and `sh` must be on `PATH`); no container runtime is
   required.

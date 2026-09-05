@@ -31,6 +31,7 @@
     "npm:@nats-io/jwt@^0.0.10-5": "0.0.10-5",
     "npm:@nats-io/kv@3.3.1": "3.3.1",
     "npm:@nats-io/kv@^3.3.1": "3.3.1",
+    "npm:@nats-io/nats-core@3.3.1": "3.3.1",
     "npm:@nats-io/nats-core@^3.3.1": "3.4.0",
     "npm:@nats-io/nkeys@2.0.3": "2.0.3",
     "npm:@nats-io/nkeys@^2.0.3": "2.0.3",
@@ -2665,8 +2666,12 @@
       }
     },
     "links": {
-      "jsr:@qlever-llc/trellis-app-console@0.0.0": {},
-      "jsr:@trellis-sdk/trellis.core@1.0.0": {}
+      "jsr:@trellis-sdk/trellis.auth@1.0.0": {},
+      "jsr:@trellis-sdk/trellis.core@1.0.0": {},
+      "jsr:@trellis-sdk/trellis.eventlog@1.0.0": {},
+      "jsr:@trellis-sdk/trellis.health@1.0.0": {},
+      "jsr:@trellis-sdk/trellis.jobs@1.0.0": {},
+      "jsr:@trellis-sdk/trellis.state@1.0.0": {}
     }
   }
 }

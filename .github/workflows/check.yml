@@ -18,27 +18,10 @@ env:
   DENO_VERSION: 2.9.4
   CARGO_TERM_COLOR: always
   RUSTUP_INIT_SKIP_PATH_CHECK: "yes"
-  TRELLIS_TEST_HOST_JOBS: ${{ vars.TRELLIS_TEST_HOST_JOBS }}
 
 jobs:
-  configuration:
-    name: Check configuration
-    runs-on: [self-hosted, Linux, X64]
-    timeout-minutes: 2
-    steps:
-      - name: Require a positive host-wide live-case bound
-        shell: bash
-        run: |
-          case "${TRELLIS_TEST_HOST_JOBS:-}" in
-            ''|*[!0-9]*|0)
-              echo "TRELLIS_TEST_HOST_JOBS must be configured as a positive repository variable" >&2
-              exit 1
-              ;;
-          esac
-
   install:
     name: Install generated artifacts
-    needs: configuration
     runs-on: [self-hosted, Linux, X64]
     timeout-minutes: 20
     outputs:
@@ -146,12 +129,6 @@ jobs:
         with:
           name: check-generated
 
-      - name: Download embedded browser apps
-        uses: actions/download-artifact@v4
-        with:
-          name: check-portal
-          path: rust/crates/runtime/generated
-
       - name: Download protocol WASM
         uses: actions/download-artifact@v4
         with:
@@ -217,17 +194,17 @@ jobs:
         uses: actions/cache@v4
         with:
           path: rust/target
-          key: cargo-${{ steps.rust.outputs.cachekey }}-${{ runner.os }}-${{ runner.arch }}-static-production-clippy-lib-tests-${{ hashFiles('rust/**/Cargo.toml', 'rust/**/Cargo.lock', '.cargo/config.toml', 'rust/.cargo/config.toml') }}
+          key: cargo-${{ steps.rust.outputs.cachekey }}-${{ runner.os }}-${{ runner.arch }}-workspace-all-targets-${{ hashFiles('rust/**/Cargo.toml', 'rust/**/Cargo.lock', '.cargo/config.toml', 'rust/.cargo/config.toml') }}
 
       - name: Check formatting
         run: |
           cargo fmt --manifest-path rust/Cargo.toml --all --check
 
-      - name: Lint production Rust
-        run: cargo clippy --manifest-path rust/Cargo.toml --workspace --lib --bins -- -D warnings
+      - name: Lint Rust
+        run: cargo clippy --manifest-path rust/Cargo.toml --workspace --all-targets -- -D warnings
 
-      - name: Test Rust libraries
-        run: cargo test --manifest-path rust/Cargo.toml --workspace --lib
+      - name: Test Rust workspace
+        run: cargo test --manifest-path rust/Cargo.toml --workspace
 
   rust-tooling:
     name: Rust tooling (${{ matrix.name }})
@@ -296,18 +273,15 @@ jobs:
           ts/packages/trellis-svelte/src/context.svelte.ts
           ts/packages/trellis-test/index.ts
 
+      - name: Check TypeScript integration
+        run: deno task -c ts/integration/deno.json check
+
       - name: Test TypeScript packages
         run: deno task -c ts/deno.json test
 
-      - name: Check live runners
-        run: >-
-          deno check -c ts/deno.json
-          integration/live_runner.ts
-          rust/crates/trellis-test/integration_runner.ts
-
-  live-build:
-    name: Build live executables
-    needs: [install, wasm, portal]
+  demos:
+    name: Demo consumers
+    needs: [install, wasm]
     runs-on: [self-hosted, Linux, X64]
     timeout-minutes: 20
     steps:
@@ -319,11 +293,16 @@ jobs:
         with:
           name: check-generated
 
-      - name: Download embedded browser apps
-        uses: actions/download-artifact@v4
+      - name: Expose installed Cargo binaries
+        run: echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Set up Deno
+        uses: denoland/setup-deno@v2
         with:
-          name: check-portal
-          path: rust/crates/runtime/generated
+          deno-version: ${{ env.DENO_VERSION }}
 
       - name: Download protocol WASM
         uses: actions/download-artifact@v4
@@ -331,38 +310,37 @@ jobs:
           name: check-protocol-wasm
           path: ts/packages/trellis/auth/protocol_wasm
 
-      - name: Expose installed Cargo binaries
-        run: echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+      - name: Build repository CLI
+        run: cargo build --manifest-path rust/Cargo.toml -p trellis-cli
 
-      - name: Set up Rust
-        id: rust
-        uses: dtolnay/rust-toolchain@stable
+      - name: Check TypeScript service demo
+        working-directory: demos/ts/service
+        run: |
+          deno task generate
+          deno task check
 
-      - name: Reset isolated live build state
-        run: rm -rf rust/target/check-live
+      - name: Check TypeScript device demo
+        working-directory: demos/ts/device
+        run: |
+          deno task update
+          deno task generate
+          deno task check
 
-      - name: Cache live release build
-        uses: actions/cache@v4
-        with:
-          path: rust/target/check-live
-          key: cargo-${{ steps.rust.outputs.cachekey }}-${{ runner.os }}-${{ runner.arch }}-release-test-support-runtime-internals-${{ hashFiles('rust/**/Cargo.toml', 'rust/**/Cargo.lock', '.cargo/config.toml', 'rust/.cargo/config.toml') }}
+      - name: Check Field Ops app demo
+        working-directory: demos/app
+        run: |
+          deno task update
+          deno task generate
+          deno task check
+          deno task build
 
-      - name: Set up Deno
-        uses: denoland/setup-deno@v2
-        with:
-          deno-version: ${{ env.DENO_VERSION }}
+      - name: Check Rust service demo
+        working-directory: demos/rust/service
+        run: make generate check
 
-      - name: Build live executables
-        env:
-          CARGO_TARGET_DIR: ${{ github.workspace }}/rust/target/check-live
-        run: deno run -A -c ts/deno.json integration/live_runner.ts --build-only
-
-      - name: Upload live executables
-        uses: actions/upload-artifact@v4
-        with:
-          name: check-live-executables
-          path: dist/integration-runtime
-          retention-days: 1
+      - name: Check Rust device demo
+        working-directory: demos/rust/device
+        run: make update generate check
 
   live:
     name: Live integration
@@ -398,12 +376,18 @@ jobs:
         with:
           deno-version: ${{ env.DENO_VERSION }}
 
-      - name: Run live integration suite
-        run: deno run -A -c ts/deno.json integration/live_runner.ts
+      - name: Build Trellis server
+        run: cargo build --manifest-path rust/Cargo.toml -p trellis-server
+
+      - name: Run Rust live integration
+        run: cargo test --manifest-path rust/Cargo.toml -p trellis-rs --features live-integration --test integration -- --test-threads=1
+
+      - name: Run TypeScript live integration
+        run: deno test -A -c ts/integration/deno.json ts/integration
 
   ui-hosting:
     name: Built-in UI hosting
-    needs: [install, wasm, live-build]
+    needs: [install, wasm, portal]
     runs-on: [self-hosted, Linux, X64]
     timeout-minutes: 20
     steps:
@@ -415,28 +399,31 @@ jobs:
         with:
           name: check-generated
 
+      - name: Download embedded browser apps
+        uses: actions/download-artifact@v4
+        with:
+          name: check-portal
+          path: rust/crates/runtime/generated
+
       - name: Download protocol WASM
         uses: actions/download-artifact@v4
         with:
           name: check-protocol-wasm
           path: ts/packages/trellis/auth/protocol_wasm
 
-      - name: Download live executables
-        uses: actions/download-artifact@v4
-        with:
-          name: check-live-executables
-          path: dist/integration-runtime
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
 
       - name: Set up Deno
         uses: denoland/setup-deno@v2
         with:
           deno-version: ${{ env.DENO_VERSION }}
 
+      - name: Build Trellis server
+        run: cargo build --manifest-path rust/Cargo.toml -p trellis-server
+
       - name: Test built-in UI hosting
         working-directory: ts
         env:
-          TRELLIS_TEST_SERVER_BIN: ${{ github.workspace }}/dist/integration-runtime/trellis-server
-          TRELLIS_TEST_PREBUILT_ONLY: "1"
-        run: |
-          chmod +x "$TRELLIS_TEST_SERVER_BIN"
-          deno task test:browser:ui-hosting
+          TRELLIS_TEST_SERVER_BIN: ${{ github.workspace }}/rust/target/debug/trellis-server
+        run: deno task test:browser:ui-hosting

@@ -356,13 +356,10 @@ idempotent.
 
 - Test runtime-observable behavior with live integration tests. Do not use fake
   NATS, fake Trellis runtimes, fake auth, or fake generated clients.
-- Shared-host integration cases use one NATS account, Trellis process, and SQLite
-  set with one worker. Keep authored contract ids, actions, subjects, and
-  participant identities fixed; case-scope only physical deployments, resources,
-  durable names, state keys, and domain records.
-- In the Trellis repository, the complete TypeScript and Rust live matrices run
-  against one host with `deno run -A -c ts/deno.json integration/live_runner.ts`.
-  The harness runs NATS as a managed child process from pinned, checksum-verified
+- Each live test owns a real runtime through `TrellisTestRuntime`; use generated
+  participants and public APIs to prove caller-visible behavior. Keep IDL source
+  and `trellis.toml` at the consuming project's root.
+- The test runtime runs NATS as a managed child process from pinned, checksum-verified
   nats-server and nsc binaries (cached under `TRELLIS_TEST_CACHE_DIR`, default
   `~/.cache/trellis-test`; first use downloads them, requiring network; every reuse revalidates the cached archive sha256 against the pin and byte-checks the cached binary against a fresh extraction, so corrupted or replaced cache entries are reinstalled, and `sh`
   must be on `PATH`); no container runtime is required.
@@ -391,9 +388,8 @@ idempotent.
   (`trellis-bundle:/etc/trellis:ro,Z`,
   `trellis-state:/var/lib/trellis:rw,Z`), and run `trellis-server --system
   --local-nats=/usr/local/bin/nats-server`.
-- Add live interoperability and runtime coverage as ordinary discovered Rust or
-  Deno tests. Run them through `integration/live_runner.ts`; separate test
-  inventories and hidden skips are forbidden.
+- Run live interoperability and runtime coverage as ordinary `cargo test` or
+  `deno test` tests; separate runners, inventories, and hidden skips are forbidden.
 - Format changed Rust files and use focused checks in the inner loop. The release
   gate runs Clippy, curated pure tests, workspace Rustdoc with warnings denied,
   workspace doctests exactly once, and verifies lint-policy participation for

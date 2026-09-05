@@ -1,12 +1,9 @@
 format = 1
 
-[registries.trellis]
-prefix = "ghcr.io/qlever-llc/trellis-apis"
-
 [apis."demo.service@v1"]
 version = "1.0.0"
 path = "../service"
 
 [apis."trellis.state@v1"]
-version = "^1.0.0"
-registry = "trellis"
+version = "1.0.0"
+path = "../../../rust/crates/runtime"

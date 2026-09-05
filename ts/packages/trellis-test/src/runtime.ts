@@ -1,6 +1,3 @@
-import type { ConsumerInfo } from "@nats-io/jetstream";
-import { Kvm } from "@nats-io/kv";
-import { connect, credsAuthenticator } from "@nats-io/transport-deno";
 import {
   type ClientAuthContinuation,
   type ClientAuthRequiredContext,
@@ -12,7 +9,6 @@ import { recordTrellisDuration } from "@qlever-llc/trellis/telemetry";
 import { dirname, join } from "@std/path";
 
 import { TrellisTestAdminAutomation } from "./admin_client.ts";
-import type { LocalNatsBootstrapManifest } from "./nats_bootstrap.ts";
 import {
   removeStaleMarkedDirectories,
   writeTrellisTestOwnerMarker,
@@ -24,12 +20,7 @@ import {
   reserveLocalPort,
   writeTrellisConfig,
 } from "./control_plane_config.ts";
-import { TrellisControlPlaneSqlite } from "./control_plane_sqlite.ts";
 import { NatsTestContainer } from "./nats_container.ts";
-import type {
-  JetStreamAckObserver,
-  NatsMessageObserver,
-} from "./nats_container.ts";
 import { sqliteMemoryUrl as sqliteMemoryUrlHelper } from "./temp.ts";
 import {
   startTrellisProcess,
@@ -41,11 +32,8 @@ import type {
   TrellisTestClientKey,
   TrellisTestClientParticipant,
   TrellisTestConnectedClient,
-  TrellisTestControlPlane,
   TrellisTestParticipantApproval,
   TrellisTestParticipantLike,
-  TrellisTestRawAuthConnectionPresence,
-  TrellisTestRawStateEntry,
   TrellisTestRuntimeStartOptions,
   TrellisTestServiceKey,
   WaitForOptions,
@@ -210,7 +198,6 @@ export class TrellisTestRuntime implements AsyncDisposable {
       expectedDesiredVersion?: number;
     }): Promise<unknown>;
   };
-  readonly controlPlane?: TrellisTestControlPlane;
   #controlPlane: TrellisProcessHandle | undefined;
   #nats: NatsTestContainer;
   #admin: TrellisTestAdminAutomation;
@@ -234,7 +221,6 @@ export class TrellisTestRuntime implements AsyncDisposable {
     configPath?: string;
     config?: ReturnType<typeof buildControlPlaneConfig>;
     websocketProxy?: TcpProxy;
-    controlPlaneSqlitePath?: string;
     trellisOptions?: TrellisTestRuntimeStartOptions["trellis"];
     nats: NatsTestContainer;
     controlPlane?: TrellisProcessHandle;
@@ -255,11 +241,6 @@ export class TrellisTestRuntime implements AsyncDisposable {
     this.#websocketProxy = args.websocketProxy;
     this.#trellisOptions = args.trellisOptions;
     this.#admin = args.admin;
-    if (args.controlPlaneSqlitePath !== undefined) {
-      this.controlPlane = {
-        sqlite: new TrellisControlPlaneSqlite(args.controlPlaneSqlitePath),
-      };
-    }
     this.deployments = {
       create: ({ id, kind }) =>
         this.#admin.createDeployment({
@@ -458,7 +439,6 @@ export class TrellisTestRuntime implements AsyncDisposable {
         configPath,
         config,
         websocketProxy,
-        controlPlaneSqlitePath: `${config.storage.dbPath}.platform`,
         trellisOptions: options.trellis,
         nats,
         controlPlane: startedControlPlane,
@@ -474,73 +454,6 @@ export class TrellisTestRuntime implements AsyncDisposable {
       }
       throw error;
     }
-  }
-
-  /** @internal Starts the shared integration host after one-time authority cleanup. */
-  static async startIntegrationHost(
-    options: TrellisTestRuntimeStartOptions,
-  ): Promise<TrellisTestRuntime> {
-    const runtime = await TrellisTestRuntime.start(options);
-    try {
-      await runtime.#admin.resetAcceptedIntegrationAuthorities();
-      return runtime;
-    } catch (error) {
-      await runtime.stop();
-      throw error;
-    }
-  }
-
-  /** Attaches worker-local clients and admin automation to a shared Trellis host. */
-  static async attach(args: {
-    trellisUrl: string;
-    natsUrl: string;
-    websocketUrl: string;
-    workdir: string;
-    manifest: LocalNatsBootstrapManifest;
-    adminPassword: string;
-    adminRpcProxy: { url: string; token: string };
-    deployment: string;
-    timeouts?: TrellisTestRuntimeStartOptions["timeouts"];
-  }): Promise<TrellisTestRuntime> {
-    const timeouts = {
-      startupMs: args.timeouts?.startupMs ?? 30_000,
-      reconciliationMs: args.timeouts?.reconciliationMs ?? 5_000,
-      waitForMs: args.timeouts?.waitForMs ?? 5_000,
-      shutdownMs: args.timeouts?.shutdownMs ?? 5_000,
-    };
-    const nats = await NatsTestContainer.attach({
-      workdir: args.workdir,
-      natsUrl: args.natsUrl,
-      websocketUrl: args.websocketUrl,
-      manifest: args.manifest,
-    });
-    const admin = new TrellisTestAdminAutomation({
-      trellisUrl: args.trellisUrl,
-      adminPassword: args.adminPassword,
-      defaultDeployment: args.deployment,
-      reconciliationMs: timeouts.reconciliationMs,
-      autoAccept: ["initial", "update"],
-      getBootstrapUrl: () =>
-        Promise.reject(new Error("shared host is already bootstrapped")),
-      bootstrapComplete: true,
-      rpcProxy: args.adminRpcProxy,
-    });
-    const runtime = new TrellisTestRuntime({
-      trellisUrl: args.trellisUrl,
-      workdir: args.workdir,
-      deployment: args.deployment,
-      keepWorkdir: true,
-      ownsWorkdir: false,
-      timeouts,
-      nats,
-      admin,
-    });
-    return runtime;
-  }
-
-  /** @internal Forwards one low-level Auth RPC over the host admin session. */
-  callAdminRpc(method: string, input: unknown): Promise<unknown> {
-    return this.#admin.callAdminRpc(method, input);
   }
 
   /** Registers a service contract and creates a service instance key. */
@@ -596,8 +509,6 @@ export class TrellisTestRuntime implements AsyncDisposable {
 
   /**
    * Completes a test app/client auth flow through runtime admin automation.
-   * Used by the parallel integration runner coordinator to proxy auth flows
-   * from worker processes.
    */
   async completeClientAuth(
     ctx: ClientAuthRequiredContext,
@@ -658,86 +569,6 @@ export class TrellisTestRuntime implements AsyncDisposable {
   /** Drains the underlying NATS connection. */
   async drain(): Promise<void> {
     await this.#nats.nc.drain();
-  }
-
-  /** Lists JetStream consumers on the scratch NATS `trellis` event stream. */
-  async listTrellisJetStreamConsumers(): Promise<ConsumerInfo[]> {
-    return await this.#nats.listTrellisJetStreamConsumers();
-  }
-
-  /** Deletes a JetStream consumer from the scratch NATS server by stream and durable/name. */
-  async deleteJetStreamConsumer(
-    stream: string,
-    name: string,
-  ): Promise<boolean> {
-    return await this.#nats.deleteJetStreamConsumer(stream, name);
-  }
-
-  /** Seeds one raw auth connection-presence KV entry for malformed-entry tests. */
-  async seedRawAuthConnectionPresence(
-    args: TrellisTestRawAuthConnectionPresence,
-  ): Promise<void> {
-    const nc = await connect({
-      servers: this.#nats.natsUrl,
-      authenticator: credsAuthenticator(
-        await Deno.readFile(
-          join(this.workdir, "nats", "creds", "auth-auth.creds"),
-        ),
-      ),
-    });
-    try {
-      const kv = await new Kvm(nc).open("trellis_connections");
-      await kv.put(args.key, JSON.stringify(args.value));
-    } finally {
-      await nc.close().catch(() => undefined);
-    }
-  }
-
-  /** Seeds one raw state KV entry for malformed-entry tests. */
-  async seedRawStateEntry(args: TrellisTestRawStateEntry): Promise<void> {
-    const nc = await connect({
-      servers: this.#nats.natsUrl,
-      authenticator: credsAuthenticator(
-        await Deno.readFile(
-          join(this.workdir, "nats", "creds", "auth-auth.creds"),
-        ),
-      ),
-    });
-    try {
-      const kv = await new Kvm(nc).open("trellis_state");
-      await kv.put(args.key, JSON.stringify(args.value));
-    } finally {
-      await nc.close().catch(() => undefined);
-    }
-  }
-
-  /** Publish one synthetic immutable revocation for live provider-watch tests. */
-  async publishAuthorizationRevocation(
-    contextDigest: string,
-    value: Record<string, unknown>,
-  ): Promise<void> {
-    const store = await new Kvm(this.#nats.nc).open(
-      "trellis_authorization_contexts",
-    );
-    await store.put(
-      `revocation.${contextDigest}`,
-      new TextEncoder().encode(JSON.stringify(value)),
-    );
-  }
-
-  /** Observes JetStream ACK reply frames on the scratch NATS server. */
-  async startJetStreamAckObserver(
-    subject?: string,
-  ): Promise<JetStreamAckObserver> {
-    return await this.#nats.startJetStreamAckObserver(subject);
-  }
-
-  /** Observes raw NATS messages with selected headers on the scratch NATS server. */
-  async startNatsMessageObserver(
-    subject: string,
-    headerNames: readonly string[] = [],
-  ): Promise<NatsMessageObserver> {
-    return await this.#nats.startNatsMessageObserver(subject, headerNames);
   }
 
   /** Restarts only the Trellis control-plane process, preserving workdir, SQLite state, and NATS. */

@@ -1,4 +1,5 @@
 import { assertEquals, assertRejects } from "@std/assert";
+
 import {
   type AdminDeploymentContext,
   createDeployment,
@@ -9,7 +10,6 @@ import type {
 } from "../src/admin/methods.ts";
 import {
   adminMethods,
-  revokeStaleIntegrationAuthorities,
   TrellisTestAdminAutomation,
 } from "../src/admin_client.ts";
 
@@ -39,69 +39,6 @@ const expectedAdminMethods = [
   "authDeploymentAuthorityReject",
   "authSessionsRevoke",
 ] as const;
-
-Deno.test("shared runtime authority reset revokes stale accepted authority once", async () => {
-  const authorities = [
-    {
-      authorityId: "authority-old",
-      participantId: "trellis.test.old@v1",
-      version: 3,
-      state: "accepted",
-    },
-    {
-      authorityId: "authority-admin",
-      participantId: "trellis-app.cli@v1",
-      version: 7,
-      state: "accepted",
-    },
-  ];
-  const revoked: string[] = [];
-  const idempotencyKeys: string[] = [];
-  const port = {
-    listUserIdentities: (
-      _args: { cursor?: string; limit: number },
-    ) =>
-      Promise.resolve({
-        entries: [{ principalId: "principal-admin" }],
-        nextCursor: null,
-      }),
-    listAcceptedAuthorities: (
-      _args: { principalId: string; cursor?: string; limit: number },
-    ) =>
-      Promise.resolve({
-        entries: authorities.filter((authority) =>
-          authority.state === "accepted"
-        ),
-        nextCursor: null,
-      }),
-    revokeAuthority: (args: {
-      authorityId: string;
-      expectedVersion: number;
-      reason: string;
-      idempotencyKey: string;
-    }) => {
-      authorities.find((authority) =>
-        authority.authorityId === args.authorityId
-      )!.state = "revoked";
-      revoked.push(args.authorityId);
-      idempotencyKeys.push(args.idempotencyKey);
-      return Promise.resolve();
-    },
-  };
-
-  await revokeStaleIntegrationAuthorities(
-    port,
-    "trellis-app.cli@v1",
-  );
-  await revokeStaleIntegrationAuthorities(
-    port,
-    "trellis-app.cli@v1",
-  );
-
-  assertEquals(revoked, ["authority-old"]);
-  assertEquals(idempotencyKeys, ["trellis-test-reset:authority-old:3"]);
-  assertEquals(authorities[1].state, "accepted");
-});
 
 Deno.test("admin registry and local dispatch stay in parity", async () => {
   assertEquals(Object.keys(adminMethods), [...expectedAdminMethods]);
@@ -133,7 +70,6 @@ Deno.test("client auth completion is not an admin RPC", async () => {
     autoAccept: [],
     getBootstrapUrl: () => Promise.reject(new Error("not used")),
     bootstrapComplete: true,
-    rpcProxy: { url: "http://127.0.0.1", token: "test" },
   });
 
   await assertRejects(

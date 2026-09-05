@@ -368,21 +368,10 @@ Rules:
 - Service repos author APIs and participants in `contract.trellis`, run
   `trellis update` for dependency changes and `trellis generate` for IDL changes,
   and connect only through their materialized generated participant facade.
-- Deno-first TypeScript service repos can use
-  `@qlever-llc/trellis-test/integration` and
-  `@qlever-llc/trellis-test/integration/runner` for out-of-tree integration
-  tests that need a real Trellis runtime. Add `trellis.integration.ts` with an
-  explicit `runtime.trellis.command`, child `denoTestArgs`, and case descriptors.
-  Test modules should use `trellisIntegrationTest(...)`,
-  `runtimeScopeForCase(CASE_ID)`, fixed authored participant ids/actions/subjects,
-  case-slugged physical names and state/resource keys, participant approval/provisioning,
-  `TrellisService.connect(...)`, `runtime.connectClient(...)`, and
-  `runtime.captureEvents(...)` when needed. Run serially with the generic runner
-  and `--config`; use shared mode with `--parallel --jobs 1`. Shared cases use one
-  NATS account, Trellis process, and SQLite set; the harness resets stale accepted
-  authority before attached authentication. Higher worker counts are rejected
-  because fixed protocol subjects share that account. Keep one case per module.
-  `trellis-test` runs NATS as a managed child process
+- Deno-first TypeScript service repos use `TrellisTestRuntime` from
+  `@qlever-llc/trellis-test` for tests that need a real Trellis runtime. Ordinary
+  Deno tests register generated participants, connect through public service and
+  client APIs, and own and stop one runtime per test. `trellis-test` runs NATS as a managed child process
   from pinned, checksum-verified nats-server and nsc binaries (cached under
   `TRELLIS_TEST_CACHE_DIR`, default `~/.cache/trellis-test`; first use downloads them, requiring network; every reuse revalidates the cached archive sha256 against the pin and byte-checks the cached binary against a fresh extraction, so corrupted or replaced cache entries are reinstalled, and `sh` must be on `PATH`); no container runtime is
   required.

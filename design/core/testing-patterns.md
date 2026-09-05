@@ -35,12 +35,10 @@ runtime, fake auth, fake generated clients, or fake control-plane responders.
 Those tests create a second implementation of Trellis and drift from the
 runtime.
 
-When behavior that requires the complete runtime is not reachable through
-current public test helpers, extend the test library with the smallest named
-case-scoped surface needed to provide real input or observe real state. Examples
-include a control-plane SQLite inspection helper or a JetStream inspection
-helper. Do not add generic chaos frameworks or synthetic fault hooks when a real
-component boundary can prove the invariant deterministically.
+When behavior is not reachable through a public generated API, test the
+authoritative production component directly at its real storage or transport
+adapter boundary. Do not expose runtime internals, add generic chaos frameworks,
+or add synthetic fault hooks solely for tests.
 
 ### Test Ownership
 

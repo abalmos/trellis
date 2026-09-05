@@ -5,10 +5,10 @@ Feeds provide caller-filtered live views.
 ```trellis
 model OrdersWatchInput { customerId: string; }
 model OrdersWatchEvent { orderId: string; status: string; }
-feed Orders.Watch {
-  input = OrdersWatchInput;
-  event = OrdersWatchEvent;
-  capability subscribe = ["orders.read"];
+feed "Orders.Watch" {
+  version "v1";
+  input OrdersWatchInput;
+  event OrdersWatchEvent;
 }
 ```
 

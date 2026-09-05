@@ -364,20 +364,14 @@ async fn account_flow_oauth_accepts_browser_continuation_binding() {
 }
 
 #[tokio::test]
-#[ignore = "requires Podman for a live NATS JetStream container"]
 async fn nats_kv_repository_conforms() {
     struct Server {
         child: Child,
-        name: String,
     }
 
     impl Drop for Server {
         fn drop(&mut self) {
-            let _ = Command::new("podman")
-                .args(["rm", "-f", &self.name])
-                .stdout(Stdio::null())
-                .stderr(Stdio::null())
-                .status();
+            let _ = self.child.kill();
             let _ = self.child.wait();
         }
     }
@@ -385,24 +379,21 @@ async fn nats_kv_repository_conforms() {
     let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
     let port = listener.local_addr().unwrap().port();
     drop(listener);
-    let name = format!("trellis-auth-ephemeral-test-{}-{port}", std::process::id());
+    let directory = tempfile::tempdir().unwrap();
+    let binary = trellis_local_nats::NatsServerBinary::resolve(
+        &trellis_local_nats::NatsBinarySource::DownloadPinned,
+        Some(&directory.path().join("cache")),
+    )
+    .unwrap();
     let server = Server {
-        child: Command::new("podman")
-            .args([
-                "run",
-                "--rm",
-                "--name",
-                &name,
-                "-p",
-                &format!("127.0.0.1:{port}:4222"),
-                "docker.io/library/nats:2-alpine",
-                "-js",
-            ])
+        child: Command::new(binary)
+            .args(["-a", "127.0.0.1", "-p", &port.to_string(), "-js"])
+            .arg("-sd")
+            .arg(directory.path().join("data"))
             .stdout(Stdio::null())
-            .stderr(Stdio::null())
+            .stderr(Stdio::inherit())
             .spawn()
             .unwrap(),
-        name,
     };
     let url = format!("nats://127.0.0.1:{port}");
     let mut client = None;

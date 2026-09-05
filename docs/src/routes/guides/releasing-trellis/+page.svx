@@ -36,7 +36,8 @@ named `trellis-test` helper and prove the behavior through a live control plane.
 Before committing or ending an implementation cycle, run the focused checks that match the files touched. A local live run starts one managed NATS server and gives every selected case its own NATS account, Trellis process, and SQLite files:
 
 ```sh
-deno run -A -c ts/deno.json integration/live_runner.ts
+cargo test --manifest-path rust/Cargo.toml -p trellis-rs --features live-integration --test integration -- --test-threads=1
+deno test -A -c ts/integration/deno.json ts/integration
 ```
 
 The standard runner starts real infrastructure, then executes the discovered
@@ -59,7 +60,8 @@ deno test -A -c ts/integration/deno.json ts/integration/idl/field_ops_demo.integ
 The top-level live runner executes both discovered suites:
 
 ```sh
-deno run -A -c ts/deno.json integration/live_runner.ts
+cargo test --manifest-path rust/Cargo.toml -p trellis-rs --features live-integration --test integration -- --test-threads=1
+deno test -A -c ts/integration/deno.json ts/integration
 ```
 
 For focused Rust diagnostics, pass a native test-filter substring to Cargo.

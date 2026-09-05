@@ -34,9 +34,7 @@ deno add npm:@qlever-llc/trellis
 Create `contract.trellis`. Devices declare the APIs they use after connecting.
 
 ```trellis
-participant acme.my-device@v1 device {
-  display_name = "My Device";
-  description = "Activated field device.";
+participant "acme.my-device@v1" device {
 }
 ```
 
@@ -55,7 +53,7 @@ Your application is still responsible for loading the root secret however it wan
 ```ts
 import { TrellisDevice } from "@qlever-llc/trellis";
 import { checkDeviceActivation } from "@qlever-llc/trellis/device/deno";
-import { myDevice } from "./contracts/my_device.ts";
+import { participant as myDevice } from "./.trellis/ts/participants/acme-my-device/mod.ts";
 
 const rootSecret = await Deno.readTextFile("./secrets/root.secret");
 

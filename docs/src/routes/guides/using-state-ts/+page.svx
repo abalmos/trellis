@@ -3,9 +3,9 @@
 Add `trellis.state@v1` as a dependency and select only the actions the participant needs. Durable participant state is declared in IDL with its schema and optional state version.
 
 ```trellis
-state Preferences value {
-  schema = Preferences;
-  state_version = 1;
+state preferences value {
+  schema Preferences;
+  state_version "preferences.v1";
 }
 ```
 

@@ -11,7 +11,7 @@ Open `main.ts`, which was created by `deno init`, and replace it with:
 
 ```ts
 import { TrellisService } from "@qlever-llc/trellis/service/deno";
-import { ordersService } from "./contracts/orders_service.ts";
+import { participant as ordersService } from "./.trellis/ts/participants/acme-orders-service/mod.ts";
 
 const service = await TrellisService.connect({
   trellisUrl: Deno.env.get("TRELLIS_URL")!,

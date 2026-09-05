@@ -3,9 +3,10 @@
 `contract.trellis` is the source of truth for both the public API and the participant that implements it.
 
 ```trellis
-api acme.orders@v1 {
-  display_name = "Orders";
-  description = "Order management API.";
+api "acme.orders@v1" {
+  version "1.0.0";
+  display_name "Orders";
+  description "Order management API.";
 
   model CreateOrderRequest {
     customerId: string;
@@ -15,17 +16,15 @@ api acme.orders@v1 {
     orderId: string;
   }
 
-  rpc Orders.Create {
-    input = CreateOrderRequest;
-    output = CreateOrderResponse;
-    capability call = ["orders.create"];
+  rpc "Orders.Create" {
+    version "v1";
+    input CreateOrderRequest;
+    output CreateOrderResponse;
   }
 }
 
-participant acme.orders-service@v1 service {
-  display_name = "Orders Service";
-  description = "Owns the Orders API.";
-  implements acme.orders@v1;
+participant "acme.orders-service@v1" service {
+  implements "acme.orders@v1";
 }
 ```
 

@@ -468,7 +468,22 @@ fn participant_value(
         "implements": {"self": implementation},
     });
     let object = value.as_object_mut().expect("participant is an object");
-    if !participant.uses.is_empty() {
+    let mut subscribed_events = Map::new();
+    if !participant.subscribed_events.is_empty() {
+        subscribed_events.insert(
+            "self".to_owned(),
+            Value::Array(
+                participant
+                    .subscribed_events
+                    .iter()
+                    .map(|event| {
+                        json!(canonical_selection_name(&api_value, "events", &event.value))
+                    })
+                    .collect(),
+            ),
+        );
+    }
+    if !participant.uses.is_empty() || !participant.state.is_empty() {
         let mut required_uses = Map::new();
         let mut optional_uses = Map::new();
         for (alias, declaration) in &participant.uses {
@@ -521,6 +536,14 @@ fn participant_value(
                         .as_array_mut()
                         .expect("selection is an array")
                         .push(json!(name));
+                    if section == "events" && selection.action == "subscribe" {
+                        subscribed_events
+                            .entry(alias)
+                            .or_insert_with(|| Value::Array(Vec::new()))
+                            .as_array_mut()
+                            .expect("subscribed events are an array")
+                            .push(json!(name));
+                    }
                 }
             }
             if used.required {
@@ -529,10 +552,66 @@ fn participant_value(
                 optional_uses.insert(alias.clone(), use_value);
             }
         }
+        if !participant.state.is_empty() {
+            let state_api = apis.get("trellis.state@v1").ok_or_else(|| {
+                at(
+                    project,
+                    declaration,
+                    "State requires the 'trellis.state@v1' API dependency",
+                )
+            })?;
+            let alias = participant
+                .uses
+                .iter()
+                .find(|(_, used)| used.value.api.value == "trellis.state@v1")
+                .map(|(alias, _)| alias.as_str())
+                .unwrap_or("state");
+            if let Some(existing) = required_uses
+                .get(alias)
+                .or_else(|| optional_uses.get(alias))
+            {
+                if existing["api"] != "trellis.state@v1" {
+                    return Err(at(
+                        project,
+                        declaration,
+                        "State baseline alias 'state' is already in use",
+                    ));
+                }
+            }
+            let state_digest = state_api.digest().into_diagnostic()?;
+            let mut baseline = required_uses
+                .remove(alias)
+                .or_else(|| optional_uses.remove(alias))
+                .unwrap_or_else(|| json!({"api": state_api.id(), "apiDigest": state_digest}));
+            let rpc = baseline
+                .as_object_mut()
+                .expect("API use")
+                .entry("rpc")
+                .or_insert_with(|| json!({}));
+            let calls = rpc
+                .as_object_mut()
+                .expect("RPC selection")
+                .entry("call")
+                .or_insert_with(|| json!([]))
+                .as_array_mut()
+                .expect("RPC calls");
+            for name in ["State.Get", "State.Put", "State.Delete", "State.List"] {
+                if !calls.iter().any(|call| call == name) {
+                    calls.push(json!(name));
+                }
+            }
+            required_uses.insert(alias.to_owned(), baseline);
+        }
         let mut uses = Map::new();
         insert_nonempty(&mut uses, "required", required_uses);
         insert_nonempty(&mut uses, "optional", optional_uses);
         object.insert("uses".to_owned(), Value::Object(uses));
+    }
+    if participant.kind == "service" && !subscribed_events.is_empty() {
+        object.insert(
+            "eventConsumers".to_owned(),
+            json!({"events": {"events": subscribed_events}}),
+        );
     }
     if let Some(docs) = api_value.get("docs") {
         object.insert("docs".to_owned(), docs.clone());

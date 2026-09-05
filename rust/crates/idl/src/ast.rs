@@ -133,6 +133,7 @@ pub(crate) struct Participant {
     pub kind: String,
     pub implements: Vec<Spanned<String>>,
     pub uses: BTreeMap<String, Spanned<ApiUse>>,
+    pub subscribed_events: Vec<Spanned<String>>,
     pub schemas: BTreeMap<String, Spanned<SchemaDecl>>,
     pub state: BTreeMap<String, Spanned<State>>,
     pub stores: BTreeMap<String, Spanned<Resource>>,

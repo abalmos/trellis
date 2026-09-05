@@ -3,10 +3,10 @@
 Add the API as a project dependency, run `trellis update`, then select the event in the participant:
 
 ```trellis
-participant acme.orders-service@v1 service {
-  implements acme.orders@v1;
-  use auth required api trellis.auth@v1 {
-    events subscribe = ["Connections.Opened"];
+participant "acme.orders-service@v1" service {
+  implements "acme.orders@v1";
+  use required auth "trellis.auth@v1" {
+    subscribe event "Connections.Opened";
   }
 }
 ```

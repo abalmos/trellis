@@ -2,9 +2,7 @@
   "importMap": "../ts/deno.json",
   "tasks": {
     "dev": "deno task -c ../ts/deno.json install && deno task -c ../ts/deno.json protocol:wasm && deno run -A vite dev",
-    "dev:prebuilt": "deno run -A vite dev",
-    "build": "deno task -c ../ts/deno.json install && deno task -c ../ts/deno.json protocol:wasm && deno run -A vite build",
-    "build:static:prebuilt": "deno run -A --frozen @sveltejs/kit sync && deno run -A --frozen vite build",
+    "build": "deno task -c ../ts/deno.json install && deno task -c ../ts/deno.json protocol:wasm && deno run -A --frozen @sveltejs/kit sync && deno run -A --frozen vite build",
     "build:embedded": "deno run -A scripts/build_embedded.ts",
     "preview": "deno run -A vite preview",
     "test": "deno test -A src",

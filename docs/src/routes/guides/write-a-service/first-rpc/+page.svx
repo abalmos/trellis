@@ -6,10 +6,10 @@ Declare request and response models, then reference them from the API surface:
 model GetOrderRequest { orderId: string; }
 model GetOrderResponse { orderId: string; status: string; }
 
-rpc Orders.Get {
-  input = GetOrderRequest;
-  output = GetOrderResponse;
-  capability call = ["orders.read"];
+rpc "Orders.Get" {
+  version "v1";
+  input GetOrderRequest;
+  output GetOrderResponse;
 }
 ```
 

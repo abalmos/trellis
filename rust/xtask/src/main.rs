@@ -105,8 +105,12 @@ const TRELLIS_PROJECTS: &[&str] = &[
     "rust/crates/jobs-runtime",
     "rust/crates/runtime",
     "ts/packages/trellis-test",
-    "web/contracts/console",
-    "web/contracts/portal",
+    "web",
+    "demos/ts/service",
+    "demos/ts/device",
+    "demos/app",
+    "demos/rust/service",
+    "demos/rust/device",
 ];
 
 fn run_install() -> Result<()> {

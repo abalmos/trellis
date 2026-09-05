@@ -272,30 +272,6 @@ impl<C> DeviceConnectOptions<'_, C> {
     }
 }
 
-#[cfg(feature = "test-support")]
-pub(crate) fn test_device_connect_options<'a>(
-    trellis_url: &'a str,
-    deployment_id: &'a str,
-    instance_id: &'a str,
-    contract: DeviceContractEvidence<'a>,
-    public_identity_key: &'a str,
-    identity_seed_base64url: &'a str,
-    authorization_context_store: Arc<dyn AuthorizationContextStore>,
-) -> DeviceConnectOptions<'a, crate::generated::DynamicDeviceContract> {
-    DeviceConnectOptions {
-        trellis_url,
-        deployment_id,
-        instance_id,
-        contract,
-        public_identity_key,
-        identity_seed_base64url,
-        timeout_ms: crate::service::DEFAULT_TIMEOUT_MS,
-        authorization_context_store,
-        activation_bootstrap: None,
-        contract_type: std::marker::PhantomData,
-    }
-}
-
 struct DeviceReadyBootstrap {
     response: ServiceBootstrapResponse,
     session_key_seed_base64url: String,
@@ -1832,40 +1808,6 @@ impl TrellisClient {
         &self,
     ) -> Result<AuthorizationProviderCache, TrellisClientError> {
         self.authorization_context_cache()
-    }
-
-    /// Return the active authorization context digest for live integration synchronization.
-    #[cfg(feature = "test-support")]
-    #[doc(hidden)]
-    pub fn integration_test_authorization_context_digest(
-        &self,
-    ) -> Result<String, TrellisClientError> {
-        self.authorization_context_digest()
-    }
-
-    /// Refresh and atomically replace native runtime connection metadata.
-    #[cfg(feature = "test-support")]
-    #[doc(hidden)]
-    pub async fn integration_test_refresh_authorization_context(
-        &self,
-    ) -> Result<AuthorizationRuntimeBinding, TrellisClientError> {
-        self.refresh_authorization_context().await?;
-        self.authorization_contexts
-            .as_ref()
-            .ok_or_else(|| {
-                TrellisClientError::Bootstrap("authorization context unavailable".into())
-            })?
-            .runtime_binding()
-    }
-
-    /// Close the currently installed native connection for restart tests.
-    #[cfg(feature = "test-support")]
-    #[doc(hidden)]
-    pub async fn integration_test_close_native_connection(&self) -> Result<(), TrellisClientError> {
-        self.nats()
-            .drain()
-            .await
-            .map_err(|error| TrellisClientError::NatsRequest(error.to_string()))
     }
 
     /// Refresh and verify the current authorization context immediately.

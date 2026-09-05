@@ -4,7 +4,7 @@ import {
   type DeviceActivationAuth,
   type DeviceActivationOperationRef,
 } from "@qlever-llc/trellis-svelte";
-import { participant } from "../../contracts/portal/.trellis/ts/participants/app-portal/mod.ts";
+import { participant } from "../../.trellis/ts/participants/app-portal/mod.ts";
 import { trellisUrl } from "./portal_config.ts";
 
 type PortalAuthState = DeviceActivationAuth;

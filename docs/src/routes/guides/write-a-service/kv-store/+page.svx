@@ -3,9 +3,14 @@
 Participant-owned resources are native IDL declarations, not runtime constructor options.
 
 ```trellis
-participant acme.orders-service@v1 service {
-  implements acme.orders@v1;
-  kv orders { optional = false; }
+participant "acme.orders-service@v1" service {
+  implements "acme.orders@v1";
+  kv orders {
+    purpose "Current order records.";
+    schema Order;
+    history 1;
+    ttl_ms 0;
+  }
 }
 ```
 

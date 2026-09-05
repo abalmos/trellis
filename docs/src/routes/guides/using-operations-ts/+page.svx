@@ -3,12 +3,12 @@
 Operations model caller-visible asynchronous workflows.
 
 ```trellis
-operation Reports.Generate {
-  input = GenerateReportInput;
-  update = GenerateReportUpdate;
-  output = GenerateReportOutput;
-  cancel = true;
-  capability start = ["reports.generate"];
+operation "Reports.Generate" {
+  version "v1";
+  input GenerateReportInput;
+  progress GenerateReportUpdate;
+  output GenerateReportOutput;
+  cancellable;
 }
 ```
 

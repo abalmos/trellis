@@ -39,7 +39,10 @@ fn compiles_complete_demo_service() -> miette::Result<()> {
             "send"
         );
         assert!(api_value["events"].get("Audit.Recorded").is_some());
-        assert_eq!(api_value["events"]["Audit.Recorded"]["params"][0], "/activityId");
+        assert_eq!(
+            api_value["events"]["Audit.Recorded"]["params"][0],
+            "/activityId"
+        );
         assert!(api_value["feeds"].get("Audit.Feed").is_some());
 
         assert_eq!(project.participants.len(), 1);

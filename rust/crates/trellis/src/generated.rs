@@ -70,43 +70,6 @@ impl Caller {
         Self { client }
     }
 
-    /// Return the connected NATS client for live transport-boundary tests.
-    #[cfg(feature = "test-support")]
-    #[doc(hidden)]
-    #[must_use]
-    pub fn integration_test_nats(&self) -> async_nats::Client {
-        self.client.integration_test_nats()
-    }
-
-    /// Return the active authorization context digest for live integration synchronization.
-    #[cfg(feature = "test-support")]
-    #[doc(hidden)]
-    pub fn integration_test_authorization_context_digest(
-        &self,
-    ) -> Result<String, crate::client::TrellisClientError> {
-        self.client.integration_test_authorization_context_digest()
-    }
-
-    /// Refresh and return the installed native runtime binding for live tests.
-    #[cfg(feature = "test-support")]
-    #[doc(hidden)]
-    pub async fn integration_test_refresh_authorization_context(
-        &self,
-    ) -> Result<crate::client::AuthorizationRuntimeBinding, crate::client::TrellisClientError> {
-        self.client
-            .integration_test_refresh_authorization_context()
-            .await
-    }
-
-    /// Close the installed native connection for persisted reconnect tests.
-    #[cfg(feature = "test-support")]
-    #[doc(hidden)]
-    pub async fn integration_test_close_native_connection(
-        &self,
-    ) -> Result<(), crate::client::TrellisClientError> {
-        self.client.integration_test_close_native_connection().await
-    }
-
     /// Connect a user-authenticated generated participant.
     #[doc(hidden)]
     pub async fn connect_user(
@@ -137,17 +100,6 @@ impl Caller {
         D: crate::client::RpcDescriptor,
     {
         self.client.call::<D>(input).await
-    }
-
-    /// Send deliberately malformed wire input from Trellis integration tests.
-    #[cfg(feature = "test-support")]
-    #[doc(hidden)]
-    pub async fn test_request_json_value(
-        &self,
-        subject: &str,
-        input: &serde_json::Value,
-    ) -> Result<serde_json::Value, crate::client::TrellisClientError> {
-        self.client.request_json_value(subject, input).await
     }
 
     /// Download a transfer grant for a generated participant facade.
@@ -255,34 +207,6 @@ impl Caller {
     }
 }
 
-/// Dynamic contract marker reserved for runtime-authored integration fixtures.
-#[cfg(feature = "test-support")]
-#[doc(hidden)]
-pub struct DynamicDeviceContract;
-
-/// Build dynamic-evidence device options for Trellis integration fixtures.
-#[cfg(feature = "test-support")]
-#[doc(hidden)]
-pub fn test_device_connect_options<'a>(
-    trellis_url: &'a str,
-    deployment_id: &'a str,
-    instance_id: &'a str,
-    contract: crate::client::DeviceContractEvidence<'a>,
-    public_identity_key: &'a str,
-    identity_seed_base64url: &'a str,
-    authorization_context_store: Arc<dyn AuthorizationContextStore>,
-) -> DeviceConnectOptions<'a, DynamicDeviceContract> {
-    crate::client::test_device_connect_options(
-        trellis_url,
-        deployment_id,
-        instance_id,
-        contract,
-        public_identity_key,
-        identity_seed_base64url,
-        authorization_context_store,
-    )
-}
-
 impl crate::client::StateTransport for Caller {
     fn request_state_json<'a>(
         &'a self,
@@ -378,15 +302,4 @@ impl crate::client::OperationTransport for Caller {
             cancellation,
         )
     }
-}
-
-/// Connect an ad hoc generated service runtime for Trellis integration tests.
-#[cfg(feature = "test-support")]
-#[doc(hidden)]
-pub async fn test_connect_service_runtime<C>(
-    options: crate::client::ServiceConnectWithContractOptions<'_>,
-) -> Result<crate::service::ConnectedServiceRuntime<C>, crate::service::ServiceRuntimeError> {
-    let participant_id = options.participant_id;
-    let client = crate::client::TrellisClient::connect_service_with_contract(options).await?;
-    crate::service::ConnectedServiceRuntime::from_connected_client(participant_id, Arc::new(client))
 }

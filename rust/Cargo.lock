@@ -5279,6 +5279,7 @@ dependencies = [
  "tracing-subscriber",
  "trellis-eventlog-runtime",
  "trellis-jobs-runtime",
+ "trellis-local-nats",
  "trellis-protocol",
  "trellis-rs",
  "trellis-runtime-apis",

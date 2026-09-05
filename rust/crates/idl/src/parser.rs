@@ -389,6 +389,7 @@ impl Parser<'_> {
             kind,
             implements: Vec::new(),
             uses: BTreeMap::new(),
+            subscribed_events: Vec::new(),
             schemas: BTreeMap::new(),
             state: BTreeMap::new(),
             stores: BTreeMap::new(),
@@ -402,6 +403,10 @@ impl Parser<'_> {
                 "use" => {
                     let (alias, api_use) = self.api_use()?;
                     insert(&mut participant.uses, alias, api_use, self.source)?;
+                }
+                "subscribe" => {
+                    self.word("event")?;
+                    participant.subscribed_events.push(self.string_statement()?);
                 }
                 "model" => {
                     let (name, schema) = self.model()?;
