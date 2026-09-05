@@ -69,9 +69,14 @@ wait, progress/watch, and optional cancellation/transfer.
 
 Owned event publication uses `publisher()`. Durable listeners use declared
 groups through `event_consumers()`; Trellis resolves their durable names and
-authority. Listener handles support abort and re-registration without replacing
-the provisioned durable. Delivery may repeat, so choose a side-effect strategy
-that handles duplicates.
+authority. Retain the returned listener guard while delivery is needed; dropping
+or aborting it removes that registration without stopping other registrations in
+the group. The service lifecycle reports shared pull-loop failures.
+Parameterized listeners match concrete subjects through their generated
+subscription patterns and verify each event with its matching registration.
+Unmatched messages are not acknowledged as completed work. Options select a
+declared group, mode, and concurrency, not a custom durable name. Delivery may
+repeat, so choose a side-effect strategy that handles duplicates.
 
 Jobs are private service queues. Use generated queue handles and cloneable
 `jobs_client()` handles for submission from other handlers. Worker registration
@@ -94,6 +99,13 @@ local SQL transaction. The application owns its transaction and migration
 execution. KV outbox/inbox stores do not atomically commit unrelated database
 writes. See `/guides/libraries/rust` and current Rustdoc for supported stores
 and transaction APIs.
+
+SQL outbox claims expire after 30 seconds and can be reclaimed. Pass the claimed
+record to `mark_published`/`mark_failed`; false means ownership was superseded.
+`dispatch_outbox_once` returns `ClaimLost` for superseded completion.
+Publication can repeat after interruption, so the claim fence is not
+exactly-once delivery. Current schema helpers do not upgrade pre-release
+layouts; applications own migration of any retained older database.
 
 ## Test And Verify
 

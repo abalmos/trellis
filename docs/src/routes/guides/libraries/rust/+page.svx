@@ -230,19 +230,29 @@ generated group handle resolves the Trellis-provisioned durable and registers
 typed handlers:
 
 ```rust
-service
+let _orders_listener = service
     .event_consumers()
     .orders()
-    .order_created(|event, context| async move {
+    .on_order_created(|event, context| async move {
         tracing::info!(event_id = ?context.id, order_id = %event.order_id);
         Ok(())
     })
     .await?;
+
+service.run().await?;
 ```
 
-Do not choose durable names or inspect JetStream readiness. Registration owns
-the listener lifecycle; durable delivery does not require `num_waiting > 0`
-before publication.
+Keep the returned guard alive while delivery is needed. Dropping it or calling
+`abort()` removes that registration; other registrations in the same group
+continue. The service lifecycle owns shared pull tasks and reports their
+failures. Listeners use the generated wildcard pattern for parameterized events.
+Each matching registration supplies its own verification metadata, independently
+of registration order. Messages without a registration are not acknowledged as
+completed work.
+
+Trellis chooses durable names. `ServiceEventListenOptions` exposes delivery
+`mode`, declared `group`, and `concurrency`.
+Durable delivery does not require `num_waiting > 0` before publication.
 
 ## Use resources and state
 
@@ -306,6 +316,19 @@ issuer key, and certificate digest stay bound together; historical evidence is
 not rebound to a current certificate by issuer key alone. Context refresh is
 restart recovery and returns the route, session, NATS, and context material
 needed to reconnect.
+
+## Outbox Claims
+
+SQL outbox claims expire after 30 seconds and can be recovered by another
+dispatch attempt. Pass the claimed record to `mark_published` or `mark_failed`;
+their boolean result is false if a newer claim superseded it.
+`dispatch_outbox_once` reports `ClaimLost` rather than successful completion in
+that case. Publication can repeat after interruption, so consumers still need an
+appropriate duplicate-handling strategy.
+
+SQLite and PostgreSQL schema helpers create the current helper tables. They do
+not migrate older pre-release layouts; the application owns any required
+migration and must not treat schema creation as an upgrade operation.
 
 ## Rustdoc
 

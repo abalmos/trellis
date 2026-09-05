@@ -138,6 +138,18 @@ Drizzle adapters are optional on `@qlever-llc/trellis/service/drizzle`.
 can implement the same executor/transaction interfaces. NATS KV outbox/inbox
 helpers do not provide atomicity with unrelated SQL writes.
 
+SQL and NATS KV outbox claims expire after 30 seconds. `claimDue(...)` returns
+the claimed records; pass a record, not just its ID, to `markDispatched(...)` or
+`markFailed(...)`. These return false when a newer claim superseded that record.
+KV acquisition/completion uses revision CAS. Dispatch may publish again after
+interruption, so consumers must handle duplicates. SQL inbox `record()` returns
+true only for the call that inserted the ID. Commit that marker with a domain
+side effect when both need to be atomic.
+
+The schema helpers create current tables; they do not upgrade pre-release
+layouts. Apply any required migration with the application's migration tooling
+before using a retained older database.
+
 ## Browser Apps And Verification
 
 Browser apps use

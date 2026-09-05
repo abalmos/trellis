@@ -50,7 +50,15 @@ source. Generation is offline; install missing remote dependencies first.
 Generated output lives under `.trellis/`: installed APIs in `apis/`, owned
 canonical artifacts in `artifacts/`, and language SDKs in `ts/` and `rust/`.
 Commit IDL, `trellis.toml`, and `trellis.lock`; regenerate disposable outputs.
-Compilation failure preserves the last successful generated outputs.
+Compilation, renderer, and formatter failures preserve the last successful
+generated outputs. Colliding participant output paths are errors.
+
+Selections must exactly match a name in the chosen API: `Get` and `Sites.Get`
+are distinct. Invented prefixes are not qualifiers. Unsupported surface members
+and incompatible constraints are compilation errors, not ignored options.
+Numeric bounds accept finite JSON literals such as `-1` and `2.5`; string
+lengths and list counts require unsigned integer literals. The IDL reference
+documents each surface's members and each constraint's applicable types.
 
 The generated names depend on declared action names and dependency aliases.
 Check the generated participant, rather than inventing a method from a generic
@@ -102,6 +110,13 @@ registry. See the auth design documentation for protocol details.
   and optional cancellation, updates, or transfer.
 - Job: service-private queued execution with retries and lifecycle state.
 
+Parameterized events derive their concrete subjects from payload pointers;
+listeners match the generated wildcard pattern. In Rust, retain the returned
+listener guard: dropping or aborting it removes that registration without
+stopping the other registrations in its group. Shared pull-loop failures are
+reported by the service lifecycle, and unmatched messages are not acknowledged
+as completed work. Durable names remain Trellis-owned.
+
 Operations and jobs may expose typed live updates. Updates are at-most-once, not
 persisted or replayed, and late subscribers may miss them. Durable progress and
 terminal output are separate from updates. Cancel subscriptions when no longer
@@ -133,6 +148,12 @@ event/job intents in the same transaction. Trellis provides helper-table
 migrations; the application owns its database, transaction adapter, and
 migration execution. NATS KV outbox/inbox helpers are not atomic with unrelated
 SQL transactions. See the language guides for the supported adapters.
+
+Outbox claims expire after 30 seconds and are recoverable; only the current
+claim can complete. Publication can repeat after a crash, so this is not
+exactly-once delivery. SQL inbox insertion returns true only to the caller that
+inserted the marker, including under concurrency. Schema creation does not
+upgrade old pre-release layouts; migrate retained databases explicitly.
 
 ## Optional Platform APIs
 

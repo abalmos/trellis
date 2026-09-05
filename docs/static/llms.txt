@@ -44,7 +44,10 @@ installed release.
    and resolved resource handles; do not reconstruct Trellis transport metadata.
 
 Commit authored IDL, `trellis.toml`, and `trellis.lock`. Generated `.trellis/`
-outputs are disposable and should be regenerated rather than hand-edited.
+outputs are disposable and should be regenerated rather than hand-edited. Use
+exact declared action names, not suffixes or invented qualifiers. Failed
+compilation, rendering, or formatting retains the last successful generated
+outputs; colliding participant output paths are errors.
 
 Trellis operations are caller-visible workflows; Trellis jobs are
 service-private execution. Their declarations request authority, but do not

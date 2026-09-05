@@ -186,6 +186,17 @@ Rules:
   queue storage, but they are not transactional with unrelated database side
   effects
 
+Outbox claims have a bounded 30-second lifetime. SQL and NATS KV repositories
+recover expired claims and reject completion by superseded claim owners.
+Publication remains at-least-once: a process can publish successfully and stop
+before recording completion. SQL inbox insertion reports whether that call
+inserted the marker, including when concurrent callers race for the same ID;
+domain-side-effect atomicity still requires the application's transaction.
+
+Schema helpers define the current schema and do not repair pre-release table
+layouts. Applications retaining such a database must explicitly migrate it using
+their own migration tooling before dispatching with the current helpers.
+
 Example:
 
 ```ts
