@@ -383,6 +383,8 @@ jobs:
         run: cargo test --manifest-path rust/Cargo.toml -p trellis-rs --features live-integration --test integration -- --test-threads=1
 
       - name: Run TypeScript live integration
+        env:
+          TRELLIS_TEST_SERVER_BIN: ${{ github.workspace }}/rust/target/debug/trellis-server
         run: deno test -A -c ts/integration/deno.json ts/integration
 
   ui-hosting:
