@@ -60,6 +60,7 @@ ts/packages/trellis/**/*.d.ts
 *.tgz
 
 # Rust build artifacts
+integration/fixtures/**/target/
 xtask/target/
 rust/target/
 rust/**/target/

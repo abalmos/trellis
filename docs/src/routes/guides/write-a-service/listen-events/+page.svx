@@ -3,12 +3,23 @@
 Add the API as a project dependency, run `trellis update`, then select the event in the participant:
 
 ```trellis
-participant "acme.orders-service@v1" service {
-  implements "acme.orders@v1";
-  use required auth "trellis.auth@v1" {
-    subscribe event "Connections.Opened";
+participant "acme.notifications@v1" service {
+  implements "acme.notifications@v1";
+  use required orders "acme.orders@v1" {
+    subscribe event "Orders.Shipped";
   }
 }
 ```
 
 `trellis generate` emits the selected descriptor and records the exact referenced API digest in the participant artifact.
+
+This consumer owns a separate notifications API and depends on the Orders API
+from the previous step. Register `service.onOrdersShipped(...)` during startup,
+not inside an RPC handler. Read the typed payload from the handler's `event`
+argument and return a `Result` after processing it.
+
+Keep handlers idempotent when delivery can repeat. If a non-idempotent SQL side
+effect needs duplicate suppression, commit its inbox marker in the same
+transaction as that side effect. A runtime-delivered event is already proof
+verified; do not reconstruct signatures or bypass generated subscriptions with
+raw transport listeners.

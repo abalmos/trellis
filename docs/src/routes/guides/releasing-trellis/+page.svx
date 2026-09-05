@@ -30,34 +30,33 @@ behavior: pure parser, codec, canonicalization, crypto vector, schema pointer,
 error serialization, package/export/import, generated artifact, CLI planning, or
 tiny UI helper checks. Do not use fake NATS, fake Hono, fake storage, fake
 runtime, fake auth, or fake generated-client workflows to prove Trellis behavior.
-If live coverage needs a missing failure or inspection surface, add the smallest
-named `trellis-test` helper and prove the behavior through a live control plane.
+Use real SQLite component tests for deterministic transaction invariants; do not
+add synthetic failure controls to the runtime for tests.
 
-Before committing or ending an implementation cycle, run the focused checks that match the files touched. A local live run starts one managed NATS server and gives every selected case its own NATS account, Trellis process, and SQLite files:
+Before committing or ending an implementation cycle, run the focused checks that match the files touched. Build the server/CLI and set their paths as described in `integration/README.md`. Each live test owns its real runtime lifecycle:
 
 ```sh
 cargo test --manifest-path rust/Cargo.toml -p trellis-rs --features live-integration --test integration -- --test-threads=1
 deno test -A -c ts/integration/deno.json ts/integration
 ```
 
-The standard runner starts real infrastructure, then executes the discovered
-Rust and Deno suites with their native test runners. Hidden skips and separate
+Cargo and Deno discover executable tests directly. Hidden skips and separate
 test registries are forbidden.
 
 If the full integration suites cannot be run, record the reason and the last focused checks that did run.
 
 ### Targeted integration loops
 
-Executable Rust and Deno tests are the integration catalog. The standard live runner discovers and executes them directly.
+Executable Rust and Deno tests are the integration catalog.
 
 For focused local debugging, run the smallest matching Rust test or Deno test file directly:
 
 ```sh
-cargo test --manifest-path rust/Cargo.toml -p trellis-rs --test integration jobs::
-deno test -A -c ts/integration/deno.json ts/integration/idl/field_ops_demo.integration_test.ts
+cargo test --manifest-path rust/Cargo.toml -p trellis-rs --features live-integration --test integration
+deno test -A -c ts/integration/deno.json --filter 'generated runtime workflows' ts/integration
 ```
 
-The top-level live runner executes both discovered suites:
+Run both suites before accepting changes to transport or runtime behavior:
 
 ```sh
 cargo test --manifest-path rust/Cargo.toml -p trellis-rs --features live-integration --test integration -- --test-threads=1

@@ -315,64 +315,9 @@ export class TrellisTestRuntime implements AsyncDisposable {
         shutdownMs: options.timeouts?.shutdownMs ?? 5_000,
       };
       await Deno.mkdir(join(workdir, "trellis"), { recursive: true });
-      const sharedManifest = typeof options.nats === "object"
-        ? structuredClone(options.nats.manifest)
-        : undefined;
-      if (typeof options.nats === "object" && sharedManifest !== undefined) {
-        const sharedNatsDir = join(options.nats.workdir, "nats");
-        const localNatsDir = join(workdir, "nats");
-        await Deno.mkdir(join(localNatsDir, "creds"), { recursive: true });
-        await Deno.mkdir(join(localNatsDir, "secrets"), { recursive: true });
-        const copies = [
-          [sharedManifest.paths.creds.systemService, "creds/system.creds"],
-          [sharedManifest.paths.creds.authService, "creds/auth-auth.creds"],
-          [
-            sharedManifest.paths.creds.trellisService,
-            "creds/trellis-auth.creds",
-          ],
-          [
-            sharedManifest.paths.secrets.authIssuerSigning,
-            "secrets/auth-issuer-signing.seed",
-          ],
-          [
-            sharedManifest.paths.secrets.authTargetSigning,
-            "secrets/auth-target-signing.seed",
-          ],
-          [
-            sharedManifest.paths.secrets.authCalloutXKey,
-            "secrets/auth-sx.seed",
-          ],
-        ] as const;
-        await Promise.all(
-          copies.map(([source, target]) =>
-            Deno.copyFile(
-              join(sharedNatsDir, source),
-              join(localNatsDir, target),
-            )
-          ),
-        );
-        sharedManifest.paths.creds = {
-          systemService: "creds/system.creds",
-          authService: "creds/auth-auth.creds",
-          trellisService: "creds/trellis-auth.creds",
-        };
-        sharedManifest.paths.secrets = {
-          authIssuerSigning: "secrets/auth-issuer-signing.seed",
-          authTargetSigning: "secrets/auth-target-signing.seed",
-          authCalloutXKey: "secrets/auth-sx.seed",
-        };
-      }
-      nats = typeof options.nats === "object"
-        ? await NatsTestContainer.attach({
-          ...options.nats,
-          workdir,
-          manifest: sharedManifest ?? (() => {
-            throw new Error("shared NATS manifest was not initialized");
-          })(),
-        })
-        : await NatsTestContainer.start(workdir, {
-          startupMs: timeouts.startupMs,
-        });
+      nats = await NatsTestContainer.start(workdir, {
+        startupMs: timeouts.startupMs,
+      });
       if (options.rotatableWebsocketProxy) {
         websocketProxy = TcpProxy.start(nats.websocketUrl);
       }
@@ -387,7 +332,7 @@ export class TrellisTestRuntime implements AsyncDisposable {
           workdir,
           natsUrl: nats.natsUrl,
           websocketUrl: websocketProxy?.url ?? nats.websocketUrl,
-          manifest: sharedManifest ?? nats.manifest,
+          manifest: nats.manifest,
           port,
           oauthProviders: options.oauthProviders,
           webOrigins: options.webOrigins,

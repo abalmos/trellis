@@ -1,6 +1,6 @@
 # Trellis AI guidance for services and browser apps
 
-Last verified against Trellis main (2026-08-29).
+Last verified against Trellis rs-idl (2026-09-05).
 
 This file is for AI coding agents working in a service or browser app repository
 that consumes Trellis. The canonical URL is:
@@ -23,20 +23,23 @@ exact participant artifact and needs digests.
   manifest digest for remote releases. Use `trellis add`,
   `trellis rm`, and `trellis update` to mutate them and lock-stable
   `trellis install` to generate disposable `.trellis/` outputs. Install generates
-  dependency SDKs before participant source evaluation and never executes
+   dependency SDKs from locked canonical artifacts and never executes
   provider source. `trellis publish` publishes immutable compatible canonical API
-  releases and reuses Docker credentials. TypeScript links `@trellis/apis`; Rust path-depends on
-  `trellis-apis`. Release remains package metadata; participant and runtime
+   releases and reuses Docker credentials. Native sources are `contract.trellis`
+   or direct-child `contracts/*.trellis`. Run `trellis generate` after IDL edits.
+   TypeScript imports generated modules under `.trellis/ts/apis` and
+   `.trellis/ts/participants`; Rust path-depends on generated crates under
+   `.trellis/rust/apis` and `.trellis/rust/participants`.
+   Release remains package metadata; participant and runtime
   evidence remain API ID plus semantic digest.
 - Trellis services are contract-driven participants. Contracts declare the public
   surfaces a participant owns and the external surfaces it uses.
 - Participant identity, owned API identity, and API release version are
-  independent. TypeScript `define*Contract` bodies require `id`, `apiId`, and
-  Semantic Version `apiVersion`. Rust passes all authored identity and release
-  values explicitly to `ContractBuilder::authoring`; `ContractBuilder::from_api`
-  receives release metadata in the API artifact. Release version does not affect
+  independent. Native IDL declares `participant`, `implements`, and API `version`
+  separately; TypeScript and Rust consume generated artifacts, not executable
+  contract builders. Release version does not affect
   semantic API digests, participant evidence, permissions, or subjects.
-  Generated participant facades expose `CONTRACT_ID`; generated API SDKs expose
+  Generated participant facades expose `PARTICIPANT_ID`; generated API SDKs expose
   `API_ID`.
 - Durable `eventConsumers` are contract-declared deployment resources. A group
   selects subscribed dependency events with `uses: { alias: ["Event"] }`, where
@@ -303,7 +306,7 @@ exact participant artifact and needs digests.
     context. Trellis signs event publishes at publish time and consumers validate
     event proofs before invoking handlers; prepared events intentionally remain
     free of deployment or contract metadata. In Deno-first TypeScript integration
-    tests, use `runtime.captureEvents(...)` for live event assertions instead of
+    tests, use generated event subscribers for live assertions instead of
     raw NATS subscriptions or outbox-only checks when the test must observe a
     published event through Trellis runtime authority.
 3. Declare cross-contract dependencies under `uses` with the smallest required
@@ -333,17 +336,16 @@ Rules:
 
 - generated SDKs, manifests, and package outputs belong under the service repo's
   generated output locations; do not edit generated files by hand
-- normal TypeScript contract authoring imports `define*Contract(...)` helpers from
-  the browser-safe `@qlever-llc/trellis` root. Runtime-specific helpers,
-  generated SDKs, browser auth, device activation, telemetry, and advanced
-  contract tooling stay on explicit subpaths.
+- author contracts in native IDL, not executable TypeScript or Rust. Generate
+  language consumers with `trellis generate`. Runtime-specific helpers,
+  browser auth, device activation, and telemetry stay on explicit subpaths.
 - TypeScript service repos should expose Trellis generation as
-  `trellis install`
+  `trellis generate`
 - TypeScript browser app repos should expose Trellis generation through the local
   workspace and keep generated SDK imports pointed at workspace output paths;
   generated SDKs do not have a separate published package path. Svelte apps do
   not need their own generated app SDK for the connected client type; use
-  `TrellisClientFor<typeof contract>` from the app source contract.
+  `TrellisClientFor<typeof participant>` from the generated app participant.
 - Svelte browser app repos should read the Svelte AI guide before wiring
   `createTrellisApp`, `TrellisProvider`, generated service SDK aliases for
   contract `uses`, Vite aliases, or `svelte-check` path maps
@@ -433,15 +435,12 @@ Rules:
   command, format command, typecheck/clippy command, test command, run command,
   and migration command
 - TypeScript services should import generated SDK handler aliases (without a
-  dependency generic) for extracted handlers after `trellis install`. Inline
+  dependency generic) for extracted handlers after `trellis generate`. Inline
   `service.handle...` handlers can rely on registration-site inference.
 
-The important pattern is that TypeScript services and apps run
-`trellis install`, Trellis repository development runs `cargo xtask install`, and source
-contracts remain the input.
-
-For repository installation performance diagnosis, measure `cargo xtask install`.
-A warm run reports `Installed 0 changes` for every unchanged project. Resolution
+Service repositories run `trellis update` after dependency changes,
+`trellis install` to reproduce the lock, and `trellis generate` after IDL edits.
+Native IDL remains the input. Resolution
 must be deterministic from tracked source;
 undeclared time, randomness, network, environment, and external-file inputs are
 unsupported.
@@ -462,11 +461,10 @@ unsupported.
 2. Identify the participant kind, language runtime, contract source path,
    generated SDK package names, generation command, and test/typecheck commands.
 3. Make the smallest contract change that exposes the required surface.
-4. Regenerate project-local artifacts with `trellis install`, or
-   `cargo xtask install` in the Trellis repository.
+4. Regenerate project-local artifacts with `trellis generate`.
 5. Implement handlers with generated provider APIs. For TypeScript extracted
    handlers, import generated SDK aliases such as
-    `OrdersCreateHandler` after running `trellis install`.
+    `OrdersCreateHandler` after running `trellis generate`.
 6. Use scoped handler `client` values for outbound calls and register long-lived
    event listeners during startup.
    Trellis does not provide application dependency injection. Handler arguments
@@ -476,10 +474,9 @@ unsupported.
    `@qlever-llc/trellis-test` when the test must exercise Trellis bootstrap, auth
    validation, deployment authority, generated clients, app/client auth, live
    event capture, jobs, operations, KV, store, state, or durable event consumers.
-   Prefer its assertion helpers for captured events, terminal jobs and
-   operations, immediate `Result` RPC values, and eventual RPC projection checks;
-   generated captures and service job refs can be passed directly. Keep unit
-   tests only for pure local functions that do not fake Trellis behavior.
+   Use ordinary assertions on generated RPC results, delivered events, and
+   terminal job/operation values. Deterministic transactions belong at the real
+   SQLite/adapter boundary. Do not fake Trellis behavior or add test registries.
 8. Run formatting, type checks, generation checks, and tests before reporting
    completion.
 
@@ -487,7 +484,7 @@ unsupported.
 
 Use the format, typecheck, lint, test, run, and migration commands configured by
 the service repository. If contract artifacts or generated SDKs changed, run
-`trellis install` or `cargo xtask install` and commit `trellis.lock`
+`trellis generate` and commit `trellis.lock`
 expected by that repo.
 
 ## Common mistakes to avoid

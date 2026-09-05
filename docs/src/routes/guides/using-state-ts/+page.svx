@@ -1,6 +1,8 @@
 # Use State from TypeScript
 
-Add `trellis.state@v1` as a dependency and select only the actions the participant needs. Durable participant state is declared in IDL with its schema and optional state version.
+Declare state inside an app or device participant. Define its schema model in
+the implemented API; the generator derives the required state runtime grants.
+Services use KV resources instead of participant state.
 
 ```trellis
 state preferences value {
@@ -9,4 +11,19 @@ state preferences value {
 }
 ```
 
-Run `trellis update` and `trellis generate`, then import the generated state surface.
+Run `trellis generate` and connect with the generated participant. For a
+`Preferences` model containing `theme: string`:
+
+```ts
+await client.state.preferences.put({ theme: "dark" }).orThrow();
+const stored = await client.state.preferences.get().orThrow();
+if ("found" in stored && stored.found) {
+  console.log(stored.entry.value.theme);
+}
+```
+
+State belongs to the stable principal and participant lineage, not a socket.
+It survives reconnects and server restarts. Use the revision/CAS options exposed
+by the generated handle when coordinating concurrent writes. A `state_version`
+change is a migration decision, not a cache-busting value. Never access the
+internal state bucket directly.

@@ -52,6 +52,8 @@ Trellis by hand-building NATS subjects, envelopes, or JSON wire payloads.
 
 ## Rust Rules
 
+- Author APIs and participants in native IDL and run `trellis generate` before
+  compiling. Generated crates under `.trellis/rust` are disposable outputs.
 - Connect only through the generated participant facade. Owner SDK crates are
   typed vocabulary and do not own runtime connections.
 - Use generated participant alias methods for outbound RPCs, operations, feeds,

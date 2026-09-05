@@ -11,14 +11,34 @@ Open `main.ts`, which was created by `deno init`, and replace it with:
 
 ```ts
 import { TrellisService } from "@qlever-llc/trellis/service/deno";
+import { FileAuthorizationContextStore } from "@qlever-llc/trellis/auth/file";
+import { z } from "zod";
 import { participant as ordersService } from "./.trellis/ts/participants/acme-orders-service/mod.ts";
 
+const env = z.object({
+  TRELLIS_URL: z.string().url(),
+  TRELLIS_IDENTITY_SEED: z.string().min(1),
+  TRELLIS_DEPLOYMENT: z.string().min(1),
+  TRELLIS_INSTANCE: z.string().min(1),
+  TRELLIS_PARTICIPANT_ID: z.string().min(1),
+  TRELLIS_PARTICIPANT_ARTIFACT_DIGEST: z.string().min(1),
+  TRELLIS_PARTICIPANT_NEEDS_DIGEST: z.string().min(1),
+}).parse(Deno.env.toObject());
+
 const service = await TrellisService.connect({
-  trellisUrl: Deno.env.get("TRELLIS_URL")!,
-  contract: ordersService,
+  trellisUrl: env.TRELLIS_URL,
+  participant: ordersService,
   name: "orders-service",
-  sessionKeySeed: Deno.env.get("ORDERS_SERVICE_SESSION_KEY_SEED")!,
-});
+  identity: {
+    seed: env.TRELLIS_IDENTITY_SEED,
+    deploymentId: env.TRELLIS_DEPLOYMENT,
+    instanceId: env.TRELLIS_INSTANCE,
+    participantId: env.TRELLIS_PARTICIPANT_ID,
+    participantArtifactDigest: env.TRELLIS_PARTICIPANT_ARTIFACT_DIGEST,
+    participantNeedsDigest: env.TRELLIS_PARTICIPANT_NEEDS_DIGEST,
+  },
+  authorizationContextStore: new FileAuthorizationContextStore("./trellis-context.json"),
+}).orThrow();
 
 const deps = {
   clock: () => new Date(),
@@ -27,6 +47,8 @@ const deps = {
 };
 
 console.log("Connected to Trellis!");
+// Register handlers before awaiting the supervised service lifecycle.
+await service.wait();
 ```
 
 > **Node.js users:** Import from `@qlever-llc/trellis/service/node` and replace `Deno.env.get(...)` with `process.env`.
@@ -36,7 +58,7 @@ console.log("Connected to Trellis!");
 The contract can be active before this instance connects. If deployment authority does not cover the contract boundary yet, bootstrap creates or reuses a pending authority update and waits while retrying. Required dependencies whose only known manifests are stale and incompatible are tracked as blockers until current evidence is uploaded.
 
 Those resolved bindings are Trellis runtime internals. Use the returned
-`service.kv`, `service.store`, and `service.jobs` handles; do not call
+`service.kv`, `service.store`, and `service.jobs` handles; do not
 fetch binding payloads, construct `TrellisService` or `StoreHandle`, or pass
 resource payloads into `Trellis` constructors.
 
@@ -139,9 +161,8 @@ Now run your service:
 {#snippet ts()}
 
 ```sh
-TRELLIS_URL=http://localhost:3000 \
-ORDERS_SERVICE_SESSION_KEY_SEED=<seed-from-provision> \
-deno run --allow-net --allow-env main.ts
+# Set the validated TRELLIS_* variables above from the provisioned identity.
+deno run --allow-net --allow-env --allow-read --allow-write main.ts
 ```
 
 {/snippet}

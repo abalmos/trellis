@@ -12,4 +12,25 @@ participant "acme.orders-service@v1" service {
 }
 ```
 
-Generate the project, connect the service with the generated participant, and use the generated queue handle. Jobs remain service-private execution; caller-visible workflows use operations.
+`ReconcileInput` and `ReconcileOutput` are models in the implemented API. Run
+`trellis generate`, then connect with the generated participant as described in
+[the service entrypoint guide](/guides/write-a-service/service-entrypoint).
+
+Register the worker before calling `service.wait()`:
+
+```ts
+import { Result } from "@qlever-llc/trellis";
+
+service.jobs.reconcile.handle(({ job }) => Result.ok(job.payload));
+const job = await service.jobs.reconcile.create(input).orThrow();
+const terminal = await job.wait().orThrow();
+if (terminal.state === "completed") console.log(terminal.result);
+```
+
+This identity worker assumes both models have the same shape; replace its body
+with your private work. Return `Result.err(new RetryJobError())` from
+`@qlever-llc/trellis/jobs` for retryable failures. Ordinary errors are terminal.
+Keep side effects idempotent because a retry can execute the job again.
+
+Jobs are private queues, not caller-facing API surfaces. Use an operation when
+another participant needs to start, observe, or cancel a workflow.

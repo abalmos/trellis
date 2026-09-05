@@ -89,7 +89,9 @@ For a permanent deployment, create a Quadlet unit for the service similar to the
 When you publish a new image, apply the new image contract before restarting the service:
 
 ```sh
-trellis svc my-service apply --image ghcr.io/my-org/my-service:1.2.4
+trellis svc my-service apply \
+  --api ./new-release/trellis.api.json \
+  --participant ./new-release/trellis.participant.json
 ```
 
 Trellis validates the new boundary against known manifests and creates a plan for any desired authority or resource changes. After you accept the plan, reconciliation provisions required resource changes before runtime availability, and service instance keys stay the same. Restart the container with the new image tag after applying the authority update. Production deployments use `strict` same-contract compatibility. If the new image presents an incompatible digest for the same contract id, Trellis records a pending authority migration plan; accept it only when you intend that migration. Use a new `@vN` contract id for breaking production changes. Use `mutable-dev` only for unreleased local iteration; it records and auto-accepts the same migration plan instead of waiting for manual approval. Remove authority only when you want to remove boundary that is no longer needed.

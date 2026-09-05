@@ -1,6 +1,5 @@
 //! Shared request and response types for `trellis.auth@v1`.
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 use std::collections::BTreeMap;
 /// Generated schema type `AuthCapabilitiesListRequest`.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -991,7 +990,7 @@ pub struct AuthDeploymentAuthorityAcceptMigrationResponseAuthority {
     #[serde(rename = "createdAt")]
     pub created_at: i64,
     /// The `decision` wire field.
-    pub decision: Option<BTreeMap<String, Value>>,
+    pub decision: Option<BTreeMap<String, serde_json::Value>>,
     /// The `deploymentId` wire field.
     #[serde(rename = "deploymentId")]
     pub deployment_id: String,
@@ -1007,7 +1006,7 @@ pub struct AuthDeploymentAuthorityAcceptMigrationResponseAuthority {
     /// The `kind` wire field.
     pub kind: AuthDeploymentAuthorityAcceptMigrationResponseAuthorityKind,
     /// The `materialization` wire field.
-    pub materialization: Option<BTreeMap<String, Value>>,
+    pub materialization: Option<BTreeMap<String, serde_json::Value>>,
     /// The `participantArtifactDigest` wire field.
     #[serde(rename = "participantArtifactDigest")]
     pub participant_artifact_digest: String,
@@ -2006,7 +2005,7 @@ pub struct AuthDeploymentAuthorityAcceptUpdateResponseAuthority {
     #[serde(rename = "createdAt")]
     pub created_at: i64,
     /// The `decision` wire field.
-    pub decision: Option<BTreeMap<String, Value>>,
+    pub decision: Option<BTreeMap<String, serde_json::Value>>,
     /// The `deploymentId` wire field.
     #[serde(rename = "deploymentId")]
     pub deployment_id: String,
@@ -2022,7 +2021,7 @@ pub struct AuthDeploymentAuthorityAcceptUpdateResponseAuthority {
     /// The `kind` wire field.
     pub kind: AuthDeploymentAuthorityAcceptUpdateResponseAuthorityKind,
     /// The `materialization` wire field.
-    pub materialization: Option<BTreeMap<String, Value>>,
+    pub materialization: Option<BTreeMap<String, serde_json::Value>>,
     /// The `participantArtifactDigest` wire field.
     #[serde(rename = "participantArtifactDigest")]
     pub participant_artifact_digest: String,
@@ -2993,7 +2992,7 @@ pub struct AuthDeploymentAuthorityGetResponseAuthority {
     #[serde(rename = "createdAt")]
     pub created_at: i64,
     /// The `decision` wire field.
-    pub decision: Option<BTreeMap<String, Value>>,
+    pub decision: Option<BTreeMap<String, serde_json::Value>>,
     /// The `deploymentId` wire field.
     #[serde(rename = "deploymentId")]
     pub deployment_id: String,
@@ -3009,7 +3008,7 @@ pub struct AuthDeploymentAuthorityGetResponseAuthority {
     /// The `kind` wire field.
     pub kind: AuthDeploymentAuthorityGetResponseAuthorityKind,
     /// The `materialization` wire field.
-    pub materialization: Option<BTreeMap<String, Value>>,
+    pub materialization: Option<BTreeMap<String, serde_json::Value>>,
     /// The `participantArtifactDigest` wire field.
     #[serde(rename = "participantArtifactDigest")]
     pub participant_artifact_digest: String,
@@ -3547,7 +3546,7 @@ pub struct AuthDeploymentAuthorityListResponseEntriesItem {
     #[serde(rename = "createdAt")]
     pub created_at: i64,
     /// The `decision` wire field.
-    pub decision: Option<BTreeMap<String, Value>>,
+    pub decision: Option<BTreeMap<String, serde_json::Value>>,
     /// The `deploymentId` wire field.
     #[serde(rename = "deploymentId")]
     pub deployment_id: String,
@@ -3563,7 +3562,7 @@ pub struct AuthDeploymentAuthorityListResponseEntriesItem {
     /// The `kind` wire field.
     pub kind: AuthDeploymentAuthorityListResponseEntriesItemKind,
     /// The `materialization` wire field.
-    pub materialization: Option<BTreeMap<String, Value>>,
+    pub materialization: Option<BTreeMap<String, serde_json::Value>>,
     /// The `participantArtifactDigest` wire field.
     #[serde(rename = "participantArtifactDigest")]
     pub participant_artifact_digest: String,
@@ -3604,10 +3603,10 @@ pub struct AuthDeploymentAuthorityPlanRequest {
     pub idempotency_key: String,
     /// The `participantArtifact` wire field.
     #[serde(rename = "participantArtifact")]
-    pub participant_artifact: BTreeMap<String, Value>,
+    pub participant_artifact: BTreeMap<String, serde_json::Value>,
     /// The `referencedApiArtifacts` wire field.
     #[serde(rename = "referencedApiArtifacts")]
-    pub referenced_api_artifacts: Vec<BTreeMap<String, Value>>,
+    pub referenced_api_artifacts: Vec<BTreeMap<String, serde_json::Value>>,
 }
 /// Generated schema type `AuthDeploymentAuthorityPlanResponseProposalAuthorityKind`.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -5641,7 +5640,7 @@ pub struct AuthDeploymentAuthorityReconcileResponseAuthority {
     #[serde(rename = "createdAt")]
     pub created_at: i64,
     /// The `decision` wire field.
-    pub decision: Option<BTreeMap<String, Value>>,
+    pub decision: Option<BTreeMap<String, serde_json::Value>>,
     /// The `deploymentId` wire field.
     #[serde(rename = "deploymentId")]
     pub deployment_id: String,
@@ -5657,7 +5656,7 @@ pub struct AuthDeploymentAuthorityReconcileResponseAuthority {
     /// The `kind` wire field.
     pub kind: AuthDeploymentAuthorityReconcileResponseAuthorityKind,
     /// The `materialization` wire field.
-    pub materialization: Option<BTreeMap<String, Value>>,
+    pub materialization: Option<BTreeMap<String, serde_json::Value>>,
     /// The `participantArtifactDigest` wire field.
     #[serde(rename = "participantArtifactDigest")]
     pub participant_artifact_digest: String,
@@ -7550,7 +7549,7 @@ pub struct AuthDeviceUserAuthoritiesListResponseEntriesItemDevice {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct AuthDeviceUserAuthoritiesListResponseEntriesItem {
     /// The `authority` wire field.
-    pub authority: Option<BTreeMap<String, Value>>,
+    pub authority: Option<BTreeMap<String, serde_json::Value>>,
     /// The `device` wire field.
     pub device: AuthDeviceUserAuthoritiesListResponseEntriesItemDevice,
 }
@@ -9794,7 +9793,7 @@ pub struct AuthIdentityAuthorityGetResponseAuthority {
     #[serde(rename = "createdAt")]
     pub created_at: i64,
     /// The `decision` wire field.
-    pub decision: Option<BTreeMap<String, Value>>,
+    pub decision: Option<BTreeMap<String, serde_json::Value>>,
     /// The `desiredCapabilities` wire field.
     #[serde(rename = "desiredCapabilities")]
     pub desired_capabilities: Vec<String>,
@@ -9807,7 +9806,7 @@ pub struct AuthIdentityAuthorityGetResponseAuthority {
     /// The `kind` wire field.
     pub kind: AuthIdentityAuthorityGetResponseAuthorityKind,
     /// The `materialization` wire field.
-    pub materialization: Option<BTreeMap<String, Value>>,
+    pub materialization: Option<BTreeMap<String, serde_json::Value>>,
     /// The `participantArtifactDigest` wire field.
     #[serde(rename = "participantArtifactDigest")]
     pub participant_artifact_digest: String,
@@ -10306,7 +10305,7 @@ pub struct AuthIdentityAuthorityListResponseEntriesItem {
     #[serde(rename = "createdAt")]
     pub created_at: i64,
     /// The `decision` wire field.
-    pub decision: Option<BTreeMap<String, Value>>,
+    pub decision: Option<BTreeMap<String, serde_json::Value>>,
     /// The `desiredCapabilities` wire field.
     #[serde(rename = "desiredCapabilities")]
     pub desired_capabilities: Vec<String>,
@@ -10319,7 +10318,7 @@ pub struct AuthIdentityAuthorityListResponseEntriesItem {
     /// The `kind` wire field.
     pub kind: AuthIdentityAuthorityListResponseEntriesItemKind,
     /// The `materialization` wire field.
-    pub materialization: Option<BTreeMap<String, Value>>,
+    pub materialization: Option<BTreeMap<String, serde_json::Value>>,
     /// The `participantArtifactDigest` wire field.
     #[serde(rename = "participantArtifactDigest")]
     pub participant_artifact_digest: String,
@@ -10764,7 +10763,7 @@ pub struct AuthIdentityAuthorityRevokeResponseAuthority {
     #[serde(rename = "createdAt")]
     pub created_at: i64,
     /// The `decision` wire field.
-    pub decision: Option<BTreeMap<String, Value>>,
+    pub decision: Option<BTreeMap<String, serde_json::Value>>,
     /// The `desiredCapabilities` wire field.
     #[serde(rename = "desiredCapabilities")]
     pub desired_capabilities: Vec<String>,
@@ -10777,7 +10776,7 @@ pub struct AuthIdentityAuthorityRevokeResponseAuthority {
     /// The `kind` wire field.
     pub kind: AuthIdentityAuthorityRevokeResponseAuthorityKind,
     /// The `materialization` wire field.
-    pub materialization: Option<BTreeMap<String, Value>>,
+    pub materialization: Option<BTreeMap<String, serde_json::Value>>,
     /// The `participantArtifactDigest` wire field.
     #[serde(rename = "participantArtifactDigest")]
     pub participant_artifact_digest: String,
@@ -12872,7 +12871,7 @@ pub struct AuthSessionsMeResponse {
     /// The `session` wire field.
     pub session: AuthSessionsMeResponseSession,
     /// The `user` wire field.
-    pub user: Option<BTreeMap<String, Value>>,
+    pub user: Option<BTreeMap<String, serde_json::Value>>,
 }
 /// Generated schema type `AuthSessionsRevokeRequest`.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -13697,7 +13696,7 @@ pub struct AuthUsersResolveRequest {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct AuthUsersResolveResponse {
     /// The `user` wire field.
-    pub user: Option<BTreeMap<String, Value>>,
+    pub user: Option<BTreeMap<String, serde_json::Value>>,
 }
 /// Generated schema type `AuthUsersUpdateRequestState`.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -14178,7 +14177,7 @@ pub struct AuthDeviceUserAuthoritiesResolveOutputReview {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct AuthDeviceUserAuthoritiesResolveOutput {
     /// The `authority` wire field.
-    pub authority: Option<BTreeMap<String, Value>>,
+    pub authority: Option<BTreeMap<String, serde_json::Value>>,
     /// The `device` wire field.
     pub device: AuthDeviceUserAuthoritiesResolveOutputDevice,
     /// The `review` wire field.

@@ -24,7 +24,7 @@ const MANAGED_PORTS: [u16; 3] = [4222, 8222, 8080];
 const BOGUS_NATS_URL: &str = "nats://127.0.0.1:4999";
 const BOGUS_WS_URL: &str = "ws://localhost:9999";
 /// The first managed run downloads the pinned nats-server binary into an empty
-/// cache, so startup allows 600s (recorded in the matrix row's isolation reason).
+/// cache, so startup allows 600s for that initial acquisition.
 const STARTUP_TIMEOUT: Duration = Duration::from_secs(600);
 const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(60);
 const POLL_INTERVAL: Duration = Duration::from_millis(200);

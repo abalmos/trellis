@@ -1,192 +1,20 @@
 # @qlever-llc/trellis-test
 
-Deno-first integration test helpers for Trellis service repositories.
+Deno helpers that own a real Trellis/NATS runtime for service-repository tests.
+Use ordinary `deno test -A`; there is no runner, matrix, or case registration.
 
-## Repo-local TypeScript integration suite
+## Generated Participants
 
-Within the Trellis repository, the language-owned TypeScript/Deno client
-integration suite under `ts/integration/` uses this package to start isolated
-Trellis runtime environments for public client-library behavior tests. Run the
-suite from the repository root with:
-
-```sh
-deno task -c ts/deno.json test:integration
-```
-
-Focused runs use the client cases in shared ordinary Deno and Rust test
-discovery:
-
-```sh
-deno task -c ts/deno.json test:integration -- --fixture rpc
-deno task -c ts/deno.json test:integration -- --case rpc.client-calls-service
-deno task -c ts/deno.json test:integration -- --coverage cross-runtime-rpc
-```
-
-The matrix is the parity contract for supported Trellis client languages. Every
-matrix case must be registered by the TypeScript suite and by the Rust
-`trellis-rs` integration suite; this package provides the TypeScript runtime
-primitives, not a Rust orchestration harness.
+Author a small service and caller in `contract.trellis`, run `trellis generate`,
+and import their generated participant exports. Never construct test contracts,
+subjects, or authorization evidence by hand.
 
 ```ts
-import { TrellisService } from "@qlever-llc/trellis/service";
-import {
-  assertEventCaptured,
-  TrellisTestRuntime,
-} from "@qlever-llc/trellis-test";
+import { TrellisTestRuntime } from "@qlever-llc/trellis-test";
+import { TrellisService } from "@qlever-llc/trellis/service/deno";
+import { participant as provider } from "./.trellis/ts/participants/provider/mod.ts";
+import { participant as caller } from "./.trellis/ts/participants/caller/mod.ts";
 
-await using runtime = await TrellisTestRuntime.start({
-  trellis: {
-    command: {
-      cmd: "trellis-server",
-      args: ["--config", "{config}", "all"],
-    },
-  },
-});
-
-const serviceKey = await runtime.registerService({
-  name: "entity",
-  contract: entityContract,
-});
-
-const service = await TrellisService.connect({
-  trellisUrl: runtime.trellisUrl,
-  contract: entityContract,
-  name: "entity",
-  sessionKeySeed: serviceKey.seed,
-  telemetry: false,
-}).orThrow();
-```
-
-App/client participants can connect through the same generated contract surfaces
-used by service repositories:
-
-```ts
-const client = await runtime.connectClient({
-  name: "entity-test-client",
-  contract: entityClientContract,
-});
-```
-
-Live event assertions should use generated event surfaces and
-`runtime.captureEvents(...)`. Start the capture before publishing the event:
-
-```ts
-await using capture = await runtime.captureEvents({
-  name: "entity-event-capture",
-  contract: entityContract,
-  events: ["Entity.Changed", "Entity.Indexed", "Entity.Failed"],
-});
-
-await client.event.entity.changed.publish({
-  id: "entity-1",
-  value: "updated",
-}).orThrow();
-
-const changed = await assertEventCaptured(
-  capture,
-  "Entity.Changed",
-  (record) => record.payload.id === "entity-1",
-);
-
-assertEquals(changed.payload.value, "updated");
-console.log(changed.event, changed.context.id, changed.receivedAt);
-```
-
-The package also includes generic assertions for multi-event expectations,
-negative event checks, terminal jobs and operations, and `Result`-style RPC
-values:
-
-```ts
-import {
-  assertEventsCaptured,
-  assertJobCompleted,
-  assertNoEventCaptured,
-  assertOperationCompleted,
-  assertRpcEventuallyOk,
-  assertRpcOk,
-} from "@qlever-llc/trellis-test";
-
-await assertEventsCaptured(capture, [
-  {
-    event: "Entity.Changed",
-    predicate: (record) => record.payload.id === "entity-1",
-  },
-  "Entity.Indexed",
-]);
-
-await assertNoEventCaptured(capture, "Entity.Failed");
-
-const rpcValue = await assertRpcOk(client.rpc.entity.get({ id: "entity-1" }), {
-  id: "entity-1",
-});
-
-const projected = await assertRpcEventuallyOk(
-  runtime,
-  () => client.rpc.entity.get({ id: "entity-1" }),
-  { id: "entity-1", indexed: true },
-);
-
-const jobRef = await service.jobs.entitySync.create({ id: rpcValue.id })
-  .orThrow();
-const job = await assertJobCompleted(jobRef, {
-  synced: true,
-});
-
-const operation = await client.operation.entity.rebuild.start({
-  id: rpcValue.id,
-})
-  .orThrow();
-await assertOperationCompleted(operation, {
-  indexed: true,
-});
-console.log(projected.id, job.id);
-```
-
-For lower-level `TrellisClient.connect(...)` tests, create client key material
-and spread the returned auth continuation options:
-
-```ts
-const key = await runtime.registerClient({
-  name: "entity-test-client",
-  contract: entityClientContract,
-});
-
-const clientAuth = runtime.clientAuth(key);
-const client = await TrellisClient.connect({
-  trellisUrl: runtime.trellisUrl,
-  name: "entity-test-client",
-  contract: entityClientContract,
-  ...clientAuth,
-}).orThrow();
-```
-
-Authority automation accepts update plans by default. Isolated mutable-dev tests
-that intentionally exercise safe migration plans can opt in globally or per
-approval:
-
-```ts
-await using runtime = await TrellisTestRuntime.start({
-  trellis: { command: trellisCommand },
-  authority: { autoAccept: ["update", "migration"] },
-});
-
-const approval = await runtime.contracts.approve({
-  contract,
-  allowPlanClassifications: ["update", "migration"],
-});
-console.log(approval.classification);
-```
-
-The runtime starts an isolated NATS/JetStream container with generated Trellis
-accounts, credentials, auth-callout config, a fresh SQLite database, and a real
-Trellis control-plane process. Tests must provide `trellis.command` explicitly.
-
-Tests should connect services and clients through the normal public Trellis
-APIs.
-
-For example, point `trellis.command` at a built `trellis-server`:
-
-```ts
 await using runtime = await TrellisTestRuntime.start({
   trellis: {
     command: {
@@ -195,8 +23,53 @@ await using runtime = await TrellisTestRuntime.start({
     },
   },
 });
+const identity = await runtime.registerService({
+  name: "provider",
+  contract: provider,
+});
+const service = await TrellisService.connect({
+  trellisUrl: runtime.trellisUrl,
+  participant: provider,
+  name: "provider",
+  identity,
+  authorizationContextEphemeral: true,
+  telemetry: false,
+  runtime: {},
+}).orThrow();
+const client = await runtime.connectClient({
+  name: "caller",
+  contract: caller,
+});
 ```
 
-The public API intentionally does not accept an existing NATS URL. Use this
-package when a test needs an isolated integration environment rather than a
-shared development runtime.
+Register generated handlers before starting the service. Exercise generated
+caller methods and inspect their `Result` values with ordinary assertions. Stop
+the service in `finally`, await its run task, and let `await using` stop the
+test runtime. Ephemeral authorization storage is appropriate only for isolated
+tests; production clients need persistent trust state.
+
+For events, subscribe through a generated surface before publishing, then await
+the actual typed payload. For operations and jobs, await their public terminal
+result. No helper should replace a real boundary with a fabricated result.
+
+## Ownership and Waiting
+
+Each runtime owns fresh accounts, a real NATS process, SQLite files, and a real
+control-plane process. `trellis.command` is explicit. The package does not
+attach tests to a shared NATS URL or assign infrastructure by test name.
+
+`runtime.waitFor` provides bounded polling for public transitions. Prefer an
+observable completion signal when available. `tempSqlitePath` and
+`sqliteMemoryUrl` support deterministic real SQLite tests without a control
+plane.
+
+## Repository Live Suite
+
+See [integration setup](../../../integration/README.md) for generation, binary
+builds, and `TRELLIS_TEST_SERVER_BIN` / `TRELLIS_TEST_CLI_BIN` environment
+variables. Run all or a native filter:
+
+```sh
+deno test -A -c ts/integration/deno.json ts/integration
+deno test -A -c ts/integration/deno.json --filter 'generated runtime workflows' ts/integration
+```

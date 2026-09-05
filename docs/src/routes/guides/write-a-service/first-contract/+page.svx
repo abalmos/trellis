@@ -29,3 +29,17 @@ participant "acme.orders-service@v1" service {
 ```
 
 Run `trellis generate`. The canonical `trellis.api.v1` and `trellis.participant.v1` artifacts are emitted before language SDKs are replaced.
+
+The API declares the public vocabulary. The participant declares who implements
+it and which other APIs and resources it needs. Keep these identities distinct:
+more than one participant can implement an API, and an API release version is
+not a transport version.
+
+Add TypeScript output configuration to `trellis.toml` as shown in
+[setup](/guides/write-a-service/setup). Import the generated participant from
+`.trellis/ts/participants/acme-orders-service/mod.ts`. SDK types and descriptors
+come from `.trellis/ts/apis/`; do not duplicate models in service code.
+
+Generation validates the entire project before replacing the last successful
+outputs. Fix errors in IDL and regenerate rather than editing generated files.
+Check in authored source and `trellis.lock`; keep `.trellis/` disposable.

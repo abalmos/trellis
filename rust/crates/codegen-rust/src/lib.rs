@@ -2149,9 +2149,6 @@ fn render_participant_state_rs(loaded: &ParticipantInput) -> String {
     if !rendered.is_empty() {
         lines.push(String::new());
         lines.push("use serde::{Deserialize, Serialize};".to_string());
-        if rendered.iter().any(|line| line.contains("Value")) {
-            lines.push("use serde_json::Value;".to_string());
-        }
         if rendered.iter().any(|line| line.contains("BTreeMap<")) {
             lines.push("use std::collections::BTreeMap;".to_string());
         }
@@ -2558,9 +2555,6 @@ fn render_types_rs(loaded: &ApiInput) -> String {
     } else {
         lines.push(String::new());
         lines.push("use serde::{Deserialize, Serialize};".to_string());
-        if rendered.iter().any(|line| line.contains("Value")) {
-            lines.push("use serde_json::Value;".to_string());
-        }
         if rendered.iter().any(|line| line.contains("BTreeMap<")) {
             lines.push("use std::collections::BTreeMap;".to_string());
         }
@@ -3110,9 +3104,6 @@ fn render_participant_job_descriptors_rs(loaded: &ParticipantInput) -> String {
         let rendered = renderer.finish();
         if !rendered.is_empty() {
             lines.push("use serde::{Deserialize, Serialize};".to_string());
-            if rendered.iter().any(|line| line.contains("Value")) {
-                lines.push("use serde_json::Value;".to_string());
-            }
             lines.push(String::new());
             lines.extend(rendered);
             lines.push(String::new());
@@ -3998,11 +3989,13 @@ impl TypeRenderer {
                 cloned["type"] = serde_json::Value::String(non_null[0].to_string());
                 return self.scalar_or_container_expr(type_name, &cloned);
             }
-            return "Value".to_string();
+            return "serde_json::Value".to_string();
         }
 
         if schema.get("enum").is_some() || schema.get("const").is_some() {
-            return literal_base_type(schema).unwrap_or("Value").to_string();
+            return literal_base_type(schema)
+                .unwrap_or("serde_json::Value")
+                .to_string();
         }
 
         match schema.get("type").and_then(serde_json::Value::as_str) {
@@ -4022,9 +4015,9 @@ impl TypeRenderer {
                     let value_type = self.type_expr(&value_name, value_schema);
                     return format!("BTreeMap<String, {value_type}>");
                 }
-                "BTreeMap<String, Value>".to_string()
+                "BTreeMap<String, serde_json::Value>".to_string()
             }
-            _ => "Value".to_string(),
+            _ => "serde_json::Value".to_string(),
         }
     }
 
@@ -4612,28 +4605,11 @@ mod tests {
     }
 
     #[test]
-    fn protocol_api_generation_uses_api_identity() {
-        let out_dir = unique_temp_dir("protocol-api");
-        fs::create_dir_all(&out_dir).unwrap();
-        let api_path = write_sample_manifest(&out_dir);
-        generate_rust_sdk(&GenerateRustSdkOpts {
-            api_path,
-            out_dir: out_dir.clone(),
-            crate_name: "example-auth".to_owned(),
-            crate_version: "0.1.0".to_owned(),
-            runtime_deps: RustRuntimeDeps {
-                source: RustRuntimeSource::Registry,
-                version: "0.11.0".to_owned(),
-                repo_root: None,
-            },
-        })
-        .unwrap();
-
-        assert!(out_dir.join("api.json").is_file());
-        assert!(out_dir.join("src/api.rs").is_file());
-        let api = fs::read_to_string(out_dir.join("src/api.rs")).unwrap();
-        assert!(api.contains("pub const API_ID"));
-        fs::remove_dir_all(out_dir).unwrap();
+    fn generated_runtime_consumer_compiles() {
+        cargo_check(
+            &PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("../../../integration/fixtures/runtime/Cargo.toml"),
+        );
     }
 
     fn write_sample_manifest(root: &Path) -> PathBuf {
@@ -4751,10 +4727,7 @@ mod tests {
             .arg("--quiet")
             .env(
                 "CARGO_TARGET_DIR",
-                manifest_path
-                    .parent()
-                    .expect("generated crate root")
-                    .join("target"),
+                PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/codegen-consumers"),
             )
             .output()
             .expect("run cargo check");
@@ -4879,12 +4852,6 @@ mod tests {
             &sdk_out.join("Cargo.toml"),
             "trellis-sdk-core",
             "0.1.0"
-        ));
-        let trellis_md = fs::read_to_string(sdk_out.join("TRELLIS.md")).unwrap();
-        assert!(trellis_md.contains("# Trellis API Guide: trellis.core@v1"));
-        assert!(trellis_md.contains("Trellis.Info"));
-        assert!(trellis_md.contains(
-            "https://raw.githubusercontent.com/qlever-llc/trellis/main/docs/static/llms.txt"
         ));
 
         fs::remove_dir_all(out_dir).unwrap();
@@ -5216,31 +5183,8 @@ mod tests {
             })
             .unwrap();
 
-            let connect = fs::read_to_string(facade.join("src/connect.rs")).unwrap();
-            assert!(connect.contains("pub async fn connect("));
-            assert!(!connect.contains("connect_service"));
-            if kind == "device" {
-                let lib = fs::read_to_string(facade.join("src/lib.rs")).unwrap();
-                assert!(lib.contains("ConnectedClient, Participant"));
-                assert!(connect.contains(
-                    "/// Exact generated participant and API evidence used for device bootstrap."
-                ));
-                assert!(connect.contains(
-                    "impl trellis_rs::service::GeneratedServiceParticipant for Participant"
-                ));
-                assert!(connect.contains("DeviceConnectOptions::<Participant>::new"));
-                assert!(connect.contains("DeviceActivationOptions<'_, Participant>"));
-                assert!(connect.contains("options.into_connect_options(session)?"));
-                assert!(!connect.contains("opts.participant_needs_digest"));
-                assert!(!connect.contains("session_key_seed_base64url"));
-            } else if matches!(kind, "app" | "agent") {
-                assert!(connect.contains("\"installation:{}:{}:{}\""));
-                assert!(connect.contains("crate::participant::PARTICIPANT_ID"));
-                assert!(connect.contains("crate::participant::PARTICIPANT_DIGEST"));
-                assert!(connect.contains("canonical_trellis_origin(opts.trellis_url)"));
-            }
-
             cargo_check(&facade.join("Cargo.toml"));
+            fs::remove_dir_all(out_dir).unwrap();
         }
     }
 

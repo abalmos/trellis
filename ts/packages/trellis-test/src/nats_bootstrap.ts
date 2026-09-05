@@ -38,11 +38,6 @@ export type LocalNatsBootstrapManifest = {
   };
 };
 
-/** NATS account manifests keyed by isolated integration-test case id. */
-export type LocalNatsBootstrapPoolManifest = {
-  tenants: Record<string, LocalNatsBootstrapManifest>;
-};
-
 /** Localhost TCP ports used by a generated NATS server bootstrap. */
 export type NatsBootstrapPorts = {
   readonly nats: number;
@@ -103,12 +98,9 @@ include ./jwt.conf
 }
 
 /** Renders the nsc script that generates accounts, JWTs, and creds locally. */
-export function renderNscScript(outDir: string, tenantCount: number): string {
-  const tenants = Array.from({ length: tenantCount }, (_, index) => {
-    const suffix = tenantCount === 1 ? "" : `_${index}`;
-    const fileSuffix = tenantCount === 1 ? "" : `-${index}`;
-    return `AUTH_ACCOUNT_NAME='AUTH${suffix}'
-TRELLIS_ACCOUNT_NAME='TRELLIS${suffix}'
+export function renderNscScript(outDir: string): string {
+  const accounts = `AUTH_ACCOUNT_NAME='AUTH'
+TRELLIS_ACCOUNT_NAME='TRELLIS'
 nsc add account --name "$AUTH_ACCOUNT_NAME"
 nsc add account --name "$TRELLIS_ACCOUNT_NAME"
 nsc edit account --name "$AUTH_ACCOUNT_NAME" --sk generate
@@ -121,15 +113,15 @@ AUTH_USER=$(nsc describe user --account "$AUTH_ACCOUNT_NAME" --name auth --field
 TRELLIS_USER=$(nsc describe user --account "$TRELLIS_ACCOUNT_NAME" --name auth --field sub | tr -d '"')
 TRELLIS_ACCOUNT=$(nsc describe account --name "$TRELLIS_ACCOUNT_NAME" --field sub | tr -d '"')
 nsc edit authcallout --account "$AUTH_ACCOUNT_NAME" --auth-user "$AUTH_USER" --allowed-account "$TRELLIS_ACCOUNT" --curve generate
-nsc generate creds --account "$AUTH_ACCOUNT_NAME" --name auth > "$WORK_DIR/creds/auth-auth${fileSuffix}.creds"
-nsc generate creds --account "$TRELLIS_ACCOUNT_NAME" --name auth > "$WORK_DIR/creds/trellis-auth${fileSuffix}.creds"
+nsc generate creds --account "$AUTH_ACCOUNT_NAME" --name auth > "$WORK_DIR/creds/auth-auth.creds"
+nsc generate creds --account "$TRELLIS_ACCOUNT_NAME" --name auth > "$WORK_DIR/creds/trellis-auth.creds"
 AUTH_ACCOUNT=$(nsc describe account --name "$AUTH_ACCOUNT_NAME" --field sub | tr -d '"')
 TRELLIS_ACCOUNT=$(nsc describe account --name "$TRELLIS_ACCOUNT_NAME" --field sub | tr -d '"')
 nsc describe account --name "$AUTH_ACCOUNT_NAME" --raw > "$WORK_DIR/data/jwt/\${AUTH_ACCOUNT}.jwt"
 nsc describe account --name "$TRELLIS_ACCOUNT_NAME" --raw > "$WORK_DIR/data/jwt/\${TRELLIS_ACCOUNT}.jwt"
-nsc list keys --account "$AUTH_ACCOUNT_NAME" --accounts --show-seeds --json > "$WORK_DIR/generated/auth-keys${fileSuffix}.json"
-nsc list keys --account "$TRELLIS_ACCOUNT_NAME" --accounts --show-seeds --json > "$WORK_DIR/generated/trellis-keys${fileSuffix}.json"
-cat > "$WORK_DIR/generated/metadata${fileSuffix}.json" <<EOF
+nsc list keys --account "$AUTH_ACCOUNT_NAME" --accounts --show-seeds --json > "$WORK_DIR/generated/auth-keys.json"
+nsc list keys --account "$TRELLIS_ACCOUNT_NAME" --accounts --show-seeds --json > "$WORK_DIR/generated/trellis-keys.json"
+cat > "$WORK_DIR/generated/metadata.json" <<EOF
 {
   "systemAccountName": "\${SYSTEM_ACCOUNT_NAME}",
   "systemAccountPublicKey": "\${SYS_ACCOUNT}",
@@ -142,7 +134,6 @@ cat > "$WORK_DIR/generated/metadata${fileSuffix}.json" <<EOF
   "trellisUserPublicKey": "\${TRELLIS_USER}"
 }
 EOF`;
-  }).join("\n\n");
 
   return `set -eu
 OPERATOR_NAME='Qlever'
@@ -162,7 +153,7 @@ SYS_ACCOUNT=$(nsc describe account --name "$SYSTEM_ACCOUNT_NAME" --field sub | t
 SYSTEM_USER=$(nsc describe user --account "$SYSTEM_ACCOUNT_NAME" --name system --field sub | tr -d '"')
 nsc describe account --name "$SYSTEM_ACCOUNT_NAME" --raw > "$WORK_DIR/data/jwt/\${SYS_ACCOUNT}.jwt"
 
-${tenants}
+${accounts}
 
 nsc generate config --nats-resolver --config-file "$WORK_DIR/generated/jwt.conf" --force --sys-account "$SYSTEM_ACCOUNT_NAME"
 `;
@@ -254,25 +245,6 @@ export async function generateLocalNatsBootstrap(args: {
   outDir: string;
   ports: NatsBootstrapPorts;
 }): Promise<LocalNatsBootstrapManifest> {
-  const pool = await generateLocalNatsBootstrapPool({
-    ...args,
-    tenantIds: ["default"],
-  });
-  return pool.tenants.default;
-}
-
-/** Generates one NATS server bootstrap with isolated account pairs per tenant. */
-export async function generateLocalNatsBootstrapPool(args: {
-  outDir: string;
-  tenantIds: readonly string[];
-  ports: NatsBootstrapPorts;
-}): Promise<LocalNatsBootstrapPoolManifest> {
-  if (
-    args.tenantIds.length === 0 ||
-    new Set(args.tenantIds).size !== args.tenantIds.length
-  ) {
-    throw new Error("NATS bootstrap tenant ids must be non-empty and unique");
-  }
   await Deno.mkdir(join(args.outDir, "data", "jwt"), { recursive: true });
   await Deno.mkdir(join(args.outDir, "creds"), { recursive: true });
   await Deno.mkdir(join(args.outDir, "secrets"), { recursive: true });
@@ -287,7 +259,7 @@ export async function generateLocalNatsBootstrapPool(args: {
   );
   await Deno.writeTextFile(
     join(args.outDir, "bootstrap-nsc.sh"),
-    renderNscScript(args.outDir, args.tenantIds.length),
+    renderNscScript(args.outDir),
   );
 
   const binaries = await ensureNatsBinaries();
@@ -298,86 +270,82 @@ export async function generateLocalNatsBootstrapPool(args: {
     },
   });
 
-  const tenants: Record<string, LocalNatsBootstrapManifest> = {};
-  for (const [index, tenantId] of args.tenantIds.entries()) {
-    const suffix = args.tenantIds.length === 1 ? "" : `-${index}`;
-    const issuerPath = `secrets/auth-issuer-signing${suffix}.seed`;
-    const targetPath = `secrets/auth-target-signing${suffix}.seed`;
-    const xkeyPath = `secrets/auth-sx${suffix}.seed`;
-    await Deno.writeTextFile(
-      join(args.outDir, issuerPath),
-      await firstSeedMatching(
-        join(args.outDir, "generated", `auth-keys${suffix}.json`),
-        "SA",
-        true,
-        false,
-        "auth issuer signing seed",
-      ),
-    );
-    await Deno.writeTextFile(
-      join(args.outDir, targetPath),
-      await firstSeedMatching(
-        join(args.outDir, "generated", `trellis-keys${suffix}.json`),
-        "SA",
-        true,
-        false,
-        "auth target signing seed",
-      ),
-    );
-    await Deno.writeTextFile(
-      join(args.outDir, xkeyPath),
-      await firstSeedMatching(
-        join(args.outDir, "generated", `auth-keys${suffix}.json`),
-        "SX",
-        false,
-        true,
-        "auth callout xkey seed",
-      ),
-    );
-    const metadata = JSON.parse(
-      await Deno.readTextFile(
-        join(args.outDir, "generated", `metadata${suffix}.json`),
-      ),
-    ) as GeneratedMetadata;
-    tenants[tenantId] = {
-      accounts: {
-        system: {
-          name: metadata.systemAccountName,
-          publicKey: metadata.systemAccountPublicKey,
-        },
-        auth: {
-          name: metadata.authAccountName,
-          publicKey: metadata.authAccountPublicKey,
-        },
-        trellis: {
-          name: metadata.trellisAccountName,
-          publicKey: metadata.trellisAccountPublicKey,
-        },
+  const issuerPath = "secrets/auth-issuer-signing.seed";
+  const targetPath = "secrets/auth-target-signing.seed";
+  const xkeyPath = "secrets/auth-sx.seed";
+  await Deno.writeTextFile(
+    join(args.outDir, issuerPath),
+    await firstSeedMatching(
+      join(args.outDir, "generated", "auth-keys.json"),
+      "SA",
+      true,
+      false,
+      "auth issuer signing seed",
+    ),
+  );
+  await Deno.writeTextFile(
+    join(args.outDir, targetPath),
+    await firstSeedMatching(
+      join(args.outDir, "generated", "trellis-keys.json"),
+      "SA",
+      true,
+      false,
+      "auth target signing seed",
+    ),
+  );
+  await Deno.writeTextFile(
+    join(args.outDir, xkeyPath),
+    await firstSeedMatching(
+      join(args.outDir, "generated", "auth-keys.json"),
+      "SX",
+      false,
+      true,
+      "auth callout xkey seed",
+    ),
+  );
+  const metadata = JSON.parse(
+    await Deno.readTextFile(
+      join(args.outDir, "generated", "metadata.json"),
+    ),
+  ) as GeneratedMetadata;
+  const manifest: LocalNatsBootstrapManifest = {
+    accounts: {
+      system: {
+        name: metadata.systemAccountName,
+        publicKey: metadata.systemAccountPublicKey,
       },
-      users: {
-        system: { name: "system", publicKey: metadata.systemUserPublicKey },
-        authService: { name: "auth", publicKey: metadata.authUserPublicKey },
-        trellisService: {
-          name: "auth",
-          publicKey: metadata.trellisUserPublicKey,
-        },
+      auth: {
+        name: metadata.authAccountName,
+        publicKey: metadata.authAccountPublicKey,
       },
-      paths: {
-        natsConfig: "nats.conf",
-        jwtConfig: "jwt.conf",
-        creds: {
-          systemService: "creds/system.creds",
-          authService: `creds/auth-auth${suffix}.creds`,
-          trellisService: `creds/trellis-auth${suffix}.creds`,
-        },
-        secrets: {
-          authIssuerSigning: issuerPath,
-          authTargetSigning: targetPath,
-          authCalloutXKey: xkeyPath,
-        },
+      trellis: {
+        name: metadata.trellisAccountName,
+        publicKey: metadata.trellisAccountPublicKey,
       },
-    };
-  }
+    },
+    users: {
+      system: { name: "system", publicKey: metadata.systemUserPublicKey },
+      authService: { name: "auth", publicKey: metadata.authUserPublicKey },
+      trellisService: {
+        name: "auth",
+        publicKey: metadata.trellisUserPublicKey,
+      },
+    },
+    paths: {
+      natsConfig: "nats.conf",
+      jwtConfig: "jwt.conf",
+      creds: {
+        systemService: "creds/system.creds",
+        authService: "creds/auth-auth.creds",
+        trellisService: "creds/trellis-auth.creds",
+      },
+      secrets: {
+        authIssuerSigning: issuerPath,
+        authTargetSigning: targetPath,
+        authCalloutXKey: xkeyPath,
+      },
+    },
+  };
   await Deno.writeTextFile(
     join(args.outDir, "jwt.conf"),
     normalizeJwtConfig(
@@ -389,5 +357,5 @@ export async function generateLocalNatsBootstrapPool(args: {
   await Deno.remove(join(args.outDir, "generated"), { recursive: true });
   await Deno.remove(join(args.outDir, "bootstrap-nsc.sh"));
 
-  return { tenants };
+  return manifest;
 }

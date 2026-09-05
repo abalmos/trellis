@@ -72,13 +72,27 @@ export function runtimeApiFromActions<
   const TActions extends readonly ActionDescriptor[],
 >(
   actions: TActions,
+  operationTransfers: Readonly<
+    Record<string, Omit<NonNullable<OperationDesc["transfer"]>, "direction">>
+  > = {},
 ): RuntimeApiForActions<TActions> {
   const api: RuntimeApi = { rpc: {}, operations: {}, events: {}, subjects: {} };
   for (const action of actions) {
     const descriptor = action[ACTION_METADATA].descriptor;
     if (action.kind === "rpc") api.rpc[action.name] = descriptor as RPCDesc;
     else if (action.kind === "operation") {
-      api.operations[action.name] = descriptor as OperationDesc;
+      const operation = descriptor as OperationDesc;
+      api.operations[action.name] = {
+        ...operation,
+        ...(operation.transfer
+          ? {
+            transfer: {
+              ...operation.transfer,
+              ...operationTransfers[action.name],
+            },
+          }
+          : {}),
+      };
     } else if (action.kind.startsWith("event-")) {
       api.events[action.name] = descriptor as EventDesc;
     } else {

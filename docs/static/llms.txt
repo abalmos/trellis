@@ -1,6 +1,6 @@
 # Trellis AI guide
 
-Last verified against Trellis main (2026-08-29).
+Last verified against Trellis rs-idl (2026-09-05).
 
 Canonical full guide:
 https://raw.githubusercontent.com/qlever-llc/trellis/main/docs/static/llms-full.txt
@@ -16,9 +16,11 @@ commands.
   `trellis rm`, `trellis update`, and lock-stable `trellis install`. Commit
   `trellis.toml` and `trellis.lock`; ignore `.trellis/`. Remote locks include an
   exact OCI manifest digest and reuse Docker credentials. Install verifies API
-  ID, release, semantic and OCI digests, generates SDKs before participant source
-  evaluation, and never executes provider source. TypeScript links the local
-  `@trellis/apis` aggregate; Rust path-depends on `trellis-apis`.
+  ID, release, semantic and OCI digests, and never executes provider source.
+  Author `contract.trellis` or direct-child `contracts/*.trellis`, then run
+  `trellis generate`. TypeScript imports `.trellis/ts/apis/<api>/mod.ts` and
+  `.trellis/ts/participants/<participant>/mod.ts`; Rust path-depends on generated
+  crates under `.trellis/rust/apis` and `.trellis/rust/participants`.
 - The Rust platform runtime is the sole auth owner. TypeScript owns portal source,
   generated SDKs, clients, proof bindings, and tests, but no auth runtime state.
 - HTTP is limited to browser/account flows, initial service/device bootstrap,
@@ -31,16 +33,14 @@ commands.
   `portal_source`, and `console_source` select directory or HTTP(S) proxy sources;
   surface sources override the shared source.
 - Runtime boundaries use `trellis.api.v1` and `trellis.participant.v1` artifacts.
-  TypeScript contracts are compiled to those artifacts before bootstrap.
+  Native IDL compiles to those artifacts before bootstrap.
 - Built-in clients are ordinary app participants: `trellis-app.cli@v1`,
   `trellis-app.console@v1`, and `trellis-app.portal@v1`. Privileged platform
   surfaces remain Trellis-owned `trellis.*` APIs, and authority stays bound to
   the exact participant artifact and needs digests.
-- Contract authoring supplies participant identity, owned API identity, and API
-  release version independently. TypeScript `define*Contract` bodies require
-  `id`, `apiId`, and Semantic Version `apiVersion`. Rust
-  `ContractBuilder::authoring(participant_id, api_id, api_version, ...)` requires
-  the same values explicitly. API release version is metadata and does not enter
+- Native IDL supplies participant identity, owned API identity, and API
+  release version independently in `participant`, `implements`, and API `version`
+  declarations. API release version is metadata and does not enter
   API digests, participant evidence, permissions, or transport subjects.
 - Large Rust store and transfer bodies use borrowed Tokio readers and writers;
   whole-buffer helpers remain conveniences. Transfer completion and cancellation
@@ -157,10 +157,9 @@ commands.
 - Browser apps that already hold record references to Trellis user ids can
   declare `Auth.Users.Resolve` to render minimal labels. Do not use
   `Auth.Users.List` or invent app-local user tables for basic display labels.
-- Normal TypeScript contract authoring imports `define*Contract(...)` helpers from
-  the browser-safe `@qlever-llc/trellis` root. Runtime-specific helpers,
-  generated SDKs, browser auth, device activation, telemetry, and advanced
-  contract tooling stay on explicit subpaths.
+- TypeScript and Rust consume generated participants; neither language executes
+  source code to discover contracts. Runtime-specific helpers, browser auth,
+  device activation, and telemetry stay on explicit subpaths.
 - Trellis public API object schemas are open by default. For contract schemas
   used by public RPC input/output, events, operation input/progress/output, feeds,
   or exported generated schemas, omit `additionalProperties` in every authoring
@@ -264,18 +263,9 @@ commands.
   proofs before invoking handlers. Prepared events intentionally remain free of
   deployment or contract metadata; runtime publish adds proof headers using the
   current session.
-- For live event assertions in Deno-first TypeScript integration tests, start
-  `runtime.captureEvents(...)` before publishing and assert the decoded
-  `{ event, payload, context, receivedAt }` records. Prefer this over raw NATS
-  subscriptions or outbox-only assertions when the test must observe a published
-  event through Trellis runtime authority.
-- `@qlever-llc/trellis-test` exports assertion helpers including
-  `assertEventCaptured`, `assertEventsCaptured`, `assertNoEventCaptured`,
-  `assertNoEventDuring`, `assertJobCompleted`, `assertOperationCompleted`,
-  `assertRpcOk`, `assertRpcEventuallyOk`, and `assertRpcErr` for Deno-first
-  TypeScript tests. The captured-event helpers accept generated
-  `runtime.captureEvents(...)` captures directly, and `assertJobCompleted`
-  accepts generated service job refs directly.
+- Live event tests register a generated subscriber before publishing, then assert
+  the received payload with the language's ordinary assertions. Bound every
+  wait and stop the real service and test runtime in `finally` blocks.
 - Event subject `params` must point at string, number, or integer-compatible
   payload fields. For `anyOf` or `oneOf` event payload schemas, every variant must
   contain each routed pointer.
@@ -345,9 +335,9 @@ commands.
   the current desired authority version are actionable.
 - Deployment authority plans expose `breakingChanges` as structured per-target
   compatibility failures for operator UI.
-- Wrap repository Rust generation in `cargo xtask install`.
-- Measure installation performance around `cargo xtask install`; a warm run
-  reports `Installed 0 changes` for every unchanged project.
+- Service repositories run `trellis install` for locked dependency installation
+  and `trellis generate` after IDL edits; `trellis generate --watch` supports the
+  edit loop. Do not copy Trellis-repository xtask commands into a consumer repo.
 - Contract resolution must be deterministic from tracked source. Undeclared
   time, randomness, network, environment, and external-file inputs are unsupported.
 - Rust owner SDKs are vocabulary-only. Rust services, apps, agents, and devices
@@ -357,7 +347,7 @@ commands.
   `createTrellisApp`, `TrellisProvider`, generated service SDK aliases for
   contract `uses`, Vite aliases, or `svelte-check` path maps. Do not generate or
   import an app SDK just to type a Svelte app client; use
-  `TrellisClientFor<typeof contract>` from the app source contract.
+   `TrellisClientFor<typeof participant>` from the generated app participant.
 - Browser apps should let Trellis helpers own auth redirects and treat plain
   callbacks after expired login as auth-restart opportunities, not errors.
 - Browser apps use Trellis browser helpers for initial auth redirects and portal

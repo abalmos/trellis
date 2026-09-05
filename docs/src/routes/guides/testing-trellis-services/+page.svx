@@ -3,3 +3,37 @@
 Generate test projects from native IDL before running checks. Use generated participants for service and client connections; test infrastructure must not create handwritten API descriptors.
 
 Use the smallest real boundary that proves the invariant. Transport, authorization, restart, NATS, and cross-language behavior require live integration. Deterministic repository and state-machine invariants use real component or adapter integration.
+
+Run `trellis generate` for the service and a small caller participant that selects
+the RPC under test. A Deno test owns its runtime and stops it even on failure:
+
+```ts
+import { TrellisTestRuntime } from "@qlever-llc/trellis-test";
+import { assertEquals } from "@std/assert";
+import { participant } from "./.trellis/ts/participants/orders-caller/mod.ts";
+
+Deno.test("retrieves an order", async () => {
+  const runtime = await TrellisTestRuntime.start({
+    trellis: { command: { cmd: "trellis-server", args: ["--config", "{config}", "all"] } },
+  });
+  try {
+    // Start your real service here using runtime.registerService(...) and its
+    // returned identity. Stop that service in its own finally block.
+    const client = await runtime.connectClient({ name: "caller", contract: participant });
+    const order = await client.ordersGet({ orderId: "seeded-order" }).orThrow();
+    assertEquals(order.orderId, "seeded-order");
+  } finally {
+    await runtime.stop();
+  }
+});
+```
+
+This example assumes the service has seeded that order. Use its real repository
+or public creation API, not a fake transport responder. The test helper manages
+real pinned NATS binaries; first use needs network access. Ensure `trellis-server`
+and `trellis` are available or configure the process command explicitly.
+
+Run ordinary `deno test -A` or `cargo test`. Do not add a scenario registry,
+shared-runner scheduler, or handwritten participant metadata. For SQL outbox
+atomicity, use a real SQLite transaction and prove that both business data and
+outbox rows commit together and both roll back on failure.

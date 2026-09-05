@@ -43,20 +43,22 @@ repositories.
 
 ## TypeScript local rules
 
-- Prefer generated `client.rpc`, `client.event`, `client.feed`, and
-  `client.operation` for outbound calls.
-- Register handlers with `service.handle`.
+- Author `contract.trellis`, run `trellis generate`, and import generated
+  participant modules from `.trellis/ts`.
+- Prefer generated flat caller methods for outbound calls and generated
+  `service.handle...` methods for provider registration.
 - Trellis does not provide application dependency injection. Handler arguments
   contain only Trellis-owned runtime data. Use normal JavaScript closures or
   factory patterns for application-owned dependencies such as databases,
   loggers, clocks, or domain clients. After contract changes, run the
   repository's Trellis generation command before typing extracted handlers. Use
   generated SDK aliases such as `OrdersCreateHandler` for extracted handlers.
-- Register event listeners during startup with `service.event`, never inside
-  handlers.
+- Register event listeners during startup with generated `service.on...`
+  methods, never inside handlers.
 - Inside handlers, use the scoped `client` argument for outbound calls; event
   handlers can publish and prepare events but cannot listen.
-- Use TypeBox for Trellis wire schemas and Zod for environment/config parsing.
+- Declare wire models in native IDL; generation owns their TypeBox schemas. Use
+  Zod for environment/config parsing.
 - Use Trellis pagination helpers instead of bespoke list shapes. Offset list
   RPCs should use `PageRequestSchema`, `PageResponseSchema(...)`,
   `normalizePageQuery(...)`, and `buildPageResponse(...)`. Stable ID/keyset
@@ -67,10 +69,8 @@ repositories.
 
 ## Rust local rules
 
-- Prefer generated descriptors and generated client/facade methods.
-- Use descriptor APIs such as `trellis_client.publish::<Descriptor>(...)`,
-  `trellis_client.subscribe::<Descriptor>()`, and
-  `trellis_client.operation::<Operation>().start(...)`.
+- Connect through the generated participant facade and use its generated caller
+  and provider methods. Do not construct low-level transport clients.
 - Register providers through generated `service.handle()` facades where
   available.
 - Run `cargo fmt`, `cargo clippy`, `cargo test`, and the repository's Trellis

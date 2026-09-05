@@ -13,3 +13,17 @@ feed "Orders.Watch" {
 ```
 
 Generate the SDK and implement the generated feed registration in the service.
+
+Place these declarations in the API block. Register `service.handleOrdersWatch`
+before starting the service. Its handler returns an async iterable of typed
+events and observes `signal` for cancellation. Release upstream subscriptions
+in `finally` when iteration ends or the caller cancels.
+
+The caller selects `subscribe feed "Orders.Watch";` and calls the generated
+`ordersWatch` method with its filter input and an `AbortSignal`. Consume the
+returned iterable and abort when the view or task no longer needs it. Feeds are
+live streams, not durable event replay or a replacement for state snapshots.
+
+Use one live test that receives a frame and then cancels. Assert that the
+provider stops or iteration ends; fixed sleeps and internal frame counters do
+not prove the lifecycle boundary.

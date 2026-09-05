@@ -15,3 +15,21 @@ participant "acme.documents@v1" service {
 ```
 
 Use the resolved `service.store` handle after `TrellisService.connect(...)`; do not construct store bindings in application code.
+
+For example, after connecting and registering the service lifecycle:
+
+```ts
+const store = await service.store.documents.open().orThrow();
+const entry = await store.get("invoice.pdf").orThrow();
+const bytes = await entry.bytes().orThrow();
+console.log(bytes.length);
+```
+
+Keys are logical object names within this service's resolved store. Store limits
+are runtime-enforced. Do not construct a bucket name or grant access by passing
+binding metadata to another participant.
+
+For caller uploads or downloads, declare a transfer-capable operation and bind
+it to this store in the provider participant. Transfer completion verifies the
+exact byte count and SHA-256 digest; an operation response alone is not evidence
+that the bytes arrived intact. Prefer streaming bodies for large objects.

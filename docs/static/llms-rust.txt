@@ -1,6 +1,6 @@
 # Trellis AI guidance for Rust services
 
-Last verified against Trellis main (2026-08-29).
+Last verified against Trellis rs-idl (2026-09-05).
 
 Use this file for AI coding agents working in a Rust service repository that
 consumes Trellis. The language-neutral guide is:
@@ -58,13 +58,11 @@ exact participant artifact and needs digests.
   unsupported.
 - The participant facade embeds its canonical API and participant artifacts and
   their exact digests.
-- Rust authoring supplies participant identity, API identity, and API release
-  version independently. `ContractBuilder::authoring(participant_id, api_id,
-  api_version, ...)` takes those values in that order;
-  `ContractBuilder::from_api(participant_id, api, kind)` receives the version in
-  the API artifact. `ApiBuilder::authoring(id, version, ...)` requires an explicit
-  Semantic Version. Release version does not affect the semantic API digest.
-  Generated participant facades expose `CONTRACT_ID`; generated API SDKs expose
+- Native IDL declares participant identity, implemented API identity, and API
+  release version independently. Rust consumes generated artifacts; there are no
+  application-authored Rust contract builders. Release version does not affect
+  the semantic API digest.
+  Generated participant facades expose `PARTICIPANT_ID`; generated API SDKs expose
   `API_ID`.
 - Service connect options carry the immutable provisioned identity binding.
   User/device connect options carry the private session seed and one initial
@@ -90,8 +88,8 @@ exact participant artifact and needs digests.
   endpoints are not a native fallback. Context refresh replaces authoritative
   session, route JWT, typed transport, inbox prefix, server-clock, and context
   metadata atomically. Restored clients reconnect from that durable binding.
-  Running clients retain the server list supplied at connection time; changed
-  native endpoints require constructing a new client.
+  Native endpoint rotation updates the existing connection in place, preserving
+  service subscriptions and authorization watches.
 - The deny-all bootstrap JWT grants no authority. Context refresh is restart
   recovery: it renews the route credential and installs its exact expiry
   atomically with the verified context. It only routes Auth Callout and remains
@@ -390,13 +388,11 @@ idempotent.
   --local-nats=/usr/local/bin/nats-server`.
 - Run live interoperability and runtime coverage as ordinary `cargo test` or
   `deno test` tests; separate runners, inventories, and hidden skips are forbidden.
-- Format changed Rust files and use focused checks in the inner loop. The release
-  gate runs Clippy, curated pure tests, workspace Rustdoc with warnings denied,
-  workspace doctests exactly once, and verifies lint-policy participation for
-  every workspace crate. Trellis supports the current stable Rust toolchain; no
+- Format changed Rust files and use focused checks in the inner loop. Normal
+  correctness verification includes Clippy, ordinary workspace tests, Rustdoc,
+  and live integration. Trellis supports the current stable Rust toolchain; no
   older compiler compatibility is promised.
-  Run `cargo xtask install` when contracts or dependencies change.
-   Measure `cargo xtask install` to diagnose installation performance; a warm run
-   reports `Installed 0 changes` for every unchanged project. Contract resolution must
+  Run `trellis update` after dependency edits and `trellis generate` after IDL
+  edits. Use `trellis install` to reproduce a committed lock. Resolution must
    be deterministic from tracked source; undeclared time, randomness, network,
    environment, and external-file inputs are unsupported.

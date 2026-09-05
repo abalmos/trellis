@@ -1,0 +1,53 @@
+api "test.runtime@v1" {
+    version "1.0.0";
+    display_name "Runtime acceptance";
+    description "Small generated transport and durability fixture.";
+    model Value { value: string; }
+    model Empty {}
+    rpc "Echo" { version "v1"; input Value; output Value; }
+    operation "Work" { version "v1"; input Value; output Value; }
+    operation "Upload" {
+        version "v1";
+        input Value;
+        output Value;
+        transfer send;
+    }
+    event "Changed" { version "v1"; payload Value; }
+    feed "Watch" { version "v1"; input Empty; event Value; }
+}
+
+participant "test.provider" service {
+    implements "test.runtime@v1";
+    subscribe event "Changed";
+    store files { purpose "Transfer acceptance bytes."; max_object_bytes 262144; }
+    job work { payload Value; result Value; }
+    bind operation "Upload" {
+        transfer { store files; key "/value"; expires_in_ms 60000; }
+    }
+}
+
+api "test.client@v1" {
+    version "1.0.0";
+    display_name "Runtime caller";
+    description "Caller-owned state.";
+    model Saved { value: string; }
+}
+
+participant "test.caller" app {
+    implements "test.client@v1";
+    use required runtime "test.runtime@v1" {
+        call rpc "Echo";
+        invoke operation "Work";
+        observe operation "Work";
+        invoke operation "Upload";
+        observe operation "Upload";
+        subscribe event "Changed";
+        subscribe feed "Watch";
+    }
+    state saved value { schema Saved; state_version "saved.v1"; }
+}
+
+participant "test.denied" app {
+    implements "test.client@v1";
+    use optional runtime "test.runtime@v1" { call rpc "Echo"; }
+}

@@ -106,6 +106,7 @@ const TRELLIS_PROJECTS: &[&str] = &[
     "rust/crates/runtime",
     "ts/packages/trellis-test",
     "web",
+    "integration/fixtures/runtime",
     "demos/ts/service",
     "demos/ts/device",
     "demos/app",

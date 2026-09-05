@@ -53,8 +53,7 @@ Trellis by hand-building NATS subjects, envelopes, or JSON wire payloads.
 
 ## TypeScript Rules
 
-- Prefer generated `client.rpc`, `client.event`, `client.feed`,
-  `client.operation`, `client.state`, and transfer helpers.
+- Prefer generated flat caller methods, `client.state`, and transfer helpers.
 - Service code must bootstrap with `TrellisService.connect(...)`; do not fetch
   bindings manually, construct resource handles, or import low-level runtime
   internals for service startup.
@@ -63,13 +62,13 @@ Trellis by hand-building NATS subjects, envelopes, or JSON wire payloads.
 - Import generated SDKs and participant modules from the project-local
   `.trellis/ts` tree.
 - Register RPC, feed, operation, job, event, and health handlers during startup.
-- Register service handlers with `service.handle`. Register event listeners with
-  `service.event`, not inside handlers.
-- Use `service.with(deps)` once during startup when handlers need app-owned
-  dependencies, and read them from `args.deps`.
+- Register service handlers with generated `service.handle...` methods and event
+  listeners with generated `service.on...` methods, not inside handlers.
+- Supply application-owned dependencies through normal closures; Trellis does
+  not provide `service.with(deps)` or `args.deps` dependency injection.
 - Inside handlers, use the scoped `client` argument for outbound calls.
-- Use TypeBox for Trellis RPC, event, operation, feed, state, and resource wire
-  schemas. Use Zod for environment, config, files, and other runtime inputs.
+- Declare wire models in native IDL; generation owns their TypeBox schemas. Use
+  Zod for environment, config, files, and other runtime inputs.
 - Public request schemas should tolerate unknown extra fields unless rejecting
   them is required for security or correctness.
 - Use Trellis pagination helpers instead of bespoke list response shapes.

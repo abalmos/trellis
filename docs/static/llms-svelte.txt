@@ -1,6 +1,6 @@
 # Trellis AI guidance for Svelte browser apps
 
-Last verified against Trellis main (2026-07-25).
+Last verified against Trellis rs-idl (2026-09-05).
 
 Use this file for AI coding agents working in a Svelte or SvelteKit browser app
 repository that consumes Trellis. The language-neutral guide is:
@@ -21,7 +21,7 @@ import {
   createTrellisApp,
   type TrellisClientFor,
 } from "@qlever-llc/trellis-svelte";
-import { participant } from "../../.trellis/ts/participants/acme.dashboard@v1.ts";
+import { participant } from "../../.trellis/ts/participants/acme-dashboard/mod.ts";
 
 type AppClient = TrellisClientFor<typeof participant>;
 
@@ -123,4 +123,4 @@ packages, and Vite. Keep those resolver layers explicit:
 
 Use the format, typecheck, lint, test, run, and migration commands configured by
 the app repository. If contract artifacts or generated SDKs changed, run
-`trellis install` and commit `trellis.lock`; `.trellis` output remains disposable.
+`trellis generate` and commit `trellis.lock`; `.trellis` output remains disposable.

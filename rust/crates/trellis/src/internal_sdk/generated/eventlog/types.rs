@@ -1,6 +1,5 @@
 //! Shared request and response types for `trellis.eventlog@v1`.
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 use std::collections::BTreeMap;
 /// Generated schema type `EventLogConsumersInspectRequest`.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -699,7 +698,7 @@ pub struct EventLogQueryRequest {
     pub search: Option<String>,
     /// The `sort` wire field.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub sort: Option<BTreeMap<String, Value>>,
+    pub sort: Option<BTreeMap<String, serde_json::Value>>,
     /// The `subject` wire field.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub subject: Option<String>,
@@ -906,7 +905,7 @@ pub struct EventLogQueryResponse {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct EventLogWatchEvent(
     ///The wrapped wire value.
-    pub BTreeMap<String, Value>,
+    pub BTreeMap<String, serde_json::Value>,
 );
 /// Generated schema type `NotFoundErrorDataType`.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -948,7 +947,7 @@ impl PartialEq<NotFoundErrorDataType> for &str {
 pub struct NotFoundErrorData {
     /// The `context` wire field.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub context: Option<BTreeMap<String, Value>>,
+    pub context: Option<BTreeMap<String, serde_json::Value>>,
     /// The `id` wire field.
     pub id: String,
     /// The `message` wire field.

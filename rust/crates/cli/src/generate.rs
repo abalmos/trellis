@@ -272,6 +272,7 @@ pub(crate) fn generate_once(root: &Path) -> Result<GenerationResult> {
                     .referenced_apis
                     .keys()
                     .map(|id| referenced.path().join(format!("{id}.json")))
+                    .chain(api_paths.iter().cloned())
                     .collect(),
                 out_dir: out.clone(),
             })

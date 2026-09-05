@@ -193,6 +193,12 @@ fn render_ts_participant(opts: &GenerateTsParticipantOpts) -> Result<String, Cod
                 message: error.to_string(),
             })?;
     let owned = load_sdk_source(&opts.owned_api_path)?;
+    let mut loaded_apis = vec![&owned];
+    let referenced = opts
+        .referenced_api_paths
+        .iter()
+        .map(load_sdk_source)
+        .collect::<Result<Vec<_>, _>>()?;
     let mut apis = BTreeMap::from([(owned.render_model.id.clone(), owned.value.clone())]);
     let referenced_ids = participant_value["implements"]
         .as_object()
@@ -202,10 +208,10 @@ fn render_ts_participant(opts: &GenerateTsParticipantOpts) -> Result<String, Cod
         .flat_map(|entries| entries.values())
         .filter_map(|entry| entry["api"].as_str())
         .collect::<BTreeSet<_>>();
-    for path in &opts.referenced_api_paths {
-        let api = load_sdk_source(path)?;
+    for api in &referenced {
         if referenced_ids.contains(api.render_model.id.as_str()) {
-            apis.insert(api.render_model.id, api.value);
+            apis.insert(api.render_model.id.clone(), api.value.clone());
+            loaded_apis.push(api);
         }
     }
     let aliases = apis
@@ -213,18 +219,16 @@ fn render_ts_participant(opts: &GenerateTsParticipantOpts) -> Result<String, Cod
         .enumerate()
         .map(|(index, id)| (id.clone(), format!("Api{index}")))
         .collect::<BTreeMap<_, _>>();
-    let metadata_aliases = apis
+    let metadata_aliases = loaded_apis
         .iter()
-        .flat_map(|(id, api)| {
-            let alias = &aliases[id];
-            api["schemas"]
-                .as_object()
+        .flat_map(|api| {
+            let alias = &aliases[&api.render_model.id];
+            public_schema_type_aliases(api, &public_schema_exports(api))
                 .into_iter()
-                .flat_map(|schemas| schemas.iter())
-                .map(move |(name, schema)| SchemaTypeAlias {
-                    key: name.clone(),
-                    type_name: format!("{alias}.{}", key_to_pascal(name)),
-                    schema: schema.clone(),
+                .map(move |schema| SchemaTypeAlias {
+                    key: schema.key,
+                    type_name: format!("{alias}.{}", schema.type_name),
+                    schema: schema.schema,
                 })
         })
         .collect::<Vec<_>>();
@@ -282,8 +286,14 @@ fn render_ts_participant(opts: &GenerateTsParticipantOpts) -> Result<String, Cod
     }
     lines.push("  [PARTICIPANT_RUNTIME]: {".to_owned());
     lines.push(format!(
-        "    ownedApi: runtimeApiFromActions([{}]),",
-        owned_actions.iter().cloned().collect::<Vec<_>>().join(", ")
+        "    ownedApi: runtimeApiFromActions([{}], {}),",
+        owned_actions.iter().cloned().collect::<Vec<_>>().join(", "),
+        serde_json::to_string(
+            &participant_value["implements"]["self"]
+                .get("operationTransfers")
+                .cloned()
+                .unwrap_or_else(|| serde_json::json!({}))
+        )?
     ));
     lines.push(format!(
         "    usedApi: runtimeApiFromActions([{}]),",
@@ -297,8 +307,14 @@ fn render_ts_participant(opts: &GenerateTsParticipantOpts) -> Result<String, Cod
             .join(", ")
     ));
     lines.push(format!(
-        "    api: runtimeApiFromActions([{}]),",
-        all_actions.iter().cloned().collect::<Vec<_>>().join(", ")
+        "    api: runtimeApiFromActions([{}], {}),",
+        all_actions.iter().cloned().collect::<Vec<_>>().join(", "),
+        serde_json::to_string(
+            &participant_value["implements"]["self"]
+                .get("operationTransfers")
+                .cloned()
+                .unwrap_or_else(|| serde_json::json!({}))
+        )?
     ));
     lines.push(format!(
         "    actions: [{}],",
@@ -476,7 +492,7 @@ fn insert_participant_metadata(
             ("kv", "PARTICIPANT_KV_METADATA"),
             ("store", "PARTICIPANT_STORE_METADATA"),
         ] {
-            let Some(entries) = resources[section].as_object() else {
+            let Some(entries) = resources.get(section).and_then(Value::as_object) else {
                 continue;
             };
             lines.push(format!("  [{symbol}]: {{"));
@@ -2293,31 +2309,23 @@ mod tests {
     }
 
     #[test]
-    fn protocol_api_generation_uses_api_identity() {
-        let manifest_path =
-            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../runtime/trellis.api.json");
-        let sources = collect_ts_sdk_sources(&GenerateTsSdkOpts {
-            api_path: manifest_path,
-            out_dir: unique_temp_dir("protocol-api"),
-            package_name: "@example/auth".to_owned(),
-            package_version: "0.1.0".to_owned(),
-            runtime_deps: TsRuntimeDeps {
-                source: TsRuntimeSource::Registry,
-                version: "0.11.0".to_owned(),
-                repo_root: None,
-            },
-        })
-        .unwrap();
-        let source = |path: &str| {
-            sources
-                .iter()
-                .find(|source| source.path == Path::new(path))
-                .unwrap()
-                .contents
-                .as_str()
-        };
-
-        assert!(source("api.ts").contains("export const API_ID"));
+    fn generated_runtime_consumer_type_checks() {
+        let repo = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../..");
+        let output = std::process::Command::new("deno")
+            .current_dir(repo)
+            .args([
+                "check",
+                "-c",
+                "ts/integration/deno.json",
+                "ts/integration/runtime_test.ts",
+            ])
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
     }
 
     #[test]

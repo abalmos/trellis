@@ -25,7 +25,6 @@ import { reserveLocalPort } from "./control_plane_config.ts";
 import { ensureNatsBinaries } from "./nats_binaries.ts";
 import {
   generateLocalNatsBootstrap,
-  generateLocalNatsBootstrapPool,
   type LocalNatsBootstrapManifest,
   type NatsBootstrapPorts,
 } from "./nats_bootstrap.ts";
@@ -49,7 +48,6 @@ type StartedNatsContainer = {
   natsUrl: string;
   websocketUrl: string;
   manifest: LocalNatsBootstrapManifest;
-  manifests: Record<string, LocalNatsBootstrapManifest>;
   nc: NatsConnection;
   child?: Deno.ChildProcess;
   status?: Promise<CommandStatus>;
@@ -60,7 +58,6 @@ type StartedNatsContainer = {
 
 type StartNatsTestContainerOptions = {
   startupMs?: number;
-  tenantIds?: readonly string[];
 };
 
 async function readRegularFileContent(
@@ -263,7 +260,6 @@ export class NatsTestContainer implements AsyncDisposable {
   readonly natsUrl: string;
   readonly websocketUrl: string;
   readonly manifest: LocalNatsBootstrapManifest;
-  readonly manifests: Readonly<Record<string, LocalNatsBootstrapManifest>>;
   readonly nc: NatsConnection;
   readonly #child: Deno.ChildProcess | undefined;
   readonly #status: Promise<CommandStatus> | undefined;
@@ -276,7 +272,6 @@ export class NatsTestContainer implements AsyncDisposable {
     this.natsUrl = started.natsUrl;
     this.websocketUrl = started.websocketUrl;
     this.manifest = started.manifest;
-    this.manifests = started.manifests;
     this.nc = started.nc;
     this.#child = started.child;
     this.#status = started.status;
@@ -323,20 +318,10 @@ export class NatsTestContainer implements AsyncDisposable {
         http: portLeases.http.port,
         websocket: portLeases.websocket.port,
       };
-      const tenantIds = options.tenantIds ?? ["default"];
-      const manifests = options.tenantIds === undefined
-        ? {
-          default: await generateLocalNatsBootstrap({
-            outDir: natsDir,
-            ports,
-          }),
-        }
-        : (await generateLocalNatsBootstrapPool({
-          outDir: natsDir,
-          tenantIds,
-          ports,
-        })).tenants;
-      const manifest = manifests[tenantIds[0]];
+      const manifest = await generateLocalNatsBootstrap({
+        outDir: natsDir,
+        ports,
+      });
       const stdoutLog = await Deno.open(join(natsDir, "nats.stdout.log"), {
         write: true,
         create: true,
@@ -439,7 +424,6 @@ export class NatsTestContainer implements AsyncDisposable {
           natsUrl,
           websocketUrl,
           manifest,
-          manifests,
           nc,
           child,
           status,
@@ -461,40 +445,6 @@ export class NatsTestContainer implements AsyncDisposable {
       }
     } finally {
       for (const lease of Object.values(portLeases)) lease.release();
-    }
-  }
-
-  /** Attaches test helpers to one tenant on an externally owned NATS server. */
-  static async attach(args: {
-    workdir: string;
-    natsUrl: string;
-    websocketUrl: string;
-    manifest: LocalNatsBootstrapManifest;
-  }): Promise<NatsTestContainer> {
-    const nc = await connect({
-      servers: args.natsUrl,
-      authenticator: credsAuthenticator(
-        await Deno.readFile(
-          join(
-            args.workdir,
-            "nats",
-            args.manifest.paths.creds.trellisService,
-          ),
-        ),
-      ),
-    });
-    try {
-      await ensureSharedStreams(nc);
-      return new NatsTestContainer({
-        natsUrl: args.natsUrl,
-        websocketUrl: args.websocketUrl,
-        manifest: args.manifest,
-        manifests: { default: args.manifest },
-        nc,
-      });
-    } catch (error) {
-      await nc.close().catch(() => undefined);
-      throw error;
     }
   }
 

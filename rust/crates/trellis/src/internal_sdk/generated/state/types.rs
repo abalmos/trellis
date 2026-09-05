@@ -1,6 +1,5 @@
 //! Shared request and response types for `trellis.state@v1`.
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 fn deserialize_optional_nullable<'de, D, T>(deserializer: D) -> Result<Option<Option<T>>, D::Error>
 where
     D: serde::Deserializer<'de>,
@@ -120,7 +119,7 @@ pub struct StateAdminGetResponseVariant2Entry {
     #[serde(rename = "updatedAt")]
     pub updated_at: String,
     /// The `value` wire field.
-    pub value: Value,
+    pub value: serde_json::Value,
 }
 /// Generated schema type `StateAdminGetResponseVariant3Entry`.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -138,7 +137,7 @@ pub struct StateAdminGetResponseVariant3Entry {
     #[serde(rename = "updatedAt")]
     pub updated_at: String,
     /// The `value` wire field.
-    pub value: Value,
+    pub value: serde_json::Value,
 }
 /// Generated schema type `StateAdminGetResponse`.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -241,7 +240,7 @@ pub struct StateAdminListResponseEntriesItemVariant2Entry {
     #[serde(rename = "updatedAt")]
     pub updated_at: String,
     /// The `value` wire field.
-    pub value: Value,
+    pub value: serde_json::Value,
 }
 /// Generated schema type `StateAdminListResponseEntriesItem`.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -279,7 +278,7 @@ pub enum StateAdminListResponseEntriesItem {
         #[serde(rename = "updatedAt")]
         updated_at: String,
         /// The `value` wire field.
-        value: Value,
+        value: serde_json::Value,
     },
 }
 /// Generated schema type `StateAdminListResponse`.
@@ -342,7 +341,7 @@ pub struct StateGetResponseVariant2Entry {
     #[serde(rename = "updatedAt")]
     pub updated_at: String,
     /// The `value` wire field.
-    pub value: Value,
+    pub value: serde_json::Value,
 }
 /// Generated schema type `StateGetResponseVariant3Entry`.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -360,7 +359,7 @@ pub struct StateGetResponseVariant3Entry {
     #[serde(rename = "updatedAt")]
     pub updated_at: String,
     /// The `value` wire field.
-    pub value: Value,
+    pub value: serde_json::Value,
 }
 /// Generated schema type `StateGetResponse`.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -426,7 +425,7 @@ pub struct StateListResponseEntriesItemVariant2Entry {
     #[serde(rename = "updatedAt")]
     pub updated_at: String,
     /// The `value` wire field.
-    pub value: Value,
+    pub value: serde_json::Value,
 }
 /// Generated schema type `StateListResponseEntriesItem`.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -464,7 +463,7 @@ pub enum StateListResponseEntriesItem {
         #[serde(rename = "updatedAt")]
         updated_at: String,
         /// The `value` wire field.
-        value: Value,
+        value: serde_json::Value,
     },
 }
 /// Generated schema type `StateListResponse`.
@@ -504,7 +503,7 @@ pub struct StatePutRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ttl_ms: Option<i64>,
     /// The `value` wire field.
-    pub value: Value,
+    pub value: serde_json::Value,
 }
 /// Generated schema type `StatePutResponseVariant1Entry`.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -522,7 +521,7 @@ pub struct StatePutResponseVariant1Entry {
     #[serde(rename = "updatedAt")]
     pub updated_at: String,
     /// The `value` wire field.
-    pub value: Value,
+    pub value: serde_json::Value,
 }
 /// Generated schema type `StatePutResponseVariant2EntryVariant2Entry`.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -540,7 +539,7 @@ pub struct StatePutResponseVariant2EntryVariant2Entry {
     #[serde(rename = "updatedAt")]
     pub updated_at: String,
     /// The `value` wire field.
-    pub value: Value,
+    pub value: serde_json::Value,
 }
 /// Generated schema type `StatePutResponseVariant2Entry`.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -578,7 +577,7 @@ pub enum StatePutResponseVariant2Entry {
         #[serde(rename = "updatedAt")]
         updated_at: String,
         /// The `value` wire field.
-        value: Value,
+        value: serde_json::Value,
     },
 }
 /// Generated schema type `StatePutResponse`.

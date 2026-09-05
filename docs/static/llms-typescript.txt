@@ -1,6 +1,6 @@
 # Trellis AI guidance for TypeScript services
 
-Last verified against Trellis main (2026-08-29).
+Last verified against Trellis rs-idl (2026-09-05).
 
 Use this file for AI coding agents working in a TypeScript service repository
 that consumes Trellis. The language-neutral guide is:
@@ -96,16 +96,15 @@ Rules:
   materialize locked APIs and consumer-local SDKs
 - generated SDKs, manifests, and package outputs belong under the service repo's
   generated output locations; do not edit generated files by hand
-- public contract object schemas are open by default; use `Type.Object({ ... })`
-  without `additionalProperties: false` unless a security-sensitive proof
-  boundary or another documented requirement must reject unknown fields
-- after changing a contract, run `trellis install` before typing extracted
+- public native-IDL models lower to additive wire schemas. Keep proof/security
+  strictness at the documented signed boundary, not arbitrary public DTOs
+- after changing IDL, run `trellis generate` before typing extracted
   handlers so generated SDK aliases match the current surfaces
 - App and device contracts may declare schema-backed value or map State stores and
   use their generated `client.state.<store>` facades. State supports revisions,
   per-entry TTL, and author-declared migration versions; services use
   `service.kv`, and callers never access the internal `trellis_state` bucket.
-- TypeScript contract authoring compiles to canonical `trellis.api.v1` and
+- Native IDL compiles to canonical `trellis.api.v1` and
   `trellis.participant.v1` artifacts before bootstrap. Do not send legacy contract
   manifests directly to the Rust auth runtime.
 - HTTP is limited to browser/account flows, initial service/device bootstrap,
@@ -310,9 +309,9 @@ participants through public APIs, and stops the runtime in `finally`.
 RPC handler `context.afterReply(task)` is only for effects that must run after a
 successful response is published and flushed, such as disconnecting the caller.
 Normal handler effects should complete before returning.
-Use `runtime.connectClient(...)`, `runtime.captureEvents(...)`, and exported
-assertion helpers for captured events, terminal jobs and operations, and
-immediate or eventual `Result` RPC values.
+Use `runtime.connectClient(...)`, generated event subscribers, and ordinary
+assertions on RPC results and terminal job/operation output. Bound asynchronous
+waits and stop services and runtimes in `finally` blocks.
 
 Do not use fake NATS, fake Trellis runtimes, fake auth, fake generated clients,
 or hand-built bootstrap/control-plane responders to prove Trellis behavior. If a
@@ -474,10 +473,9 @@ Generated SDK event types are event bodies. Trellis event metadata is assigned b
 the runtime and is available as `PreparedTrellisEvent.header` after `prepare(...)`
 and as `context.id` / `context.time` in event listeners.
 
-For integration tests that must observe a published live event, start
-`runtime.captureEvents(...)` before publishing through a generated event facade.
-Assert the capture record's decoded `payload` and metadata instead of subscribing
-to raw NATS subjects or relying only on outbox rows.
+For live event tests, register the generated subscriber before publishing through
+the generated event facade. Assert the received body and metadata instead of
+subscribing to raw NATS subjects or relying only on outbox rows.
 
 Use `service.createSqlOutbox(...)` when a service-local SQL transaction and event
 enqueue must commit or roll back together. Configure it once during startup with

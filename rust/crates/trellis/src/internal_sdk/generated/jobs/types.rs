@@ -1,6 +1,5 @@
 //! Shared request and response types for `trellis.jobs@v1`.
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 use std::collections::BTreeMap;
 /// Generated schema type `JobsCancelRequest`.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -69,7 +68,7 @@ pub struct JobsCancelResponseJobErrorDetailWorker {
 pub struct JobsCancelResponseJobErrorDetail {
     /// The `causes` wire field.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub causes: Option<Vec<BTreeMap<String, Value>>>,
+    pub causes: Option<Vec<BTreeMap<String, serde_json::Value>>>,
     /// The `fingerprint` wire field.
     pub fingerprint: String,
     /// The `firstSeen` wire field.
@@ -486,7 +485,7 @@ pub struct JobsCancelResponseJob {
     #[serde(rename = "maxTries")]
     pub max_tries: i64,
     /// The `payload` wire field.
-    pub payload: Value,
+    pub payload: serde_json::Value,
     /// The `progress` wire field.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub progress: Option<JobsCancelResponseJobProgress>,
@@ -496,7 +495,7 @@ pub struct JobsCancelResponseJob {
     pub queue_policy: Option<JobsCancelResponseJobQueuePolicy>,
     /// The `result` wire field.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub result: Option<Value>,
+    pub result: Option<serde_json::Value>,
     /// The `service` wire field.
     pub service: String,
     /// The `startedAt` wire field.
@@ -593,7 +592,7 @@ pub struct JobsDismissDLQResponseJobErrorDetailWorker {
 pub struct JobsDismissDLQResponseJobErrorDetail {
     /// The `causes` wire field.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub causes: Option<Vec<BTreeMap<String, Value>>>,
+    pub causes: Option<Vec<BTreeMap<String, serde_json::Value>>>,
     /// The `fingerprint` wire field.
     pub fingerprint: String,
     /// The `firstSeen` wire field.
@@ -1010,7 +1009,7 @@ pub struct JobsDismissDLQResponseJob {
     #[serde(rename = "maxTries")]
     pub max_tries: i64,
     /// The `payload` wire field.
-    pub payload: Value,
+    pub payload: serde_json::Value,
     /// The `progress` wire field.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub progress: Option<JobsDismissDLQResponseJobProgress>,
@@ -1020,7 +1019,7 @@ pub struct JobsDismissDLQResponseJob {
     pub queue_policy: Option<JobsDismissDLQResponseJobQueuePolicy>,
     /// The `result` wire field.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub result: Option<Value>,
+    pub result: Option<serde_json::Value>,
     /// The `service` wire field.
     pub service: String,
     /// The `startedAt` wire field.
@@ -1147,7 +1146,7 @@ pub struct JobsInspectResponseAttemptsItemErrorWorker {
 pub struct JobsInspectResponseAttemptsItemError {
     /// The `causes` wire field.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub causes: Option<Vec<BTreeMap<String, Value>>>,
+    pub causes: Option<Vec<BTreeMap<String, serde_json::Value>>>,
     /// The `fingerprint` wire field.
     pub fingerprint: String,
     /// The `firstSeen` wire field.
@@ -1286,7 +1285,7 @@ pub struct JobsInspectResponseErrorsItemWorker {
 pub struct JobsInspectResponseErrorsItem {
     /// The `causes` wire field.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub causes: Option<Vec<BTreeMap<String, Value>>>,
+    pub causes: Option<Vec<BTreeMap<String, serde_json::Value>>>,
     /// The `fingerprint` wire field.
     pub fingerprint: String,
     /// The `firstSeen` wire field.
@@ -1367,7 +1366,7 @@ pub struct JobsInspectResponseJobErrorDetailWorker {
 pub struct JobsInspectResponseJobErrorDetail {
     /// The `causes` wire field.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub causes: Option<Vec<BTreeMap<String, Value>>>,
+    pub causes: Option<Vec<BTreeMap<String, serde_json::Value>>>,
     /// The `fingerprint` wire field.
     pub fingerprint: String,
     /// The `firstSeen` wire field.
@@ -1784,7 +1783,7 @@ pub struct JobsInspectResponseJob {
     #[serde(rename = "maxTries")]
     pub max_tries: i64,
     /// The `payload` wire field.
-    pub payload: Value,
+    pub payload: serde_json::Value,
     /// The `progress` wire field.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub progress: Option<JobsInspectResponseJobProgress>,
@@ -1794,7 +1793,7 @@ pub struct JobsInspectResponseJob {
     pub queue_policy: Option<JobsInspectResponseJobQueuePolicy>,
     /// The `result` wire field.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub result: Option<Value>,
+    pub result: Option<serde_json::Value>,
     /// The `service` wire field.
     pub service: String,
     /// The `startedAt` wire field.
@@ -2291,7 +2290,7 @@ pub struct JobsInspectResponseTimelineItemErrorDetailWorker {
 pub struct JobsInspectResponseTimelineItemErrorDetail {
     /// The `causes` wire field.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub causes: Option<Vec<BTreeMap<String, Value>>>,
+    pub causes: Option<Vec<BTreeMap<String, serde_json::Value>>>,
     /// The `fingerprint` wire field.
     pub fingerprint: String,
     /// The `firstSeen` wire field.
@@ -2650,7 +2649,7 @@ pub struct JobsInspectResponseTimelineItem {
     /// The `rawEvent` wire field.
     #[serde(rename = "rawEvent")]
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub raw_event: Option<Value>,
+    pub raw_event: Option<serde_json::Value>,
     /// The `reason` wire field.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
@@ -2857,7 +2856,7 @@ pub struct JobsListDLQResponseEntriesItemErrorDetailWorker {
 pub struct JobsListDLQResponseEntriesItemErrorDetail {
     /// The `causes` wire field.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub causes: Option<Vec<BTreeMap<String, Value>>>,
+    pub causes: Option<Vec<BTreeMap<String, serde_json::Value>>>,
     /// The `fingerprint` wire field.
     pub fingerprint: String,
     /// The `firstSeen` wire field.
@@ -3274,7 +3273,7 @@ pub struct JobsListDLQResponseEntriesItem {
     #[serde(rename = "maxTries")]
     pub max_tries: i64,
     /// The `payload` wire field.
-    pub payload: Value,
+    pub payload: serde_json::Value,
     /// The `progress` wire field.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub progress: Option<JobsListDLQResponseEntriesItemProgress>,
@@ -3284,7 +3283,7 @@ pub struct JobsListDLQResponseEntriesItem {
     pub queue_policy: Option<JobsListDLQResponseEntriesItemQueuePolicy>,
     /// The `result` wire field.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub result: Option<Value>,
+    pub result: Option<serde_json::Value>,
     /// The `service` wire field.
     pub service: String,
     /// The `startedAt` wire field.
@@ -4763,7 +4762,7 @@ pub struct JobsReplayDLQResponseJobErrorDetailWorker {
 pub struct JobsReplayDLQResponseJobErrorDetail {
     /// The `causes` wire field.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub causes: Option<Vec<BTreeMap<String, Value>>>,
+    pub causes: Option<Vec<BTreeMap<String, serde_json::Value>>>,
     /// The `fingerprint` wire field.
     pub fingerprint: String,
     /// The `firstSeen` wire field.
@@ -5180,7 +5179,7 @@ pub struct JobsReplayDLQResponseJob {
     #[serde(rename = "maxTries")]
     pub max_tries: i64,
     /// The `payload` wire field.
-    pub payload: Value,
+    pub payload: serde_json::Value,
     /// The `progress` wire field.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub progress: Option<JobsReplayDLQResponseJobProgress>,
@@ -5190,7 +5189,7 @@ pub struct JobsReplayDLQResponseJob {
     pub queue_policy: Option<JobsReplayDLQResponseJobQueuePolicy>,
     /// The `result` wire field.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub result: Option<Value>,
+    pub result: Option<serde_json::Value>,
     /// The `service` wire field.
     pub service: String,
     /// The `startedAt` wire field.
@@ -5287,7 +5286,7 @@ pub struct JobsRetryResponseJobErrorDetailWorker {
 pub struct JobsRetryResponseJobErrorDetail {
     /// The `causes` wire field.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub causes: Option<Vec<BTreeMap<String, Value>>>,
+    pub causes: Option<Vec<BTreeMap<String, serde_json::Value>>>,
     /// The `fingerprint` wire field.
     pub fingerprint: String,
     /// The `firstSeen` wire field.
@@ -5704,7 +5703,7 @@ pub struct JobsRetryResponseJob {
     #[serde(rename = "maxTries")]
     pub max_tries: i64,
     /// The `payload` wire field.
-    pub payload: Value,
+    pub payload: serde_json::Value,
     /// The `progress` wire field.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub progress: Option<JobsRetryResponseJobProgress>,
@@ -5714,7 +5713,7 @@ pub struct JobsRetryResponseJob {
     pub queue_policy: Option<JobsRetryResponseJobQueuePolicy>,
     /// The `result` wire field.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub result: Option<Value>,
+    pub result: Option<serde_json::Value>,
     /// The `service` wire field.
     pub service: String,
     /// The `startedAt` wire field.
@@ -6320,7 +6319,7 @@ impl PartialEq<NotFoundErrorDataType> for &str {
 pub struct NotFoundErrorData {
     /// The `context` wire field.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub context: Option<BTreeMap<String, Value>>,
+    pub context: Option<BTreeMap<String, serde_json::Value>>,
     /// The `id` wire field.
     pub id: String,
     /// The `jobId` wire field.

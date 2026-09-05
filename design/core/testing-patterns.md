@@ -48,14 +48,12 @@ Rust-only runtime behavior remains in ordinary Rust integration tests.
 
 ### Case-Owned Runtime
 
-A live subsystem run owns one managed NATS server. Every selected case receives
-its own NATS account and starts its own `trellis-server` process and SQLite set.
-Built-in Jobs and Event Log run as subsystems of that case-owned process. Cases
-keep authored contract ids, participant ids, action names, versions, and
-protocol subjects fixed; account isolation prevents those fixed protocol
-subjects and participant identities from colliding across cases. Run and case
-slugs still isolate physical deployment ids, resource keys, state keys, durable
-names, and domain records.
+Each live test starts and stops its own real NATS and `trellis-server` processes
+and owns its temporary SQLite state. Built-in Jobs and Event Log run inside that
+server. Tests use generated participants from a small native-IDL fixture; they
+do not construct substitute API descriptors. Prebuilt server and CLI paths may
+be supplied through environment variables. There is no shared-runner registry,
+tenant allocator, artifact manifest, or host-wide scheduler.
 
 Rust and TypeScript live tests use ordinary Rust and Deno discovery. The normal
 Check runs both discovered suites against real Trellis infrastructure. Focused
@@ -68,12 +66,24 @@ Real component and adapter integration tests may cover transaction, repository,
 projection, reducer, and state-machine invariants without starting the complete
 runtime. Pure unit tests remain appropriate for:
 
-- pure parser, codec, canonicalization, crypto vector, schema pointer, or error
-  serialization checks
-- package export/import, publishing, generated artifact, or type-surface smoke
-  checks
-- CLI argument parsing and release-tool planning checks
-- tiny UI copy or page-state helpers
+- security, data-integrity, and observable regression checks
+- exact byte-level codecs, canonicalization, proofs, and signatures where
+  independent implementations must agree
+- compiling generated language consumers, including a watch recovery consumer
+  that uses the newly generated field
+- publication inputs and CLI behavior that users actually rely on
+
+Do not freeze implementation details with generated-source substring assertions,
+test-name inventories, empty-array/private-shape checks, or large parser
+matrices without a demonstrated regression. Native IDL needs a small successful
+compile case and a useful malformed-source diagnostic, not one test per grammar
+branch. Semantic protocol logic shared through Rust/WASM does not need a second
+cross-language corpus. Keep vectors only for independently implemented wire or
+cryptographic boundaries.
+
+Checked-in demos are consumer acceptance: run their normal dependency update,
+generation, type-check, and Cargo commands. Do not copy them into test fixtures,
+add demo runners, or maintain a parallel scenario catalog.
 
 If a smaller test needs fake Trellis runtime pieces to pass, move it to live
 integration or replace it with a real component boundary. Delete it after live

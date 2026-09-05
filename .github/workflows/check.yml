@@ -155,7 +155,7 @@ jobs:
 
   rust:
     name: Rust
-    needs: [install, portal]
+    needs: [install, wasm, portal]
     runs-on: [self-hosted, Linux, X64]
     timeout-minutes: 20
     steps:
@@ -195,6 +195,12 @@ jobs:
         with:
           path: rust/target
           key: cargo-${{ steps.rust.outputs.cachekey }}-${{ runner.os }}-${{ runner.arch }}-workspace-all-targets-${{ hashFiles('rust/**/Cargo.toml', 'rust/**/Cargo.lock', '.cargo/config.toml', 'rust/.cargo/config.toml') }}
+
+      - name: Download protocol WASM
+        uses: actions/download-artifact@v4
+        with:
+          name: check-protocol-wasm
+          path: ts/packages/trellis/auth/protocol_wasm
 
       - name: Check formatting
         run: |
@@ -376,15 +382,19 @@ jobs:
         with:
           deno-version: ${{ env.DENO_VERSION }}
 
-      - name: Build Trellis server
-        run: cargo build --manifest-path rust/Cargo.toml -p trellis-server
+      - name: Build live runtime binaries
+        run: cargo build --manifest-path rust/Cargo.toml -p trellis-server -p trellis-cli
 
       - name: Run Rust live integration
-        run: cargo test --manifest-path rust/Cargo.toml -p trellis-rs --features live-integration --test integration -- --test-threads=1
+        env:
+          TRELLIS_TEST_SERVER_BIN: ${{ github.workspace }}/rust/target/debug/trellis-server
+          TRELLIS_TEST_CLI_BIN: ${{ github.workspace }}/rust/target/debug/trellis
+        run: cargo test --manifest-path rust/Cargo.toml -p trellis-rs --features live-integration --test integration -- --test-threads=1 --nocapture
 
       - name: Run TypeScript live integration
         env:
           TRELLIS_TEST_SERVER_BIN: ${{ github.workspace }}/rust/target/debug/trellis-server
+          TRELLIS_TEST_CLI_BIN: ${{ github.workspace }}/rust/target/debug/trellis
         run: deno test -A -c ts/integration/deno.json ts/integration
 
   ui-hosting:

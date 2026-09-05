@@ -3,7 +3,57 @@
 Declare the browser app participant in the app's native `.trellis` source and generate it before checking or building the app.
 
 ```ts
+import { createTrellisApp } from "@qlever-llc/trellis-svelte";
 import { participant } from "../../.trellis/ts/participants/orders-app/mod.ts";
+
+export const trellisApp = createTrellisApp({
+  participant,
+  trellisUrl: "https://trellis.example.com",
+});
 ```
 
 Use the generated participant for browser connection and bind flows. Keep secrets and durable server credentials in server-only modules; browser trust state uses the Trellis browser storage adapter.
+
+## Declare app authority
+
+Add the APIs the app consumes to `trellis.toml`, resolve them with
+`trellis update`, and select the required actions in native IDL `use required`
+blocks. Use `use optional` only for authority the user can decline. Run
+`trellis generate` after changes, then run the app's normal check and build.
+Do not author `defineAppContract` objects or generate participant evidence in
+browser code.
+
+## Own one browser connection
+
+Mount `TrellisProvider` with the app owner near the root layout. In child
+components, call `trellisApp.getTrellis()` during component initialization to
+obtain the typed generated caller. `trellisApp.getConnection()` returns a
+Svelte-reactive connection; read its `status` in markup or a derived expression.
+Show connecting, disconnected, and failed states rather than silently rendering
+an empty data view.
+
+The app owner can live in a module, but connected clients belong to Svelte
+context. Never put a user's connected client in module-global mutable state on
+the server. Keep server-only helpers under `$lib/server` or in `.server.ts`
+files. Do not disable SSR globally merely to hide an incorrect browser import.
+
+## Call the generated API
+
+Generated callers expose flat selected methods, for example `ordersGet(...)`,
+not a hand-constructed RPC namespace. Handle their `Result` values explicitly.
+Use operations for asynchronous workflows, generated event subscriptions for
+live delivery, and the returned cancellation handles when leaving a view. Do
+not subscribe through raw NATS or recreate signed wire envelopes.
+
+Let the provider own browser authentication redirects and the returned callback.
+An expired plain callback starts a new flow; explicit approval denial remains a
+user-visible outcome. The browser's durable trust floor survives logout, so do
+not clear IndexedDB as a routine recovery technique.
+
+## Verify a browser consumer
+
+Keep Vite aliases, npm/JSR imports, and TypeScript path mappings aligned with the
+generated module's imports. Run the app's normal `svelte-check` and production
+build, then exercise login, a generated call, disconnect/reconnect, and logout
+against a real runtime. See [the Svelte AI guide](/llms-svelte.txt) for resolver
+details and [/api](/api) for current package APIs.
