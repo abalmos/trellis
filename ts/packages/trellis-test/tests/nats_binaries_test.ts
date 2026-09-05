@@ -494,5 +494,5 @@ function archiveFor(
       { name: `nats-server-v0.0.0-fixture/nats-server`, content: binary },
     ]));
   }
-  return zipSync({ "nsc": binary });
+  return zipSync({ "nsc": binary }, { mtime: new Date(2000, 0, 1) });
 }

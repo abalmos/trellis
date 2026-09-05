@@ -620,7 +620,7 @@ fn render_cargo_toml(
 
 fn runtime_dependency_lines(
     runtime_deps: &RustRuntimeDeps,
-    _out_dir: &Path,
+    out_dir: &Path,
 ) -> Result<Vec<String>, CodegenRustError> {
     match runtime_deps.source {
         RustRuntimeSource::Registry => {
@@ -633,12 +633,26 @@ fn runtime_dependency_lines(
                 .ok_or(CodegenRustError::MissingRuntimeRepoRoot)?;
             let repo_root = fs::canonicalize(repo_root).unwrap_or_else(|_| repo_root.clone());
             let trellis_path = workspace_package_dir(&repo_root, "trellis-rs")?;
+            let trellis_path = cargo_dependency_path(&trellis_path, out_dir)?;
             Ok(vec![format!(
                 "trellis-rs = {{ path = {} }}",
                 string_literal(&trellis_path.display().to_string())
             )])
         }
     }
+}
+
+fn cargo_dependency_path(path: &Path, out_dir: &Path) -> std::io::Result<PathBuf> {
+    let path = fs::canonicalize(path).or_else(|_| std::path::absolute(path))?;
+    let out_dir = fs::canonicalize(out_dir).or_else(|_| std::path::absolute(out_dir))?;
+    Ok(out_dir
+        .ancestors()
+        .find_map(|base| {
+            let tail = path.strip_prefix(base).ok()?;
+            let depth = out_dir.components().count() - base.components().count();
+            Some(PathBuf::from("../".repeat(depth)).join(tail))
+        })
+        .unwrap_or(path))
 }
 
 fn render_rust_sdk_trellis_md(opts: &GenerateRustSdkOpts, loaded: &ApiInput) -> String {
@@ -1183,7 +1197,7 @@ fn render_participant_cargo_toml(
         dependency_lines.push("tokio = { version = \"1\", features = [\"io-util\"] }".to_string());
     }
     if let (Some(crate_name), Some(path)) = (&opts.owned_sdk_crate_name, &opts.owned_sdk_path) {
-        let path = fs::canonicalize(path).unwrap_or_else(|_| path.clone());
+        let path = cargo_dependency_path(path, &opts.out_dir)?;
         dependency_lines.push(format!(
             "{} = {{ path = {} }}",
             crate_name,
@@ -1195,8 +1209,7 @@ fn render_participant_cargo_toml(
             dependency_lines.push(format!("{} = {dependency}", mapping.crate_name));
             continue;
         }
-        let path =
-            fs::canonicalize(&mapping.crate_path).unwrap_or_else(|_| mapping.crate_path.clone());
+        let path = cargo_dependency_path(&mapping.crate_path, &opts.out_dir)?;
         dependency_lines.push(format!(
             "{} = {{ path = {} }}",
             mapping.crate_name,
@@ -4804,7 +4817,7 @@ mod tests {
         let cargo = render_cargo_toml(
             &GenerateRustSdkOpts {
                 api_path: PathBuf::from("generated/protocol/apis/trellis.core@v1.json"),
-                out_dir: PathBuf::from("generated/packages/cargo/trellis-core"),
+                out_dir: repo_root.join("generated/packages/cargo/trellis-core"),
                 crate_name: "trellis-sdk-core".to_string(),
                 crate_version: "0.1.0".to_string(),
                 runtime_deps: RustRuntimeDeps {
@@ -4818,14 +4831,19 @@ mod tests {
         )
         .unwrap();
 
-        assert!(cargo.contains(
-            &repo_root
-                .join("rust/crates/runtime-client")
-                .display()
-                .to_string()
-        ));
-        assert!(!cargo.contains("trellis-service"));
-        assert!(!cargo.contains("rust/crates/client"));
+        let manifest: toml::Value = toml::from_str(&cargo).unwrap();
+        let dependency = manifest["dependencies"]["trellis-rs"]["path"]
+            .as_str()
+            .unwrap();
+        let moved_root = repo_root.with_extension("moved");
+        fs::rename(&repo_root, &moved_root).unwrap();
+        let sdk_dir = moved_root.join("generated/packages/cargo/trellis-core");
+        fs::create_dir_all(&sdk_dir).unwrap();
+        assert_eq!(
+            fs::canonicalize(sdk_dir.join(dependency)).unwrap(),
+            fs::canonicalize(moved_root.join("rust/crates/runtime-client")).unwrap(),
+        );
+        fs::remove_dir_all(moved_root).unwrap();
     }
 
     #[test]
