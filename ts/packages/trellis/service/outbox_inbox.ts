@@ -10,7 +10,12 @@ import type { TypedKV } from "../kv.ts";
 import { recordTrellisError } from "../telemetry/mod.ts";
 import type { PreparedTrellisEvent } from "../session.ts";
 
-export type OutboxMessageState = "pending" | "dispatched" | "failed";
+export type OutboxMessageState =
+  | "pending"
+  | "claimed"
+  | "dispatched"
+  | "failed";
+const outboxClaimMs = 30_000;
 
 export type OutboxRecordKind = "event.publish" | "job.create" | "job.submit";
 
@@ -78,12 +83,18 @@ export type OutboxDispatchRuntime = {
 export type OutboxRepository = {
   enqueue(record: PreparedOutboxRecord): Promise<OutboxMessage>;
   get(id: string): Promise<OutboxMessage | undefined>;
+  /** Claim due work for 30 seconds; the returned attempt fences completion. */
   claimDue(limit: number, now: Date): Promise<OutboxMessage[]>;
-  markDispatched(id: string, now: Date, outcome?: unknown): Promise<void>;
+  /** Complete the returned claim; false means its ownership was superseded. */
+  markDispatched(
+    claim: OutboxMessage,
+    now: Date,
+    outcome?: unknown,
+  ): Promise<boolean>;
   markFailed(
-    id: string,
+    claim: OutboxMessage,
     failure: { error: string; nextAttemptAt: Date; now: Date },
-  ): Promise<void>;
+  ): Promise<boolean>;
 };
 
 export type InboxRepository = {
@@ -216,12 +227,6 @@ export function createSqliteOutboxSchema(
   const sqlTables = validateSqlOutboxTables(tables);
   return [
     `CREATE TABLE IF NOT EXISTS ${sqlTables.outbox} (id TEXT PRIMARY KEY, kind TEXT NOT NULL, name TEXT NOT NULL, subject TEXT NOT NULL, payload TEXT NOT NULL, headers TEXT NOT NULL, state TEXT NOT NULL, attempts INTEGER NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, next_attempt_at TEXT, last_error TEXT, outcome TEXT)`,
-    `PRAGMA writable_schema=ON`,
-    `UPDATE sqlite_schema SET sql = replace(sql, 'event TEXT NOT NULL', 'name TEXT NOT NULL') WHERE type = 'table' AND name = '${sqlTables.outbox}' AND sql LIKE '%event TEXT NOT NULL%' AND sql NOT LIKE '%name TEXT NOT NULL%'`,
-    `UPDATE sqlite_schema SET sql = replace(sql, 'last_error TEXT)', 'last_error TEXT, kind TEXT NOT NULL DEFAULT ''event.publish'', outcome TEXT)') WHERE type = 'table' AND name = '${sqlTables.outbox}' AND sql NOT LIKE '%kind TEXT%' AND sql NOT LIKE '%outcome TEXT%'`,
-    `UPDATE sqlite_schema SET sql = replace(sql, 'last_error TEXT, outcome TEXT)', 'last_error TEXT, kind TEXT NOT NULL DEFAULT ''event.publish'', outcome TEXT)') WHERE type = 'table' AND name = '${sqlTables.outbox}' AND sql NOT LIKE '%kind TEXT%' AND sql LIKE '%outcome TEXT%'`,
-    `UPDATE sqlite_schema SET sql = replace(sql, 'last_error TEXT)', 'last_error TEXT, outcome TEXT)') WHERE type = 'table' AND name = '${sqlTables.outbox}' AND sql LIKE '%kind TEXT%' AND sql NOT LIKE '%outcome TEXT%'`,
-    `PRAGMA writable_schema=RESET`,
     `CREATE INDEX IF NOT EXISTS ${sqlTables.outbox}_due_idx ON ${sqlTables.outbox} (state, next_attempt_at)`,
     `CREATE TABLE IF NOT EXISTS ${sqlTables.inbox} (message_id TEXT PRIMARY KEY, received_at TEXT NOT NULL)`,
   ];
@@ -234,7 +239,6 @@ export function createPostgresOutboxSchema(
   const sqlTables = validateSqlOutboxTables(tables);
   return [
     `CREATE TABLE IF NOT EXISTS ${sqlTables.outbox} (id text PRIMARY KEY, kind text NOT NULL, name text NOT NULL, subject text NOT NULL, payload text NOT NULL, headers jsonb NOT NULL, state text NOT NULL, attempts integer NOT NULL, created_at timestamptz NOT NULL, updated_at timestamptz NOT NULL, next_attempt_at timestamptz, last_error text, outcome jsonb)`,
-    `DO $$ BEGIN IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = '${sqlTables.outbox}' AND column_name = 'event') AND NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = '${sqlTables.outbox}' AND column_name = 'name') THEN ALTER TABLE ${sqlTables.outbox} RENAME COLUMN event TO name; END IF; ALTER TABLE ${sqlTables.outbox} ADD COLUMN IF NOT EXISTS kind text NOT NULL DEFAULT 'event.publish'; ALTER TABLE ${sqlTables.outbox} ADD COLUMN IF NOT EXISTS outcome jsonb; END $$`,
     `CREATE INDEX IF NOT EXISTS ${sqlTables.outbox}_due_idx ON ${sqlTables.outbox} (state, next_attempt_at)`,
     `CREATE TABLE IF NOT EXISTS ${sqlTables.inbox} (message_id text PRIMARY KEY, received_at timestamptz NOT NULL)`,
   ];
@@ -344,19 +348,26 @@ export class MemoryOutboxRepository implements OutboxRepository {
       ) {
         continue;
       }
+      message.state = "claimed";
+      message.attempts += 1;
+      message.updatedAt = dueAt;
+      message.nextAttemptAt = new Date(now.getTime() + outboxClaimMs)
+        .toISOString();
       claimed.push({ ...message, headers: { ...message.headers } });
     }
     return claimed;
   }
 
   async markDispatched(
-    id: string,
+    claim: OutboxMessage,
     now: Date,
     outcome?: unknown,
-  ): Promise<void> {
-    const message = this.#messages.get(id);
-    if (!message) return;
-    this.#messages.set(id, {
+  ): Promise<boolean> {
+    const message = this.#messages.get(claim.id);
+    if (message?.state !== "claimed" || message.attempts !== claim.attempts) {
+      return false;
+    }
+    this.#messages.set(claim.id, {
       ...message,
       state: "dispatched",
       updatedAt: now.toISOString(),
@@ -364,22 +375,25 @@ export class MemoryOutboxRepository implements OutboxRepository {
       lastError: undefined,
       outcome: outcome ?? message.outcome,
     });
+    return true;
   }
 
   async markFailed(
-    id: string,
+    claim: OutboxMessage,
     failure: { error: string; nextAttemptAt: Date; now: Date },
-  ): Promise<void> {
-    const message = this.#messages.get(id);
-    if (!message) return;
-    this.#messages.set(id, {
+  ): Promise<boolean> {
+    const message = this.#messages.get(claim.id);
+    if (message?.state !== "claimed" || message.attempts !== claim.attempts) {
+      return false;
+    }
+    this.#messages.set(claim.id, {
       ...message,
       state: "failed",
-      attempts: message.attempts + 1,
       updatedAt: failure.now.toISOString(),
       nextAttemptAt: failure.nextAttemptAt.toISOString(),
       lastError: failure.error,
     });
+    return true;
   }
 
   snapshot(): readonly OutboxMessage[] {
@@ -466,54 +480,80 @@ export class SqlOutboxRepository implements OutboxRepository {
 
   async claimDue(limit: number, now: Date): Promise<OutboxMessage[]> {
     const rows = await this.executor.query(
-      `SELECT id, kind, name, subject, payload, headers, state, attempts, created_at, updated_at, next_attempt_at, last_error, outcome FROM ${this.tables.outbox} WHERE state != ${
+      `UPDATE ${this.tables.outbox} SET state = ${
         placeholder(this.dialect, 1)
-      } AND (next_attempt_at IS NULL OR next_attempt_at <= ${
+      }, attempts = attempts + 1, updated_at = ${
         placeholder(this.dialect, 2)
-      }) ORDER BY created_at LIMIT ${placeholder(this.dialect, 3)}`,
-      ["dispatched", now.toISOString(), limit],
+      }, next_attempt_at = ${placeholder(this.dialect, 3)} WHERE id IN (
+        SELECT id FROM ${this.tables.outbox} WHERE state != ${
+        placeholder(this.dialect, 4)
+      }
+        AND (next_attempt_at IS NULL OR next_attempt_at <= ${
+        placeholder(this.dialect, 5)
+      })
+        ORDER BY created_at LIMIT ${placeholder(this.dialect, 6)}${
+        this.dialect === "postgres" ? " FOR UPDATE SKIP LOCKED" : ""
+      }
+      ) RETURNING *`,
+      [
+        "claimed",
+        now.toISOString(),
+        new Date(now.getTime() + outboxClaimMs).toISOString(),
+        "dispatched",
+        now.toISOString(),
+        Math.max(0, limit),
+      ],
     );
     return rows.map(rowToOutboxMessage);
   }
 
   async markDispatched(
-    id: string,
+    claim: OutboxMessage,
     now: Date,
     outcome?: unknown,
-  ): Promise<void> {
+  ): Promise<boolean> {
     const outcomeJson = outcome !== undefined ? JSON.stringify(outcome) : null;
-    await this.executor.execute(
+    const rows = await this.executor.query(
       `UPDATE ${this.tables.outbox} SET state = ${
         placeholder(this.dialect, 1)
       }, updated_at = ${
         placeholder(this.dialect, 2)
       }, next_attempt_at = NULL, last_error = NULL, outcome = ${
         placeholder(this.dialect, 3)
-      } WHERE id = ${placeholder(this.dialect, 4)}`,
-      ["dispatched", now.toISOString(), outcomeJson, id],
+      } WHERE id = ${
+        placeholder(this.dialect, 4)
+      } AND state = 'claimed' AND attempts = ${
+        placeholder(this.dialect, 5)
+      } RETURNING id`,
+      ["dispatched", now.toISOString(), outcomeJson, claim.id, claim.attempts],
     );
+    return rows.length === 1;
   }
 
   async markFailed(
-    id: string,
+    claim: OutboxMessage,
     failure: { error: string; nextAttemptAt: Date; now: Date },
-  ): Promise<void> {
-    await this.executor.execute(
+  ): Promise<boolean> {
+    const rows = await this.executor.query(
       `UPDATE ${this.tables.outbox} SET state = ${
         placeholder(this.dialect, 1)
-      }, attempts = attempts + 1, updated_at = ${
-        placeholder(this.dialect, 2)
-      }, next_attempt_at = ${placeholder(this.dialect, 3)}, last_error = ${
-        placeholder(this.dialect, 4)
-      } WHERE id = ${placeholder(this.dialect, 5)}`,
+      }, updated_at = ${placeholder(this.dialect, 2)}, next_attempt_at = ${
+        placeholder(this.dialect, 3)
+      }, last_error = ${placeholder(this.dialect, 4)} WHERE id = ${
+        placeholder(this.dialect, 5)
+      } AND state = 'claimed' AND attempts = ${
+        placeholder(this.dialect, 6)
+      } RETURNING id`,
       [
         "failed",
         failure.now.toISOString(),
         failure.nextAttemptAt.toISOString(),
         failure.error,
-        id,
+        claim.id,
+        claim.attempts,
       ],
     );
+    return rows.length === 1;
   }
 }
 
@@ -530,30 +570,14 @@ export class SqlInboxRepository implements InboxRepository {
   }
 
   async record(messageId: string, now: Date = new Date()): Promise<boolean> {
-    try {
-      const existing = await this.executor.query(
-        `SELECT message_id FROM ${this.tables.inbox} WHERE message_id = ${
-          placeholder(this.dialect, 1)
-        }`,
-        [messageId],
-      );
-      if (existing.length > 0) return false;
-      const conflict = this.dialect === "postgres"
-        ? "ON CONFLICT (message_id) DO NOTHING"
-        : "ON CONFLICT(message_id) DO NOTHING";
-      await this.executor.execute(
-        `INSERT INTO ${this.tables.inbox} (message_id, received_at) VALUES (${
-          placeholders(this.dialect, 2)
-        }) ${conflict}`,
-        [messageId, now.toISOString()],
-      );
-      return true;
-    } catch (cause) {
-      if (cause instanceof Error && cause.message.includes("unique")) {
-        return false;
-      }
-      throw cause;
-    }
+    const inserted = await this.executor.query(
+      `INSERT INTO ${this.tables.inbox} (message_id, received_at) VALUES (${
+        placeholders(this.dialect, 2)
+      })
+       ON CONFLICT(message_id) DO NOTHING RETURNING message_id`,
+      [messageId, now.toISOString()],
+    );
+    return inserted.length === 1;
   }
 }
 
@@ -639,7 +663,7 @@ export class NatsKvOutboxRepository implements OutboxRepository {
 
       const entry = loaded;
       const record = entry.value;
-      if (record.state === "dispatched" || record.state === "claimed") {
+      if (record.state === "dispatched") {
         continue;
       }
       if (record.nextAttemptAt !== undefined && record.nextAttemptAt > dueAt) {
@@ -649,7 +673,9 @@ export class NatsKvOutboxRepository implements OutboxRepository {
       const next: KvOutboxRecord = {
         ...record,
         state: "claimed",
+        attempts: record.attempts + 1,
         updatedAt: dueAt,
+        nextAttemptAt: new Date(now.getTime() + outboxClaimMs).toISOString(),
       };
       const stored = await entry.put(next, true).take();
       if (isErr(stored)) {
@@ -662,15 +688,19 @@ export class NatsKvOutboxRepository implements OutboxRepository {
   }
 
   async markDispatched(
-    id: string,
+    claim: OutboxMessage,
     now: Date,
     outcome?: unknown,
-  ): Promise<void> {
-    const loaded = await this.kv.get(id).take();
+  ): Promise<boolean> {
+    const loaded = await this.kv.get(claim.id).take();
     if (isErr(loaded)) {
-      if (hasKvReason(loaded.error, "not found")) return;
+      if (hasKvReason(loaded.error, "not found")) return false;
       throw loaded.error;
     }
+    if (
+      loaded.value.state !== "claimed" ||
+      loaded.value.attempts !== claim.attempts
+    ) return false;
     const outcomeStr = outcome !== undefined
       ? JSON.stringify(outcome)
       : undefined;
@@ -682,28 +712,38 @@ export class NatsKvOutboxRepository implements OutboxRepository {
       lastError: undefined,
       outcome: outcomeStr ?? loaded.value.outcome,
     }, true).take();
-    if (isErr(stored)) throw stored.error;
+    if (isErr(stored)) {
+      if (hasKvReason(stored.error, "revision mismatch")) return false;
+      throw stored.error;
+    }
+    return true;
   }
 
   async markFailed(
-    id: string,
+    claim: OutboxMessage,
     failure: { error: string; nextAttemptAt: Date; now: Date },
-  ): Promise<void> {
-    const loaded = await this.kv.get(id).take();
+  ): Promise<boolean> {
+    const loaded = await this.kv.get(claim.id).take();
     if (isErr(loaded)) {
-      if (hasKvReason(loaded.error, "not found")) return;
+      if (hasKvReason(loaded.error, "not found")) return false;
       throw loaded.error;
     }
     const record = loaded.value;
+    if (record.state !== "claimed" || record.attempts !== claim.attempts) {
+      return false;
+    }
     const stored = await loaded.put({
       ...record,
       state: "failed",
-      attempts: record.attempts + 1,
       updatedAt: failure.now.toISOString(),
       nextAttemptAt: failure.nextAttemptAt.toISOString(),
       lastError: failure.error,
     }, true).take();
-    if (isErr(stored)) throw stored.error;
+    if (isErr(stored)) {
+      if (hasKvReason(stored.error, "revision mismatch")) return false;
+      throw stored.error;
+    }
+    return true;
   }
 }
 
@@ -742,7 +782,6 @@ export class OutboxDispatcher {
   #idleTimer: ReturnType<typeof setTimeout> | undefined;
   #running = false;
   #pending = false;
-  #retryDue = false;
   #stopped = false;
 
   /** Creates a dispatcher over an existing outbox repository and runtime. */
@@ -769,7 +808,6 @@ export class OutboxDispatcher {
   stop(): void {
     this.#stopped = true;
     this.#pending = false;
-    this.#retryDue = false;
     this.#clearTimer("wake");
     this.#clearTimer("retry");
     this.#clearTimer("idle");
@@ -790,7 +828,6 @@ export class OutboxDispatcher {
     this.#retryTimer = setTimeout(() => {
       this.#retryTimer = undefined;
       if (this.#stopped) return;
-      this.#retryDue = true;
       this.#pending = true;
       if (!this.#running) this.#scheduleWakeup(0);
     }, this.#retryDelayMs());
@@ -809,16 +846,11 @@ export class OutboxDispatcher {
     if (this.#stopped || this.#running) return;
     this.#running = true;
     this.#clearTimer("idle");
-    let drainNow = new Date();
     try {
       do {
-        if (this.#retryDue) {
-          drainNow = new Date();
-          this.#retryDue = false;
-        }
         this.#pending = false;
         while (!this.#stopped) {
-          const result = await this.#dispatchBatch(drainNow);
+          const result = await this.#dispatchBatch();
           if (result.failed > 0) {
             this.#scheduleRetryWakeup();
           }
@@ -835,11 +867,10 @@ export class OutboxDispatcher {
     }
   }
 
-  async #dispatchBatch(now: Date): Promise<OutboxDispatchResult> {
+  async #dispatchBatch(): Promise<OutboxDispatchResult> {
     try {
       return await dispatchOutbox(this.#repository, this.#runtime, {
         limit: this.#options.limit,
-        now,
         retryDelayMs: this.#retryDelayMs(),
       });
     } catch (error) {
@@ -897,6 +928,7 @@ export async function dispatchOutbox(
       );
       const value = result.take();
       if (isErr(value)) {
+        const failedAt = options.now ?? new Date();
         recordTrellisError(value.error, {
           surface: "outbox",
           direction: "dispatcher",
@@ -904,16 +936,16 @@ export async function dispatchOutbox(
           phase: "publish",
           messagingSystem: "nats",
         });
-        failed += 1;
-        await repository.markFailed(message.id, {
-          error: value.error.message,
-          nextAttemptAt: new Date(now.getTime() + retryDelayMs),
-          now,
-        });
+        if (
+          await repository.markFailed(message, {
+            error: value.error.message,
+            nextAttemptAt: new Date(failedAt.getTime() + retryDelayMs),
+            now: failedAt,
+          })
+        ) failed += 1;
         continue;
       }
-      dispatched += 1;
-      await repository.markDispatched(message.id, now);
+      if (await repository.markDispatched(message, now)) dispatched += 1;
     } else if (
       message.kind === "job.create" || message.kind === "job.submit"
     ) {
@@ -921,30 +953,33 @@ export async function dispatchOutbox(
         const result = await runtime.dispatchJobSubmission(message);
         const value = result.take();
         if (isErr(value)) {
+          const failedAt = options.now ?? new Date();
           recordTrellisError(value.error, {
             surface: "outbox",
             direction: "dispatcher",
             operation: message.name,
             phase: "job.dispatch",
           });
-          failed += 1;
-          await repository.markFailed(message.id, {
-            error: value.error.message,
-            nextAttemptAt: new Date(now.getTime() + retryDelayMs),
-            now,
-          });
+          if (
+            await repository.markFailed(message, {
+              error: value.error.message,
+              nextAttemptAt: new Date(failedAt.getTime() + retryDelayMs),
+              now: failedAt,
+            })
+          ) failed += 1;
           continue;
         }
-        dispatched += 1;
-        await repository.markDispatched(message.id, now, value);
+        if (await repository.markDispatched(message, now, value)) {
+          dispatched += 1;
+        }
       } else {
-        recordTrellisError(new Error(`job dispatch not supported`), {
+        recordTrellisError(new Error("job dispatch not supported"), {
           surface: "outbox",
           direction: "dispatcher",
           operation: message.name,
           phase: "dispatch",
         });
-        await repository.markDispatched(message.id, now, {
+        await repository.markDispatched(message, now, {
           error: "job dispatch not supported",
         });
       }
@@ -956,7 +991,7 @@ export async function dispatchOutbox(
         operation: message.name,
         phase: "dispatch",
       });
-      await repository.markDispatched(message.id, now, { error });
+      await repository.markDispatched(message, now, { error });
     }
   }
   return { dispatched, failed };
@@ -1033,12 +1068,12 @@ function rowToOutboxMessage(row: SqlRow): OutboxMessage {
 function kvRecordToOutboxMessage(record: KvOutboxRecord): OutboxMessage {
   return {
     id: record.id,
-    kind: record.kind as OutboxRecordKind,
+    kind: kindField(record, "kind"),
     name: record.name,
     subject: record.subject,
     payload: record.payload,
     headers: { ...record.headers },
-    state: record.state === "claimed" ? "pending" : record.state,
+    state: record.state,
     attempts: record.attempts,
     createdAt: record.createdAt,
     updatedAt: record.updatedAt,
@@ -1128,7 +1163,10 @@ function kindField(row: SqlRow, field: string): OutboxRecordKind {
 
 function stateField(row: SqlRow, field: string): OutboxMessageState {
   const value = stringField(row, field);
-  if (value === "pending" || value === "dispatched" || value === "failed") {
+  if (
+    value === "pending" || value === "claimed" || value === "dispatched" ||
+    value === "failed"
+  ) {
     return value;
   }
   throw new Error(`Expected SQL field ${field} to be an outbox state`);

@@ -13,6 +13,7 @@ use crate::client::{subject::SubjectError, EventDescriptor};
 const OUTBOX_STATUS_PENDING: &str = "pending";
 const OUTBOX_STATUS_IN_FLIGHT: &str = "in_flight";
 const OUTBOX_STATUS_PUBLISHED: &str = "published";
+const OUTBOX_CLAIM_SECONDS: i64 = 30;
 pub(crate) const EVENT_ID_HEADER: &str = "Nats-Msg-Id";
 pub(crate) const EVENT_TIME_HEADER: &str = "Trellis-Event-Time";
 
@@ -156,6 +157,9 @@ fn sqlite_header_decode_error(error: serde_json::Error) -> rusqlite::Error {
 /// Errors returned by Trellis event outbox and inbox stores.
 #[derive(Debug, thiserror::Error)]
 pub enum EventStoreError {
+    /// A stored event has invalid claim metadata.
+    #[error("invalid outbox record: {0}")]
+    InvalidRecord(String),
     /// JSON encoding or decoding failed.
     #[error("json error: {0}")]
     Json(#[from] serde_json::Error),
@@ -191,7 +195,8 @@ pub trait OutboxStore {
         event: &PreparedTrellisEvent,
     ) -> impl std::future::Future<Output = Result<(), EventStoreError>>;
 
-    /// Claim one pending event for publication.
+    /// Atomically claim pending work or work abandoned for at least 30 seconds.
+    /// The returned attempt number fences completion against later claims.
     fn claim_next(
         &mut self,
     ) -> impl std::future::Future<Output = Result<Option<OutboxEventRecord>, EventStoreError>>;
@@ -199,15 +204,15 @@ pub trait OutboxStore {
     /// Mark a claimed event as successfully published.
     fn mark_published(
         &mut self,
-        id: &str,
-    ) -> impl std::future::Future<Output = Result<(), EventStoreError>>;
+        record: &OutboxEventRecord,
+    ) -> impl std::future::Future<Output = Result<bool, EventStoreError>>;
 
     /// Return a claimed event to pending state after a publish failure.
     fn mark_failed(
         &mut self,
-        id: &str,
+        record: &OutboxEventRecord,
         error: &str,
-    ) -> impl std::future::Future<Output = Result<(), EventStoreError>>;
+    ) -> impl std::future::Future<Output = Result<bool, EventStoreError>>;
 }
 
 /// Storage abstraction for consumer-side duplicate suppression.
@@ -237,6 +242,8 @@ pub enum OutboxDispatchResult {
     Published { id: String },
     /// One event failed and was returned to pending state.
     Failed { id: String, error: String },
+    /// A later claim or completion superseded this dispatch attempt.
+    ClaimLost { id: String },
 }
 
 /// Claim and publish at most one outbox event.
@@ -255,12 +262,16 @@ where
     };
     match publish(record.event.clone()).await {
         Ok(()) => {
-            store.mark_published(&record.id).await?;
+            if !store.mark_published(&record).await? {
+                return Ok(OutboxDispatchResult::ClaimLost { id: record.id });
+            }
             Ok(OutboxDispatchResult::Published { id: record.id })
         }
         Err(error) => {
             let error = error.to_string();
-            store.mark_failed(&record.id, &error).await?;
+            if !store.mark_failed(&record, &error).await? {
+                return Ok(OutboxDispatchResult::ClaimLost { id: record.id });
+            }
             Ok(OutboxDispatchResult::Failed {
                 id: record.id,
                 error,
@@ -273,6 +284,7 @@ where
 struct MemoryOutboxEntry {
     record: OutboxEventRecord,
     status: String,
+    claimed_until: i64,
 }
 
 /// In-memory outbox useful for tests and single-process prototypes.
@@ -299,9 +311,9 @@ impl OutboxStore for MemoryOutboxStore {
         id: &str,
         event: &PreparedTrellisEvent,
     ) -> Result<(), EventStoreError> {
-        self.records.insert(
-            id.to_string(),
-            MemoryOutboxEntry {
+        self.records
+            .entry(id.to_string())
+            .or_insert_with(|| MemoryOutboxEntry {
                 record: OutboxEventRecord {
                     id: id.to_string(),
                     event: event.clone(),
@@ -309,37 +321,53 @@ impl OutboxStore for MemoryOutboxStore {
                     last_error: None,
                 },
                 status: OUTBOX_STATUS_PENDING.to_string(),
-            },
-        );
+                claimed_until: 0,
+            });
         Ok(())
     }
 
     async fn claim_next(&mut self) -> Result<Option<OutboxEventRecord>, EventStoreError> {
-        let Some((_, entry)) = self
-            .records
-            .iter_mut()
-            .find(|(_, entry)| entry.status == OUTBOX_STATUS_PENDING)
-        else {
+        let now = OffsetDateTime::now_utc().unix_timestamp();
+        let Some((_, entry)) = self.records.iter_mut().find(|(_, entry)| {
+            entry.status == OUTBOX_STATUS_PENDING
+                || (entry.status == OUTBOX_STATUS_IN_FLIGHT && entry.claimed_until <= now)
+        }) else {
             return Ok(None);
         };
+        entry.record.attempts = entry.record.attempts.checked_add(1).ok_or_else(|| {
+            EventStoreError::InvalidRecord("attempt counter exhausted".to_string())
+        })?;
         entry.status = OUTBOX_STATUS_IN_FLIGHT.to_string();
-        entry.record.attempts = entry.record.attempts.saturating_add(1);
+        entry.claimed_until = now + OUTBOX_CLAIM_SECONDS;
         Ok(Some(entry.record.clone()))
     }
 
-    async fn mark_published(&mut self, id: &str) -> Result<(), EventStoreError> {
-        if let Some(entry) = self.records.get_mut(id) {
+    async fn mark_published(
+        &mut self,
+        record: &OutboxEventRecord,
+    ) -> Result<bool, EventStoreError> {
+        if let Some(entry) = self.records.get_mut(&record.id).filter(|entry| {
+            entry.status == OUTBOX_STATUS_IN_FLIGHT && entry.record.attempts == record.attempts
+        }) {
             entry.status = OUTBOX_STATUS_PUBLISHED.to_string();
+            return Ok(true);
         }
-        Ok(())
+        Ok(false)
     }
 
-    async fn mark_failed(&mut self, id: &str, error: &str) -> Result<(), EventStoreError> {
-        if let Some(entry) = self.records.get_mut(id) {
+    async fn mark_failed(
+        &mut self,
+        record: &OutboxEventRecord,
+        error: &str,
+    ) -> Result<bool, EventStoreError> {
+        if let Some(entry) = self.records.get_mut(&record.id).filter(|entry| {
+            entry.status == OUTBOX_STATUS_IN_FLIGHT && entry.record.attempts == record.attempts
+        }) {
             entry.status = OUTBOX_STATUS_PENDING.to_string();
             entry.record.last_error = Some(error.to_string());
+            return Ok(true);
         }
-        Ok(())
+        Ok(false)
     }
 }
 
@@ -390,6 +418,7 @@ impl<'a> SqliteOutboxStore<'a> {
                 event_time TEXT NOT NULL,\
                 status TEXT NOT NULL,\
                 attempts INTEGER NOT NULL DEFAULT 0,\
+                claimed_until BIGINT NOT NULL DEFAULT 0,\
                 last_error TEXT\
             );",
         )?;
@@ -425,12 +454,15 @@ impl OutboxStore for SqliteOutboxStore<'_> {
         let row = self
             .connection
             .query_row(
-                "SELECT id, subject, payload, headers, event_id, event_time, attempts, last_error \
-                 FROM trellis_outbox_events WHERE status = ?1 ORDER BY rowid LIMIT 1",
-                params![OUTBOX_STATUS_PENDING],
+                "UPDATE trellis_outbox_events SET status = ?1, attempts = attempts + 1, \
+                 claimed_until = unixepoch() + ?2 WHERE id = (\
+                 SELECT id FROM trellis_outbox_events WHERE status = ?3 OR \
+                 (status = ?1 AND claimed_until <= unixepoch()) ORDER BY rowid LIMIT 1) \
+                 RETURNING id, subject, payload, headers, event_id, event_time, attempts, last_error",
+                params![OUTBOX_STATUS_IN_FLIGHT, OUTBOX_CLAIM_SECONDS, OUTBOX_STATUS_PENDING],
                 |row| {
                     let id: String = row.get(0)?;
-                    let attempts: u32 = row.get::<_, i64>(6)?.try_into().unwrap_or(u32::MAX);
+                    let attempts: u32 = row.get(6)?;
                     let header_json: String = row.get(3)?;
                     let headers =
                         serde_json::from_str(&header_json).map_err(sqlite_header_decode_error)?;
@@ -449,31 +481,28 @@ impl OutboxStore for SqliteOutboxStore<'_> {
                 },
             )
             .optional()?;
-        let Some(mut record) = row else {
-            return Ok(None);
-        };
-        record.attempts = record.attempts.saturating_add(1);
-        self.connection.execute(
-            "UPDATE trellis_outbox_events SET status = ?1, attempts = ?2 WHERE id = ?3",
-            params![OUTBOX_STATUS_IN_FLIGHT, record.attempts, record.id],
-        )?;
-        Ok(Some(record))
+        Ok(row)
     }
 
-    async fn mark_published(&mut self, id: &str) -> Result<(), EventStoreError> {
-        self.connection.execute(
-            "UPDATE trellis_outbox_events SET status = ?1 WHERE id = ?2",
-            params![OUTBOX_STATUS_PUBLISHED, id],
-        )?;
-        Ok(())
+    async fn mark_published(
+        &mut self,
+        record: &OutboxEventRecord,
+    ) -> Result<bool, EventStoreError> {
+        Ok(self.connection.execute(
+            "UPDATE trellis_outbox_events SET status = ?1 WHERE id = ?2 AND status = ?3 AND attempts = ?4",
+            params![OUTBOX_STATUS_PUBLISHED, record.id, OUTBOX_STATUS_IN_FLIGHT, record.attempts],
+        )? == 1)
     }
 
-    async fn mark_failed(&mut self, id: &str, error: &str) -> Result<(), EventStoreError> {
-        self.connection.execute(
-            "UPDATE trellis_outbox_events SET status = ?1, last_error = ?2 WHERE id = ?3",
-            params![OUTBOX_STATUS_PENDING, error, id],
-        )?;
-        Ok(())
+    async fn mark_failed(
+        &mut self,
+        record: &OutboxEventRecord,
+        error: &str,
+    ) -> Result<bool, EventStoreError> {
+        Ok(self.connection.execute(
+            "UPDATE trellis_outbox_events SET status = ?1, last_error = ?2 WHERE id = ?3 AND status = ?4 AND attempts = ?5",
+            params![OUTBOX_STATUS_PENDING, error, record.id, OUTBOX_STATUS_IN_FLIGHT, record.attempts],
+        )? == 1)
     }
 }
 
@@ -545,6 +574,7 @@ impl<'a> PostgresOutboxStore<'a> {
                 event_time TEXT NOT NULL,\
                 status TEXT NOT NULL,\
                 attempts INTEGER NOT NULL DEFAULT 0,\
+                claimed_until BIGINT NOT NULL DEFAULT 0,\
                 last_error TEXT\
             );",
         )?;
@@ -578,21 +608,24 @@ impl OutboxStore for PostgresOutboxStore<'_> {
 
     async fn claim_next(&mut self) -> Result<Option<OutboxEventRecord>, EventStoreError> {
         let row = self.client.query_opt(
-            "SELECT id, subject, payload, headers, event_id, event_time, attempts, last_error \
-             FROM trellis_outbox_events WHERE status = $1 ORDER BY id LIMIT 1",
-            &[&OUTBOX_STATUS_PENDING],
+            "UPDATE trellis_outbox_events SET status = $1, attempts = attempts + 1, \
+             claimed_until = EXTRACT(EPOCH FROM clock_timestamp())::bigint + $2 WHERE id = (\
+             SELECT id FROM trellis_outbox_events WHERE status = $3 OR \
+             (status = $1 AND claimed_until <= EXTRACT(EPOCH FROM clock_timestamp())::bigint) \
+             ORDER BY id LIMIT 1 FOR UPDATE SKIP LOCKED) \
+             RETURNING id, subject, payload, headers, event_id, event_time, attempts, last_error",
+            &[
+                &OUTBOX_STATUS_IN_FLIGHT,
+                &OUTBOX_CLAIM_SECONDS,
+                &OUTBOX_STATUS_PENDING,
+            ],
         )?;
         let Some(row) = row else {
             return Ok(None);
         };
         let id: String = row.get(0);
         let attempts = u32::try_from(row.get::<_, i32>(6))
-            .unwrap_or(u32::MAX)
-            .saturating_add(1);
-        self.client.execute(
-            "UPDATE trellis_outbox_events SET status = $1, attempts = $2 WHERE id = $3",
-            &[&OUTBOX_STATUS_IN_FLIGHT, &(attempts as i32), &id],
-        )?;
+            .map_err(|error| EventStoreError::InvalidRecord(error.to_string()))?;
         let header_json: String = row.get(3);
         let headers = serde_json::from_str(&header_json)?;
         Ok(Some(OutboxEventRecord {
@@ -609,20 +642,25 @@ impl OutboxStore for PostgresOutboxStore<'_> {
         }))
     }
 
-    async fn mark_published(&mut self, id: &str) -> Result<(), EventStoreError> {
-        self.client.execute(
-            "UPDATE trellis_outbox_events SET status = $1 WHERE id = $2",
-            &[&OUTBOX_STATUS_PUBLISHED, &id],
-        )?;
-        Ok(())
+    async fn mark_published(
+        &mut self,
+        record: &OutboxEventRecord,
+    ) -> Result<bool, EventStoreError> {
+        Ok(self.client.execute(
+            "UPDATE trellis_outbox_events SET status = $1 WHERE id = $2 AND status = $3 AND attempts = $4",
+            &[&OUTBOX_STATUS_PUBLISHED, &record.id, &OUTBOX_STATUS_IN_FLIGHT, &(record.attempts as i32)],
+        )? == 1)
     }
 
-    async fn mark_failed(&mut self, id: &str, error: &str) -> Result<(), EventStoreError> {
-        self.client.execute(
-            "UPDATE trellis_outbox_events SET status = $1, last_error = $2 WHERE id = $3",
-            &[&OUTBOX_STATUS_PENDING, &error, &id],
-        )?;
-        Ok(())
+    async fn mark_failed(
+        &mut self,
+        record: &OutboxEventRecord,
+        error: &str,
+    ) -> Result<bool, EventStoreError> {
+        Ok(self.client.execute(
+            "UPDATE trellis_outbox_events SET status = $1, last_error = $2 WHERE id = $3 AND status = $4 AND attempts = $5",
+            &[&OUTBOX_STATUS_PENDING, &error, &record.id, &OUTBOX_STATUS_IN_FLIGHT, &(record.attempts as i32)],
+        )? == 1)
     }
 }
 
@@ -675,6 +713,57 @@ mod tests {
     use super::*;
     use serde::Deserialize;
     use serde_json::Value;
+
+    #[tokio::test]
+    async fn sqlite_outbox_claims_recover_and_fence_concurrent_workers() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("outbox.db");
+        let first = Connection::open(&path).unwrap();
+        SqliteOutboxStore::create_schema(&first).unwrap();
+        let second = Connection::open(&path).unwrap();
+        SqliteOutboxStore::new(&first)
+            .enqueue(
+                "event",
+                &PreparedTrellisEvent::new("events.v1.Created", Bytes::from_static(&[1, 2, 3])),
+            )
+            .await
+            .unwrap();
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(2));
+        let [left, right] = [first, second].map(|connection| {
+            let barrier = barrier.clone();
+            tokio::task::spawn_blocking(move || {
+                let mut store = SqliteOutboxStore::new(&connection);
+                barrier.wait();
+                tokio::runtime::Handle::current()
+                    .block_on(store.claim_next())
+                    .unwrap()
+            })
+        });
+        let claims = left
+            .await
+            .unwrap()
+            .into_iter()
+            .chain(right.await.unwrap())
+            .collect::<Vec<_>>();
+        assert_eq!(claims.len(), 1);
+        // Reopen persistent storage after abandoning the only acquired claim.
+        let connection = Connection::open(&path).unwrap();
+        let mut recovered = SqliteOutboxStore::new(&connection);
+        assert!(recovered.claim_next().await.unwrap().is_none());
+        recovered
+            .connection
+            .execute("UPDATE trellis_outbox_events SET claimed_until = 0", [])
+            .unwrap();
+        let current = recovered.claim_next().await.unwrap().unwrap();
+        assert!(!recovered.mark_published(&claims[0]).await.unwrap());
+        assert!(!recovered
+            .mark_failed(&claims[0], "stale worker")
+            .await
+            .unwrap());
+        assert!(recovered.claim_next().await.unwrap().is_none());
+        assert!(recovered.mark_published(&current).await.unwrap());
+        assert!(recovered.claim_next().await.unwrap().is_none());
+    }
 
     #[derive(Debug, Deserialize, Serialize)]
     struct TestEvent {
@@ -865,7 +954,7 @@ mod tests {
         assert_eq!(retried.last_error.as_deref(), Some("temporary"));
         assert_eq!(retried.event, prepared);
         store
-            .mark_published("sqlite-outbox")
+            .mark_published(&retried)
             .await
             .expect("mark published succeeds");
         assert!(store
