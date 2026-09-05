@@ -1,18 +1,79 @@
 # Set up the project
 
-Create `trellis.toml`, a native IDL source, and a language manifest.
+This walkthrough uses Deno and TypeScript to expose one RPC, call it through
+Trellis, and shut down cleanly. It returns an order receipt without persisting
+orders. No database, ORM, or configuration library is involved. These are
+example choices, not requirements for a Trellis service.
+
+For Rust connection and provider APIs, see the
+[Rust library guide](/guides/libraries/rust). The native contract and generation
+workflow are shared by both languages.
+
+## Prerequisites
+
+- Install [the Trellis CLI](/guides/install-trellis-cli) matching your
+  libraries.
+- Install Deno 2 for this example.
+- For manual deployment, have a [running Trellis](/guides/starting-trellis) and
+  an administrator login. The [automated test](/guides/testing-trellis-services)
+  instead starts an isolated runtime using `trellis-server` and `trellis`.
+
+These pages track the repository source. If using an older released CLI, use the
+documentation from that release rather than combining authoring generations.
+
+## Create a standalone project
+
+```sh
+mkdir orders-service
+cd orders-service
+deno init
+deno add jsr:@qlever-llc/trellis jsr:@qlever-llc/trellis-test jsr:@std/assert
+```
+
+Select matching released versions when installing packages. Keep the import
+mappings that `deno add` writes; generated code uses those package specifiers.
+The test package is only needed to run the live test.
+
+Create `trellis.toml`:
 
 ```toml
-[project]
-name = "orders-service"
+format = 1
+
+[apis]
 ```
+
+The tutorial defines its provider and caller API in the same project, so no
+external API dependency is needed. `trellis.toml` is a Trellis compiler
+manifest, not the service's runtime configuration file.
+
+The resulting authored project will contain:
 
 ```text
 orders-service/
-├── contract.trellis
-├── trellis.toml
-├── deno.json
-└── src/
+  trellis.toml
+  trellis.lock
+  contract.trellis
+  deno.json
+  service.ts
+  main.ts
+  service_test.ts
 ```
 
-Run `trellis update` after changing dependencies and `trellis generate` after changing IDL. Generated files live under `.trellis/artifacts`, `.trellis/ts`, and `.trellis/rust`; do not edit them.
+## Run the checked-in example instead
+
+The same source is checked in under
+[`docs/examples/orders`](https://github.com/qlever-llc/trellis/tree/main/docs/examples/orders).
+When using a Trellis source checkout, its tasks resolve that checkout's
+libraries, so unreleased generated APIs can be tested without published
+packages:
+
+```sh
+# From the Trellis repository root, after building the CLI:
+deno task -c docs/examples/orders/deno.json generate
+deno task -c docs/examples/orders/deno.json check
+```
+
+The relative paths in that example's task file are repository-only plumbing. In
+a standalone service, use its installed packages and ordinary `trellis` and
+`deno` commands. Continue with
+[the contract](/guides/write-a-service/first-contract).

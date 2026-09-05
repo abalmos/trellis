@@ -397,6 +397,15 @@ jobs:
           TRELLIS_TEST_CLI_BIN: ${{ github.workspace }}/rust/target/debug/trellis
         run: deno test -A -c ts/integration/deno.json ts/integration
 
+      - name: Verify documented Orders service
+        env:
+          TRELLIS_TEST_SERVER_BIN: ${{ github.workspace }}/rust/target/debug/trellis-server
+          TRELLIS_TEST_CLI_BIN: ${{ github.workspace }}/rust/target/debug/trellis
+        run: |
+          deno task -c docs/examples/orders/deno.json generate
+          deno task -c docs/examples/orders/deno.json check
+          deno task -c docs/examples/orders/deno.json test
+
   ui-hosting:
     name: Built-in UI hosting
     needs: [install, wasm, portal]

@@ -1,535 +1,167 @@
-# Trellis AI guidance for services and browser apps
+# Trellis Consumer Guide
 
-Last verified against Trellis rs-idl (2026-09-05).
+For services, apps, agents, and devices consuming Trellis. Read the
+[TypeScript](llms-typescript.txt), [Rust](llms-rust.txt), or
+[Svelte](llms-svelte.txt) guide for language-specific usage. Use the guide from
+the same release or checkout as the CLI and libraries.
 
-This file is for AI coding agents working in a service or browser app repository
-that consumes Trellis. The canonical URL is:
+## What Trellis Owns
 
-https://raw.githubusercontent.com/qlever-llc/trellis/main/docs/static/llms-full.txt
+Trellis owns native contract compilation, generated APIs, authenticated
+communication, connection lifecycle, and declared runtime resources. It does not
+choose an application's configuration format, environment parser, database, ORM,
+dependency injection, folder structure, UI framework, or testing policy.
+Application-owned code can use other systems alongside Trellis.
 
-For a short bootstrap file, use:
+The requirements below apply when using Trellis surfaces. For example, a Trellis
+event's proof and subject are runtime-owned; that does not prohibit an
+application from using a separate message system for unrelated work.
 
-https://raw.githubusercontent.com/qlever-llc/trellis/main/docs/static/llms.txt
+## Project And Generation
 
-## Operating model
+A minimal `trellis.toml` is:
 
-Built-in clients are ordinary app participants: `trellis-app.cli@v1`,
-`trellis-app.console@v1`, and `trellis-app.portal@v1`. Privileged platform
-surfaces remain Trellis-owned `trellis.*` APIs, and authority stays bound to the
-exact participant artifact and needs digests.
+```toml
+format = 1
 
-- `trellis.toml` declares local canonical API paths or named OCI registries and
-  `trellis.lock` pins exact API ID, release, semantic digest, source, and OCI
-  manifest digest for remote releases. Use `trellis add`,
-  `trellis rm`, and `trellis update` to mutate them and lock-stable
-  `trellis install` to generate disposable `.trellis/` outputs. Install generates
-   dependency SDKs from locked canonical artifacts and never executes
-  provider source. `trellis publish` publishes immutable compatible canonical API
-   releases and reuses Docker credentials. Native sources are `contract.trellis`
-   or direct-child `contracts/*.trellis`. Run `trellis generate` after IDL edits.
-   TypeScript imports generated modules under `.trellis/ts/apis` and
-   `.trellis/ts/participants`; Rust path-depends on generated crates under
-   `.trellis/rust/apis` and `.trellis/rust/participants`.
-   Release remains package metadata; participant and runtime
-  evidence remain API ID plus semantic digest.
-- Trellis services are contract-driven participants. Contracts declare the public
-  surfaces a participant owns and the external surfaces it uses.
-- Participant identity, owned API identity, and API release version are
-  independent. Native IDL declares `participant`, `implements`, and API `version`
-  separately; TypeScript and Rust consume generated artifacts, not executable
-  contract builders. Release version does not affect
-  semantic API digests, participant evidence, permissions, or subjects.
-  Generated participant facades expose `PARTICIPANT_ID`; generated API SDKs expose
-  `API_ID`.
-- Durable `eventConsumers` are contract-declared deployment resources. A group
-  selects subscribed dependency events with `uses: { alias: ["Event"] }`, where
-  `alias` comes from top-level `uses`, and self-owned events with
-  `self: ["Event"]`. Dependency durable consumption remains authority-backed by
-  top-level `uses`; runtime listeners consume only reconciled Trellis bindings,
-  and runtime durable consumers are Trellis-provisioned only.
-- Rust services use generated handlers under `service.event_consumers()` for
-  durable event consumers. Select the declared group accessor and never provide
-  a JetStream durable name from application code. The returned handle supports
-  `abort()`; aborting a
-  durable listener removes that handler from the shared registry so re-registering
-  can resume delivery from the same Trellis-provisioned durable consumer.
-  Authorization-provider, registry, and storage availability failures are NAKed
-  for redelivery; malformed signatures and unauthorized events are TERMed.
-- Runtime authority comes from deployment authority and identity authority.
-- Trellis public API object schemas are open by default. For contract schemas
-  used by public RPC input/output, events, operation input/progress/output, feeds,
-  or exported generated schemas, omit `additionalProperties` in every authoring
-  language unless a security-sensitive proof boundary or another documented
-  requirement must reject unknown fields. Ignoring unknown fields is how older
-  clients and newer servers stay forward-compatible.
-- Deployment authority proposal/desired `needs` are grouped by `contracts`,
-  `surfaces`, `capabilities`, and `resources`. Materialized authority is a
-  runtime projection with `grants` grouped by `capabilities`, `surfaces`, and
-  `nats`; service and device permissions require current materialization for the
-  accepted desired authority version.
-- Deployment materialization is shared by the deployment and exact participant,
-  with dependency and resource selections isolated per authority. Session,
-  instance, device, and delegation eligibility is checked separately, so one
-  unhealthy instance does not rewrite authority for healthy peers.
-- Contextual participant resolution is deterministic and network-free. Every
-  implemented, required, or optional API reference resolves by exact API ID and
-  digest; selected surfaces and schema pointers are checked before deriving
-  separate required and optional grants, provided APIs, and private resources.
-  API aliases and human metadata do not affect the needs digest or authority
-  fingerprint.
-- Configured extraction pointers must resolve for every schema-valid payload:
-  object members are required at every step, array indexes are guaranteed by
-  `minItems`, and every `anyOf` or `oneOf` branch proves the path and type.
-  Required event consumers cannot depend on optional API uses.
-- Participants select exact actions, never named capabilities. A capability is
-  API-scoped (`trellis.jobs::read`, for example). Trellis-owned `trellis.*`
-  APIs/capabilities and explicitly reserved platform participants require exact
-  canonical artifacts. `trellis-app.cli@v1`, `trellis-app.console@v1`, and
-  `trellis-app.portal@v1` are ordinary app participants whose IDs grant nothing.
-  `admin` is a protected read-only policy bundle, not runtime authority.
-  `trellis.auth::admin` marks administrator identity; granular capabilities such
-  as `trellis.auth::capabilities.delegate` authorize machine actions.
-  Capability evidence is presented only when all of its permission atoms are in
-  the exact request; partial and uncovered permissions remain explicit, and
-  capability evidence includes its defining API digest and never expands runtime
-  grants.
-- Bootstrap presents canonical participant and referenced API artifacts through
-  the same semantic authority planner as admin APIs. Additive compatible changes
-  are updates, incompatible API changes are migrations, and equivalent retries
-  reuse one pending proposal; no client-authored transport permissions are used.
-  Deployment authority has one stable lineage per deployment + participant.
-  Proposal IDs are immutable review records: pending semantic duplicates reuse
-  one record, changed pending semantics supersede, and terminal history never
-  blocks later reproposal. Initial plans are visible before authority acceptance.
-- Service bootstrap polls pending deployment authority until it becomes ready by
-  default. Rust `ServiceConnectOptions::new(trellis_url, name, deployment_id,
-  provisioned_identity_seed_base64url, session_key_seed_base64url,
-  authorization_context_store)` accepts runtime and credential inputs only;
-  generated `GeneratedServiceContract` constants are the sole contract-evidence
-  source for service and device facades; callers provide only runtime and
-  credential inputs. Rust services use
-  `ServiceConnectOptions::with_authority_pending_timeout_ms(Some(...))` only when
-  startup needs an overall deadline; per-request timeouts remain bounded.
-- Generated Rust device connection options do not accept a session key seed.
-  Each activation/bootstrap attempt generates a fresh Ed25519 key, pending
-  attempts discard it, and only ready evidence carries the successful private
-  seed into the exact connection handoff.
-- The runtime `contracts` store is a digest-keyed manifest cache, not durable
-  authority. Invalid cached manifests may be pruned without changing
-  implementation offers, sessions, identity grants, deployment authority,
-  materialized authority, or resource bindings. If Trellis reports a missing
-  manifest for a digest, present the full manifest again.
-- Stale or obsolete persisted materialized-authority projections are repaired by
-  Trellis storage upgrade and reconciliation. Service repositories should update
-  contracts through the normal generation and authority-review flow, not patch
-  Trellis authority tables or projection records by hand.
-- NATS is the private transport boundary. Application code uses generated
-  participant facades rather than hand-built subjects, raw NATS connection
-  handles, `trellis_rs::client`, or `trellis_rs::generated`.
-- HTTP is limited to browser/account flows, initial service/device bootstrap,
-  proof-bound restart recovery, and portal assets. Connected
-  control uses generated RPC, operation, and event APIs over NATS; there is no
-  HTTP context registry, revocation, logout, or client-bootstrap API.
-- Built-in browser routes are `/login/*` with `/assets/login/*` and `/console/*`
-  with `/console/assets/*`; auth APIs remain under `/auth/*`.
-- Built-in web routes use embedded assets by default. `[http].web_source`,
-  `portal_source`, and `console_source` select directory or HTTP(S) proxy sources;
-  surface sources override the shared source.
-- Feed subscriptions are connection-scoped. Closing or aborting a client feed
-  propagates cancellation to the provider; watch feeds must not create a durable
-  consumer per viewer.
-- The runtime owns authentication, authorization, authority validation,
-  deployment approval, resource bindings, request context, and wire validation.
-- The Rust platform process is the sole auth runtime owner. TypeScript retains
-  portal source, generated clients, proof bindings, and live client/service tests;
-  it does not register auth handlers or access migrated auth state.
-- Auth and bootstrap exchange canonical `trellis.api.v1` and
-  `trellis.participant.v1` artifacts. Normal TypeScript contract authoring is
-  compiled to those protocol artifacts before runtime admission.
-- Physical resource bindings are evidence only. Exact participant-resource atoms
-  in `GrantSet` authorize access; missing optional evidence removes only the
-  corresponding optional atoms.
-- Browser approval accepts only a server-owned consent digest and selected
-  server-issued optional bundle ids. OIDC callbacks require a state-specific
-  `HttpOnly` cookie and revalidate portal/provider registration policy. The full
-  server-owned consent proposal is immutable across browser-flow transitions.
-- Trusted portal policy is exact to portal + participant. Writing or removing it
-  requires the `trellis.auth::admin` marker because it can mint portal-bound
-  administrator authority. Base capabilities and recursive capability-group
-  macros plus verified provider-role mappings select only proposal-defined
-  authority. Successful trusted local registration applies the same policy
-  immediately as local or OIDC login. Policy reconciliation uses
-  ordinary identity authority, context revocation, and exact connection kicks;
-  removing a portal, provider allowance, or policy atomically clears verified-role
-  provenance. Restoring configuration alone cannot resurrect authority; a fresh
-  verified login is required. Retained sessions can refresh and reconnect after
-  eligible authority returns.
-- Ordinary context expiry still permits delayed historical event verification;
-  explicit context revocation invalidates every RPC and event proof from that
-  context, including proofs created before revocation.
-- Bootstrap replays rerun current issuance and generate fresh credentials.
-  Public HTTP/RPC/operation/callout errors use stable redacted codes.
-- Bootstrap and browser bind return a deny-all JWT and signed authorization
-  context. Every NATS connect uses the standard nonce signature and a digest-only
-  context token; shared sentinel credentials and second Trellis handshake proofs
-  are retired.
-- `TrellisClient.connect(...)` solely owns browser restore, auth request, redirect
-  continuation, `userAuthBind`, coherent bundle persistence, WebSocket connect,
-  refresh, reconnect, and terminal cleanup. Start returns exactly
-  `{ flowId, loginUrl }`; approval has no caller idempotency key; bind replay is
-  server-owned by immutable `flowId`. Refresh returns and atomically replaces the
-  complete session, route JWT and expiry, typed transports, server clock, and
-  authorization context. One participant-scoped browser installation owns its
-  seed, session/runtime state, and trust floor; connected `logout()` revokes the
-  server session, retains trust, clears that exact session, and drains NATS.
-- The trust chain is a pinned authorization root, a root-signed current manifest
-  containing active issuer public keys, and an issuer-signed short-lived context.
-  Clients durably retain the
-  root key id/digest and minimum manifest generation/digest across session clears
-  and restarts. TypeScript and Svelte delegate cryptographic verification to the
-  authoritative Rust/WASM verifier. Manifest overlap uses direct public-key
-  entries in the exact accepted generation. All runtimes compute the same
-  digest-jittered refresh time. Bootstrap supplies the complete current trust
-  chain. Provider runtimes keep a
-  separate private cache over the internal NATS KV authorization registry for
-  presented caller contexts and revocation state; registry handles are never
-  service-author APIs. Verified contexts remain opaque Rust/WASM handles reused
-  across request and event proofs and discarded on manifest-epoch changes.
-  Providers watch manifest generation and revocations,
-  become ready after current manifest verification and revocation initial state,
-  and fail closed on actual connection/watch failure. Quiet watches are healthy.
-  Native file context-store paths are single-writer and private to one active
-  client process. Ordinary request and event proof v1 verification is local,
-  exact-permission/capability checked, revocation aware, and
-  performs no control-plane or registry I/O on cache hits.
-- The deny-all bootstrap JWT grants no authority and only selects the Auth
-  Callout route. Context refresh is restart recovery: it atomically renews the
-  route JWT with the verified context and returns route/session/NATS metadata plus
-  its exact expiry. Clients whose context or route JWT expired retain the
-  session/trust floor and send proof-bound `currentContextDigest: null` recovery
-  rather than restarting enrollment. Pending devices retry `/bootstrap/device`
-  with fresh proofs; there is no separate wait or connect-info endpoint. Rust
-  uses `DeviceActivationOptions`, `check_device_activation`, and
-  `wait_for_device_activation`, then hands ready evidence to pure
-  `connect_device`.
-- Bootstrap and refresh return server time in milliseconds. Clients estimate a
-  request-midpoint offset and use corrected time for validity, reconnect,
-  UI state, and scheduling. Same-digest refresh success still reschedules.
-  `maximumContextBytes` means canonical complete signed-context JSON UTF-8 bytes,
-  not base64url token length.
-- Authorization-relevant session, principal, credential, authority,
-  materialization, deployment, instance, device, and delegation mutations revoke
-  matching contexts transactionally. Liveness/profile noise and semantic
-  reconciliation no-ops do not.
-- Signed contexts distinguish the stable principal from participant evidence and
-  bind the exact participant/needs digests, source authority version, session
-  key, reply-inbox prefix, exact grant set, and platform capabilities.
-- Signed protocol integers and nested extension integers use the JSON safe-integer
-  range. Each context decision rechecks the caller-supplied minimum manifest
-  generation so stale verified handles cannot bypass rollback protection.
-- Use operations for caller-visible async workflows. Use jobs for service-private
-  background work. Both inherit transport permissions compiled from the
-  connected principal's current context; operation/job declarations and subject
-  strings never create or widen grants.
-- In Rust, low-level Jobs lifecycle constructors live only under
-  `trellis_rs::jobs::events` and accept `events::EventMeta` for the five shared
-  lifecycle fields. Current-attempt constructors take `tries` separately;
-  zero-attempt constructors do not. Constructors are not flat re-exports from
-  `trellis_rs::jobs`.
-- Operations and job queues may declare one optional `update` schema. Keep
-  `progress` for low-frequency durable telemetry/snapshots; updates are typed
-  live-only, at-most-once content with no persistence, replay, admin, or Event
-  Log surface. Operation watchers opt in, late subscribers may miss frames,
-  cumulative payloads are preferred, and terminal output/result is authoritative.
-- Active jobs emit updates and `JobRef` or queue-by-job-id subscriptions consume
-  them. Job update subscriptions filter stale attempts and duplicate or
-  out-of-order attempt-local sequences and must be cleaned up. SQL-outbox callers
-  subscribe using the preallocated `jobId` before dispatch when early frames
-  matter. Job update subjects are private Core NATS outside `JOBS`.
-- Jobs admin workbenches use `Jobs.Query` for server-side safe-field search,
-  sorting, grouping, and stats, `Jobs.Metrics` for grouped operational summaries
-  and time buckets, and `Jobs.Inspect` for one-job detail, timeline, attempts,
-  related jobs, errors, trigger, lineage, and current `waitingOn` edges. Jobs
-  remain `active` while waiting; active-job wait helpers should annotate long
-  external async work with safe metadata. `Jobs.List` and `Jobs.Get` are removed.
-  `Jobs.Watch` is an invalidation feed only; rerun query, metrics, or inspection
-  reads after `jobChanged`, `jobInspectChanged`, or
-  `queryInvalidated` frames.
-- Event Log admin workbenches are read-only observability surfaces. Use
-  `EventLog.Query`, `EventLog.Inspect`, `EventLog.Metrics`,
-  `EventLog.Consumers.Query`, and `EventLog.Watch`. Declare it as an optional
-  dependency unless the app cannot operate without historical event data.
-  Publisher deployment attribution comes from verified event session proof;
-  owner contract/event comes from subject/catalog matching. `EventLog.Query`
-  accepts `includeEventTypes` and `excludeEventTypes` arrays of owner
-  contract/event pairs and `integrityExceptionOnly` for events whose owner
-  resolution or proof verification failed. `EventLog.Metrics` returns exact
-  `summary.integrityExceptions`, resolved event-type counts, and typed time
-  buckets with volume, payload size, resolution, and verification counts.
-- Use job `keyConcurrency` for service-private work that must have at most one
-  active job per logical key across service instances. Configure worker count in
-  the service implementation, not the contract or resource binding. Keyed concurrency
-  defaults should fail clearly (`stalePolicy: "fail-stale"`,
-  `whenFull: "reject"`); coalescing and replacing queued jobs must be explicit
-  queue policy choices.
-- TypeScript job handlers request automatic redelivery by returning or throwing
-  `RetryJobError` from `@qlever-llc/trellis/jobs`; ordinary handler errors are
-  terminal job failures.
-- Rust active jobs report JetStream-derived attempt and redelivery metadata.
-  Retryable failures NAK before the final allowed delivery; the final delivery
-  remains unacknowledged so `AckWait` drives the durable MaxDeliver advisory.
-- Jobs admin mutation requests accept optional `reason`; reasons appear in
-  lifecycle admin metadata and inspection timelines. Active cancellation remains
-  cooperative through `Jobs.Cancel`; do not add hard stop or kill flows. The
-  SQLite jobs projection is disposable; the `JOBS` JetStream stream is the source
-  of truth.
-- Public expected failures should be modeled in the contract or as Result-style
-  values. Reserve thrown exceptions or panics for unexpected boundary failures.
-- Operations support declared typed errors via `errors` on the operation descriptor,
-  following the same rules as RPC errors.
-- TypeScript telemetry helpers live under `@qlever-llc/trellis/telemetry`. Use
-  `recordTrellisDuration(...)` for low-cardinality OpenTelemetry duration
-  histograms and `recordTrellisError(...)` for error counters. Metric attributes
-  must not include user IDs, session keys, flow IDs, request IDs, trace IDs,
-  contract IDs, NATS subjects, URLs, or other unbounded values.
+[apis]
+```
 
-## Contract workflow
+Author APIs and participants in `contract.trellis` or direct-child
+`contracts/*.trellis`. An API defines models and public RPC, event, feed, and
+operation surfaces. A participant identifies a service, app, agent, or device,
+the API it implements, its selected dependencies, and its runtime resources.
+Participant identity, API identity, API release version, and surface transport
+version are separate concepts.
 
-1. Define or update the service contract.
-2. Declare owned RPCs, events, feeds, operations, resources, state, files, and
-   jobs in the contract shape supported by the language package.
-   For events with subject `params`, route only string, number, or
-   integer-compatible payload fields. If the event payload is an `anyOf` or
-   `oneOf` union, every branch must expose each routed pointer.
-    Generated TypeScript SDK event aliases model event bodies; Trellis runtime
-    event metadata is exposed through prepared-event metadata and listener
-    context. Trellis signs event publishes at publish time and consumers validate
-    event proofs before invoking handlers; prepared events intentionally remain
-    free of deployment or contract metadata. In Deno-first TypeScript integration
-    tests, use generated event subscribers for live assertions instead of
-    raw NATS subscriptions or outbox-only checks when the test must observe a
-    published event through Trellis runtime authority.
-3. Declare cross-contract dependencies under `uses` with the smallest required
-   surface selection.
-4. Regenerate SDKs and contract artifacts with the repository's Trellis tooling.
-5. Review and update deployment authority through the normal Trellis CLI/runtime
-   flow for the service deployment.
-6. If runtime auth or bootstrap reports a missing digest, retry with the full
-   manifest generated from source so Trellis can repopulate its manifest cache.
-7. Compile and test the service against the generated APIs. Treat generated API
-   errors as contract drift, not as places to add stringly typed shortcuts.
+Dependency commands:
 
-Prefer source, generated SDKs, and generated API docs for exact signatures. Guides
-show patterns; generated packages define the current callable surface.
+- `trellis add` and `trellis rm` change dependency declarations.
+- `trellis update` resolves dependencies and updates `trellis.lock`.
+- `trellis install` reproduces locked dependencies and generated outputs.
+- `trellis generate` compiles local IDL and generates SDKs using installed
+  dependency artifacts. Use `--watch` for continuous generation.
 
-Device activation uses repeated fresh proof-bound `POST /bootstrap/device`
-requests. `Auth.DeviceUserAuthorities.Resolve` claims the durable expiring review
-for one user; administrative approval cannot complete missing required
-delegation, server-side operation wait is event-driven, and cancellation is
-unsupported.
+Dependencies can reference local projects or canonical APIs in OCI registries.
+Remote locks pin release and digests; credentials use the Docker credential
+configuration. Installation verifies artifacts rather than executing provider
+source. Generation is offline; install missing remote dependencies first.
 
-## Service repository setup
+Generated output lives under `.trellis/`: installed APIs in `apis/`, owned
+canonical artifacts in `artifacts/`, and language SDKs in `ts/` and `rust/`.
+Commit IDL, `trellis.toml`, and `trellis.lock`; regenerate disposable outputs.
+Compilation failure preserves the last successful generated outputs.
 
-Use this guidance for service and browser app repositories that consume Trellis.
+The generated names depend on declared action names and dependency aliases.
+Check the generated participant, rather than inventing a method from a generic
+example. TypeScript participants expose flat caller methods and generated
+`handle...`, `publish...`, and `on...` methods where the selection allows them.
+Rust participants expose typed methods through generated facades.
 
-Rules:
+## Connect And Authorize
 
-- generated SDKs, manifests, and package outputs belong under the service repo's
-  generated output locations; do not edit generated files by hand
-- author contracts in native IDL, not executable TypeScript or Rust. Generate
-  language consumers with `trellis generate`. Runtime-specific helpers,
-  browser auth, device activation, and telemetry stay on explicit subpaths.
-- TypeScript service repos should expose Trellis generation as
-  `trellis generate`
-- TypeScript browser app repos should expose Trellis generation through the local
-  workspace and keep generated SDK imports pointed at workspace output paths;
-  generated SDKs do not have a separate published package path. Svelte apps do
-  not need their own generated app SDK for the connected client type; use
-  `TrellisClientFor<typeof participant>` from the generated app participant.
-- Svelte browser app repos should read the Svelte AI guide before wiring
-  `createTrellisApp`, `TrellisProvider`, generated service SDK aliases for
-  contract `uses`, Vite aliases, or `svelte-check` path maps
-- Browser apps should let Trellis-owned auth redirects and callbacks flow through
-  the Trellis browser/Svelte helpers. Plain callbacks after expired login flows
-  should restart the current auth request; reserve user-visible callback errors
-  for explicit outcomes such as `authError=approval_denied`.
-- Browser apps should use Trellis browser helpers for initial auth redirects and
-  portal flows. Once connected, sign-out and other auth control use generated
-  Auth APIs over NATS; do not add HTTP logout, context, revocation, or
-  client-bootstrap calls. Trellis still owns provider return-target validation;
-  apps should not hard-code IdP logout endpoints or arbitrary return URLs.
-- Browser apps that already received Trellis user ids on authorized records can
-  declare `Auth.Users.Resolve` to render minimal display labels. It is not a
-  directory; do not request `Auth.Users.List` or denormalize user profile tables
-  just to show labels.
-- Rust native refresh atomically persists the complete server-issued session,
-  JWT, authorization context, clock metadata, inbox prefix, and typed native
-  transports. Restored clients use that binding rather than bootstrap routing,
-  while running clients retain their initial server list and require a new
-  connection when endpoints change.
-- Service repos author APIs and participants in `contract.trellis`, run
-  `trellis update` for dependency changes and `trellis generate` for IDL changes,
-  and connect only through their materialized generated participant facade.
-- Deno-first TypeScript service repos use `TrellisTestRuntime` from
-  `@qlever-llc/trellis-test` for tests that need a real Trellis runtime. Ordinary
-  Deno tests register generated participants, connect through public service and
-  client APIs, and own and stop one runtime per test. `trellis-test` runs NATS as a managed child process
-  from pinned, checksum-verified nats-server and nsc binaries (cached under
-  `TRELLIS_TEST_CACHE_DIR`, default `~/.cache/trellis-test`; first use downloads them, requiring network; every reuse revalidates the cached archive sha256 against the pin and byte-checks the cached binary against a fresh extraction, so corrupted or replaced cache entries are reinstalled, and `sh` must be on `PATH`); no container runtime is
-  required.
-- `trellis-server [OPTIONS] [MODE]` owns the runtime process; mode defaults to
-  `all`. `trellis-server check [OPTIONS] [MODE]` validates configuration,
-  trust, stores, streams, and NATS connectivity, then exits. Add
-  `--reset-admin` to rotate the one-time create/edit URL for
-  the permanent bootstrap recovery principal; completing it can change that
-  account's username and password, restores exact current CLI authority, and
-  revokes its existing sessions. Ordinary authority lifecycle applies to CLI
-  authority. Plain
-  startup uses configured external NATS and never spawns or downloads it.
-  `--local-nats` uses PATH, `--local-nats=PATH` uses an exact trusted binary,
-  `--nats-download` explicitly uses the verified pin, and `--dev` means user
-  paths plus PATH NATS and verbose output. User defaults follow XDG; `--system`
-  selects FHS config, data, state, cache, runtime, and log roots. Optional
-  `[paths].data/state/cache/runtime/logs` values override those roots; relative
-  values remain config-relative. Omitted SQLite paths use the effective data
-  root, while an explicit per-store path wins.
-- The runtime OCI image bakes the `trellis` CLI and the pinned,
-  checksum-verified nats-server at `/usr/local/bin/nats-server`; `nsc` is
-  test-harness-only and not in the image. The entrypoint stays
-  `trellis-server` for external-NATS deployments. For a managed single
-  container, mount the generated bundle read-only from its own named volume
-  and the writable state on a second volume
-  (`trellis-bundle:/etc/trellis:ro,Z`,
-  `trellis-state:/var/lib/trellis:rw,Z`), and run `trellis-server --system
-  --local-nats=/usr/local/bin/nats-server`.
-  Migration authority plans should be allowed only in tests that intentionally
-  cover migrations.
-- Deployment authority plans can be `superseded`; only `pending` plans targeting
-  the current desired authority version are actionable.
-- Deployment authority plans expose `breakingChanges` as structured per-target
-  compatibility failures for operator UI.
-- Trellis runtime behavior should be tested with live integration tests, not fake
-  NATS, fake Trellis runtimes, fake auth, fake generated clients, or hand-built
-  bootstrap/control-plane responders. If a live test needs a missing failure or
-  inspection surface, add the smallest named test helper instead of enriching a
-  fake.
-- Trellis State is a Rust Platform-owned API for schema-backed app/device value
-  and map stores. Its namespace is the stable principal plus contract lineage,
-  independent of session and artifact digest. Generated facades provide revision
-  CAS, TTL, bounded map listing, and author-declared migration results. Services
-  use KV resources; participants never access the internal `trellis_state` bucket.
-- Rust store handles stream borrowed Tokio readers and writers through
-  `write_from(...)` and `read_into(...)`; whole-buffer `write(...)` and `read(...)`
-  remain conveniences. Streaming writes enforce exact and contract-bound sizes
-  while reading.
-- Transfer operations stream bounded ordered frames; downloads are client-pulled
-  one frame at a time and do not open the store reader before the first
-  authenticated pull. Grant frame sizes are restricted to 1 byte through 1 MiB.
-  Signed headers distinguish binary data from JSON controls. Completion and
-  cancellation are authenticated and acknowledged, completion binds the exact
-  byte count and required SHA-256 digest, and download EOF follows verified store
-  EOF. Rust operation builders
-  accept `.transfer_from(reader, expected_size).start()` and receive grants can
-  write through `download_transfer_into(...)`.
-- the local `AGENTS.md` should record the contract source path, generated artifact
-  command, format command, typecheck/clippy command, test command, run command,
-  and migration command
-- TypeScript services should import generated SDK handler aliases (without a
-  dependency generic) for extracted handlers after `trellis generate`. Inline
-  `service.handle...` handlers can rely on registration-site inference.
+Service bootstrap takes a provisioned identity and the generated participant.
+Device bootstrap follows device activation. Browser apps use Trellis browser
+authentication helpers. These are different identity lifecycles, not
+interchangeable connection shortcuts.
 
-Service repositories run `trellis update` after dependency changes,
-`trellis install` to reproduce the lock, and `trellis generate` after IDL edits.
-Native IDL remains the input. Resolution
-must be deterministic from tracked source;
-undeclared time, randomness, network, environment, and external-file inputs are
-unsupported.
+Generated artifacts supply participant/API identity, digests, and requested
+authority. Bootstrap can wait for an administrator to approve deployment
+authority. Adding an action to IDL does not itself authorize a running client.
+Optional dependency actions remain unavailable without the corresponding
+authority. Capability names are API-scoped; transport subjects and physical
+resource bindings are not grants.
 
-## Language-specific guides
+The libraries own session proofs, context verification, refresh, and reconnect.
+Services and devices that survive restarts need durable authorization-context
+storage; browser clients use their participant-scoped IndexedDB installation.
+Explicit ephemeral storage is available for tests and ephemeral processes. Keep
+a file-backed installation private to one active process. Clearing a session
+retains the trust rollback floor.
 
-- TypeScript services:
-  https://raw.githubusercontent.com/qlever-llc/trellis/main/docs/static/llms-typescript.txt
-- Svelte browser apps:
-  https://raw.githubusercontent.com/qlever-llc/trellis/main/docs/static/llms-svelte.txt
-- Rust services:
-  https://raw.githubusercontent.com/qlever-llc/trellis/main/docs/static/llms-rust.txt
+Trellis HTTP endpoints serve bootstrap, browser/account flows, recovery, and
+browser assets. Connected Trellis control uses generated APIs over NATS. Use the
+browser client's `logout()` for normal sign-out so local installation and
+connection state are updated together.
 
-## Service workflow
+Request and event proofs are verified before application handlers run. Ordinary
+context expiry allows eligible historical events to be verified; explicit
+context revocation invalidates all proofs from that context. Applications do not
+implement their own verifier or inspect Trellis's internal authorization KV
+registry. See the auth design documentation for protocol details.
 
-1. Read local `AGENTS.md`, `README.md`, package/crate docs, and local task
-   definitions first.
-2. Identify the participant kind, language runtime, contract source path,
-   generated SDK package names, generation command, and test/typecheck commands.
-3. Make the smallest contract change that exposes the required surface.
-4. Regenerate project-local artifacts with `trellis generate`.
-5. Implement handlers with generated provider APIs. For TypeScript extracted
-   handlers, import generated SDK aliases such as
-    `OrdersCreateHandler` after running `trellis generate`.
-6. Use scoped handler `client` values for outbound calls and register long-lived
-   event listeners during startup.
-   Trellis does not provide application dependency injection. Handler arguments
-   contain only Trellis-owned runtime data. Application resources are supplied by
-   normal JavaScript closure or factory patterns.
-7. Add or update live integration tests at the service boundary. Use
-   `@qlever-llc/trellis-test` when the test must exercise Trellis bootstrap, auth
-   validation, deployment authority, generated clients, app/client auth, live
-   event capture, jobs, operations, KV, store, state, or durable event consumers.
-   Use ordinary assertions on generated RPC results, delivered events, and
-   terminal job/operation values. Deterministic transactions belong at the real
-   SQLite/adapter boundary. Do not fake Trellis behavior or add test registries.
-8. Run formatting, type checks, generation checks, and tests before reporting
-   completion.
+## Choose A Surface
 
-## Verification commands
+- RPC: a typed request and response, including declared business errors.
+- Event: a published fact. Durable consumption uses participant-declared event
+  consumer groups and can redeliver; handlers need an appropriate duplicate
+  handling strategy for their side effects.
+- Feed: connection-scoped live data. Closing or aborting the subscription
+  cancels provider work; it is not a durable event history.
+- Operation: caller-visible asynchronous work with progress, terminal output,
+  and optional cancellation, updates, or transfer.
+- Job: service-private queued execution with retries and lifecycle state.
 
-Use the format, typecheck, lint, test, run, and migration commands configured by
-the service repository. If contract artifacts or generated SDKs changed, run
-`trellis generate` and commit `trellis.lock`
-expected by that repo.
+Operations and jobs may expose typed live updates. Updates are at-most-once, not
+persisted or replayed, and late subscribers may miss them. Durable progress and
+terminal output are separate from updates. Cancel subscriptions when no longer
+needed; cancellation of underlying work is cooperative.
 
-## Common mistakes to avoid
+Declare expected RPC/operation errors in IDL to obtain typed generated error
+handling. Runtime validation and transport failures remain distinct from those
+business errors. Application-local error handling is an application decision.
 
-- Hand-building transport subjects, envelopes, headers, or JSON payloads instead
-  of using generated Trellis APIs.
-- Trying to access raw NATS connections from Trellis clients or services. Use
-  generated surfaces and Trellis-owned lifecycle/resource handles.
-- Adding compatibility shims before confirming that compatibility is required.
-- Treating jobs as caller-visible workflows. Use operations for caller-visible
-  async work.
-- Depending on Trellis keyed concurrency as the only durable correctness guard.
-  It prevents duplicate active work; service-owned checkpoint commits and
-  database side effects should still be idempotent.
-- Publishing an event before a local transaction commits when downstream systems
-  require the local state and event to be atomic. In TypeScript services, use
-   `service.createSqlOutbox(...)`, close over the outbox as a plain dependency,
-   and put all DB work plus transaction-scoped `event.*.*.enqueue(...)` and
-   `job.*.*.create/submit(...)` calls inside `outbox.transaction(...)`. Do not
-   generate local outbox
-  wrappers, manual `SqlOutboxRepository` handler wiring, direct
-  `createSqlOutbox({ drizzle })` sugar, or per-handler Drizzle adapters. Configure
-  the outbox with generic `executor` and `transaction` options; use
-  `@qlever-llc/trellis/service/drizzle` only for optional startup/adapter code.
-  Trellis owns helper-table migrations via `getSqlOutboxMigrations(...)`, and
-  services run those migrations with their normal migration tool.
-- Adding an inbox around every subscription. Prefer idempotent handlers; use an
-  inbox only for non-idempotent side effects.
-- Using NATS KV outbox/inbox helpers as if they were atomic with unrelated SQL or
-  external side effects.
-- Catching expected business failures as generic exceptions instead of modeling
-  declared errors or Result values.
-- Editing generated files by hand without updating the source contract.
-- Typing TypeScript extracted service handlers before running `trellis install` after a
-  contract change. Import generated SDK handler aliases (without a dependency
-  generic, e.g. `OrdersCreateHandler`) after generation. Source
-  `defineError(...)` instances are valid handler returns when their serialized
-  data matches the generated declared error.
-- Expanding `uses` broadly when a narrow surface selection is sufficient.
+## Resources And Application Data
 
-## Human reference links
+Connected services expose declared KV, blob stores, and jobs through resolved
+handles. Apps and devices can declare value/map State stores with schemas,
+revision checks, TTL, and migration versions. State follows principal and
+participant lineage across reconnects, rather than belonging to a socket.
 
-- Docs-site path for the AI guide page: `/guides/ai/developing-trellis-services`
-- Docs-site path for TypeScript libraries: `/guides/libraries/typescript`
-- Docs-site path for testing Trellis services: `/guides/testing-trellis-services`
-- Docs-site path for SvelteKit apps: `/guides/writing-sveltekit-apps`
-- Docs-site path for Rust libraries: `/guides/libraries/rust`
-- Docs-site path for the API reference: `/api`
+Bindings are runtime internals. Use generated resource handles instead of
+constructing Trellis storage subjects or opening internal buckets. This does not
+constrain the application's own database or external storage clients.
+
+Store and transfer APIs support streaming. Whole-buffer helpers collect the
+entire value in memory. Transfers authenticate cancellation and completion;
+successful completion verifies size and SHA-256. Frame sizes are bounded by the
+grant, up to 1 MiB.
+
+Direct event publication does not atomically commit an application database
+transaction. When that atomicity is needed, the SQL outbox integration can write
+event/job intents in the same transaction. Trellis provides helper-table
+migrations; the application owns its database, transaction adapter, and
+migration execution. NATS KV outbox/inbox helpers are not atomic with unrelated
+SQL transactions. See the language guides for the supported adapters.
+
+## Optional Platform APIs
+
+Declare these dependencies only when the application uses them:
+
+- `Auth.Users.Resolve` supplies minimal display labels for known Trellis user
+  IDs. It is not a general user directory or a restriction on application
+  profiles.
+- Jobs administration uses `Jobs.Query`, `Jobs.Metrics`, `Jobs.Inspect`, and
+  `Jobs.Watch`. Watch is an invalidation feed: reread the affected query.
+- Event Log offers read-only event history and consumer observability through
+  its Query, Inspect, Metrics, Consumers, and Watch surfaces.
+
+## Test And Troubleshoot
+
+Choose application testing tools independently. For a test that needs real
+Trellis transport, authority, or restart behavior, the Deno package
+`@qlever-llc/trellis-test` provides `TrellisTestRuntime`. It can also launch a
+Rust service process. There is no equivalent public Rust test-runtime helper.
+The helper runs real NATS child processes; first use downloads pinned binaries.
+Provide the `trellis-server` and `trellis` executables as described in
+`/guides/testing-trellis-services`.
+
+A missing generated method usually means the action was not selected or SDKs
+need regeneration. Pending service startup may require deployment authority
+approval. Authorization failures require inspecting that authority, not
+constructing a raw subject or granting access in application code.
+
+For runtime operation, see `/guides/starting-trellis`. For a complete service,
+see `/guides/write-a-service`. Use `/api` for public language APIs and generated
+source for project-specific names. Run the consumer repository's own checks
+after generation; Trellis-repository xtask commands are not consumer commands.

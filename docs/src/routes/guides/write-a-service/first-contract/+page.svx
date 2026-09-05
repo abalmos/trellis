@@ -1,45 +1,66 @@
 # Declare an API and participant
 
-`contract.trellis` is the source of truth for both the public API and the participant that implements it.
+Create `contract.trellis` in the project from
+[setup](/guides/write-a-service/setup):
 
 ```trellis
 api "acme.orders@v1" {
-  version "1.0.0";
-  display_name "Orders";
-  description "Order management API.";
-
-  model CreateOrderRequest {
-    customerId: string;
-  }
-
-  model CreateOrderResponse {
-    orderId: string;
-  }
-
-  rpc "Orders.Create" {
-    version "v1";
-    input CreateOrderRequest;
-    output CreateOrderResponse;
-  }
+    version "1.0.0";
+    display_name "Orders";
+    description "Minimal service walkthrough.";
+    model CreateOrderRequest { customerId: string; }
+    model CreateOrderResponse { orderId: string; customerId: string; }
+    rpc "Orders.Create" {
+        version "v1";
+        input CreateOrderRequest;
+        output CreateOrderResponse;
+    }
 }
 
-participant "acme.orders-service@v1" service {
-  implements "acme.orders@v1";
+participant "acme.orders-service" service {
+    implements "acme.orders@v1";
+}
+
+api "acme.orders-caller@v1" {
+    version "1.0.0";
+    display_name "Orders caller";
+    description "Caller for the service walkthrough.";
+}
+
+participant "acme.orders-caller" app {
+    implements "acme.orders-caller@v1";
+    use required orders "acme.orders@v1" {
+        call rpc "Orders.Create";
+    }
 }
 ```
 
-Run `trellis generate`. The canonical `trellis.api.v1` and `trellis.participant.v1` artifacts are emitted before language SDKs are replaced.
+The first API defines the request and response. The service participant
+implements it. The caller has its own identity and explicitly selects the one
+action it will call; it does not gain permission merely by importing its types.
+The empty caller-owned API is separate from the Orders API it consumes.
 
-The API declares the public vocabulary. The participant declares who implements
-it and which other APIs and resources it needs. Keep these identities distinct:
-more than one participant can implement an API, and an API release version is
-not a transport version.
+Generate the project:
 
-Add TypeScript output configuration to `trellis.toml` as shown in
-[setup](/guides/write-a-service/setup). Import the generated participant from
-`.trellis/ts/participants/acme-orders-service/mod.ts`. SDK types and descriptors
-come from `.trellis/ts/apis/`; do not duplicate models in service code.
+```sh
+trellis update
+trellis generate
+```
 
-Generation validates the entire project before replacing the last successful
-outputs. Fix errors in IDL and regenerate rather than editing generated files.
-Check in authored source and `trellis.lock`; keep `.trellis/` disposable.
+Because the project contains `deno.json`, generation emits TypeScript. A project
+with `Cargo.toml` receives Rust crates; one with both manifests receives both.
+There is no separate TypeScript contract execution or output stanza to
+configure.
+
+The provider participant is
+`.trellis/ts/participants/acme-orders-service/mod.ts`; the caller is
+`.trellis/ts/participants/acme-orders-caller/mod.ts`. API types and action
+descriptors are exported by `.trellis/ts/apis/acme-orders/mod.ts`.
+
+The API ID, participant ID, API release (`1.0.0`), and RPC transport version
+(`v1`) are distinct. See [native IDL design](/design/contracts/trellis-idl) for
+project and resolution semantics. This page is a minimal RPC example, not a
+complete grammar reference; the operations, jobs, State, and store guides cover
+their respective declarations.
+
+Next, [implement the service](/guides/write-a-service/service-entrypoint).

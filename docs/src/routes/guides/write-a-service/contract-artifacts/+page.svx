@@ -1,6 +1,6 @@
 # Generate SDKs and artifacts
 
-Run:
+From the project containing `trellis.toml`, run:
 
 ```sh
 trellis update
@@ -17,4 +17,14 @@ The project-local output is:
 └── ts/         # private generated TypeScript SDKs and participants
 ```
 
-`trellis generate` is offline. Local dependencies compile from source; registry dependencies use exact installed artifacts from `trellis.lock`. A failed compile leaves the previous successful outputs untouched.
+The language directories depend on the project manifests: `deno.json` or
+`deno.jsonc` selects TypeScript; `Cargo.toml` selects Rust. A mixed project can
+generate both. The tree above shows both possibilities.
+
+`trellis generate` is offline. Local dependencies compile from source; registry
+dependencies use exact installed artifacts from `trellis.lock`. A failed compile
+leaves the previous successful outputs untouched.
+
+In CI or a fresh checkout, `trellis install` reproduces locked dependency
+artifacts and generates the language outputs. Use `trellis update` when you
+intend to resolve dependency changes, not merely to rebuild an existing lock.

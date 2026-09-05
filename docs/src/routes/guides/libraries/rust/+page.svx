@@ -15,9 +15,9 @@ the generated crate source and the Rustdoc links on the [API Reference](/api).
 ## Generated crates
 
 Generation writes API SDKs under `.trellis/rust/apis/` and participant facades
-under `.trellis/rust/participants/`. Both are ordinary,
-materialized Cargo crates with relative local dependencies. They do not run a
-Trellis generator from `build.rs`.
+under `.trellis/rust/participants/`. Both are ordinary, materialized Cargo
+crates with relative local dependencies. They do not run a Trellis generator
+from `build.rs`.
 
 A participant facade normally exposes:
 
@@ -30,12 +30,15 @@ A participant facade normally exposes:
 - generated modules for owned APIs, dependency aliases, state, resources, jobs,
   and event-consumer groups when declared
 
-The facade embeds the participant contract id, digest, and canonical native API artifact.
-Callers do not supply those values.
+The facade embeds the participant contract id, digest, and canonical native API
+artifact. Callers do not supply those values.
 
 ## Connect a service
 
-Service facades expose authenticated service bootstrap only:
+Service facades expose authenticated service bootstrap only. This connection
+fragment assumes an existing generated participant and application
+`register_handlers` function; the environment variable names and `anyhow` return
+type are example choices, not Trellis requirements:
 
 ```rust
 use std::sync::Arc;
@@ -68,11 +71,11 @@ async fn main() -> anyhow::Result<()> {
 ```
 
 Bootstrap authenticates the service, presents the generated facade's embedded
-contract as the sole contract evidence, waits for
-deployment authority, resolves resource bindings, and owns the RPC/feed/worker
-lifecycle. Pending authority waits indefinitely by default. Use
-`with_authority_pending_timeout_ms(Some(...))` only when process startup needs an
-overall deadline; `with_timeout_ms(...)` bounds each request.
+contract as the sole contract evidence, waits for deployment authority, resolves
+resource bindings, and owns the RPC/feed/worker lifecycle. Pending authority
+waits indefinitely by default. Use
+`with_authority_pending_timeout_ms(Some(...))` only when process startup needs
+an overall deadline; `with_timeout_ms(...)` bounds each request.
 
 ## Connect an app or agent
 
@@ -82,13 +85,11 @@ Apps, CLIs, and agents use the generated user-session option type:
 use orders_console_participant::{connect, ConnectOptions};
 
 let connected = connect(ConnectOptions::new(
-    "nats://127.0.0.1:4222",
-    bootstrap_jwt,
-    session_id,
-    inbox_prefix,
+    "http://127.0.0.1:8080",
     session_key_seed,
-    participant_digest,
+    authorization_installation,
     30_000,
+    authorization_context_store,
 ))
 .await?;
 
@@ -100,6 +101,12 @@ let response = connected
     })
     .await?;
 ```
+
+Here `authorization_installation` is the initial `AuthorizationInstallation`
+from the user-session flow and `authorization_context_store` is an
+`Arc<dyn AuthorizationContextStore>` that retains its trust state. This is a
+connection fragment, not a replacement for browser/user authentication. Do not
+manually assemble NATS credentials or participant digests.
 
 The dependency alias (`orders`) comes from the participant contract. If an alias
 or remote surface is absent from that contract, its accessor or method does not
@@ -113,7 +120,7 @@ Activated devices use the generated device option type:
 use std::sync::Arc;
 
 use inspection_device_participant::{connect, ConnectOptions};
-use trellis_rs::client::MemoryAuthorizationContextStore;
+use trellis_rs::client::FileAuthorizationContextStore;
 
 let connected = connect(ConnectOptions::new(
     "http://127.0.0.1:8080",
@@ -122,7 +129,7 @@ let connected = connect(ConnectOptions::new(
     public_identity_key,
     identity_seed_base64url,
     10_000,
-    Arc::new(MemoryAuthorizationContextStore::default()),
+    Arc::new(FileAuthorizationContextStore::new("./device-context.json")),
 ))
 .await?;
 ```
@@ -248,7 +255,8 @@ let documents = service.store().documents().await?;
 
 These handles already contain resolved bootstrap bindings. Services do not call
 binding discovery or import a raw NATS client. Generated state stores similarly
-expose typed reads and compare-and-set operations through the participant facade.
+expose typed reads and compare-and-set operations through the participant
+facade.
 
 ## Submit and handle jobs
 
@@ -290,8 +298,8 @@ recovery, and public immutable trust. Connected control uses generated RPC,
 operation, and event APIs over NATS; service code must not call HTTP context,
 revocation, logout, or client-bootstrap endpoints. Provider authorization
 evidence is read from the internal NATS KV registry with readiness and bounded
-watch staleness; registry handles and subjects are not service APIs, and ordinary
-request/event cache hits perform no external I/O.
+watch staleness; registry handles and subjects are not service APIs, and
+ordinary request/event cache hits perform no external I/O.
 
 Trust rotation is generation-exact: accepted manifest generation and digest,
 issuer key, and certificate digest stay bound together; historical evidence is

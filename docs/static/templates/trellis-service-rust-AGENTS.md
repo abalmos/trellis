@@ -1,85 +1,40 @@
-# AGENTS.md
+# Trellis Rust Integration
 
-This repository contains Rust apps or services built on Trellis. Use Trellis
-runtime facades, generated SDKs, descriptors, and contracts; do not work around
-Trellis by hand-building NATS subjects, envelopes, or JSON wire payloads.
+This template covers Trellis integration, not the application's configuration,
+database, DI, code organization, logging, or general development policy.
 
-## Start Here
+## Documentation
 
-- Use the Trellis source that matches this checkout's Trellis dependency.
-- If Trellis dependencies are linked locally, first resolve the Trellis git
-  root: `git -C <linked-package-path> rev-parse --show-toplevel`.
-- Read Trellis AI guides relative to that git root, not relative to the linked
-  package directory: `<trellis-repo-root>/docs/static/llms.txt`,
-  `<trellis-repo-root>/docs/static/llms-full.txt`, and
-  `<trellis-repo-root>/docs/static/llms-rust.txt`.
-- If no local Trellis path is linked, read the same files from the matching
-  Trellis release branch, where `<version-tag>` is the Trellis version tag,
-  including the leading `v`, such as `v0.11.0-rc.3`:
-  `https://raw.githubusercontent.com/Qlever-LLC/trellis/refs/heads/release/<version-tag>/docs/static/llms.txt`,
-  `https://raw.githubusercontent.com/Qlever-LLC/trellis/refs/heads/release/<version-tag>/docs/static/llms-full.txt`,
-  and
-  `https://raw.githubusercontent.com/Qlever-LLC/trellis/refs/heads/release/<version-tag>/docs/static/llms-rust.txt`.
-- Read the short guide for every Trellis task. Read the full and Rust guides
-  before changing contracts, service handlers, events, operations, generated
-  SDKs, or outbox/inbox code.
-- Do not read the whole Trellis `design/` tree by default. Start with the
-  smallest relevant doc set.
+Use `docs/static/llms.txt` and `llms-rust.txt` from the Trellis revision
+matching this project's CLI and libraries. With a local checkout, read those
+files there. Use the docs site's `/api` for current Rustdoc and generated crate
+source for the exact participant-specific methods.
 
-## Repo-Wide Rules
+## Trellis Boundary
 
-- Keep changes minimal and aligned with the existing architecture.
-- This repo owns domain services, apps, and domain models. Trellis runtime,
-  protocol, SDK generation, and Trellis-owned contracts belong in Trellis.
-- If a Trellis API cannot support the task, stop and explain the gap instead of
-  bypassing Trellis with custom transport code.
-- Before adding compatibility shims, aliases, dual-read/write paths, or
-  migrations, ask whether compatibility is wanted unless deployed data requires
-  it.
-- Services communicate through Trellis contract surfaces. Use RPCs, operations,
-  events, feeds, state, files, jobs, KV, and store handles instead of direct
-  cross-service storage or raw transport access.
-- Do not edit generated files by hand. Change the source contract or schema and
-  run the documented generation command.
-- Use operations for caller-visible async workflows. Use jobs for
-  service-private background execution.
-- Prefer idempotent event handlers. Add inbox tracking only for non-idempotent
-  side effects.
-- Use prepared events plus an outbox when event enqueue must commit atomically
-  with service-local durable state.
-- Expected public or RPC failures should use declared errors or ordinary Rust
-  `Result` values rather than panics.
+- Author native IDL and run `trellis generate` before compiling generated
+  participant consumers. Use `trellis update` for dependency changes and
+  `trellis install` to reproduce `trellis.lock`.
+- Commit authored files and lock; regenerate disposable `.trellis/` crates.
+- Connect through the generated participant facade. API SDK crates supply
+  vocabulary, not independent runtime connections.
+- Register owned providers through `handle()` before running the service
+  lifecycle. Use generated callers, publishers, event-consumer groups, and
+  resource handles for Trellis communication.
+- Trellis owns its proofs, transport subjects, credentials, and binding
+  resolution. Private Trellis workspace crates are not application dependencies.
+- Long-lived clients need durable authorization-context storage. Use the
+  supported store types documented by the matching runtime release.
+- Direct publication is not atomic with application SQL state; use the outbox
+  transaction integration when that atomicity is needed.
+- `TrellisTestRuntime` is a Deno test helper that can launch Rust processes, not
+  an exported Rust runtime harness.
 
-## Rust Rules
+## Project Details
 
-- Author APIs and participants in native IDL and run `trellis generate` before
-  compiling. Generated crates under `.trellis/rust` are disposable outputs.
-- Connect only through the generated participant facade. Owner SDK crates are
-  typed vocabulary and do not own runtime connections.
-- Use generated participant alias methods for outbound RPCs, operations, feeds,
-  events, state, resources, and jobs.
-- Register owned providers through generated `service.handle()` facades.
-- Use public `trellis` runtime facades and generated participant crates. Do not
-  depend on unpublished low-level runtime crates from application code.
-- Do not import `trellis_rs::client` or `trellis_rs::generated`, extract or
-  construct raw transport handles, or build subjects in application code.
-- Direct descriptor publish is the default. Use prepared events only when event
-  publication must be coupled to local durable state.
-- Use SQL outbox/inbox stores when they must participate in a SQL transaction.
-  Use NATS KV stores only when no unrelated database transaction must be atomic
-  with the event record.
-- Runtime durable event consumers are Trellis-provisioned from contract
-  `eventConsumers`; do not create or name arbitrary JetStream durable consumers
-  in service code.
-- Keep public APIs documented with Rustdoc when they are meant for other crates.
-
-## Fill In For This Repository
-
+- Trellis version or local checkout:
 - Contract source:
-- Generated SDK/artifact command:
-- Format command:
-- Clippy command:
-- Test command:
+- Generation command:
+- Check/test commands:
 - Local run command:
-- Database migration command:
-- Local Trellis checkout or release branch:
+- Application-specific policies:

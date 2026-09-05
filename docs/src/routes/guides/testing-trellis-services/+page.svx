@@ -1,39 +1,109 @@
 # Test Trellis services
 
-Generate test projects from native IDL before running checks. Use generated participants for service and client connections; test infrastructure must not create handwritten API descriptors.
+This example starts real NATS and Trellis, provisions the Orders service,
+connects a generated caller, and checks the RPC response. It uses the contract
+and handler from [the service walkthrough](/guides/write-a-service). No
+pre-seeded database or fake transport responder is needed.
 
-Use the smallest real boundary that proves the invariant. Transport, authorization, restart, NATS, and cross-language behavior require live integration. Deterministic repository and state-machine invariants use real component or adapter integration.
+Trellis does not prescribe a service's other tests or testing framework. A real
+runtime is useful here because the behavior being checked crosses bootstrap,
+authority, transport, and generated caller/provider boundaries.
 
-Run `trellis generate` for the service and a small caller participant that selects
-the RPC under test. A Deno test owns its runtime and stops it even on failure:
+## Prerequisites
+
+Install `@qlever-llc/trellis-test` and `@std/assert` in the example's Deno
+project. Have matching `trellis-server` and `trellis` executables available. The
+helper downloads pinned NATS binaries on first use, which requires network
+access. Run `trellis generate` before the test.
+
+## A complete test
+
+Create `service_test.ts`:
 
 ```ts
+import { assertEquals, assertMatch } from "@std/assert";
 import { TrellisTestRuntime } from "@qlever-llc/trellis-test";
-import { assertEquals } from "@std/assert";
-import { participant } from "./.trellis/ts/participants/orders-caller/mod.ts";
+import { TrellisService } from "@qlever-llc/trellis/service/deno";
+import { participant as provider } from "./.trellis/ts/participants/acme-orders-service/mod.ts";
+import { participant as caller } from "./.trellis/ts/participants/acme-orders-caller/mod.ts";
+import { createOrder } from "./service.ts";
 
-Deno.test("retrieves an order", async () => {
+Deno.test("orders caller invokes the real service", async () => {
   const runtime = await TrellisTestRuntime.start({
-    trellis: { command: { cmd: "trellis-server", args: ["--config", "{config}", "all"] } },
+    trellis: {
+      command: {
+        cmd: Deno.env.get("TRELLIS_TEST_SERVER_BIN") ?? "trellis-server",
+        args: ["--config", "{config}", "all"],
+      },
+    },
   });
   try {
-    // Start your real service here using runtime.registerService(...) and its
-    // returned identity. Stop that service in its own finally block.
-    const client = await runtime.connectClient({ name: "caller", contract: participant });
-    const order = await client.ordersGet({ orderId: "seeded-order" }).orThrow();
-    assertEquals(order.orderId, "seeded-order");
+    const identity = await runtime.registerService({
+      name: "orders",
+      contract: provider,
+    });
+    const service = await TrellisService.connect({
+      participant: provider,
+      name: "orders-service",
+      trellisUrl: runtime.trellisUrl,
+      identity,
+      authorizationContextEphemeral: true,
+      telemetry: false,
+    }).orThrow();
+    let exit: Promise<unknown> | undefined;
+    try {
+      await service.handleOrdersCreate(createOrder);
+      exit = service.wait().catch((error: unknown) => error);
+      const client = await runtime.connectClient({
+        name: "caller",
+        contract: caller,
+      });
+      const order = await client.ordersCreate({ customerId: "customer-1" })
+        .orThrow();
+      assertEquals(order.customerId, "customer-1");
+      assertMatch(order.orderId, /^[0-9a-f-]{36}$/);
+    } finally {
+      await service.stop();
+      const failure = await exit;
+      if (failure) throw failure;
+    }
   } finally {
     await runtime.stop();
   }
 });
 ```
 
-This example assumes the service has seeded that order. Use its real repository
-or public creation API, not a fake transport responder. The test helper manages
-real pinned NATS binaries; first use needs network access. Ensure `trellis-server`
-and `trellis` are available or configure the process command explicitly.
+The explicit ephemeral authorization store belongs to this isolated test; the
+production entrypoint uses a durable file store. The test helper tracks and
+closes connected clients. The service is stopped before the runtime, even if an
+assertion fails; lifecycle failures are rethrown rather than hidden.
 
-Run ordinary `deno test -A` or `cargo test`. Do not add a scenario registry,
-shared-runner scheduler, or handwritten participant metadata. For SQL outbox
-atomicity, use a real SQLite transaction and prove that both business data and
-outbox rows commit together and both roll back on failure.
+## Run it
+
+In a standalone service project with executables on `PATH`:
+
+```sh
+trellis generate
+deno test -A service_test.ts
+```
+
+`TRELLIS_TEST_CLI_BIN` selects the CLI used by the test helper. This test's
+`TRELLIS_TEST_SERVER_BIN` variable selects its explicit server command. For the
+checked-in example, from the Trellis repository root after building both
+binaries:
+
+```sh
+deno task -c docs/examples/orders/deno.json generate
+TRELLIS_TEST_CLI_BIN="$PWD/rust/target/debug/trellis" \
+TRELLIS_TEST_SERVER_BIN="$PWD/rust/target/debug/trellis-server" \
+deno task -c docs/examples/orders/deno.json test
+```
+
+Expected result: one passing test, with all child processes stopped. A Rust
+provider can be launched as a child of the same Deno runtime;
+`TrellisTestRuntime` is not an exported Rust helper.
+
+For deterministic application transaction behavior, test the actual adapter and
+database instead of starting a network solely to check SQL. In particular,
+outbox atomicity means both domain writes and event intents commit together, and
+both disappear on rollback. That property is distinct from this RPC test.

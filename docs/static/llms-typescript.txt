@@ -1,590 +1,152 @@
-# Trellis AI guidance for TypeScript services
+# Trellis For TypeScript Consumers
 
-Last verified against Trellis rs-idl (2026-09-05).
+Use with [the consumer guide](llms-full.txt) from the same Trellis revision.
+Trellis requirements concern its own APIs and lifecycle. Configuration parsing,
+validation of non-Trellis inputs, databases, DI, code layout, and local testing
+tools are application choices. Neither Zod nor an ORM is required.
 
-Use this file for AI coding agents working in a TypeScript service repository
-that consumes Trellis. The language-neutral guide is:
+## Generate And Connect
 
-https://raw.githubusercontent.com/qlever-llc/trellis/main/docs/static/llms-full.txt
+Author native IDL, run `trellis update` after dependency changes, and run
+`trellis generate` after IDL changes. Import participants from
+`.trellis/ts/participants/<participant>/mod.ts` and generated vocabulary from
+`.trellis/ts/apis/<api>/mod.ts`. Commit the authored files and lock, not
+generated outputs. There is no TypeScript contract-authoring execution step.
 
-For Svelte browser apps, use:
+Services import `TrellisService` from `@qlever-llc/trellis/service/deno` or
+`@qlever-llc/trellis/service/node`. Connect with the generated participant,
+provisioned identity, Trellis URL, and durable authorization-context store.
+`FileAuthorizationContextStore` lives on `@qlever-llc/trellis/auth/file`; it is
+not part of the browser-safe root. The complete setup and identity example is in
+`/guides/write-a-service/service-entrypoint`.
 
-https://raw.githubusercontent.com/qlever-llc/trellis/main/docs/static/llms-svelte.txt
-
-## Service repository setup
-
-Built-in clients are ordinary app participants: `trellis-app.cli@v1`,
-`trellis-app.console@v1`, and `trellis-app.portal@v1`. Privileged platform
-surfaces remain Trellis-owned `trellis.*` APIs, and authority stays bound to the
-exact participant artifact and needs digests.
-
-- Manage local or OCI canonical API dependencies with `trellis add`, `trellis rm`,
-  `trellis update`, and lock-stable `trellis install`. Commit `trellis.toml` and
-  `trellis.lock`, ignore `.trellis/`, and import generated APIs and participants
-  from `.trellis/ts/apis` and `.trellis/ts/participants`. Install verifies exact API ID, release, and
-  semantic digest, and remote OCI digest and never executes provider source.
-
-Recommended TypeScript service shape:
-
-```text
-services/<name>/
-|-- deno.json or package.json
-|-- contract.trellis         # Native API and participant source
-|-- rpc/*.ts                 # RPC handlers
-|-- events/*.ts              # Event listeners and publishers
-|-- operations/*.ts          # Operation providers
-|-- db/ and migrations/      # Service-local storage and migrations
-|-- config.ts                # Zod environment/config parsing
-`-- main.ts                  # Bootstrap, registration, shutdown
-```
-
-Rules:
-
-- author APIs and participants in `contract.trellis`, or direct-child
-  `contracts/*.trellis` files; do not execute TypeScript to discover contracts
-- run `trellis generate` after IDL changes, or `trellis generate --watch` while
-  editing, and import the generated `participant` runtime object
-- pass generated participants to `TrellisService.connect(...)`,
-  `TrellisClient.connect(...)`, device helpers, and test runtime registration
-- Browser apps use `TrellisClient.connect(...)` as the sole auth lifecycle owner.
-  Do not start or bind flows, persist auth state, or classify auth messages in UI
-  wrappers. Browser bundles require `nats.transports.websocket`; service and Deno
-  device runtimes require `nats.transports.native`. Refresh installs the complete
-  returned session, JWT, transport, clock, and authorization-context bundle.
-  Browser state is one participant-scoped IndexedDB installation containing one
-  seed, session/runtime state, and retained trust floor; do not persist a second
-  key or session record.
-- Device activation wait repeats `/bootstrap/device` with a fresh proof over the
-  same target session identity and uses
-  `expiresAt - serverNow` as a monotonic duration. A changed review id is an
-  explicit expired/replaced review, not a review to follow silently. Resolve
-  cancellation is unsupported.
-- `deno.json` should expose locked API installation through `trellis install`
-- IDL resolution is deterministic from tracked source and exact installed
-  canonical API artifacts.
-- Service-boundary integration tests start `TrellisTestRuntime` from
-  `@qlever-llc/trellis-test`, register generated service participants, connect
-  services through `TrellisService.connect(...)`, and connect generated callers
-  through `runtime.connectClient(...)`. Use ordinary `deno test` discovery and
-  let each test own and stop its runtime. `trellis-test` runs NATS as a managed child process from pinned,
-  checksum-verified nats-server and nsc binaries (cached under
-  `TRELLIS_TEST_CACHE_DIR`, default `~/.cache/trellis-test`; first use downloads them, requiring network; every reuse revalidates the cached archive sha256 against the pin and byte-checks the cached binary against a fresh extraction, so corrupted or replaced cache entries are reinstalled, and `sh` must be on `PATH`); no container runtime is
-  required.
-- `trellis-server [OPTIONS] [MODE]` owns the runtime process; mode defaults to
-  `all`. `trellis-server check [OPTIONS] [MODE]` validates configuration,
-  trust, stores, streams, and NATS connectivity, then exits. Add
-  `--reset-admin` to rotate the one-time create/edit URL for
-  the permanent bootstrap recovery principal; completing it can change that
-  account's username and password, restores exact current CLI authority, and
-  revokes its existing sessions. Ordinary authority lifecycle applies to CLI
-  authority. Plain
-  startup uses configured external NATS and never spawns or downloads it.
-  `--local-nats` uses PATH, `--local-nats=PATH` uses an exact trusted binary,
-  `--nats-download` explicitly uses the verified pin, and `--dev` means user
-  paths plus PATH NATS and verbose output. User defaults follow XDG; `--system`
-  selects FHS config, state, cache, runtime, and log roots.
-- The runtime OCI image bakes the `trellis` CLI and the pinned,
-  checksum-verified nats-server at `/usr/local/bin/nats-server`; `nsc` is
-  test-harness-only and not in the image. The entrypoint stays
-  `trellis-server` for external-NATS deployments. For a managed single
-  container, mount the generated bundle read-only from its own named volume
-  and the writable state on a second volume
-  (`trellis-bundle:/etc/trellis:ro,Z`, `trellis-state:/var/lib/trellis:rw,Z`),
-  with the bundle's SQLite store paths rewritten to the state volume, and run
-  `trellis-server --system --local-nats=/usr/local/bin/nats-server`.
-- commit `trellis.toml` and `trellis.lock`, then run `trellis install` to
-  materialize locked APIs and consumer-local SDKs
-- generated SDKs, manifests, and package outputs belong under the service repo's
-  generated output locations; do not edit generated files by hand
-- public native-IDL models lower to additive wire schemas. Keep proof/security
-  strictness at the documented signed boundary, not arbitrary public DTOs
-- after changing IDL, run `trellis generate` before typing extracted
-  handlers so generated SDK aliases match the current surfaces
-- App and device contracts may declare schema-backed value or map State stores and
-  use their generated `client.state.<store>` facades. State supports revisions,
-  per-entry TTL, and author-declared migration versions; services use
-  `service.kv`, and callers never access the internal `trellis_state` bucket.
-- Native IDL compiles to canonical `trellis.api.v1` and
-  `trellis.participant.v1` artifacts before bootstrap. Do not send legacy contract
-  manifests directly to the Rust auth runtime.
-- HTTP is limited to browser/account flows, initial service/device bootstrap,
-  proof-bound restart recovery, and portal assets. Connected control,
-  including auth control, uses generated APIs over NATS; do not add HTTP
-  context, revocation, logout, or client-bootstrap calls.
-- Built-in browser routes are `/login/*` with `/assets/login/*` and `/console/*`
-  with `/console/assets/*`; auth APIs remain under `/auth/*`.
-- `TrellisService.connect(...)`, `TrellisClient.connect(...)`, and device helpers
-  own session bootstrap and reconnect. They use an immutable provisioned identity
-  or browser session key, a session-bound deny-all JWT, the standard NATS nonce
-  signature, and a digest-only context token. Ready bootstrap includes a pinned trust root and
-  signed short-lived context. TypeScript delegates cryptographic verification to
-  the Rust/WASM verifier. Production service/device clients must provide a
-  durable authorization-context store; browser clients use origin-scoped
-  IndexedDB, while memory is explicit for tests and ephemeral processes. Stores
-  atomically retain the root key id/digest, minimum manifest generation/digest,
-  and current context across restarts. A newer `manifest.current` is persisted
-  before stale context is cleared and the existing refresh task is woken.
-  Clearing context retains trust. Clients
-  accept issuer overlap only through direct public-key entries in the exact
-  accepted manifest generation. Clients compute deterministic refresh time and atomically use the
-  current digest on reconnect. Bootstrap/refresh server time is converted to a
-  request-midpoint clock offset. Context refresh is restart recovery and returns
-  route/session/NATS metadata with the renewed route credential and context.
-  After context or route-JWT expiry, clients retain session/trust evidence and
-  use proof-bound `currentContextDigest: null` recovery; same-digest success
-  still reschedules. Pending devices retry `/bootstrap/device`.
-  Rust/WASM is authoritative for TypeScript security-object verification.
-  Provider authorization state uses
-  the internal NATS KV registry with readiness, manifest/revocation watches, and
-  reconnect reconstruction; registry handles are not service-author APIs and
-  ordinary cache hits perform no external I/O. Each verified context remains an
-  opaque Rust/WASM handle reused for request and event proofs, then is discarded
-  on manifest-epoch change. Quiet watches remain healthy.
-  Native Deno/Node services can use `FileAuthorizationContextStore` from the
-  explicit `@qlever-llc/trellis/auth/file` subpath; it is intentionally absent
-  from the browser-safe auth graph. Each file path is single-writer and must be
-  private to one active service/client process.
-  Service/device bootstrap presents canonical participant and referenced API
-  artifacts inside the signed request. Service repositories do not load shared
-  NATS credentials or authorization registry KV directly.
-- Every RPC request and published event carries a context-bound v2 proof. The
-  receiving provider verifies requests locally from its in-memory authorization
-  cache, and runtime event consumers verify events locally against retained
-  historical evidence. There is no central Auth validation RPC on either hot
-  path; do not add one or perform provider-side session database lookups solely
-  for authorization.
-- Ordinary context expiry still permits delayed historical event verification;
-  explicit context revocation invalidates every RPC and event proof from that
-  context, including proofs created before revocation.
-- The deny-all bootstrap JWT grants no authority. Context refresh is restart
-  recovery: it renews the route credential and installs its exact expiry
-  atomically with the verified context. It only routes Auth Callout and remains
-  bounded by current session, authority, delegation, context, and the configured
-  JWT lifetime cap.
-- `maximumContextBytes` is the canonical complete signed-context JSON UTF-8 byte
-  limit, not the base64url token length.
-- Trellis caches manifests by digest at runtime. If auth/bootstrap reports a
-  missing digest after the cache is pruned, regenerate from source and present the
-  full source boundary so the client can recompile its protocol artifacts; do not
-  patch deployment authority or implementation offers by hand.
-- Deployment authority proposal/desired `needs` are grouped by `contracts`,
-  `surfaces`, `capabilities`, and `resources`. Materialized authority is a
-  projection with runtime `grants` grouped by `capabilities`, `surfaces`, and
-  `nats`; service permissions require current materialization for the accepted
-  desired authority version. Stale or obsolete persisted projections are repaired
-  by Trellis storage upgrade and reconciliation.
-- Capability keys are API-scoped (`trellis.jobs::read`, for example).
-  Trellis-owned `trellis.*` APIs/capabilities and explicitly reserved platform
-  participants require exact canonical artifacts. `trellis-app.cli@v1`,
-  `trellis-app.console@v1`, and `trellis-app.portal@v1` are ordinary app
-  participants whose IDs grant nothing. `admin` is a protected policy bundle,
-  not runtime authority. Gate administrator UI by the exact effective
-  `trellis.auth::admin` marker, never the group name; granular capabilities such
-  as `trellis.auth::capabilities.delegate` authorize machine actions.
-- Deployment materialization is shared by the deployment and exact participant.
-  Session and instance eligibility is checked separately, so one unhealthy
-  instance does not rewrite authority for healthy peers.
-- Additive compatible participant changes produce update proposals; incompatible
-  API changes produce migration proposals. Equivalent retries reuse one semantic
-  proposal, and changed proposals supersede older pending proposals. Each
-  deployment + participant has one stable authority lineage; terminal plan
-  history never blocks later reproposal.
-- Deployment authority plans can be `superseded`; only `pending` plans targeting
-  the current desired authority version are actionable.
-- Deployment authority plans expose `breakingChanges` as structured per-target
-  compatibility failures for operator UI.
-- Portal helpers submit only the current server-owned consent digest, selected
-  optional bundle ids, decision, and idempotency key. Do not send grants,
-  capabilities, resource atoms, or expiry. OIDC callbacks are browser-cookie and
-  portal-policy bound. The server-owned consent proposal is immutable across flow
-  state transitions.
-- Trusted portal policy is exact to portal + participant, requires the
-  `trellis.auth::admin` marker to write or remove, and may select only
-  proposal-defined capabilities through base policy or verified provider-role
-  mappings. Successful trusted local registration applies that policy immediately
-  like local or OIDC login. On policy changes, Trellis revokes superseded contexts;
-  removing a portal, provider allowance, or policy also clears verified-role
-  provenance. Restoring configuration alone cannot replay cached roles: a new
-  verified login is required. Retained sessions can refresh and reconnect after
-  eligible authority returns.
-- Treat bindings as physical evidence, never authority. Bootstrap replay
-  revalidates current state and returns a newly generated credential.
-- TypeScript telemetry helpers are exported from `@qlever-llc/trellis/telemetry`.
-  Use `recordTrellisDuration(...)` for low-cardinality OpenTelemetry duration
-  histograms and `recordTrellisError(...)` for error counters. Metric attributes
-  must not include user IDs, session keys, flow IDs, request IDs, trace IDs,
-  contract IDs, NATS subjects, URLs, or other unbounded values.
-
-## Use surface-first APIs
-
-Use generated facades on the connected client:
-
-```ts
-const order = await client.rpc.orders.get({ orderId: "ord_123" }).orThrow();
-
-await client.event.orders.shipped.publish({
-  orderId: "ord_123",
-  customerId: "cust_456",
-  shippedAt: new Date().toISOString(),
-}).orThrow();
-
-const feed = await client.feed.orders.live({ customerId: "cust_456" }).orThrow();
-
-const op = await client.operation.orders.process
-  .start({ orderId: "ord_123" })
-  .orThrow();
-```
-
-An operation or job queue may declare one optional `update` schema. Keep
-`progress` for low-frequency durable telemetry/snapshots. Updates are typed
-live-only, at-most-once content: they are not persisted, replayed, exposed in
-admin/Event Log, or delivered to late subscribers. Prefer cumulative payloads
-and treat terminal output/result as authoritative.
-Operation and job traffic remains bounded by transport permissions compiled from
-the connected service context; declarations and subject names never create
-grants.
-
-```ts
-// Inside an operation handler:
-await op.emitUpdate({ completed: 3, total: 10 }).orThrow();
-
-const ref = await client.operation.orders.process
-  .input({ orderId: "ord_123" })
-  .onUpdate((event) => console.log(event.update))
-  .start()
-  .orThrow();
-const events = await ref.watch({ updates: true }).orThrow();
-
-// Inside an active job handler:
-await job.emitUpdate({ completed: 3, total: 10 }).orThrow();
-const updates = await jobRef.updates().orThrow();
-const early = await service.jobs.syncOrder.updates(preallocatedJobId).orThrow();
-early.unsubscribe();
-```
-
-Job subscriptions filter stale attempts and duplicate or out-of-order
-attempt-local sequences and clean up when iteration ends or `unsubscribe()` is
-called. SQL-outbox callers should subscribe by the returned preallocated
-`jobId` before dispatch when early frames matter. Job update subjects are
-private Core NATS outside `JOBS`; application code must not build them.
-
-Close or abort feed subscriptions when the caller no longer needs them. Trellis
-propagates cancellation to the provider's `signal`; feed handlers must stop
-connection-scoped work and release resources when that signal aborts.
-
-If a generated facade is missing, check the contract generation path or the
-current API reference.
-
-For cross-contract calls, declare a narrow `uses` selection and call the other
-contract SDK's `use(spec)` helper with only the blocks needed by this service.
-Avoid broad selections just to make generated client types appear.
-
-Connected TypeScript clients, devices, and services do not expose raw NATS
-handles. Use generated `rpc`, `event`, `feed`, `operation`, `state`, and
-`transfer` surfaces for communication, `service.kv` / `service.store` /
-`service.jobs` for service-owned resources, and `connection` for lifecycle status
-or shutdown.
-
-Store and transfer bodies accept `ReadableStream<Uint8Array>` and async iterables
-for bounded streaming. Use `bytes()` only when intentionally collecting the whole
-value in memory. Cancelling a receive stream sends an authenticated transfer
-cancel control and waits for its acknowledgement; a caller may already have
-consumed a valid prefix. Grants restrict frames to 1 byte through 1 MiB and
-completed transfers require independent size and SHA-256 verification.
-
-For browser app sign-out, call `logout()` on the connected client. It owns the
-generated Auth operation, exact installation transition, and connection drain. Do not
-add an HTTP logout, context, revocation, or client-bootstrap call, and do not
-hard-code IdP endpoints or arbitrary return URLs.
-
-For user labels on records that already contain Trellis user ids, declare
-`Auth.Users.Resolve` and pass the explicit ids. Do not request `Auth.Users.List`
-or build app-local profile tables for basic display labels.
-
-For integration tests, use generated participant modules and
-`TrellisTestRuntime` instead of raw NATS subjects or hand-built bootstrap
-responses. Each ordinary Deno test owns its runtime, registers and connects
-participants through public APIs, and stops the runtime in `finally`.
-
-RPC handler `context.afterReply(task)` is only for effects that must run after a
-successful response is published and flushed, such as disconnecting the caller.
-Normal handler effects should complete before returning.
-Use `runtime.connectClient(...)`, generated event subscribers, and ordinary
-assertions on RPC results and terminal job/operation output. Bound asynchronous
-waits and stop services and runtimes in `finally` blocks.
-
-Do not use fake NATS, fake Trellis runtimes, fake auth, fake generated clients,
-or hand-built bootstrap/control-plane responders to prove Trellis behavior. If a
-live integration test needs a missing failure or inspection surface, add the
-smallest named test helper instead of enriching a fake.
-
-`trellis-server` uses XDG roots by default and FHS roots with `--system`.
-Optional `[paths].data/state/cache/runtime/logs` config values relocate those
-roots; omitted SQLite paths use the effective data root, while explicit
-absolute paths are exact and explicit relative paths remain config-relative.
-
-For service-private jobs that must be singleton per logical key, declare
-`keyConcurrency` on the job queue. Configure per-instance worker count on
-`service.jobs.<queue>.handle(handler, { concurrency })`; it is not part of the
-contract or resource binding. Keyed queues default to clear failure
-(`stalePolicy: "fail-stale"`, `whenFull: "reject"`); only use
-`whenFull: "coalesce"` or `"replace-oldest"` when the service explicitly wants
-scheduler-style compression or supersession. `create(...)` means “create a new
-job or return a typed failure”; use the additive `submit(...)` helper when code
-needs to inspect accepted/rejected/coalesced/replaced outcomes.
-
-Job handlers that need JetStream redelivery should return or throw
-`RetryJobError` from `@qlever-llc/trellis/jobs`. Ordinary thrown errors or
-`Result.err(...)` values remain terminal job failures.
-
-For Jobs admin clients, use `Jobs.Query` for server-side search/sort/group/stats,
-`Jobs.Metrics` for grouped operational summaries and time buckets, and
-`Jobs.Inspect` for one-job detail, timeline, attempts, related jobs, errors,
-trigger, lineage, and current `waitingOn` edges. Jobs remain `active` while
-waiting. Trellis records `JobRef.wait()` and `OperationRef.wait()` automatically
-inside active job handlers; wrap long external awaits with `job.waitFor(...)` and
-safe metadata. `Jobs.List` and `Jobs.Get` are removed. Use `Jobs.Watch` as an
-invalidation feed only; rerun the query, metrics, or inspection read after
-invalidation frames. Admin mutations accept optional `reason`, and active
-cancellation remains cooperative through `Jobs.Cancel`.
-
-For Event Log admin clients, use the read-only `EventLog.Query`,
-`EventLog.Inspect`, `EventLog.Metrics`, `EventLog.Consumers.Query`, and
-`EventLog.Watch` surfaces. Event Log is optional observability infrastructure;
-apps should declare it as an optional dependency unless they cannot operate
-without historical event data. Treat publisher deployment as verified session
-attribution, not subject inference; subject/catalog matching identifies owner
-contract/event. `EventLog.Query` accepts `includeEventTypes` and
-`excludeEventTypes` arrays of `{ ownerContractId, ownerEventName }` pairs and
-`integrityExceptionOnly` for events whose owner resolution or proof verification
-failed. `EventLog.Metrics` returns exact `summary.integrityExceptions`, resolved
-event-type counts, and typed `buckets` with volume, payload size, resolution, and
-verification counts.
-
-## Register handlers with `service.handle`
-
-Register providers through the generated `service.handle` tree. Handler code
-receives typed input and a scoped `client` for allowed outbound calls. Trellis
-does not provide application dependency injection; handler arguments contain only
-Trellis-owned runtime data. Application resources are supplied by normal
-JavaScript closure or factory patterns.
+For a participant declaring RPC `Orders.Create`, with matching generated input
+and output models:
 
 ```ts
 import { Result } from "@qlever-llc/trellis";
 
-await service.handle.rpc.orders.get(async ({ input, client }) => {
-  const row = await loadOrder(input.orderId);
-  if (!row) return Result.err(orderNotFound(input.orderId));
-
-  await client.event.orders.viewed.publish({
-    orderId: input.orderId,
-    viewedAt: new Date().toISOString(),
-  }).orThrow();
-
-  return Result.ok(row);
-});
+await service.handleOrdersCreate(({ input }) =>
+  Result.ok({ orderId: crypto.randomUUID(), customerId: input.customerId })
+);
 ```
 
-The scoped `client` represents the service's allowed outbound dependencies.
-Register event listeners during service startup with `service.event`.
+The UUID is just this example's application identifier. Trellis does not choose
+the service's identifier scheme. Register providers, then await
+`service.wait()`; stop the service with `service.stop()` during shutdown.
 
-When handlers need application-owned dependencies, capture them in a closure:
+A caller that selects this action calls:
 
 ```ts
-import { Result } from "@qlever-llc/trellis";
-import type { OrdersGetHandler } from "@my-org/orders-service-sdk";
-
-const deps = { db, logger };
-
-await service.handle.rpc.orders.get(async ({ input, client }) => {
-  const row = await deps.db.orders.get(input.orderId);
-  if (!row) return Result.err(orderNotFound(input.orderId));
-
-  deps.logger.info({ orderId: input.orderId }, "loaded order");
-  await client.event.orders.viewed.publish({ orderId: input.orderId }).orThrow();
-
-  return Result.ok(row);
-});
-
-export const getOrder: OrdersGetHandler = async ({ input, client }) => {
-  const row = await deps.db.orders.get(input.orderId);
-  if (!row) return Result.err(orderNotFound(input.orderId));
-
-  await client.event.orders.viewed.publish({ orderId: input.orderId }).orThrow();
-  return Result.ok(row);
-};
+const order = await client.ordersCreate({ customerId: "customer-1" }).orThrow();
 ```
 
-Inline handlers infer from the `service.handle...` registration site. Extracted
-RPC, event, feed, operation, and job handlers should use concrete handler aliases
-from the generated SDK, for example `OrdersGetHandler`.
+Generated flat names depend on action names and alias collisions. Inspect the
+generated participant when choosing names. The old `client.rpc.orders.create`
+and `service.handle.rpc.orders.create` trees are not the generated participant
+interface. Dependency selections belong in IDL `use` blocks, not SDK `use(spec)`
+calls.
 
-## Schemas and errors
+## Handler Types And Application Dependencies
 
-- Author contract wire schemas in native `.trellis` IDL. Use TypeBox only for
-  application-local runtime values that are not part of a Trellis contract.
-- Event subject `params` are JSON Pointers into the event payload. They must
-  resolve to string, number, or integer-compatible schema nodes. For `anyOf` or
-  `oneOf` event payload schemas, every branch must contain each routed pointer.
-- Use Zod for environment and local configuration parsing.
-- Use Trellis pagination helpers for list RPCs instead of inventing new page
-  envelopes. Offset pagination uses `PageRequestSchema`,
-  `PageResponseSchema(entry)`, `normalizePageQuery(...)`, and
-  `buildPageResponse(...)`. Stable ID/keyset pagination uses `CursorQuerySchema`,
-  `CursorPageSchema(item)`, `CursorPageResponseSchema<TItem>`,
-  `normalizeCursorQuery(...)`, and `buildCursorPage(...)`.
-- When every pre-handler schema validation failure is annotated, Trellis returns
-  `SchemaValidationError` instead of `ValidationError` — the handler does not
-  run in either case. `SchemaValidationError` carries an `issues[]` array with
-  stable field-level UX information (path, keyword, code, message, label, note,
-  severity, params). A single structural or unannotated failure downgrades the
-  entire response to `ValidationError`.
-- Return declared business errors through `Result` values. Use `.orThrow()` only
-  at process boundaries where throwing is intentional.
-- Extracted handler aliases accept source `defineError(...)` instances when their
-  serialized data matches the generated declared error data. Client-side SDKs
-  still reconstruct declared errors as generated SDK classes.
+Inline handlers infer their types at registration. Extracted handlers can use
+`RpcHandler<typeof participant, "Orders.Create">` from
+`@qlever-llc/trellis/service`. `OperationHandler`, `FeedHandler`, and
+`JobHandler` provide corresponding typed boundaries. Regenerate after an IDL
+change.
 
-## Operation Typed Errors
-- Operations support declared expected errors: `errors: [ref.error(...)]`
-- Declared operation errors narrow `op.fail(error)` to the declared error union plus Trellis runtime errors
-- Generated SDK types include `{Base}OperationHandlerError` aliases
-- Manifest: operation descriptors carry `errors: [{ type: "..." }]`
+Handlers receive Trellis-owned arguments such as `input`, `context`, and the
+scoped outbound `client`. Trellis does not inject application dependencies. A
+closure is one way to supply a database or domain function; an application can
+use its own DI system to construct that closure.
 
-## Prepared events and outbox/inbox
+Declare wire models and expected errors in IDL. The generator owns the runtime
+schemas and generated error types. Handlers can return declared errors through
+`Result.err(...)`; callers can distinguish them from runtime/transport failures.
+`.orThrow()` converts a failed result to an exception where that matches the
+application's control flow. Trellis's optional pagination utilities do not
+require all application list APIs to use one envelope.
 
-Trellis signs event publishes at publish time and consumers validate event proofs
-before invoking handlers. Prepared events intentionally store subject, payload,
-event id, and event time without deployment or contract metadata; runtime publish
-adds proof headers from the current session.
+## Events And Feeds
 
-Direct publish is the default when no local transaction must be coupled to the
-event:
+For a declared event `Orders.Changed`, generated service methods include
+`publishOrdersChanged(...)` and, when selected, `onOrdersChanged(...)`:
 
 ```ts
-await client.event.orders.shipped.publish({
-  orderId: input.orderId,
-  customerId: input.customerId,
-  shippedAt: new Date().toISOString(),
+await service.onOrdersChanged(({ event }) => {
+  console.log(event);
+  return Result.ok(undefined);
 }).orThrow();
 ```
 
-Generated SDK event types are event bodies. Trellis event metadata is assigned by
-the runtime and is available as `PreparedTrellisEvent.header` after `prepare(...)`
-and as `context.id` / `context.time` in event listeners.
+The `event` is the typed payload; `context` carries runtime metadata. Durable
+service consumers come from declared event consumer groups. The runtime owns
+their durable names and proof verification. A normal publish happens
+immediately; it is not a database commit fence.
 
-For live event tests, register the generated subscriber before publishing through
-the generated event facade. Assert the received body and metadata instead of
-subscribing to raw NATS subjects or relying only on outbox rows.
+Feed providers receive an abort signal. Stop connection-scoped work when it
+aborts, and close or abort a caller subscription when no longer needed.
 
-Use `service.createSqlOutbox(...)` when a service-local SQL transaction and event
-enqueue must commit or roll back together. Configure it once during startup with
-a generic SQL `executor` for dispatcher work and a `transaction` runner that
-provides the service transaction object plus a transaction-scoped Trellis
-`SqlExecutor`. The outbox object is a plain dependency that handlers close over.
+## Operations And Jobs
+
+For operation `Reports.Generate`:
 
 ```ts
-import {
-  type SqlExecutor,
-  type TrellisServiceSqlOutboxOptions,
-} from "@qlever-llc/trellis/service";
-import { Result } from "@qlever-llc/trellis";
-
-const sqlOutbox: TrellisServiceSqlOutboxOptions<AppTransaction> = {
-  dialect: "postgres",
-  executor: poolExecutor,
-  transaction: async (work) =>
-    pool.transaction(async (tx) =>
-      work({ tx, executor: createTransactionExecutor(tx) })
-    ),
-};
-
-function createTransactionExecutor(tx: AppTransaction): SqlExecutor {
-  return {
-    query: (statement, params) => tx.query(statement, params),
-    execute: async (statement, params) => {
-      await tx.execute(statement, params);
-    },
-  };
-}
-
-const outbox = service.createSqlOutbox(sqlOutbox);
-const deps = { ordersRepo, auditRepo, outbox };
-
-await service.handle.rpc.orders.ship(async ({ input }) => {
-  await deps.outbox.transaction(async ({ tx, event, job }) => {
-    await deps.ordersRepo.markShipped(tx, input.orderId);
-    await deps.auditRepo.insert(tx, { entityId: input.orderId });
-
-    await event.orders.shipped.enqueue({
-      orderId: input.orderId,
-      customerId: input.customerId,
-      shippedAt: new Date().toISOString(),
-    }).orThrow();
-    await event.audit.recorded.enqueue({
-      entityId: input.orderId,
-      action: "order.shipped",
-    }).orThrow();
-
-    await job.syncCustomer.create({
-      customerId: input.customerId,
-    }).orThrow();
-  }).orThrow();
-
-  return Result.ok({ accepted: true });
-});
+const operation = await client.reportsGenerate(input).start().orThrow();
+const terminal = await operation.wait().orThrow();
+if (terminal.state === "completed") console.log(terminal.output);
 ```
 
-Rules for agents:
+The provider registers with `service.handleReportsGenerate(...)` and uses its
+`op` argument to start, report progress, complete, or fail the operation.
+Transfer-capable invocations return a transfer-aware result; consult its
+generated type rather than assuming the ordinary operation result shape.
 
-- close over the outbox object as a plain dependency when handlers need
-  transactional enqueue; handlers do not receive `outbox` as an injected argument
-- wrap all service DB writes, event enqueues, and job submission intents that
-  must be atomic in `outbox.transaction(...)`
-- use transaction-scoped `event.*.*.enqueue(...)` and `job.*.*.create/submit(...)`
-  only inside that callback; normal event facades expose `prepare`, `publish`,
-  and `listen`, not `enqueue`
-- multiple DB writes, event enqueues, and job submissions in one transaction are supported
-- do not generate ad hoc local outbox wrappers, manual `SqlOutboxRepository` /
-  `OutboxDispatcher` handler wiring, or per-handler Drizzle transaction wrappers
+Private queues are available as `service.jobs.<queue>`. Register handlers with
+`handle(...)`, create work with `create(...)`, and observe the returned job
+reference. TypeScript retryable failures use `RetryJobError` from
+`@qlever-llc/trellis/jobs`; ordinary errors are terminal. Worker concurrency is
+an implementation option, while `keyConcurrency` is a declared queue policy.
+Live updates are separate from durable progress and terminal results.
 
-Trellis owns SQL helper-table migration artifacts. Services choose table names
-and run the artifacts through their normal database migration tool:
+## Resources And Transactional Events
+
+Use `service.kv`, `service.store`, and `service.jobs` for declared resources.
+App/device state uses `client.state.<name>`. These are Trellis-managed handles,
+not an application database abstraction.
+
+When SQL writes and event/job intents need one atomic commit, configure
+`service.createSqlOutbox(...)` with `dialect`, an `executor`, and a
+`transaction` runner. The transaction runner supplies the application's `tx` and
+a transaction-scoped `SqlExecutor`:
 
 ```ts
-import { getSqlOutboxMigrations } from "@qlever-llc/trellis/service";
-
-const migrations = getSqlOutboxMigrations({
-  dialect: "postgres",
-  tables: { outbox: "trellis_outbox", inbox: "trellis_inbox" },
-});
-
-for (const migration of migrations) {
-  await migrationRunner.register({
-    id: migration.id,
-    checksum: migration.checksum,
-    up: migration.up,
-    down: migration.down ?? [],
-  });
-}
+await outbox.transaction(async ({ tx, event, job }) => {
+  await orders.markShipped(tx, orderId);
+  await event.orders.shipped.enqueue({ orderId }).orThrow();
+}).orThrow();
 ```
 
-Drizzle remains optional through `@qlever-llc/trellis/service/drizzle` adapter
-helpers. There is intentionally no direct `createSqlOutbox({ drizzle })` sugar.
-If a service uses Drizzle, adapt it into the generic `executor` and `transaction`
-options at startup; treat `createDrizzleSqlExecutor(...)` as advanced/adapter
-usage, not a normal per-handler pattern.
+Here `orders` and `tx` belong to the application. The transaction-scoped event
+tree is an outbox API, unlike ordinary flat publish methods. Normal event
+facades do not expose `enqueue`. Job submission intents use the callback's `job`
+tree. `getSqlOutboxMigrations(...)` returns Trellis helper-table migration
+artifacts for the application's migration tool to apply.
 
-Use `SqlInboxRepository` only when replaying a message would repeat a
-non-idempotent side effect. Register the listener during service startup, not
-inside a handler.
+Drizzle adapters are optional on `@qlever-llc/trellis/service/drizzle`.
+`createSqlOutbox({ drizzle })` is not a supported option. Other database tools
+can implement the same executor/transaction interfaces. NATS KV outbox/inbox
+helpers do not provide atomicity with unrelated SQL writes.
 
-Use `NatsKvOutboxRepository` and `NatsKvInboxRepository` for services that do not
-have SQL state. They are durable helpers, but they are not atomic with unrelated
-database transactions.
+## Browser Apps And Verification
 
-## Verification
+Browser apps use
+`TrellisClient.connect({ participant, trellisUrl, auth:
+"browser" })` or the
+[Svelte integration](llms-svelte.txt). Let the Trellis client own its auth
+installation, refresh, reconnect, and normal `logout()`.
 
-Use the format, typecheck, lint, test, run, and migration commands configured by
-the service repository. If contract artifacts or generated SDKs changed, run
-`trellis install` and commit `trellis.lock`; `.trellis` output remains disposable.
+For real-runtime tests, use the Deno `TrellisTestRuntime` package and generated
+participants. See `/guides/testing-trellis-services` for a complete test rather
+than constructing handwritten bootstrap responses. The application's other tests
+remain its own choice. Regenerate SDKs, then run that repository's checks.

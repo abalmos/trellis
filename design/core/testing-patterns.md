@@ -15,6 +15,11 @@ order: 90
 
 ## Design
 
+This is the Trellis repository's correctness policy, not a required test
+framework or organization for downstream services. Consumer repositories choose
+their own test tooling. The live runtime helper is available when their tests
+need to exercise the actual Trellis boundary.
+
 Trellis behavior is distributed runtime behavior. Tests that prove Trellis
 runtime behavior must use a live Trellis control plane and real TypeScript and
 Rust client/service paths.

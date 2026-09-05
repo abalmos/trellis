@@ -1,44 +1,28 @@
-<script lang="ts">
-  import LanguageTabs from "$lib/components/LanguageTabs.svelte";
-</script>
+# Select optional authority
 
-The required uses block is for dependencies your service cannot run without. The auth event subscription above belongs there if your service needs those events to do its job.
+Required and optional action selections belong in native IDL, not a TypeScript
+`uses` object or Rust builder. For example, a separate caller can request the
+Orders RPC without making it mandatory:
 
-Sometimes an integration is useful but not required. Put those in `uses.optional`:
-
-<LanguageTabs>
-{#snippet ts()}
-
-```ts
-import * as core from "@trellis/apis/trellis.core";
-
-uses: {
-  required: {
-    auth: auth.use({
-      events: { subscribe: ["Auth.Connections.Opened"] },
-    }),
-  },
-  optional: {
-    coreStatus: core.use({
-      rpc: { call: ["Trellis.Surface.Status"] },
-    }),
-  },
-},
+```trellis
+participant "acme.optional-caller" app {
+  use optional orders "acme.orders@v1" {
+    call rpc "Orders.Create";
+  }
+}
 ```
 
-Optional uses still participate in the contract digest, so Trellis can tell exactly what the service was built to use. If the target contract or surface is not active, Trellis skips the optional binding and grants no authority for it.
+The referenced API must still be available when compiling the project. Optional
+does not mean an unresolved build dependency, an automatic network fallback, or
+a guarantee that a running provider exists. It means that the participant can be
+authorized without that action selection being granted.
 
-{/snippet}
-{#snippet rust()}
+After `trellis generate`, the caller facade has `ordersCreate`, but calling it
+without accepted optional authority is denied. Handle the returned `Result` and
+show or disable the optional feature according to your application's behavior.
+Do not use generated method presence as evidence of a grant.
 
-```rust
-.optional_use_ref(
-    "warehouse",
-    use_contract("warehouse@v1").with_rpc_call(["Warehouse.Ping"]),
-)
-```
-
-Use optional dependencies only when the service can run correctly without the remote contract. If a missing dependency means the service cannot fulfill its core contract, keep it required.
-
-{/snippet}
-</LanguageTabs>
+Use `use required` for the authority the participant needs to fulfill its role.
+Changing required or optional selections changes participant needs: regenerate
+the artifact and review the deployment authority rather than editing permissions
+or digests in application code.
