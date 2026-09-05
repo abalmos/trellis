@@ -49,6 +49,8 @@ utils/arangodb/data/
 
 # Generated build artifacts
 generated/
+!rust/crates/trellis/src/internal_sdk/generated/
+!rust/crates/trellis/src/internal_sdk/generated/**
 ts/packages/trellis/auth/protocol_wasm/
 docs/static/api/typescript/
 **/npm/
