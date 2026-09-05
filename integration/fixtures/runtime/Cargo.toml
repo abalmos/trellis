@@ -10,6 +10,8 @@ exclude = [".trellis"]
 [dependencies]
 trellis-participant-test-provider = { path = ".trellis/rust/participants/test-provider" }
 trellis-sdk-test-runtime = { path = ".trellis/rust/apis/test-runtime" }
+trellis-participant-test-events = { path = ".trellis/rust/participants/test-events" }
+trellis-sdk-test-events = { path = ".trellis/rust/apis/test-events" }
 trellis-rs = { path = "../../../rust/crates/trellis" }
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "signal"] }
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }

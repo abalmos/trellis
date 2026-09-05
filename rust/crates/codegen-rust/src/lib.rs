@@ -2738,7 +2738,7 @@ fn render_events_rs(loaded: &ApiInput) -> String {
         ));
         lines.push(format!(
             "    const SUBJECT: &'static str = {};",
-            string_literal(&loaded.subjects.events[key].base)
+            string_literal(&loaded.subjects.events[key].template)
         ));
         lines.push(format!(
             "    const SUBSCRIBE_SUBJECT: &'static str = {};",

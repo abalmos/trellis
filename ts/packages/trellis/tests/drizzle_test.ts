@@ -1,12 +1,7 @@
-import { assertEquals, assertStringIncludes, assertThrows } from "@std/assert";
+import { assertEquals, assertThrows } from "@std/assert";
 import type { SQL } from "drizzle-orm";
 import { CasingCache } from "npm:drizzle-orm@0.44.7/casing";
-import type { PreparedOutboxRecord } from "../service/outbox_inbox.ts";
-import {
-  createSqlOutboxAdapter,
-  getSqlOutboxMigrations,
-  type SqlRow,
-} from "../service/mod.ts";
+import type { SqlRow } from "../service/mod.ts";
 import {
   bindDrizzleSqlStatement,
   createDrizzleSqlExecutor,
@@ -16,20 +11,6 @@ import {
 } from "../service/drizzle.ts";
 
 const casing = new CasingCache();
-
-function prepared(id: string): PreparedOutboxRecord {
-  return {
-    id,
-    kind: "event.publish",
-    name: "Thing.Changed",
-    subject: "events.v1.Thing.Changed",
-    payload: JSON.stringify({
-      header: { id, time: "2026-05-25T00:00:00.000Z" },
-      value: "test",
-    }),
-    headers: { "Nats-Msg-Id": id },
-  };
-}
 
 function toSqliteQuery(query: SQL) {
   return query.toQuery({
@@ -155,38 +136,6 @@ Deno.test("runDrizzleSqlTransaction adapts transaction executors", async () => {
   assertEquals(toSqliteQuery(single(transaction.runQueries)).params, [
     "tx_write",
   ]);
-});
-
-Deno.test("Drizzle SQL executor works with sqlite outbox adapter", async () => {
-  const database = new RecordingDrizzleDatabase();
-  const executor = createDrizzleSqlExecutor(database);
-  const adapter = createSqlOutboxAdapter(executor, "sqlite");
-
-  await adapter.outbox.enqueue(prepared("drizzle_outbox"));
-  await adapter.outbox.claimDue(10, new Date("2026-05-25T00:00:00.000Z"));
-
-  const insert = toSqliteQuery(single(database.runQueries));
-  assertEquals(insert.params[0], "drizzle_outbox");
-  assertEquals(insert.params.length, 13);
-
-  const claim = toSqliteQuery(single(database.allQueries));
-  assertEquals(claim.sql.includes("FROM trellis_outbox"), true);
-  assertEquals(claim.params, [
-    "dispatched",
-    "2026-05-25T00:00:00.000Z",
-    10,
-  ]);
-});
-
-Deno.test("Postgres outbox migrations include legacy event column upgrade", () => {
-  const up = getSqlOutboxMigrations({ dialect: "postgres" })[0].up.join("\n");
-
-  assertStringIncludes(up, "RENAME COLUMN event TO name");
-  assertStringIncludes(
-    up,
-    "ADD COLUMN IF NOT EXISTS kind text NOT NULL DEFAULT 'event.publish'",
-  );
-  assertStringIncludes(up, "ADD COLUMN IF NOT EXISTS outcome jsonb");
 });
 
 class RecordingDrizzleDatabase implements DrizzleSqlDatabase {

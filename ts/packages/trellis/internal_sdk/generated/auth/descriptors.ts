@@ -3385,7 +3385,7 @@ export const AuthDeviceUserAuthoritiesApproved = eventActions(
   API_ID,
   "Auth.DeviceUserAuthorities.Approved",
   {
-    subject: "events.v1.Auth.DeviceUserAuthorities.Approved",
+    subject: "events.v1.Auth.DeviceUserAuthorities.Approved.{/deploymentId}",
     publishPermission: Object.freeze({
       apiId: "trellis.auth@v1",
       apiVersion: "v1",
@@ -3416,7 +3416,7 @@ export const AuthDeviceUserAuthoritiesRequested = eventActions(
   API_ID,
   "Auth.DeviceUserAuthorities.Requested",
   {
-    subject: "events.v1.Auth.DeviceUserAuthorities.Requested",
+    subject: "events.v1.Auth.DeviceUserAuthorities.Requested.{/deploymentId}",
     publishPermission: Object.freeze({
       apiId: "trellis.auth@v1",
       apiVersion: "v1",
@@ -3447,7 +3447,7 @@ export const AuthDeviceUserAuthoritiesResolved = eventActions(
   API_ID,
   "Auth.DeviceUserAuthorities.Resolved",
   {
-    subject: "events.v1.Auth.DeviceUserAuthorities.Resolved",
+    subject: "events.v1.Auth.DeviceUserAuthorities.Resolved.{/deploymentId}",
     publishPermission: Object.freeze({
       apiId: "trellis.auth@v1",
       apiVersion: "v1",
@@ -3478,7 +3478,8 @@ export const AuthDeviceUserAuthoritiesReviewRequested = eventActions(
   API_ID,
   "Auth.DeviceUserAuthorities.ReviewRequested",
   {
-    subject: "events.v1.Auth.DeviceUserAuthorities.ReviewRequested",
+    subject:
+      "events.v1.Auth.DeviceUserAuthorities.ReviewRequested.{/deploymentId}",
     publishPermission: Object.freeze({
       apiId: "trellis.auth@v1",
       apiVersion: "v1",

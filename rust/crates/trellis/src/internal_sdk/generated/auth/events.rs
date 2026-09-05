@@ -44,7 +44,7 @@ pub struct AuthDeviceUserAuthoritiesApprovedEventDescriptor;
 impl EventDescriptor for AuthDeviceUserAuthoritiesApprovedEventDescriptor {
     type Event = super::types::AuthDeviceUserAuthoritiesApprovedEvent;
     const KEY: &'static str = "Auth.DeviceUserAuthorities.Approved";
-    const SUBJECT: &'static str = "events.v1.Auth.DeviceUserAuthorities.Approved";
+    const SUBJECT: &'static str = "events.v1.Auth.DeviceUserAuthorities.Approved.{/deploymentId}";
     const SUBSCRIBE_SUBJECT: &'static str = "events.v1.Auth.DeviceUserAuthorities.Approved.*";
     const EVENT_SCHEMA_JSON: &'static str =
         super::schemas::AUTH_DEVICE_USER_AUTHORITIES_APPROVED_EVENT_SCHEMA_JSON;
@@ -57,7 +57,7 @@ pub struct AuthDeviceUserAuthoritiesRequestedEventDescriptor;
 impl EventDescriptor for AuthDeviceUserAuthoritiesRequestedEventDescriptor {
     type Event = super::types::AuthDeviceUserAuthoritiesRequestedEvent;
     const KEY: &'static str = "Auth.DeviceUserAuthorities.Requested";
-    const SUBJECT: &'static str = "events.v1.Auth.DeviceUserAuthorities.Requested";
+    const SUBJECT: &'static str = "events.v1.Auth.DeviceUserAuthorities.Requested.{/deploymentId}";
     const SUBSCRIBE_SUBJECT: &'static str = "events.v1.Auth.DeviceUserAuthorities.Requested.*";
     const EVENT_SCHEMA_JSON: &'static str =
         super::schemas::AUTH_DEVICE_USER_AUTHORITIES_REQUESTED_EVENT_SCHEMA_JSON;
@@ -70,7 +70,7 @@ pub struct AuthDeviceUserAuthoritiesResolvedEventDescriptor;
 impl EventDescriptor for AuthDeviceUserAuthoritiesResolvedEventDescriptor {
     type Event = super::types::AuthDeviceUserAuthoritiesResolvedEvent;
     const KEY: &'static str = "Auth.DeviceUserAuthorities.Resolved";
-    const SUBJECT: &'static str = "events.v1.Auth.DeviceUserAuthorities.Resolved";
+    const SUBJECT: &'static str = "events.v1.Auth.DeviceUserAuthorities.Resolved.{/deploymentId}";
     const SUBSCRIBE_SUBJECT: &'static str = "events.v1.Auth.DeviceUserAuthorities.Resolved.*";
     const EVENT_SCHEMA_JSON: &'static str =
         super::schemas::AUTH_DEVICE_USER_AUTHORITIES_RESOLVED_EVENT_SCHEMA_JSON;
@@ -83,7 +83,8 @@ pub struct AuthDeviceUserAuthoritiesReviewRequestedEventDescriptor;
 impl EventDescriptor for AuthDeviceUserAuthoritiesReviewRequestedEventDescriptor {
     type Event = super::types::AuthDeviceUserAuthoritiesReviewRequestedEvent;
     const KEY: &'static str = "Auth.DeviceUserAuthorities.ReviewRequested";
-    const SUBJECT: &'static str = "events.v1.Auth.DeviceUserAuthorities.ReviewRequested";
+    const SUBJECT: &'static str =
+        "events.v1.Auth.DeviceUserAuthorities.ReviewRequested.{/deploymentId}";
     const SUBSCRIBE_SUBJECT: &'static str =
         "events.v1.Auth.DeviceUserAuthorities.ReviewRequested.*";
     const EVENT_SCHEMA_JSON: &'static str =

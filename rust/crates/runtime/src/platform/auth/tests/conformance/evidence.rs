@@ -13,6 +13,40 @@ use crate::platform::auth::{
     ResourceProviderIdentity, SessionRecord, SqliteAuthorizationStore,
 };
 
+#[test]
+fn event_resource_evidence_accepts_parameter_filters_not_malformed_subjects() {
+    use crate::platform::auth::authority::validate_resource_evidence;
+
+    for (subject, valid) in [
+        ("events.v1.Beta.*", true),
+        ("events.v1.Alpha", true),
+        ("events.v1.Beta*", false),
+        ("events..Beta", false),
+        ("events.v1.>", false),
+        ("events.v1. Beta", false),
+    ] {
+        let evidence = ResourceBindingEvidence {
+            resource_kind: "eventConsumer".to_owned(),
+            local_name: "events".to_owned(),
+            binding_id: "events_binding".to_owned(),
+            owner_participant_id: "event_service".to_owned(),
+            provider_identity: ResourceProviderIdentity::EventConsumer {
+                stream: "trellis".to_owned(),
+                consumer: "events_consumer".to_owned(),
+                filter_subjects: vec![subject.to_owned()],
+            },
+            state: ResourceBindingState::Available,
+            materialized_at: NOW,
+            error: None,
+        };
+        assert_eq!(
+            validate_resource_evidence(&[evidence]).is_ok(),
+            valid,
+            "{subject}"
+        );
+    }
+}
+
 pub(super) async fn exercise_resources(
     store: SqliteAuthorizationStore,
 ) -> Result<(), Box<dyn std::error::Error>> {

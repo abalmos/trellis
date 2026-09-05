@@ -2047,6 +2047,16 @@ impl TrellisClient {
         D: EventDescriptor,
         D::Event: Send + 'static,
     {
+        self.event_messages(options, Some(self.descriptor_subject(D::SUBSCRIBE_SUBJECT)))
+            .await
+    }
+
+    pub(crate) async fn event_messages<T: Send + 'static>(
+        &self,
+        options: EventSubscribeOptions,
+        filter_subject: Option<String>,
+    ) -> Result<BoxStream<'static, Result<EventMessage<T>, TrellisClientError>>, TrellisClientError>
+    {
         let jetstream = jetstream::new(self.nats());
         let stream_name = options.stream.as_deref().unwrap_or(DEFAULT_EVENT_STREAM);
         let event_stream = timeout(
@@ -2063,9 +2073,12 @@ impl TrellisClient {
             ));
         }
 
-        let config = event_consumer_config(&options, self.descriptor_subject(D::SUBSCRIBE_SUBJECT));
-        let durable_name = config.durable_name.clone();
-        let consumer = match durable_name.as_deref() {
+        let durable_name = if options.mode == EventSubscriptionMode::Durable {
+            options.durable_name.as_deref()
+        } else {
+            None
+        };
+        let consumer = match durable_name {
             Some(name) => timeout(
                 std::time::Duration::from_millis(self.timeout_ms),
                 event_stream.get_consumer(name),
@@ -2073,13 +2086,21 @@ impl TrellisClient {
             .await
             .map_err(|_| TrellisClientError::Timeout)?
             .map_err(|error| TrellisClientError::NatsRequest(error.to_string()))?,
-            None => timeout(
-                std::time::Duration::from_millis(self.timeout_ms),
-                event_stream.create_consumer(config),
-            )
-            .await
-            .map_err(|_| TrellisClientError::Timeout)?
-            .map_err(|error| TrellisClientError::NatsRequest(error.to_string()))?,
+            None => {
+                let subject = filter_subject.ok_or_else(|| {
+                    TrellisClientError::EventSubscriptionProtocol(
+                        "ephemeral event subscriptions require a filter subject".to_owned(),
+                    )
+                })?;
+                let config = event_consumer_config(&options, subject);
+                timeout(
+                    std::time::Duration::from_millis(self.timeout_ms),
+                    event_stream.create_consumer(config),
+                )
+                .await
+                .map_err(|_| TrellisClientError::Timeout)?
+                .map_err(|error| TrellisClientError::NatsRequest(error.to_string()))?
+            }
         };
 
         let messages = timeout(
@@ -2107,7 +2128,7 @@ impl TrellisClient {
         Ok(Box::pin(stream)
             as BoxStream<
                 'static,
-                Result<EventMessage<D::Event>, TrellisClientError>,
+                Result<EventMessage<T>, TrellisClientError>,
             >)
     }
 

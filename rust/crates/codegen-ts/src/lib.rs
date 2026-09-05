@@ -1312,7 +1312,7 @@ fn render_descriptors_ts(opts: &GenerateTsSdkOpts, loaded: &ApiInput) -> String 
         ));
         lines.push(format!(
             "  subject: {},",
-            js_string(&loaded.subjects.events[key].base)
+            js_string(&loaded.subjects.events[key].template)
         ));
         lines.push(format!(
             "  publishPermission: {},",

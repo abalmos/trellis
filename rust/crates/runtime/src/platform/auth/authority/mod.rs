@@ -653,11 +653,15 @@ pub(crate) fn validate_resource_evidence(
                     ));
                 }
                 for subject in filter_subjects {
-                    validate_physical_name(
-                        "resource.providerIdentity.filterSubjects",
-                        subject,
-                        true,
-                    )?;
+                    for token in subject.split('.') {
+                        if token != "*" {
+                            validate_physical_name(
+                                "resource.providerIdentity.filterSubjects",
+                                token,
+                                false,
+                            )?;
+                        }
+                    }
                 }
             }
             _ => {
