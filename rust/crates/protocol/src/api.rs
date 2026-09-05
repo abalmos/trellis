@@ -216,10 +216,16 @@ impl ApiArtifact {
             .events
             .iter()
             .map(|(name, definition)| {
+                let base = derive_event_subject(&definition.version, name)?;
+                let mut template = base.clone();
+                for parameter in &definition.params {
+                    template.push_str(&format!(".{{{parameter}}}"));
+                }
                 Ok((
                     name.clone(),
                     DerivedEventSubjects {
-                        base: derive_event_subject(&definition.version, name)?,
+                        base,
+                        template,
                         wildcard: derive_event_wildcard_subject(
                             &definition.version,
                             name,
@@ -929,7 +935,11 @@ fn validate_event_subjects(
     Ok(())
 }
 
-fn event_patterns_overlap(left: &str, right: &str) -> bool {
+/// Compare Trellis event patterns, including a pattern and a concrete subject.
+///
+/// Trellis parameters occupy one `*` token each. This is not a matcher for
+/// arbitrary NATS subscriptions containing the multi-token `>` wildcard.
+pub fn event_patterns_overlap(left: &str, right: &str) -> bool {
     let left = left.split('.').collect::<Vec<_>>();
     let right = right.split('.').collect::<Vec<_>>();
     left.len() == right.len()

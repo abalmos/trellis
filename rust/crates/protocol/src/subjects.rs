@@ -21,12 +21,14 @@ pub struct DerivedApiSubjects {
     pub feeds: BTreeMap<String, String>,
 }
 
-/// Base and wildcard subscription subjects for one event.
+/// Base, publish template, and wildcard subscription subjects for one event.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DerivedEventSubjects {
     /// Event subject before parameter tokens are appended.
     pub base: String,
+    /// Publish subject template with JSON-pointer placeholders for parameters.
+    pub template: String,
     /// Subscription subject with one wildcard per event parameter.
     pub wildcard: String,
 }

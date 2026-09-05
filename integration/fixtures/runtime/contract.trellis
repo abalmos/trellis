@@ -51,3 +51,36 @@ participant "test.denied" app {
     implements "test.client@v1";
     use optional runtime "test.runtime@v1" { call rpc "Echo"; }
 }
+
+api "test.events@v1" {
+    version "1.0.0";
+    display_name "Durable event acceptance";
+    description "Distinct publisher authority on one consumer.";
+    model Empty {}
+    model Sample { site: string; value: string; }
+    model Observed { values: list<string>; }
+    event "Alpha" { version "v1"; payload Sample; }
+    event "Beta" { version "v1"; payload Sample; params ["/site"]; }
+    rpc "Observed" { version "v1"; input Empty; output Observed; }
+    rpc "DropAlpha" { version "v1"; input Empty; output Empty; }
+}
+
+participant "test.events" service {
+    implements "test.events@v1";
+    subscribe event "Alpha";
+    subscribe event "Beta";
+}
+
+participant "test.alpha" app {
+    implements "test.client@v1";
+    use required events "test.events@v1" {
+        publish event "Alpha";
+        call rpc "Observed";
+        call rpc "DropAlpha";
+    }
+}
+
+participant "test.beta" app {
+    implements "test.client@v1";
+    use required events "test.events@v1" { publish event "Beta"; }
+}

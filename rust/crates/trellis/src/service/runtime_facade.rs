@@ -4,17 +4,17 @@ use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet};
 use std::future::Future;
 use std::marker::PhantomData;
-use std::pin::Pin;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex as StdMutex};
-use std::task::{Context, Poll};
 use std::time::Duration;
 
 use async_nats::header::HeaderMap;
 use bytes::Bytes;
 use futures_util::future::BoxFuture;
 use futures_util::{Stream, StreamExt};
-use tokio::task::{AbortHandle, JoinError, JoinHandle};
+use tokio::sync::mpsc;
+use tokio::task::AbortHandle;
+use trellis_protocol::event_patterns_overlap;
 
 pub use super::core_bootstrap::CoreBootstrapBinding;
 use super::resources::{validate_kv_binding, validate_store_binding, ResourceRuntimeClient};
@@ -63,16 +63,20 @@ struct DurableEventListenerKey {
 }
 
 struct SharedDurableEventListener {
-    expected_subjects: BTreeSet<String>,
-    handlers: BTreeMap<String, BTreeMap<u64, SharedEventHandler>>,
+    registrations: BTreeMap<String, EventRegistration>,
     concurrency: u32,
     pull_abort_handles: Vec<AbortHandle>,
 }
 
-struct DurableEventPullConfig {
+#[derive(Clone)]
+struct EventRegistration {
     event_api_id: String,
     event_name: String,
     publish_capabilities: Vec<String>,
+    handlers: BTreeMap<u64, SharedEventHandler>,
+}
+
+struct DurableEventPullConfig {
     key: DurableEventListenerKey,
     subscribe_options: EventSubscribeOptions,
     context: ServiceEventListenerContext,
@@ -254,15 +258,6 @@ pub enum ServiceRuntimeError {
         queue_type: String,
     },
 
-    /// A durable event listener supplied a caller-owned durable name.
-    #[error(
-        "durable event consumer names are provisioned by Trellis event consumer bindings; remove caller durable name '{durable_name}'"
-    )]
-    CallerDurableName {
-        /// Caller-provided durable consumer name.
-        durable_name: String,
-    },
-
     /// No durable event consumer group was declared for the requested event subject.
     #[error("event subject '{subject}' is not declared in any event consumer group")]
     MissingEventConsumerGroup {
@@ -343,8 +338,6 @@ pub struct ServiceEventListenOptions {
     pub mode: ServiceEventListenerMode,
     /// Contract-local event consumer group name. Required when more than one group matches.
     pub group: Option<String>,
-    /// Caller-provided durable names are rejected because Trellis owns durable consumers.
-    pub durable_name: Option<String>,
     /// Number of local pull loops for a parallel durable consumer group.
     pub concurrency: u32,
 }
@@ -354,7 +347,6 @@ impl Default for ServiceEventListenOptions {
         Self {
             mode: ServiceEventListenerMode::Durable,
             group: None,
-            durable_name: None,
             concurrency: 1,
         }
     }
@@ -416,7 +408,7 @@ pub enum ServiceEventListenerMode {
 /// when the last handler for a durable consumer is removed, the shared pull task
 /// is also aborted.
 pub struct ServiceEventListenerHandle {
-    task: JoinHandle<Result<(), ServiceRuntimeError>>,
+    task: Option<AbortHandle>,
     registration: StdMutex<Option<ServiceEventListenerRegistration>>,
 }
 
@@ -437,7 +429,7 @@ impl std::fmt::Debug for ServiceEventListenerHandle {
 
 impl ServiceEventListenerHandle {
     fn new(
-        task: JoinHandle<Result<(), ServiceRuntimeError>>,
+        task: Option<AbortHandle>,
         registration: Option<ServiceEventListenerRegistration>,
     ) -> Self {
         Self {
@@ -453,26 +445,15 @@ impl ServiceEventListenerHandle {
                 remove_service_event_listener_registration(registration);
             }
         }
-        self.task.abort();
+        if let Some(task) = &self.task {
+            task.abort();
+        }
     }
 }
 
 impl Drop for ServiceEventListenerHandle {
     fn drop(&mut self) {
-        if let Ok(registration) = self.registration.get_mut() {
-            if let Some(registration) = registration.take() {
-                remove_service_event_listener_registration(registration);
-            }
-        }
-        self.task.abort();
-    }
-}
-
-impl Future for ServiceEventListenerHandle {
-    type Output = Result<Result<(), ServiceRuntimeError>, JoinError>;
-
-    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        Pin::new(&mut self.task).poll(cx)
+        self.abort();
     }
 }
 
@@ -484,6 +465,7 @@ pub struct ServiceHandle {
     binding: CoreBootstrapBinding,
     resources: ServiceResourceBindings,
     event_listeners: SharedDurableEventListeners,
+    event_failures: mpsc::UnboundedSender<ServiceRuntimeError>,
     auth: LocalAuthVerifier,
 }
 
@@ -630,16 +612,7 @@ impl ServiceHandle {
         F: Fn(D::Event, ServiceEventListenerContext) -> Fut + Send + Sync + 'static,
         Fut: Future<Output = Result<(), ServerError>> + Send + 'static,
     {
-        listen_event_with_bindings::<D, _, _>(
-            self.client(),
-            self.auth.clone(),
-            self.auth.api_id(),
-            &self.resources.event_consumers,
-            Arc::clone(&self.event_listeners),
-            handler,
-            options,
-        )
-        .await
+        listen_event_with_bindings::<D, _, _>(self, self.auth.api_id(), handler, options).await
     }
 
     /// Start a descriptor-backed event listener with an explicit owning API id.
@@ -659,16 +632,7 @@ impl ServiceHandle {
         F: Fn(D::Event, ServiceEventListenerContext) -> Fut + Send + Sync + 'static,
         Fut: Future<Output = Result<(), ServerError>> + Send + 'static,
     {
-        listen_event_with_bindings::<D, _, _>(
-            self.client(),
-            self.auth.clone(),
-            event_api_id,
-            &self.resources.event_consumers,
-            Arc::clone(&self.event_listeners),
-            handler,
-            options,
-        )
-        .await
+        listen_event_with_bindings::<D, _, _>(self, event_api_id, handler, options).await
     }
 
     /// Open a bound KV resource client by contract-local resource name.
@@ -815,6 +779,8 @@ pub struct ConnectedServiceRuntime<C> {
     binding: CoreBootstrapBinding,
     resources: ServiceResourceBindings,
     event_listeners: SharedDurableEventListeners,
+    event_failures: mpsc::UnboundedSender<ServiceRuntimeError>,
+    event_failure_receiver: mpsc::UnboundedReceiver<ServiceRuntimeError>,
     auth: LocalAuthVerifier,
     _event_listener_cleanup: ServiceEventListenerRegistryCleanup,
     router: Router,
@@ -898,6 +864,7 @@ impl<C> ConnectedServiceRuntime<C> {
     ) -> Self {
         let resources = binding.resource_bindings();
         let event_listeners = SharedDurableEventListeners::default();
+        let (event_failures, event_failure_receiver) = mpsc::unbounded_channel();
         let api_id = api_id.into();
         let auth =
             LocalAuthVerifier::new(client.authorization_context_cache().ok(), api_id.clone());
@@ -910,6 +877,8 @@ impl<C> ConnectedServiceRuntime<C> {
             binding,
             resources,
             event_listeners: Arc::clone(&event_listeners),
+            event_failures,
+            event_failure_receiver,
             auth,
             _event_listener_cleanup: ServiceEventListenerRegistryCleanup::new(event_listeners),
             router,
@@ -1080,16 +1049,9 @@ impl<C> ConnectedServiceRuntime<C> {
         F: Fn(D::Event, ServiceEventListenerContext) -> Fut + Send + Sync + 'static,
         Fut: Future<Output = Result<(), ServerError>> + Send + 'static,
     {
-        listen_event_with_bindings::<D, _, _>(
-            self.client(),
-            self.auth.clone(),
-            self.auth.api_id(),
-            &self.resources.event_consumers,
-            Arc::clone(&self.event_listeners),
-            handler,
-            options,
-        )
-        .await
+        self.generated_handle()
+            .listen_event::<D, _, _>(handler, options)
+            .await
     }
 
     /// Open a bound KV resource client by contract-local resource name.
@@ -1143,16 +1105,9 @@ impl<C> ConnectedServiceRuntime<C> {
         F: Fn(D::Event, ServiceEventListenerContext) -> Fut + Send + Sync + 'static,
         Fut: Future<Output = Result<(), ServerError>> + Send + 'static,
     {
-        listen_event_with_bindings::<D, _, _>(
-            self.client(),
-            self.auth.clone(),
-            event_api_id,
-            &self.resources.event_consumers,
-            Arc::clone(&self.event_listeners),
-            handler,
-            options,
-        )
-        .await
+        self.generated_handle()
+            .listen_event_with_api_id::<D, _, _>(event_api_id, handler, options)
+            .await
     }
 
     /// Register one descriptor-backed RPC handler and record its subject.
@@ -1200,6 +1155,7 @@ impl<C> ConnectedServiceRuntime<C> {
 
     /// Run registered subjects using the default NATS request loop.
     pub async fn run(self) -> Result<(), ServiceRuntimeError> {
+        let mut event_failures = self.event_failure_receiver;
         let subjects = self.registered_subjects.into_iter().collect::<Vec<_>>();
         let job_hosts = self.job_hosts;
         let host = bootstrap_service_host(
@@ -1217,17 +1173,25 @@ impl<C> ConnectedServiceRuntime<C> {
                 .await
                 .map_err(ServiceRuntimeError::from)
         };
-        if job_hosts.is_empty() {
-            return serve.await;
-        }
-        let workers = async {
-            futures_util::future::try_join_all(job_hosts.into_iter().map(WorkerHostHandle::join))
+        let run = async {
+            if job_hosts.is_empty() {
+                return serve.await;
+            }
+            let workers = async {
+                futures_util::future::try_join_all(
+                    job_hosts.into_iter().map(WorkerHostHandle::join),
+                )
                 .await
                 .map_err(ServiceRuntimeError::JobWorker)?;
+                Ok(())
+            };
+            tokio::try_join!(serve, workers)?;
             Ok(())
         };
-        tokio::try_join!(serve, workers)?;
-        Ok(())
+        tokio::select! {
+            result = run => result,
+            Some(error) = event_failures.recv() => Err(error),
+        }
     }
 
     /// Return a cloneable service handle for generated participant code.
@@ -1239,6 +1203,7 @@ impl<C> ConnectedServiceRuntime<C> {
             binding: self.binding.clone(),
             resources: self.resources.clone(),
             event_listeners: Arc::clone(&self.event_listeners),
+            event_failures: self.event_failures.clone(),
             auth: self.auth.clone(),
         }
     }
@@ -1323,11 +1288,8 @@ fn service_event_context_from_headers(
 }
 
 async fn listen_event_with_bindings<D, F, Fut>(
-    client: &Arc<TrellisClient>,
-    auth: LocalAuthVerifier,
+    service: &ServiceHandle,
     event_api_id: &str,
-    bindings: &BTreeMap<String, super::EventConsumerResourceBinding>,
-    event_listeners: SharedDurableEventListeners,
     handler: F,
     options: ServiceEventListenOptions,
 ) -> Result<ServiceEventListenerHandle, ServiceRuntimeError>
@@ -1337,22 +1299,21 @@ where
     F: Fn(D::Event, ServiceEventListenerContext) -> Fut + Send + Sync + 'static,
     Fut: Future<Output = Result<(), ServerError>> + Send + 'static,
 {
+    let client = &service.client;
+    let auth = service.auth.clone();
+    let bindings = &service.resources.event_consumers;
+    let event_listeners = Arc::clone(&service.event_listeners);
+    let failures = service.event_failures.clone();
     let event_api_id = event_api_id.to_owned();
     let event_name = D::KEY.to_owned();
     let publish_capabilities = D::PUBLISH_CAPABILITIES
         .iter()
         .map(|capability| (*capability).to_owned())
         .collect::<Vec<_>>();
-    if let Some(durable_name) = options.durable_name.as_deref() {
-        return Err(ServiceRuntimeError::CallerDurableName {
-            durable_name: durable_name.to_string(),
-        });
-    }
-
     if options.mode == ServiceEventListenerMode::Ephemeral {
         let mut events = client
             .nats()
-            .subscribe(client.descriptor_subject(D::SUBJECT))
+            .subscribe(client.descriptor_subject(D::SUBSCRIBE_SUBJECT))
             .await
             .map_err(|error| TrellisClientError::NatsRequest(error.to_string()))?;
         client
@@ -1364,8 +1325,8 @@ where
         let event_api_id = event_api_id.clone();
         let event_name = event_name.clone();
         let publish_capabilities = publish_capabilities.clone();
-        return Ok(ServiceEventListenerHandle::new(
-            tokio::spawn(async move {
+        let task = tokio::spawn(async move {
+            let result = async {
                 while let Some(message) = events.next().await {
                     let publisher = match event_auth
                         .verify_event(
@@ -1403,15 +1364,22 @@ where
                         });
                     }
                 }
-                Ok(())
-            }),
+                Ok::<(), ServiceRuntimeError>(())
+            }
+            .await;
+            if let Err(error) = result {
+                let _ = failures.send(error);
+            }
+        });
+        return Ok(ServiceEventListenerHandle::new(
+            Some(task.abort_handle()),
             None,
         ));
     }
 
-    let subject = client.descriptor_subject(D::SUBJECT);
+    let subject = client.descriptor_subject(D::SUBSCRIBE_SUBJECT);
     let (group, binding) =
-        resolve_event_consumer_binding(bindings, &subject, options.group.as_deref(), None)?;
+        resolve_event_consumer_binding(bindings, &subject, options.group.as_deref())?;
     validate_event_listener_concurrency(&group, binding.ordering, options.concurrency, None)?;
     let key = DurableEventListenerKey {
         stream: binding.stream.clone(),
@@ -1451,13 +1419,31 @@ where
             options.concurrency,
             Some(listener.concurrency),
         )?;
+        for (pattern, registration) in &listener.registrations {
+            if event_patterns_overlap(pattern, &subject)
+                && (pattern != &subject
+                    || registration.event_api_id != event_api_id
+                    || registration.event_name != event_name)
+            {
+                return Err(TrellisClientError::EventSubscriptionProtocol(format!(
+                    "event registration '{subject}' overlaps '{pattern}'"
+                ))
+                .into());
+            }
+        }
         listener
-            .handlers
+            .registrations
             .entry(subject.clone())
-            .or_default()
+            .or_insert_with(|| EventRegistration {
+                event_api_id,
+                event_name,
+                publish_capabilities,
+                handlers: BTreeMap::new(),
+            })
+            .handlers
             .insert(handler_id, handler);
         return Ok(ServiceEventListenerHandle::new(
-            tokio::spawn(async { futures_util::future::pending().await }),
+            None,
             Some(ServiceEventListenerRegistration {
                 event_listeners: Arc::clone(&event_listeners),
                 key,
@@ -1475,27 +1461,37 @@ where
     };
     let pull_abort_handles = (0..options.concurrency)
         .map(|_| {
-            tokio::spawn(run_durable_event_pull_loop::<D>(
+            let pull = run_durable_event_pull_loop(
                 Arc::clone(client),
                 auth.clone(),
                 Arc::clone(&event_listeners),
                 DurableEventPullConfig {
-                    event_api_id: event_api_id.clone(),
-                    event_name: event_name.clone(),
-                    publish_capabilities: publish_capabilities.clone(),
                     key: key.clone(),
                     subscribe_options: subscribe_options.clone(),
                     context: context.clone(),
                 },
-            ))
+            );
+            let failures = failures.clone();
+            tokio::spawn(async move {
+                if let Err(error) = pull.await {
+                    let _ = failures.send(error);
+                }
+            })
             .abort_handle()
         })
         .collect();
     listeners.insert(
         key.clone(),
         SharedDurableEventListener {
-            expected_subjects: binding.filter_subjects.iter().cloned().collect(),
-            handlers: BTreeMap::from([(subject.clone(), BTreeMap::from([(handler_id, handler)]))]),
+            registrations: BTreeMap::from([(
+                subject.clone(),
+                EventRegistration {
+                    event_api_id,
+                    event_name,
+                    publish_capabilities,
+                    handlers: BTreeMap::from([(handler_id, handler)]),
+                },
+            )]),
             concurrency: options.concurrency,
             pull_abort_handles,
         },
@@ -1503,7 +1499,7 @@ where
     drop(listeners);
 
     Ok(ServiceEventListenerHandle::new(
-        tokio::spawn(async { futures_util::future::pending().await }),
+        None,
         Some(ServiceEventListenerRegistration {
             event_listeners,
             key,
@@ -1553,13 +1549,13 @@ fn remove_service_event_listener_registration(registration: ServiceEventListener
     let Some(listener) = listeners.get_mut(&registration.key) else {
         return;
     };
-    if let Some(handlers) = listener.handlers.get_mut(&registration.subject) {
-        handlers.remove(&registration.handler_id);
-        if handlers.is_empty() {
-            listener.handlers.remove(&registration.subject);
+    if let Some(event) = listener.registrations.get_mut(&registration.subject) {
+        event.handlers.remove(&registration.handler_id);
+        if event.handlers.is_empty() {
+            listener.registrations.remove(&registration.subject);
         }
     }
-    if listener.handlers.values().all(BTreeMap::is_empty) {
+    if listener.registrations.is_empty() {
         if let Some(listener) = listeners.remove(&registration.key) {
             for handle in listener.pull_abort_handles {
                 handle.abort();
@@ -1577,23 +1573,15 @@ fn remove_service_event_listeners(event_listeners: &SharedDurableEventListeners)
     }
 }
 
-async fn run_durable_event_pull_loop<D>(
+async fn run_durable_event_pull_loop(
     client: Arc<TrellisClient>,
     auth: LocalAuthVerifier,
     event_listeners: SharedDurableEventListeners,
     config: DurableEventPullConfig,
-) where
-    D: crate::client::EventDescriptor + 'static,
-    D::Event: Send + 'static,
-{
+) -> Result<(), ServiceRuntimeError> {
     loop {
-        if !durable_listener_ready(&event_listeners, &config.key) {
-            tokio::time::sleep(Duration::from_millis(25)).await;
-            continue;
-        }
-
         let mut messages = match client
-            .subscribe_messages::<D>(config.subscribe_options.clone())
+            .event_messages::<serde_json::Value>(config.subscribe_options.clone(), None)
             .await
         {
             Ok(messages) => messages,
@@ -1601,20 +1589,15 @@ async fn run_durable_event_pull_loop<D>(
                 tokio::time::sleep(Duration::from_millis(DURABLE_EVENT_CONSUMER_RETRY_MS)).await;
                 continue;
             }
-            Err(error) => {
-                tracing::warn!(
-                    group = ?config.context.group,
-                    error = %error,
-                    "Durable event subscription failed; retrying"
-                );
-                tokio::time::sleep(Duration::from_millis(DURABLE_EVENT_CONSUMER_RETRY_MS)).await;
-                continue;
-            }
+            Err(error) => return Err(error.into()),
         };
 
-        while durable_listener_ready(&event_listeners, &config.key) {
+        loop {
             let Some(result) = messages.next().await else {
-                break;
+                return Err(TrellisClientError::EventSubscriptionProtocol(
+                    "durable event stream closed".to_owned(),
+                )
+                .into());
             };
             let message = match result {
                 Ok(message) => message,
@@ -1623,32 +1606,30 @@ async fn run_durable_event_pull_loop<D>(
                         .await;
                     break;
                 }
-                Err(error) => {
-                    tracing::warn!(
-                        group = ?config.context.group,
-                        error = %error,
-                        "Durable event pull failed; retrying"
-                    );
-                    tokio::time::sleep(Duration::from_millis(DURABLE_EVENT_CONSUMER_RETRY_MS))
-                        .await;
-                    break;
-                }
+                Err(error) => return Err(error.into()),
             };
-            if !durable_listener_ready(&event_listeners, &config.key) {
-                break;
-            }
-            let handlers = lock_service_event_listeners(&event_listeners)
+            let registration = lock_service_event_listeners(&event_listeners)
                 .get(&config.key)
-                .and_then(|listener| listener.handlers.get(message.subject()).cloned())
-                .unwrap_or_default();
+                .and_then(|listener| {
+                    listener
+                        .registrations
+                        .iter()
+                        .find(|(pattern, _)| event_patterns_overlap(pattern, message.subject()))
+                        .map(|(_, registration)| registration.clone())
+                });
+            let Some(registration) = registration else {
+                tracing::warn!(subject = %message.subject(), "No registered event handler; retaining message for redelivery");
+                message.nak_after(Duration::from_secs(5)).await?;
+                continue;
+            };
             let publisher = match auth
                 .verify_event(
                     message.subject(),
                     message.payload(),
                     message.headers(),
-                    &config.event_api_id,
-                    &config.event_name,
-                    &config.publish_capabilities,
+                    &registration.event_api_id,
+                    &registration.event_name,
+                    &registration.publish_capabilities,
                 )
                 .await
             {
@@ -1671,7 +1652,7 @@ async fn run_durable_event_pull_loop<D>(
                 }
             };
             let mut handled = true;
-            for handler in handlers.values() {
+            for handler in registration.handlers.values() {
                 let context = service_event_context_from_message(
                     config.context.mode,
                     config.context.group.clone(),
@@ -1690,48 +1671,16 @@ async fn run_durable_event_pull_loop<D>(
             if !handled {
                 continue;
             }
-            if !durable_listener_ready(&event_listeners, &config.key) {
-                break;
-            }
-            if let Err(error) = message.ack().await {
-                tracing::warn!(
-                    group = ?config.context.group,
-                    error = %error,
-                    "Durable event acknowledgement failed; retrying"
-                );
-                break;
-            }
+            message.ack().await?;
         }
     }
-}
-
-fn durable_listener_ready(
-    event_listeners: &SharedDurableEventListeners,
-    key: &DurableEventListenerKey,
-) -> bool {
-    lock_service_event_listeners(event_listeners)
-        .get(key)
-        .map(|listener| {
-            listener
-                .expected_subjects
-                .iter()
-                .all(|subject| listener.handlers.contains_key(subject))
-        })
-        .unwrap_or(false)
 }
 
 fn resolve_event_consumer_binding(
     bindings: &BTreeMap<String, super::EventConsumerResourceBinding>,
     subject: &str,
     group: Option<&str>,
-    durable_name: Option<&str>,
 ) -> Result<(String, super::EventConsumerResourceBinding), ServiceRuntimeError> {
-    if let Some(durable_name) = durable_name {
-        return Err(ServiceRuntimeError::CallerDurableName {
-            durable_name: durable_name.to_string(),
-        });
-    }
-
     if let Some(group) = group {
         let binding =
             bindings
@@ -1874,7 +1823,7 @@ mod tests {
         )]);
 
         let (group, binding) =
-            resolve_event_consumer_binding(&bindings, "events.v1.Billing.Paid", None, None)
+            resolve_event_consumer_binding(&bindings, "events.v1.Billing.Paid", None)
                 .expect("binding resolves");
 
         assert_eq!(group, "projection");
@@ -1955,17 +1904,7 @@ mod tests {
         )]);
 
         assert!(matches!(
-            resolve_event_consumer_binding(
-                &bindings,
-                "events.v1.Billing.Paid",
-                None,
-                Some("caller-owned"),
-            ),
-            Err(ServiceRuntimeError::CallerDurableName { durable_name })
-                if durable_name == "caller-owned"
-        ));
-        assert!(matches!(
-            resolve_event_consumer_binding(&bindings, "events.v1.Missing", None, None),
+            resolve_event_consumer_binding(&bindings, "events.v1.Missing", None),
             Err(ServiceRuntimeError::MissingEventConsumerGroup { subject })
                 if subject == "events.v1.Missing"
         ));
@@ -1974,7 +1913,6 @@ mod tests {
                 &bindings,
                 "events.v1.Billing.Paid",
                 Some("missing"),
-                None,
             ),
             Err(ServiceRuntimeError::EventConsumerGroupNotFound { group })
                 if group == "missing"
@@ -1984,7 +1922,6 @@ mod tests {
                 &bindings,
                 "events.v1.Other",
                 Some("projection"),
-                None,
             ),
             Err(ServiceRuntimeError::EventConsumerGroupSubjectMismatch { group, subject })
                 if group == "projection" && subject == "events.v1.Other"
@@ -2008,7 +1945,6 @@ mod tests {
             resolve_event_consumer_binding(
                 &bindings,
                 "events.v1.Billing.Paid",
-                None,
                 None,
             ),
             Err(ServiceRuntimeError::AmbiguousEventConsumerGroup { subject, groups })

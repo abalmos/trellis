@@ -20,6 +20,8 @@ Deno.test("generated TypeScript caller reaches Rust provider", async () => {
     const process = new Deno.Command("cargo", {
       args: [
         "run",
+        "--bin",
+        "trellis-runtime-acceptance",
         "--manifest-path",
         fromFileUrl(
           new URL(

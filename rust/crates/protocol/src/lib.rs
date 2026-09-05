@@ -278,9 +278,9 @@ mod session_proof;
 mod subjects;
 
 pub use api::{
-    compare_api_replacement, lint_api_authoring, parse_api, ApiArtifact, ApiCompatibilityIssue,
-    ApiCompatibilityIssueCode, ApiCompatibilityReport, StateDefinition, StateKind,
-    API_AUTHORING_SCHEMA_V1_JSON, API_FORMAT_V1,
+    compare_api_replacement, event_patterns_overlap, lint_api_authoring, parse_api, ApiArtifact,
+    ApiCompatibilityIssue, ApiCompatibilityIssueCode, ApiCompatibilityReport, StateDefinition,
+    StateKind, API_AUTHORING_SCHEMA_V1_JSON, API_FORMAT_V1,
 };
 pub use authorization::{
     authorization_context_refresh_at, authorization_context_signing_digest,
