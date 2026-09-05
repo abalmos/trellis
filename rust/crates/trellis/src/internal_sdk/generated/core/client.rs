@@ -1,11 +1,11 @@
 //! Thin typed client helpers for `trellis.core@v1`.
 /// Typed API wrapper for the `trellis.core@v1` contract.
 pub struct CoreClient<'a> {
-    inner: &'a crate::generated::Caller,
+    inner: &'a trellis_rs::generated::Caller,
 }
 impl<'a> CoreClient<'a> {
     /// Wrap an already connected low-level Trellis client.
-    pub fn new(inner: &'a crate::generated::Caller) -> Self {
+    pub fn new(inner: &'a trellis_rs::generated::Caller) -> Self {
         Self { inner }
     }
     /// Access typed RPC calls.
@@ -27,7 +27,7 @@ impl<'a> CoreClient<'a> {
 }
 /// Typed RPC surface.
 pub struct Rpc<'a> {
-    pub(crate) _inner: &'a crate::generated::Caller,
+    pub(crate) _inner: &'a trellis_rs::generated::Caller,
 }
 impl<'a> Rpc<'a> {
     /// Access the `trellis` RPC group.
@@ -37,7 +37,7 @@ impl<'a> Rpc<'a> {
 }
 /// Typed RPC methods in the `trellis` group.
 pub struct TrellisRpc<'a> {
-    inner: &'a crate::generated::Caller,
+    inner: &'a trellis_rs::generated::Caller,
 }
 impl<'a> TrellisRpc<'a> {
     /// Call `Trellis.Surface.Status`.
@@ -46,7 +46,7 @@ impl<'a> TrellisRpc<'a> {
         input: &super::types::TrellisSurfaceStatusRequest,
     ) -> Result<
         super::types::TrellisSurfaceStatusResponse,
-        crate::generated::CallError<super::rpc::TrellisSurfaceStatusError>,
+        trellis_rs::generated::CallError<super::rpc::TrellisSurfaceStatusError>,
     > {
         self.inner
             .call_typed::<
@@ -58,16 +58,16 @@ impl<'a> TrellisRpc<'a> {
 }
 /// Typed event surface.
 pub struct Event<'a> {
-    pub(crate) _inner: &'a crate::generated::Caller,
+    pub(crate) _inner: &'a trellis_rs::generated::Caller,
 }
 impl<'a> Event<'a> {}
 /// Typed feed surface.
 pub struct Feed<'a> {
-    pub(crate) _inner: &'a crate::generated::Caller,
+    pub(crate) _inner: &'a trellis_rs::generated::Caller,
 }
 impl<'a> Feed<'a> {}
 /// Typed operation surface.
 pub struct Operation<'a> {
-    pub(crate) _inner: &'a crate::generated::Caller,
+    pub(crate) _inner: &'a trellis_rs::generated::Caller,
 }
 impl<'a> Operation<'a> {}

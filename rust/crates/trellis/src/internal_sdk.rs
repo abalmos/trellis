@@ -3,9 +3,6 @@
 #[path = "internal_sdk/generated/auth/lib.rs"]
 pub mod auth;
 
-#[path = "internal_sdk/generated/core/mod.rs"]
-pub mod core;
-
 #[path = "internal_sdk/generated/eventlog/lib.rs"]
 pub mod eventlog;
 

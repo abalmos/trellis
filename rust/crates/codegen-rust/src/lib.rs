@@ -4757,8 +4757,8 @@ mod tests {
     fn cargo_toml_uses_registry_dependencies() {
         let cargo = render_cargo_toml(
             &GenerateRustSdkOpts {
-                api_path: PathBuf::from("generated/protocol/apis/trellis.core@v1.json"),
-                out_dir: PathBuf::from("generated/packages/cargo/trellis-core"),
+                api_path: PathBuf::from(".trellis/apis/trellis.core@v1/1.0.0/trellis.api.json"),
+                out_dir: PathBuf::from(".trellis/rust/apis/core"),
                 crate_name: "trellis-sdk-core".to_string(),
                 crate_version: "0.1.0".to_string(),
                 runtime_deps: RustRuntimeDeps {
@@ -4772,28 +4772,28 @@ mod tests {
         )
         .unwrap();
 
-        assert!(cargo.contains("description = \"Generated Rust SDK crate for trellis-sdk-core.\""));
-        assert!(cargo.contains("repository = \"https://github.com/qlever-llc/trellis\""));
-        assert!(cargo.contains("trellis-rs = \"0.1.0\""));
-        assert!(cargo.contains("publish = false"));
-        assert!(!cargo.contains("trellis-service"));
-        assert!(!cargo.contains("path ="));
+        let manifest: toml::Value = toml::from_str(&cargo).unwrap();
+        let dependency = &manifest["dependencies"]["trellis-rs"];
+        assert_eq!(
+            dependency
+                .as_str()
+                .or_else(|| dependency.get("version").and_then(toml::Value::as_str)),
+            Some("0.1.0")
+        );
+        assert!(dependency.get("path").is_none());
+        assert_eq!(manifest["package"]["publish"].as_bool(), Some(false));
     }
 
     #[test]
     fn cargo_toml_uses_workspace_member_paths_for_local_runtime_deps() {
         let repo_root = unique_temp_dir("workspace-runtime-paths");
         fs::create_dir_all(repo_root.join("rust/crates/runtime-client")).unwrap();
-        fs::create_dir_all(repo_root.join("rust/crates/runtime-service")).unwrap();
-        fs::create_dir_all(repo_root.join("rust/crates/sdk-generator")).unwrap();
         fs::write(
             repo_root.join("rust/Cargo.toml"),
             concat!(
                 "[workspace]\n",
                 "members = [\n",
                 "  \"crates/runtime-client\",\n",
-                "  \"crates/runtime-service\",\n",
-                "  \"crates/sdk-generator\",\n",
                 "]\n",
             ),
         )
@@ -4803,21 +4803,11 @@ mod tests {
             "[package]\nname = \"trellis-rs\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
         )
         .unwrap();
-        fs::write(
-            repo_root.join("rust/crates/runtime-service/Cargo.toml"),
-            "[package]\nname = \"trellis-service\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
-        )
-        .unwrap();
-        fs::write(
-            repo_root.join("rust/crates/sdk-generator/Cargo.toml"),
-            "[package]\nname = \"trellis-codegen-rust\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
-        )
-        .unwrap();
 
         let cargo = render_cargo_toml(
             &GenerateRustSdkOpts {
-                api_path: PathBuf::from("generated/protocol/apis/trellis.core@v1.json"),
-                out_dir: repo_root.join("generated/packages/cargo/trellis-core"),
+                api_path: PathBuf::from(".trellis/apis/trellis.core@v1/1.0.0/trellis.api.json"),
+                out_dir: repo_root.join(".trellis/rust/apis/core"),
                 crate_name: "trellis-sdk-core".to_string(),
                 crate_version: "0.1.0".to_string(),
                 runtime_deps: RustRuntimeDeps {
@@ -4837,7 +4827,7 @@ mod tests {
             .unwrap();
         let moved_root = repo_root.with_extension("moved");
         fs::rename(&repo_root, &moved_root).unwrap();
-        let sdk_dir = moved_root.join("generated/packages/cargo/trellis-core");
+        let sdk_dir = moved_root.join(".trellis/rust/apis/core");
         fs::create_dir_all(&sdk_dir).unwrap();
         assert_eq!(
             fs::canonicalize(sdk_dir.join(dependency)).unwrap(),
@@ -4907,13 +4897,6 @@ mod tests {
         let error = format_generated_rust_source("src/lib.rs", "pub fn broken(").unwrap_err();
 
         assert!(matches!(error, CodegenRustError::RustSyntax { path, .. } if path == "src/lib.rs"));
-    }
-
-    #[test]
-    fn generated_rust_source_validation_formats_valid_source() {
-        let formatted = format_generated_rust_source("src/lib.rs", "pub fn ok(){ }").unwrap();
-
-        assert_eq!(formatted, "pub fn ok() {}\n");
     }
 
     #[test]

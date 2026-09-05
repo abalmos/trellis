@@ -1655,50 +1655,6 @@ fn validate_typescript(path: &Path, contents: &str) -> Result<(), CodegenTsError
     })
 }
 
-/// Local module specifiers referenced by TypeScript source code.
-#[derive(Debug, PartialEq, Eq)]
-pub struct TypeScriptModuleDependencies {
-    /// Static and literal dynamic module specifiers in stable order.
-    pub specifiers: Vec<String>,
-    /// Whether a computed dynamic import prevents complete static discovery.
-    pub has_computed_dynamic_import: bool,
-    /// Whether parse errors prevent complete static discovery.
-    pub has_parse_errors: bool,
-}
-
-/// Parse TypeScript imports and re-exports for incremental input tracking.
-pub fn typescript_module_dependencies(contents: &str) -> TypeScriptModuleDependencies {
-    let allocator = Allocator::default();
-    let parsed = Parser::new(&allocator, contents, SourceType::tsx()).parse();
-    let has_parse_errors = !parsed.errors.is_empty();
-    let mut specifiers = parsed
-        .module_record
-        .requested_modules
-        .keys()
-        .map(ToString::to_string)
-        .collect::<Vec<_>>();
-    let mut has_computed_dynamic_import = false;
-    for dynamic_import in &parsed.module_record.dynamic_imports {
-        let source = &contents[dynamic_import.module_request.start as usize
-            ..dynamic_import.module_request.end as usize];
-        let literal = source
-            .strip_prefix(['\'', '"'])
-            .and_then(|source| source.strip_suffix(['\'', '"']));
-        if let Some(literal) = literal {
-            specifiers.push(literal.to_string());
-        } else {
-            has_computed_dynamic_import = true;
-        }
-    }
-    specifiers.sort();
-    specifiers.dedup();
-    TypeScriptModuleDependencies {
-        specifiers,
-        has_computed_dynamic_import,
-        has_parse_errors,
-    }
-}
-
 fn write_if_changed(path: &Path, contents: &str) -> Result<(), CodegenTsError> {
     if fs::read_to_string(path).ok().as_deref() == Some(contents) {
         return Ok(());
@@ -1768,10 +1724,10 @@ mod path_tests {
     fn manifest_source_reference_uses_repo_relative_path() {
         assert_eq!(
             api_source_reference(
-                Path::new("/repo/generated/protocol/apis/trellis.core@v1.json"),
+                Path::new("/repo/.trellis/apis/trellis.core@v1/1.0.0/trellis.api.json"),
                 Some(Path::new("/repo")),
             ),
-            "./generated/protocol/apis/trellis.core@v1.json"
+            "./.trellis/apis/trellis.core@v1/1.0.0/trellis.api.json"
         );
     }
 
@@ -1779,10 +1735,10 @@ mod path_tests {
     fn relative_path_string_is_normalized_without_dot_segments() {
         assert_eq!(
             relative_path_string(
-                Path::new("/repo/generated/packages/jsr/trellis-core"),
-                Path::new("/repo/ts/packages/contracts/npm"),
+                Path::new("/repo/.trellis/ts/apis/core"),
+                Path::new("/repo/ts/packages/trellis"),
             ),
-            "../../../../ts/packages/contracts/npm"
+            "../../../../ts/packages/trellis"
         );
     }
 }
@@ -2252,44 +2208,6 @@ mod tests {
             .unwrap()
             .as_nanos();
         std::env::temp_dir().join(format!("trellis-codegen-ts-{label}-{nanos}"))
-    }
-
-    #[test]
-    fn module_dependencies_include_static_and_literal_dynamic_imports() {
-        let dependencies = typescript_module_dependencies(
-            r#"
-                import "./side-effect.ts";
-                import { value } from "./value.ts";
-                export { other } from "./other.ts";
-                export * from "./all.ts";
-                await import("./dynamic.ts");
-            "#,
-        );
-
-        assert_eq!(
-            dependencies.specifiers,
-            [
-                "./all.ts",
-                "./dynamic.ts",
-                "./other.ts",
-                "./side-effect.ts",
-                "./value.ts",
-            ]
-        );
-        assert!(!dependencies.has_computed_dynamic_import);
-    }
-
-    #[test]
-    fn module_dependencies_flag_computed_dynamic_imports() {
-        let dependencies = typescript_module_dependencies("await import(`./${name}.ts`);");
-
-        assert!(dependencies.specifiers.is_empty());
-        assert!(dependencies.has_computed_dynamic_import);
-    }
-
-    #[test]
-    fn module_dependencies_report_parse_errors() {
-        assert!(typescript_module_dependencies("import {").has_parse_errors);
     }
 
     #[test]

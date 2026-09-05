@@ -130,6 +130,7 @@ fn run_install() -> Result<()> {
     }
     for (project, stem, module) in [
         ("rust/crates/runtime", "auth", "auth"),
+        ("rust/crates/runtime", "trellis-core", "core"),
         ("rust/crates/eventlog-runtime", "eventlog", "eventlog"),
         ("rust/crates/runtime", "health", "health"),
         ("rust/crates/jobs-runtime", "jobs", "jobs"),

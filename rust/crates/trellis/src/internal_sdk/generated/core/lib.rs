@@ -1,5 +1,5 @@
 //! Generated Rust SDK crate for one Trellis API.
-const _: () = crate::generated::assert_abi(1);
+const _: () = trellis_rs::generated::assert_abi(1);
 /// Embedded API identity and artifact.
 pub mod api;
 /// Typed outbound adapters.

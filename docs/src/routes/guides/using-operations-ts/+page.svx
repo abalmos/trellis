@@ -8,14 +8,14 @@ operation "Reports.Generate" {
   input GenerateReportInput;
   progress GenerateReportUpdate;
   output GenerateReportOutput;
-  cancel;
+  cancellable;
 }
 ```
 
 Place this declaration and its models inside the API. The service participant
 implements that API; the caller selects `invoke operation "Reports.Generate"`
-and `observe operation "Reports.Generate"` inside its `use required` block.
-Run `trellis generate` in both projects.
+and `observe operation "Reports.Generate"` inside its `use required` block. Run
+`trellis generate` in both projects.
 
 Register a provider before starting the service lifecycle:
 

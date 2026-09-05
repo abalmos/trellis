@@ -12,7 +12,7 @@ pub const AUTH_RUNTIME_PARTICIPANT_JSON: &str = include_str!("trellis.auth-runti
 
 #[path = "../../trellis/src/internal_sdk/generated/auth/lib.rs"]
 pub mod auth;
-#[path = "../../trellis/src/internal_sdk/generated/core/mod.rs"]
+#[path = "../../trellis/src/internal_sdk/generated/core/lib.rs"]
 pub mod core;
 #[path = "../../trellis/src/internal_sdk/generated/eventlog/lib.rs"]
 pub mod eventlog;
