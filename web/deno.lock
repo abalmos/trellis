@@ -1683,6 +1683,7 @@
           "npm:ulid@^3.0.2"
         ]
       },
+      "jsr:@qlever-llc/trellis-app-console@0.0.0": {},
       "jsr:@qlever-llc/trellis-integration@0.0.0": {},
       "jsr:@qlever-llc/trellis-svelte@0.12.0": {},
       "jsr:@qlever-llc/trellis-test@0.12.0": {
@@ -1702,7 +1703,7 @@
           "npm:drizzle-orm@0.44.7"
         ]
       },
-      "jsr:@trellis/apis@0.0.0": {}
+      "jsr:@trellis-sdk/trellis.core@1.0.0": {}
     }
   }
 }

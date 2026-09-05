@@ -1,6 +1,6 @@
 import Type, { type StaticDecode } from "typebox";
 
-import type { JsonValue as TrellisJsonValue } from "../../contracts.ts";
+import type { JsonValue as TrellisJsonValue } from "../../participant.ts";
 
 export const StateStoreKindSchema = Type.Union([
   Type.Literal("value"),

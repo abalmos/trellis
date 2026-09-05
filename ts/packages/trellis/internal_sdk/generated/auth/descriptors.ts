@@ -1,11 +1,11 @@
-// Generated from ./rust/crates/runtime/.trellis/generated/protocol/apis/trellis.auth@v1.json
+// Generated from ./rust/crates/runtime/.trellis/artifacts/apis/trellis.auth@v1.json
 import {
   eventActions,
   feedAction,
   operationAction,
   rpcAction,
   schema,
-} from "../../../contracts.ts";
+} from "@qlever-llc/trellis";
 import * as Types from "./types.ts";
 import {
   AuthCapabilitiesListRequestSchema,
@@ -3317,7 +3317,7 @@ export const AuthConnectionsClosed = eventActions(
     subscribeCapabilities: ["trellis.auth::events.stream"] as const,
   },
   "AuthConnectionsClosed",
-  false,
+  true,
   ACTION_SOURCE,
 );
 
@@ -3347,7 +3347,7 @@ export const AuthConnectionsKicked = eventActions(
     subscribeCapabilities: ["trellis.auth::events.stream"] as const,
   },
   "AuthConnectionsKicked",
-  false,
+  true,
   ACTION_SOURCE,
 );
 
@@ -3377,7 +3377,7 @@ export const AuthConnectionsOpened = eventActions(
     subscribeCapabilities: ["trellis.auth::events.stream"] as const,
   },
   "AuthConnectionsOpened",
-  false,
+  true,
   ACTION_SOURCE,
 );
 
@@ -3408,7 +3408,7 @@ export const AuthDeviceUserAuthoritiesApproved = eventActions(
     subscribeCapabilities: ["trellis.auth::events.stream"] as const,
   },
   "AuthDeviceUserAuthoritiesApproved",
-  false,
+  true,
   ACTION_SOURCE,
 );
 
@@ -3439,7 +3439,7 @@ export const AuthDeviceUserAuthoritiesRequested = eventActions(
     subscribeCapabilities: ["trellis.auth::events.stream"] as const,
   },
   "AuthDeviceUserAuthoritiesRequested",
-  false,
+  true,
   ACTION_SOURCE,
 );
 
@@ -3470,7 +3470,7 @@ export const AuthDeviceUserAuthoritiesResolved = eventActions(
     subscribeCapabilities: ["trellis.auth::events.stream"] as const,
   },
   "AuthDeviceUserAuthoritiesResolved",
-  false,
+  true,
   ACTION_SOURCE,
 );
 
@@ -3501,7 +3501,7 @@ export const AuthDeviceUserAuthoritiesReviewRequested = eventActions(
     subscribeCapabilities: ["trellis.auth::events.stream"] as const,
   },
   "AuthDeviceUserAuthoritiesReviewRequested",
-  false,
+  true,
   ACTION_SOURCE,
 );
 
@@ -3531,6 +3531,88 @@ export const AuthSessionsRevoked = eventActions(
     subscribeCapabilities: ["trellis.auth::events.stream"] as const,
   },
   "AuthSessionsRevoked",
-  false,
+  true,
   ACTION_SOURCE,
 );
+
+export const ACTIONS = {
+  "Auth.Capabilities.List": AuthCapabilitiesList,
+  "Auth.CapabilityGroups.Delete": AuthCapabilityGroupsDelete,
+  "Auth.CapabilityGroups.Get": AuthCapabilityGroupsGet,
+  "Auth.CapabilityGroups.List": AuthCapabilityGroupsList,
+  "Auth.CapabilityGroups.Put": AuthCapabilityGroupsPut,
+  "Auth.Connections.Kick": AuthConnectionsKick,
+  "Auth.Connections.List": AuthConnectionsList,
+  "Auth.DeploymentAuthority.AcceptMigration":
+    AuthDeploymentAuthorityAcceptMigration,
+  "Auth.DeploymentAuthority.AcceptUpdate": AuthDeploymentAuthorityAcceptUpdate,
+  "Auth.DeploymentAuthority.Get": AuthDeploymentAuthorityGet,
+  "Auth.DeploymentAuthority.List": AuthDeploymentAuthorityList,
+  "Auth.DeploymentAuthority.Plan": AuthDeploymentAuthorityPlan,
+  "Auth.DeploymentAuthority.Plans.Get": AuthDeploymentAuthorityPlansGet,
+  "Auth.DeploymentAuthority.Plans.List": AuthDeploymentAuthorityPlansList,
+  "Auth.DeploymentAuthority.Reconcile": AuthDeploymentAuthorityReconcile,
+  "Auth.DeploymentAuthority.Reject": AuthDeploymentAuthorityReject,
+  "Auth.Deployments.Create": AuthDeploymentsCreate,
+  "Auth.Deployments.Disable": AuthDeploymentsDisable,
+  "Auth.Deployments.Enable": AuthDeploymentsEnable,
+  "Auth.Deployments.List": AuthDeploymentsList,
+  "Auth.Deployments.Remove": AuthDeploymentsRemove,
+  "Auth.DeviceUserAuthorities.List": AuthDeviceUserAuthoritiesList,
+  "Auth.DeviceUserAuthorities.Reviews.Decide":
+    AuthDeviceUserAuthoritiesReviewsDecide,
+  "Auth.DeviceUserAuthorities.Reviews.List":
+    AuthDeviceUserAuthoritiesReviewsList,
+  "Auth.DeviceUserAuthorities.Revoke": AuthDeviceUserAuthoritiesRevoke,
+  "Auth.Devices.ConnectInfo.Get": AuthDevicesConnectInfoGet,
+  "Auth.Devices.Disable": AuthDevicesDisable,
+  "Auth.Devices.Enable": AuthDevicesEnable,
+  "Auth.Devices.List": AuthDevicesList,
+  "Auth.Devices.Provision": AuthDevicesProvision,
+  "Auth.Devices.Remove": AuthDevicesRemove,
+  "Auth.IdentityAuthority.Get": AuthIdentityAuthorityGet,
+  "Auth.IdentityAuthority.List": AuthIdentityAuthorityList,
+  "Auth.IdentityAuthority.Revoke": AuthIdentityAuthorityRevoke,
+  "Auth.IdentityGrants.List": AuthIdentityGrantsList,
+  "Auth.IdentityGrants.Revoke": AuthIdentityGrantsRevoke,
+  "Auth.Portals.Get": AuthPortalsGet,
+  "Auth.Portals.GrantOverrides.List": AuthPortalsGrantOverridesList,
+  "Auth.Portals.GrantOverrides.Put": AuthPortalsGrantOverridesPut,
+  "Auth.Portals.GrantOverrides.Remove": AuthPortalsGrantOverridesRemove,
+  "Auth.Portals.List": AuthPortalsList,
+  "Auth.Portals.LoginSettings.Get": AuthPortalsLoginSettingsGet,
+  "Auth.Portals.LoginSettings.Update": AuthPortalsLoginSettingsUpdate,
+  "Auth.Portals.Put": AuthPortalsPut,
+  "Auth.Portals.Remove": AuthPortalsRemove,
+  "Auth.Portals.Routes.Put": AuthPortalsRoutesPut,
+  "Auth.Portals.Routes.Remove": AuthPortalsRoutesRemove,
+  "Auth.ServiceInstances.Disable": AuthServiceInstancesDisable,
+  "Auth.ServiceInstances.Enable": AuthServiceInstancesEnable,
+  "Auth.ServiceInstances.List": AuthServiceInstancesList,
+  "Auth.ServiceInstances.Provision": AuthServiceInstancesProvision,
+  "Auth.ServiceInstances.Remove": AuthServiceInstancesRemove,
+  "Auth.Sessions.List": AuthSessionsList,
+  "Auth.Sessions.Logout": AuthSessionsLogout,
+  "Auth.Sessions.Me": AuthSessionsMe,
+  "Auth.Sessions.Revoke": AuthSessionsRevoke,
+  "Auth.UserIdentities.List": AuthUserIdentitiesList,
+  "Auth.UserIdentities.Unlink": AuthUserIdentitiesUnlink,
+  "Auth.Users.Create": AuthUsersCreate,
+  "Auth.Users.Get": AuthUsersGet,
+  "Auth.Users.IdentityLink.Create": AuthUsersIdentityLinkCreate,
+  "Auth.Users.List": AuthUsersList,
+  "Auth.Users.Password.Change": AuthUsersPasswordChange,
+  "Auth.Users.PasswordReset.Create": AuthUsersPasswordResetCreate,
+  "Auth.Users.Resolve": AuthUsersResolve,
+  "Auth.Users.Update": AuthUsersUpdate,
+  "Auth.DeviceUserAuthorities.Resolve": AuthDeviceUserAuthoritiesResolve,
+  "Auth.Connections.Closed": AuthConnectionsClosed,
+  "Auth.Connections.Kicked": AuthConnectionsKicked,
+  "Auth.Connections.Opened": AuthConnectionsOpened,
+  "Auth.DeviceUserAuthorities.Approved": AuthDeviceUserAuthoritiesApproved,
+  "Auth.DeviceUserAuthorities.Requested": AuthDeviceUserAuthoritiesRequested,
+  "Auth.DeviceUserAuthorities.Resolved": AuthDeviceUserAuthoritiesResolved,
+  "Auth.DeviceUserAuthorities.ReviewRequested":
+    AuthDeviceUserAuthoritiesReviewRequested,
+  "Auth.Sessions.Revoked": AuthSessionsRevoked,
+} as const;

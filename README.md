@@ -79,8 +79,8 @@ deno task -c ts/deno.json test:integration
 cargo test --manifest-path rust/Cargo.toml -p trellis-rs --test integration -- --nocapture
 ```
 
-Both suites conform to client cases in `integration/client-test-matrix.json`,
-the shared parity contract for supported client languages.
+Both suites use ordinary Rust and Deno test discovery, the shared parity
+contract for supported client languages.
 
 ## Design documents
 

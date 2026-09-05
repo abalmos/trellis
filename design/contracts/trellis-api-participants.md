@@ -28,15 +28,14 @@ authoritatively resolved `participantNeedsDigest`. Participant resolution also
 returns required and optional grant sets. Runtime identity and provenance use
 the participant digest.
 
-TypeScript defined contracts expose:
+Generated TypeScript participants expose:
 
-- `CONTRACT_ID` — participant id
-- `CONTRACT_DIGEST` — semantic participant digest
+- participant id and semantic participant digest
 - `API`, `API_DIGEST`
 - `PARTICIPANT`
 
-Rust `ContractArtifacts` exposes the equivalent native objects, digests, and
-grant sets without being serializable as a third artifact.
+Generated Rust participant facades expose the equivalent canonical evidence and
+grant sets without defining a third artifact model.
 
 ## API artifact
 
@@ -62,18 +61,18 @@ grants.
 
 ## Authoring and generation
 
-TypeScript and Rust builders construct native artifacts directly from their
-in-memory authoring source. Neither language converts through JSON to recover
-runtime descriptors.
+Trellis IDL compiles declarative source into canonical protocol artifacts. Rust
+and TypeScript code generators consume those artifacts directly; neither
+language executes application source to discover APIs or participants.
 
 Canonical generated JSON lives at:
 
-- `.trellis/generated/protocol/apis/<api-id>.json`
-- `.trellis/generated/protocol/participants/<participant-id>.json`
+- `.trellis/artifacts/apis/<api-id>.json`
+- `.trellis/artifacts/participants/<participant-id>.json`
 
-Generated API modules expose API identity and native API evidence. Generated
-participant/service modules expose participant identity, native participant
-JSON, needs digest, owned API evidence, and exact referenced API evidence.
+Generated API modules expose API identity and canonical API evidence. Generated
+participant modules expose participant identity, canonical participant data,
+needs digest, owned API evidence, and exact referenced API evidence.
 
 ## Runtime presentation
 
@@ -87,14 +86,6 @@ State declarations, writers, migrations, and admin views use the resolved
 participant binding's artifact digest. Compatible participant digest changes do
 not change the State namespace; namespace identity remains participant id,
 scope, owner, store, and state version.
-
-## Conformance
-
-Cross-language conformance covers representative native authoring for minimal
-apps, RPC, operations and signals, events and feeds, State, Jobs, KV and store,
-required and optional uses, event consumers, capability and consent, transfers,
-devices, and agents. Each vector asserts normalized API and participant JSON,
-API and participant digests, needs digest, and required and optional grants.
 
 Protocol validation, contextual participant resolution, and grant derivation are
 authoritative in `trellis_protocol`. TypeScript computes intrinsic API and

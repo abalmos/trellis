@@ -1,6 +1,6 @@
 ---
 title: Testing Patterns
-description: Trellis testing policy for smallest real boundaries, live integration coverage, and matrix parity.
+description: Trellis testing policy for smallest real boundaries and live integration coverage.
 order: 90
 ---
 
@@ -44,20 +44,9 @@ component boundary can prove the invariant deterministically.
 
 ### Test Ownership
 
-`integration/client-test-matrix.json` owns externally observable client
-interoperability. Every supported client language implements those rows against
-the Rust runtime. `integration/rust-runtime-test-matrix.json` owns Rust runtime
-correctness and does not require TypeScript twins.
-
-Rules:
-
-- derive runner registration from the matrices; do not maintain shadow skip or
-  registration lists
-- compare implemented Rust mappings to the compiled executable list and the
-  executed result stream
-- treat any implemented, uncompiled, or unexecuted case as a release failure
-- keep pending rows explicit with a reason and owner
-- do not use source-text annotations as proof that a test compiled or ran
+Executable Rust and Deno tests are the catalog. Cross-language behavior is
+proved by the smallest live test that crosses the real transport boundary;
+Rust-only runtime behavior remains in ordinary Rust integration tests.
 
 ### Case-Owned Runtime
 
@@ -70,30 +59,10 @@ subjects and participant identities from colliding across cases. Run and case
 slugs still isolate physical deployment ids, resource keys, state keys, durable
 names, and domain records.
 
-Rust executes each case as an exact-test process. The Rust and TypeScript
-runners use bounded, machine-relative worker pools; `TRELLIS_INTEGRATION_JOBS`
-may override each runner's pool for local diagnosis. Do not restore parallelism
-by rewriting semantic identities or by adding test-only protocol behavior.
-
-The normal Check runs semantic subsystem slices as independent GitHub Actions
-jobs. Live executables are built once as normal locked release binaries and
-distributed to those jobs; live execution does not compile Rust. Subsystem jobs
-may run concurrently without a fixed matrix-topology cap. Each selected case
-acquires one host-wide slot controlled by `TRELLIS_TEST_HOST_JOBS`, which Check
-sets to the measured aggregate bound of eight on the current self-hosted runner.
-Custom fixtures borrow that slot when replacing the case runtime and acquire an
-additional slot for each concurrently running child process.
-
-`isolated-process` remains matrix documentation for genuinely process- or
-deployment-global behavior such as restart, ownership loss, startup migration,
-destructive trust rotation, or malformed global configuration. Every such row
-records its reason, but it uses the same case-owned process pool as other cases;
-feature area alone is never an isolation reason.
-
-Each live run emits machine-readable inventory, result, process-start, and
-duration records. Case-owned duration summaries aggregate count, average, and
-maximum time by operation and phase so gate-performance claims use retained
-measurements rather than terminal-log estimates.
+Rust and TypeScript live tests use ordinary Rust and Deno discovery. The normal
+Check runs both discovered suites against real Trellis infrastructure. Focused
+local runs select tests through the native Rust and Deno test runners rather
+than a second registry or scheduler.
 
 ### Smaller Test Boundary
 
@@ -126,10 +95,10 @@ Verification has three explicit tiers:
   package tests, type checks, and live fixture or case that prove the change.
 - **Tier 2, phase gate:** run preparation when generated artifacts may change,
   workspace formatting, lint and documentation checks, affected package suites,
-  and the matching TypeScript and Rust live cases plus matrix conformance.
+  and the matching TypeScript and Rust live tests.
 - **Tier 3, integrated gate:** the normal `Check` workflow owns formatting,
   lint/type checks, generated freshness, package tests, and the complete
-  unfiltered live matrices with no hidden skips. The release workflow does not
+  unfiltered live suites with no hidden skips. The release workflow does not
   repeat those checks; it verifies release metadata and the exact packages,
   archives, images, and publication inputs assembled from a green `rs` base.
   Trellis supports current stable Rust only; no older compiler compatibility is

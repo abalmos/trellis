@@ -16,23 +16,23 @@ import type {
   FeedDesc,
   InferSchemaType,
   RPCDesc,
-} from "./contracts.ts";
+} from "./participant.ts";
 import type {
   PermissionAtom as DescriptorPermissionAtom,
   RuntimeApi,
-} from "./contract_support/runtime.ts";
+} from "./participant_runtime/api.ts";
 import {
-  CONTRACT_RUNTIME,
-  type ContractRuntime,
-} from "./contract_support/contract_runtime.ts";
+  PARTICIPANT_RUNTIME,
+  type ParticipantRuntime,
+} from "./participant_runtime/participant.ts";
 import {
-  CONTRACT_JOBS_METADATA,
-  CONTRACT_KV_METADATA,
-  CONTRACT_STATE_METADATA,
-  type ContractJobsMetadata,
-  type ContractKvMetadata,
-  type EventConsumerResourceBinding,
-} from "./contract_support/mod.ts";
+  PARTICIPANT_JOBS_METADATA,
+  PARTICIPANT_KV_METADATA,
+  PARTICIPANT_STATE_METADATA,
+  type ParticipantJobsMetadata,
+  type ParticipantKvMetadata,
+} from "./participant_runtime/metadata.ts";
+import type { EventConsumerResourceBinding } from "./participant_runtime/schemas.ts";
 import type { StaticDecode } from "typebox";
 import { buildEventProofInput } from "./auth/proof.ts";
 import {
@@ -589,7 +589,7 @@ export type TrellisAuth = {
 export type TrellisMode = "client" | "service";
 type Simplify<T> = { [K in keyof T]: T[K] } & {};
 type OwnedApiFor<TContract> = TContract extends {
-  readonly [CONTRACT_RUNTIME]: ContractRuntime<
+  readonly [PARTICIPANT_RUNTIME]: ParticipantRuntime<
     never,
     infer TOwnedApi,
     RuntimeApi,
@@ -599,13 +599,13 @@ type OwnedApiFor<TContract> = TContract extends {
   : never
   : never;
 type ContractKvFor<TContract> = TContract extends {
-  readonly [CONTRACT_KV_METADATA]?: infer TKv;
-} ? NonNullable<TKv> extends ContractKvMetadata ? NonNullable<TKv>
+  readonly [PARTICIPANT_KV_METADATA]?: infer TKv;
+} ? NonNullable<TKv> extends ParticipantKvMetadata ? NonNullable<TKv>
   : {}
   : {};
 type ContractJobsFor<TContract> = TContract extends {
-  readonly [CONTRACT_JOBS_METADATA]?: infer TJobs;
-} ? NonNullable<TJobs> extends ContractJobsMetadata ? NonNullable<TJobs>
+  readonly [PARTICIPANT_JOBS_METADATA]?: infer TJobs;
+} ? NonNullable<TJobs> extends ParticipantJobsMetadata ? NonNullable<TJobs>
   : {}
   : {};
 export type RuntimeStateStoreShape = {
@@ -617,12 +617,12 @@ export type RuntimeStateStoreShape = {
 };
 export type RuntimeStateStores = Record<string, RuntimeStateStoreShape>;
 export type RuntimeStateStoresForContract<TContract> = TContract extends {
-  readonly [CONTRACT_STATE_METADATA]?: infer TState;
+  readonly [PARTICIPANT_STATE_METADATA]?: infer TState;
 } ? NonNullable<TState> extends RuntimeStateStores ? NonNullable<TState>
   : {}
   : {};
 type TrellisApiFor<TContract> = TContract extends {
-  readonly [CONTRACT_RUNTIME]: ContractRuntime<
+  readonly [PARTICIPANT_RUNTIME]: ParticipantRuntime<
     never,
     RuntimeApi,
     RuntimeApi,
@@ -1830,7 +1830,7 @@ function natsSubjectMatches(pattern: string, subject: string): boolean {
   return patternParts.length === subjectParts.length;
 }
 
-export type HandlerKvFacade<TKv extends ContractKvMetadata> = {
+export type HandlerKvFacade<TKv extends ParticipantKvMetadata> = {
   [K in keyof TKv]: TKv[K]["required"] extends false
     ? TypedKV<TKv[K]["schema"]> | undefined
     : TypedKV<TKv[K]["schema"]>;

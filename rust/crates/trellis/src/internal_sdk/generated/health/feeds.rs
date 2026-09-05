@@ -1,5 +1,5 @@
 //! Typed feed descriptors for `trellis.health@v1`.
-use crate::generated::FeedDescriptor;
+use trellis_rs::generated::FeedDescriptor;
 /// Descriptor for `Health.Watch`.
 pub struct HealthWatchFeedDescriptor;
 impl FeedDescriptor for HealthWatchFeedDescriptor {

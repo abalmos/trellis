@@ -1,5 +1,5 @@
 //! Typed event descriptors for `trellis.auth@v1`.
-use crate::generated::EventDescriptor;
+use trellis_rs::generated::EventDescriptor;
 /// Descriptor for `Auth.Connections.Closed`.
 pub struct AuthConnectionsClosedEventDescriptor;
 impl EventDescriptor for AuthConnectionsClosedEventDescriptor {

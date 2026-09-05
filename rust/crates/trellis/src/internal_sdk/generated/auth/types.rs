@@ -6227,6 +6227,45 @@ impl PartialEq<AuthDeploymentsCreateRequestKind> for &str {
         *self == other.as_str()
     }
 }
+/// Generated schema type `AuthDeploymentsCreateRequestReviewMode`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum AuthDeploymentsCreateRequestReviewMode {
+    /// The `none` wire value.
+    #[serde(rename = "none")]
+    None,
+    /// The `required` wire value.
+    #[serde(rename = "required")]
+    Required,
+}
+impl AuthDeploymentsCreateRequestReviewMode {
+    /// Return the contract wire value.
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::Required => "required",
+        }
+    }
+}
+impl AsRef<str> for AuthDeploymentsCreateRequestReviewMode {
+    fn as_ref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl std::fmt::Display for AuthDeploymentsCreateRequestReviewMode {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(self.as_str())
+    }
+}
+impl PartialEq<&str> for AuthDeploymentsCreateRequestReviewMode {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+impl PartialEq<AuthDeploymentsCreateRequestReviewMode> for &str {
+    fn eq(&self, other: &AuthDeploymentsCreateRequestReviewMode) -> bool {
+        *self == other.as_str()
+    }
+}
 /// Generated schema type `AuthDeploymentsCreateRequest`.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct AuthDeploymentsCreateRequest {
@@ -6252,7 +6291,7 @@ pub struct AuthDeploymentsCreateRequest {
     pub requires_device_delegation: bool,
     /// The `reviewMode` wire field.
     #[serde(rename = "reviewMode")]
-    pub review_mode: Option<String>,
+    pub review_mode: Option<AuthDeploymentsCreateRequestReviewMode>,
 }
 /// Generated schema type `AuthDeploymentsCreateResponseDeploymentKind`.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -6290,6 +6329,45 @@ impl PartialEq<&str> for AuthDeploymentsCreateResponseDeploymentKind {
 }
 impl PartialEq<AuthDeploymentsCreateResponseDeploymentKind> for &str {
     fn eq(&self, other: &AuthDeploymentsCreateResponseDeploymentKind) -> bool {
+        *self == other.as_str()
+    }
+}
+/// Generated schema type `AuthDeploymentsCreateResponseDeploymentReviewMode`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum AuthDeploymentsCreateResponseDeploymentReviewMode {
+    /// The `none` wire value.
+    #[serde(rename = "none")]
+    None,
+    /// The `required` wire value.
+    #[serde(rename = "required")]
+    Required,
+}
+impl AuthDeploymentsCreateResponseDeploymentReviewMode {
+    /// Return the contract wire value.
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::Required => "required",
+        }
+    }
+}
+impl AsRef<str> for AuthDeploymentsCreateResponseDeploymentReviewMode {
+    fn as_ref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl std::fmt::Display for AuthDeploymentsCreateResponseDeploymentReviewMode {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(self.as_str())
+    }
+}
+impl PartialEq<&str> for AuthDeploymentsCreateResponseDeploymentReviewMode {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+impl PartialEq<AuthDeploymentsCreateResponseDeploymentReviewMode> for &str {
+    fn eq(&self, other: &AuthDeploymentsCreateResponseDeploymentReviewMode) -> bool {
         *self == other.as_str()
     }
 }
@@ -6367,7 +6445,7 @@ pub struct AuthDeploymentsCreateResponseDeployment {
     pub requires_device_delegation: bool,
     /// The `reviewMode` wire field.
     #[serde(rename = "reviewMode")]
-    pub review_mode: Option<String>,
+    pub review_mode: Option<AuthDeploymentsCreateResponseDeploymentReviewMode>,
     /// The `revokedAt` wire field.
     #[serde(rename = "revokedAt")]
     pub revoked_at: Option<i64>,
@@ -6436,6 +6514,45 @@ impl PartialEq<&str> for AuthDeploymentsDisableResponseDeploymentKind {
 }
 impl PartialEq<AuthDeploymentsDisableResponseDeploymentKind> for &str {
     fn eq(&self, other: &AuthDeploymentsDisableResponseDeploymentKind) -> bool {
+        *self == other.as_str()
+    }
+}
+/// Generated schema type `AuthDeploymentsDisableResponseDeploymentReviewMode`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum AuthDeploymentsDisableResponseDeploymentReviewMode {
+    /// The `none` wire value.
+    #[serde(rename = "none")]
+    None,
+    /// The `required` wire value.
+    #[serde(rename = "required")]
+    Required,
+}
+impl AuthDeploymentsDisableResponseDeploymentReviewMode {
+    /// Return the contract wire value.
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::Required => "required",
+        }
+    }
+}
+impl AsRef<str> for AuthDeploymentsDisableResponseDeploymentReviewMode {
+    fn as_ref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl std::fmt::Display for AuthDeploymentsDisableResponseDeploymentReviewMode {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(self.as_str())
+    }
+}
+impl PartialEq<&str> for AuthDeploymentsDisableResponseDeploymentReviewMode {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+impl PartialEq<AuthDeploymentsDisableResponseDeploymentReviewMode> for &str {
+    fn eq(&self, other: &AuthDeploymentsDisableResponseDeploymentReviewMode) -> bool {
         *self == other.as_str()
     }
 }
@@ -6513,7 +6630,7 @@ pub struct AuthDeploymentsDisableResponseDeployment {
     pub requires_device_delegation: bool,
     /// The `reviewMode` wire field.
     #[serde(rename = "reviewMode")]
-    pub review_mode: Option<String>,
+    pub review_mode: Option<AuthDeploymentsDisableResponseDeploymentReviewMode>,
     /// The `revokedAt` wire field.
     #[serde(rename = "revokedAt")]
     pub revoked_at: Option<i64>,
@@ -6600,6 +6717,45 @@ impl PartialEq<AuthDeploymentsEnableResponseDeploymentKind> for &str {
         *self == other.as_str()
     }
 }
+/// Generated schema type `AuthDeploymentsEnableResponseDeploymentReviewMode`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum AuthDeploymentsEnableResponseDeploymentReviewMode {
+    /// The `none` wire value.
+    #[serde(rename = "none")]
+    None,
+    /// The `required` wire value.
+    #[serde(rename = "required")]
+    Required,
+}
+impl AuthDeploymentsEnableResponseDeploymentReviewMode {
+    /// Return the contract wire value.
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::Required => "required",
+        }
+    }
+}
+impl AsRef<str> for AuthDeploymentsEnableResponseDeploymentReviewMode {
+    fn as_ref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl std::fmt::Display for AuthDeploymentsEnableResponseDeploymentReviewMode {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(self.as_str())
+    }
+}
+impl PartialEq<&str> for AuthDeploymentsEnableResponseDeploymentReviewMode {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+impl PartialEq<AuthDeploymentsEnableResponseDeploymentReviewMode> for &str {
+    fn eq(&self, other: &AuthDeploymentsEnableResponseDeploymentReviewMode) -> bool {
+        *self == other.as_str()
+    }
+}
 /// Generated schema type `AuthDeploymentsEnableResponseDeploymentState`.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum AuthDeploymentsEnableResponseDeploymentState {
@@ -6674,7 +6830,7 @@ pub struct AuthDeploymentsEnableResponseDeployment {
     pub requires_device_delegation: bool,
     /// The `reviewMode` wire field.
     #[serde(rename = "reviewMode")]
-    pub review_mode: Option<String>,
+    pub review_mode: Option<AuthDeploymentsEnableResponseDeploymentReviewMode>,
     /// The `revokedAt` wire field.
     #[serde(rename = "revokedAt")]
     pub revoked_at: Option<i64>,
@@ -6844,6 +7000,45 @@ impl PartialEq<AuthDeploymentsListResponseEntriesItemKind> for &str {
         *self == other.as_str()
     }
 }
+/// Generated schema type `AuthDeploymentsListResponseEntriesItemReviewMode`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum AuthDeploymentsListResponseEntriesItemReviewMode {
+    /// The `none` wire value.
+    #[serde(rename = "none")]
+    None,
+    /// The `required` wire value.
+    #[serde(rename = "required")]
+    Required,
+}
+impl AuthDeploymentsListResponseEntriesItemReviewMode {
+    /// Return the contract wire value.
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::Required => "required",
+        }
+    }
+}
+impl AsRef<str> for AuthDeploymentsListResponseEntriesItemReviewMode {
+    fn as_ref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl std::fmt::Display for AuthDeploymentsListResponseEntriesItemReviewMode {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(self.as_str())
+    }
+}
+impl PartialEq<&str> for AuthDeploymentsListResponseEntriesItemReviewMode {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+impl PartialEq<AuthDeploymentsListResponseEntriesItemReviewMode> for &str {
+    fn eq(&self, other: &AuthDeploymentsListResponseEntriesItemReviewMode) -> bool {
+        *self == other.as_str()
+    }
+}
 /// Generated schema type `AuthDeploymentsListResponseEntriesItemState`.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum AuthDeploymentsListResponseEntriesItemState {
@@ -6918,7 +7113,7 @@ pub struct AuthDeploymentsListResponseEntriesItem {
     pub requires_device_delegation: bool,
     /// The `reviewMode` wire field.
     #[serde(rename = "reviewMode")]
-    pub review_mode: Option<String>,
+    pub review_mode: Option<AuthDeploymentsListResponseEntriesItemReviewMode>,
     /// The `revokedAt` wire field.
     #[serde(rename = "revokedAt")]
     pub revoked_at: Option<i64>,
@@ -6990,6 +7185,45 @@ impl PartialEq<&str> for AuthDeploymentsRemoveResponseDeploymentKind {
 }
 impl PartialEq<AuthDeploymentsRemoveResponseDeploymentKind> for &str {
     fn eq(&self, other: &AuthDeploymentsRemoveResponseDeploymentKind) -> bool {
+        *self == other.as_str()
+    }
+}
+/// Generated schema type `AuthDeploymentsRemoveResponseDeploymentReviewMode`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum AuthDeploymentsRemoveResponseDeploymentReviewMode {
+    /// The `none` wire value.
+    #[serde(rename = "none")]
+    None,
+    /// The `required` wire value.
+    #[serde(rename = "required")]
+    Required,
+}
+impl AuthDeploymentsRemoveResponseDeploymentReviewMode {
+    /// Return the contract wire value.
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::Required => "required",
+        }
+    }
+}
+impl AsRef<str> for AuthDeploymentsRemoveResponseDeploymentReviewMode {
+    fn as_ref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl std::fmt::Display for AuthDeploymentsRemoveResponseDeploymentReviewMode {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(self.as_str())
+    }
+}
+impl PartialEq<&str> for AuthDeploymentsRemoveResponseDeploymentReviewMode {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+impl PartialEq<AuthDeploymentsRemoveResponseDeploymentReviewMode> for &str {
+    fn eq(&self, other: &AuthDeploymentsRemoveResponseDeploymentReviewMode) -> bool {
         *self == other.as_str()
     }
 }
@@ -7067,7 +7301,7 @@ pub struct AuthDeploymentsRemoveResponseDeployment {
     pub requires_device_delegation: bool,
     /// The `reviewMode` wire field.
     #[serde(rename = "reviewMode")]
-    pub review_mode: Option<String>,
+    pub review_mode: Option<AuthDeploymentsRemoveResponseDeploymentReviewMode>,
     /// The `revokedAt` wire field.
     #[serde(rename = "revokedAt")]
     pub revoked_at: Option<i64>,

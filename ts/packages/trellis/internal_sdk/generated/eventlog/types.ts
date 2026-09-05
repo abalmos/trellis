@@ -1,13 +1,13 @@
-// Generated from ./rust/crates/eventlog-runtime/.trellis/generated/protocol/apis/trellis.eventlog@v1.json
-import type { SerializableErrorData } from "../../../contracts.ts";
-import { TrellisError } from "../../../errors/index.ts";
+// Generated from ./rust/crates/eventlog-runtime/.trellis/artifacts/apis/trellis.eventlog@v1.json
+import type { SerializableErrorData } from "@qlever-llc/trellis";
+import { TrellisError } from "@qlever-llc/trellis";
 import { NotFoundErrorDataSchema } from "./schemas.ts";
 
 export type EventLogConsumersInspectInput = {
   consumerName: string;
   stream?: string;
 };
-export type EventLogConsumersInspectOutput = { [k: string]: unknown };
+export type EventLogConsumersInspectOutput = {};
 
 export type EventLogConsumersQueryInput = {
   contractId?: string;
@@ -30,7 +30,34 @@ export type EventLogConsumersQueryInput = {
   subject?: string;
 };
 export type EventLogConsumersQueryOutput = {
-  consumers: Array<unknown>;
+  consumers: Array<
+    {
+      ackPending: number;
+      ackWaitMs?: number;
+      consumerName: string;
+      contractId?: string;
+      deploymentId?: string;
+      filterSubjects: Array<string>;
+      group?: string;
+      managedBy?: "authority" | "platform" | "external";
+      maxDeliver?: number;
+      oldestPendingAt?: string;
+      oldestPendingEventId?: string;
+      pending: number;
+      redelivered?: number;
+      status:
+        | "current"
+        | "processing"
+        | "behind"
+        | "saturated"
+        | "inactive"
+        | "failing"
+        | "missing"
+        | "orphaned";
+      stream: string;
+      waitingPulls: number;
+    }
+  >;
   limit: number;
   offset: number;
   total: number;
@@ -40,7 +67,7 @@ export type EventLogInspectInput = {
   eventId?: string;
   streamSequence?: number;
 };
-export type EventLogInspectOutput = { [k: string]: unknown };
+export type EventLogInspectOutput = {};
 
 export type EventLogMetricsInput = {
   window?: "15m" | "1h" | "6h" | "24h" | "7d";
@@ -111,30 +138,43 @@ export type EventLogQueryInput = {
   publisherParticipantId?: string;
   resolution?: Array<("resolved" | "unresolved" | "malformed")>;
   search?: string;
-  sort?: { [k: string]: unknown };
+  sort?: {};
   subject?: string;
-  verificationStatus?: Array<("verified")>;
+  verificationStatus?: Array<"verified">;
   window?: "15m" | "1h" | "6h" | "24h" | "7d";
 };
 export type EventLogQueryOutput = {
-  events: Array<unknown>;
+  events: Array<
+    {
+      eventId: string;
+      eventTime: string;
+      headerCount: number;
+      ownerContractId?: string;
+      ownerEventName?: string;
+      payloadSizeBytes: number;
+      publisherDeploymentId?: string;
+      publisherInstanceId?: string;
+      publisherKind?: "service" | "device" | "user";
+      publisherParticipantDigest?: string;
+      publisherParticipantId?: string;
+      resolution: "resolved" | "unresolved" | "malformed";
+      streamSequence: number;
+      subject: string;
+      traceId?: string;
+      verificationStatus: "verified";
+    }
+  >;
   limit: number;
   offset: number;
   total: number;
 };
 
-export type EventLogWatchInput = { [k: string]: unknown };
-export type EventLogWatchEvent = { [k: string]: unknown };
+export type EventLogWatchInput = {};
+export type EventLogWatchEvent = {};
 
 export type NotFoundErrorData =
   & SerializableErrorData
-  & ({
-    context?: { [k: string]: unknown };
-    id: string;
-    message: string;
-    type: "NotFoundError";
-    [k: string]: unknown;
-  });
+  & ({ context?: {}; id: string; message: string; type: "NotFoundError" });
 export class NotFoundError extends TrellisError<NotFoundErrorData> {
   static readonly schema = NotFoundErrorDataSchema;
   override readonly name = "NotFoundError" as const;

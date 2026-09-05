@@ -1,12 +1,12 @@
 //! Thin typed client helpers for `trellis.eventlog@v1`.
-use crate::generated::TrellisClientError;
+use trellis_rs::generated::TrellisClientError;
 /// Typed API wrapper for the `trellis.eventlog@v1` contract.
 pub struct EventlogClient<'a> {
-    inner: &'a crate::generated::Caller,
+    inner: &'a trellis_rs::generated::Caller,
 }
 impl<'a> EventlogClient<'a> {
     /// Wrap an already connected low-level Trellis client.
-    pub fn new(inner: &'a crate::generated::Caller) -> Self {
+    pub fn new(inner: &'a trellis_rs::generated::Caller) -> Self {
         Self { inner }
     }
     /// Access typed RPC calls.
@@ -28,7 +28,7 @@ impl<'a> EventlogClient<'a> {
 }
 /// Typed RPC surface.
 pub struct Rpc<'a> {
-    pub(crate) _inner: &'a crate::generated::Caller,
+    pub(crate) _inner: &'a trellis_rs::generated::Caller,
 }
 impl<'a> Rpc<'a> {
     /// Access the `event_log` RPC group.
@@ -38,7 +38,7 @@ impl<'a> Rpc<'a> {
 }
 /// Typed RPC methods in the `event_log` group.
 pub struct EventLogRpc<'a> {
-    inner: &'a crate::generated::Caller,
+    inner: &'a trellis_rs::generated::Caller,
 }
 impl<'a> EventLogRpc<'a> {
     /// Call `EventLog.Consumers.Inspect`.
@@ -47,7 +47,7 @@ impl<'a> EventLogRpc<'a> {
         input: &super::types::EventLogConsumersInspectRequest,
     ) -> Result<
         super::rpc::Empty,
-        crate::generated::CallError<super::rpc::EventLogConsumersInspectError>,
+        trellis_rs::generated::CallError<super::rpc::EventLogConsumersInspectError>,
     > {
         self.inner
             .call_typed::<
@@ -62,7 +62,7 @@ impl<'a> EventLogRpc<'a> {
         input: &super::types::EventLogConsumersQueryRequest,
     ) -> Result<
         super::types::EventLogConsumersQueryResponse,
-        crate::generated::CallError<super::rpc::EventLogConsumersQueryError>,
+        trellis_rs::generated::CallError<super::rpc::EventLogConsumersQueryError>,
     > {
         self.inner
             .call_typed::<
@@ -75,7 +75,7 @@ impl<'a> EventLogRpc<'a> {
     pub async fn inspect(
         &self,
         input: &super::types::EventLogInspectRequest,
-    ) -> Result<super::rpc::Empty, crate::generated::CallError<super::rpc::EventLogInspectError>>
+    ) -> Result<super::rpc::Empty, trellis_rs::generated::CallError<super::rpc::EventLogInspectError>>
     {
         self.inner
             .call_typed::<super::rpc::EventLogInspectRpc, super::rpc::EventLogInspectError>(input)
@@ -87,7 +87,7 @@ impl<'a> EventLogRpc<'a> {
         input: &super::types::EventLogMetricsRequest,
     ) -> Result<
         super::types::EventLogMetricsResponse,
-        crate::generated::CallError<super::rpc::EventLogMetricsError>,
+        trellis_rs::generated::CallError<super::rpc::EventLogMetricsError>,
     > {
         self.inner
             .call_typed::<super::rpc::EventLogMetricsRpc, super::rpc::EventLogMetricsError>(input)
@@ -99,7 +99,7 @@ impl<'a> EventLogRpc<'a> {
         input: &super::types::EventLogQueryRequest,
     ) -> Result<
         super::types::EventLogQueryResponse,
-        crate::generated::CallError<super::rpc::EventLogQueryError>,
+        trellis_rs::generated::CallError<super::rpc::EventLogQueryError>,
     > {
         self.inner
             .call_typed::<super::rpc::EventLogQueryRpc, super::rpc::EventLogQueryError>(input)
@@ -108,12 +108,12 @@ impl<'a> EventLogRpc<'a> {
 }
 /// Typed event surface.
 pub struct Event<'a> {
-    pub(crate) _inner: &'a crate::generated::Caller,
+    pub(crate) _inner: &'a trellis_rs::generated::Caller,
 }
 impl<'a> Event<'a> {}
 /// Typed feed surface.
 pub struct Feed<'a> {
-    pub(crate) _inner: &'a crate::generated::Caller,
+    pub(crate) _inner: &'a trellis_rs::generated::Caller,
 }
 impl<'a> Feed<'a> {
     /// Access the `event_log` feed group.
@@ -123,7 +123,7 @@ impl<'a> Feed<'a> {
 }
 /// Typed feeds in the `event_log` group.
 pub struct EventLogFeed<'a> {
-    inner: &'a crate::generated::Caller,
+    inner: &'a trellis_rs::generated::Caller,
 }
 impl<'a> EventLogFeed<'a> {
     /// Subscribe to `EventLog.Watch`.
@@ -143,6 +143,6 @@ impl<'a> EventLogFeed<'a> {
 }
 /// Typed operation surface.
 pub struct Operation<'a> {
-    pub(crate) _inner: &'a crate::generated::Caller,
+    pub(crate) _inner: &'a trellis_rs::generated::Caller,
 }
 impl<'a> Operation<'a> {}

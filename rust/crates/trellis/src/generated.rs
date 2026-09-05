@@ -15,6 +15,18 @@ pub const fn assert_abi(version: u32) {
     assert!(version == ABI_VERSION, "generated Trellis ABI mismatch");
 }
 
+/// Static schema evidence exposed by generated wire types.
+pub trait TrellisApi {
+    /// Canonical API identity containing this schema.
+    fn api_id() -> &'static str;
+    /// Canonical API digest containing this schema.
+    fn api_digest() -> &'static str;
+    /// Schema registry name.
+    fn schema_name() -> &'static str;
+    /// Canonical JSON Schema representation.
+    fn schema_json() -> &'static str;
+}
+
 pub use crate::client::{
     AuthErrorPayload, AuthorizationContextBundle, AuthorizationContextStore,
     AuthorizationInstallation, CallError, DeclaredError, DeclaredErrorPayload,

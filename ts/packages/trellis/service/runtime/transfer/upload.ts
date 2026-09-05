@@ -1,5 +1,5 @@
 import type { Subscription } from "@nats-io/nats-core";
-import type { PermissionAtom } from "../../../contract_support/runtime.ts";
+import type { PermissionAtom } from "../../../participant_runtime/api.ts";
 import type { RuntimeOperationTransferProgress } from "../../../session.ts";
 import type { StoreError } from "../../../errors/StoreError.ts";
 import type { TransferError } from "../../../errors/TransferError.ts";

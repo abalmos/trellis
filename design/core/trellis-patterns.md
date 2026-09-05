@@ -215,7 +215,7 @@ split by concern:
 - [service-development.md](./service-development.md) - service layout,
   lifecycle, and jobs vs operations usage
 - [testing-patterns.md](./testing-patterns.md) - smallest-real-boundary testing,
-  matrix parity, and unit-test boundaries
+  live discovery, and unit-test boundaries
 - [observability-patterns.md](./observability-patterns.md) - health, stats,
   docs, telemetry, and request correlation
 - [frontend-svelte-patterns.md](./frontend-svelte-patterns.md) - Svelte frontend

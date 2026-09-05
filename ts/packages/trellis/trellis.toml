@@ -1,5 +1,0 @@
-format = 1
-default-registry = "trellis"
-
-[registries.trellis]
-prefix = "ghcr.io/qlever-llc/trellis-apis"

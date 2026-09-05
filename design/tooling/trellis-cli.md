@@ -10,8 +10,8 @@ order: 10
 
 - [../contracts/trellis-api-participants.md](./../contracts/trellis-api-participants.md) -
   canonical contract and catalog model
-- [../contracts/trellis-typescript-contract-authoring.md](./../contracts/trellis-typescript-contract-authoring.md) -
-  source-first TypeScript contract authoring
+- [../contracts/trellis-idl.md](./../contracts/trellis-idl.md) - native IDL
+  authoring and compilation
 - [../contracts/trellis-rust-contract-libraries.md](./../contracts/trellis-rust-contract-libraries.md) -
   Rust SDK and participant generation direction
 
@@ -61,12 +61,10 @@ cargo xtask build
 `cargo xtask
 build` installs first and then invokes the default Rust workspace
 build. Live client-library integration is language-owned and is run outside
-`cargo xtask build`: use `deno task -c ts/deno.json test:integration` for the
-TypeScript suite and
-`cargo test --manifest-path rust/Cargo.toml -p trellis-rs --test integration -- --nocapture`
-for the Rust suite. Both suites are governed by the `kind: "client"` cases in
-`integration/client-test-matrix.json`; every supported client language must
-cover every client matrix case against a live Trellis runtime.
+`cargo xtask build`: use
+`deno run -A -c ts/deno.json integration/live_runner.ts`. The runner discovers
+the ordinary Rust and Deno integration tests and provides their shared real
+infrastructure.
 
 Installation:
 
@@ -398,40 +396,22 @@ incompatible releases under an existing stable API ID. Dependency SDKs are
 generated before the consumer's own participant source is evaluated, while
 participant evidence continues to pin only API ID plus semantic digest.
 
-## Contract boundary
+## IDL boundary
 
-The developer-facing CLI boundary is the contract source.
+The developer-facing CLI boundary is native Trellis IDL.
 
-- project roots keep contract sources next to `deno.json`, `deno.jsonc`,
-  `package.json`, or `Cargo.toml`
-- single-contract TypeScript/JavaScript projects may use a top-level
-  `contract.ts` or `contract.js`, and that file default exports the contract
-  module that installation loads
-- multi-contract TypeScript/JavaScript projects use `contracts/*.ts` or
-  `contracts/*.js`, and those files default export the contract module that
-  installation loads
-- Deno-configured TypeScript projects resolve source modules with Deno; Node
-  package projects resolve TypeScript source modules with `tsx` and JavaScript
-  source modules with Node
-- generated TypeScript SDKs are private project-local installation output
-- Rust projects use `contracts/*.rs` source modules with native API and
-  participant artifact functions; those modules build artifacts with Rust code
-  or wrap checked-in native API JSON
-- every contract source must declare a required `kind`
-- the `trellis` runtime service may own multiple logical contracts such as
-  `trellis.core@v1`, `trellis.auth@v1`, and `trellis.state@v1`
-- installation emits canonical native API artifacts into project-local output
-- app and service repos SHOULD wrap `trellis install` into their normal `dev`,
-  `build`, and CI tasks rather than making end users run separate manifest
-  commands during routine browser-app development
-- operators may plan authority updates or authority migrations from generated
-  native API artifacts or OCI images that embed `/trellis/api.json`
-- OCI images may override that default path with the `io.trellis.contract.path`
-  label
+- project roots use `contract.trellis` or `contracts/*.trellis`
+- `trellis-idl` compiles all project sources before outputs are replaced
+- `trellis-protocol` validates and normalizes canonical API and participant
+  artifacts and remains authoritative for semantic digests and resolution
+- local dependencies compile from source; registry dependencies use exact
+  lock-verified artifacts under `.trellis/apis`
+- generated TypeScript and Rust SDKs are private project-local outputs under
+  `.trellis/ts` and `.trellis/rust`
+- `trellis generate` is offline and never executes source-language modules
+- a failed compile preserves the last successful generated outputs
 
-`.trellis/` contains derived native artifacts and SDKs only. TypeScript
-consumers import `@trellis/apis/<lineage>` and Rust consumers import
-`trellis_apis::<module>`.
+`.trellis/artifacts` contains owned canonical API and participant artifacts.
 
 ## Implementation
 
@@ -442,26 +422,26 @@ The Rust implementation uses:
 - `miette` for diagnostics
 - `tracing` and `tracing-subscriber` for logging
 - `comfy-table` for human-readable tabular output
-- Rust crates for operator flows, contract validation, packing, and code
+- Rust crates for operator flows, protocol validation, packing, and code
   generation
 
 The CLI owns explicit operational and package-manager command execution.
 Repo-specific build workflows remain wrapper scripts or tasks around those
-explicit commands. Shared logic lives in the public `trellis` and
-`trellis-contracts` packages plus dedicated internal workspace crates:
+explicit commands. Shared logic lives in the public `trellis` package plus
+dedicated internal workspace crates:
 
 - `trellis`
-- `trellis-contracts`
+- `trellis-idl`
+- `trellis-protocol`
 - `trellis-codegen-ts`
 - `trellis-codegen-rust`
-- the internal `trellis-generation` library
 
 The current CLI implementation uses internal Trellis SDK modules plus local
-helper modules for command parsing, auth session storage, contract resolution,
-and self-update behavior.
+helper modules for command parsing, auth session storage, participant
+resolution, and self-update behavior.
 
 ## References
 
 - `design/contracts/trellis-api-participants.md`
 - `design/contracts/trellis-rust-contract-libraries.md`
-- `design/contracts/trellis-typescript-contract-authoring.md`
+- `design/contracts/trellis-idl.md`

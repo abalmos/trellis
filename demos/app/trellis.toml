@@ -1,8 +1,12 @@
 format = 1
 
-[apis]
-"demo.service@v1" = { version = "1.0.0", path = "../ts/service/.trellis/generated/protocol/apis/demo.service@v1.json" }
+[registries.trellis]
+prefix = "ghcr.io/qlever-llc/trellis-apis"
+
+[apis."demo.service@v1"]
+version = "1.0.0"
+path = "../ts/service"
 
 [apis."trellis.state@v1"]
 version = "^1.0.0"
-path = "../../rust/crates/runtime/.trellis/generated/protocol/apis/trellis.state@v1.json"
+registry = "trellis"

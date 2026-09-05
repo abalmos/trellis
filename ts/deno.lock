@@ -20,6 +20,7 @@
     "jsr:@std/internal@^1.0.14": "1.0.14",
     "jsr:@std/io@0.225.2": "0.225.2",
     "jsr:@std/path@1": "1.1.5",
+    "jsr:@std/path@^1.1.2": "1.1.5",
     "jsr:@std/path@^1.1.4": "1.1.5",
     "jsr:@std/path@^1.1.5": "1.1.5",
     "jsr:@ts-morph/bootstrap@0.27": "0.27.0",
@@ -2664,7 +2665,8 @@
       }
     },
     "links": {
-      "jsr:@trellis/apis@0.0.0": {}
+      "jsr:@qlever-llc/trellis-app-console@0.0.0": {},
+      "jsr:@trellis-sdk/trellis.core@1.0.0": {}
     }
   }
 }

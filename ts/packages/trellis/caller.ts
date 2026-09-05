@@ -3,20 +3,20 @@ import type { StaticDecode, TSchema } from "typebox";
 import type {
   ActionDescriptor,
   DescriptorForAction,
-} from "./contract_support/descriptors.ts";
+} from "./participant_runtime/descriptors.ts";
 import {
-  type ContractWithRuntime,
-  getContractRuntime,
-} from "./contract_support/contract_runtime.ts";
+  type GeneratedParticipant,
+  getParticipantRuntime,
+} from "./participant_runtime/participant.ts";
 import type {
   EventDesc,
   FeedDesc,
   OperationDesc,
   RPCDesc,
   Schema,
-} from "./contract_support/runtime.ts";
+} from "./participant_runtime/api.ts";
 import type { TrellisConnection } from "./connection.ts";
-import type { NativeProtocolContract } from "./contract_support/protocol_artifacts.ts";
+import type { GeneratedParticipantEvidence } from "./participant_runtime/artifacts.ts";
 import type { OperationInvoker } from "./operations.ts";
 import type {
   EventListenerContext,
@@ -82,7 +82,7 @@ type UnionToIntersection<T> =
     (value: infer TIntersection) => void ? TIntersection
     : never;
 
-type SelectedAction<TContract> = TContract extends ContractWithRuntime<
+type SelectedAction<TContract> = TContract extends GeneratedParticipant<
   infer TAction
 > ? TAction
   : never;
@@ -96,7 +96,7 @@ type CallerMethods<TContract> = UnionToIntersection<
 >;
 
 /** Minimum participant contract accepted by the public caller connector. */
-export type CallerContract = NativeProtocolContract;
+export type CallerParticipant = GeneratedParticipantEvidence;
 
 /** Flat caller surface inferred from the participant contract's selected actions. */
 export type CallerRuntime<TContract> = CallerMethods<TContract> & {
@@ -108,7 +108,7 @@ export type CallerRuntime<TContract> = CallerMethods<TContract> & {
 };
 
 /** Projects a private Trellis session into the selected flat caller vocabulary. */
-export function createCallerRuntime<TContract extends ContractWithRuntime>(
+export function createCallerRuntime<TContract extends GeneratedParticipant>(
   session: object,
   contract: TContract,
 ): CallerRuntime<TContract> {
@@ -121,7 +121,7 @@ export function createCallerRuntime<TContract extends ContractWithRuntime>(
     wait: runtime.wait.bind(runtime),
   };
 
-  for (const { action } of getContractRuntime(contract).actions) {
+  for (const { action } of getParticipantRuntime(contract).actions) {
     switch (action.kind) {
       case "rpc":
         caller[action.connectedName] = (input: unknown, opts?: RequestOpts) =>

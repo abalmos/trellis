@@ -21,7 +21,6 @@ import {
   removeStalePidNamedResources,
 } from "./cleanup.ts";
 import { reserveLocalPort } from "./control_plane_config.ts";
-import { recordTrellisTestProcessStart } from "./integration/metrics.ts";
 import {
   generateLocalNatsBootstrap,
   generateLocalNatsBootstrapPool,
@@ -477,7 +476,6 @@ export class NatsTestContainer implements AsyncDisposable {
           ),
         });
         await ensureSharedStreams(nc);
-        await recordTrellisTestProcessStart("nats", String(child.pid));
         return new NatsTestContainer({
           natsUrl,
           websocketUrl,

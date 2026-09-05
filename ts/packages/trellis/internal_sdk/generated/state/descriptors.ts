@@ -1,11 +1,11 @@
-// Generated from ./rust/crates/runtime/.trellis/generated/protocol/apis/trellis.state@v1.json
+// Generated from ./rust/crates/runtime/.trellis/artifacts/apis/trellis.state@v1.json
 import {
   eventActions,
   feedAction,
   operationAction,
   rpcAction,
   schema,
-} from "../../../contracts.ts";
+} from "@qlever-llc/trellis";
 import * as Types from "./types.ts";
 import {
   StateAdminDeleteRequestSchema,
@@ -313,3 +313,13 @@ export const StatePut = rpcAction(
   "StatePut",
   ACTION_SOURCE,
 );
+
+export const ACTIONS = {
+  "State.Admin.Delete": StateAdminDelete,
+  "State.Admin.Get": StateAdminGet,
+  "State.Admin.List": StateAdminList,
+  "State.Delete": StateDelete,
+  "State.Get": StateGet,
+  "State.List": StateList,
+  "State.Put": StatePut,
+} as const;

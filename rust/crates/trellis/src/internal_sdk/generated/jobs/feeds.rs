@@ -1,5 +1,5 @@
 //! Typed feed descriptors for `trellis.jobs@v1`.
-use crate::generated::FeedDescriptor;
+use trellis_rs::generated::FeedDescriptor;
 /// Descriptor for `Jobs.Watch`.
 pub struct JobsWatchFeedDescriptor;
 impl FeedDescriptor for JobsWatchFeedDescriptor {

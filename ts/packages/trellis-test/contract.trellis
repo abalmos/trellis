@@ -1,0 +1,49 @@
+api "test.admin@v1" {
+  version "1.0.0";
+  display_name "Trellis Test Admin";
+  description "Admin participant used by live Trellis integration tests.";
+}
+
+participant "test.admin" app {
+  implements "test.admin@v1";
+  use required auth "trellis.auth@v1" {
+    call rpc "Auth.CapabilityGroups.Put";
+    call rpc "Auth.Connections.List";
+    call rpc "Auth.DeploymentAuthority.AcceptMigration";
+    call rpc "Auth.DeploymentAuthority.AcceptUpdate";
+    call rpc "Auth.DeploymentAuthority.Get";
+    call rpc "Auth.DeploymentAuthority.List";
+    call rpc "Auth.DeploymentAuthority.Plan";
+    call rpc "Auth.DeploymentAuthority.Plans.List";
+    call rpc "Auth.DeploymentAuthority.Reconcile";
+    call rpc "Auth.DeploymentAuthority.Reject";
+    call rpc "Auth.Deployments.Create";
+    call rpc "Auth.Devices.Provision";
+    call rpc "Auth.IdentityAuthority.List";
+    call rpc "Auth.IdentityAuthority.Revoke";
+    call rpc "Auth.Portals.Get";
+    call rpc "Auth.Portals.GrantOverrides.Put";
+    call rpc "Auth.Portals.GrantOverrides.Remove";
+    call rpc "Auth.Portals.List";
+    call rpc "Auth.Portals.LoginSettings.Update";
+    call rpc "Auth.Portals.Put";
+    call rpc "Auth.Portals.Routes.Put";
+    call rpc "Auth.ServiceInstances.Provision";
+    call rpc "Auth.Sessions.Revoke";
+    call rpc "Auth.UserIdentities.List";
+  }
+  use required eventlog "trellis.eventlog@v1" {
+    call rpc "EventLog.Query";
+  }
+  use required health "trellis.health@v1" {
+    call rpc "Health.Query";
+  }
+  use required jobs "trellis.jobs@v1" {
+    call rpc "Jobs.Query";
+  }
+  use required state "trellis.state@v1" {
+    call rpc "State.Admin.Delete";
+    call rpc "State.Admin.Get";
+    call rpc "State.Admin.List";
+  }
+}

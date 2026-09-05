@@ -2,12 +2,12 @@ import type { OperationHandler } from "@qlever-llc/trellis/service";
 import { BaseError } from "@qlever-llc/result";
 import { isErr, UnexpectedError } from "@qlever-llc/trellis";
 import { ASSIGNED_INSPECTIONS } from "../../../../shared/field_data.ts";
-import contract from "../../../contract.ts";
+import { participant } from "../../../.trellis/ts/participants/demo-service/mod.ts";
 import { recordActivity } from "../activity/index.ts";
 import { buildReportRecord, recordReport } from "./reportStore.ts";
 
 export const generateReport: OperationHandler<
-  typeof contract,
+  typeof participant,
   "Reports.Generate"
 > = async ({ input, op, client }) => {
   function toBaseError(cause: unknown): BaseError {
@@ -26,7 +26,7 @@ export const generateReport: OperationHandler<
       return null;
     }
 
-    const failed = await op.fail(error).take();
+    const failed = await op.fail(new UnexpectedError({ cause: error })).take();
     if (isErr(failed)) {
       if (isTerminalOperationError(failed.error)) {
         return null;
@@ -59,7 +59,7 @@ export const generateReport: OperationHandler<
         stage: "drafting",
         message: `Collecting field notes for ${inspectionLabel}`,
       },
-      { stage: "checking", message: `Checking evidence and site readiness` },
+      { stage: "checking", message: "Checking evidence and site readiness" },
       {
         stage: "publishing",
         message: `Publishing closeout status for ${inspectionLabel}`,

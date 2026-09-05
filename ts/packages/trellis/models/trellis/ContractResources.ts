@@ -6,12 +6,12 @@ import {
   ContractResourcesSchema,
   ContractStoreResourceSchema,
   EventConsumerResourceBindingSchema,
-  InstalledServiceContractSchema,
+  InstalledGeneratedServiceParticipantSchema,
   JobsQueueBindingSchema,
   JobsResourceBindingSchema,
   KvResourceBindingSchema,
   StoreResourceBindingSchema,
-} from "../../contracts.ts";
+} from "../../participant.ts";
 import type { Static } from "typebox";
 
 export {
@@ -22,7 +22,7 @@ export {
   ContractResourcesSchema,
   ContractStoreResourceSchema,
   EventConsumerResourceBindingSchema,
-  InstalledServiceContractSchema,
+  InstalledGeneratedServiceParticipantSchema,
   JobsQueueBindingSchema,
   JobsResourceBindingSchema,
   KvResourceBindingSchema,
@@ -44,6 +44,6 @@ export type JobsResourceBinding = Static<typeof JobsResourceBindingSchema>;
 export type ContractResourceBindings = Static<
   typeof ContractResourceBindingsSchema
 >;
-export type InstalledServiceContract = Static<
-  typeof InstalledServiceContractSchema
+export type InstalledGeneratedServiceParticipant = Static<
+  typeof InstalledGeneratedServiceParticipantSchema
 >;

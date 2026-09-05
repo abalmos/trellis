@@ -266,10 +266,10 @@ fn parses_target_first_service_and_device_resource_tokens() {
             assert_eq!(command.id.as_deref(), Some("api"));
             match command.command {
                 SvcSubcommand::Resource(SvcResourceAction::Apply(args)) => {
-                    assert_eq!(args.api.as_deref(), Some("./trellis.api.json"));
+                    assert_eq!(args.api, PathBuf::from("./trellis.api.json"));
                     assert_eq!(
-                        args.participant.as_deref(),
-                        Some("./trellis.participant.json")
+                        args.participant,
+                        PathBuf::from("./trellis.participant.json")
                     );
                 }
                 other => panic!("unexpected svc command: {other:?}"),
@@ -284,7 +284,7 @@ fn parses_target_first_service_and_device_resource_tokens() {
         "api",
         "apply",
         "--manifest",
-        "./trellis.contract.json",
+        "./trellis.participant.json",
     ])
     .is_err());
 

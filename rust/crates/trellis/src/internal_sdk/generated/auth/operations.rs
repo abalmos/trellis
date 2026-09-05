@@ -1,6 +1,6 @@
 //! Typed operation descriptors for `trellis.auth@v1`.
-use crate::generated::{NoOperationUpdates, OperationDescriptor};
-use crate::service::OperationFailureLike;
+use trellis_rs::generated::{NoOperationUpdates, OperationDescriptor};
+use trellis_rs::service::OperationFailureLike;
 /// Descriptor for `Auth.DeviceUserAuthorities.Resolve`.
 pub struct AuthDeviceUserAuthoritiesResolveOperation;
 impl OperationDescriptor for AuthDeviceUserAuthoritiesResolveOperation {
@@ -32,19 +32,19 @@ impl OperationDescriptor for AuthDeviceUserAuthoritiesResolveOperation {
 #[derive(Debug, Clone, PartialEq)]
 pub enum AuthDeviceUserAuthoritiesResolveOperationError {
     /// `AuthError` failure.
-    AuthError(crate::generated::AuthErrorPayload),
+    AuthError(trellis_rs::generated::AuthErrorPayload),
     /// `UnexpectedError` failure.
     UnexpectedError(super::types::AuthErrorDetails),
     /// `ValidationError` failure.
     ValidationError(super::types::AuthErrorDetails),
 }
-impl crate::generated::DeclaredError for AuthDeviceUserAuthoritiesResolveOperationError {
+impl trellis_rs::generated::DeclaredError for AuthDeviceUserAuthoritiesResolveOperationError {
     fn decode(
-        payload: &crate::generated::RemoteErrorPayload,
+        payload: &trellis_rs::generated::RemoteErrorPayload,
     ) -> Result<Option<Self>, serde_json::Error> {
         match payload.error_type() {
             Some("AuthError") => payload
-                .decode_declared::<crate::generated::AuthErrorPayload>("AuthError")
+                .decode_declared::<trellis_rs::generated::AuthErrorPayload>("AuthError")
                 .map(|value| value.map(Self::AuthError)),
             Some("UnexpectedError") => payload
                 .decode_declared::<super::types::AuthErrorDetails>("UnexpectedError")

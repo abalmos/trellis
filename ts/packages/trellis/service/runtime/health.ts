@@ -8,7 +8,7 @@
  * @module
  */
 
-import type { JsonValue } from "../../contracts.ts";
+import type { JsonValue } from "../../participant.ts";
 import { ulid } from "ulid";
 import type { HealthHeartbeatSample } from "../../internal_sdk/generated/health/mod.ts";
 

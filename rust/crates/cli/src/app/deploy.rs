@@ -1,7 +1,5 @@
 use std::collections::BTreeMap;
 use std::io::{self, Write};
-use std::path::Path;
-use std::path::PathBuf;
 
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine as _;
@@ -14,7 +12,6 @@ use trellis_runtime_apis::auth::AuthClient;
 use crate::app::{connect_authenticated_cli_client, generate_session_keypair, json_value_label};
 use crate::cli::*;
 use crate::output;
-use trellis_generation::contract_input;
 
 const DEVICE_NAME_METADATA_KEY: &str = "name";
 const DEVICE_SERIAL_METADATA_KEY: &str = "serialNumber";
@@ -206,7 +203,12 @@ async fn create_device(format: OutputFormat, id: &str, args: &DevCreateArgs) -> 
                 participant_id: None,
                 expires_at: None,
                 requires_device_delegation: args.requires_device_delegation,
-                review_mode: Some(args.review_mode.as_wire_value().to_owned()),
+                review_mode: Some(
+                    serde_json::from_value(serde_json::Value::String(
+                        args.review_mode.as_wire_value().to_owned(),
+                    ))
+                    .expect("CLI review mode is a generated wire enum"),
+                ),
                 portal_id: None,
                 idempotency_key: cli_idempotency_key(),
             },
@@ -222,28 +224,28 @@ async fn apply_contract(
     deployment_id: &str,
     args: &ApplyArgs,
 ) -> miette::Result<()> {
-    let resolved = contract_input::resolve_contract_input(
-        args.api.as_deref().map(Path::new),
-        args.participant.as_deref().map(Path::new),
-        &args
-            .referenced_api
-            .iter()
-            .map(PathBuf::from)
-            .collect::<Vec<_>>(),
-        args.source.as_deref().map(Path::new),
-        args.image.as_deref(),
-        "CONTRACT",
-        contract_input::default_image_api_path(),
-    )?;
+    let api_value: Value =
+        serde_json::from_slice(&std::fs::read(&args.api).into_diagnostic()?).into_diagnostic()?;
+    let api = trellis_protocol::parse_api(&api_value).into_diagnostic()?;
+    let participant_value: Value =
+        serde_json::from_slice(&std::fs::read(&args.participant).into_diagnostic()?)
+            .into_diagnostic()?;
+    let participant = trellis_protocol::parse_participant(&participant_value).into_diagnostic()?;
+    let mut referenced_api_artifacts = vec![api.normalized_value().into_diagnostic()?];
+    for path in &args.referenced_api {
+        let value: Value =
+            serde_json::from_slice(&std::fs::read(path).into_diagnostic()?).into_diagnostic()?;
+        referenced_api_artifacts.push(
+            trellis_protocol::parse_api(&value)
+                .into_diagnostic()?
+                .normalized_value()
+                .into_diagnostic()?,
+        );
+    }
     let (_state, connected) = connect_authenticated_cli_client(format).await?;
-    let participant = resolved.participant.ok_or_else(|| {
-        miette::miette!("deployment apply requires a native Trellis participant artifact")
-    })?;
-    let Value::Object(participant_artifact) = participant.value else {
+    let Value::Object(participant_artifact) = participant.normalized_value().into_diagnostic()?
+    else {
         return Err(miette::miette!("participant artifact must be an object"));
-    };
-    let Value::Object(api_artifact) = resolved.api.value else {
-        return Err(miette::miette!("API artifact must be an object"));
     };
     let response = AuthClient::new(&connected)
         .rpc()
@@ -252,14 +254,15 @@ async fn apply_contract(
             &trellis_runtime_apis::auth::types::AuthDeploymentAuthorityPlanRequest {
                 deployment_id: deployment_id.to_string(),
                 participant_artifact: participant_artifact.into_iter().collect(),
-                referenced_api_artifacts: std::iter::once(api_artifact)
-                    .chain(resolved.referenced_apis.into_iter().map(|api| {
-                        api.value
-                            .as_object()
+                referenced_api_artifacts: referenced_api_artifacts
+                    .into_iter()
+                    .map(|api| {
+                        api.as_object()
                             .expect("validated API artifact is an object")
                             .clone()
-                    }))
-                    .map(|api| api.into_iter().collect())
+                            .into_iter()
+                            .collect()
+                    })
                     .collect(),
                 expires_at: None,
                 idempotency_key: cli_idempotency_key(),
@@ -273,7 +276,10 @@ async fn apply_contract(
     } else {
         output::print_success("deployment authority plan created");
         output::print_info(&format!("deploymentId={deployment_id}"));
-        output::print_info(&format!("participantDigest={}", participant.digest));
+        output::print_info(&format!(
+            "participantDigest={}",
+            participant.digest().into_diagnostic()?
+        ));
         if let Some(plan) = response.get("proposal") {
             if let Some(plan_id) = plan.get("proposalId").and_then(Value::as_str) {
                 output::print_info(&format!("proposalId={plan_id}"));

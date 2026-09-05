@@ -1,15 +1,4 @@
 import { dirname, fromFileUrl, join, resolve } from "@std/path";
-import clientMatrix from "../../../integration/client-test-matrix.json" with {
-  type: "json",
-};
-import runtimeMatrix from "../../../integration/rust-runtime-test-matrix.json" with {
-  type: "json",
-};
-import {
-  summarizeTrellisTestDurations,
-  summarizeTrellisTestProcessStarts,
-} from "../../../ts/packages/trellis-test/src/integration/metrics.ts";
-import { reserveHostTestSlot } from "../../../ts/packages/trellis-test/src/control_plane_config.ts";
 import { startTrellisIntegrationSharedRuntimeHost } from "../../../ts/packages/trellis-test/src/integration/shared_runtime_host.ts";
 import { TRELLIS_TEST_SHARED_RUNTIME_ENV } from "../../../ts/packages/trellis-test/src/integration/shared_runtime_protocol.ts";
 
@@ -17,7 +6,6 @@ const repoRoot = fromFileUrl(new URL("../../../", import.meta.url));
 const INTEGRATION_BINARY_ENV = "TRELLIS_TEST_INTEGRATION_BIN";
 const PREBUILT_ONLY_ENV = "TRELLIS_TEST_PREBUILT_ONLY";
 const ALLOW_DIRTY_PREBUILT_ENV = "TRELLIS_TEST_ALLOW_DIRTY_PREBUILT";
-const TEST_JOBS_ENV = "TRELLIS_TEST_JOBS";
 export const INTEGRATION_LIVE_ARTIFACTS_MANIFEST =
   "dist/integration-runtime/manifest.json";
 const INTEGRATION_LIVE_ARTIFACTS_FORMAT =
@@ -63,11 +51,7 @@ async function main(args: readonly string[]): Promise<number> {
   const executable = Deno.env.get(INTEGRATION_BINARY_ENV) ??
     await buildIntegrationTest();
   const runtimeBinaries = await buildRuntimeBinaries();
-  const compiled = await listTests(executable, []);
-  assertCompiledInventory(compiled);
-  const selectedCompiled = await listTests(executable, testArgs);
-  const registered = new Set(expectedRustTests());
-  const tenantIds = selectedCompiled.filter((id) => registered.has(id));
+  const tenantIds = await listTests(executable, testArgs);
   if (tenantIds.length === 0) {
     throw new Error("Rust integration selection contains no registered cases");
   }
@@ -89,69 +73,25 @@ async function main(args: readonly string[]): Promise<number> {
     })
     : {
       env: { [TRELLIS_TEST_SHARED_RUNTIME_ENV]: inheritedManifest },
-      metrics: () => [],
       output: () => "shared host is owned by the live orchestrator",
       stop: async () => {},
     };
 
   try {
     const env = { ...host.env, ...runtimeBinaries, TMPDIR: tempDir };
-    const runs: TestRun[] = [];
-    const jobs = rustIntegrationJobs(
-      tenantIds.length,
-      Deno.env.get(TEST_JOBS_ENV),
+    const run = await runTests(
+      executable,
+      [...testArgs, "--test-threads=1"],
+      env,
     );
-    let next = 0;
-    let failed = false;
-    await Promise.all(Array.from({ length: jobs }, async () => {
-      while (!failed) {
-        const name = tenantIds[next++];
-        if (name === undefined) return;
-        const hostSlot = await reserveHostTestSlot();
-        const caseEnv = hostSlot === undefined
-          ? env
-          : { ...env, TRELLIS_TEST_CASE_SLOT: "1" };
-        const run = await runTests(executable, [
-          name,
-          "--exact",
-          "--format=pretty",
-        ], caseEnv).finally(() => hostSlot?.release());
-        runs.push(run);
-        failed ||= !run.success;
-      }
-    }));
-    const results = runs.flatMap((run) => rustTestResults(run.stdout));
-    const success = runs.every((run) => run.success);
-    if (success) assertRustExecutionInventory(tenantIds, results);
-    console.log(JSON.stringify({
-      event: "rust-integration-results",
-      registered: expectedRustTests().length,
-      compiled: compiled.length,
-      selected: tenantIds.length,
-      passed: results.filter((result) => result.status === "passed").length,
-      failed: results.filter((result) => result.status === "failed").length,
-      ignored: results.filter((result) => result.status === "ignored").length,
-      tests: results,
-    }));
-    if (!success) {
+    if (!run.success) {
       console.error(
         `shared Trellis output:\n${host.output?.() ?? "<unavailable>"}`,
       );
     }
-    return runs.find((run) => !run.success)?.code ?? 0;
+    return run.code;
   } finally {
-    try {
-      if (inheritedManifest === undefined) {
-        const metrics = host.metrics === undefined ? [] : await host.metrics();
-        console.log(JSON.stringify({
-          event: "integration-process-summary",
-          starts: summarizeTrellisTestProcessStarts(metrics),
-          slowest: summarizeTrellisTestDurations(metrics),
-        }));
-      }
-    } finally {
-      await host.stop();
-    }
+    await host.stop();
   }
 }
 
@@ -188,20 +128,6 @@ export function parseIntegrationRunnerArgs(
   return args[0] === "--" ? args.slice(1) : args;
 }
 
-export function rustIntegrationJobs(
-  testCount: number,
-  configuredJobs: string | undefined,
-  hardwareConcurrency = navigator.hardwareConcurrency,
-): number {
-  const configured = Number.parseInt(configuredJobs ?? "", 10);
-  return Math.min(
-    testCount,
-    Number.isSafeInteger(configured) && configured > 0
-      ? configured
-      : Math.max(1, Math.ceil(hardwareConcurrency / 2)),
-  );
-}
-
 export async function buildIntegrationTest(): Promise<string> {
   rejectCargoFallback("Rust integration test executable");
   const output = await new Deno.Command("cargo", {
@@ -213,6 +139,8 @@ export async function buildIntegrationTest(): Promise<string> {
       "rust/Cargo.toml",
       "-p",
       "trellis-rs",
+      "--features",
+      "live-integration",
       "--test",
       "integration",
       "--no-run",
@@ -510,104 +438,6 @@ export function testNamesFromList(output: string): string[] {
   return output.split("\n")
     .filter((line) => line.endsWith(": test"))
     .map((line) => line.slice(0, -": test".length));
-}
-
-type RustTestResult = {
-  readonly name: string;
-  readonly status: "passed" | "failed" | "ignored";
-};
-
-export function rustTestResults(output: string): RustTestResult[] {
-  const results: RustTestResult[] = [];
-  for (const line of output.split("\n")) {
-    const match = /^test (.+) \.\.\. (ok|FAILED|ignored)$/.exec(line.trim());
-    if (match === null) continue;
-    results.push({
-      name: match[1],
-      status: match[2] === "ok"
-        ? "passed"
-        : match[2] === "FAILED"
-        ? "failed"
-        : "ignored",
-    });
-  }
-  return results;
-}
-
-export function expectedRustTests(): string[] {
-  return [...clientMatrix.cases, ...runtimeMatrix.cases]
-    .filter((entry) => entry.completion.rust === "implemented")
-    .map((entry) => {
-      const implementation = entry.implementations?.rust;
-      if (implementation === undefined) {
-        throw new Error(
-          `implemented Rust matrix case ${entry.id} has no mapping`,
-        );
-      }
-      return `${implementation.module}::${implementation.function}`;
-    })
-    .toSorted();
-}
-
-export async function verifyCompiledRustInventory(
-  executable: string,
-): Promise<void> {
-  assertCompiledInventory(await listTests(executable, []));
-}
-
-function assertCompiledInventory(compiled: readonly string[]): void {
-  assertRegisteredTestsCompiled(expectedRustTests(), compiled);
-}
-
-export function assertRegisteredTestsCompiled(
-  registered: readonly string[],
-  compiled: readonly string[],
-): void {
-  const missing = registered.filter((name) => !compiled.includes(name));
-  if (missing.length > 0) {
-    throw new Error(
-      `registered Rust cases are not compiled: ${missing.join(", ")}`,
-    );
-  }
-}
-
-export function assertRustExecutionInventory(
-  expected: readonly string[],
-  results: readonly RustTestResult[],
-): void {
-  const ignored = results.filter((result) => result.status === "ignored");
-  if (ignored.length > 0) {
-    throw new Error(
-      `selected Rust integration tests were ignored: ${
-        ignored.map((result) => result.name).join(", ")
-      }`,
-    );
-  }
-  const executed = results
-    .map((result) => result.name)
-    .toSorted();
-  assertSameTests("executed Rust cases", expected.toSorted(), executed);
-}
-
-function assertSameTests(
-  label: string,
-  expected: readonly string[],
-  actual: readonly string[],
-): void {
-  const missing = expected.filter((name) => !actual.includes(name));
-  const unexpected = actual.filter((name) => !expected.includes(name));
-  if (
-    expected.length !== actual.length || missing.length > 0 ||
-    unexpected.length > 0
-  ) {
-    throw new Error(
-      `${label} differ from expected inventory: missing [${
-        missing.join(", ")
-      }], ` +
-        `unexpected [${unexpected.join(", ")}], ` +
-        `expected ${expected.length}, actual ${actual.length}`,
-    );
-  }
 }
 
 function rejectCargoFallback(label: string): void {

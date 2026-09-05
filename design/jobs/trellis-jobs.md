@@ -1280,11 +1280,11 @@ identity used for routing and permission derivation.
 
 **Scope assignments:**
 
-| Actor          | Grants                                                     |
-| -------------- | ---------------------------------------------------------- |
-| Services       | `service` plus derived service-local jobs subjects         |
-| `jobs` service | `service` + `read` + `mutate` + `stream` |
-| Admin UIs      | `read` + `mutate` + `stream`             |
+| Actor          | Grants                                             |
+| -------------- | -------------------------------------------------- |
+| Services       | `service` plus derived service-local jobs subjects |
+| `jobs` service | `service` + `read` + `mutate` + `stream`           |
+| Admin UIs      | `read` + `mutate` + `stream`                       |
 
 Note: Regular users do not interact with jobs directly. End-user progress or
 completion flows are exposed through service-owned operations, not the jobs

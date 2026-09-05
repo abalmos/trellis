@@ -1,9 +1,9 @@
 import { ok } from "@qlever-llc/trellis";
 import type { RpcHandler } from "@qlever-llc/trellis/service";
-import type contract from "../../../contract.ts";
+import type { participant } from "../../../.trellis/ts/participants/demo-service/mod.ts";
 import { recordActivity } from "../activity/index.ts";
 
-type Handler = RpcHandler<typeof contract, "Evidence.Delete">;
+type Handler = RpcHandler<typeof participant, "Evidence.Delete">;
 
 /** Deletes a stored evidence object from the demo evidence locker. */
 export const deleteEvidence: Handler = async ({ input, client }) => {

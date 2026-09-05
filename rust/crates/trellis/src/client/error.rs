@@ -199,6 +199,14 @@ pub trait DeclaredError: Sized + std::fmt::Debug {
 #[derive(Debug)]
 pub enum NoDeclaredError {}
 
+impl std::fmt::Display for NoDeclaredError {
+    fn fmt(&self, _: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match *self {}
+    }
+}
+
+impl std::error::Error for NoDeclaredError {}
+
 impl DeclaredError for NoDeclaredError {
     fn decode(_payload: &RemoteErrorPayload) -> Result<Option<Self>, serde_json::Error> {
         Ok(None)

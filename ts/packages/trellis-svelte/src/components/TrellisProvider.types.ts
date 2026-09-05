@@ -6,12 +6,12 @@ import type {
 import type { Snippet } from "svelte";
 import type {
   TrellisAppOwner,
-  TrellisContractLike,
+  TrellisParticipantLike,
 } from "../context.svelte.ts";
 
 /** Props accepted by the Svelte Trellis provider component. */
 export type TrellisProviderProps<
-  TContract extends TrellisContractLike = TrellisContractLike,
+  TContract extends TrellisParticipantLike = TrellisParticipantLike,
 > = {
   trellisApp: TrellisAppOwner<TContract>;
   auth?: ClientAuthOptions;

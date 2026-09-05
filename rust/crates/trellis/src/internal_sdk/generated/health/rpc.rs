@@ -1,6 +1,6 @@
 //! Typed RPC descriptors for `trellis.health@v1`.
-use crate::generated::RpcDescriptor;
 use serde::{Deserialize, Serialize};
+use trellis_rs::generated::RpcDescriptor;
 /// Empty request or response payload used by zero-argument RPCs.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Empty {}
@@ -23,23 +23,23 @@ pub enum HealthInspectError {
     /// `NotFoundError` error payload.
     NotFoundError(super::types::NotFoundErrorData),
     /// `UnexpectedError` error payload.
-    UnexpectedError(crate::generated::DeclaredErrorPayload),
+    UnexpectedError(trellis_rs::generated::DeclaredErrorPayload),
     /// `ValidationError` error payload.
-    ValidationError(crate::generated::DeclaredErrorPayload),
+    ValidationError(trellis_rs::generated::DeclaredErrorPayload),
 }
-impl crate::generated::DeclaredError for HealthInspectError {
+impl trellis_rs::generated::DeclaredError for HealthInspectError {
     fn decode(
-        payload: &crate::generated::RemoteErrorPayload,
+        payload: &trellis_rs::generated::RemoteErrorPayload,
     ) -> Result<Option<Self>, serde_json::Error> {
         match payload.error_type() {
             Some("NotFoundError") => payload
                 .decode_declared::<super::types::NotFoundErrorData>("NotFoundError")
                 .map(|value| value.map(Self::NotFoundError)),
             Some("UnexpectedError") => payload
-                .decode_declared::<crate::generated::DeclaredErrorPayload>("UnexpectedError")
+                .decode_declared::<trellis_rs::generated::DeclaredErrorPayload>("UnexpectedError")
                 .map(|value| value.map(Self::UnexpectedError)),
             Some("ValidationError") => payload
-                .decode_declared::<crate::generated::DeclaredErrorPayload>("ValidationError")
+                .decode_declared::<trellis_rs::generated::DeclaredErrorPayload>("ValidationError")
                 .map(|value| value.map(Self::ValidationError)),
             _ => Ok(None),
         }
@@ -61,20 +61,20 @@ impl RpcDescriptor for HealthMetricsRpc {
 #[derive(Debug, Clone, PartialEq)]
 pub enum HealthMetricsError {
     /// `UnexpectedError` error payload.
-    UnexpectedError(crate::generated::DeclaredErrorPayload),
+    UnexpectedError(trellis_rs::generated::DeclaredErrorPayload),
     /// `ValidationError` error payload.
-    ValidationError(crate::generated::DeclaredErrorPayload),
+    ValidationError(trellis_rs::generated::DeclaredErrorPayload),
 }
-impl crate::generated::DeclaredError for HealthMetricsError {
+impl trellis_rs::generated::DeclaredError for HealthMetricsError {
     fn decode(
-        payload: &crate::generated::RemoteErrorPayload,
+        payload: &trellis_rs::generated::RemoteErrorPayload,
     ) -> Result<Option<Self>, serde_json::Error> {
         match payload.error_type() {
             Some("UnexpectedError") => payload
-                .decode_declared::<crate::generated::DeclaredErrorPayload>("UnexpectedError")
+                .decode_declared::<trellis_rs::generated::DeclaredErrorPayload>("UnexpectedError")
                 .map(|value| value.map(Self::UnexpectedError)),
             Some("ValidationError") => payload
-                .decode_declared::<crate::generated::DeclaredErrorPayload>("ValidationError")
+                .decode_declared::<trellis_rs::generated::DeclaredErrorPayload>("ValidationError")
                 .map(|value| value.map(Self::ValidationError)),
             _ => Ok(None),
         }
@@ -96,20 +96,20 @@ impl RpcDescriptor for HealthQueryRpc {
 #[derive(Debug, Clone, PartialEq)]
 pub enum HealthQueryError {
     /// `UnexpectedError` error payload.
-    UnexpectedError(crate::generated::DeclaredErrorPayload),
+    UnexpectedError(trellis_rs::generated::DeclaredErrorPayload),
     /// `ValidationError` error payload.
-    ValidationError(crate::generated::DeclaredErrorPayload),
+    ValidationError(trellis_rs::generated::DeclaredErrorPayload),
 }
-impl crate::generated::DeclaredError for HealthQueryError {
+impl trellis_rs::generated::DeclaredError for HealthQueryError {
     fn decode(
-        payload: &crate::generated::RemoteErrorPayload,
+        payload: &trellis_rs::generated::RemoteErrorPayload,
     ) -> Result<Option<Self>, serde_json::Error> {
         match payload.error_type() {
             Some("UnexpectedError") => payload
-                .decode_declared::<crate::generated::DeclaredErrorPayload>("UnexpectedError")
+                .decode_declared::<trellis_rs::generated::DeclaredErrorPayload>("UnexpectedError")
                 .map(|value| value.map(Self::UnexpectedError)),
             Some("ValidationError") => payload
-                .decode_declared::<crate::generated::DeclaredErrorPayload>("ValidationError")
+                .decode_declared::<trellis_rs::generated::DeclaredErrorPayload>("ValidationError")
                 .map(|value| value.map(Self::ValidationError)),
             _ => Ok(None),
         }

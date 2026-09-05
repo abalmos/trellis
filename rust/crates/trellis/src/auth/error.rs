@@ -8,10 +8,6 @@ pub enum TrellisAuthError {
     #[error("invalid contract json: {0}")]
     ContractJson(#[from] serde_json::Error),
 
-    /// Contract digest calculation failed.
-    #[error("contract digest error: {0}")]
-    ContractDigest(#[from] trellis_contracts::ContractsError),
-
     /// A protocol-owned participant or proof value was invalid.
     #[error("auth protocol error: {0}")]
     Protocol(Box<trellis_protocol::ProtocolError>),

@@ -8,7 +8,7 @@ import type {
   ConnectedTrellisService,
   RpcHandler,
 } from "@qlever-llc/trellis/service";
-import type contract from "../contract.ts";
+import type { participant } from "../.trellis/ts/participants/demo-service/mod.ts";
 import type { getSiteSummary } from "../../shared/field_data.ts";
 
 export type ReceiveTransferIssuer = {
@@ -43,7 +43,7 @@ export type FieldOpsDeps = {
   activityFeedEventNames: ActivityFeedEventNames;
 };
 
-export type FieldOpsService = ConnectedTrellisService<typeof contract>;
+export type FieldOpsService = ConnectedTrellisService<typeof participant>;
 export type FieldOpsHandlerClient = Parameters<
-  RpcHandler<typeof contract, "Assignments.List">
+  RpcHandler<typeof participant, "Assignments.List">
 >[0]["client"];

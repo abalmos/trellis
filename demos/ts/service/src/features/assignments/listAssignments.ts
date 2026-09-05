@@ -1,9 +1,9 @@
 import { ASSIGNED_INSPECTIONS } from "../../../../shared/field_data.ts";
 import { ok } from "@qlever-llc/trellis";
 import type { RpcHandler } from "@qlever-llc/trellis/service";
-import type contract from "../../../contract.ts";
+import type { participant } from "../../../.trellis/ts/participants/demo-service/mod.ts";
 
-type Handler = RpcHandler<typeof contract, "Assignments.List">;
+type Handler = RpcHandler<typeof participant, "Assignments.List">;
 
 export const listAssignments: Handler = ({ input }) => {
   const offset = input.offset ?? 0;

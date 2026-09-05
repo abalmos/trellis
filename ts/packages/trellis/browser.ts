@@ -18,11 +18,10 @@ export {
   isJsonValue,
   schema,
   unwrapSchema,
-} from "./contracts.ts";
-export type { InferSchemaType, JsonValue } from "./contracts.ts";
+} from "./participant.ts";
+export type { InferSchemaType, JsonValue } from "./participant.ts";
 export { TrellisConnection } from "./connection.ts";
 export type { TrellisConnectionStatus } from "./connection.ts";
-export { defineError, withTrellisValidation } from "./contract_support/mod.ts";
 export {
   buildCursorPage,
   buildPageResponse,
@@ -33,14 +32,13 @@ export {
   normalizePageQuery,
   PageRequestSchema,
   PageResponseSchema,
-} from "./contract_support/mod.ts";
+} from "./participant.ts";
 export type {
   CursorPage,
   CursorPageInfo,
   CursorPageResponseSchema,
   CursorQuery,
   CursorQueryOptions,
-  ErrorClass,
   InferRuntimeRpcError,
   NormalizedCursorQuery,
   PageRequest,
@@ -50,14 +48,7 @@ export type {
   SerializableErrorData,
   TrellisValidationExtension,
   TrellisValidationIssueHint,
-} from "./contract_support/mod.ts";
-export {
-  defineAgentContract,
-  defineAppContract,
-  defineDeviceContract,
-  defineServiceContract,
-} from "./contract.ts";
-export type { DefineContractInput } from "./contract.ts";
+} from "./participant.ts";
 export {
   AsyncResult,
   BaseError,

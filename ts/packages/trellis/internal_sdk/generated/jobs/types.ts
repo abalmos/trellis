@@ -1,6 +1,6 @@
-// Generated from ./rust/crates/jobs-runtime/.trellis/generated/protocol/apis/trellis.jobs@v1.json
-import type { SerializableErrorData } from "../../../contracts.ts";
-import { TrellisError } from "../../../errors/index.ts";
+// Generated from ./rust/crates/jobs-runtime/.trellis/artifacts/apis/trellis.jobs@v1.json
+import type { SerializableErrorData } from "@qlever-llc/trellis";
+import { TrellisError } from "@qlever-llc/trellis";
 import { NotFoundErrorDataSchema } from "./schemas.ts";
 
 export type JobsCancelInput = { id: string; reason?: string };
@@ -820,7 +820,7 @@ export type JobsMetricsOutput = {
   step: string;
   summary: Array<
     {
-      byState: { [k: string]: unknown };
+      byState: { [k: string]: number };
       dead?: number;
       failed?: number;
       failureRate?: number;
@@ -1004,7 +1004,7 @@ export type JobsQueryOutput = {
   nextOffset?: number;
   offset: number;
   stats: {
-    byState: { [k: string]: unknown };
+    byState: { [k: string]: number };
     dead?: number;
     failed?: number;
     queued?: number;
@@ -1316,7 +1316,7 @@ export type JobsWatchEvent = { kind: "ready"; timestamp: string } | {
 export type NotFoundErrorData =
   & SerializableErrorData
   & ({
-    context?: { [k: string]: unknown };
+    context?: {};
     id: string;
     jobId?: string;
     message: string;

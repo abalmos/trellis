@@ -1,6 +1,3 @@
 {
-  "extends": "../deno.json",
-  "imports": {
-    "@trellis/apis/trellis.auth": "./.trellis/generated/ts/trellis-apis/trellis.auth.ts"
-  }
+  "extends": "../deno.json"
 }

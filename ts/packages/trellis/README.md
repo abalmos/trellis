@@ -1,7 +1,7 @@
 # @qlever-llc/trellis
 
-JavaScript Trellis client runtime. Provides contract-driven client helpers and
-runtime error types.
+JavaScript Trellis client runtime. Provides generated-participant client helpers
+and runtime error types.
 
 For AI-agent context, start with the generated package `TRELLIS.md` files and
 the raw docs index:
@@ -10,23 +10,12 @@ the raw docs index:
 - https://raw.githubusercontent.com/qlever-llc/trellis/main/docs/static/llms-full.txt
 
 ```typescript
-import { defineAppContract, TrellisClient } from "@qlever-llc/trellis";
-import * as auth from "@trellis/apis/trellis.auth";
-
-const app = defineAppContract(() => ({
-  id: "example.app@v1",
-  displayName: "Example App",
-  description: "Example Trellis browser client.",
-  uses: {
-    required: {
-      auth: auth.use({ rpc: { call: ["Auth.Sessions.Me"] } }),
-    },
-  },
-}));
+import { TrellisClient } from "@qlever-llc/trellis";
+import { participant } from "./.trellis/ts/participants/example-app/mod.ts";
 
 const client = await TrellisClient.connect({
   trellisUrl: "https://trellis.example.com",
-  contract: app,
+  participant,
 });
 const meResult = await client.rpc.auth.sessionsMe({});
 const me = meResult.orThrow();

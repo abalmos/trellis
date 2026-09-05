@@ -1,12 +1,12 @@
 //! Thin typed client helpers for `trellis.auth@v1`.
-use crate::generated::TrellisClientError;
+use trellis_rs::generated::TrellisClientError;
 /// Typed API wrapper for the `trellis.auth@v1` contract.
 pub struct AuthClient<'a> {
-    inner: &'a crate::generated::Caller,
+    inner: &'a trellis_rs::generated::Caller,
 }
 impl<'a> AuthClient<'a> {
     /// Wrap an already connected low-level Trellis client.
-    pub fn new(inner: &'a crate::generated::Caller) -> Self {
+    pub fn new(inner: &'a trellis_rs::generated::Caller) -> Self {
         Self { inner }
     }
     /// Access typed RPC calls.
@@ -28,7 +28,7 @@ impl<'a> AuthClient<'a> {
 }
 /// Typed RPC surface.
 pub struct Rpc<'a> {
-    pub(crate) _inner: &'a crate::generated::Caller,
+    pub(crate) _inner: &'a trellis_rs::generated::Caller,
 }
 impl<'a> Rpc<'a> {
     /// Access the `auth` RPC group.
@@ -38,7 +38,7 @@ impl<'a> Rpc<'a> {
 }
 /// Typed RPC methods in the `auth` group.
 pub struct AuthRpc<'a> {
-    inner: &'a crate::generated::Caller,
+    inner: &'a trellis_rs::generated::Caller,
 }
 impl<'a> AuthRpc<'a> {
     /// Call `Auth.Capabilities.List`.
@@ -47,7 +47,7 @@ impl<'a> AuthRpc<'a> {
         input: &super::types::AuthCapabilitiesListRequest,
     ) -> Result<
         super::types::AuthCapabilitiesListResponse,
-        crate::generated::CallError<super::rpc::AuthCapabilitiesListError>,
+        trellis_rs::generated::CallError<super::rpc::AuthCapabilitiesListError>,
     > {
         self.inner
             .call_typed::<
@@ -62,7 +62,7 @@ impl<'a> AuthRpc<'a> {
         input: &super::types::AuthCapabilityGroupsDeleteRequest,
     ) -> Result<
         super::types::AuthCapabilityGroupsDeleteResponse,
-        crate::generated::CallError<super::rpc::AuthCapabilityGroupsDeleteError>,
+        trellis_rs::generated::CallError<super::rpc::AuthCapabilityGroupsDeleteError>,
     > {
         self.inner
             .call_typed::<
@@ -77,7 +77,7 @@ impl<'a> AuthRpc<'a> {
         input: &super::types::AuthCapabilityGroupsGetRequest,
     ) -> Result<
         super::types::AuthCapabilityGroupsGetResponse,
-        crate::generated::CallError<super::rpc::AuthCapabilityGroupsGetError>,
+        trellis_rs::generated::CallError<super::rpc::AuthCapabilityGroupsGetError>,
     > {
         self.inner
             .call_typed::<
@@ -92,7 +92,7 @@ impl<'a> AuthRpc<'a> {
         input: &super::types::AuthCapabilityGroupsListRequest,
     ) -> Result<
         super::types::AuthCapabilityGroupsListResponse,
-        crate::generated::CallError<super::rpc::AuthCapabilityGroupsListError>,
+        trellis_rs::generated::CallError<super::rpc::AuthCapabilityGroupsListError>,
     > {
         self.inner
             .call_typed::<
@@ -107,7 +107,7 @@ impl<'a> AuthRpc<'a> {
         input: &super::types::AuthCapabilityGroupsPutRequest,
     ) -> Result<
         super::types::AuthCapabilityGroupsPutResponse,
-        crate::generated::CallError<super::rpc::AuthCapabilityGroupsPutError>,
+        trellis_rs::generated::CallError<super::rpc::AuthCapabilityGroupsPutError>,
     > {
         self.inner
             .call_typed::<
@@ -122,7 +122,7 @@ impl<'a> AuthRpc<'a> {
         input: &super::types::AuthConnectionsKickRequest,
     ) -> Result<
         super::types::AuthConnectionsKickResponse,
-        crate::generated::CallError<super::rpc::AuthConnectionsKickError>,
+        trellis_rs::generated::CallError<super::rpc::AuthConnectionsKickError>,
     > {
         self.inner
             .call_typed::<super::rpc::AuthConnectionsKickRpc, super::rpc::AuthConnectionsKickError>(
@@ -136,7 +136,7 @@ impl<'a> AuthRpc<'a> {
         input: &super::types::AuthConnectionsListRequest,
     ) -> Result<
         super::types::AuthConnectionsListResponse,
-        crate::generated::CallError<super::rpc::AuthConnectionsListError>,
+        trellis_rs::generated::CallError<super::rpc::AuthConnectionsListError>,
     > {
         self.inner
             .call_typed::<super::rpc::AuthConnectionsListRpc, super::rpc::AuthConnectionsListError>(
@@ -150,7 +150,7 @@ impl<'a> AuthRpc<'a> {
         input: &super::types::AuthDeploymentAuthorityAcceptMigrationRequest,
     ) -> Result<
         super::types::AuthDeploymentAuthorityAcceptMigrationResponse,
-        crate::generated::CallError<super::rpc::AuthDeploymentAuthorityAcceptMigrationError>,
+        trellis_rs::generated::CallError<super::rpc::AuthDeploymentAuthorityAcceptMigrationError>,
     > {
         self.inner
             .call_typed::<
@@ -165,7 +165,7 @@ impl<'a> AuthRpc<'a> {
         input: &super::types::AuthDeploymentAuthorityAcceptUpdateRequest,
     ) -> Result<
         super::types::AuthDeploymentAuthorityAcceptUpdateResponse,
-        crate::generated::CallError<super::rpc::AuthDeploymentAuthorityAcceptUpdateError>,
+        trellis_rs::generated::CallError<super::rpc::AuthDeploymentAuthorityAcceptUpdateError>,
     > {
         self.inner
             .call_typed::<
@@ -180,7 +180,7 @@ impl<'a> AuthRpc<'a> {
         input: &super::types::AuthDeploymentAuthorityGetRequest,
     ) -> Result<
         super::types::AuthDeploymentAuthorityGetResponse,
-        crate::generated::CallError<super::rpc::AuthDeploymentAuthorityGetError>,
+        trellis_rs::generated::CallError<super::rpc::AuthDeploymentAuthorityGetError>,
     > {
         self.inner
             .call_typed::<
@@ -195,7 +195,7 @@ impl<'a> AuthRpc<'a> {
         input: &super::types::AuthDeploymentAuthorityListRequest,
     ) -> Result<
         super::types::AuthDeploymentAuthorityListResponse,
-        crate::generated::CallError<super::rpc::AuthDeploymentAuthorityListError>,
+        trellis_rs::generated::CallError<super::rpc::AuthDeploymentAuthorityListError>,
     > {
         self.inner
             .call_typed::<
@@ -210,7 +210,7 @@ impl<'a> AuthRpc<'a> {
         input: &super::types::AuthDeploymentAuthorityPlanRequest,
     ) -> Result<
         super::types::AuthDeploymentAuthorityPlanResponse,
-        crate::generated::CallError<super::rpc::AuthDeploymentAuthorityPlanError>,
+        trellis_rs::generated::CallError<super::rpc::AuthDeploymentAuthorityPlanError>,
     > {
         self.inner
             .call_typed::<
@@ -225,7 +225,7 @@ impl<'a> AuthRpc<'a> {
         input: &super::types::AuthDeploymentAuthorityPlansGetRequest,
     ) -> Result<
         super::types::AuthDeploymentAuthorityPlansGetResponse,
-        crate::generated::CallError<super::rpc::AuthDeploymentAuthorityPlansGetError>,
+        trellis_rs::generated::CallError<super::rpc::AuthDeploymentAuthorityPlansGetError>,
     > {
         self.inner
             .call_typed::<
@@ -240,7 +240,7 @@ impl<'a> AuthRpc<'a> {
         input: &super::types::AuthDeploymentAuthorityPlansListRequest,
     ) -> Result<
         super::types::AuthDeploymentAuthorityPlansListResponse,
-        crate::generated::CallError<super::rpc::AuthDeploymentAuthorityPlansListError>,
+        trellis_rs::generated::CallError<super::rpc::AuthDeploymentAuthorityPlansListError>,
     > {
         self.inner
             .call_typed::<
@@ -255,7 +255,7 @@ impl<'a> AuthRpc<'a> {
         input: &super::types::AuthDeploymentAuthorityReconcileRequest,
     ) -> Result<
         super::types::AuthDeploymentAuthorityReconcileResponse,
-        crate::generated::CallError<super::rpc::AuthDeploymentAuthorityReconcileError>,
+        trellis_rs::generated::CallError<super::rpc::AuthDeploymentAuthorityReconcileError>,
     > {
         self.inner
             .call_typed::<
@@ -270,7 +270,7 @@ impl<'a> AuthRpc<'a> {
         input: &super::types::AuthDeploymentAuthorityRejectRequest,
     ) -> Result<
         super::types::AuthDeploymentAuthorityRejectResponse,
-        crate::generated::CallError<super::rpc::AuthDeploymentAuthorityRejectError>,
+        trellis_rs::generated::CallError<super::rpc::AuthDeploymentAuthorityRejectError>,
     > {
         self.inner
             .call_typed::<
@@ -285,7 +285,7 @@ impl<'a> AuthRpc<'a> {
         input: &super::types::AuthDeploymentsCreateRequest,
     ) -> Result<
         super::types::AuthDeploymentsCreateResponse,
-        crate::generated::CallError<super::rpc::AuthDeploymentsCreateError>,
+        trellis_rs::generated::CallError<super::rpc::AuthDeploymentsCreateError>,
     > {
         self.inner
             .call_typed::<
@@ -300,7 +300,7 @@ impl<'a> AuthRpc<'a> {
         input: &super::types::AuthDeploymentsDisableRequest,
     ) -> Result<
         super::types::AuthDeploymentsDisableResponse,
-        crate::generated::CallError<super::rpc::AuthDeploymentsDisableError>,
+        trellis_rs::generated::CallError<super::rpc::AuthDeploymentsDisableError>,
     > {
         self.inner
             .call_typed::<
@@ -315,7 +315,7 @@ impl<'a> AuthRpc<'a> {
         input: &super::types::AuthDeploymentsEnableRequest,
     ) -> Result<
         super::types::AuthDeploymentsEnableResponse,
-        crate::generated::CallError<super::rpc::AuthDeploymentsEnableError>,
+        trellis_rs::generated::CallError<super::rpc::AuthDeploymentsEnableError>,
     > {
         self.inner
             .call_typed::<
@@ -330,7 +330,7 @@ impl<'a> AuthRpc<'a> {
         input: &super::types::AuthDeploymentsListRequest,
     ) -> Result<
         super::types::AuthDeploymentsListResponse,
-        crate::generated::CallError<super::rpc::AuthDeploymentsListError>,
+        trellis_rs::generated::CallError<super::rpc::AuthDeploymentsListError>,
     > {
         self.inner
             .call_typed::<super::rpc::AuthDeploymentsListRpc, super::rpc::AuthDeploymentsListError>(
@@ -344,7 +344,7 @@ impl<'a> AuthRpc<'a> {
         input: &super::types::AuthDeploymentsRemoveRequest,
     ) -> Result<
         super::types::AuthDeploymentsRemoveResponse,
-        crate::generated::CallError<super::rpc::AuthDeploymentsRemoveError>,
+        trellis_rs::generated::CallError<super::rpc::AuthDeploymentsRemoveError>,
     > {
         self.inner
             .call_typed::<
@@ -359,7 +359,7 @@ impl<'a> AuthRpc<'a> {
         input: &super::types::AuthDeviceUserAuthoritiesListRequest,
     ) -> Result<
         super::types::AuthDeviceUserAuthoritiesListResponse,
-        crate::generated::CallError<super::rpc::AuthDeviceUserAuthoritiesListError>,
+        trellis_rs::generated::CallError<super::rpc::AuthDeviceUserAuthoritiesListError>,
     > {
         self.inner
             .call_typed::<
@@ -374,7 +374,7 @@ impl<'a> AuthRpc<'a> {
         input: &super::types::AuthDeviceUserAuthoritiesReviewsDecideRequest,
     ) -> Result<
         super::types::AuthDeviceUserAuthoritiesReviewsDecideResponse,
-        crate::generated::CallError<super::rpc::AuthDeviceUserAuthoritiesReviewsDecideError>,
+        trellis_rs::generated::CallError<super::rpc::AuthDeviceUserAuthoritiesReviewsDecideError>,
     > {
         self.inner
             .call_typed::<
@@ -389,7 +389,7 @@ impl<'a> AuthRpc<'a> {
         input: &super::types::AuthDeviceUserAuthoritiesReviewsListRequest,
     ) -> Result<
         super::types::AuthDeviceUserAuthoritiesReviewsListResponse,
-        crate::generated::CallError<super::rpc::AuthDeviceUserAuthoritiesReviewsListError>,
+        trellis_rs::generated::CallError<super::rpc::AuthDeviceUserAuthoritiesReviewsListError>,
     > {
         self.inner
             .call_typed::<
@@ -404,7 +404,7 @@ impl<'a> AuthRpc<'a> {
         input: &super::types::AuthDeviceUserAuthoritiesRevokeRequest,
     ) -> Result<
         super::types::AuthDeviceUserAuthoritiesRevokeResponse,
-        crate::generated::CallError<super::rpc::AuthDeviceUserAuthoritiesRevokeError>,
+        trellis_rs::generated::CallError<super::rpc::AuthDeviceUserAuthoritiesRevokeError>,
     > {
         self.inner
             .call_typed::<
@@ -419,7 +419,7 @@ impl<'a> AuthRpc<'a> {
         input: &super::types::AuthDevicesConnectInfoGetRequest,
     ) -> Result<
         super::types::AuthDevicesConnectInfoGetResponse,
-        crate::generated::CallError<super::rpc::AuthDevicesConnectInfoGetError>,
+        trellis_rs::generated::CallError<super::rpc::AuthDevicesConnectInfoGetError>,
     > {
         self.inner
             .call_typed::<
@@ -434,7 +434,7 @@ impl<'a> AuthRpc<'a> {
         input: &super::types::AuthDevicesDisableRequest,
     ) -> Result<
         super::types::AuthDevicesDisableResponse,
-        crate::generated::CallError<super::rpc::AuthDevicesDisableError>,
+        trellis_rs::generated::CallError<super::rpc::AuthDevicesDisableError>,
     > {
         self.inner
             .call_typed::<super::rpc::AuthDevicesDisableRpc, super::rpc::AuthDevicesDisableError>(
@@ -448,7 +448,7 @@ impl<'a> AuthRpc<'a> {
         input: &super::types::AuthDevicesEnableRequest,
     ) -> Result<
         super::types::AuthDevicesEnableResponse,
-        crate::generated::CallError<super::rpc::AuthDevicesEnableError>,
+        trellis_rs::generated::CallError<super::rpc::AuthDevicesEnableError>,
     > {
         self.inner
             .call_typed::<super::rpc::AuthDevicesEnableRpc, super::rpc::AuthDevicesEnableError>(
@@ -462,7 +462,7 @@ impl<'a> AuthRpc<'a> {
         input: &super::types::AuthDevicesListRequest,
     ) -> Result<
         super::types::AuthDevicesListResponse,
-        crate::generated::CallError<super::rpc::AuthDevicesListError>,
+        trellis_rs::generated::CallError<super::rpc::AuthDevicesListError>,
     > {
         self.inner
             .call_typed::<super::rpc::AuthDevicesListRpc, super::rpc::AuthDevicesListError>(input)
@@ -474,7 +474,7 @@ impl<'a> AuthRpc<'a> {
         input: &super::types::AuthDevicesProvisionRequest,
     ) -> Result<
         super::types::AuthDevicesProvisionResponse,
-        crate::generated::CallError<super::rpc::AuthDevicesProvisionError>,
+        trellis_rs::generated::CallError<super::rpc::AuthDevicesProvisionError>,
     > {
         self.inner
             .call_typed::<
@@ -489,7 +489,7 @@ impl<'a> AuthRpc<'a> {
         input: &super::types::AuthDevicesRemoveRequest,
     ) -> Result<
         super::types::AuthDevicesRemoveResponse,
-        crate::generated::CallError<super::rpc::AuthDevicesRemoveError>,
+        trellis_rs::generated::CallError<super::rpc::AuthDevicesRemoveError>,
     > {
         self.inner
             .call_typed::<super::rpc::AuthDevicesRemoveRpc, super::rpc::AuthDevicesRemoveError>(
@@ -503,7 +503,7 @@ impl<'a> AuthRpc<'a> {
         input: &super::types::AuthIdentityAuthorityGetRequest,
     ) -> Result<
         super::types::AuthIdentityAuthorityGetResponse,
-        crate::generated::CallError<super::rpc::AuthIdentityAuthorityGetError>,
+        trellis_rs::generated::CallError<super::rpc::AuthIdentityAuthorityGetError>,
     > {
         self.inner
             .call_typed::<
@@ -518,7 +518,7 @@ impl<'a> AuthRpc<'a> {
         input: &super::types::AuthIdentityAuthorityListRequest,
     ) -> Result<
         super::types::AuthIdentityAuthorityListResponse,
-        crate::generated::CallError<super::rpc::AuthIdentityAuthorityListError>,
+        trellis_rs::generated::CallError<super::rpc::AuthIdentityAuthorityListError>,
     > {
         self.inner
             .call_typed::<
@@ -533,7 +533,7 @@ impl<'a> AuthRpc<'a> {
         input: &super::types::AuthIdentityAuthorityRevokeRequest,
     ) -> Result<
         super::types::AuthIdentityAuthorityRevokeResponse,
-        crate::generated::CallError<super::rpc::AuthIdentityAuthorityRevokeError>,
+        trellis_rs::generated::CallError<super::rpc::AuthIdentityAuthorityRevokeError>,
     > {
         self.inner
             .call_typed::<
@@ -548,7 +548,7 @@ impl<'a> AuthRpc<'a> {
         input: &super::types::AuthIdentityGrantsListRequest,
     ) -> Result<
         super::types::AuthIdentityGrantsListResponse,
-        crate::generated::CallError<super::rpc::AuthIdentityGrantsListError>,
+        trellis_rs::generated::CallError<super::rpc::AuthIdentityGrantsListError>,
     > {
         self.inner
             .call_typed::<
@@ -563,7 +563,7 @@ impl<'a> AuthRpc<'a> {
         input: &super::types::AuthIdentityGrantsRevokeRequest,
     ) -> Result<
         super::types::AuthIdentityGrantsRevokeResponse,
-        crate::generated::CallError<super::rpc::AuthIdentityGrantsRevokeError>,
+        trellis_rs::generated::CallError<super::rpc::AuthIdentityGrantsRevokeError>,
     > {
         self.inner
             .call_typed::<
@@ -578,7 +578,7 @@ impl<'a> AuthRpc<'a> {
         input: &super::types::AuthPortalsGetRequest,
     ) -> Result<
         super::types::AuthPortalsGetResponse,
-        crate::generated::CallError<super::rpc::AuthPortalsGetError>,
+        trellis_rs::generated::CallError<super::rpc::AuthPortalsGetError>,
     > {
         self.inner
             .call_typed::<super::rpc::AuthPortalsGetRpc, super::rpc::AuthPortalsGetError>(input)
@@ -590,7 +590,7 @@ impl<'a> AuthRpc<'a> {
         input: &super::types::AuthPortalsGrantOverridesListRequest,
     ) -> Result<
         super::types::AuthPortalsGrantOverridesListResponse,
-        crate::generated::CallError<super::rpc::AuthPortalsGrantOverridesListError>,
+        trellis_rs::generated::CallError<super::rpc::AuthPortalsGrantOverridesListError>,
     > {
         self.inner
             .call_typed::<
@@ -605,7 +605,7 @@ impl<'a> AuthRpc<'a> {
         input: &super::types::AuthPortalsGrantOverridesPutRequest,
     ) -> Result<
         super::types::AuthPortalsGrantOverridesPutResponse,
-        crate::generated::CallError<super::rpc::AuthPortalsGrantOverridesPutError>,
+        trellis_rs::generated::CallError<super::rpc::AuthPortalsGrantOverridesPutError>,
     > {
         self.inner
             .call_typed::<
@@ -620,7 +620,7 @@ impl<'a> AuthRpc<'a> {
         input: &super::types::AuthPortalsGrantOverridesRemoveRequest,
     ) -> Result<
         super::types::AuthPortalsGrantOverridesRemoveResponse,
-        crate::generated::CallError<super::rpc::AuthPortalsGrantOverridesRemoveError>,
+        trellis_rs::generated::CallError<super::rpc::AuthPortalsGrantOverridesRemoveError>,
     > {
         self.inner
             .call_typed::<
@@ -635,7 +635,7 @@ impl<'a> AuthRpc<'a> {
         input: &super::types::AuthPortalsListRequest,
     ) -> Result<
         super::types::AuthPortalsListResponse,
-        crate::generated::CallError<super::rpc::AuthPortalsListError>,
+        trellis_rs::generated::CallError<super::rpc::AuthPortalsListError>,
     > {
         self.inner
             .call_typed::<super::rpc::AuthPortalsListRpc, super::rpc::AuthPortalsListError>(input)
@@ -647,7 +647,7 @@ impl<'a> AuthRpc<'a> {
         input: &super::types::AuthPortalsLoginSettingsGetRequest,
     ) -> Result<
         super::types::AuthPortalsLoginSettingsGetResponse,
-        crate::generated::CallError<super::rpc::AuthPortalsLoginSettingsGetError>,
+        trellis_rs::generated::CallError<super::rpc::AuthPortalsLoginSettingsGetError>,
     > {
         self.inner
             .call_typed::<
@@ -662,7 +662,7 @@ impl<'a> AuthRpc<'a> {
         input: &super::types::AuthPortalsLoginSettingsUpdateRequest,
     ) -> Result<
         super::types::AuthPortalsLoginSettingsUpdateResponse,
-        crate::generated::CallError<super::rpc::AuthPortalsLoginSettingsUpdateError>,
+        trellis_rs::generated::CallError<super::rpc::AuthPortalsLoginSettingsUpdateError>,
     > {
         self.inner
             .call_typed::<
@@ -677,7 +677,7 @@ impl<'a> AuthRpc<'a> {
         input: &super::types::AuthPortalsPutRequest,
     ) -> Result<
         super::types::AuthPortalsPutResponse,
-        crate::generated::CallError<super::rpc::AuthPortalsPutError>,
+        trellis_rs::generated::CallError<super::rpc::AuthPortalsPutError>,
     > {
         self.inner
             .call_typed::<super::rpc::AuthPortalsPutRpc, super::rpc::AuthPortalsPutError>(input)
@@ -689,7 +689,7 @@ impl<'a> AuthRpc<'a> {
         input: &super::types::AuthPortalsRemoveRequest,
     ) -> Result<
         super::types::AuthPortalsRemoveResponse,
-        crate::generated::CallError<super::rpc::AuthPortalsRemoveError>,
+        trellis_rs::generated::CallError<super::rpc::AuthPortalsRemoveError>,
     > {
         self.inner
             .call_typed::<super::rpc::AuthPortalsRemoveRpc, super::rpc::AuthPortalsRemoveError>(
@@ -703,7 +703,7 @@ impl<'a> AuthRpc<'a> {
         input: &super::types::AuthPortalsRoutesPutRequest,
     ) -> Result<
         super::types::AuthPortalsRoutesPutResponse,
-        crate::generated::CallError<super::rpc::AuthPortalsRoutesPutError>,
+        trellis_rs::generated::CallError<super::rpc::AuthPortalsRoutesPutError>,
     > {
         self.inner
             .call_typed::<
@@ -718,7 +718,7 @@ impl<'a> AuthRpc<'a> {
         input: &super::types::AuthPortalsRoutesRemoveRequest,
     ) -> Result<
         super::types::AuthPortalsRoutesRemoveResponse,
-        crate::generated::CallError<super::rpc::AuthPortalsRoutesRemoveError>,
+        trellis_rs::generated::CallError<super::rpc::AuthPortalsRoutesRemoveError>,
     > {
         self.inner
             .call_typed::<
@@ -733,7 +733,7 @@ impl<'a> AuthRpc<'a> {
         input: &super::types::AuthServiceInstancesDisableRequest,
     ) -> Result<
         super::types::AuthServiceInstancesDisableResponse,
-        crate::generated::CallError<super::rpc::AuthServiceInstancesDisableError>,
+        trellis_rs::generated::CallError<super::rpc::AuthServiceInstancesDisableError>,
     > {
         self.inner
             .call_typed::<
@@ -748,7 +748,7 @@ impl<'a> AuthRpc<'a> {
         input: &super::types::AuthServiceInstancesEnableRequest,
     ) -> Result<
         super::types::AuthServiceInstancesEnableResponse,
-        crate::generated::CallError<super::rpc::AuthServiceInstancesEnableError>,
+        trellis_rs::generated::CallError<super::rpc::AuthServiceInstancesEnableError>,
     > {
         self.inner
             .call_typed::<
@@ -763,7 +763,7 @@ impl<'a> AuthRpc<'a> {
         input: &super::types::AuthServiceInstancesListRequest,
     ) -> Result<
         super::types::AuthServiceInstancesListResponse,
-        crate::generated::CallError<super::rpc::AuthServiceInstancesListError>,
+        trellis_rs::generated::CallError<super::rpc::AuthServiceInstancesListError>,
     > {
         self.inner
             .call_typed::<
@@ -778,7 +778,7 @@ impl<'a> AuthRpc<'a> {
         input: &super::types::AuthServiceInstancesProvisionRequest,
     ) -> Result<
         super::types::AuthServiceInstancesProvisionResponse,
-        crate::generated::CallError<super::rpc::AuthServiceInstancesProvisionError>,
+        trellis_rs::generated::CallError<super::rpc::AuthServiceInstancesProvisionError>,
     > {
         self.inner
             .call_typed::<
@@ -793,7 +793,7 @@ impl<'a> AuthRpc<'a> {
         input: &super::types::AuthServiceInstancesRemoveRequest,
     ) -> Result<
         super::types::AuthServiceInstancesRemoveResponse,
-        crate::generated::CallError<super::rpc::AuthServiceInstancesRemoveError>,
+        trellis_rs::generated::CallError<super::rpc::AuthServiceInstancesRemoveError>,
     > {
         self.inner
             .call_typed::<
@@ -808,7 +808,7 @@ impl<'a> AuthRpc<'a> {
         input: &super::types::AuthSessionsListRequest,
     ) -> Result<
         super::types::AuthSessionsListResponse,
-        crate::generated::CallError<super::rpc::AuthSessionsListError>,
+        trellis_rs::generated::CallError<super::rpc::AuthSessionsListError>,
     > {
         self.inner
             .call_typed::<super::rpc::AuthSessionsListRpc, super::rpc::AuthSessionsListError>(input)
@@ -819,7 +819,7 @@ impl<'a> AuthRpc<'a> {
         &self,
     ) -> Result<
         super::types::AuthSessionsLogoutResponse,
-        crate::generated::CallError<super::rpc::AuthSessionsLogoutError>,
+        trellis_rs::generated::CallError<super::rpc::AuthSessionsLogoutError>,
     > {
         self.inner
             .call_typed::<super::rpc::AuthSessionsLogoutRpc, super::rpc::AuthSessionsLogoutError>(
@@ -832,7 +832,7 @@ impl<'a> AuthRpc<'a> {
         &self,
     ) -> Result<
         super::types::AuthSessionsMeResponse,
-        crate::generated::CallError<super::rpc::AuthSessionsMeError>,
+        trellis_rs::generated::CallError<super::rpc::AuthSessionsMeError>,
     > {
         self.inner
             .call_typed::<super::rpc::AuthSessionsMeRpc, super::rpc::AuthSessionsMeError>(
@@ -846,7 +846,7 @@ impl<'a> AuthRpc<'a> {
         input: &super::types::AuthSessionsRevokeRequest,
     ) -> Result<
         super::types::AuthSessionsRevokeResponse,
-        crate::generated::CallError<super::rpc::AuthSessionsRevokeError>,
+        trellis_rs::generated::CallError<super::rpc::AuthSessionsRevokeError>,
     > {
         self.inner
             .call_typed::<super::rpc::AuthSessionsRevokeRpc, super::rpc::AuthSessionsRevokeError>(
@@ -860,7 +860,7 @@ impl<'a> AuthRpc<'a> {
         input: &super::types::AuthUserIdentitiesListRequest,
     ) -> Result<
         super::types::AuthUserIdentitiesListResponse,
-        crate::generated::CallError<super::rpc::AuthUserIdentitiesListError>,
+        trellis_rs::generated::CallError<super::rpc::AuthUserIdentitiesListError>,
     > {
         self.inner
             .call_typed::<
@@ -875,7 +875,7 @@ impl<'a> AuthRpc<'a> {
         input: &super::types::AuthUserIdentitiesUnlinkRequest,
     ) -> Result<
         super::types::AuthUserIdentitiesUnlinkResponse,
-        crate::generated::CallError<super::rpc::AuthUserIdentitiesUnlinkError>,
+        trellis_rs::generated::CallError<super::rpc::AuthUserIdentitiesUnlinkError>,
     > {
         self.inner
             .call_typed::<
@@ -890,7 +890,7 @@ impl<'a> AuthRpc<'a> {
         input: &super::types::AuthUsersCreateRequest,
     ) -> Result<
         super::types::AuthUsersCreateResponse,
-        crate::generated::CallError<super::rpc::AuthUsersCreateError>,
+        trellis_rs::generated::CallError<super::rpc::AuthUsersCreateError>,
     > {
         self.inner
             .call_typed::<super::rpc::AuthUsersCreateRpc, super::rpc::AuthUsersCreateError>(input)
@@ -902,7 +902,7 @@ impl<'a> AuthRpc<'a> {
         input: &super::types::AuthUsersGetRequest,
     ) -> Result<
         super::types::AuthUsersGetResponse,
-        crate::generated::CallError<super::rpc::AuthUsersGetError>,
+        trellis_rs::generated::CallError<super::rpc::AuthUsersGetError>,
     > {
         self.inner
             .call_typed::<super::rpc::AuthUsersGetRpc, super::rpc::AuthUsersGetError>(input)
@@ -914,7 +914,7 @@ impl<'a> AuthRpc<'a> {
         input: &super::types::AuthUsersIdentityLinkCreateRequest,
     ) -> Result<
         super::types::AuthUsersIdentityLinkCreateResponse,
-        crate::generated::CallError<super::rpc::AuthUsersIdentityLinkCreateError>,
+        trellis_rs::generated::CallError<super::rpc::AuthUsersIdentityLinkCreateError>,
     > {
         self.inner
             .call_typed::<
@@ -929,7 +929,7 @@ impl<'a> AuthRpc<'a> {
         input: &super::types::AuthUsersListRequest,
     ) -> Result<
         super::types::AuthUsersListResponse,
-        crate::generated::CallError<super::rpc::AuthUsersListError>,
+        trellis_rs::generated::CallError<super::rpc::AuthUsersListError>,
     > {
         self.inner
             .call_typed::<super::rpc::AuthUsersListRpc, super::rpc::AuthUsersListError>(input)
@@ -941,7 +941,7 @@ impl<'a> AuthRpc<'a> {
         input: &super::types::AuthUsersPasswordChangeRequest,
     ) -> Result<
         super::types::AuthUsersPasswordChangeResponse,
-        crate::generated::CallError<super::rpc::AuthUsersPasswordChangeError>,
+        trellis_rs::generated::CallError<super::rpc::AuthUsersPasswordChangeError>,
     > {
         self.inner
             .call_typed::<
@@ -956,7 +956,7 @@ impl<'a> AuthRpc<'a> {
         input: &super::types::AuthUsersPasswordResetCreateRequest,
     ) -> Result<
         super::types::AuthUsersPasswordResetCreateResponse,
-        crate::generated::CallError<super::rpc::AuthUsersPasswordResetCreateError>,
+        trellis_rs::generated::CallError<super::rpc::AuthUsersPasswordResetCreateError>,
     > {
         self.inner
             .call_typed::<
@@ -971,7 +971,7 @@ impl<'a> AuthRpc<'a> {
         input: &super::types::AuthUsersResolveRequest,
     ) -> Result<
         super::types::AuthUsersResolveResponse,
-        crate::generated::CallError<super::rpc::AuthUsersResolveError>,
+        trellis_rs::generated::CallError<super::rpc::AuthUsersResolveError>,
     > {
         self.inner
             .call_typed::<super::rpc::AuthUsersResolveRpc, super::rpc::AuthUsersResolveError>(input)
@@ -983,7 +983,7 @@ impl<'a> AuthRpc<'a> {
         input: &super::types::AuthUsersUpdateRequest,
     ) -> Result<
         super::types::AuthUsersUpdateResponse,
-        crate::generated::CallError<super::rpc::AuthUsersUpdateError>,
+        trellis_rs::generated::CallError<super::rpc::AuthUsersUpdateError>,
     > {
         self.inner
             .call_typed::<super::rpc::AuthUsersUpdateRpc, super::rpc::AuthUsersUpdateError>(input)
@@ -992,7 +992,7 @@ impl<'a> AuthRpc<'a> {
 }
 /// Typed event surface.
 pub struct Event<'a> {
-    pub(crate) _inner: &'a crate::generated::Caller,
+    pub(crate) _inner: &'a trellis_rs::generated::Caller,
 }
 impl<'a> Event<'a> {
     /// Access the `auth` event group.
@@ -1002,7 +1002,7 @@ impl<'a> Event<'a> {
 }
 /// Typed events in the `auth` group.
 pub struct AuthEvent<'a> {
-    inner: &'a crate::generated::Caller,
+    inner: &'a trellis_rs::generated::Caller,
 }
 impl<'a> AuthEvent<'a> {
     /// Access `Auth.Connections.Closed`.
@@ -1042,7 +1042,7 @@ impl<'a> AuthEvent<'a> {
 }
 /// Typed `Auth.Connections.Closed` event operations.
 pub struct AuthConnectionsClosedEvent<'a> {
-    inner: &'a crate::generated::Caller,
+    inner: &'a trellis_rs::generated::Caller,
 }
 impl<'a> AuthConnectionsClosedEvent<'a> {
     /// Publish `Auth.Connections.Closed`.
@@ -1072,7 +1072,7 @@ impl<'a> AuthConnectionsClosedEvent<'a> {
 }
 /// Typed `Auth.Connections.Kicked` event operations.
 pub struct AuthConnectionsKickedEvent<'a> {
-    inner: &'a crate::generated::Caller,
+    inner: &'a trellis_rs::generated::Caller,
 }
 impl<'a> AuthConnectionsKickedEvent<'a> {
     /// Publish `Auth.Connections.Kicked`.
@@ -1102,7 +1102,7 @@ impl<'a> AuthConnectionsKickedEvent<'a> {
 }
 /// Typed `Auth.Connections.Opened` event operations.
 pub struct AuthConnectionsOpenedEvent<'a> {
-    inner: &'a crate::generated::Caller,
+    inner: &'a trellis_rs::generated::Caller,
 }
 impl<'a> AuthConnectionsOpenedEvent<'a> {
     /// Publish `Auth.Connections.Opened`.
@@ -1132,7 +1132,7 @@ impl<'a> AuthConnectionsOpenedEvent<'a> {
 }
 /// Typed `Auth.DeviceUserAuthorities.Approved` event operations.
 pub struct AuthDeviceUserAuthoritiesApprovedEvent<'a> {
-    inner: &'a crate::generated::Caller,
+    inner: &'a trellis_rs::generated::Caller,
 }
 impl<'a> AuthDeviceUserAuthoritiesApprovedEvent<'a> {
     /// Publish `Auth.DeviceUserAuthorities.Approved`.
@@ -1162,7 +1162,7 @@ impl<'a> AuthDeviceUserAuthoritiesApprovedEvent<'a> {
 }
 /// Typed `Auth.DeviceUserAuthorities.Requested` event operations.
 pub struct AuthDeviceUserAuthoritiesRequestedEvent<'a> {
-    inner: &'a crate::generated::Caller,
+    inner: &'a trellis_rs::generated::Caller,
 }
 impl<'a> AuthDeviceUserAuthoritiesRequestedEvent<'a> {
     /// Publish `Auth.DeviceUserAuthorities.Requested`.
@@ -1192,7 +1192,7 @@ impl<'a> AuthDeviceUserAuthoritiesRequestedEvent<'a> {
 }
 /// Typed `Auth.DeviceUserAuthorities.Resolved` event operations.
 pub struct AuthDeviceUserAuthoritiesResolvedEvent<'a> {
-    inner: &'a crate::generated::Caller,
+    inner: &'a trellis_rs::generated::Caller,
 }
 impl<'a> AuthDeviceUserAuthoritiesResolvedEvent<'a> {
     /// Publish `Auth.DeviceUserAuthorities.Resolved`.
@@ -1222,7 +1222,7 @@ impl<'a> AuthDeviceUserAuthoritiesResolvedEvent<'a> {
 }
 /// Typed `Auth.DeviceUserAuthorities.ReviewRequested` event operations.
 pub struct AuthDeviceUserAuthoritiesReviewRequestedEvent<'a> {
-    inner: &'a crate::generated::Caller,
+    inner: &'a trellis_rs::generated::Caller,
 }
 impl<'a> AuthDeviceUserAuthoritiesReviewRequestedEvent<'a> {
     /// Publish `Auth.DeviceUserAuthorities.ReviewRequested`.
@@ -1254,7 +1254,7 @@ impl<'a> AuthDeviceUserAuthoritiesReviewRequestedEvent<'a> {
 }
 /// Typed `Auth.Sessions.Revoked` event operations.
 pub struct AuthSessionsRevokedEvent<'a> {
-    inner: &'a crate::generated::Caller,
+    inner: &'a trellis_rs::generated::Caller,
 }
 impl<'a> AuthSessionsRevokedEvent<'a> {
     /// Publish `Auth.Sessions.Revoked`.
@@ -1284,12 +1284,12 @@ impl<'a> AuthSessionsRevokedEvent<'a> {
 }
 /// Typed feed surface.
 pub struct Feed<'a> {
-    pub(crate) _inner: &'a crate::generated::Caller,
+    pub(crate) _inner: &'a trellis_rs::generated::Caller,
 }
 impl<'a> Feed<'a> {}
 /// Typed operation surface.
 pub struct Operation<'a> {
-    pub(crate) _inner: &'a crate::generated::Caller,
+    pub(crate) _inner: &'a trellis_rs::generated::Caller,
 }
 impl<'a> Operation<'a> {
     /// Access the `auth` operation group.
@@ -1299,7 +1299,7 @@ impl<'a> Operation<'a> {
 }
 /// Typed operations in the `auth` group.
 pub struct AuthOperation<'a> {
-    inner: &'a crate::generated::Caller,
+    inner: &'a trellis_rs::generated::Caller,
 }
 impl<'a> AuthOperation<'a> {
     /// Access `Auth.DeviceUserAuthorities.Resolve`.
@@ -1309,7 +1309,7 @@ impl<'a> AuthOperation<'a> {
 }
 /// Typed `Auth.DeviceUserAuthorities.Resolve` operation controls.
 pub struct AuthDeviceUserAuthoritiesResolveOperation<'a> {
-    inner: &'a crate::generated::Caller,
+    inner: &'a trellis_rs::generated::Caller,
 }
 impl<'a> AuthDeviceUserAuthoritiesResolveOperation<'a> {
     /// Start `Auth.DeviceUserAuthorities.Resolve`.
@@ -1317,9 +1317,9 @@ impl<'a> AuthDeviceUserAuthoritiesResolveOperation<'a> {
         &self,
         input: &super::types::AuthDeviceUserAuthoritiesResolveInput,
     ) -> Result<
-        crate::generated::OperationRef<
+        trellis_rs::generated::OperationRef<
             'a,
-            crate::generated::Caller,
+            trellis_rs::generated::Caller,
             super::operations::AuthDeviceUserAuthoritiesResolveOperation,
         >,
         TrellisClientError,

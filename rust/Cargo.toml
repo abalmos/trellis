@@ -8,7 +8,7 @@ members = [
   "crates/jobs-runtime",
   "crates/eventlog-runtime",
   "crates/trellis-test",
-  "crates/contracts",
+  "crates/idl",
   "crates/protocol",
   "crates/protocol-wasm",
   "crates/codegen-ts",
@@ -16,7 +16,6 @@ members = [
   "crates/cli",
   "crates/server",
   "crates/runtime",
-  "tools/generate",
   "xtask",
 ]
 default-members = [
@@ -28,20 +27,17 @@ default-members = [
   "crates/jobs-runtime",
   "crates/eventlog-runtime",
   "crates/trellis-test",
-  "crates/contracts",
   "crates/protocol",
   "crates/codegen-ts",
   "crates/codegen-rust",
   "crates/cli",
   "crates/server",
   "crates/runtime",
-  "tools/generate",
   "xtask",
 ]
 resolver = "2"
 
 [patch.crates-io]
-trellis-contracts = { path = "crates/contracts" }
 trellis-rs = { path = "crates/trellis" }
 
 [workspace.package]
@@ -82,6 +78,8 @@ heck = "0.5.0"
 jsonptr = { version = "0.7.1", default-features = false }
 jsonschema = { version = "0.47.0", default-features = false }
 miette = { version = "7.6.0", features = ["fancy"] }
+logos = "0.16.1"
+notify-debouncer-mini = "0.7"
 owo-colors = "4.3.0"
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter", "fmt", "json"] }

@@ -3,12 +3,8 @@
   "name": "@trellis-demo/device",
   "version": "0.0.0",
   "exports": "./src/main.ts",
-  "imports": {
-    "@trellis/apis/demo.service": "./.trellis/generated/ts/trellis-apis/demo.service.ts"
-  },
   "tasks": {
-    "check": "deno task -c ../../../ts/deno.json install && deno task check:installed",
-    "check:installed": "deno check src/main.ts contract.ts",
+    "check": "deno check src/main.ts",
     "start": "deno run --allow-env --allow-net --allow-read --allow-write --allow-sys src/main.ts"
   }
 }

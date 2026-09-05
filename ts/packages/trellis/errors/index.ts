@@ -3,7 +3,6 @@ import {
   type UnexpectedErrorData,
   UnexpectedErrorDataSchema,
 } from "@qlever-llc/result";
-import { schema } from "../contract_support/mod.ts";
 import { AuthError } from "./AuthError.ts";
 import type { AuthErrorData } from "./AuthError.ts";
 import { AuthErrorDataSchema } from "./AuthError.ts";
@@ -149,7 +148,7 @@ export type MapErrorNamesToTypes<T extends readonly TrellisErrorName[]> = {
 export const BUILTIN_RPC_ERRORS = {
   UnexpectedError: {
     type: "UnexpectedError",
-    schema: schema<UnexpectedErrorData>(UnexpectedErrorDataSchema),
+    schema: UnexpectedErrorDataSchema,
     fromSerializable(data: UnexpectedErrorData) {
       return new UnexpectedError({
         id: data.id,
@@ -160,7 +159,7 @@ export const BUILTIN_RPC_ERRORS = {
   },
   AuthError: {
     type: "AuthError",
-    schema: schema<AuthErrorData>(AuthErrorDataSchema),
+    schema: AuthErrorDataSchema,
     fromSerializable(data: AuthErrorData) {
       return new AuthError({
         reason: data.reason,
@@ -172,7 +171,7 @@ export const BUILTIN_RPC_ERRORS = {
   },
   TransportError: {
     type: "TransportError",
-    schema: schema<TransportErrorData>(TransportErrorDataSchema),
+    schema: TransportErrorDataSchema,
     fromSerializable(data: TransportErrorData) {
       return new TransportError({
         code: data.code,
@@ -186,7 +185,7 @@ export const BUILTIN_RPC_ERRORS = {
   },
   ValidationError: {
     type: "ValidationError",
-    schema: schema<ValidationErrorData>(ValidationErrorDataSchema),
+    schema: ValidationErrorDataSchema,
     fromSerializable(data: ValidationErrorData) {
       return new ValidationError({
         errors: data.issues.map((issue) => ({
@@ -200,7 +199,7 @@ export const BUILTIN_RPC_ERRORS = {
   },
   SchemaValidationError: {
     type: "SchemaValidationError",
-    schema: schema<SchemaValidationErrorData>(SchemaValidationErrorDataSchema),
+    schema: SchemaValidationErrorDataSchema,
     fromSerializable(data: SchemaValidationErrorData) {
       return new SchemaValidationError({
         issues: data.issues,
@@ -211,7 +210,7 @@ export const BUILTIN_RPC_ERRORS = {
   },
   KVError: {
     type: "KVError",
-    schema: schema<KVErrorData>(KVErrorDataSchema),
+    schema: KVErrorDataSchema,
     fromSerializable(data: KVErrorData) {
       return new KVError({
         operation: data.operation,
@@ -222,9 +221,7 @@ export const BUILTIN_RPC_ERRORS = {
   },
   OperationNotFoundError: {
     type: "OperationNotFoundError",
-    schema: schema<OperationNotFoundErrorData>(
-      OperationNotFoundErrorDataSchema,
-    ),
+    schema: OperationNotFoundErrorDataSchema,
     fromSerializable(data: OperationNotFoundErrorData) {
       return new OperationNotFoundError({
         operationId: data.operationId,
@@ -237,9 +234,7 @@ export const BUILTIN_RPC_ERRORS = {
   },
   OperationAlreadyTerminalError: {
     type: "OperationAlreadyTerminalError",
-    schema: schema<OperationAlreadyTerminalErrorData>(
-      OperationAlreadyTerminalErrorDataSchema,
-    ),
+    schema: OperationAlreadyTerminalErrorDataSchema,
     fromSerializable(data: OperationAlreadyTerminalErrorData) {
       return new OperationAlreadyTerminalError({
         operationId: data.operationId,
@@ -255,9 +250,7 @@ export const BUILTIN_RPC_ERRORS = {
   },
   OperationMismatchError: {
     type: "OperationMismatchError",
-    schema: schema<OperationMismatchErrorData>(
-      OperationMismatchErrorDataSchema,
-    ),
+    schema: OperationMismatchErrorDataSchema,
     fromSerializable(data: OperationMismatchErrorData) {
       return new OperationMismatchError({
         operationId: data.operationId,
@@ -274,7 +267,7 @@ export const BUILTIN_RPC_ERRORS = {
   },
   StoreError: {
     type: "StoreError",
-    schema: schema<StoreErrorData>(StoreErrorDataSchema),
+    schema: StoreErrorDataSchema,
     fromSerializable(data: StoreErrorData) {
       return new StoreError({
         operation: data.operation,
@@ -285,7 +278,7 @@ export const BUILTIN_RPC_ERRORS = {
   },
   TransferError: {
     type: "TransferError",
-    schema: schema<TransferErrorData>(TransferErrorDataSchema),
+    schema: TransferErrorDataSchema,
     fromSerializable(data: TransferErrorData) {
       return new TransferError({
         operation: data.operation,

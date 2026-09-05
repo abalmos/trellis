@@ -9,7 +9,6 @@ import {
 import { generateSessionSeed } from "../control_plane_config.ts";
 import { NatsTestContainer } from "../nats_container.ts";
 import { TrellisTestRuntime } from "../runtime.ts";
-import { readTrellisTestMetrics, TRELLIS_TEST_METRICS_ENV } from "./metrics.ts";
 import { integrationSlug } from "./names.ts";
 import {
   TRELLIS_TEST_SHARED_RUNTIME_ENV,
@@ -29,8 +28,6 @@ export type TrellisIntegrationSharedRuntimeHost = {
   readonly manifestPath: string;
   /** Environment variables workers need to attach to the host. */
   readonly env: Record<string, string>;
-  /** Reads process-start metrics before the host workdir is removed. */
-  metrics?(): Promise<readonly Record<string, unknown>[]>;
   /** Returns recent shared control-plane output for failed runs. */
   output?(): string;
   /** Stops shared Trellis, NATS, and their temporary workdirs. */
@@ -46,9 +43,6 @@ export async function startTrellisIntegrationSharedRuntimeHost(args: {
   }[];
 }): Promise<TrellisIntegrationSharedRuntimeHost> {
   const workdir = await Deno.makeTempDir({ prefix: WORKDIR_PREFIX });
-  const metricsPath = join(workdir, "metrics.jsonl");
-  const previousMetricsPath = Deno.env.get(TRELLIS_TEST_METRICS_ENV);
-  Deno.env.set(TRELLIS_TEST_METRICS_ENV, metricsPath);
   await writeTrellisTestOwnerMarker(workdir, WORKDIR_OWNER_MARKER);
   await removeStaleMarkedDirectories({
     parent: dirname(workdir),
@@ -247,9 +241,7 @@ export async function startTrellisIntegrationSharedRuntimeHost(args: {
       manifestPath,
       env: {
         [TRELLIS_TEST_SHARED_RUNTIME_ENV]: manifestPath,
-        [TRELLIS_TEST_METRICS_ENV]: metricsPath,
       },
-      metrics: () => readTrellisTestMetrics(metricsPath),
       output: () => runtime?.controlPlaneOutput() ?? "",
       async stop() {
         const errors: unknown[] = [];
@@ -264,7 +256,6 @@ export async function startTrellisIntegrationSharedRuntimeHost(args: {
             errors.push(error)
           );
         }
-        restoreMetricsPath(previousMetricsPath);
         if (errors.length > 0) {
           throw new AggregateError(
             errors,
@@ -283,15 +274,6 @@ export async function startTrellisIntegrationSharedRuntimeHost(args: {
     if (args.runtime.keepWorkdir !== true) {
       await Deno.remove(workdir, { recursive: true }).catch(() => undefined);
     }
-    restoreMetricsPath(previousMetricsPath);
     throw error;
-  }
-}
-
-function restoreMetricsPath(previous: string | undefined): void {
-  if (previous === undefined) {
-    Deno.env.delete(TRELLIS_TEST_METRICS_ENV);
-  } else {
-    Deno.env.set(TRELLIS_TEST_METRICS_ENV, previous);
   }
 }

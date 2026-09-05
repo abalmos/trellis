@@ -21,4 +21,3 @@ trellis-rs = { path = "../trellis", version = "0.12.0" }
 trellis-runtime-apis = { path = "../runtime-apis" }
 
 [dev-dependencies]
-trellis-contracts = { path = "../contracts", version = "0.12.0" }

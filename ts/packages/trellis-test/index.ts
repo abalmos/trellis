@@ -1,10 +1,6 @@
 export { TrellisTestRuntime } from "./src/runtime.ts";
 export { TrellisControlPlaneSqlite } from "./src/control_plane_sqlite.ts";
 export {
-  startTrellisTestEventCapture,
-  TrellisTestEventCapture,
-} from "./src/event_capture.ts";
-export {
   assertCapturedEventContext,
   assertEventCaptured,
   assertEventsCaptured,
@@ -43,13 +39,6 @@ export type {
   TrellisTestWaitForSource,
 } from "./src/assertions.ts";
 export type {
-  TrellisTestCapturedEvent,
-  TrellisTestCapturedEventContext,
-  TrellisTestCapturedEventPredicate,
-  TrellisTestEventCaptureOptions,
-  TrellisTestEventSourceContract,
-} from "./src/event_capture.ts";
-export type {
   JetStreamAckFrame,
   JetStreamAckObserver,
   NatsMessageFrame,
@@ -62,14 +51,13 @@ export type {
 export type {
   TrellisTestAuthorityPlanClassification,
   TrellisTestClientAuth,
-  TrellisTestClientContract,
   TrellisTestClientKey,
+  TrellisTestClientParticipant,
   TrellisTestConnectedClient,
-  TrellisTestContract,
-  TrellisTestContractApproval,
-  TrellisTestContractDescriptor,
-  TrellisTestContractLike,
   TrellisTestControlPlane,
+  TrellisTestParticipant,
+  TrellisTestParticipantApproval,
+  TrellisTestParticipantLike,
   TrellisTestRawAuthConnectionPresence,
   TrellisTestRuntimeStartOptions,
   TrellisTestServiceKey,

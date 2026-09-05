@@ -45,7 +45,7 @@ pub struct IdentityGrantsListArgs {
     /// Restrict results to grants stored for one Trellis user ID.
     pub user: Option<String>,
 
-    #[arg(long, value_name = "CONTRACT_DIGEST")]
+    #[arg(long, value_name = "PARTICIPANT_DIGEST")]
     /// Restrict results to one granted contract digest.
     pub digest: Option<String>,
 }

@@ -10,11 +10,11 @@ close to out-of-tree development as possible while remaining in this repository.
 - `demos/ts/device`: the TypeScript activated field-device TUI.
 - `demos/ts/shared`: sample data and helpers for the TypeScript participants.
 - `demos/ts`: the Deno workspace for TypeScript demo participants.
-- `demos/rust`: the Rust Field Ops service and field-device TUI Cargo workspace.
+- `demos/rust`: independent Rust Field Ops service and field-device projects.
 
-The TypeScript and Rust service/device contracts are authored in source code and
-are checked for canonical parity in the Rust generation tests. The shared
-browser app installs the demo service API into its own `.trellis` directory.
+Every participant is authored in `contract.trellis`. Run `trellis update` for
+registry dependencies and `trellis generate` in each project root. `.trellis/**`
+is installed and generated state and must not be edited.
 
 ## Browser App
 
@@ -49,20 +49,20 @@ See `demos/ts/README.md` for the complete walkthrough.
 Rust demo tasks:
 
 ```sh
-cargo xtask install
-cargo test --manifest-path demos/rust/Cargo.toml --workspace
-cargo run --manifest-path demos/rust/Cargo.toml -p trellis-rust-demo-service
-cargo run --manifest-path demos/rust/Cargo.toml -p trellis-rust-demo-device
+trellis generate --root demos/rust/service
+trellis update --root demos/rust/device
+cargo check --manifest-path demos/rust/service/Cargo.toml
+cargo check --manifest-path demos/rust/device/Cargo.toml
 ```
 
-The Rust service mounts generated `demo.service@v1` RPC and operation
-handlers and can run either through authenticated service bootstrap or the raw
-local NATS developer loop. The Rust device can run offline, with user/session
-credentials, or through a demo-local activated-device persistence flow; online
-actions use the generated participant `fieldOps` and state facades, including
-send/receive transfer helpers. In authenticated service mode, site summaries use
-the resolved service-owned `siteSummaries` KV bucket and evidence bytes use the
-resolved service-owned `uploads` object store.
+The Rust service mounts generated `demo.service@v1` RPC and operation handlers
+and can run either through authenticated service bootstrap or the raw local NATS
+developer loop. The Rust device can run offline, with user/session credentials,
+or through a demo-local activated-device persistence flow; online actions use
+the generated participant `fieldOps` and state facades, including send/receive
+transfer helpers. In authenticated service mode, site summaries use the resolved
+service-owned `siteSummaries` KV bucket and evidence bytes use the resolved
+service-owned `uploads` object store.
 
 Remaining Rust gaps are narrower than the TypeScript path: live activated-device
 authenticated smoke coverage, live verification of worker-host job consumption,

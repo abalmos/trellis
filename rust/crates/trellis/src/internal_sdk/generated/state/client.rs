@@ -1,11 +1,11 @@
 //! Thin typed client helpers for `trellis.state@v1`.
 /// Typed API wrapper for the `trellis.state@v1` contract.
 pub struct StateClient<'a> {
-    inner: &'a crate::generated::Caller,
+    inner: &'a trellis_rs::generated::Caller,
 }
 impl<'a> StateClient<'a> {
     /// Wrap an already connected low-level Trellis client.
-    pub fn new(inner: &'a crate::generated::Caller) -> Self {
+    pub fn new(inner: &'a trellis_rs::generated::Caller) -> Self {
         Self { inner }
     }
     /// Access typed RPC calls.
@@ -27,7 +27,7 @@ impl<'a> StateClient<'a> {
 }
 /// Typed RPC surface.
 pub struct Rpc<'a> {
-    pub(crate) _inner: &'a crate::generated::Caller,
+    pub(crate) _inner: &'a trellis_rs::generated::Caller,
 }
 impl<'a> Rpc<'a> {
     /// Access the `state` RPC group.
@@ -37,7 +37,7 @@ impl<'a> Rpc<'a> {
 }
 /// Typed RPC methods in the `state` group.
 pub struct StateRpc<'a> {
-    inner: &'a crate::generated::Caller,
+    inner: &'a trellis_rs::generated::Caller,
 }
 impl<'a> StateRpc<'a> {
     /// Call `State.Admin.Delete`.
@@ -46,7 +46,7 @@ impl<'a> StateRpc<'a> {
         input: &super::types::StateAdminDeleteRequest,
     ) -> Result<
         super::types::StateAdminDeleteResponse,
-        crate::generated::CallError<super::rpc::StateAdminDeleteError>,
+        trellis_rs::generated::CallError<super::rpc::StateAdminDeleteError>,
     > {
         self.inner
             .call_typed::<super::rpc::StateAdminDeleteRpc, super::rpc::StateAdminDeleteError>(input)
@@ -58,7 +58,7 @@ impl<'a> StateRpc<'a> {
         input: &super::types::StateAdminGetRequest,
     ) -> Result<
         super::types::StateAdminGetResponse,
-        crate::generated::CallError<super::rpc::StateAdminGetError>,
+        trellis_rs::generated::CallError<super::rpc::StateAdminGetError>,
     > {
         self.inner
             .call_typed::<super::rpc::StateAdminGetRpc, super::rpc::StateAdminGetError>(input)
@@ -70,7 +70,7 @@ impl<'a> StateRpc<'a> {
         input: &super::types::StateAdminListRequest,
     ) -> Result<
         super::types::StateAdminListResponse,
-        crate::generated::CallError<super::rpc::StateAdminListError>,
+        trellis_rs::generated::CallError<super::rpc::StateAdminListError>,
     > {
         self.inner
             .call_typed::<super::rpc::StateAdminListRpc, super::rpc::StateAdminListError>(input)
@@ -82,7 +82,7 @@ impl<'a> StateRpc<'a> {
         input: &super::types::StateDeleteRequest,
     ) -> Result<
         super::types::StateDeleteResponse,
-        crate::generated::CallError<super::rpc::StateDeleteError>,
+        trellis_rs::generated::CallError<super::rpc::StateDeleteError>,
     > {
         self.inner
             .call_typed::<super::rpc::StateDeleteRpc, super::rpc::StateDeleteError>(input)
@@ -94,7 +94,7 @@ impl<'a> StateRpc<'a> {
         input: &super::types::StateGetRequest,
     ) -> Result<
         super::types::StateGetResponse,
-        crate::generated::CallError<super::rpc::StateGetError>,
+        trellis_rs::generated::CallError<super::rpc::StateGetError>,
     > {
         self.inner
             .call_typed::<super::rpc::StateGetRpc, super::rpc::StateGetError>(input)
@@ -106,7 +106,7 @@ impl<'a> StateRpc<'a> {
         input: &super::types::StateListRequest,
     ) -> Result<
         super::types::StateListResponse,
-        crate::generated::CallError<super::rpc::StateListError>,
+        trellis_rs::generated::CallError<super::rpc::StateListError>,
     > {
         self.inner
             .call_typed::<super::rpc::StateListRpc, super::rpc::StateListError>(input)
@@ -118,7 +118,7 @@ impl<'a> StateRpc<'a> {
         input: &super::types::StatePutRequest,
     ) -> Result<
         super::types::StatePutResponse,
-        crate::generated::CallError<super::rpc::StatePutError>,
+        trellis_rs::generated::CallError<super::rpc::StatePutError>,
     > {
         self.inner
             .call_typed::<super::rpc::StatePutRpc, super::rpc::StatePutError>(input)
@@ -127,16 +127,16 @@ impl<'a> StateRpc<'a> {
 }
 /// Typed event surface.
 pub struct Event<'a> {
-    pub(crate) _inner: &'a crate::generated::Caller,
+    pub(crate) _inner: &'a trellis_rs::generated::Caller,
 }
 impl<'a> Event<'a> {}
 /// Typed feed surface.
 pub struct Feed<'a> {
-    pub(crate) _inner: &'a crate::generated::Caller,
+    pub(crate) _inner: &'a trellis_rs::generated::Caller,
 }
 impl<'a> Feed<'a> {}
 /// Typed operation surface.
 pub struct Operation<'a> {
-    pub(crate) _inner: &'a crate::generated::Caller,
+    pub(crate) _inner: &'a trellis_rs::generated::Caller,
 }
 impl<'a> Operation<'a> {}

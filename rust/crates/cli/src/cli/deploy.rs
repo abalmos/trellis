@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use clap::{Args, Subcommand, ValueEnum};
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq, ValueEnum)]
@@ -264,28 +266,19 @@ pub struct DevCreateArgs {
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Args)]
-#[command(group(
-    clap::ArgGroup::new("contract_input")
-        .args(["source", "api", "image"])
-        .required(true)
-        .multiple(false)
-))]
-/// Apply service or device contract input.
+/// Apply canonical API and participant artifacts.
 pub struct ApplyArgs {
+    /// Canonical API artifact path.
     #[arg(long)]
-    pub source: Option<String>,
+    pub api: PathBuf,
 
+    /// Canonical participant artifact path.
     #[arg(long)]
-    pub api: Option<String>,
+    pub participant: PathBuf,
 
-    #[arg(long, requires = "api")]
-    pub participant: Option<String>,
-
-    #[arg(long, requires = "api")]
-    pub referenced_api: Vec<String>,
-
+    /// Canonical artifacts for every referenced API.
     #[arg(long)]
-    pub image: Option<String>,
+    pub referenced_api: Vec<PathBuf>,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Args)]

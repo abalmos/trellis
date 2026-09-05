@@ -1,5 +1,4 @@
 import { recordTrellisDuration as recordOpenTelemetryDuration } from "@qlever-llc/trellis/telemetry";
-import { recordTrellisTestDuration } from "../integration/metrics.ts";
 
 export function recordTrellisDuration(
   name: Parameters<typeof recordOpenTelemetryDuration>[0],
@@ -19,5 +18,4 @@ export function recordTrellisDuration(
     } = attributes;
     recordOpenTelemetryDuration(name, durationMs, otelAttributes);
   }
-  void recordTrellisTestDuration(name, durationMs, attributes);
 }

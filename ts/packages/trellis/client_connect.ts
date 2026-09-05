@@ -47,14 +47,14 @@ import {
   observeNatsTrellisConnection,
   type TrellisConnection,
 } from "./connection.ts";
-import { getContractRuntime } from "./contract_support/contract_runtime.ts";
+import { getParticipantRuntime } from "./participant_runtime/participant.ts";
 import {
-  CONTRACT_STATE_METADATA,
-  type ContractStateMetadata,
-} from "./contract_support/mod.ts";
-import type { NativeProtocolContract } from "./contract_support/protocol_artifacts.ts";
-import { resolveNativeProtocolPresentation } from "./contract_support/protocol_resolution.ts";
-import type { RuntimeApi } from "./contract_support/runtime.ts";
+  PARTICIPANT_STATE_METADATA,
+  type ParticipantStateMetadata,
+} from "./participant_runtime/metadata.ts";
+import type { GeneratedParticipantEvidence } from "./participant_runtime/artifacts.ts";
+import { resolveParticipantPresentation } from "./participant_runtime/resolution.ts";
+import type { RuntimeApi } from "./participant_runtime/api.ts";
 import { TransportError } from "./errors/index.ts";
 import {
   DEFAULT_RUNTIME_MAX_RECONNECT_ATTEMPTS,
@@ -67,8 +67,8 @@ import {
 } from "./session.ts";
 import { recordTrellisDuration } from "./telemetry/mod.ts";
 
-type ClientContract = NativeProtocolContract & {
-  readonly [CONTRACT_STATE_METADATA]?: ContractStateMetadata;
+type ClientContract = GeneratedParticipantEvidence & {
+  readonly [PARTICIPANT_STATE_METADATA]?: ParticipantStateMetadata;
 };
 
 /** Browser caller runtime whose lifecycle owner can revoke and end its session. */
@@ -215,11 +215,7 @@ type ClientConnectArgsFor<TContract extends ClientContract> =
   & ClientOpts
   & {
     trellisUrl: string;
-    contract: TContract;
-    participant: {
-      id: string;
-      artifactDigest: string;
-    };
+    participant: TContract;
     auth?: ClientAuthOptions;
     onAuthRequired?: (
       ctx: ClientAuthRequiredContext,
@@ -812,7 +808,7 @@ function bootstrapTargetsRequestedContract<
 ): boolean {
   return bootstrap.status === "ready" &&
     bootstrap.connectInfo.participantId === args.participant.id &&
-    bootstrap.connectInfo.participantDigest === args.contract.CONTRACT_DIGEST;
+    bootstrap.connectInfo.participantDigest === args.participant.digest;
 }
 
 async function buildSessionKeyLoginUrl(args: {
@@ -820,27 +816,22 @@ async function buildSessionKeyLoginUrl(args: {
   redirectTo: string;
   identity: ClientRuntimeIdentity;
   participant: ClientConnectArgsFor<ClientContract>["participant"];
-  contract: ClientContract;
 }): Promise<
   { status: "auth_required"; loginUrl: string }
 > {
   const startedAt = performance.now();
   const requestId = ulid();
   const issuedAt = Date.now();
-  const presentation = await resolveNativeProtocolPresentation(args.contract);
-  if (
-    args.participant.id !== args.contract.CONTRACT_ID ||
-    args.participant.artifactDigest !== args.contract.CONTRACT_DIGEST
-  ) {
-    throw new Error("Client participant identity does not match its contract");
-  }
+  const presentation = await resolveParticipantPresentation(
+    args.participant,
+  );
   const unsigned = {
     requestId,
     issuedAt,
     sessionPublicKey: args.identity.sessionKey,
     sessionNkey: args.identity.sessionNkey,
     participantId: args.participant.id,
-    participantArtifactDigest: args.participant.artifactDigest,
+    participantArtifactDigest: args.participant.digest,
     participantArtifact: presentation.participant,
     referencedApiArtifacts: [presentation.api, ...presentation.referencedApis],
     redirectTarget: args.redirectTo,
@@ -859,7 +850,7 @@ async function buildSessionKeyLoginUrl(args: {
         sessionPublicKey: args.identity.sessionKey,
         sessionNkey: args.identity.sessionNkey,
         participantId: args.participant.id,
-        participantDigest: args.participant.artifactDigest,
+        participantDigest: args.participant.digest,
         redirectTarget: args.redirectTo,
         requestDigest,
       }),
@@ -924,7 +915,7 @@ export async function connectClientWithDeps<
   const trustScope = browserInstallationScope(
     trellisUrl,
     args.participant.id,
-    args.participant.artifactDigest,
+    args.participant.digest,
   );
   const browserInstallation = args.auth?.mode === "session_key"
     ? undefined
@@ -1242,8 +1233,8 @@ export async function connectClientWithDeps<
   });
   void nc.closed().then(stopContextRefresh, stopContextRefresh);
 
-  const api = getContractRuntime(args.contract).usedApi as RuntimeApi;
-  const state = args.contract[CONTRACT_STATE_METADATA] as TrellisOpts<
+  const api = getParticipantRuntime(args.participant).usedApi as RuntimeApi;
+  const state = args.participant[PARTICIPANT_STATE_METADATA] as TrellisOpts<
     RuntimeApi
   >["state"];
 
@@ -1275,7 +1266,7 @@ export async function connectClientWithDeps<
       outcome: "ok",
     },
   );
-  const caller = createCallerRuntime(client, args.contract);
+  const caller = createCallerRuntime(client, args.participant);
   return Object.assign(caller, {
     logout: async () => {
       endingSession = true;
@@ -1351,7 +1342,6 @@ async function resolveAuthRequired<
     redirectTo,
     identity,
     participant: args.participant,
-    contract: args.contract,
   });
 
   const loginUrl = authStart.loginUrl;

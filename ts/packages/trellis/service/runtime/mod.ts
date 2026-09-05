@@ -31,6 +31,7 @@ export type { HealthHeartbeatSample } from "../../internal_sdk/generated/health/
 export { HealthHeartbeatSampleSchema } from "../../internal_sdk/generated/health/schemas.ts";
 export {
   type FeedHandler,
+  type GeneratedServiceParticipant,
   type HealthCheckHandler,
   type HealthInfoHandler,
   type JobHandler,
@@ -39,7 +40,6 @@ export {
   type OperationHandler,
   type OperationRegistration,
   type RpcHandler,
-  type ServiceContract,
   type ServiceEventHandler,
   StoreHandle,
   type Trellis,

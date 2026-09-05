@@ -22,7 +22,7 @@ use sha2::{Digest as _, Sha256};
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use trellis_protocol::{
-    ApiSurfaceKind, GrantSet, ParticipantResourceKind, PermissionAction, PermissionAtom,
+    ApiSurfaceKind, GrantSet, PermissionAction, PermissionAtom,
     PermissionTarget,
 };
 

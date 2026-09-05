@@ -154,7 +154,7 @@ impl<'a> DeviceContractEvidence<'a> {
 /// Runtime and device-identity options for an activated device principal.
 ///
 /// The type parameter `C` supplies the exact generated participant and API evidence through
-/// [`crate::service::GeneratedServiceContract`]; callers do not provide or duplicate that
+/// [`crate::service::GeneratedServiceParticipant`]; callers do not provide or duplicate that
 /// evidence.
 pub struct DeviceConnectOptions<'a, C> {
     trellis_url: &'a str,
@@ -169,7 +169,7 @@ pub struct DeviceConnectOptions<'a, C> {
     contract_type: std::marker::PhantomData<C>,
 }
 
-impl<'a, C: crate::service::GeneratedServiceContract> DeviceConnectOptions<'a, C> {
+impl<'a, C: crate::service::GeneratedServiceParticipant> DeviceConnectOptions<'a, C> {
     /// Create activated-device connection options using the exact generated evidence from `C`.
     ///
     /// Runtime bootstrap generates fresh session keys internally; this constructor accepts only
@@ -188,7 +188,7 @@ impl<'a, C: crate::service::GeneratedServiceContract> DeviceConnectOptions<'a, C
             instance_id,
             contract: DeviceContractEvidence {
                 participant_id: C::PARTICIPANT_ID,
-                participant_digest: C::CONTRACT_DIGEST,
+                participant_digest: C::PARTICIPANT_DIGEST,
                 participant_needs_digest: C::PARTICIPANT_NEEDS_DIGEST,
                 participant_json: C::PARTICIPANT_JSON,
                 api_json: C::API_JSON,

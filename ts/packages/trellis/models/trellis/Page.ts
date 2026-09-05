@@ -3,4 +3,4 @@ export {
   PageRequestSchema,
   type PageResponse,
   PageResponseSchema,
-} from "../../contract_support/protocol.ts";
+} from "../../participant_runtime/schemas.ts";

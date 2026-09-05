@@ -58,9 +58,8 @@ Rules:
 
 ```text
 services/<name>/
+├── contract.trellis # Native API and participant declarations
 ├── main.ts          # Bootstrap, handlers, shutdown
-├── contract.ts      # Local contract definition
-├── contracts/       # Optional contract module directory
 ├── config.ts        # Environment configuration
 ├── globals.ts       # Shared runtime state
 ├── deno.json        # Tasks, imports
@@ -69,13 +68,8 @@ services/<name>/
 
 The full template above is common for installable services. Smaller repo-local
 participants such as demos or utilities may only need `main.ts`, `deno.json`,
-and one contract module.
-
-For TypeScript service contract source files, use a top-level `contract.ts` for
-single-contract services and `contracts/*.ts` only when the service owns
-multiple contract modules. In either layout, the contract module should default
-export the `defineServiceContract(...)` result so `trellis install` can resolve
-it directly.
+and `contract.trellis`. Projects with multiple source files use direct children
+of `contracts/*.trellis` instead.
 
 ### Lifecycle
 
@@ -83,11 +77,11 @@ For `kind: "service"` participants:
 
 ```ts
 import { TrellisService } from "@qlever-llc/trellis/service/deno";
-import { myService } from "./contract.ts";
+import { participant } from "../.trellis/ts/participants/acme.service@v1.ts";
 
 const service = await TrellisService.connect({
   trellisUrl: config.trellisUrl,
-  contract: myService,
+  participant,
   name: "<name>",
   sessionKeySeed: config.sessionKeySeed,
   runtime: {},
@@ -273,39 +267,34 @@ const handler = async ({ input, deps }) => {
 
 ### Minimal installable service example
 
+```trellis
+api "acme.echo@v1" {
+  version "1.0.0";
+  display_name "Echo Service";
+  description "A minimal installable Trellis service example.";
+  model EchoMessage { message: string; }
+  error UnexpectedError;
+  rpc "Echo.Ping" {
+    version "v1";
+    input EchoMessage;
+    output EchoMessage;
+    errors [UnexpectedError];
+  }
+}
+
+participant "acme.echo@v1" service {
+  implements "acme.echo@v1";
+}
+```
+
 ```ts
-import { defineServiceContract, Result } from "@qlever-llc/trellis";
+import { Result } from "@qlever-llc/trellis";
 import { TrellisService } from "@qlever-llc/trellis/service/deno";
-import { Type } from "typebox";
-
-const schemas = {
-  EchoRequest: Type.Object({ message: Type.String() }),
-  EchoResponse: Type.Object({ message: Type.String() }),
-} as const;
-
-export const serviceContract = defineServiceContract(
-  { schemas },
-  (ref) => ({
-    id: "acme.echo@v1",
-    displayName: "Echo Service",
-    description: "A minimal installable Trellis service example.",
-    rpc: {
-      "Echo.Ping": {
-        version: "v1",
-        input: ref.schema("EchoRequest"),
-        output: ref.schema("EchoResponse"),
-        capabilities: { call: [] },
-        errors: [ref.error("UnexpectedError")],
-      },
-    },
-  }),
-);
-
-export default serviceContract;
+import { participant } from "../.trellis/ts/participants/acme.echo@v1.ts";
 
 const service = await TrellisService.connect({
   trellisUrl,
-  contract: serviceContract,
+  participant,
   name: "echo",
   sessionKeySeed,
   runtime: {},
@@ -326,7 +315,7 @@ Rules:
 - a minimal installable service should own at least one public surface such as
   an RPC, operation, or event rather than existing only to call other services
 - installable service code uses `TrellisService.connect(...)` and mounts only
-  names from its owned contract surface
+  names from its generated participant surface
 - service resource handles come from the connected runtime; do not call
   `Trellis.Bindings.Get` or manually construct service, KV, store, or jobs
   handles in service-author code
@@ -376,11 +365,10 @@ Rules:
 
 Behavior:
 
-- `TrellisService.connect(...)` performs bootstrap, auth handshake, contract
+- `TrellisService.connect(...)` performs bootstrap, auth handshake, participant
   verification, runtime connection setup, and eager binding resolution
-- if Trellis does not know the requested digest, service bootstrap asks the
-  runtime for the full manifest; the runtime retries with the canonical contract
-  emitted by `defineServiceContract(...)` or the generated SDK module
+- if Trellis does not know the requested digest, service bootstrap presents the
+  canonical participant artifact carried by the generated participant module
 - service bootstrap validates and analyzes the presented manifest as a contract
   proposal; invalid manifests fail immediately, while unknown required `uses`
   dependencies produce targeted dependency blockers unless deployment authority

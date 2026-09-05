@@ -57,9 +57,8 @@ Trellis by hand-building NATS subjects, envelopes, or JSON wire payloads.
 - Use generated participant alias methods for outbound RPCs, operations, feeds,
   events, state, resources, and jobs.
 - Register owned providers through generated `service.handle()` facades.
-- Use public `trellis` runtime facades and `trellis-contracts` contract-model
-  APIs. Do not depend on unpublished low-level runtime crates from application
-  code.
+- Use public `trellis` runtime facades and generated participant crates. Do not
+  depend on unpublished low-level runtime crates from application code.
 - Do not import `trellis_rs::client` or `trellis_rs::generated`, extract or
   construct raw transport handles, or build subjects in application code.
 - Direct descriptor publish is the default. Use prepared events only when event

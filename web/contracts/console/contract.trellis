@@ -1,0 +1,109 @@
+api "trellis-app.console@v1" {
+  version "1.0.0";
+  display_name "Trellis Console";
+  description "Drive the Trellis administration client's contract-declared platform access.";
+}
+
+participant "trellis-app.console@v1" app {
+  implements "trellis-app.console@v1";
+  use required trellis_auth_v1 "trellis.auth@v1" {
+    call rpc "Auth.Capabilities.List";
+    call rpc "Auth.CapabilityGroups.Delete";
+    call rpc "Auth.CapabilityGroups.Get";
+    call rpc "Auth.CapabilityGroups.List";
+    call rpc "Auth.CapabilityGroups.Put";
+    call rpc "Auth.Connections.Kick";
+    call rpc "Auth.Connections.List";
+    call rpc "Auth.DeploymentAuthority.AcceptMigration";
+    call rpc "Auth.DeploymentAuthority.AcceptUpdate";
+    call rpc "Auth.DeploymentAuthority.Get";
+    call rpc "Auth.DeploymentAuthority.List";
+    call rpc "Auth.DeploymentAuthority.Plan";
+    call rpc "Auth.DeploymentAuthority.Plans.Get";
+    call rpc "Auth.DeploymentAuthority.Plans.List";
+    call rpc "Auth.DeploymentAuthority.Reconcile";
+    call rpc "Auth.DeploymentAuthority.Reject";
+    call rpc "Auth.Deployments.Create";
+    call rpc "Auth.Deployments.Disable";
+    call rpc "Auth.Deployments.Enable";
+    call rpc "Auth.Deployments.List";
+    call rpc "Auth.Deployments.Remove";
+    call rpc "Auth.DeviceUserAuthorities.List";
+    call rpc "Auth.DeviceUserAuthorities.Reviews.Decide";
+    call rpc "Auth.DeviceUserAuthorities.Reviews.List";
+    call rpc "Auth.DeviceUserAuthorities.Revoke";
+    call rpc "Auth.Devices.ConnectInfo.Get";
+    call rpc "Auth.Devices.Disable";
+    call rpc "Auth.Devices.Enable";
+    call rpc "Auth.Devices.List";
+    call rpc "Auth.Devices.Provision";
+    call rpc "Auth.Devices.Remove";
+    call rpc "Auth.IdentityAuthority.Get";
+    call rpc "Auth.IdentityAuthority.List";
+    call rpc "Auth.IdentityAuthority.Revoke";
+    call rpc "Auth.IdentityGrants.List";
+    call rpc "Auth.IdentityGrants.Revoke";
+    call rpc "Auth.Portals.Get";
+    call rpc "Auth.Portals.GrantOverrides.List";
+    call rpc "Auth.Portals.GrantOverrides.Put";
+    call rpc "Auth.Portals.GrantOverrides.Remove";
+    call rpc "Auth.Portals.List";
+    call rpc "Auth.Portals.LoginSettings.Get";
+    call rpc "Auth.Portals.LoginSettings.Update";
+    call rpc "Auth.Portals.Put";
+    call rpc "Auth.Portals.Remove";
+    call rpc "Auth.Portals.Routes.Put";
+    call rpc "Auth.Portals.Routes.Remove";
+    call rpc "Auth.ServiceInstances.Disable";
+    call rpc "Auth.ServiceInstances.Enable";
+    call rpc "Auth.ServiceInstances.List";
+    call rpc "Auth.ServiceInstances.Provision";
+    call rpc "Auth.ServiceInstances.Remove";
+    call rpc "Auth.Sessions.List";
+    call rpc "Auth.Sessions.Logout";
+    call rpc "Auth.Sessions.Me";
+    call rpc "Auth.Sessions.Revoke";
+    call rpc "Auth.UserIdentities.List";
+    call rpc "Auth.Users.Create";
+    call rpc "Auth.Users.Get";
+    call rpc "Auth.Users.IdentityLink.Create";
+    call rpc "Auth.Users.List";
+    call rpc "Auth.Users.Password.Change";
+    call rpc "Auth.Users.PasswordReset.Create";
+    call rpc "Auth.Users.Resolve";
+    call rpc "Auth.Users.Update";
+  }
+  use required trellis_eventlog_v1 "trellis.eventlog@v1" {
+    call rpc "EventLog.Consumers.Inspect";
+    call rpc "EventLog.Consumers.Query";
+    call rpc "EventLog.Inspect";
+    call rpc "EventLog.Metrics";
+    call rpc "EventLog.Query";
+    subscribe feed "EventLog.Watch";
+  }
+  use required trellis_health_v1 "trellis.health@v1" {
+    call rpc "Health.Inspect";
+    call rpc "Health.Metrics";
+    call rpc "Health.Query";
+    subscribe event "Health.StatusChanged";
+    subscribe feed "Health.Watch";
+  }
+  use required trellis_jobs_v1 "trellis.jobs@v1" {
+    call rpc "Jobs.Cancel";
+    call rpc "Jobs.DismissDLQ";
+    call rpc "Jobs.GetKey";
+    call rpc "Jobs.Inspect";
+    call rpc "Jobs.ListDLQ";
+    call rpc "Jobs.ListServices";
+    call rpc "Jobs.Metrics";
+    call rpc "Jobs.Query";
+    call rpc "Jobs.ReplayDLQ";
+    call rpc "Jobs.Retry";
+    subscribe feed "Jobs.Watch";
+  }
+  use required trellis_state_v1 "trellis.state@v1" {
+    call rpc "State.Admin.Delete";
+    call rpc "State.Admin.Get";
+    call rpc "State.Admin.List";
+  }
+}

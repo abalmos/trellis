@@ -13,8 +13,8 @@ suite from the repository root with:
 deno task -c ts/deno.json test:integration
 ```
 
-Focused runs use the client cases in shared
-`integration/client-test-matrix.json` metadata:
+Focused runs use the client cases in shared ordinary Deno and Rust test
+discovery:
 
 ```sh
 deno task -c ts/deno.json test:integration -- --fixture rpc

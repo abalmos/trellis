@@ -114,12 +114,12 @@ pub const DEFAULT_AUTHORITY_PENDING_TIMEOUT_MS: Option<u64> = None;
 /// Native participant and API evidence emitted by generated Rust participant facades.
 ///
 /// Service and device facades use this as their sole source of exact contract evidence.
-pub trait GeneratedServiceContract {
+pub trait GeneratedServiceParticipant {
     /// Trellis participant id, for example `example.service@v1`.
     const PARTICIPANT_ID: &'static str;
 
     /// Content digest for the generated participant artifact.
-    const CONTRACT_DIGEST: &'static str;
+    const PARTICIPANT_DIGEST: &'static str;
 
     /// Digest of the participant needs resolution.
     const PARTICIPANT_NEEDS_DIGEST: &'static str;
@@ -1260,14 +1260,14 @@ impl<C> ConnectedServiceRuntime<C> {
     }
 }
 
-impl<C: GeneratedServiceContract> ConnectedServiceRuntime<C> {
+impl<C: GeneratedServiceParticipant> ConnectedServiceRuntime<C> {
     /// Connect with generated contract constants and parse the returned bootstrap binding.
     pub async fn connect(options: ServiceConnectOptions<'_>) -> Result<Self, ServiceRuntimeError> {
         let client =
             TrellisClient::connect_service_with_contract(ServiceConnectWithContractOptions {
                 trellis_url: options.trellis_url,
                 participant_id: C::PARTICIPANT_ID,
-                participant_digest: C::CONTRACT_DIGEST,
+                participant_digest: C::PARTICIPANT_DIGEST,
                 participant_json: C::PARTICIPANT_JSON,
                 api_json: C::API_JSON,
                 api_digest: C::API_DIGEST,

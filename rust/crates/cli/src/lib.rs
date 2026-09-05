@@ -3,6 +3,7 @@
 #[cfg(feature = "runtime")]
 pub mod app;
 pub mod cli;
+pub mod generate;
 pub mod oci;
 pub mod output;
 pub mod package;

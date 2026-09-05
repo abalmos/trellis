@@ -1,11 +1,9 @@
 use std::future::Future;
 use std::marker::PhantomData;
 
+use crate::client::{PageResponse, TrellisClient, TrellisClientError};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_json::{Map, Value};
-use trellis_contracts::PageResponse;
-
-use crate::client::{TrellisClient, TrellisClientError};
 
 const GET_SUBJECT: &str = "rpc.v1.State.Get";
 const PUT_SUBJECT: &str = "rpc.v1.State.Put";

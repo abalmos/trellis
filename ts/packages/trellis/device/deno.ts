@@ -72,8 +72,8 @@ type DeviceActivationStateStore = {
  * Options for the Deno-only device activation status helper.
  */
 export type CheckDeviceActivationArgs<
-  TContract extends TrellisDeviceActivationArgs["contract"] =
-    TrellisDeviceActivationArgs["contract"],
+  TContract extends TrellisDeviceActivationArgs["participant"] =
+    TrellisDeviceActivationArgs["participant"],
 > = TrellisDeviceActivationArgs<TContract> & {
   stateDir?: string;
   statePath?: string;
@@ -372,7 +372,7 @@ function createActivatedLocalState(
 }
 
 async function createActivationRequiredStatus<
-  TContract extends TrellisDeviceActivationArgs["contract"],
+  TContract extends TrellisDeviceActivationArgs["participant"],
 >(args: {
   checkArgs: CheckDeviceActivationArgs<TContract>;
   store: DeviceActivationStateStore;
@@ -381,14 +381,14 @@ async function createActivationRequiredStatus<
   const session = args.localState?.status === "pending"
     ? await resumeDeviceActivationWithDeps({
       trellisUrl: args.checkArgs.trellisUrl,
-      contract: args.checkArgs.contract,
+      participant: args.checkArgs.participant,
       identity: args.checkArgs.identity,
       rootSecret: args.checkArgs.rootSecret,
       localState: args.localState,
     }, { now: () => Date.now() })
     : await startDeviceActivationWithDeps({
       trellisUrl: args.checkArgs.trellisUrl,
-      contract: args.checkArgs.contract,
+      participant: args.checkArgs.participant,
       identity: args.checkArgs.identity,
       rootSecret: args.checkArgs.rootSecret,
     }, { now: () => Date.now() });
@@ -449,14 +449,14 @@ async function createActivationRequiredStatus<
  * Reports Deno device activation status and hides local activation persistence details.
  */
 export async function checkDeviceActivation<
-  TContract extends TrellisDeviceActivationArgs["contract"],
+  TContract extends TrellisDeviceActivationArgs["participant"],
 >(
   args: CheckDeviceActivationArgs<TContract>,
 ): Promise<TrellisDeviceActivationStatus> {
   const store = await openDeviceActivationStateStore({
     trellisUrl: args.trellisUrl,
     rootSecret: args.rootSecret,
-    participantDigest: args.contract.CONTRACT_DIGEST,
+    participantDigest: args.participant.digest,
     stateDir: args.stateDir,
     statePath: args.statePath,
   });

@@ -27,24 +27,24 @@ secondary Trellis callout for the platform concept it exercises.
 3. If the browser app should use a non-default Trellis URL, set
    `PUBLIC_TRELLIS_URL` in `demos/app/.env`. The default is
    `http://localhost:3000`.
-4. Install locked APIs and generated contracts once:
+4. Install registry APIs and generate each project:
 
 ```sh
-cargo xtask install
+trellis generate --root demos/ts/service
+trellis update --root demos/ts/device
+trellis update --root demos/app
 ```
 
-Each demo project owns its dependencies and generated SDKs. Rerun install after
-changing a contract or dependency. Trellis computes approval identity from the
-normalized contract interface: editing display-only metadata such as
-`displayName` or `description` updates portal/catalog copy but does not force a
-new browser, CLI, or device approval digest.
+Each project owns its dependencies and generated SDKs under `.trellis/`. Use
+`trellis generate --watch` while editing `contract.trellis`; do not edit
+generated artifacts. Trellis computes approval identity from the normalized
+participant interface: editing display-only metadata such as `displayName` or
+`description` updates portal/catalog copy but does not force a new browser, CLI,
+or device approval digest.
 
-The demo contracts use Trellis schema references (`ref.schema(...)`) at surface
-declaration sites and self-contained embedded TypeBox schemas in `src/schemas`.
-Do not add JSON Schema `$ref` inside those embedded schemas; v1 contract
-validation rejects both local and remote embedded refs. If you add templated
-event subjects, declare `params` in subject-token order and point them at
-properties that exist in the event payload schema.
+The demo schemas and surfaces are ordinary Trellis IDL declarations. If you add
+templated event subjects, declare `params` in subject-token order and point them
+at properties that exist in the event payload schema.
 
 When evolving the demo service during a rollout, keep duplicate RPC, operation,
 event, and job payload schemas wire-compatible. The demo schemas intentionally
@@ -56,11 +56,10 @@ contract lineage.
 
 ## Create And Start The Service
 
-Create one service deployment, review its deployment authority with
-`demos/ts/service/contract.ts`, then provision one service instance and start
-the service with the provisioned instance seed. After deployment authority
-includes the service contract boundary, the service instance can connect and
-serve traffic.
+Create one service deployment, review its generated participant authority, then
+provision one service instance and start the service with the provisioned
+instance seed. After deployment authority includes the service contract
+boundary, the service instance can connect and serve traffic.
 
 ```sh
 trellis deploy create svc/demo.field-ops
@@ -77,9 +76,9 @@ Use the `instanceSeed` field from the provision JSON as `<instance-seed>`.
 
 ## Create And Start The Device
 
-Create one device deployment, review its deployment authority with
-`demos/ts/device/contract.ts`, provision one device instance, then start the TUI
-with the provisioned root secret.
+Create one device deployment, review its generated participant authority,
+provision one device instance, then start the TUI with the provisioned root
+secret.
 
 ```sh
 trellis deploy create dev/demo.field-device
@@ -101,8 +100,8 @@ without another approval step.
 
 ## Start The Browser App
 
-Start the Svelte Field Inspection Desk from its own Deno config after
-`cargo xtask install` has generated the app SDK. The app defaults to
+Start the Svelte Field Inspection Desk after `trellis update --root demos/app`
+has generated its participant and API SDK. The app defaults to
 `http://localhost:3000` for its Trellis server and can be pointed at another
 server with `PUBLIC_TRELLIS_URL`. It keeps local Trellis package and generated
 SDK aliases explicitly in `demos/app/svelte.config.js`; `vite.config.js` should
@@ -112,7 +111,7 @@ not duplicate those local package mappings.
 deno task -c demos/app/deno.json dev
 ```
 
-If you change the app contract's requested RPC, operation, event, or state
+If you change the app participant's requested RPC, operation, event, or state
 surface, the next browser sign-in may require approval when the requested
 boundary exceeds the existing identity authority. If you only rename the demo
 app or adjust its description, existing approval remains valid because that

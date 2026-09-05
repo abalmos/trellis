@@ -1,0 +1,234 @@
+api "trellis.eventlog@v1" {
+  version "1.0.0";
+  display_name "Trellis Event Log";
+  description "Read-only Event Log API for Trellis event stream observability.";
+  model EventConsumerStatusRow {
+    ackPending: int;
+    ackWaitMs?: int;
+    consumerName: string;
+    contractId?: string;
+    deploymentId?: string;
+    filterSubjects: list<string>;
+    group?: string;
+    managedBy?: "authority" | "platform" | "external";
+    maxDeliver?: int;
+    oldestPendingAt?: string;
+    oldestPendingEventId?: string;
+    pending: int;
+    redelivered?: int;
+    status: "current" | "processing" | "behind" | "saturated" | "inactive" | "failing" | "missing" | "orphaned";
+    stream: string;
+    waitingPulls: int;
+  }
+  model EventLogConsumersInspectRequest {
+    consumerName: string;
+    stream?: string;
+  }
+  model EventLogConsumersInspectResponse {
+  }
+  model EventLogConsumersQueryRequest {
+    contractId?: string;
+    deploymentId?: string;
+    limit: int(minimum=1, maximum=500);
+    offset?: uint;
+    ownerContractId?: string;
+    status?: list<"current" | "processing" | "behind" | "saturated" | "inactive" | "failing" | "missing" | "orphaned">;
+    subject?: string;
+  }
+  model EventLogConsumersQueryResponse {
+    consumers: list<EventConsumerStatusRow>;
+    limit: int;
+    offset: int;
+    total: int;
+  }
+  model EventLogInspectRequest {
+    eventId?: string;
+    streamSequence?: int;
+  }
+  model EventLogInspectResponse {
+  }
+  model EventLogMetricsRequest {
+    window?: "15m" | "1h" | "6h" | "24h" | "7d";
+  }
+  model EventLogMetricsResponse {
+    buckets: list<EventLogMetricsResponsebucketsItem>;
+    summary: EventLogMetricsResponsesummary;
+  }
+  model EventLogQueryRequest {
+    consumerDeploymentId?: string;
+    consumerName?: string;
+    excludeEventTypes?: list<EventLogQueryRequestexcludeEventTypesItem>;
+    includeEventTypes?: list<EventLogQueryRequestincludeEventTypesItem>;
+    integrityExceptionOnly?: bool;
+    limit: int(minimum=1, maximum=500);
+    offset?: uint;
+    ownerContractId?: string;
+    ownerEventName?: string;
+    publisherDeploymentId?: string;
+    publisherParticipantId?: string;
+    resolution?: list<"resolved" | "unresolved" | "malformed">;
+    search?: string;
+    sort?: EventLogQueryRequestsort;
+    subject?: string;
+    verificationStatus?: list<"verified">;
+    window?: "15m" | "1h" | "6h" | "24h" | "7d";
+  }
+  model EventLogQueryResponse {
+    events: list<EventLogRow>;
+    limit: int;
+    offset: int;
+    total: int;
+  }
+  model EventLogRow {
+    eventId: string;
+    eventTime: string;
+    headerCount: int;
+    ownerContractId?: string;
+    ownerEventName?: string;
+    payloadSizeBytes: int;
+    publisherDeploymentId?: string;
+    publisherInstanceId?: string;
+    publisherKind?: "service" | "device" | "user";
+    publisherParticipantDigest?: string;
+    publisherParticipantId?: string;
+    resolution: "resolved" | "unresolved" | "malformed";
+    streamSequence: int;
+    subject: string;
+    traceId?: string;
+    verificationStatus: "verified";
+  }
+  model EventLogWatchFrame {
+  }
+  model EventLogWatchRequest {
+  }
+  model NotFoundErrorData {
+    context?: NotFoundErrorDatacontext;
+    id: string;
+    message: string;
+    type: "NotFoundError";
+  }
+  model EventLogMetricsResponsebucketsItem {
+    byResolution: EventLogMetricsResponsebucketsItembyResolution;
+    byVerificationStatus: EventLogMetricsResponsebucketsItembyVerificationStatus;
+    integrityExceptions: int;
+    payloadSizeBytes: int;
+    start: string;
+    total: int;
+  }
+  model EventLogMetricsResponsesummary {
+    byResolution: EventLogMetricsResponsesummarybyResolution;
+    byVerificationStatus: EventLogMetricsResponsesummarybyVerificationStatus;
+    eventTypes: list<EventLogMetricsResponsesummaryeventTypesItem>;
+    integrityExceptions: int;
+    payloadSizeBytes: int;
+    total: int;
+    uniqueSubjects: int;
+  }
+  model EventLogQueryRequestexcludeEventTypesItem {
+    ownerContractId: string;
+    ownerEventName: string;
+  }
+  model EventLogQueryRequestincludeEventTypesItem {
+    ownerContractId: string;
+    ownerEventName: string;
+  }
+  model EventLogQueryRequestsort {
+  }
+  model NotFoundErrorDatacontext {
+  }
+  model EventLogMetricsResponsebucketsItembyResolution {
+    malformed?: int;
+    resolved?: int;
+    unresolved?: int;
+  }
+  model EventLogMetricsResponsebucketsItembyVerificationStatus {
+    "auth-unavailable"?: int;
+    "invalid-signature"?: int;
+    "missing-proof"?: int;
+    "missing-session"?: int;
+    "outside-session-window"?: int;
+    "subject-denied"?: int;
+    verified?: int;
+  }
+  model EventLogMetricsResponsesummarybyResolution {
+    malformed?: int;
+    resolved?: int;
+    unresolved?: int;
+  }
+  model EventLogMetricsResponsesummarybyVerificationStatus {
+    "auth-unavailable"?: int;
+    "invalid-signature"?: int;
+    "missing-proof"?: int;
+    "missing-session"?: int;
+    "outside-session-window"?: int;
+    "subject-denied"?: int;
+    verified?: int;
+  }
+  model EventLogMetricsResponsesummaryeventTypesItem {
+    count: int;
+    ownerContractId: string;
+    ownerEventName: string;
+  }
+  error NotFoundError {
+    schema NotFoundErrorData;
+  }
+  error UnexpectedError;
+  error ValidationError;
+  capability "trellis.eventlog::read" {
+  }
+  capability "trellis.eventlog::stream" {
+  }
+  rpc "EventLog.Consumers.Inspect" {
+    version "v1";
+    input EventLogConsumersInspectRequest;
+    output EventLogConsumersInspectResponse;
+    errors [NotFoundError, UnexpectedError, ValidationError];
+    capabilities {
+      call ["trellis.eventlog::read"];
+    }
+  }
+  rpc "EventLog.Consumers.Query" {
+    version "v1";
+    input EventLogConsumersQueryRequest;
+    output EventLogConsumersQueryResponse;
+    errors [UnexpectedError, ValidationError];
+    capabilities {
+      call ["trellis.eventlog::read"];
+    }
+  }
+  rpc "EventLog.Inspect" {
+    version "v1";
+    input EventLogInspectRequest;
+    output EventLogInspectResponse;
+    errors [NotFoundError, UnexpectedError, ValidationError];
+    capabilities {
+      call ["trellis.eventlog::read"];
+    }
+  }
+  rpc "EventLog.Metrics" {
+    version "v1";
+    input EventLogMetricsRequest;
+    output EventLogMetricsResponse;
+    errors [UnexpectedError, ValidationError];
+    capabilities {
+      call ["trellis.eventlog::read"];
+    }
+  }
+  rpc "EventLog.Query" {
+    version "v1";
+    input EventLogQueryRequest;
+    output EventLogQueryResponse;
+    errors [UnexpectedError, ValidationError];
+    capabilities {
+      call ["trellis.eventlog::read"];
+    }
+  }
+  feed "EventLog.Watch" {
+    version "v1";
+    input EventLogWatchRequest;
+    event EventLogWatchFrame;
+    capabilities {
+      subscribe ["trellis.eventlog::stream"];
+    }
+  }
+}

@@ -1,33 +1,18 @@
 {
   "name": "@trellis-demo/app",
   "version": "0.0.0",
-  "exports": "./contract.ts",
-  "links": [
-    "../../ts/packages/result",
-    "../../ts/packages/trellis",
-    "../../ts/packages/trellis-svelte"
-  ],
   "tasks": {
-    "install": "deno task -c ../../ts/deno.json install",
-    "dev": "deno task install && deno run -A vite dev",
-    "build": "deno task install && deno run -A vite build",
+    "dev": "deno run -A vite dev",
+    "build": "deno run -A vite build",
     "preview": "deno run -A vite preview",
-    "check": "deno task install && deno task check:installed",
-    "check:installed": "deno run -A @sveltejs/kit sync && deno run -A svelte-check --tsconfig ./tsconfig.check.json"
+    "check": "deno run -A @sveltejs/kit sync && deno run -A svelte-check --tsconfig ./tsconfig.check.json"
   },
   "imports": {
-    "@qlever-llc/result": "../../ts/packages/result/mod.ts",
-    "@qlever-llc/trellis-svelte": "../../ts/packages/trellis-svelte/src/index.ts",
-    "@qlever-llc/trellis": "../../ts/packages/trellis/index.ts",
-    "@qlever-llc/trellis/auth": "../../ts/packages/trellis/auth.ts",
-    "@qlever-llc/trellis/auth/browser": "../../ts/packages/trellis/auth/browser.ts",
-    "@qlever-llc/trellis/browser": "../../ts/packages/trellis/browser.ts",
-    "@qlever-llc/trellis/contracts": "../../ts/packages/trellis/contracts.ts",
-    "@qlever-llc/trellis/device/deno": "../../ts/packages/trellis/device/deno.ts",
-    "@qlever-llc/trellis/errors": "../../ts/packages/trellis/errors/index.ts",
-    "@qlever-llc/trellis/service": "../../ts/packages/trellis/service/mod.ts",
-    "@qlever-llc/trellis/service/deno": "../../ts/packages/trellis/service/deno.ts",
-    "@trellis/apis/demo.service": "./.trellis/generated/ts/trellis-apis/demo.service.ts",
+    "@qlever-llc/result": "jsr:@qlever-llc/result@^0.12.0",
+    "@qlever-llc/trellis-svelte": "jsr:@qlever-llc/trellis-svelte@^0.12.0",
+    "@qlever-llc/trellis": "jsr:@qlever-llc/trellis@^0.12.0",
+    "@qlever-llc/trellis/auth/browser": "jsr:@qlever-llc/trellis@^0.12.0/auth/browser",
+    "@qlever-llc/trellis/contracts": "jsr:@qlever-llc/trellis@^0.12.0/contracts",
     "@sveltejs/acorn-typescript": "npm:@sveltejs/acorn-typescript@^1.0.9",
     "@sveltejs/adapter-auto": "npm:@sveltejs/adapter-auto@^7.0.1",
     "@sveltejs/adapter-static": "npm:@sveltejs/adapter-static@3.0.10",

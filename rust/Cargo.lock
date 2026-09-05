@@ -1353,6 +1353,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "42703706b716c37f96a77aea830392ad231f44c9e9a67872fa5548707e11b11c"
 
 [[package]]
+name = "fsevent-sys"
+version = "4.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "76ee7a02da4d231650c7cea31349b889be2f45ddb3ef3032d2ec8185f6313fd2"
+dependencies = [
+ "libc",
+]
+
+[[package]]
 name = "futures-channel"
 version = "0.3.32"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1974,6 +1983,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "inotify"
+version = "0.11.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4cc00ea907cab49550b7da656f80ebb97be1b997d931fbcd28d39734e17ce592"
+dependencies = [
+ "bitflags",
+ "inotify-sys",
+ "libc",
+]
+
+[[package]]
+name = "inotify-sys"
+version = "0.1.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c033f80b2c113cdf91ab7a33faa9cbc014726dcad99880c8609af2a370edf37d"
+dependencies = [
+ "libc",
+]
+
+[[package]]
 name = "inout"
 version = "0.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2173,6 +2202,26 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a4933f3f57a8e9d9da04db23fb153356ecaf00cbd14aee46279c33dc80925c37"
 
 [[package]]
+name = "kqueue"
+version = "1.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8d763e5b24120b4ddf50de6c92308156765aabfbbccebf401da7cff2d70a41ea"
+dependencies = [
+ "kqueue-sys",
+ "libc",
+]
+
+[[package]]
+name = "kqueue-sys"
+version = "1.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "07293a4e297ac234359b510362495713f75ea345d5307140414f20c69ffeb087"
+dependencies = [
+ "bitflags",
+ "libc",
+]
+
+[[package]]
 name = "lazy_static"
 version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2257,6 +2306,38 @@ name = "log"
 version = "0.4.33"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0ceec5bc11778974d1bcb055b18002eba7f4b3518b6a0081b3af5f21666da9ad"
+
+[[package]]
+name = "logos"
+version = "0.16.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "eb2c55a318a87600ea870ff8c2012148b44bf18b74fad48d0f835c38c7d07c5f"
+dependencies = [
+ "logos-derive",
+]
+
+[[package]]
+name = "logos-codegen"
+version = "0.16.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "58b3ffaa284e1350d017a57d04ada118c4583cf260c8fb01e0fe28a2e9cf8970"
+dependencies = [
+ "fnv",
+ "proc-macro2",
+ "quote",
+ "regex-automata",
+ "regex-syntax",
+ "syn",
+]
+
+[[package]]
+name = "logos-derive"
+version = "0.16.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "52d3a9855747c17eaf4383823f135220716ab49bea5fbea7dd42cc9a92f8aa31"
+dependencies = [
+ "logos-codegen",
+]
 
 [[package]]
 name = "lru-slab"
@@ -2354,6 +2435,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "02bd0af71c67b473010cbbc60715ee815645a4dc942899111f494b4b737d6fda"
 dependencies = [
  "libc",
+ "log",
  "wasi 0.11.1+wasi-snapshot-preview1",
  "windows-sys 0.61.2",
 ]
@@ -2409,6 +2491,45 @@ name = "nonzero_ext"
 version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "38bf9645c8b145698bb0b18a4637dcacbc421ea49bef2317e4fd8065a387cf21"
+
+[[package]]
+name = "notify"
+version = "8.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4d3d07927151ff8575b7087f245456e549fea62edf0ec4e565a5ee50c8402bc3"
+dependencies = [
+ "bitflags",
+ "fsevent-sys",
+ "inotify",
+ "kqueue",
+ "libc",
+ "log",
+ "mio",
+ "notify-types",
+ "walkdir",
+ "windows-sys 0.60.2",
+]
+
+[[package]]
+name = "notify-debouncer-mini"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "17849edfaabd9a5fef1c606d99cfc615a8e99f7ac4366406d86c7942a3184cf2"
+dependencies = [
+ "log",
+ "notify",
+ "notify-types",
+ "tempfile",
+]
+
+[[package]]
+name = "notify-types"
+version = "2.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "42b8cfee0e339a0337359f3c88165702ac6e600dc01c0cc9579a92d62b08477a"
+dependencies = [
+ "bitflags",
+]
 
 [[package]]
 name = "nu-ansi-term"
@@ -4923,6 +5044,7 @@ dependencies = [
  "ed25519-dalek",
  "json5",
  "miette",
+ "notify-debouncer-mini",
  "oci-client",
  "owo-colors",
  "qrcode",
@@ -4946,8 +5068,7 @@ dependencies = [
  "trellis-bootstrap",
  "trellis-codegen-rust",
  "trellis-codegen-ts",
- "trellis-contracts",
- "trellis-generation",
+ "trellis-idl",
  "trellis-local-bootstrap",
  "trellis-protocol",
  "trellis-rs",
@@ -4965,7 +5086,7 @@ dependencies = [
  "syn",
  "thiserror 2.0.18",
  "toml",
- "trellis-contracts",
+ "trellis-protocol",
 ]
 
 [[package]]
@@ -4975,15 +5096,6 @@ dependencies = [
  "oxc_allocator",
  "oxc_parser",
  "oxc_span",
- "serde_json",
- "thiserror 2.0.18",
- "trellis-contracts",
-]
-
-[[package]]
-name = "trellis-contracts"
-version = "0.12.0"
-dependencies = [
  "serde",
  "serde_json",
  "thiserror 2.0.18",
@@ -5006,20 +5118,17 @@ dependencies = [
 ]
 
 [[package]]
-name = "trellis-generation"
+name = "trellis-idl"
 version = "0.12.0"
 dependencies = [
+ "base64 0.22.1",
+ "logos",
  "miette",
- "owo-colors",
+ "semver",
  "serde",
  "serde_json",
- "sha2 0.11.0",
- "syn",
- "tempfile",
  "toml",
- "trellis-codegen-rust",
- "trellis-codegen-ts",
- "trellis-contracts",
+ "trellis-protocol",
 ]
 
 [[package]]
@@ -5035,7 +5144,6 @@ dependencies = [
  "time",
  "tokio",
  "tracing",
- "trellis-contracts",
  "trellis-rs",
  "trellis-runtime-apis",
 ]
@@ -5125,10 +5233,8 @@ dependencies = [
  "time",
  "tokio",
  "tracing",
- "trellis-contracts",
  "trellis-local-nats",
  "trellis-protocol",
- "trellis-runtime-apis",
  "trellis-test",
  "ulid",
  "url",
@@ -6071,6 +6177,7 @@ dependencies = [
  "serde_json",
  "tokio",
  "trellis-cli",
+ "trellis-codegen-ts",
  "wasm-bindgen-cli-support",
 ]
 

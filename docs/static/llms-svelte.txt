@@ -13,20 +13,20 @@ https://raw.githubusercontent.com/qlever-llc/trellis/main/docs/static/llms-types
 
 ## Browser app setup
 
-Svelte browser apps are contract-driven clients. Use the app source contract's
-default export as the app contract.
+Author the app in `contract.trellis`, run `trellis generate`, and pass its
+generated participant module to the Svelte integration.
 
 ```ts
 import {
   createTrellisApp,
   type TrellisClientFor,
 } from "@qlever-llc/trellis-svelte";
-import contract from "../../contract.ts";
+import { participant } from "../../.trellis/ts/participants/acme.dashboard@v1.ts";
 
-type AppClient = TrellisClientFor<typeof contract>;
+type AppClient = TrellisClientFor<typeof participant>;
 
 export const trellisApp = createTrellisApp({
-  contract,
+  participant,
   trellisUrl: "http://localhost:3000",
 });
 ```
@@ -66,27 +66,11 @@ Rules:
 - Trusted portal policy is administered for one exact portal + participant.
   Capability groups and provider-role mappings are server-side macros bounded by
   the immutable proposal; Svelte portal code never expands or applies them.
-- `TrellisClientFor<typeof contract>` and
-  `createTrellisApp(...)` require a module-shaped contract with `CONTRACT`,
-  `CONTRACT_ID`, `CONTRACT_DIGEST`, `API`, `API_DIGEST`, and `PARTICIPANT`. The
-  source contract returned by `defineAppContract(...)` already has that shape;
-  Trellis resolves contextual participant needs at runtime.
-- Import `defineAppContract(...)` from the browser-safe `@qlever-llc/trellis`
-  root. Keep generated SDKs and browser auth helpers on their explicit subpaths
-  or local workspace aliases.
-- Do not pass the generated `CONTRACT` manifest constant to `createTrellisApp`.
-  `CONTRACT` alone is only the manifest and will fail with missing `API`, digest,
-  or metadata properties.
-- Do not manually compose `{ CONTRACT, API: { owned: OWNED_API } }` for normal
-  Svelte app bootstrap. That partial shape can lose native API/participant
-  identity, state metadata, and clean inferred client types.
-- Do not generate or import the app's own generated SDK just to type
-  `getTrellis()` or `createTrellisApp(...)`. The app source contract is the
-  client type source; use `TrellisClientFor<typeof contract>`.
-- Generated service SDKs are still used for contract authoring, especially
-  `sdk.use(spec)` declarations in app `uses` blocks. Keep those imports pointed
-  at the local generated workspace output or an import-map alias owned by the
-  consuming repo.
+- `TrellisClientFor<typeof participant>` and `createTrellisApp(...)` consume the
+  generated participant directly. Do not reconstruct participant evidence in
+  application code.
+- Keep generated API SDKs and browser auth helpers on their explicit subpaths or
+  local workspace aliases.
 
 ## Svelte integration
 
@@ -99,37 +83,22 @@ Use Svelte context, not module-global mutable state, for app-scoped Trellis
 clients. `@qlever-llc/trellis-svelte` owns the app context created by
 `createTrellisApp(...)`.
 
-## Cross-contract clients
+## Cross-participant clients
 
-For cross-contract app calls, declare the narrow `uses` selection the app needs
-inside the app's source contract and call the other contract SDK's `sdk.use(spec)`
-helper there. Do not depend on broad generated surfaces just to make client types
-appear.
+For calls to another API, declare the narrow required or optional `use` selection
+in `contract.trellis`. Generated participant types expose only those selections.
 
 If the app needs labels for Trellis user ids already present on authorized
 records, declare `Auth.Users.Resolve` and resolve explicit ids. Do not request
 `Auth.Users.List` or create a Svelte-app user table just for display labels.
 
-```ts
-import { defineAppContract } from "@qlever-llc/trellis";
-import * as orders from "@trellis/apis/acme.orders";
-
-const contract = defineAppContract(() => ({
-  id: "acme.dashboard@v1",
-  apiId: "acme.dashboard@v1",
-  apiVersion: "1.0.0",
-  displayName: "Acme Dashboard",
-  description: "Browser app for order workflows.",
-  uses: {
-    required: {
-      orders: orders.use({
-        rpc: { call: ["Orders.Get"] },
-      }),
-    },
-  },
-}));
-
-export default contract;
+```trellis
+participant "acme.dashboard@v1" app {
+  implements "acme.dashboard@v1";
+  use required orders "acme.orders@v1" {
+    call rpc "Orders.Get";
+  }
+}
 ```
 
 ## Vite, npm, JSR, and `svelte-check`

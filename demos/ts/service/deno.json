@@ -4,8 +4,7 @@
   "version": "0.0.0",
   "exports": "./src/main.ts",
   "tasks": {
-    "check": "deno task -c ../../../ts/deno.json install && deno task check:installed",
-    "check:installed": "deno check src/main.ts contract.ts",
+    "check": "deno check src/main.ts",
     "start": "deno run --allow-env --allow-net --allow-sys --allow-write=/tmp src/main.ts"
   }
 }

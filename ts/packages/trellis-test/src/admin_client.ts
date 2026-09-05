@@ -17,8 +17,8 @@ import {
   ADMIN_PARTICIPANT,
   ADMIN_USERNAME,
   type AdminClient,
-  adminContract,
   adminMethods,
+  adminParticipant,
   type AdminRpc,
   type TrellisTestAdminRpcMethod,
 } from "./admin/methods.ts";
@@ -27,8 +27,8 @@ import { isRecord, postAdminRpc, postJson } from "./admin/transport.ts";
 import { generateSessionSeed } from "./control_plane_config.ts";
 import type {
   TrellisTestAuthorityPlanClassification,
-  TrellisTestContractApproval,
-  TrellisTestContractLike,
+  TrellisTestParticipantApproval,
+  TrellisTestParticipantLike,
   TrellisTestServiceKey,
 } from "./types.ts";
 
@@ -191,8 +191,7 @@ export class TrellisTestAdminAutomation {
           trellisUrl: this.#trellisUrl,
           name: "trellis-test-admin",
           timeout: 60_000,
-          contract: adminContract,
-          participant: ADMIN_PARTICIPANT,
+          participant: adminParticipant,
           auth: {
             mode: "session_key",
             authorizationContextEphemeral: true,
@@ -291,28 +290,30 @@ export class TrellisTestAdminAutomation {
   }
 
   async provisionDevice(
-    input: import("@trellis/apis/trellis.auth").AuthDevicesProvisionInput,
+    input: import("../.trellis/ts/apis/auth/mod.ts").AuthDevicesProvisionInput,
   ): Promise<
-    import("@trellis/apis/trellis.auth").AuthDevicesProvisionOutput
+    import("../.trellis/ts/apis/auth/mod.ts").AuthDevicesProvisionOutput
   > {
     return await this.#rpc("authDevicesProvision", input);
   }
 
   async stateAdminGet(
-    input: import("@trellis/apis/trellis.state").StateAdminGetInput,
-  ): Promise<import("@trellis/apis/trellis.state").StateAdminGetOutput> {
+    input: import("../.trellis/ts/apis/state/mod.ts").StateAdminGetInput,
+  ): Promise<import("../.trellis/ts/apis/state/mod.ts").StateAdminGetOutput> {
     return await this.#rpc("stateAdminGet", input);
   }
 
   async stateAdminList(
-    input: import("@trellis/apis/trellis.state").StateAdminListInput,
-  ): Promise<import("@trellis/apis/trellis.state").StateAdminListOutput> {
+    input: import("../.trellis/ts/apis/state/mod.ts").StateAdminListInput,
+  ): Promise<import("../.trellis/ts/apis/state/mod.ts").StateAdminListOutput> {
     return await this.#rpc("stateAdminList", input);
   }
 
   async stateAdminDelete(
-    input: import("@trellis/apis/trellis.state").StateAdminDeleteInput,
-  ): Promise<import("@trellis/apis/trellis.state").StateAdminDeleteOutput> {
+    input: import("../.trellis/ts/apis/state/mod.ts").StateAdminDeleteInput,
+  ): Promise<
+    import("../.trellis/ts/apis/state/mod.ts").StateAdminDeleteOutput
+  > {
     return await this.#rpc("stateAdminDelete", input);
   }
 
@@ -360,10 +361,10 @@ export class TrellisTestAdminAutomation {
   /** Plans, accepts, reconciles, and waits for a contract authority change. */
   async approveContract(args: {
     deployment?: string;
-    contract: TrellisTestContractLike;
+    contract: TrellisTestParticipantLike;
     allowPlanClassifications?:
       readonly TrellisTestAuthorityPlanClassification[];
-  }): Promise<TrellisTestContractApproval> {
+  }): Promise<TrellisTestParticipantApproval> {
     return await adminDeployment.approveContract(this.#deployment, args);
   }
 
@@ -380,7 +381,7 @@ export class TrellisTestAdminAutomation {
   /** Provisions a service instance key through `Auth.ServiceInstances.Provision`. */
   async provisionServiceInstance(args: {
     deployment?: string;
-    contract: TrellisTestContractLike;
+    contract: TrellisTestParticipantLike;
     sessionKeySeed?: string;
   }): Promise<TrellisTestServiceKey> {
     return await adminDeployment.provisionServiceInstance(
@@ -392,7 +393,7 @@ export class TrellisTestAdminAutomation {
   /** Runs the full service registration sequence used by test services. */
   async registerService(args: {
     deployment?: string;
-    contract: TrellisTestContractLike;
+    contract: TrellisTestParticipantLike;
     sessionKeySeed?: string;
   }): Promise<TrellisTestServiceKey> {
     return await adminDeployment.registerService(this.#deployment, args);

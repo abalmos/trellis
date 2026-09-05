@@ -1,5 +1,5 @@
 use jsonschema::Draft;
-use serde_json::Value;
+use serde_json::{Map, Value};
 
 use crate::{
     identifiers::{api_error, participant_error},
@@ -148,18 +148,37 @@ fn validate_wire_schema_additive_inner(
             ));
         }
     }
-    for keyword in ["additionalProperties", "unevaluatedProperties"] {
-        if object_capable
-            && map
-                .get(keyword)
-                .is_some_and(|value| value != &Value::Bool(true))
-        {
-            return Err(schema_error(
-                name,
-                child_path(path, keyword),
-                format!("wire schemas that accept objects must leave '{keyword}' open"),
-            ));
-        }
+    let typed_map_values = (map.get("type").and_then(Value::as_str) == Some("object")
+        && map
+            .get("properties")
+            .is_none_or(|value| value.as_object().is_some_and(Map::is_empty))
+        && map
+            .get("required")
+            .is_none_or(|value| value.as_array().is_some_and(Vec::is_empty)))
+    .then(|| map.get("additionalProperties"))
+    .flatten()
+    .filter(|value| value.is_object());
+    if object_capable
+        && map
+            .get("additionalProperties")
+            .is_some_and(|value| value != &Value::Bool(true) && typed_map_values.is_none())
+    {
+        return Err(schema_error(
+            name,
+            child_path(path, "additionalProperties"),
+            "wire struct schemas must leave 'additionalProperties' open",
+        ));
+    }
+    if object_capable
+        && map
+            .get("unevaluatedProperties")
+            .is_some_and(|value| value != &Value::Bool(true))
+    {
+        return Err(schema_error(
+            name,
+            child_path(path, "unevaluatedProperties"),
+            "wire schemas that accept objects must leave 'unevaluatedProperties' open",
+        ));
     }
     if map.get("const").is_some_and(literal_contains_object) {
         return Err(schema_error(
@@ -243,6 +262,15 @@ fn validate_wire_schema_additive_inner(
                 )?;
             }
         }
+    }
+    if let Some(values) = typed_map_values {
+        validate_wire_schema_additive_inner(
+            name,
+            root,
+            values,
+            &child_path(path, "additionalProperties"),
+            refs,
+        )?;
     }
     for keyword in [
         "contains",

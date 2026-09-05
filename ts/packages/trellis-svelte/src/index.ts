@@ -9,7 +9,7 @@ export type {
   TrellisAppUrlResolver,
   TrellisClientFor,
   TrellisContextClient,
-  TrellisContractLike,
+  TrellisParticipantLike,
 } from "./context.svelte.ts";
 export { createTrellisApp, resolveTrellisAppUrl } from "./context.svelte.ts";
 export {

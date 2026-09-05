@@ -3,7 +3,7 @@ import { Pointer } from "typebox/value";
 import type {
   PermissionAtom,
   RuntimeApi,
-} from "../../contract_support/runtime.ts";
+} from "../../participant_runtime/api.ts";
 import {
   AsyncResult,
   BaseError,

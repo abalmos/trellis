@@ -3,9 +3,9 @@ import {
   createTrellisApp,
   type TrellisClientFor,
 } from "@qlever-llc/trellis-svelte";
-import contract from "../../contract.ts";
+import { participant } from "../../.trellis/ts/participants/demo-app/mod.ts";
 
-export type TrellisDemoAppClient = TrellisClientFor<typeof contract>;
+export type TrellisDemoAppClient = TrellisClientFor<typeof participant>;
 
 const defaultTrellisUrl = "http://localhost:3000";
 
@@ -15,14 +15,10 @@ export const trellisUrl = new URL(
   .toString()
   .replace(/\/$/, "");
 
-export { contract };
+export { participant };
 
 export const trellisApp = createTrellisApp({
-  contract,
-  participant: {
-    id: contract.CONTRACT_ID,
-    artifactDigest: contract.CONTRACT_DIGEST,
-  },
+  participant,
   trellisUrl,
 });
 

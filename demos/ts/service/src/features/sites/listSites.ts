@@ -1,9 +1,9 @@
 import { isErr, ok } from "@qlever-llc/trellis";
 import type { SiteSummary } from "../../../../shared/field_data.ts";
 import type { RpcHandler } from "@qlever-llc/trellis/service";
-import type contract from "../../../contract.ts";
+import type { participant } from "../../../.trellis/ts/participants/demo-service/mod.ts";
 
-type Handler = RpcHandler<typeof contract, "Sites.List">;
+type Handler = RpcHandler<typeof participant, "Sites.List">;
 
 export const listSites: Handler = async ({ input, client }) => {
   const sites: SiteSummary[] = [];

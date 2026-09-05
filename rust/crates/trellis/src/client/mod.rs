@@ -92,7 +92,8 @@ pub use transfer::{
     download_transfer_grant_from_value, DownloadTransferDirection, DownloadTransferGrant, FileInfo,
     TransferCancellation, TransferGrantType, UploadTransferDirection, UploadTransferGrant,
 };
-pub use trellis_contracts::{PageRequest, PageResponse};
+mod pagination;
+pub use pagination::{PageRequest, PageResponse};
 
 #[cfg(test)]
 mod tests;

@@ -1,6 +1,8 @@
+import { Value } from "typebox/value";
 import { UnexpectedError } from "@qlever-llc/trellis";
 import type { OperationHandler } from "@qlever-llc/trellis/service";
-import contract from "../../../contract.ts";
+import { participant } from "../../../.trellis/ts/participants/demo-service/mod.ts";
+import { SitesRefreshResponseSchema } from "../../../.trellis/ts/apis/demo-service/schemas.ts";
 import { recordActivity } from "../activity/index.ts";
 
 function pause(ms: number): Promise<void> {
@@ -8,7 +10,7 @@ function pause(ms: number): Promise<void> {
 }
 
 export const refreshSite: OperationHandler<
-  typeof contract,
+  typeof participant,
   "Sites.Refresh"
 > = async ({ input, op, client }) => {
   await op.started().orThrow();
@@ -42,19 +44,20 @@ export const refreshSite: OperationHandler<
 
   await pause(700);
 
-  const completed = await op.complete(completedJob.result).orThrow();
+  const result = Value.Parse(SitesRefreshResponseSchema, completedJob.result);
+  const completed = await op.complete(result).orThrow();
 
   await client.publishSitesRefreshed({
-    refreshId: completedJob.result.refreshId,
-    site: completedJob.result.site,
+    refreshId: result.refreshId,
+    site: result.site,
     refreshedAt: new Date().toISOString(),
   }).orThrow();
   await pause(700);
 
   await recordActivity(client, {
     kind: "site-refreshed",
-    message: `Refreshed ${completedJob.result.site.siteName}`,
-    relatedSiteId: completedJob.result.site.siteId,
+    message: `Refreshed ${result.site.siteName}`,
+    relatedSiteId: result.site.siteId,
   });
 
   return completed;

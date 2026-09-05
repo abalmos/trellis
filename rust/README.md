@@ -2,7 +2,8 @@
 
 Rust crates for the Trellis platform.
 
-The public Cargo authoring packages are `trellis` and `trellis-contracts`.
+The public Cargo runtime package is `trellis`; projects author APIs and
+participants in Trellis IDL and generate Rust code with the `trellis` CLI.
 Low-level crates in this workspace support the platform implementation,
 generators, CLIs, and tests; they are not the stable package surface that normal
 Rust services and apps should author against. Internal workspace crates are
@@ -20,9 +21,8 @@ behind modules of the public `trellis` facade.
 | `trellis-client`           | Unpublished compatibility package for `trellis_rs::client`       |
 | `trellis-codegen-rust`     | Internal Rust SDK code generation                                |
 | `trellis-codegen-ts`       | Internal TypeScript SDK code generation                          |
-| `trellis-contracts`        | Contract manifest model and validation                           |
+| `trellis-idl`              | Native Trellis IDL compiler                                      |
 | `trellis-core-bootstrap`   | Internal bootstrap helpers for infrastructure state              |
-| `trellis-generation`       | Internal project-install generation library                      |
 | `trellis-local-bootstrap`  | Internal local Trellis/NATS bootstrap bundle generation          |
 | `trellis-service`          | Unpublished compatibility/test package for `trellis_rs::service` |
 | `trellis-eventlog-runtime` | Internal built-in Event Log runtime                              |
@@ -76,4 +76,4 @@ cargo test --manifest-path rust/Cargo.toml -p trellis-rs --test integration -- -
 
 That Rust suite is a peer of the TypeScript/Deno suite
 (`deno task -c ts/deno.json test:integration`) and must conform to the shared
-client cases in `integration/client-test-matrix.json`.
+client behavior through ordinary integration-test discovery.

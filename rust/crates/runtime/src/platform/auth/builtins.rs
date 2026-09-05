@@ -133,9 +133,9 @@ pub(crate) fn auth_runtime_participant_binding(
     let api = trellis_protocol::parse_api(&api_value)
         .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
     let mut participant_value: Value =
-        serde_json::from_str(include_str!("../../../trellis.participant.json"))
+        serde_json::from_str(trellis_runtime_apis::AUTH_RUNTIME_PARTICIPANT_JSON)
             .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
-    participant_value["implements"]["auth"]["apiDigest"] = Value::String(
+    participant_value["implements"]["self"]["apiDigest"] = Value::String(
         api.digest()
             .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?,
     );

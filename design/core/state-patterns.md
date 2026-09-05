@@ -21,53 +21,31 @@ need private projections or internal checkpoints should continue to use
 schema-backed `resources.kv` directly through `service.kv.<alias>` or injected
 handler `client.kv.<alias>` stores.
 
-## Contract Model
+## Participant Model
 
-The public state model is a top-level contract `state` declaration.
+The public state model is a participant `state` declaration in Trellis IDL.
 
 Each declared store is named and schema-backed:
 
-- the contract declares `state.<storeName>`
-- each store requires `kind: "value" | "map"`
-- each store requires `schema: { schema: "SchemaName" }`
-- the referenced schema must exist in the contract's top-level `schemas` map
-- each store may declare `stateVersion`; it defaults to `"v1"`
-- each store may declare `acceptedVersions`, a map of older author-known state
-  versions to schemas that the current runtime can read for migration
+- the participant declares a named `state` with kind `value` or `map`
+- each store references a schema from its implemented API
+- each store may declare `state_version`; it defaults to `"v1"`
 - the declared store metadata drives both emitted manifest content and typed
   runtime facades
 
 Example:
 
-```ts
-const contract = defineAppContract(
-  {
-    schemas: {
-      Preferences: Type.Object({ theme: Type.String() }),
-      Preferences: Type.Object({
-        theme: Type.String(),
-        compact: Type.Boolean(),
-      }),
-      Draft: Type.Object({ title: Type.String() }),
-    },
-  },
-  (ref) => ({
-    id: "acme.notes@v1",
-    displayName: "Notes",
-    description: "Notes app",
-    uses: [state({
-      preferences: {
-        kind: "value",
-        schema: ref.schema("Preferences"),
-        stateVersion: "preferences.v2",
-        acceptedVersions: {
-          "preferences.v1": ref.schema("Preferences"),
-        },
-      },
-      drafts: { kind: "map", schema: ref.schema("Draft") },
-    })],
-  }),
-);
+```trellis
+participant "acme.notes@v1" app {
+  implements "acme.notes@v1";
+  state preferences value {
+    schema Preferences;
+    state_version "preferences.v2";
+  }
+  state drafts map {
+    schema Draft;
+  }
+}
 ```
 
 ## Store Kinds
