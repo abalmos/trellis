@@ -1,4 +1,4 @@
-// Generated from ./rust/crates/eventlog-runtime/.trellis/artifacts/apis/trellis.eventlog@v1.json
+// Generated from trellis.eventlog@v1
 import {
   eventActions,
   feedAction,

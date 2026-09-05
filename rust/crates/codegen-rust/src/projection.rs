@@ -1,5 +1,4 @@
 use std::collections::BTreeMap;
-use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -235,55 +234,11 @@ pub(crate) struct FeedDefinition {
     pub(crate) docs: Option<Documentation>,
 }
 
-/// Replay policy for a durable event consumer group.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
-#[serde(rename_all = "lowercase")]
-pub(crate) enum EventDefinitionConsumerReplay {
-    #[default]
-    /// Deliver only events published after consumer creation.
-    New,
-    /// Replay all retained events before live delivery.
-    All,
-}
-
-/// Ordering policy for a durable event consumer group.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
-#[serde(rename_all = "lowercase")]
-pub(crate) enum EventDefinitionConsumerOrdering {
-    #[default]
-    /// Deliver one event at a time in stream order.
-    Strict,
-    /// Permit concurrent delivery.
-    Parallel,
-}
-
-/// One durable event consumer group declared by a contract manifest.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+/// Native event selections used to render one consumer group.
+#[derive(Debug, Clone, Deserialize)]
 pub(crate) struct EventDefinitionConsumerGroup {
-    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    #[doc = concat!("The `", stringify!(uses), "` contract value.")]
-    pub(crate) uses: BTreeMap<String, Vec<String>>,
-    #[serde(rename = "self", default, skip_serializing_if = "Vec::is_empty")]
-    #[doc = concat!("The `", stringify!(self_events), "` contract value.")]
-    pub(crate) self_events: Vec<String>,
-    #[serde(default)]
-    #[doc = concat!("The `", stringify!(replay), "` contract value.")]
-    pub(crate) replay: EventDefinitionConsumerReplay,
-    #[serde(default)]
-    #[doc = concat!("The `", stringify!(ordering), "` contract value.")]
-    pub(crate) ordering: EventDefinitionConsumerOrdering,
-    #[serde(rename = "ackWaitMs", skip_serializing_if = "Option::is_none")]
-    #[doc = concat!("The `", stringify!(ack_wait_ms), "` contract value.")]
-    pub(crate) ack_wait_ms: Option<i64>,
-    #[serde(rename = "maxDeliver", skip_serializing_if = "Option::is_none")]
-    #[doc = concat!("The `", stringify!(max_deliver), "` contract value.")]
-    pub(crate) max_deliver: Option<i64>,
-    #[serde(rename = "backoffMs", skip_serializing_if = "Option::is_none")]
-    #[doc = concat!("The `", stringify!(backoff_ms), "` contract value.")]
-    pub(crate) backoff_ms: Option<Vec<i64>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    #[doc = concat!("The `", stringify!(docs), "` contract value.")]
-    pub(crate) docs: Option<Documentation>,
+    /// Event names keyed by their implemented or used API alias.
+    pub(crate) events: BTreeMap<String, Vec<String>>,
 }
 
 /// One logical KV resource declaration in a contract manifest.
@@ -514,6 +469,9 @@ pub(crate) struct ParticipantProjection {
     pub(crate) id: String,
     /// Participant kind.
     pub(crate) kind: ParticipantKind,
+    /// Implemented API aliases used by owned event consumers.
+    #[serde(default)]
+    pub(crate) implements: BTreeMap<String, Value>,
     /// Participant-owned schemas used by State, jobs, and resources.
     #[serde(default)]
     pub(crate) schemas: BTreeMap<String, Value>,
@@ -598,8 +556,6 @@ pub(crate) struct ParticipantInput {
 /// A native API together with its canonical forms and derived routing subjects.
 #[derive(Debug, Clone)]
 pub(crate) struct ApiInput {
-    #[doc = concat!("The `", stringify!(path), "` contract value.")]
-    pub(crate) path: PathBuf,
     #[doc = concat!("The `", stringify!(value), "` contract value.")]
     pub(crate) value: Value,
     /// Parsed protocol-owned native API artifact.

@@ -7,7 +7,7 @@ use crate::{
     lexer::{lex, Token, TokenKind},
 };
 use miette::{LabeledSpan, MietteDiagnostic, NamedSource, Report};
-use std::collections::{btree_map::Entry, BTreeMap};
+use std::collections::{btree_map::Entry, BTreeMap, BTreeSet};
 
 pub(crate) fn parse(sources: Vec<Source>) -> miette::Result<Project> {
     let mut project = Project {
@@ -115,19 +115,19 @@ impl Parser<'_> {
                     insert(&mut api.errors, name, declaration, self.source)?;
                 }
                 "rpc" => {
-                    let (name, surface) = self.surface()?;
+                    let (name, surface) = self.surface("rpc")?;
                     insert(&mut api.rpcs, name, surface, self.source)?;
                 }
                 "operation" => {
-                    let (name, surface) = self.surface()?;
+                    let (name, surface) = self.surface("operation")?;
                     insert(&mut api.operations, name, surface, self.source)?;
                 }
                 "event" => {
-                    let (name, surface) = self.surface()?;
+                    let (name, surface) = self.surface("event")?;
                     insert(&mut api.events, name, surface, self.source)?;
                 }
                 "feed" => {
-                    let (name, surface) = self.surface()?;
+                    let (name, surface) = self.surface("feed")?;
                     insert(&mut api.feeds, name, surface, self.source)?;
                 }
                 other => {
@@ -294,11 +294,11 @@ impl Parser<'_> {
                 ConstraintValue::String(self.string()?.value)
             } else {
                 let token = self.token(TokenKind::Number)?;
-                ConstraintValue::Integer(self.text(&token).parse().map_err(|_| {
+                ConstraintValue::Number(serde_json::from_str(self.text(&token)).map_err(|_| {
                     diagnostic(
                         self.source,
                         token.clone(),
-                        "integer constraint is too large",
+                        "expected a finite JSON numeric literal",
                     )
                 })?)
             };
@@ -311,13 +311,39 @@ impl Parser<'_> {
         Ok(constraints)
     }
 
-    fn surface(&mut self) -> miette::Result<(Spanned<String>, Spanned<Surface>)> {
+    fn surface(&mut self, kind: &str) -> miette::Result<(Spanned<String>, Spanned<Surface>)> {
         let name = self.string()?;
         let start = name.span.start;
         self.token(TokenKind::LBrace)?;
         let mut surface = Surface::default();
+        let mut seen = BTreeSet::new();
         while !self.at(TokenKind::RBrace) {
-            match self.word_text()?.as_str() {
+            let member = self.word_text()?;
+            let allowed = matches!(member.as_str(), "version" | "docs" | "capabilities")
+                || match kind {
+                    "rpc" => matches!(member.as_str(), "input" | "output" | "errors" | "transfer"),
+                    "operation" => matches!(
+                        member.as_str(),
+                        "input" | "output" | "progress" | "errors" | "transfer" | "cancellable"
+                    ),
+                    "event" => matches!(member.as_str(), "payload" | "event" | "params" | "class"),
+                    "feed" => matches!(member.as_str(), "input" | "event" | "payload"),
+                    _ => unreachable!("known surface kind"),
+                };
+            if !allowed {
+                return Err(
+                    self.error_previous(format!("member '{member}' is not supported by {kind}"))
+                );
+            }
+            let canonical_member = if member == "payload" {
+                "event"
+            } else {
+                &member
+            };
+            if !seen.insert(canonical_member.to_owned()) {
+                return Err(self.error_previous(format!("duplicate member '{member}' in {kind}")));
+            }
+            match member.as_str() {
                 "version" => surface.version = Some(self.string_statement()?),
                 "input" => surface.input = Some(self.ident_statement()?),
                 "output" => surface.output = Some(self.ident_statement()?),
@@ -339,7 +365,6 @@ impl Parser<'_> {
                     self.token(TokenKind::Semi)?;
                 }
                 "capabilities" => surface.capabilities = self.capabilities()?,
-                "subject" => surface.subject = Some(self.string_statement()?),
                 "class" => surface.class = Some(self.ident_statement()?),
                 "docs" => surface.docs = Some(self.docs()?),
                 other => {
@@ -642,10 +667,13 @@ impl Parser<'_> {
 
     fn number_statement(&mut self) -> miette::Result<u64> {
         let span = self.token(TokenKind::Number)?;
-        let value = self
-            .text(&span)
-            .parse()
-            .map_err(|_| diagnostic(self.source, span.clone(), "integer value is too large"))?;
+        let value = self.text(&span).parse().map_err(|_| {
+            diagnostic(
+                self.source,
+                span.clone(),
+                "expected an unsigned integer within u64 range",
+            )
+        })?;
         self.token(TokenKind::Semi)?;
         Ok(value)
     }
@@ -790,7 +818,7 @@ pub(crate) fn diagnostic(
 fn token_name(kind: &TokenKind) -> &'static str {
     match kind {
         TokenKind::Ident => "an identifier",
-        TokenKind::Number => "an integer",
+        TokenKind::Number => "a numeric literal",
         TokenKind::String => "a quoted string",
         TokenKind::LBrace => "'{'",
         TokenKind::RBrace => "'}'",

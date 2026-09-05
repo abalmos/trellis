@@ -195,19 +195,21 @@ pub trait OutboxStore {
         event: &PreparedTrellisEvent,
     ) -> impl std::future::Future<Output = Result<(), EventStoreError>>;
 
-    /// Atomically claim pending work or work abandoned for at least 30 seconds.
+    /// Atomically claim pending work or a claim whose 30-second lease expired.
     /// The returned attempt number fences completion against later claims.
     fn claim_next(
         &mut self,
     ) -> impl std::future::Future<Output = Result<Option<OutboxEventRecord>, EventStoreError>>;
 
     /// Mark a claimed event as successfully published.
+    /// Returns false when the claim was superseded, without changing the newer claim.
     fn mark_published(
         &mut self,
         record: &OutboxEventRecord,
     ) -> impl std::future::Future<Output = Result<bool, EventStoreError>>;
 
     /// Return a claimed event to pending state after a publish failure.
+    /// Returns false when the claim was superseded, without changing the newer claim.
     fn mark_failed(
         &mut self,
         record: &OutboxEventRecord,

@@ -1,4 +1,4 @@
-// Generated from ./rust/crates/eventlog-runtime/.trellis/artifacts/apis/trellis.eventlog@v1.json
+// Generated from trellis.eventlog@v1
 import type { SerializableErrorData } from "@qlever-llc/trellis";
 import { TrellisError } from "@qlever-llc/trellis";
 import { NotFoundErrorDataSchema } from "./schemas.ts";

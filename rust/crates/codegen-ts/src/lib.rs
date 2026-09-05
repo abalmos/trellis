@@ -3,13 +3,12 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use oxc_allocator::Allocator;
 use oxc_parser::Parser;
 use oxc_span::SourceType;
 use serde_json::Value;
-use trellis_protocol::parse_api;
+use trellis_protocol::{ApiArtifact, ParticipantArtifact};
 
 mod projection;
 use projection::{ApiInput, ApiProjection};
@@ -25,9 +24,6 @@ pub enum CodegenTsError {
 
     #[error("json error: {0}")]
     Json(#[from] serde_json::Error),
-
-    #[error("missing manifest path file name")]
-    MissingManifestFileName,
 
     #[error("missing runtime repo root for local runtime source")]
     MissingRuntimeRepoRoot,
@@ -45,11 +41,7 @@ pub enum CodegenTsError {
     InvalidOutputPath(PathBuf),
 }
 
-fn load_sdk_source(path: impl AsRef<Path>) -> Result<ApiInput, CodegenTsError> {
-    let path = path.as_ref().to_path_buf();
-    let source = fs::read_to_string(&path)?;
-    let value: Value = serde_json::from_str(&source)?;
-    let api = parse_api(&value)?;
+fn project_api(api: &ApiArtifact) -> Result<ApiInput, CodegenTsError> {
     let value = api.normalized_value()?;
     let mut render_model = serde_json::from_value::<ApiProjection>(value.clone())?;
     for (name, error) in &mut render_model.errors {
@@ -66,24 +58,10 @@ fn load_sdk_source(path: impl AsRef<Path>) -> Result<ApiInput, CodegenTsError> {
 /// Options for generating one TypeScript SDK package.
 #[derive(Debug, Clone)]
 pub struct GenerateTsSdkOpts {
-    pub api_path: PathBuf,
     pub out_dir: PathBuf,
     pub package_name: String,
     pub package_version: String,
     pub runtime_deps: TsRuntimeDeps,
-}
-
-/// Options for generating one TypeScript participant runtime module.
-#[derive(Debug, Clone)]
-pub struct GenerateTsParticipantOpts {
-    /// Canonical participant artifact path.
-    pub participant_path: PathBuf,
-    /// Canonical artifact path for the implemented API.
-    pub owned_api_path: PathBuf,
-    /// Canonical artifact paths for referenced APIs.
-    pub referenced_api_paths: Vec<PathBuf>,
-    /// Generated participant package directory.
-    pub out_dir: PathBuf,
 }
 
 /// One generated TypeScript SDK source file.
@@ -108,17 +86,24 @@ pub enum TsRuntimeSource {
     Local,
 }
 
-/// Generate a TypeScript SDK package for one native API.
-pub fn generate_ts_sdk(opts: &GenerateTsSdkOpts) -> Result<(), CodegenTsError> {
-    let sources = collect_ts_sdk_sources(opts)?;
+/// Render a validated API into an empty caller-owned staging directory.
+/// Publish the directory only after this function succeeds.
+pub fn generate_ts_sdk(api: &ApiArtifact, opts: &GenerateTsSdkOpts) -> Result<(), CodegenTsError> {
+    let sources = collect_ts_sdk_sources(api, opts)?;
     write_ts_sdk_sources(&opts.out_dir, &sources)
 }
 
-/// Generate runtime data for one TypeScript participant.
-pub fn generate_ts_participant(opts: &GenerateTsParticipantOpts) -> Result<(), CodegenTsError> {
-    let source = render_ts_participant(opts)?;
+/// Render a validated participant into an empty caller-owned staging directory.
+/// Publish the directory only after this function succeeds.
+pub fn generate_ts_participant(
+    participant: &ParticipantArtifact,
+    owned: &ApiArtifact,
+    apis: &BTreeMap<&str, &ApiArtifact>,
+    out_dir: &Path,
+) -> Result<(), CodegenTsError> {
+    let source = render_ts_participant(participant, owned, apis)?;
     write_ts_sdk_sources(
-        &opts.out_dir,
+        out_dir,
         &[GeneratedTsSource {
             path: PathBuf::from("mod.ts"),
             contents: source,
@@ -126,7 +111,7 @@ pub fn generate_ts_participant(opts: &GenerateTsParticipantOpts) -> Result<(), C
     )
 }
 
-/// Atomically write a previously rendered TypeScript SDK package.
+/// Validate source paths and write a package into a caller-owned staging directory.
 pub fn write_ts_sdk_sources(
     out_dir: &Path,
     sources: &[GeneratedTsSource],
@@ -141,65 +126,20 @@ pub fn write_ts_sdk_sources(
             return Err(CodegenTsError::InvalidOutputPath(source.path.clone()));
         }
     }
-    let parent = out_dir.parent().unwrap_or_else(|| Path::new("."));
-    fs::create_dir_all(parent)?;
-    let nonce = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_nanos();
-    let stem = out_dir
-        .file_name()
-        .and_then(|name| name.to_str())
-        .unwrap_or("sdk");
-    let staging = parent.join(format!(".{stem}.tmp-{}-{nonce}", std::process::id()));
-    let backup = parent.join(format!(".{stem}.old-{}-{nonce}", std::process::id()));
-    fs::create_dir(&staging)?;
-
     for source in sources {
-        write_generated_file(&staging.join(&source.path), &source.contents)?;
-    }
-
-    if out_dir.exists() {
-        fs::rename(out_dir, &backup)?;
-    }
-    if let Err(error) = fs::rename(&staging, out_dir) {
-        if backup.exists() {
-            let _ = fs::rename(&backup, out_dir);
-        }
-        return Err(error.into());
-    }
-    if backup.exists() {
-        fs::remove_dir_all(backup)?;
+        write_generated_file(&out_dir.join(&source.path), &source.contents)?;
     }
 
     Ok(())
 }
 
-fn render_ts_participant(opts: &GenerateTsParticipantOpts) -> Result<String, CodegenTsError> {
-    let participant: trellis_protocol::ParticipantArtifact =
-        serde_json::from_slice(&fs::read(&opts.participant_path)?)?;
-    let participant_value =
-        participant
-            .normalized_value()
-            .map_err(|error| CodegenTsError::InvalidTypeScript {
-                path: opts.participant_path.clone(),
-                message: error.to_string(),
-            })?;
-    let participant_digest =
-        participant
-            .digest()
-            .map_err(|error| CodegenTsError::InvalidTypeScript {
-                path: opts.participant_path.clone(),
-                message: error.to_string(),
-            })?;
-    let owned = load_sdk_source(&opts.owned_api_path)?;
-    let mut loaded_apis = vec![&owned];
-    let referenced = opts
-        .referenced_api_paths
-        .iter()
-        .map(load_sdk_source)
-        .collect::<Result<Vec<_>, _>>()?;
-    let mut apis = BTreeMap::from([(owned.render_model.id.clone(), owned.value.clone())]);
+fn render_ts_participant(
+    participant: &ParticipantArtifact,
+    owned: &ApiArtifact,
+    referenced: &BTreeMap<&str, &ApiArtifact>,
+) -> Result<String, CodegenTsError> {
+    let participant_value = participant.normalized_value()?;
+    let participant_digest = participant.digest()?;
     let referenced_ids = participant_value["implements"]
         .as_object()
         .into_iter()
@@ -208,6 +148,15 @@ fn render_ts_participant(opts: &GenerateTsParticipantOpts) -> Result<String, Cod
         .flat_map(|entries| entries.values())
         .filter_map(|entry| entry["api"].as_str())
         .collect::<BTreeSet<_>>();
+    let referenced = referenced
+        .values()
+        .copied()
+        .filter(|api| api.id() != owned.id() && referenced_ids.contains(api.id()))
+        .map(project_api)
+        .collect::<Result<Vec<_>, _>>()?;
+    let owned = project_api(owned)?;
+    let mut loaded_apis = vec![&owned];
+    let mut apis = BTreeMap::from([(owned.render_model.id.clone(), owned.value.clone())]);
     for api in &referenced {
         if referenced_ids.contains(api.render_model.id.as_str()) {
             apis.insert(api.render_model.id.clone(), api.value.clone());
@@ -573,9 +522,10 @@ pub fn render_ts_sdk_config(opts: &GenerateTsSdkOpts) -> Result<GeneratedTsSourc
 
 /// Render all files that make up a TypeScript SDK package without writing them.
 pub fn collect_ts_sdk_sources(
+    api: &ApiArtifact,
     opts: &GenerateTsSdkOpts,
 ) -> Result<Vec<GeneratedTsSource>, CodegenTsError> {
-    let loaded = load_sdk_source(&opts.api_path)?;
+    let loaded = project_api(api)?;
     validate_public_export_names(&loaded)?;
     Ok(vec![
         render_ts_sdk_config(opts)?,
@@ -589,11 +539,11 @@ pub fn collect_ts_sdk_sources(
         },
         GeneratedTsSource {
             path: PathBuf::from("schemas.ts"),
-            contents: render_schemas_ts(opts, &loaded),
+            contents: render_schemas_ts(&loaded),
         },
         GeneratedTsSource {
             path: PathBuf::from("api.ts"),
-            contents: render_api_ts(opts, &loaded)?,
+            contents: render_api_ts(&loaded)?,
         },
         GeneratedTsSource {
             path: PathBuf::from("mod.ts"),
@@ -667,26 +617,19 @@ fn deno_json(opts: &GenerateTsSdkOpts) -> Result<serde_json::Map<String, Value>,
     Ok(root)
 }
 
-fn render_api_ts(opts: &GenerateTsSdkOpts, loaded: &ApiInput) -> Result<String, CodegenTsError> {
-    let source_reference =
-        api_source_reference(&opts.api_path, opts.runtime_deps.repo_root.as_deref());
-    let (api, digest) = native_api_source(loaded)?;
+fn render_api_ts(loaded: &ApiInput) -> Result<String, CodegenTsError> {
+    let source_reference = &loaded.render_model.id;
     Ok(format!(
         "// Generated from {}\n\nexport const API_ID = {} as const;\nexport const API_DIGEST = {} as const;\nexport const API = {} as const;\n",
-        escape_js_string(&source_reference),
+        escape_js_string(source_reference),
         js_string(&loaded.render_model.id),
-        js_string(&digest),
-        serde_json::to_string(&api)?,
+        js_string(&loaded.digest),
+        serde_json::to_string(&loaded.value)?,
     ))
 }
 
-fn native_api_source(loaded: &ApiInput) -> Result<(Value, String), CodegenTsError> {
-    Ok((loaded.value.clone(), loaded.digest.clone()))
-}
-
 fn render_wire_types_ts(opts: &GenerateTsSdkOpts, loaded: &ApiInput) -> String {
-    let source_reference =
-        api_source_reference(&opts.api_path, opts.runtime_deps.repo_root.as_deref());
+    let source_reference = &loaded.render_model.id;
     let public_schema_exports = public_schema_exports(loaded);
     let schema_type_aliases = public_schema_type_aliases(loaded, &public_schema_exports);
     let schema_const_names = public_schema_exports
@@ -707,7 +650,7 @@ fn render_wire_types_ts(opts: &GenerateTsSdkOpts, loaded: &ApiInput) -> String {
         .collect::<BTreeSet<_>>();
     let mut lines = vec![format!(
         "// Generated from {}",
-        escape_js_string(&source_reference)
+        escape_js_string(source_reference)
     )];
 
     if !loaded.render_model.errors.is_empty() {
@@ -903,13 +846,12 @@ fn render_wire_types_ts(opts: &GenerateTsSdkOpts, loaded: &ApiInput) -> String {
     format!("{}\n", lines.join("\n"))
 }
 
-fn render_schemas_ts(opts: &GenerateTsSdkOpts, loaded: &ApiInput) -> String {
-    let source_reference =
-        api_source_reference(&opts.api_path, opts.runtime_deps.repo_root.as_deref());
+fn render_schemas_ts(loaded: &ApiInput) -> String {
+    let source_reference = &loaded.render_model.id;
     let public_schema_exports = public_schema_exports(loaded);
     let mut lines = vec![format!(
         "// Generated from {}",
-        escape_js_string(&source_reference)
+        escape_js_string(source_reference)
     )];
 
     for export in public_schema_exports {
@@ -935,8 +877,7 @@ fn render_schemas_ts(opts: &GenerateTsSdkOpts, loaded: &ApiInput) -> String {
 }
 
 fn render_descriptors_ts(opts: &GenerateTsSdkOpts, loaded: &ApiInput) -> String {
-    let source_reference =
-        api_source_reference(&opts.api_path, opts.runtime_deps.repo_root.as_deref());
+    let source_reference = &loaded.render_model.id;
     let trellis_runtime_import = trellis_runtime_import(opts);
     let public_schema_exports = public_schema_exports(loaded);
     let schema_const_names = public_schema_exports
@@ -980,7 +921,7 @@ fn render_descriptors_ts(opts: &GenerateTsSdkOpts, loaded: &ApiInput) -> String 
     let source_export = "API";
     let digest_export = "API_DIGEST";
     let mut lines = vec![
-        format!("// Generated from {}", escape_js_string(&source_reference)),
+        format!("// Generated from {}", escape_js_string(source_reference)),
         format!(
             "import {{ eventActions, feedAction, operationAction, rpcAction, schema }} from {};",
             js_string(&trellis_runtime_import)
@@ -1510,23 +1451,6 @@ fn relative_path_string(from_dir: &Path, to_path: &Path) -> String {
     normalize_relative_path_string(relative.to_string_lossy().replace('\\', "/"))
 }
 
-fn api_source_reference(api_path: &Path, repo_root: Option<&Path>) -> String {
-    let api_path = api_path
-        .canonicalize()
-        .unwrap_or_else(|_| api_path.to_path_buf());
-
-    if let Some(repo_root) = repo_root {
-        let repo_root = repo_root
-            .canonicalize()
-            .unwrap_or_else(|_| repo_root.to_path_buf());
-        if let Ok(relative) = api_path.strip_prefix(&repo_root) {
-            return normalize_relative_path_string(relative.to_string_lossy().replace('\\', "/"));
-        }
-    }
-
-    normalize_relative_path_string(api_path.to_string_lossy().replace('\\', "/"))
-}
-
 fn normalize_relative_path_string(path: String) -> String {
     if path.is_empty() || path.starts_with("../") || path.starts_with("./") || path.starts_with('/')
     {
@@ -1717,19 +1641,8 @@ fn resolve_schema_ref<'a>(loaded: &'a ApiInput, schema_name: &str) -> &'a Value 
 
 #[cfg(test)]
 mod path_tests {
-    use super::{api_source_reference, relative_path_string};
+    use super::relative_path_string;
     use std::path::Path;
-
-    #[test]
-    fn manifest_source_reference_uses_repo_relative_path() {
-        assert_eq!(
-            api_source_reference(
-                Path::new("/repo/.trellis/apis/trellis.core@v1/1.0.0/trellis.api.json"),
-                Some(Path::new("/repo")),
-            ),
-            "./.trellis/apis/trellis.core@v1/1.0.0/trellis.api.json"
-        );
-    }
 
     #[test]
     fn relative_path_string_is_normalized_without_dot_segments() {

@@ -1,4 +1,4 @@
-// Generated from ./rust/crates/runtime/.trellis/artifacts/apis/trellis.health@v1.json
+// Generated from trellis.health@v1
 import type { SerializableErrorData } from "@qlever-llc/trellis";
 import { TrellisError } from "@qlever-llc/trellis";
 import { NotFoundErrorDataSchema } from "./schemas.ts";

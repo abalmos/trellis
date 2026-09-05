@@ -91,6 +91,7 @@ export type OutboxRepository = {
     now: Date,
     outcome?: unknown,
   ): Promise<boolean>;
+  /** Retry the returned claim; false means its ownership was superseded. */
   markFailed(
     claim: OutboxMessage,
     failure: { error: string; nextAttemptAt: Date; now: Date },
@@ -98,6 +99,7 @@ export type OutboxRepository = {
 };
 
 export type InboxRepository = {
+  /** Insert a dedupe marker; true only when this call inserted it. */
   record(messageId: string, now?: Date): Promise<boolean>;
 };
 

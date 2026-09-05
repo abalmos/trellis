@@ -1,4 +1,4 @@
-// Generated from ./rust/crates/runtime/.trellis/artifacts/apis/trellis.auth@v1.json
+// Generated from trellis.auth@v1
 import type { SerializableErrorData } from "@qlever-llc/trellis";
 import { TrellisError } from "@qlever-llc/trellis";
 import { AuthErrorDetailsSchema } from "./schemas.ts";

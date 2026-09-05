@@ -107,6 +107,14 @@ and subscribe; feed subscribe; and state read and write. The compiler pins the
 selected API's exact digest and delegates selection validation and grant
 derivation to `trellis-protocol`.
 
+Selections use the exact declared name in the selected API. `Get` and
+`Sites.Get` are distinct surfaces; neither declaration order nor a suffix match
+can change which is selected. An invented qualifier such as `invented.Sites.Get`
+is rejected. API aliases select an API in the `use` declaration; do not prepend
+one to an action name unless it is literally part of that action's declared
+name. The same exact-name rule applies to resource and implemented-event
+selections.
+
 Dependency projects contribute only the requested API compiled from their own
 IDL source. Their participants and manifests are not compiled recursively.
 Therefore participants in sibling projects may depend on one another without a
@@ -147,6 +155,11 @@ full compilation and generation. Source errors are reported without replacing
 the previous successful artifacts, and the watcher remains active so a later
 valid edit can regenerate them.
 
+Renderer and formatter failures also retain the previous successful generated
+outputs. Participant identities that would share an output path are rejected
+rather than overwriting one another. Generation does not replace installed API
+dependencies.
+
 ## Types
 
 Initial scalar types are `string`, `bool`, `int`, `uint`, and `number`. `int`
@@ -154,6 +167,21 @@ lowers to a JSON Schema integer, while `uint` adds `minimum: 0`. Types compose
 as `list<T>`, typed string-keyed `map<T>`, named references, string literals,
 and unions with `|`. Scalar constraints include `minimum`, `maximum`,
 `min_length`, `max_length`, `pattern`, and `format`.
+
+Constraints apply to specific types:
+
+| Constraints                | Types                   | Values                                                                     |
+| -------------------------- | ----------------------- | -------------------------------------------------------------------------- |
+| `minimum`, `maximum`       | `number`, `int`, `uint` | finite JSON numbers, including negative, fractional, and exponent literals |
+| `min_length`, `max_length` | `string`                | unsigned integer literals                                                  |
+| `pattern`, `format`        | `string`                | string literals                                                            |
+| `min_items`, `max_items`   | `list<T>`               | unsigned integer literals                                                  |
+
+For example, `number(minimum = -1, maximum = 2.5)` and
+`list<string>(min_items = 1)` are valid. Counts do not accept fractional or
+exponent notation. `uint` retains its implicit zero lower bound. Inapplicable
+constraints, repeated constraints, and lower bounds exceeding upper bounds are
+source-located compilation errors.
 
 `field?: T` means the field may be absent. It does not permit `null`. A nullable
 value must explicitly include `null` in its union. Struct models remain open to
@@ -165,6 +193,25 @@ These are semantic Trellis types. JSON Schema is the current lowering carried by
 `trellis.api.v1`, not the definition of the IDL type system. Other protocol
 schema representations may exist in the future without becoming raw schema
 authoring syntax or changing the Trellis source model.
+
+## Surface Members
+
+Every surface accepts `version`, `docs`, and `capabilities`. Its remaining
+members depend on the surface kind:
+
+| Surface   | Members                                                            |
+| --------- | ------------------------------------------------------------------ |
+| RPC       | `input`, `output`, `errors`, `transfer`                            |
+| Operation | `input`, `output`, `progress`, `errors`, `transfer`, `cancellable` |
+| Event     | `payload` (or `event`), `params`, `class`                          |
+| Feed      | `input`, `event` (or `payload`)                                    |
+
+Other members and repeated members are rejected at their source location,
+including using both names of the same payload member. Required members are
+still required: for example, an RPC needs its input and output. Event `params`
+are JSON pointers into the payload. Generated publishers derive concrete
+subjects from those values, and listeners subscribe to the corresponding
+wildcard pattern.
 
 ## Protocol Boundary
 

@@ -4,8 +4,7 @@ use std::sync::{Arc, Mutex};
 use trellis_participant_test_events::{ConnectedService, ServiceConnectOptions};
 use trellis_rs::client::MemoryAuthorizationContextStore;
 use trellis_rs::generated::EventDescriptor;
-use trellis_rs::service::ServiceEventListenOptions;
-use trellis_sdk_test_events::events::{AlphaEventDescriptor, BetaEventDescriptor};
+use trellis_sdk_test_events::events::BetaEventDescriptor;
 use trellis_sdk_test_events::rpc::Empty;
 use trellis_sdk_test_events::{BetaEvent, ObservedResponse};
 
@@ -32,27 +31,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Arc::new(MemoryAuthorizationContextStore::default()),
     ))
     .await?;
-    let handle = service.generated_handle();
+    let consumers = service.event_consumers();
+    let events = consumers.events();
     let seen = Arc::new(Mutex::new(BTreeSet::new()));
     let alpha = || {
         let seen = Arc::clone(&seen);
-        handle.listen_event::<AlphaEventDescriptor, _, _>(
-            move |event, _| {
-                seen.lock().unwrap().insert(event.value);
-                async { Ok(()) }
-            },
-            ServiceEventListenOptions::default(),
-        )
+        events.alpha(move |event, _| {
+            seen.lock().unwrap().insert(event.value);
+            async { Ok(()) }
+        })
     };
     let beta = || {
         let seen = Arc::clone(&seen);
-        handle.listen_event::<BetaEventDescriptor, _, _>(
-            move |event, _| {
-                seen.lock().unwrap().insert(event.value);
-                async { Ok(()) }
-            },
-            ServiceEventListenOptions::default(),
-        )
+        events.beta(move |event, _| {
+            seen.lock().unwrap().insert(event.value);
+            async { Ok(()) }
+        })
     };
     let (alpha, _beta) = if std::env::var("REVERSE")?.parse::<bool>()? {
         let beta = beta().await?;

@@ -1,4 +1,4 @@
-// Generated from ./rust/crates/runtime/.trellis/artifacts/apis/trellis.state@v1.json
+// Generated from trellis.state@v1
 import {
   eventActions,
   feedAction,
