@@ -8,7 +8,7 @@ use std::ops::Range;
 pub(crate) enum TokenKind {
     #[regex(r"[A-Za-z_][A-Za-z0-9_]*")]
     Ident,
-    #[regex(r"0|[1-9][0-9]*")]
+    #[regex(r"-?(0|[1-9][0-9]*)(\.[0-9]+)?([eE][+-]?[0-9]+)?")]
     Number,
     #[regex(r#"\"([^\"\\]|\\.)*\""#)]
     String,

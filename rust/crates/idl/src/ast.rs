@@ -100,7 +100,7 @@ pub(crate) struct Constraint {
 
 #[derive(Clone, Debug)]
 pub(crate) enum ConstraintValue {
-    Integer(i64),
+    Number(serde_json::Number),
     String(String),
 }
 
@@ -116,7 +116,6 @@ pub(crate) struct Surface {
     pub transfer: Option<Transfer>,
     pub cancellable: bool,
     pub capabilities: BTreeMap<String, Vec<String>>,
-    pub subject: Option<Spanned<String>>,
     pub class: Option<Spanned<String>>,
     pub docs: Option<Docs>,
 }

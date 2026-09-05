@@ -220,9 +220,6 @@ fn surface_value(
     let version = required(project, declaration, surface.version.as_ref(), "version")?;
     let mut object = Map::new();
     object.insert("version".to_owned(), json!(version.value));
-    if let Some(subject) = &surface.subject {
-        object.insert("subject".to_owned(), json!(subject.value));
-    }
     if let Some(class) = &surface.class {
         object.insert("class".to_owned(), json!(class.value));
     }
@@ -476,9 +473,7 @@ fn participant_value(
                 participant
                     .subscribed_events
                     .iter()
-                    .map(|event| {
-                        json!(canonical_selection_name(&api_value, "events", &event.value))
-                    })
+                    .map(|event| json!(event.value))
                     .collect(),
             ),
         );
@@ -499,7 +494,6 @@ fn participant_value(
                 "api": referenced.id(),
                 "apiDigest": referenced.digest().into_diagnostic()?,
             });
-            let referenced_value = referenced.normalized_value().into_diagnostic()?;
             let use_object = use_value.as_object_mut().expect("API use is an object");
             for selection in &used.selections {
                 let selection = &selection.value;
@@ -517,7 +511,7 @@ fn participant_value(
                 let section_object = section_value
                     .as_object_mut()
                     .expect("selection section is an object");
-                let name = canonical_selection_name(&referenced_value, section, &selection.name);
+                let name = selection.name.clone();
                 if selection.action == "control" {
                     section_object
                         .entry("control")
@@ -630,7 +624,7 @@ fn participant_value(
             declaration_value.schema.value.clone()
         } else {
             require_api_schema(project, &api_value, &declaration_value.schema)?;
-            canonical_selection_name(&api_value, "schemas", &declaration_value.schema.value)
+            declaration_value.schema.value.clone()
         };
         let mut state_value = json!({
             "kind": declaration_value.kind,
@@ -680,7 +674,7 @@ fn participant_value(
             schema.value.clone()
         } else {
             require_api_schema(project, &api_value, schema)?;
-            canonical_selection_name(&api_value, "schemas", &schema.value)
+            schema.value.clone()
         };
         let mut value = json!({"purpose": purpose, "schema": {"schema": schema}});
         let object = value.as_object_mut().expect("resource is an object");
@@ -703,7 +697,7 @@ fn participant_value(
             payload.value.clone()
         } else {
             require_api_schema(project, &api_value, payload)?;
-            canonical_selection_name(&api_value, "schemas", &payload.value)
+            payload.value.clone()
         };
         let mut value = json!({"payload": {"schema": payload_name}});
         if let Some(result) = &resource.result {
@@ -711,7 +705,7 @@ fn participant_value(
                 result.value.clone()
             } else {
                 require_api_schema(project, &api_value, result)?;
-                canonical_selection_name(&api_value, "schemas", &result.value)
+                result.value.clone()
             };
             value["result"] = json!({"schema": result_name});
         }
@@ -725,18 +719,6 @@ fn participant_value(
         object.insert("jobQueues".to_owned(), Value::Object(jobs));
     }
     Ok(value)
-}
-
-fn canonical_selection_name(api: &Value, section: &str, authored: &str) -> String {
-    api[section]
-        .as_object()
-        .and_then(|entries| {
-            entries
-                .keys()
-                .find(|name| *name == authored || authored.ends_with(&format!(".{name}")))
-        })
-        .cloned()
-        .unwrap_or_else(|| authored.to_owned())
 }
 
 fn lower_schema(
@@ -858,25 +840,80 @@ fn constrained(
     project: &Project,
 ) -> miette::Result<Value> {
     let object = value.as_object_mut().expect("schema is an object");
+    let mut seen = BTreeSet::new();
     for constraint in constraints {
-        let keyword = match constraint.name.as_str() {
-            "minimum" => "minimum",
-            "maximum" => "maximum",
-            "min_length" => "minLength",
-            "max_length" => "maxLength",
-            "pattern" => "pattern",
-            "format" => "format",
-            "min_items" => "minItems",
-            "max_items" => "maxItems",
+        let (keyword, applies, valid_value) = match constraint.name.as_str() {
+            name @ ("minimum" | "maximum") => (
+                name,
+                matches!(ty.value, Type::Number(_) | Type::Integer { .. }),
+                matches!(constraint.value, ConstraintValue::Number(_)),
+            ),
+            name @ ("min_length" | "max_length") => (
+                if name == "min_length" {
+                    "minLength"
+                } else {
+                    "maxLength"
+                },
+                matches!(ty.value, Type::String(_)),
+                matches!(&constraint.value, ConstraintValue::Number(value) if value.as_u64().is_some()),
+            ),
+            name @ ("pattern" | "format") => (
+                name,
+                matches!(ty.value, Type::String(_)),
+                matches!(constraint.value, ConstraintValue::String(_)),
+            ),
+            name @ ("min_items" | "max_items") => (
+                if name == "min_items" {
+                    "minItems"
+                } else {
+                    "maxItems"
+                },
+                matches!(ty.value, Type::List { .. }),
+                matches!(&constraint.value, ConstraintValue::Number(value) if value.as_u64().is_some()),
+            ),
             other => return Err(at(project, ty, format!("unsupported constraint '{other}'"))),
         };
+        if !applies || !valid_value {
+            return Err(at(project, ty, format!("constraint '{}' has an invalid type or literal (numeric bounds need numbers; lengths and counts need unsigned integers; pattern and format need strings)", constraint.name)));
+        }
+        if !seen.insert(keyword) {
+            return Err(at(
+                project,
+                ty,
+                format!("duplicate constraint '{}'", constraint.name),
+            ));
+        }
+        if keyword == "minimum"
+            && matches!(ty.value, Type::Integer { unsigned: true, .. })
+            && matches!(&constraint.value, ConstraintValue::Number(value) if value.as_f64().is_some_and(|value| value < 0.0))
+        {
+            return Err(at(project, ty, "uint minimum cannot be negative"));
+        }
         object.insert(
             keyword.to_owned(),
             match &constraint.value {
-                ConstraintValue::Integer(value) => json!(value),
+                ConstraintValue::Number(value) => json!(value),
                 ConstraintValue::String(value) => json!(value),
             },
         );
+    }
+    for (minimum, maximum) in [
+        ("minimum", "maximum"),
+        ("minLength", "maxLength"),
+        ("minItems", "maxItems"),
+    ] {
+        if let (Some(min), Some(max)) = (
+            object.get(minimum).and_then(Value::as_f64),
+            object.get(maximum).and_then(Value::as_f64),
+        ) {
+            if min > max {
+                return Err(at(
+                    project,
+                    ty,
+                    format!("{minimum} must not exceed {maximum}"),
+                ));
+            }
+        }
     }
     Ok(value)
 }
