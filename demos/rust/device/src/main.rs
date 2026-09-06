@@ -6,8 +6,8 @@ use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine as _;
 use clap::Parser;
 use futures_util::StreamExt;
-use trellis_participant_demo_device::state::{DraftInspectionState, SelectedSiteState};
-use trellis_participant_demo_device::ConnectedClient;
+use device_trellis::participants::demo_device::state::{DraftInspectionState, SelectedSiteState};
+use device_trellis::participants::demo_device::ConnectedClient;
 use trellis_rs::{
     auth::{
         check_device_activation, derive_device_identity, wait_for_device_activation,
@@ -15,7 +15,7 @@ use trellis_rs::{
     },
     client::{download_transfer_grant_from_value, MemoryAuthorizationContextStore},
 };
-use trellis_sdk_demo_service::types::{
+use device_trellis::apis::demo_service::types::{
     AssignmentsListRequest, EvidenceDownloadRequest, EvidenceListRequest, EvidenceUploadInput,
     ReportsGenerateInput, SitesListRequest, SitesListResponseEntriesItem,
 };
@@ -91,7 +91,7 @@ async fn connect_device_if_configured(args: &Args) -> anyhow::Result<Option<Conn
     )?;
     let identity = derive_device_identity(&root_secret)?;
     let activation = DeviceActivationOptions::new(
-        trellis_rs::client::DeviceConnectOptions::<trellis_participant_demo_device::Participant>::new(
+        trellis_rs::client::DeviceConnectOptions::<device_trellis::participants::demo_device::Participant>::new(
             trellis_url,
             deployment_id,
             instance_id,

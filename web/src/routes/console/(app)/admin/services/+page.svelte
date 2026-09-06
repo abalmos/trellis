@@ -1,12 +1,7 @@
 <script lang="ts">
   import { isErr } from "@qlever-llc/result";
-  import type {
-    AuthDeploymentAuthorityListOutput,
-    AuthDeploymentAuthorityPlansListOutput,
-    AuthDeploymentsListOutput,
-    AuthServiceInstancesListOutput,
-  } from "@trellis/apis/trellis.auth";
-  import type { HealthQueryOutput } from "@trellis/apis/trellis.health";
+  import { type apis } from "trellis-web-generated";
+  
   import { resolve } from "$lib/console_paths";
   import { onMount } from "svelte";
   import DataTable from "$lib/components/DataTable.svelte";
@@ -19,12 +14,12 @@
   import { errorMessage, formatDate } from "$lib/format";
   import { getTrellis } from "$lib/trellis";
 
-  type Deployment = AuthDeploymentsListOutput["entries"][number];
-  type ServiceInstance = AuthServiceInstancesListOutput["entries"][number];
-  type DeploymentAuthority = AuthDeploymentAuthorityListOutput["entries"][number];
-  type AuthorityPlan = AuthDeploymentAuthorityPlansListOutput["entries"][number];
+  type Deployment = apis.auth.AuthDeploymentsListOutput["entries"][number];
+  type ServiceInstance = apis.auth.AuthServiceInstancesListOutput["entries"][number];
+  type DeploymentAuthority = apis.auth.AuthDeploymentAuthorityListOutput["entries"][number];
+  type AuthorityPlan = apis.auth.AuthDeploymentAuthorityPlansListOutput["entries"][number];
   type ContractRef = { contractId: string; digest: string };
-  type HealthParticipant = HealthQueryOutput["entries"][number];
+  type HealthParticipant = apis.health.HealthQueryOutput["entries"][number];
   const trellis = getTrellis();
   const RPC_TIMEOUT_MS = 10_000;
 

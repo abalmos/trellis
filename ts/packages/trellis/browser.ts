@@ -2,6 +2,8 @@
  * Browser-safe Trellis client entrypoint.
  */
 
+export * from "./index.ts";
+
 export {
   classifyBrowserAuthError,
   createAuth,

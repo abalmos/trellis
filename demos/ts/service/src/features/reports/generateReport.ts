@@ -2,12 +2,12 @@ import type { OperationHandler } from "@qlever-llc/trellis/service";
 import { BaseError } from "@qlever-llc/result";
 import { isErr, UnexpectedError } from "@qlever-llc/trellis";
 import { ASSIGNED_INSPECTIONS } from "../../../../shared/field_data.ts";
-import { participant } from "../../../.trellis/ts/participants/demo-service/mod.ts";
+import { participants } from "../../../trellis/index.js";
 import { recordActivity } from "../activity/index.ts";
 import { buildReportRecord, recordReport } from "./reportStore.ts";
 
 export const generateReport: OperationHandler<
-  typeof participant,
+  typeof participants.demoService.participant,
   "Reports.Generate"
 > = async ({ input, op, client }) => {
   function toBaseError(cause: unknown): BaseError {

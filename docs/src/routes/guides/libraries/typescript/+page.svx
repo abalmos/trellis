@@ -1,19 +1,33 @@
 # TypeScript libraries
 
-Application code imports runtime classes from `@qlever-llc/trellis` and generated descriptors or participants from the project-local `.trellis/ts` tree.
+Application code imports runtime classes from `@qlever-llc/trellis` and the `apis`
+and `participants` namespaces from its ordinary generated package. With
+`format = 1` and `name = "orders-trellis"` in `trellis.toml`:
 
 ```ts
 import { TrellisClient } from "@qlever-llc/trellis";
-import { participant } from "../../.trellis/ts/participants/orders-app/mod.ts";
+import { participants } from "orders-trellis";
 
 const client = await TrellisClient.connect({
-  participant,
+  participant: participants.ordersApp.participant,
   trellisUrl: "https://trellis.example.com",
   auth: "browser",
 }).orThrow();
 ```
 
-Do not construct API or participant metadata in TypeScript. Author it in native IDL, run `trellis generate`, and treat generated files as disposable build products.
+Do not construct API or participant metadata in TypeScript. Author it in native
+IDL and run `trellis generate`. One detected language defaults to `trellis/`;
+`[generate].output` can override it. Mixed-language projects require explicit
+Rust and TypeScript output tables. Each language gets one package, not one per
+API or participant.
+
+The generated ESM package contains executable `.js`, `.d.ts`, and `package.json`,
+always at version `0.0.0`, with the published runtime dependency matching the CLI.
+It needs no consumer transpiler or Trellis CLI. Install it with ordinary package
+tooling, for example `npm install ./trellis`; Deno projects can map the package
+name to `./trellis/index.js` in their own imports. Generation creates no Deno
+configuration and never edits the consumer's manifest. Commit output when clones
+should build without regeneration or the Trellis API cache.
 
 Use `@qlever-llc/trellis/service/deno` or `/service/node` for service bootstrap.
 Pass `participant` and the immutable provisioned `identity` to

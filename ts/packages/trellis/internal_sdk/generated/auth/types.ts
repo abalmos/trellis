@@ -2973,7 +2973,8 @@ export type AuthErrorData =
     retryable: boolean;
   });
 export class AuthError extends TrellisError<AuthErrorData> {
-  static readonly schema = AuthErrorDetailsSchema;
+  static readonly schema: typeof AuthErrorDetailsSchema =
+    AuthErrorDetailsSchema;
   override readonly name = "AuthError" as const;
   readonly data: AuthErrorData;
   constructor(data: AuthErrorData) {
@@ -3000,7 +3001,8 @@ export type UnexpectedErrorData =
     retryable: boolean;
   });
 export class UnexpectedError extends TrellisError<UnexpectedErrorData> {
-  static readonly schema = AuthErrorDetailsSchema;
+  static readonly schema: typeof AuthErrorDetailsSchema =
+    AuthErrorDetailsSchema;
   override readonly name = "UnexpectedError" as const;
   readonly data: UnexpectedErrorData;
   constructor(data: UnexpectedErrorData) {
@@ -3027,7 +3029,8 @@ export type ValidationErrorData =
     retryable: boolean;
   });
 export class ValidationError extends TrellisError<ValidationErrorData> {
-  static readonly schema = AuthErrorDetailsSchema;
+  static readonly schema: typeof AuthErrorDetailsSchema =
+    AuthErrorDetailsSchema;
   override readonly name = "ValidationError" as const;
   readonly data: ValidationErrorData;
   constructor(data: ValidationErrorData) {

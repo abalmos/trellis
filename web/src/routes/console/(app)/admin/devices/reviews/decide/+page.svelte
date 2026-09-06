@@ -1,11 +1,7 @@
 <script lang="ts">
   import { ulid } from "ulid";
   import { isErr } from "@qlever-llc/result";
-  import type {
-    AuthDeviceUserAuthoritiesReviewsDecideInput,
-    AuthDeviceUserAuthoritiesReviewsListOutput,
-    AuthDevicesListOutput,
-  } from "@trellis/apis/trellis.auth";
+  import { type apis } from "trellis-web-generated";
   import { page } from "$app/state";
   import { onMount } from "svelte";
   import ConfirmationModal from "$lib/components/ConfirmationModal.svelte";
@@ -19,8 +15,8 @@
   import { getNotifications } from "$lib/notifications.svelte";
   import { getTrellis } from "$lib/trellis";
 
-  type Review = AuthDeviceUserAuthoritiesReviewsListOutput["entries"][number];
-  type DeviceInstance = AuthDevicesListOutput["entries"][number];
+  type Review = apis.auth.AuthDeviceUserAuthoritiesReviewsListOutput["entries"][number];
+  type DeviceInstance = apis.auth.AuthDevicesListOutput["entries"][number];
 
   const understoodMetadataKeys = ["name", "serialNumber", "modelNumber"] as const;
   const trellis = getTrellis();
@@ -91,7 +87,7 @@
           expectedVersion: selectedReview.version,
           idempotencyKey: ulid(),
           reason: decision === "reject" && reason.trim() ? reason.trim() : null,
-        } satisfies AuthDeviceUserAuthoritiesReviewsDecideInput,
+        } satisfies apis.auth.AuthDeviceUserAuthoritiesReviewsDecideInput,
       ).take();
       if (isErr(response)) { error = errorMessage(response); return; }
       notifications.success(`Review ${selectedReview.reviewId} ${decision === "approve" ? "approved" : "rejected"}.`, decision === "approve" ? "Approved" : "Rejected");

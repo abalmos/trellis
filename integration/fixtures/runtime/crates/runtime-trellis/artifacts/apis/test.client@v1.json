@@ -1,0 +1,1 @@
+{"description":"Caller-owned state.","displayName":"Runtime caller","format":"trellis.api.v1","id":"test.client@v1","schemas":{"Saved":{"properties":{"value":{"type":"string"}},"required":["value"],"type":"object"}},"version":"1.0.0"}

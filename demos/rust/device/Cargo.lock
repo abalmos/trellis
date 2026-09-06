@@ -487,6 +487,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "device-trellis"
+version = "0.0.0"
+dependencies = [
+ "futures-util",
+ "serde",
+ "serde_json",
+ "tokio",
+ "trellis-rs",
+]
+
+[[package]]
 name = "digest"
 version = "0.10.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2563,20 +2574,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "trellis-participant-demo-device"
-version = "0.0.0"
-dependencies = [
- "futures-util",
- "serde",
- "serde_json",
- "tokio",
- "trellis-rs",
- "trellis-sdk-demo-device",
- "trellis-sdk-demo-service",
- "trellis-sdk-state",
-]
-
-[[package]]
 name = "trellis-protocol"
 version = "0.12.0"
 dependencies = [
@@ -2632,40 +2629,11 @@ dependencies = [
  "anyhow",
  "base64",
  "clap",
+ "device-trellis",
  "futures-util",
  "serde",
  "serde_json",
  "tokio",
- "trellis-participant-demo-device",
- "trellis-rs",
- "trellis-sdk-demo-service",
-]
-
-[[package]]
-name = "trellis-sdk-demo-device"
-version = "1.0.0"
-dependencies = [
- "serde",
- "serde_json",
- "trellis-rs",
-]
-
-[[package]]
-name = "trellis-sdk-demo-service"
-version = "1.0.0"
-dependencies = [
- "futures-util",
- "serde",
- "serde_json",
- "trellis-rs",
-]
-
-[[package]]
-name = "trellis-sdk-state"
-version = "1.0.0"
-dependencies = [
- "serde",
- "serde_json",
  "trellis-rs",
 ]
 

@@ -16,7 +16,7 @@ workflow are shared by both languages.
 - Install Deno 2 for this example.
 - For manual deployment, have a [running Trellis](/guides/starting-trellis) and
   an administrator login. The [automated test](/guides/testing-trellis-services)
-  instead starts an isolated runtime using `trellis-server` and `trellis`.
+  instead starts an isolated runtime using `trellis-server`.
 
 These pages track the repository source. If using an older released CLI, use the
 documentation from that release rather than combining authoring generations.
@@ -27,7 +27,7 @@ documentation from that release rather than combining authoring generations.
 mkdir orders-service
 cd orders-service
 deno init
-deno add jsr:@qlever-llc/trellis jsr:@qlever-llc/trellis-test jsr:@std/assert
+deno add npm:@qlever-llc/trellis jsr:@qlever-llc/trellis-test jsr:@std/assert
 ```
 
 Select matching released versions when installing packages. Keep the import
@@ -38,13 +38,16 @@ Create `trellis.toml`:
 
 ```toml
 format = 1
-
-[apis]
+name = "orders-trellis"
 ```
 
 The tutorial defines its provider and caller API in the same project, so no
 external API dependency is needed. `trellis.toml` is a Trellis compiler
 manifest, not the service's runtime configuration file.
+
+Add `"orders-trellis": "./trellis/index.js"` to `deno.json`'s `imports`. This
+maps the local package name to its generated ESM entrypoint. The generator never
+edits your Deno or npm configuration.
 
 The resulting authored project will contain:
 
@@ -57,23 +60,23 @@ orders-service/
   service.ts
   main.ts
   service_test.ts
+  trellis/          # one generated package, committed for ordinary clone builds
 ```
 
 ## Run the checked-in example instead
 
 The same source is checked in under
 [`docs/examples/orders`](https://github.com/qlever-llc/trellis/tree/main/docs/examples/orders).
-When using a Trellis source checkout, its tasks resolve that checkout's
-libraries, so unreleased generated APIs can be tested without published
-packages:
+Its generated package is committed. Its tasks use ordinary installed libraries,
+not parent-repository paths, so a copied checkout needs no Trellis CLI or API
+cache for its normal check and test:
 
 ```sh
-# From the Trellis repository root, after building the CLI:
-deno task -c docs/examples/orders/deno.json generate
-deno task -c docs/examples/orders/deno.json check
+cd docs/examples/orders
+deno task check
+deno task test
 ```
 
-The relative paths in that example's task file are repository-only plumbing. In
-a standalone service, use its installed packages and ordinary `trellis` and
-`deno` commands. Continue with
+The live test still needs the matching `trellis-server` runtime executable and
+pinned NATS binaries. Only authoring changes require regeneration. Continue with
 [the contract](/guides/write-a-service/first-contract).

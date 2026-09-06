@@ -1,12 +1,12 @@
 use std::collections::BTreeSet;
 use std::sync::{Arc, Mutex};
 
-use trellis_participant_test_events::{ConnectedService, ServiceConnectOptions};
+use runtime_trellis::participants::test_events::{ConnectedService, ServiceConnectOptions};
 use trellis_rs::client::MemoryAuthorizationContextStore;
 use trellis_rs::generated::EventDescriptor;
-use trellis_sdk_test_events::events::BetaEventDescriptor;
-use trellis_sdk_test_events::rpc::Empty;
-use trellis_sdk_test_events::{BetaEvent, ObservedResponse};
+use runtime_trellis::apis::test_events::events::BetaEventDescriptor;
+use runtime_trellis::apis::test_events::rpc::Empty;
+use runtime_trellis::apis::test_events::{BetaEvent, ObservedResponse};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {

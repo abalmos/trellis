@@ -1,7 +1,7 @@
 <script lang="ts">
   import { ulid } from "ulid";
   import { isErr } from "@qlever-llc/result";
-  import type { AuthConnectionsKickInput } from "@trellis/apis/trellis.auth";
+  import { type apis } from "trellis-web-generated";
   import { resolve } from "$lib/console_paths";
   import { page } from "$app/state";
   import { onMount } from "svelte";
@@ -54,7 +54,7 @@
         connectionId: selectedConnection.connectionId,
         idempotencyKey: ulid(),
         reason: null,
-      } satisfies AuthConnectionsKickInput).take();
+      } satisfies apis.auth.AuthConnectionsKickInput).take();
       if (isErr(response)) { error = errorMessage(response); return; }
       notifications.success(`Disconnected ${summary.title}.`, "Kicked");
       await load();

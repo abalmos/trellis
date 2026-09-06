@@ -12,9 +12,11 @@ authority, transport, and generated caller/provider boundaries.
 ## Prerequisites
 
 Install `@qlever-llc/trellis-test` and `@std/assert` in the example's Deno
-project. Have matching `trellis-server` and `trellis` executables available. The
+project. Have a matching `trellis-server` executable available. The
 helper downloads pinned NATS binaries on first use, which requires network
-access. Run `trellis generate` before the test.
+access. Use the committed generated package, or run `trellis generate` after
+authoring changes. The ordinary live test does not need the Trellis CLI or API
+cache.
 
 ## A complete test
 
@@ -24,8 +26,7 @@ Create `service_test.ts`:
 import { assertEquals, assertMatch } from "@std/assert";
 import { TrellisTestRuntime } from "@qlever-llc/trellis-test";
 import { TrellisService } from "@qlever-llc/trellis/service/deno";
-import { participant as provider } from "./.trellis/ts/participants/acme-orders-service/mod.ts";
-import { participant as caller } from "./.trellis/ts/participants/acme-orders-caller/mod.ts";
+import { participants } from "orders-trellis";
 import { createOrder } from "./service.ts";
 
 Deno.test("orders caller invokes the real service", async () => {
@@ -40,10 +41,10 @@ Deno.test("orders caller invokes the real service", async () => {
   try {
     const identity = await runtime.registerService({
       name: "orders",
-      contract: provider,
+      contract: participants.acmeOrdersService.participant,
     });
     const service = await TrellisService.connect({
-      participant: provider,
+      participant: participants.acmeOrdersService.participant,
       name: "orders-service",
       trellisUrl: runtime.trellisUrl,
       identity,
@@ -56,7 +57,7 @@ Deno.test("orders caller invokes the real service", async () => {
       exit = service.wait().catch((error: unknown) => error);
       const client = await runtime.connectClient({
         name: "caller",
-        contract: caller,
+        contract: participants.acmeOrdersCaller.participant,
       });
       const order = await client.ordersCreate({ customerId: "customer-1" })
         .orThrow();
@@ -83,20 +84,15 @@ assertion fails; lifecycle failures are rethrown rather than hidden.
 In a standalone service project with executables on `PATH`:
 
 ```sh
-trellis generate
 deno test -A service_test.ts
 ```
 
-`TRELLIS_TEST_CLI_BIN` selects the CLI used by the test helper. This test's
-`TRELLIS_TEST_SERVER_BIN` variable selects its explicit server command. For the
-checked-in example, from the Trellis repository root after building both
-binaries:
+This test's `TRELLIS_TEST_SERVER_BIN` variable can select a runtime executable
+instead of `trellis-server` on `PATH`. In the checked-in or copied Orders example:
 
 ```sh
-deno task -c docs/examples/orders/deno.json generate
-TRELLIS_TEST_CLI_BIN="$PWD/rust/target/debug/trellis" \
-TRELLIS_TEST_SERVER_BIN="$PWD/rust/target/debug/trellis-server" \
-deno task -c docs/examples/orders/deno.json test
+deno task check
+deno task test
 ```
 
 Expected result: one passing test, with all child processes stopped. A Rust

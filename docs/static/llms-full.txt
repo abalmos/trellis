@@ -23,8 +23,7 @@ A minimal `trellis.toml` is:
 
 ```toml
 format = 1
-
-[apis]
+name = "orders-trellis"
 ```
 
 Author APIs and participants in `contract.trellis` or direct-child
@@ -39,19 +38,45 @@ Dependency commands:
 - `trellis add` and `trellis rm` change dependency declarations.
 - `trellis update` resolves dependencies and updates `trellis.lock`.
 - `trellis install` reproduces locked dependencies and generated outputs.
-- `trellis generate` compiles local IDL and generates SDKs using installed
-  dependency artifacts. Use `--watch` for continuous generation.
+- `trellis generate` compiles local IDL and generates packages using locally
+  available dependencies. Use `--watch` for continuous offline generation.
 
 Dependencies can reference local projects or canonical APIs in OCI registries.
 Remote locks pin release and digests; credentials use the Docker credential
-configuration. Installation verifies artifacts rather than executing provider
-source. Generation is offline; install missing remote dependencies first.
+configuration. Installation validates exact remote APIs in the global
+content-addressed OCI cache, without a project-local installation tree. Direct
+local dependencies contribute only requested APIs compiled from their own IDL,
+without recursively resolving producer participants or manifests. Tooling supplies
+validated API values to the compiler; it does not execute source-language modules.
+Generation is offline; install missing remote dependencies first.
 
-Generated output lives under `.trellis/`: installed APIs in `apis/`, owned
-canonical artifacts in `artifacts/`, and language SDKs in `ts/` and `rust/`.
-Commit IDL, `trellis.toml`, and `trellis.lock`; regenerate disposable outputs.
+Root `Cargo.toml` selects Rust. Root `package.json`, `deno.json`, or `deno.jsonc`
+selects TypeScript/JavaScript. One detected language defaults to `trellis/`, with
+optional `[generate].output`. Multiple detected languages require explicit
+`[generate.rust].output` and `[generate.typescript].output`. No separate language
+selection or implicit language directory exists. No supported marker means no
+language output; API-only projects remain valid. `name` is required only for
+language output and does not identify an API, participant, or deployed service.
+
+Each language gets one ordinary package with that name and version `0.0.0`.
+APIs and participants are separate `apis` and `participants` module namespaces,
+not independent packages or flattened root exports. TypeScript output contains
+executable ESM `.js`, `.d.ts`, and `package.json`, with no consumer transpilation
+step. Rust output is an ordinary path-dependency crate. Both declare published
+Trellis runtime dependencies matching the CLI version. Generation never edits the
+consumer's language manifests or chooses runtime paths from repository ancestry.
+Use normal ecosystem overrides if developing against a local runtime.
+
+Each package retains tooling JSON under `artifacts/apis` and
+`artifacts/participants`, including referenced APIs. Language code embeds canonical
+evidence; JSON files are not import surfaces. `trellis publish` consumes compiled
+owned API values directly. No persistent generation index is created.
+
+Commit IDL, `trellis.toml`, and `trellis.lock`. Commit generated packages when
+clones should build without the CLI or API cache; regenerate rather than hand-edit.
 Compilation, renderer, and formatter failures preserve the last successful
-generated outputs. Colliding participant output paths are errors.
+generated outputs. Namespace collisions are errors, unrelated user files are
+protected, and publication uses only short-lived staging and backups.
 
 Selections must exactly match a name in the chosen API: `Get` and `Sites.Get`
 are distinct. Invented prefixes are not qualifiers. Unsupported surface members

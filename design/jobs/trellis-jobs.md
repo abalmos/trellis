@@ -42,8 +42,8 @@ reference and Rustdoc under `/api`. This document defines the subsystem
 invariants those APIs must preserve.
 
 In TypeScript, the service-local runtime surface lives in `@qlever-llc/trellis`
-and the standard Trellis Jobs admin RPC contract lives in
-`@trellis/apis/trellis.jobs`:
+and the standard Trellis Jobs admin RPC contract is generated in the configured
+local package's `apis.jobs` module:
 
 - service-local jobs are exposed on connected service runtimes as `service.jobs`
 - admin and operator jobs access uses the centralized `Jobs.*` RPC surface,

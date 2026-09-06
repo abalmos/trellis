@@ -12,8 +12,7 @@ subjects, or authorization evidence by hand.
 ```ts
 import { TrellisTestRuntime } from "@qlever-llc/trellis-test";
 import { TrellisService } from "@qlever-llc/trellis/service/deno";
-import { participant as provider } from "./.trellis/ts/participants/provider/mod.ts";
-import { participant as caller } from "./.trellis/ts/participants/caller/mod.ts";
+import { participants } from "test-trellis";
 
 await using runtime = await TrellisTestRuntime.start({
   trellis: {
@@ -25,20 +24,19 @@ await using runtime = await TrellisTestRuntime.start({
 });
 const identity = await runtime.registerService({
   name: "provider",
-  contract: provider,
+  contract: participants.provider.participant,
 });
 const service = await TrellisService.connect({
   trellisUrl: runtime.trellisUrl,
-  participant: provider,
+  participant: participants.provider.participant,
   name: "provider",
   identity,
   authorizationContextEphemeral: true,
   telemetry: false,
-  runtime: {},
 }).orThrow();
 const client = await runtime.connectClient({
   name: "caller",
-  contract: caller,
+  contract: participants.caller.participant,
 });
 ```
 

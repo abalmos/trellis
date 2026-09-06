@@ -4,7 +4,7 @@ import {
   type DeviceActivationAuth,
   type DeviceActivationOperationRef,
 } from "@qlever-llc/trellis-svelte";
-import { participant } from "../../.trellis/ts/participants/app-portal/mod.ts";
+import { participants } from "trellis-web-generated";
 import { trellisUrl } from "./portal_config.ts";
 
 type PortalAuthState = DeviceActivationAuth;
@@ -28,7 +28,7 @@ function createPortalAuthState(
       ).toString();
       await TrellisClient.connect({
         trellisUrl,
-        participant,
+        participant: participants.appPortal.participant,
         auth: { redirectTo, context: options?.context },
         onAuthRequired: ({ loginUrl }) => {
           window.location.href = loginUrl;
@@ -59,7 +59,7 @@ export function createPortalDeviceActivationController() {
           flowId: callbackFlowId,
         },
         onAuthRequired: () => ({ status: "handled" }),
-        participant,
+        participant: participants.appPortal.participant,
       }).orThrow();
       callbackFlowId = undefined;
 

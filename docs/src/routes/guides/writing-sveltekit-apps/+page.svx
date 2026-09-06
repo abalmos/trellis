@@ -7,15 +7,17 @@ checking or building the app. For example, in `src/lib/trellis.ts`:
 
 ```ts
 import { createTrellisApp } from "@qlever-llc/trellis-svelte";
-import { participant } from "../../.trellis/ts/participants/orders-app/mod.ts";
+import { participants } from "orders-trellis";
 
 export const trellisApp = createTrellisApp({
-  participant,
+  participant: participants.ordersApp.participant,
   trellisUrl: "https://trellis.example.com",
 });
 ```
 
-Use the generated participant for browser connection and bind flows. Keep
+Here `orders-trellis` is the package name from `trellis.toml`, installed as an
+ordinary local package. Its JavaScript and declarations need no generation step
+during the app's normal build. Use the generated participant for browser connection and bind flows. Keep
 secrets and durable server credentials in server-only modules; browser trust
 state uses the Trellis browser storage adapter.
 

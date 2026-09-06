@@ -64,8 +64,14 @@ participant "example.b" service {
     .into_diagnostic()?;
 
     let result = (|| {
-        compile_project(&a)?;
-        compile_project(&b)?;
+        compile_project(
+            &a,
+            trellis_idl::compile_apis(&trellis_idl::parse_project(&b)?)?,
+        )?;
+        compile_project(
+            &b,
+            trellis_idl::compile_apis(&trellis_idl::parse_project(&a)?)?,
+        )?;
         Ok(())
     })();
     fs::remove_dir_all(root).into_diagnostic()?;

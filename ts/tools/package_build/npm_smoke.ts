@@ -1,4 +1,8 @@
 import { basename, join, relative, SEPARATOR } from "@std/path";
+import { copy } from "@std/fs";
+import runtimeConfig from "../../packages/trellis/deno.json" with {
+  type: "json",
+};
 
 const tsRootUrl = new URL("../../", import.meta.url);
 const tsRoot = tsRootUrl.pathname;
@@ -13,16 +17,9 @@ const packages = [
 
 const runtimeImports = [
   "@qlever-llc/result",
-  "@qlever-llc/trellis",
-  "@qlever-llc/trellis/auth",
-  "@qlever-llc/trellis/auth/browser",
-  "@qlever-llc/trellis/auth/file",
-  "@qlever-llc/trellis/browser",
-  "@qlever-llc/trellis/contracts",
-  "@qlever-llc/trellis/errors",
-  "@qlever-llc/trellis/service",
-  "@qlever-llc/trellis/service/node",
-  "@qlever-llc/trellis/telemetry",
+  ...Object.keys(runtimeConfig.exports).map((path) =>
+    path === "." ? runtimeConfig.name : `${runtimeConfig.name}${path.slice(1)}`
+  ),
 ] as const;
 
 type PackageJson = {
@@ -224,7 +221,9 @@ async function assertNoGeneratedBuildReferences(projectDir: string) {
   for await (const filePath of walkFiles(packageDir)) {
     if (!filePath.endsWith(".js") && !filePath.endsWith(".d.ts")) continue;
     const source = await Deno.readTextFile(filePath);
-    if (source.includes(".build/generated-sdk")) {
+    if (
+      source.includes(".build/generated-sdk") || source.includes(".trellis/")
+    ) {
       offenders.push(relative(packageDir, filePath).replaceAll(SEPARATOR, "/"));
     }
   }
@@ -271,7 +270,10 @@ try {
     runtimeImports.map((specifier) =>
       `await import(${JSON.stringify(specifier)});`
     )
-      .join("\n") + esmWasmSmoke + '\nconsole.log("ESM imports ok");\n',
+      .join("\n") +
+      esmWasmSmoke +
+      '\nconst common = await import("@qlever-llc/trellis");\nconst browser = await import("@qlever-llc/trellis/browser");\nfor (const name of Object.keys(common)) { if (!(name in browser)) throw new Error(`Browser entrypoint lost ${name}`); }\n' +
+      '\nconst { apis, participants } = await import("orders-trellis");\nif (apis.acmeOrders.API.id !== "acme.orders@v1" || !participants.acmeOrdersCaller.participant) throw new Error("Generated Orders package failed to load");\nconsole.log("ESM imports ok");\n',
   );
   await Deno.writeTextFile(
     join(projectDir, "smoke.cjs"),
@@ -314,6 +316,21 @@ void createTrellisApp;
 void TrellisProvider;
 
 export type { ProviderProps };
+import type { apis, participants } from "orders-trellis";
+import type { ConnectedTrellisService } from "@qlever-llc/trellis/service";
+const orderInput: apis.acmeOrders.OrdersCreateInput = { customerId: "customer-1" };
+// @ts-expect-error Generated input must reject non-string customer IDs.
+const invalidOrderInput: apis.acmeOrders.OrdersCreateInput = { customerId: 1 };
+void orderInput;
+void invalidOrderInput;
+declare const ordersService: ConnectedTrellisService<typeof participants.acmeOrdersService.participant>;
+const stopped: Promise<void> = ordersService.stop();
+const waiting: Promise<void> = ordersService.wait();
+void stopped;
+void waiting;
+void ordersService.handleOrdersCreate(({ input }) => Result.ok({ orderId: "order-1", customerId: input.customerId }));
+// @ts-expect-error Generated handlers must preserve their output schema.
+void ordersService.handleOrdersCreate(({ input }) => Result.ok({ orderId: 1, customerId: input.customerId }));
 `,
   );
 }
@@ -323,14 +340,20 @@ const tarballs = packedPackages.map(({ tarball }) => tarball);
 const projectDir = await Deno.makeTempDir({ prefix: "trellis-npm-smoke-" });
 console.log(`Created npm smoke project at ${projectDir}`);
 await writeConsumerProject(projectDir);
+await copy(
+  join(tsRoot, "../docs/examples/orders/trellis"),
+  join(projectDir, "orders-trellis"),
+);
 await run("npm", [
   "install",
   "--no-package-lock",
   "--ignore-scripts",
   ...tarballs,
+  join(projectDir, "orders-trellis"),
   "@types/node",
   "typescript",
   "svelte",
+  "drizzle-orm",
 ], { cwd: projectDir });
 await assertNoGeneratedBuildReferences(projectDir);
 await run("node", ["smoke.mjs"], { cwd: projectDir });

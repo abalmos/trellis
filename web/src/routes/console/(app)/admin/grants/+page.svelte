@@ -1,10 +1,7 @@
 <script lang="ts">
   import { ulid } from "ulid";
   import { isErr } from "@qlever-llc/result";
-  import type {
-    AuthCapabilityGroupsListOutput,
-    AuthPortalsGrantOverridesListOutput,
-  } from "@trellis/apis/trellis.auth";
+  import { type apis } from "trellis-web-generated";
   import { resolve } from "$lib/console_paths";
   import { onMount } from "svelte";
   import { SvelteSet } from "svelte/reactivity";
@@ -21,8 +18,8 @@
   import { bulkExpectedCount, bulkTargetDetails, runBulk, toggleAll, toggleId } from "$lib/bulk.ts";
   import { getTrellis } from "$lib/trellis";
 
-  type Policy = AuthPortalsGrantOverridesListOutput["entries"][number];
-  type Group = AuthCapabilityGroupsListOutput["entries"][number];
+  type Policy = apis.auth.AuthPortalsGrantOverridesListOutput["entries"][number];
+  type Group = apis.auth.AuthCapabilityGroupsListOutput["entries"][number];
 
   const trellis = getTrellis();
   let loading = $state(true);

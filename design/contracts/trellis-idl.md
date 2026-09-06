@@ -95,6 +95,9 @@ or generated artifact. Version requirements belong in the manifest rather than
 the IDL:
 
 ```toml
+format = 1
+name = "inventory-consumer-trellis"
+
 [apis."inventory@v1"]
 version = "^1.0"
 path = "../inventory"
@@ -120,33 +123,55 @@ IDL source. Their participants and manifests are not compiled recursively.
 Therefore participants in sibling projects may depend on one another without a
 compilation order or cycle handling.
 
-Registry dependencies are acquired by the package manager. IDL compilation reads
-the exact version and digest from `trellis.lock` and validates the installed
-canonical artifact under `.trellis/apis`; it does not perform network
-resolution. Local path dependencies continue to compile directly from source.
+Registry dependencies are acquired by the package manager. Tooling loads exact
+locked APIs directly from the validated global content-addressed OCI cache and
+supplies `ApiArtifact` values to compilation. The compiler does not know cache
+locations, installation layouts, credentials, or network policy. Local path
+dependencies continue to compile directly from source.
 
 ## Generation
 
-`trellis generate` compiles the project's declarative IDL, writes canonical API
-and participant artifacts, and invokes the existing generators for the Rust and
-TypeScript project markers present at the project root.
+`trellis.toml` has `format = 1`. Its language-neutral `name` is required when a
+language package is generated; it is not an API or participant identity.
 
-Everything under `.trellis/` is Trellis-owned derived or installed state and may
-be discarded. Exact installed registry APIs live under
-`.trellis/apis/<API_ID>/<VERSION>/trellis.api.json`. Canonical artifacts owned
-by the project live under `.trellis/artifacts/apis` and
-`.trellis/artifacts/participants`.
+Language detection uses a root `Cargo.toml` for Rust and a root `package.json`,
+`deno.json`, or `deno.jsonc` for TypeScript/JavaScript. One detected language
+generates one ordinary package at `trellis/`; `[generate].output` can override
+that destination. Multiple detected languages require both
+`[generate.rust].output` and `[generate.typescript].output`. No
+language-selection setting or implicit language subdirectory is added. Projects
+with no supported marker generate no language package and remain valid API-only
+projects.
 
-Rust projects generate every owned and referenced API SDK under
-`.trellis/rust/apis` and participant facades under `.trellis/rust/participants`.
-TypeScript projects generate every owned and referenced API SDK under
-`.trellis/ts/apis` and participant runtime modules under
-`.trellis/ts/participants`. Generated participant modules project canonical
-artifacts, exact digests, descriptors, resources, state, and transfers; they are
-runtime data, not another authoring mode. An API's source (current project,
-local dependency, or installed registry dependency) does not change its
-generated SDK location. Language trees are created only when the corresponding
-project marker is present.
+Each selected language gets one cohesive package named by `name`, always at
+version `0.0.0`. Owned and dependency APIs are modules under `apis`; participant
+surfaces are modules under `participants`. Normalization collisions within
+either namespace are errors. There are no per-API or per-participant packages or
+flattened root surfaces. Generated participants project canonical artifacts,
+exact digests, descriptors, resources, state, and transfers; they are runtime
+data, not another authoring mode.
+
+Rust output is an ordinary path-dependency crate. TypeScript output is an
+ordinary ESM package with executable `.js`, `.d.ts`, and `package.json`, not a
+Deno package. The same TypeScript renderer feeds native Oxc JavaScript and
+declaration emission. Consumers need no transpilation step. Both packages depend
+on the normal published Trellis runtime corresponding to the generator version.
+Generation does not modify the consumer's language manifest or infer runtime
+paths from repository ancestry; repository development uses ordinary ecosystem
+dependency overrides in its harness.
+
+Canonical values stay in memory through resolution, compilation, and rendering.
+For file-based tooling, each package contains canonical JSON under
+`artifacts/apis/<api-id>.json` and
+`artifacts/participants/<participant-id>.json`, including dependency API
+evidence. These are not language import surfaces. Publication consumes compiled
+owned `ApiArtifact` values directly, not these files. No project-local
+dependency installation tree or persistent generation index exists. Commit
+generated packages when ordinary clones should build without the CLI or Trellis
+API cache, as the Orders example does.
+
+`trellis install` acquires exact locked dependencies and generates packages.
+`trellis generate` is offline and uses already available dependencies.
 
 `trellis generate --watch` (or `-w`) performs the same full generation once,
 then watches the project and every direct local dependency project recursively.
@@ -156,9 +181,9 @@ the previous successful artifacts, and the watcher remains active so a later
 valid edit can regenerate them.
 
 Renderer and formatter failures also retain the previous successful generated
-outputs. Participant identities that would share an output path are rejected
-rather than overwriting one another. Generation does not replace installed API
-dependencies.
+outputs. Output collisions are rejected, unrelated user files are protected, and
+publication uses only short-lived staging and backups. Generation does not
+modify the global dependency cache.
 
 ## Types
 

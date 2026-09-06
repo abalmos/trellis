@@ -176,7 +176,8 @@ export type NotFoundErrorData =
   & SerializableErrorData
   & ({ context?: {}; id: string; message: string; type: "NotFoundError" });
 export class NotFoundError extends TrellisError<NotFoundErrorData> {
-  static readonly schema = NotFoundErrorDataSchema;
+  static readonly schema: typeof NotFoundErrorDataSchema =
+    NotFoundErrorDataSchema;
   override readonly name = "NotFoundError" as const;
   readonly data: NotFoundErrorData;
   constructor(data: NotFoundErrorData) {

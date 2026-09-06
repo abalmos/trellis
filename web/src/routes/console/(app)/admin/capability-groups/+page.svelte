@@ -1,7 +1,7 @@
 <script lang="ts">
   import { ulid } from "ulid";
   import { isErr } from "@qlever-llc/result";
-  import type { AuthCapabilityGroupsListOutput } from "@trellis/apis/trellis.auth";
+  import { type apis } from "trellis-web-generated";
   import { resolve } from "$lib/console_paths";
   import { onMount } from "svelte";
   import ActionMenu from "$lib/components/ActionMenu.svelte";
@@ -15,7 +15,7 @@
   import { errorMessage, formatDate } from "$lib/format";
   import { getTrellis } from "$lib/trellis";
 
-  type CapabilityGroupView = AuthCapabilityGroupsListOutput["entries"][number];
+  type CapabilityGroupView = apis.auth.AuthCapabilityGroupsListOutput["entries"][number];
 
   const trellis = getTrellis();
 

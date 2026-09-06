@@ -35,12 +35,14 @@ trellis update --root demos/ts/device
 trellis update --root demos/app
 ```
 
-Each project owns its dependencies and generated SDKs under `.trellis/`. Use
-`trellis generate --watch` while editing `contract.trellis`; do not edit
-generated artifacts. Trellis computes approval identity from the normalized
-participant interface: editing display-only metadata such as `displayName` or
-`description` updates portal/catalog copy but does not force a new browser, CLI,
-or device approval digest.
+Each project owns one ordinary ESM package under `trellis/`, with executable
+JavaScript, declarations, and `apis` and `participants` namespaces. Registry
+dependencies use the validated global API cache. Use `trellis generate --watch`
+while editing `contract.trellis`; do not edit generated artifacts. Trellis
+computes approval identity from the normalized participant interface: editing
+display-only metadata such as `displayName` or `description` updates
+portal/catalog copy but does not force a new browser, CLI, or device approval
+digest.
 
 The demo schemas and surfaces are ordinary Trellis IDL declarations. If you add
 templated event subjects, declare `params` in subject-token order and point them

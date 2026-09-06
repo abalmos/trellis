@@ -1,10 +1,7 @@
 <script lang="ts">
   import { ulid } from "ulid";
   import { isErr } from "@qlever-llc/result";
-  import type {
-    AuthDeploymentsListOutput,
-    AuthDevicesProvisionInput,
-  } from "@trellis/apis/trellis.auth";
+  import { type apis } from "trellis-web-generated";
   import { onMount } from "svelte";
   import EmptyState from "$lib/components/EmptyState.svelte";
   import LoadingState from "$lib/components/LoadingState.svelte";
@@ -15,7 +12,7 @@
   import { getNotifications } from "$lib/notifications.svelte";
   import { getTrellis } from "$lib/trellis";
 
-  type Deployment = AuthDeploymentsListOutput["entries"][number];
+  type Deployment = apis.auth.AuthDeploymentsListOutput["entries"][number];
   const trellis = getTrellis();
   const notifications = getNotifications();
 
@@ -59,7 +56,7 @@
         instanceId: instanceId.trim() || null,
         identityPublicKey: identityPublicKey.trim() || null,
         participantId: null,
-      } satisfies AuthDevicesProvisionInput,
+      } satisfies apis.auth.AuthDevicesProvisionInput,
       ).take();
       if (isErr(response)) { error = errorMessage(response); return; }
       notifications.success("Device instance provisioned.", "Provisioned");

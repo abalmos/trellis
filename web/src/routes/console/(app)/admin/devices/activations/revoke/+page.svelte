@@ -1,10 +1,7 @@
 <script lang="ts">
   import { ulid } from "ulid";
   import { isErr } from "@qlever-llc/result";
-  import type {
-    AuthDeviceUserAuthoritiesListOutput,
-    AuthDeviceUserAuthoritiesRevokeInput,
-  } from "@trellis/apis/trellis.auth";
+  import { type apis } from "trellis-web-generated";
   import { page } from "$app/state";
   import { onMount } from "svelte";
   import ConfirmationModal from "$lib/components/ConfirmationModal.svelte";
@@ -17,7 +14,7 @@
   import { getNotifications } from "$lib/notifications.svelte";
   import { getTrellis } from "$lib/trellis";
 
-  type Activation = AuthDeviceUserAuthoritiesListOutput["entries"][number];
+  type Activation = apis.auth.AuthDeviceUserAuthoritiesListOutput["entries"][number];
 
   const trellis = getTrellis();
   const notifications = getNotifications();
@@ -68,7 +65,7 @@
         devicePrincipalId: selectedActivation.device.principalId,
         idempotencyKey: ulid(),
         reason: null,
-      } satisfies AuthDeviceUserAuthoritiesRevokeInput,
+      } satisfies apis.auth.AuthDeviceUserAuthoritiesRevokeInput,
       ).take();
       if (isErr(response)) { error = errorMessage(response); return; }
       notifications.success(`Device activation revoked for ${selectedActivation.device.instanceId}.`, "Revoked");

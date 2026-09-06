@@ -34,17 +34,26 @@ installed release.
 ## Essential Workflow
 
 1. Author `contract.trellis` or direct-child `contracts/*.trellis` files.
-2. Declare API dependencies in `trellis.toml`; run `trellis update` to resolve
+2. Set `format = 1`, a local package `name` when generating a language package,
+   and API dependencies in `trellis.toml`; run `trellis update` to resolve
    changes and record `trellis.lock`.
 3. Run `trellis install` to reproduce locked dependencies and `trellis generate`
    after IDL edits. `trellis generate --watch` supports the edit loop.
-4. Import the generated participant from `.trellis/ts/participants/`, or depend
-   on its Cargo crate under `.trellis/rust/participants/`.
+4. Depend on the one ordinary generated package for your language. Import its
+   `apis` and `participants` namespaces, not separate API or participant packages.
 5. Connect through that participant's supported runtime API. Use generated calls
    and resolved resource handles; do not reconstruct Trellis transport metadata.
 
-Commit authored IDL, `trellis.toml`, and `trellis.lock`. Generated `.trellis/`
-outputs are disposable and should be regenerated rather than hand-edited. Use
+Commit authored IDL, `trellis.toml`, and `trellis.lock`. Commit generated packages
+when clones should build without the Trellis CLI or API cache; regenerate rather
+than hand-edit them. One detected language defaults to `trellis/` with optional
+`[generate].output`. Multiple detected languages require explicit
+`[generate.rust].output` and `[generate.typescript].output`. Detection uses root
+Cargo, npm, or Deno manifests; no marker means no language package. Package
+version is always `0.0.0`. TypeScript packages contain executable ESM JavaScript
+and declarations; Rust packages are ordinary path-dependency crates. Both use
+published runtime dependencies matching the CLI. No project-local installation
+tree, runtime-path configuration, or consumer transpilation step is required. Use
 exact declared action names, not suffixes or invented qualifiers. Failed
 compilation, rendering, or formatting retains the last successful generated
 outputs; colliding participant output paths are errors.

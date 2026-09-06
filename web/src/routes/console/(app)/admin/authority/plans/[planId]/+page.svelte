@@ -2,7 +2,7 @@
   import { ulid } from "ulid";
   import { isErr, type BaseError, type Result } from "@qlever-llc/result";
   import type { DeploymentAuthorityKind, DeploymentAuthorityPlan } from "@qlever-llc/trellis/auth";
-  import type { AuthDeploymentAuthorityPlansGetOutput } from "@trellis/apis/trellis.auth";
+  import { type apis } from "trellis-web-generated";
   import { goto } from "$app/navigation";
   import { resolve } from "$lib/console_paths";
   import { page } from "$app/state";
@@ -718,7 +718,7 @@
     return isRecord(value) && typeof value.id === "string" && value.id.length > 0 ? value as ContractDetail : null;
   }
 
-  function toPlan(proposal: AuthDeploymentAuthorityPlansGetOutput["proposal"]): DeploymentAuthorityPlan {
+  function toPlan(proposal: apis.auth.AuthDeploymentAuthorityPlansGetOutput["proposal"]): DeploymentAuthorityPlan {
     const common = {
       planId: proposal.proposalId,
       deploymentId: proposal.subjectId,

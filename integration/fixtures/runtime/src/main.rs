@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
-use trellis_participant_test_provider::{ConnectedService, ServiceConnectOptions};
+use runtime_trellis::participants::test_provider::{ConnectedService, ServiceConnectOptions};
 use trellis_rs::client::MemoryAuthorizationContextStore;
-use trellis_sdk_test_runtime::EchoResponse;
+use runtime_trellis::apis::test_runtime::EchoResponse;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {

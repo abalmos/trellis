@@ -1,10 +1,7 @@
 <script lang="ts">
   import { ulid } from "ulid";
   import { isErr } from "@qlever-llc/result";
-  import type {
-    AuthDevicesDisableInput,
-    AuthDevicesListOutput,
-  } from "@trellis/apis/trellis.auth";
+  import { type apis } from "trellis-web-generated";
   import { page } from "$app/state";
   import { onMount } from "svelte";
   import ConfirmationModal from "$lib/components/ConfirmationModal.svelte";
@@ -17,7 +14,7 @@
   import { getNotifications } from "$lib/notifications.svelte";
   import { getTrellis } from "$lib/trellis";
 
-  type Instance = AuthDevicesListOutput["entries"][number];
+  type Instance = apis.auth.AuthDevicesListOutput["entries"][number];
 
   const trellis = getTrellis();
   const notifications = getNotifications();
@@ -64,7 +61,7 @@
         idempotencyKey: ulid(),
         instanceId: selectedInstance.instanceId,
         reason: null,
-      } satisfies AuthDevicesDisableInput,
+      } satisfies apis.auth.AuthDevicesDisableInput,
       ).take();
       if (isErr(response)) { error = errorMessage(response); return; }
       notifications.success(`Device instance ${selectedInstance.instanceId} disabled.`, "Disabled");

@@ -15,7 +15,7 @@
 import { dirname, join } from "@std/path";
 import { gunzipSync, unzipSync } from "fflate";
 import { ulid } from "ulid";
-import natsBinaries from "../../../../rust/crates/local-nats/nats-binaries.json" with {
+import natsBinaries from "./nats-binaries.json" with {
   type: "json",
 };
 

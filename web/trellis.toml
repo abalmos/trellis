@@ -1,4 +1,5 @@
 format = 1
+name = "trellis-web-generated"
 
 [apis."trellis.core@v1"]
 version = "^1.0"

@@ -1,9 +1,9 @@
 <script lang="ts">
-  import type { JobsMetricsOutput } from "@trellis/apis/trellis.jobs";
+  import { type apis } from "trellis-web-generated";
   import { compactDuration } from "../format";
 
   type Props = {
-    buckets: JobsMetricsOutput["buckets"];
+    buckets: apis.jobs.JobsMetricsOutput["buckets"];
     selectedKey?: string | null;
     windowLabel: string;
   };

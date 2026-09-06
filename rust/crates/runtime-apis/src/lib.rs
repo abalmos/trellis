@@ -10,15 +10,15 @@ pub use trellis_rs::{generated, service};
 /// Canonical generated participant artifact for the platform runtime.
 pub const AUTH_RUNTIME_PARTICIPANT_JSON: &str = include_str!("trellis.auth-runtime.json");
 
-#[path = "../../trellis/src/internal_sdk/generated/auth/lib.rs"]
+#[path = "../../trellis/src/internal_sdk/generated/auth/mod.rs"]
 pub mod auth;
-#[path = "../../trellis/src/internal_sdk/generated/core/lib.rs"]
+#[path = "../../trellis/src/internal_sdk/generated/core/mod.rs"]
 pub mod core;
-#[path = "../../trellis/src/internal_sdk/generated/eventlog/lib.rs"]
+#[path = "../../trellis/src/internal_sdk/generated/eventlog/mod.rs"]
 pub mod eventlog;
-#[path = "../../trellis/src/internal_sdk/generated/health/lib.rs"]
+#[path = "../../trellis/src/internal_sdk/generated/health/mod.rs"]
 pub mod health;
-#[path = "../../trellis/src/internal_sdk/generated/jobs/lib.rs"]
+#[path = "../../trellis/src/internal_sdk/generated/jobs/mod.rs"]
 pub mod jobs;
-#[path = "../../trellis/src/internal_sdk/generated/state/lib.rs"]
+#[path = "../../trellis/src/internal_sdk/generated/state/mod.rs"]
 pub mod state;

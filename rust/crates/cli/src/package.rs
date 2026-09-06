@@ -1,6 +1,6 @@
 //! Project API dependency and publication commands.
 
-use std::{collections::BTreeSet, fs, path::Path};
+use std::{collections::BTreeMap, fs, path::Path};
 
 use miette::{miette, IntoDiagnostic, Result, WrapErr};
 use semver::{Version, VersionReq};
@@ -20,8 +20,6 @@ struct PackageResult {
     installed_apis: usize,
     changed_dependencies: usize,
     generated_projects: usize,
-    #[serde(skip)]
-    owned_api_paths: Vec<std::path::PathBuf>,
 }
 
 pub async fn add(format: OutputFormat, args: &AddArgs) -> Result<()> {
@@ -147,7 +145,8 @@ pub async fn publish(format: OutputFormat, args: &PublishArgs) -> Result<()> {
     let root = canonical_root(&args.project.root)?;
     let manifest = read_manifest(&root.join("trellis.toml"))?;
     let lock = read_lock(&root.join("trellis.lock"))?;
-    let install = install_root(&root, &manifest, &lock).await?;
+    let (apis, _) = acquire_dependencies(&root, &manifest, &lock).await?;
+    let compiled = trellis_idl::compile_project(&root, apis)?;
     let registry = args
         .registry
         .as_ref()
@@ -157,17 +156,11 @@ pub async fn publish(format: OutputFormat, args: &PublishArgs) -> Result<()> {
         .registries
         .get(registry)
         .ok_or_else(|| miette!("registry '{registry}' is not configured"))?;
-    let mut paths = install.owned_api_paths;
-    paths.sort();
-    if paths.is_empty() {
+    if compiled.apis.is_empty() {
         return Err(miette!("project has no owned canonical APIs to publish"));
     }
     let mut checked = Vec::new();
-    for path in paths {
-        let value =
-            serde_json::from_slice(&fs::read(&path).into_diagnostic()?).into_diagnostic()?;
-        let candidate =
-            trellis_protocol::parse_api(&value).map_err(|error| miette!(error.to_string()))?;
+    for candidate in compiled.apis.into_values() {
         let (version, existing_digest) = check_publication(config, &candidate).await?;
         let id = candidate.id().to_owned();
         checked.push((candidate, id, version.to_string(), existing_digest));
@@ -404,6 +397,18 @@ async fn install_root(
     manifest: &ProjectManifest,
     lock: &ProjectLock,
 ) -> Result<PackageResult> {
+    let (apis, changed_dependencies) = acquire_dependencies(root, manifest, lock).await?;
+    let compiled = trellis_idl::compile_project(root, apis)?;
+    let generated = crate::generate::generate_compiled(root, manifest, &compiled)?;
+    Ok(PackageResult {
+        installed_apis: lock.api.len(),
+        changed_dependencies,
+        generated_projects: generated,
+    })
+}
+
+fn validate_lock(manifest: &ProjectManifest, lock: &ProjectLock) -> Result<()> {
+    lock.validate()?;
     if lock.manifest_digest != manifest.digest()? {
         return Err(miette!(
             "trellis.toml changed since trellis.lock; run `trellis update`"
@@ -426,130 +431,30 @@ async fn install_root(
                 locked.id
             ));
         }
-        if dependency.path.is_some() {
-            let (_, version, digest) = resolve_path_api(root, &locked.id, dependency)?;
-            if version.to_string() != locked.version {
-                return Err(miette!(
-                    "locked {} is {} but path now contains {}; run `trellis update`",
-                    locked.id,
-                    locked.version,
-                    version
-                ));
-            }
-            if digest != locked.api_digest {
-                return Err(miette!(
-                    "locked API digest does not match canonical path artifact"
-                ));
-            }
+        if !VersionReq::parse(&dependency.version)
+            .into_diagnostic()?
+            .matches(&Version::parse(&locked.version).into_diagnostic()?)
+        {
+            return Err(miette!(
+                "locked API '{}' release {} does not satisfy {}; run `trellis update`",
+                locked.id,
+                locked.version,
+                dependency.version
+            ));
         }
     }
-
-    let trellis_root = root.join(".trellis");
-    let registry_apis = lock
-        .api
-        .iter()
-        .filter(|api| api.registry.is_some())
-        .collect::<Vec<_>>();
-    let expected_installed = registry_apis
-        .iter()
-        .map(|api| {
-            trellis_root
-                .join("apis")
-                .join(&api.id)
-                .join(&api.version)
-                .join("trellis.api.json")
-        })
-        .collect::<BTreeSet<_>>();
-    let dependencies_fresh = installed_api_paths(&trellis_root.join("apis"))
-        .is_some_and(|paths| paths == expected_installed)
-        && registry_apis.iter().all(|api| {
-            installed_api_matches_lock(
-                &trellis_root
-                    .join("apis")
-                    .join(&api.id)
-                    .join(&api.version)
-                    .join("trellis.api.json"),
-                api,
-            )
-        });
-    if dependencies_fresh {
-        let generated = crate::generate::generate_once(root)?;
-        return Ok(PackageResult {
-            installed_apis: lock.api.len(),
-            changed_dependencies: 0,
-            generated_projects: generated.generated,
-            owned_api_paths: generated.owned_api_paths,
-        });
-    }
-
-    let changed_dependencies = stage_dependencies(manifest, lock, &trellis_root).await?;
-    let generated = crate::generate::generate_once(root)?;
-    Ok(PackageResult {
-        installed_apis: lock.api.len(),
-        changed_dependencies,
-        generated_projects: generated.generated,
-        owned_api_paths: generated.owned_api_paths,
-    })
+    Ok(())
 }
 
-fn installed_api_paths(root: &Path) -> Option<BTreeSet<std::path::PathBuf>> {
-    if !root.exists() {
-        return Some(BTreeSet::new());
-    }
-    let mut paths = BTreeSet::new();
-    for id in fs::read_dir(root).ok()? {
-        let id = id.ok()?;
-        if !id.file_type().ok()?.is_dir() {
-            return None;
-        }
-        for version in fs::read_dir(id.path()).ok()? {
-            let version = version.ok()?;
-            if !version.file_type().ok()?.is_dir() {
-                return None;
-            }
-            let mut entries = fs::read_dir(version.path()).ok()?;
-            let artifact = entries.next()?.ok()?.path();
-            if artifact.file_name()?.to_str()? != "trellis.api.json" || entries.next().is_some() {
-                return None;
-            }
-            paths.insert(artifact);
-        }
-    }
-    Some(paths)
-}
-
-fn installed_api_matches_lock(path: &Path, locked: &LockedApi) -> bool {
-    let Ok(bytes) = fs::read(path) else {
-        return false;
-    };
-    let Ok(value) = serde_json::from_slice(&bytes) else {
-        return false;
-    };
-    let Ok(api) = trellis_protocol::parse_api(&value) else {
-        return false;
-    };
-    api.id() == locked.id
-        && api.version() == locked.version
-        && api.digest().ok().as_deref() == Some(locked.api_digest.as_str())
-}
-
-async fn stage_dependencies(
+async fn acquire_dependencies(
+    root: &Path,
     manifest: &ProjectManifest,
     lock: &ProjectLock,
-    trellis_root: &Path,
-) -> Result<usize> {
-    fs::create_dir_all(trellis_root).into_diagnostic()?;
-    let staging = tempfile::Builder::new()
-        .prefix(".install-")
-        .tempdir_in(trellis_root)
-        .into_diagnostic()?;
-    let staged = staging.path();
+) -> Result<(BTreeMap<String, trellis_protocol::ApiArtifact>, usize)> {
+    validate_lock(manifest, lock)?;
+    let mut apis = path_dependencies(root, manifest, Some(lock))?;
+    let mut acquired = 0;
     for locked in lock.api.iter().filter(|api| api.registry.is_some()) {
-        let api_out = staged
-            .join("apis")
-            .join(&locked.id)
-            .join(&locked.version)
-            .join("trellis.api.json");
         let registry = locked
             .registry
             .as_ref()
@@ -562,20 +467,102 @@ async fn stage_dependencies(
             .oci_digest
             .as_deref()
             .ok_or_else(|| miette!("locked API '{}' has no OCI digest", locked.id))?;
-        let pulled = oci::pull_locked(
-            config,
-            &locked.id,
-            &locked.version,
-            &locked.api_digest,
-            digest,
-        )
-        .await?;
-        fs::create_dir_all(api_out.parent().expect("installed API has a parent"))
-            .into_diagnostic()?;
-        fs::write(api_out, pulled.bytes).into_diagnostic()?;
+        let pulled = match oci::read_locked(&locked.id, &locked.version, &locked.api_digest, digest)
+        {
+            Ok(pulled) => pulled,
+            Err(_) => {
+                let pulled = oci::pull_locked(
+                    config,
+                    &locked.id,
+                    &locked.version,
+                    &locked.api_digest,
+                    digest,
+                )
+                .await?;
+                acquired += 1;
+                pulled
+            }
+        };
+        apis.insert(locked.id.clone(), pulled.api);
     }
-    replace_managed_paths(staged, trellis_root, &["apis"])?;
-    Ok(lock.api.iter().filter(|api| api.registry.is_some()).count())
+    Ok((apis, acquired))
+}
+
+fn path_dependencies(
+    root: &Path,
+    manifest: &ProjectManifest,
+    exact_lock: Option<&ProjectLock>,
+) -> Result<BTreeMap<String, trellis_protocol::ApiArtifact>> {
+    let mut apis = BTreeMap::new();
+    for (id, dependency) in &manifest.apis {
+        let Some(path) = &dependency.path else {
+            continue;
+        };
+        let api = compile_path_api(root, id, path)?;
+        let version = Version::parse(api.version()).into_diagnostic()?;
+        if !VersionReq::parse(&dependency.version)
+            .into_diagnostic()?
+            .matches(&version)
+        {
+            return Err(miette!(
+                "{id} release {version} does not satisfy {}",
+                dependency.version
+            ));
+        }
+        if let Some(lock) = exact_lock {
+            let locked = lock
+                .api
+                .iter()
+                .find(|api| &api.id == id)
+                .expect("validated lock membership");
+            if api.version() != locked.version {
+                return Err(miette!(
+                    "locked API '{id}' is {}, but path now contains {}; run `trellis update`",
+                    locked.version,
+                    api.version()
+                ));
+            }
+            if api.digest().into_diagnostic()? != locked.api_digest {
+                return Err(miette!("locked API '{id}' digest does not match canonical path artifact; run `trellis update`"));
+            }
+        }
+        apis.insert(id.clone(), api);
+    }
+    Ok(apis)
+}
+
+/// Compile current sources with direct local APIs and exact cached registry releases.
+pub fn compile_project(
+    root: &Path,
+    manifest: &ProjectManifest,
+) -> Result<trellis_idl::CompiledProject> {
+    let mut apis = path_dependencies(root, manifest, None)?;
+    if manifest
+        .apis
+        .values()
+        .any(|dependency| dependency.registry.is_some())
+    {
+        let lock = read_lock(&root.join("trellis.lock"))
+            .wrap_err("registry dependencies require trellis.lock; run `trellis update`")?;
+        validate_lock(manifest, &lock)?;
+        for locked in lock.api.iter().filter(|api| api.registry.is_some()) {
+            let pulled = oci::read_locked(
+                &locked.id,
+                &locked.version,
+                &locked.api_digest,
+                locked.oci_digest.as_deref().expect("validated OCI lock"),
+            )
+            .map_err(|error| {
+                miette!(
+                    "cached API '{}' {} is unavailable: {error}; run `trellis install`",
+                    locked.id,
+                    locked.version
+                )
+            })?;
+            apis.insert(locked.id.clone(), pulled.api);
+        }
+    }
+    trellis_idl::compile_project(root, apis)
 }
 
 async fn select_remote_version(
@@ -596,64 +583,6 @@ fn select_version(versions: Vec<Version>, requirement: Option<&VersionReq>) -> O
         .into_iter()
         .filter(|version| requirement.is_none_or(|requirement| requirement.matches(version)))
         .max()
-}
-
-fn replace_managed_paths(staged: &Path, root: &Path, relative_paths: &[&str]) -> Result<()> {
-    let paths = relative_paths
-        .iter()
-        .map(|relative| {
-            let destination = root.join(relative);
-            let backup = destination.with_extension("trellis-install-old");
-            (staged.join(relative), destination, backup)
-        })
-        .collect::<Vec<_>>();
-    for (_, _, backup) in &paths {
-        if backup.is_dir() {
-            fs::remove_dir_all(backup).into_diagnostic()?;
-        } else if backup.exists() {
-            fs::remove_file(backup).into_diagnostic()?;
-        }
-    }
-    for (_, destination, backup) in &paths {
-        if destination.exists() {
-            if let Err(error) = fs::rename(destination, backup) {
-                for (_, previous_destination, previous_backup) in &paths {
-                    if previous_backup.exists() {
-                        let _ = fs::rename(previous_backup, previous_destination);
-                    }
-                }
-                return Err(error).into_diagnostic();
-            }
-        }
-    }
-    for (source, destination, _) in &paths {
-        if source.exists() {
-            if let Some(parent) = destination.parent() {
-                fs::create_dir_all(parent).into_diagnostic()?;
-            }
-            if let Err(error) = fs::rename(source, destination) {
-                for (_, moved_destination, backup) in paths.iter().rev() {
-                    if moved_destination.is_dir() {
-                        let _ = fs::remove_dir_all(moved_destination);
-                    } else if moved_destination.exists() {
-                        let _ = fs::remove_file(moved_destination);
-                    }
-                    if backup.exists() {
-                        let _ = fs::rename(backup, moved_destination);
-                    }
-                }
-                return Err(error).into_diagnostic();
-            }
-        }
-    }
-    for (_, _, backup) in &paths {
-        if backup.is_dir() {
-            let _ = fs::remove_dir_all(backup);
-        } else if backup.exists() {
-            let _ = fs::remove_file(backup);
-        }
-    }
-    Ok(())
 }
 
 fn print_result(
@@ -855,6 +784,8 @@ mod tests {
             &root.path().join("trellis.toml"),
             &ProjectManifest {
                 format: 1,
+                name: None,
+                generate: None,
                 default_registry: Some("local".into()),
                 registries: BTreeMap::from([("local".into(), registry.clone())]),
                 apis: BTreeMap::from([(
@@ -965,6 +896,8 @@ mod tests {
         let oci_digest = crate::oci::publish(&registry, &api).await.unwrap();
         let manifest = ProjectManifest {
             format: 1,
+            name: Some("cache-consumer".into()),
+            generate: None,
             default_registry: Some("local".into()),
             registries: BTreeMap::from([("local".into(), registry)]),
             apis: BTreeMap::from([(
@@ -989,6 +922,7 @@ mod tests {
             }],
         };
         let write_project = |root: &Path| {
+            fs::write(root.join("package.json"), "{}").unwrap();
             fs::write(
                 root.join("contract.trellis"),
                 "api \"acme.consumer@v1\" { version \"1.0.0\"; display_name \"Consumer\"; description \"Consumer API.\"; }\n",
@@ -1005,8 +939,17 @@ mod tests {
         };
         write_project(root.path());
 
+        let missing = crate::generate::generate_project(root.path())
+            .unwrap_err()
+            .to_string();
+        assert!(missing.contains("trellis install"), "{missing}");
         let first = install_root(root.path(), &manifest, &lock).await.unwrap();
         assert_eq!(first.installed_apis, 1);
+        let artifact = root
+            .path()
+            .join("trellis/artifacts/apis/acme.orders@v1.json");
+        let previous = fs::read(&artifact).unwrap();
+        drop(server);
         let docker_config = tempfile::tempdir().unwrap();
         fs::write(docker_config.path().join("config.json"), "{").unwrap();
         unsafe { std::env::set_var("DOCKER_CONFIG", docker_config.path()) };
@@ -1026,25 +969,46 @@ mod tests {
                 .installed_apis,
             1
         );
-        fs::remove_dir_all(root.path().join(".trellis")).unwrap();
+        fs::remove_dir_all(root.path().join("trellis")).unwrap();
         let cached = install_root(root.path(), &manifest, &lock).await.unwrap();
         assert_eq!(cached.installed_apis, 1);
-        assert!(root
+        assert_eq!(fs::read(&artifact).unwrap(), previous);
+        assert!(!root.path().join(".trellis").exists());
+        assert!(!second.path().join(".trellis").exists());
+        crate::generate::generate_project(second.path()).unwrap();
+        let cached_api = cache
             .path()
-            .join(".trellis/apis/acme.orders@v1/1.4.2/trellis.api.json")
-            .is_file());
+            .join("oci/sha256")
+            .join(
+                lock.api[0]
+                    .oci_digest
+                    .as_deref()
+                    .unwrap()
+                    .strip_prefix("sha256:")
+                    .unwrap(),
+            )
+            .join("api.json");
+        fs::write(cached_api, "{}").unwrap();
+        let corrupt = crate::generate::generate_project(root.path())
+            .unwrap_err()
+            .to_string();
+        assert!(corrupt.contains("digest mismatch"), "{corrupt}");
+        assert_eq!(fs::read(&artifact).unwrap(), previous);
         unsafe { std::env::remove_var("DOCKER_CONFIG") };
         unsafe { std::env::remove_var("TRELLIS_CACHE") };
     }
 
     #[tokio::test]
-    async fn install_is_exact_and_preserves_previous_materialization_on_drift() {
+    async fn install_is_exact_and_preserves_previous_package_on_drift() {
         let root = tempfile::tempdir().unwrap();
         write_test_project(root.path());
+        fs::write(root.path().join("deno.json"), "{}").unwrap();
         let api_path = root.path().join("auth");
         write_test_api(&api_path, "trellis.auth@v1", "1.0.0", false);
         let manifest = ProjectManifest {
             format: 1,
+            name: Some("local-consumer".into()),
+            generate: None,
             default_registry: None,
             registries: BTreeMap::new(),
             apis: BTreeMap::from([(
@@ -1062,7 +1026,7 @@ mod tests {
         install_root(root.path(), &manifest, &lock).await.unwrap();
         let generated = root
             .path()
-            .join(".trellis/artifacts/apis/test.project@v1.json");
+            .join("trellis/artifacts/apis/trellis.auth@v1.json");
         let previous = fs::read(&generated).unwrap();
 
         write_test_api(&api_path, "trellis.auth@v1", "1.0.1", false);
@@ -1204,6 +1168,8 @@ mod tests {
             &root.path().join("trellis.toml"),
             &ProjectManifest {
                 format: 1,
+                name: None,
+                generate: None,
                 default_registry: None,
                 registries: BTreeMap::new(),
                 apis: BTreeMap::new(),

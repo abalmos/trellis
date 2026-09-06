@@ -1,6 +1,6 @@
 <script lang="ts">
   import { isErr, type BaseError, type Result } from "@qlever-llc/result";
-  import type { AuthDeploymentAuthorityPlansListOutput } from "@trellis/apis/trellis.auth";
+  import { type apis } from "trellis-web-generated";
   import { base } from "$lib/console_paths";
   import { onMount } from "svelte";
   import DataTable from "$lib/components/DataTable.svelte";
@@ -16,7 +16,7 @@
   import { getTrellis } from "$lib/trellis";
 
   type AuthorityKind = "identity" | "deployment" | "service" | "device" | "app" | "cli" | "native" | "device-user";
-  type AuthorityPlan = AuthDeploymentAuthorityPlansListOutput["entries"][number];
+  type AuthorityPlan = apis.auth.AuthDeploymentAuthorityPlansListOutput["entries"][number];
   type PlanState = "pending" | "accepted" | "rejected" | "expired" | "superseded";
   type PlanClassification = "update" | "migration";
   type PlanListInput = {

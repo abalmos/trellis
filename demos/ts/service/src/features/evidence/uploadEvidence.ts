@@ -1,9 +1,9 @@
 import type { OperationHandler } from "@qlever-llc/trellis/service";
-import { participant } from "../../../.trellis/ts/participants/demo-service/mod.ts";
+import { participants } from "../../../trellis/index.js";
 import { recordActivity } from "../activity/index.ts";
 
 export const uploadEvidence: OperationHandler<
-  typeof participant,
+  typeof participants.demoService.participant,
   "Evidence.Upload"
 > = async ({ input, op, transfer, client }) => {
   const transferred = await transfer.completed().orThrow();

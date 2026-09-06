@@ -12,10 +12,10 @@ Create `service.ts`:
 ```ts
 import { Result } from "@qlever-llc/trellis";
 import type { RpcHandler } from "@qlever-llc/trellis/service";
-import { participant } from "./.trellis/ts/participants/acme-orders-service/mod.ts";
+import { participants } from "orders-trellis";
 
 /** Returns an example order receipt; this walkthrough does not persist orders. */
-export const createOrder: RpcHandler<typeof participant, "Orders.Create"> = (
+export const createOrder: RpcHandler<typeof participants.acmeOrdersService.participant, "Orders.Create"> = (
   { input },
 ) => Result.ok({ orderId: crypto.randomUUID(), customerId: input.customerId });
 ```
@@ -32,7 +32,7 @@ Replace `main.ts` with:
 ```ts
 import { FileAuthorizationContextStore } from "@qlever-llc/trellis/auth/file";
 import { TrellisService } from "@qlever-llc/trellis/service/deno";
-import { participant } from "./.trellis/ts/participants/acme-orders-service/mod.ts";
+import { participants } from "orders-trellis";
 import { createOrder } from "./service.ts";
 
 function requiredEnv(name: string): string {
@@ -42,7 +42,7 @@ function requiredEnv(name: string): string {
 }
 
 const service = await TrellisService.connect({
-  participant,
+  participant: participants.acmeOrdersService.participant,
   name: "orders-service",
   trellisUrl: requiredEnv("TRELLIS_URL"),
   identity: {
@@ -102,13 +102,13 @@ trellis svc orders-service create --format json
 
 The create command uses `orders-service` as a display name. Set
 `TRELLIS_DEPLOYMENT` to the returned `deployment.deploymentId`, not that display
-name. Then apply the provider's artifacts explicitly (this project also contains
-a caller, so there is no unique participant for `--source .` to select):
+name. This project also contains a caller; choose the provider's artifact files
+explicitly:
 
 ```sh
 trellis svc "$TRELLIS_DEPLOYMENT" apply \
-  --api '.trellis/artifacts/apis/acme.orders@v1.json' \
-  --participant '.trellis/artifacts/participants/acme.orders-service.json'
+  --api 'trellis/artifacts/apis/acme.orders@v1.json' \
+  --participant 'trellis/artifacts/participants/acme.orders-service.json'
 ```
 
 Review the pending deployment authority in Console under **Admin / Services**

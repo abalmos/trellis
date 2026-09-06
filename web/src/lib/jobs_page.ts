@@ -1,30 +1,19 @@
 import { AsyncResult, BaseError, isErr } from "@qlever-llc/result";
-import {
-  type JobsCancelOutput,
-  type JobsDismissDLQOutput,
-  type JobsInspectInput,
-  type JobsInspectOutput,
-  type JobsListServicesInput,
-  type JobsListServicesOutput,
-  type JobsQueryInput,
-  type JobsQueryOutput,
-  type JobsReplayDLQOutput,
-  type JobsRetryOutput,
-} from "@trellis/apis/trellis.jobs";
+import { type apis } from "trellis-web-generated";
 
-export type JobInspection = JobsInspectOutput;
+export type JobInspection = apis.jobs.JobsInspectOutput;
 
 export type JobsPageData = {
   available: boolean;
   message?: string;
-  services: JobsListServicesOutput["entries"];
-  jobs: JobsQueryOutput["entries"];
-  groups: JobsQueryOutput["groups"];
-  stats: JobsQueryOutput["stats"];
-  count: JobsQueryOutput["count"];
-  offset: JobsQueryOutput["offset"];
-  limit: JobsQueryOutput["limit"];
-  nextOffset?: JobsQueryOutput["nextOffset"];
+  services: apis.jobs.JobsListServicesOutput["entries"];
+  jobs: apis.jobs.JobsQueryOutput["entries"];
+  groups: apis.jobs.JobsQueryOutput["groups"];
+  stats: apis.jobs.JobsQueryOutput["stats"];
+  count: apis.jobs.JobsQueryOutput["count"];
+  offset: apis.jobs.JobsQueryOutput["offset"];
+  limit: apis.jobs.JobsQueryOutput["limit"];
+  nextOffset?: apis.jobs.JobsQueryOutput["nextOffset"];
 };
 
 export type JobsDetailData = {
@@ -35,15 +24,17 @@ export type JobsDetailData = {
 
 type JobsPageRpc = {
   listServices(
-    input: JobsListServicesInput,
-  ): AsyncResult<JobsListServicesOutput, BaseError>;
-  queryJobs(filter: JobsQueryInput): AsyncResult<JobsQueryOutput, BaseError>;
+    input: apis.jobs.JobsListServicesInput,
+  ): AsyncResult<apis.jobs.JobsListServicesOutput, BaseError>;
+  queryJobs(
+    filter: apis.jobs.JobsQueryInput,
+  ): AsyncResult<apis.jobs.JobsQueryOutput, BaseError>;
 };
 
 type JobsDetailRpc = {
   inspect(
-    input: JobsInspectInput,
-  ): AsyncResult<JobsInspectOutput, BaseError>;
+    input: apis.jobs.JobsInspectInput,
+  ): AsyncResult<apis.jobs.JobsInspectOutput, BaseError>;
 };
 
 type JobsActionRpc<TOutput> = {
@@ -103,15 +94,15 @@ async function takeOrThrow<T>(result: AsyncResult<T, BaseError>): Promise<T> {
 /** Queries Jobs workbench data through the typed Jobs.Query RPC boundary. */
 export function queryJobs(
   rpc: Pick<JobsPageRpc, "queryJobs">,
-  filter: JobsQueryInput,
-): AsyncResult<JobsQueryOutput, BaseError> {
+  filter: apis.jobs.JobsQueryInput,
+): AsyncResult<apis.jobs.JobsQueryOutput, BaseError> {
   return rpc.queryJobs(filter);
 }
 
 /** Loads the Jobs list page data and normalizes unavailable Jobs runtime errors. */
 export async function loadJobsPageData(
   rpc: JobsPageRpc,
-  filter: JobsQueryInput = { limit: 50 },
+  filter: apis.jobs.JobsQueryInput = { limit: 50 },
 ): Promise<JobsPageData> {
   try {
     const servicesResponse = rpc.listServices({ limit: 500 });
@@ -173,32 +164,32 @@ export async function loadJobDetailData(
 
 /** Cancels a cancellable job by id. */
 export async function cancelJob(
-  rpc: JobsActionRpc<JobsCancelOutput>,
+  rpc: JobsActionRpc<apis.jobs.JobsCancelOutput>,
   id: string,
-): Promise<JobsCancelOutput> {
+): Promise<apis.jobs.JobsCancelOutput> {
   return takeOrThrow(rpc.action({ id }));
 }
 
 /** Retries a failed job by id. */
 export async function retryJob(
-  rpc: JobsActionRpc<JobsRetryOutput>,
+  rpc: JobsActionRpc<apis.jobs.JobsRetryOutput>,
   id: string,
-): Promise<JobsRetryOutput> {
+): Promise<apis.jobs.JobsRetryOutput> {
   return takeOrThrow(rpc.action({ id }));
 }
 
 /** Replays a dead-lettered job by id. */
 export async function replayDlqJob(
-  rpc: JobsActionRpc<JobsReplayDLQOutput>,
+  rpc: JobsActionRpc<apis.jobs.JobsReplayDLQOutput>,
   id: string,
-): Promise<JobsReplayDLQOutput> {
+): Promise<apis.jobs.JobsReplayDLQOutput> {
   return takeOrThrow(rpc.action({ id }));
 }
 
 /** Dismisses a dead-lettered job by id. */
 export async function dismissDlqJob(
-  rpc: JobsActionRpc<JobsDismissDLQOutput>,
+  rpc: JobsActionRpc<apis.jobs.JobsDismissDLQOutput>,
   id: string,
-): Promise<JobsDismissDLQOutput> {
+): Promise<apis.jobs.JobsDismissDLQOutput> {
   return takeOrThrow(rpc.action({ id }));
 }

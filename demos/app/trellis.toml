@@ -1,4 +1,5 @@
 format = 1
+name = "app-trellis"
 
 [apis."demo.service@v1"]
 version = "1.0.0"

@@ -1,15 +1,6 @@
 import { AsyncResult, BaseError, UnexpectedError } from "@qlever-llc/result";
 import { deepEqual } from "node:assert/strict";
-import type {
-  JobsCancelOutput,
-  JobsDismissDLQOutput,
-  JobsInspectOutput,
-  JobsListServicesOutput,
-  JobsQueryInput,
-  JobsQueryOutput,
-  JobsReplayDLQOutput,
-  JobsRetryOutput,
-} from "@trellis/apis/trellis.jobs";
+import { type apis } from "trellis-web-generated";
 
 import {
   cancelJob,
@@ -48,18 +39,21 @@ Deno.test("loadJobsPageData requests jobs and services with the provided filter"
   function request(
     method: "Jobs.ListServices",
     input: { limit: number; offset?: number },
-  ): AsyncResult<JobsListServicesOutput, BaseError>;
+  ): AsyncResult<apis.jobs.JobsListServicesOutput, BaseError>;
   function request(
     method: "Jobs.Query",
-    input: JobsQueryInput,
-  ): AsyncResult<JobsQueryOutput, BaseError>;
+    input: apis.jobs.JobsQueryInput,
+  ): AsyncResult<apis.jobs.JobsQueryOutput, BaseError>;
   function request(
     method: "Jobs.ListServices" | "Jobs.Query",
-    input: { limit: number; offset?: number } | JobsQueryInput,
-  ): AsyncResult<JobsListServicesOutput | JobsQueryOutput, BaseError> {
+    input: { limit: number; offset?: number } | apis.jobs.JobsQueryInput,
+  ): AsyncResult<
+    apis.jobs.JobsListServicesOutput | apis.jobs.JobsQueryOutput,
+    BaseError
+  > {
     calls.push({ method, input });
     if (method === "Jobs.ListServices") {
-      return AsyncResult.ok<JobsListServicesOutput>({
+      return AsyncResult.ok<apis.jobs.JobsListServicesOutput>({
         count: 1,
         entries: [{ name: "documents", healthy: true, workers: [] }],
         limit: 500,
@@ -67,7 +61,7 @@ Deno.test("loadJobsPageData requests jobs and services with the provided filter"
       });
     }
 
-    return AsyncResult.ok<JobsQueryOutput>({
+    return AsyncResult.ok<apis.jobs.JobsQueryOutput>({
       count: 2,
       entries: [
         {
@@ -119,15 +113,18 @@ Deno.test("loadJobsPageData reports Jobs admin runtime as unavailable when Jobs 
   function request(
     method: "Jobs.ListServices",
     input: { limit: number; offset?: number },
-  ): AsyncResult<JobsListServicesOutput, BaseError>;
+  ): AsyncResult<apis.jobs.JobsListServicesOutput, BaseError>;
   function request(
     method: "Jobs.Query",
-    input: JobsQueryInput,
-  ): AsyncResult<JobsQueryOutput, BaseError>;
+    input: apis.jobs.JobsQueryInput,
+  ): AsyncResult<apis.jobs.JobsQueryOutput, BaseError>;
   function request(
     method: "Jobs.ListServices" | "Jobs.Query",
-    _input: { limit: number; offset?: number } | JobsQueryInput,
-  ): AsyncResult<JobsListServicesOutput | JobsQueryOutput, BaseError> {
+    _input: { limit: number; offset?: number } | apis.jobs.JobsQueryInput,
+  ): AsyncResult<
+    apis.jobs.JobsListServicesOutput | apis.jobs.JobsQueryOutput,
+    BaseError
+  > {
     if (method === "Jobs.ListServices") {
       return AsyncResult.err(
         new UnexpectedError({
@@ -136,7 +133,7 @@ Deno.test("loadJobsPageData reports Jobs admin runtime as unavailable when Jobs 
       );
     }
 
-    return AsyncResult.ok<JobsQueryOutput>({
+    return AsyncResult.ok<apis.jobs.JobsQueryOutput>({
       count: 0,
       entries: [],
       groups: [],
@@ -163,15 +160,18 @@ Deno.test("loadJobsPageData reports lowercase NATS no responders as unavailable"
   function request(
     method: "Jobs.ListServices",
     input: { limit: number; offset?: number },
-  ): AsyncResult<JobsListServicesOutput, BaseError>;
+  ): AsyncResult<apis.jobs.JobsListServicesOutput, BaseError>;
   function request(
     method: "Jobs.Query",
-    input: JobsQueryInput,
-  ): AsyncResult<JobsQueryOutput, BaseError>;
+    input: apis.jobs.JobsQueryInput,
+  ): AsyncResult<apis.jobs.JobsQueryOutput, BaseError>;
   function request(
     method: "Jobs.ListServices" | "Jobs.Query",
-    _input: { limit: number; offset?: number } | JobsQueryInput,
-  ): AsyncResult<JobsListServicesOutput | JobsQueryOutput, BaseError> {
+    _input: { limit: number; offset?: number } | apis.jobs.JobsQueryInput,
+  ): AsyncResult<
+    apis.jobs.JobsListServicesOutput | apis.jobs.JobsQueryOutput,
+    BaseError
+  > {
     if (method === "Jobs.ListServices") {
       return AsyncResult.err(
         new UnexpectedError({
@@ -180,7 +180,7 @@ Deno.test("loadJobsPageData reports lowercase NATS no responders as unavailable"
       );
     }
 
-    return AsyncResult.ok<JobsQueryOutput>({
+    return AsyncResult.ok<apis.jobs.JobsQueryOutput>({
       count: 0,
       entries: [],
       groups: [],
@@ -205,15 +205,18 @@ Deno.test("loadJobsPageData reports missing Jobs permissions with re-auth guidan
   function request(
     method: "Jobs.ListServices",
     input: { limit: number; offset?: number },
-  ): AsyncResult<JobsListServicesOutput, BaseError>;
+  ): AsyncResult<apis.jobs.JobsListServicesOutput, BaseError>;
   function request(
     method: "Jobs.Query",
-    input: JobsQueryInput,
-  ): AsyncResult<JobsQueryOutput, BaseError>;
+    input: apis.jobs.JobsQueryInput,
+  ): AsyncResult<apis.jobs.JobsQueryOutput, BaseError>;
   function request(
     method: "Jobs.ListServices" | "Jobs.Query",
-    _input: { limit: number; offset?: number } | JobsQueryInput,
-  ): AsyncResult<JobsListServicesOutput | JobsQueryOutput, BaseError> {
+    _input: { limit: number; offset?: number } | apis.jobs.JobsQueryInput,
+  ): AsyncResult<
+    apis.jobs.JobsListServicesOutput | apis.jobs.JobsQueryOutput,
+    BaseError
+  > {
     if (method === "Jobs.ListServices") {
       return AsyncResult.err(
         new UnexpectedError({
@@ -224,7 +227,7 @@ Deno.test("loadJobsPageData reports missing Jobs permissions with re-auth guidan
       );
     }
 
-    return AsyncResult.ok<JobsQueryOutput>({
+    return AsyncResult.ok<apis.jobs.JobsQueryOutput>({
       count: 0,
       entries: [],
       groups: [],
@@ -252,7 +255,7 @@ Deno.test("loadJobDetailData requests detail by id", async () => {
   const data = await loadJobDetailData({
     inspect: (input) => {
       calls.push({ method: "Jobs.Inspect", input });
-      return AsyncResult.ok<JobsInspectOutput>({
+      return AsyncResult.ok<apis.jobs.JobsInspectOutput>({
         attempts: [],
         errors: [],
         job: {
@@ -295,7 +298,7 @@ Deno.test("cancelJob sends id-only action input", async () => {
   await cancelJob({
     action: (input) => {
       calls.push({ method: "Jobs.Cancel", input });
-      return AsyncResult.ok<JobsCancelOutput>({
+      return AsyncResult.ok<apis.jobs.JobsCancelOutput>({
         job: {
           id: "job-1",
           service: "documents",
@@ -320,7 +323,7 @@ Deno.test("retryJob sends id-only action input", async () => {
   await retryJob({
     action: (input) => {
       calls.push({ method: "Jobs.Retry", input });
-      return AsyncResult.ok<JobsRetryOutput>({
+      return AsyncResult.ok<apis.jobs.JobsRetryOutput>({
         job: {
           id: "job-1",
           service: "documents",
@@ -345,7 +348,7 @@ Deno.test("replayDlqJob sends id-only action input", async () => {
   await replayDlqJob({
     action: (input) => {
       calls.push({ method: "Jobs.ReplayDLQ", input });
-      return AsyncResult.ok<JobsReplayDLQOutput>({
+      return AsyncResult.ok<apis.jobs.JobsReplayDLQOutput>({
         job: {
           id: "job-1",
           service: "documents",
@@ -370,7 +373,7 @@ Deno.test("dismissDlqJob sends id-only action input", async () => {
   await dismissDlqJob({
     action: (input) => {
       calls.push({ method: "Jobs.DismissDLQ", input });
-      return AsyncResult.ok<JobsDismissDLQOutput>({
+      return AsyncResult.ok<apis.jobs.JobsDismissDLQOutput>({
         job: {
           id: "job-1",
           service: "documents",

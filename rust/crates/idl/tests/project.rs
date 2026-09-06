@@ -6,7 +6,21 @@ use std::{fs, path::PathBuf};
 fn compiles_runtime_acceptance_project() {
     let root =
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../integration/fixtures/runtime");
-    let project = trellis_idl::compile_project(&root).unwrap();
+    let mut dependencies = std::collections::BTreeMap::new();
+    for project in ["runtime", "jobs-runtime", "eventlog-runtime"] {
+        dependencies.extend(
+            trellis_idl::compile_apis(
+                &trellis_idl::parse_project(
+                    &PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                        .join("..")
+                        .join(project),
+                )
+                .unwrap(),
+            )
+            .unwrap(),
+        );
+    }
+    let project = trellis_idl::compile_project(&root, dependencies).unwrap();
     assert!(project.apis.contains_key("test.runtime@v1"));
     assert!(project
         .participants
@@ -23,7 +37,7 @@ fn malformed_idl_reports_source_and_span() {
         "api \"example@v1\" { version \"1.0.0\" }",
     )
     .unwrap();
-    let error = trellis_idl::compile_project(root.path()).unwrap_err();
+    let error = trellis_idl::compile_project(root.path(), Default::default()).unwrap_err();
     let diagnostic = format!("{error:?}");
     assert!(diagnostic.contains("contract.trellis"), "{diagnostic}");
     assert!(diagnostic.contains("expected"), "{diagnostic}");
@@ -64,7 +78,7 @@ participant "caller" app {{
                 ),
             )
             .unwrap();
-            let compiled = trellis_idl::compile_project(root.path());
+            let compiled = trellis_idl::compile_project(root.path(), Default::default());
             if selected == "Invented.Get" {
                 assert!(compiled.is_err(), "invented qualification was accepted");
             } else {
@@ -117,7 +131,7 @@ api "members@v1" {{
                 ),
             )
             .unwrap();
-            let compiled = trellis_idl::compile_project(root.path());
+            let compiled = trellis_idl::compile_project(root.path(), Default::default());
             if member.is_empty() {
                 compiled.unwrap();
             } else {
@@ -176,7 +190,7 @@ api "bounds@v1" {{
             ),
         )
         .unwrap();
-        let compiled = trellis_idl::compile_project(root.path());
+        let compiled = trellis_idl::compile_project(root.path(), Default::default());
         if valid {
             let compiled = compiled.unwrap_or_else(|error| panic!("{ty}: {error:?}"));
             if ty == "number(minimum = -1, maximum = 2.5)" {

@@ -77,7 +77,9 @@ For `kind: "service"` participants:
 
 ```ts
 import { TrellisService } from "@qlever-llc/trellis/service/deno";
-import { participant } from "./.trellis/ts/participants/acme-service/mod.ts";
+import { participants } from "acme-trellis";
+
+const participant = participants.acmeService.participant;
 
 const service = await TrellisService.connect({
   trellisUrl: config.trellisUrl,
@@ -283,7 +285,9 @@ participant "acme.echo@v1" service {
 ```ts
 import { Result } from "@qlever-llc/trellis";
 import { TrellisService } from "@qlever-llc/trellis/service/deno";
-import { participant } from "./.trellis/ts/participants/acme-echo-v1/mod.ts";
+import { participants } from "acme-trellis";
+
+const participant = participants.acmeEcho.participant;
 
 const service = await TrellisService.connect({
   trellisUrl,

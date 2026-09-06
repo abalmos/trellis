@@ -36,8 +36,6 @@ Deno.test("root package import does not require project-local API packages", asy
           ...trellisImports,
           "@qlever-llc/result": new URL("../../result/mod.ts", import.meta.url)
             .href,
-          "@trellis/apis/trellis.core":
-            "./missing/generated/trellis-core/mod.ts",
         },
         nodeModulesDir: "auto",
       }),

@@ -92,12 +92,7 @@
     "@tailwindcss/vite": "npm:@tailwindcss/vite@4.2.4",
     "@types/cookie": "npm:@types/cookie@^1.0.0",
     "@types/node": "npm:@types/node@25.6.0",
-    "@trellis/apis/trellis.auth": "../web/.trellis/ts/apis/auth/mod.ts",
-    "@trellis/apis/trellis.core": "../web/.trellis/ts/apis/trellis-core/mod.ts",
-    "@trellis/apis/trellis.eventlog": "../web/.trellis/ts/apis/eventlog/mod.ts",
-    "@trellis/apis/trellis.health": "../web/.trellis/ts/apis/health/mod.ts",
-    "@trellis/apis/trellis.jobs": "../web/.trellis/ts/apis/jobs/mod.ts",
-    "@trellis/apis/trellis.state": "../web/.trellis/ts/apis/state/mod.ts",
+    "trellis-web-generated": "../web/trellis/index.js",
     "acorn": "npm:acorn@^8.16.0",
     "clsx": "npm:clsx@2.1.1",
     "cookie": "npm:cookie@^1.1.1",
@@ -152,6 +147,7 @@
   },
   "fmt": {
     "exclude": [
+      "packages/trellis-test/trellis",
       "packages/trellis-test/fixtures/authorization-trust",
       "packages/trellis/auth/protocol_wasm"
     ]

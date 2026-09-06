@@ -5,8 +5,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use serde::Deserialize;
 use serde_json::Value;
+use syn::visit_mut::VisitMut;
 use trellis_protocol::{canonicalize_json, ApiArtifact, ParticipantArtifact};
 
 mod projection;
@@ -25,12 +25,6 @@ pub enum CodegenRustError {
 
     #[error("json error: {0}")]
     Json(#[from] serde_json::Error),
-
-    #[error("toml parse error: {0}")]
-    Toml(#[from] toml::de::Error),
-
-    #[error("missing runtime repo root for local runtime source")]
-    MissingRuntimeRepoRoot,
 
     #[error("participant mapping alias '{alias}' is not declared in the participant uses")]
     UnknownParticipantMappingAlias { alias: String },
@@ -61,12 +55,6 @@ pub enum CodegenRustError {
 
     #[error("participant mapping alias '{alias}' does not expose feed '{key}'")]
     MissingMappedFeed { alias: String, key: String },
-
-    #[error("workspace does not declare package '{package_name}'")]
-    MissingWorkspacePackage { package_name: String },
-
-    #[error("workspace member '{member}' is missing a [package].name declaration")]
-    MissingWorkspaceMemberPackageName { member: String },
 
     #[error("invalid generated Rust source for {path}: {message}")]
     RustSyntax { path: String, message: String },
@@ -118,467 +106,349 @@ fn project_participant(
     })
 }
 
-/// Options for generating one Rust SDK crate.
+/// One resolved `uses` alias within the generated package.
 #[derive(Debug, Clone)]
-pub struct GenerateRustSdkOpts {
-    /// Directory where the crate will be written.
-    pub out_dir: PathBuf,
-    /// Cargo crate name for the generated SDK.
-    pub crate_name: String,
-    /// Crate version written into `Cargo.toml`.
-    pub crate_version: String,
-    /// How generated code should depend on Trellis runtime crates.
-    pub runtime_deps: RustRuntimeDeps,
-}
-
-/// One explicit `uses` alias mapping for participant-facade generation.
-#[derive(Debug, Clone)]
-pub struct ParticipantAliasMapping<'a> {
+struct ParticipantAliasMapping<'a> {
     /// Local `uses` alias from the participant manifest.
     pub alias: String,
-    /// Crate name that satisfies the alias at compile time.
+    /// Rust module path that satisfies the alias at compile time.
     pub crate_name: String,
     /// Native dependency API; used to validate exposed RPCs/events.
     pub api: &'a ApiArtifact,
-    /// Path to this API's private generated SDK crate.
-    pub crate_path: PathBuf,
 }
 
-/// Options for generating one local Rust participant facade crate.
-#[derive(Debug, Clone)]
-pub struct GenerateRustParticipantFacadeOpts<'a> {
-    /// Output directory for the generated crate.
-    pub out_dir: PathBuf,
-    /// Cargo crate name for the facade crate.
-    pub crate_name: String,
-    /// Crate version written into `Cargo.toml`.
-    pub crate_version: String,
-    /// How generated code should depend on Trellis runtime crates.
-    pub runtime_deps: RustRuntimeDeps,
-    /// Optional owned SDK crate name to import from generated facade code.
-    pub owned_sdk_crate_name: Option<String>,
-    /// Optional path to the owned SDK crate used during local generation.
-    pub owned_sdk_path: Option<PathBuf>,
-    /// Explicit mappings for locally resolvable `uses` aliases declared by the participant.
-    pub alias_mappings: Vec<ParticipantAliasMapping<'a>>,
-}
-
-/// Runtime dependency configuration for generated Rust SDKs.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct RustRuntimeDeps {
-    /// Whether dependencies come from crates.io or the local repo.
-    pub source: RustRuntimeSource,
-    /// Version string used for registry dependencies.
-    pub version: String,
-    /// Repo root required when `source` is `Local`.
-    pub repo_root: Option<PathBuf>,
-}
-
-/// Where generated SDKs should resolve Trellis runtime crates from.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum RustRuntimeSource {
-    Registry,
-    Local,
-}
-
-#[derive(Debug, Deserialize)]
-struct WorkspaceManifest {
-    workspace: WorkspaceSection,
-}
-
-#[derive(Debug, Deserialize)]
-struct WorkspaceSection {
-    members: Vec<String>,
-}
-
-#[derive(Debug, Deserialize)]
-struct PackageManifest {
-    package: Option<PackageSection>,
-}
-
-#[derive(Debug, Deserialize)]
-struct PackageSection {
-    name: String,
-}
-
-fn workspace_package_dir(
-    repo_root: &Path,
-    package_name: &str,
-) -> Result<PathBuf, CodegenRustError> {
-    let workspace_manifest_path = repo_root.join("rust/Cargo.toml");
-    let workspace_manifest: WorkspaceManifest =
-        toml::from_str(&fs::read_to_string(&workspace_manifest_path)?)?;
-
-    for member in workspace_manifest.workspace.members {
-        let member_manifest_path = repo_root.join("rust").join(&member).join("Cargo.toml");
-        let member_manifest: PackageManifest =
-            toml::from_str(&fs::read_to_string(&member_manifest_path)?)?;
-        let package = member_manifest.package.ok_or_else(|| {
-            CodegenRustError::MissingWorkspaceMemberPackageName {
-                member: member.clone(),
-            }
-        })?;
-        if package.name == package_name {
-            return Ok(member_manifest_path
-                .parent()
-                .expect("Cargo.toml should always have a parent directory")
-                .to_path_buf());
-        }
-    }
-
-    Err(CodegenRustError::MissingWorkspacePackage {
-        package_name: package_name.to_string(),
-    })
-}
-
-/// Derive the default Rust SDK crate name for a contract id.
-pub fn default_sdk_crate_name(contract_id: &str) -> String {
-    format!("trellis-sdk-{}", default_sdk_stem(contract_id))
-}
-
-/// Derive the default Rust SDK stem used for crate and facade naming.
+/// Derive the module stem used for API and participant naming.
 pub fn default_sdk_stem(contract_id: &str) -> String {
     let stem = contract_id
         .split('@')
         .next()
-        .unwrap_or("trellis-sdk")
+        .unwrap_or_default()
         .replace('.', "-");
     stem.strip_prefix("trellis-").unwrap_or(&stem).to_string()
 }
 
-/// Render a validated API into an empty caller-owned staging directory.
-/// Publish the directory only after this function succeeds.
-pub fn generate_rust_sdk(
-    api: &ApiArtifact,
-    opts: &GenerateRustSdkOpts,
+/// Render one ordinary generated crate with API and participant modules.
+/// The caller owns staging and publication of the completed package.
+pub fn generate_rust_package(
+    apis: &std::collections::BTreeMap<&str, &ApiArtifact>,
+    participants: &[ParticipantArtifact],
+    out_dir: &Path,
+    name: &str,
 ) -> Result<(), CodegenRustError> {
-    let loaded = project_api(api)?;
-    let artifact_canonical = loaded.canonical.clone();
-    let artifact_digest = loaded.digest.clone();
-    validate_generated_identifiers(&loaded)?;
-    validate_supported_schemas(&loaded)?;
-
-    fs::create_dir_all(opts.out_dir.join("src"))?;
-    let mut cargo_toml = render_cargo_toml(
-        opts,
-        !loaded.render_model.feeds.is_empty() || !loaded.render_model.events.is_empty(),
-        true,
-    )?;
-    cargo_toml.push_str(&format!(
-        "\n[package.metadata.trellis]\napi-id = {}\napi-digest = {}\napi-artifact = \"api.json\"\n",
-        string_literal(&loaded.render_model.id),
-        string_literal(&artifact_digest),
-    ));
-    write_if_changed(&opts.out_dir.join("Cargo.toml"), &cargo_toml)?;
-    write_if_changed(
-        &opts.out_dir.join("api.json"),
-        &format!("{artifact_canonical}\n"),
-    )?;
-    write_if_changed(
-        &opts.out_dir.join("TRELLIS.md"),
-        &render_rust_sdk_trellis_md(opts, &loaded),
-    )?;
-    write_if_changed(
-        &opts.out_dir.join("README.md"),
-        &format!(
-            "# {}\n\nGenerated Rust SDK for `{}`.\n\nThis crate contains contract types and typed adapters. Connect through your generated participant facade.\n",
-            opts.crate_name, loaded.render_model.id
+    fs::create_dir_all(out_dir.join("src"))?;
+    let mut sources = Vec::new();
+    let mut dependencies = BTreeSet::from([
+        format!("trellis-rs = \"{}\"", env!("CARGO_PKG_VERSION")),
+        "serde = { version = \"1.0\", features = [\"derive\"] }".to_owned(),
+        "serde_json = \"1.0\"".to_owned(),
+    ]);
+    for (namespace, ids) in [
+        ("apis", apis.keys().copied().collect::<Vec<_>>()),
+        (
+            "participants",
+            participants.iter().map(ParticipantArtifact::id).collect(),
         ),
-    )?;
-    write_rust_if_changed(
-        &opts.out_dir.join("src").join("api.rs"),
-        &render_api_rs(&loaded, &artifact_canonical, &artifact_digest),
-    )?;
-    write_rust_if_changed(
-        &opts.out_dir.join("src").join("types.rs"),
-        &render_types_rs(&loaded),
-    )?;
-    write_rust_if_changed(
-        &opts.out_dir.join("src").join("rpc.rs"),
-        &render_rpc_rs(&loaded),
-    )?;
-    write_rust_if_changed(
-        &opts.out_dir.join("src").join("operations.rs"),
-        &render_operations_rs(&loaded),
-    )?;
-    write_rust_if_changed(
-        &opts.out_dir.join("src").join("events.rs"),
-        &render_events_rs(&loaded),
-    )?;
-    write_rust_if_changed(
-        &opts.out_dir.join("src").join("feeds.rs"),
-        &render_feeds_rs(&loaded),
-    )?;
-    write_rust_if_changed(
-        &opts.out_dir.join("src").join("schemas.rs"),
-        &render_schemas_rs(&loaded),
-    )?;
-    write_rust_if_changed(
-        &opts.out_dir.join("src").join("client.rs"),
-        &render_client_rs(&loaded),
-    )?;
-    write_rust_if_changed(
-        &opts.out_dir.join("src").join("lib.rs"),
-        &render_lib_rs(&loaded),
-    )?;
-
-    format_generated_rust_files(&opts.out_dir)
+    ] {
+        let mut names = std::collections::BTreeMap::new();
+        let mut exports = String::new();
+        for id in ids {
+            let module = rust_ident(&key_to_snake(&default_sdk_stem(id)));
+            if let Some(previous) = names.insert(module.clone(), id) {
+                return Err(CodegenRustError::IdentifierCollision {
+                    scope: namespace.into(),
+                    identifier: module,
+                    originals: vec![previous.to_owned(), id.to_owned()],
+                });
+            }
+            exports.push_str(&format!("pub mod {module};\n"));
+        }
+        sources.push((
+            PathBuf::from(namespace).join("mod.rs"),
+            exports,
+            String::new(),
+        ));
+    }
+    let mut guide = vec!["# Generated by Trellis.".to_owned(), String::new(), format!("Package `{name}` contains `apis` and `participants` modules. Use an ordinary Cargo path dependency; regeneration is not part of a consumer build."), String::new()];
+    for (id, api) in apis {
+        let api = project_api(api)?;
+        validate_generated_identifiers(&api)?;
+        validate_supported_schemas(&api)?;
+        if !api.render_model.events.is_empty() || !api.render_model.feeds.is_empty() {
+            dependencies.insert("futures-util = \"0.3\"".into());
+        }
+        let module = rust_ident(&key_to_snake(&default_sdk_stem(id)));
+        guide.push(format!("## API `{id}`"));
+        push_rust_owned_surfaces(
+            &mut guide,
+            &api,
+            &format!("{}::apis::{module}", crate_ident(name)),
+            false,
+        );
+        for (file, source) in render_api_sources(&api) {
+            sources.push((
+                PathBuf::from("apis")
+                    .join(module.trim_start_matches("r#"))
+                    .join(file),
+                source,
+                module_root(file),
+            ));
+        }
+    }
+    for participant in participants {
+        let participant = project_participant(participant)?;
+        let value = participant.participant.normalized_value()?;
+        let implemented = value["implements"]
+            .as_object()
+            .and_then(|entries| entries.values().next())
+            .and_then(|entry| entry["api"].as_str())
+            .and_then(|id| apis.get(id))
+            .ok_or_else(|| CodegenRustError::MissingOwnedSdk {
+                contract: participant.participant.id().into(),
+            })?;
+        let api = project_api(implemented)?;
+        let owned = format!(
+            "crate::apis::{}",
+            rust_ident(&key_to_snake(&default_sdk_stem(implemented.id())))
+        );
+        let alias_mappings = participant
+            .render_model
+            .uses
+            .iter()
+            .filter_map(|(alias, used)| {
+                apis.get(used.api.as_str())
+                    .map(|api| ParticipantAliasMapping {
+                        alias: alias.clone(),
+                        api,
+                        crate_name: format!(
+                            "crate::apis::{}",
+                            rust_ident(&key_to_snake(&default_sdk_stem(api.id())))
+                        ),
+                    })
+            })
+            .collect::<Vec<_>>();
+        let mappings = validate_participant_mappings(&participant, &alias_mappings)?;
+        if mappings.iter().any(|mapping| {
+            mapping
+                .use_ref
+                .rpc
+                .as_ref()
+                .and_then(|rpc| rpc.call.as_ref())
+                .is_some_and(|calls| {
+                    calls
+                        .iter()
+                        .any(|key| mapping.manifest.render_model.rpc[key].transfer.is_some())
+                })
+        }) {
+            dependencies.insert("tokio = { version = \"1\", features = [\"io-util\"] }".into());
+        }
+        let module = rust_ident(&key_to_snake(&default_sdk_stem(
+            participant.participant.id(),
+        )));
+        guide.push(format!("## Participant `{}`", participant.participant.id()));
+        guide.push(format!(
+            "Connect through `{}::participants::{module}::Participant`.",
+            crate_ident(name)
+        ));
+        for mapping in &mappings {
+            push_rust_used_mapping_surfaces(&mut guide, mapping);
+        }
+        let mut files = vec![
+            (
+                "mod.rs".to_owned(),
+                render_participant_shim_lib_rs(&participant),
+            ),
+            (
+                "connect.rs".to_owned(),
+                render_participant_connect_rs(&participant, &mappings),
+            ),
+            (
+                "participant.rs".to_owned(),
+                render_participant_metadata_rs(&api, &participant, &mappings)?,
+            ),
+            (
+                "facade.rs".to_owned(),
+                render_participant_facade_rs(&participant, &mappings),
+            ),
+            (
+                "owned.rs".to_owned(),
+                render_participant_owned_rs(
+                    &api,
+                    &participant,
+                    Some(&owned),
+                    mappings
+                        .iter()
+                        .map(|mapping| (mapping.contract_id.clone(), mapping.manifest.api.clone()))
+                        .collect(),
+                )?,
+            ),
+            ("schemas.rs".to_owned(), render_schemas_rs(&api)),
+            (
+                "state.rs".to_owned(),
+                render_participant_state_rs(&participant),
+            ),
+            (
+                "uses/mod.rs".to_owned(),
+                render_participant_uses_mod_rs(&mappings),
+            ),
+        ];
+        if !participant.render_model.jobs.is_empty() {
+            files.push((
+                "jobs.rs".into(),
+                format!(
+                    "{}\n{}",
+                    render_participant_job_descriptors_rs(&participant),
+                    render_participant_jobs_facade_rs(&participant)
+                ),
+            ));
+        }
+        if !participant.render_model.event_consumers.is_empty() {
+            files.push((
+                "event_consumers.rs".into(),
+                render_participant_event_consumers_rs(&participant, &mappings, Some(&owned)),
+            ));
+        }
+        for mapping in &mappings {
+            files.push((
+                format!("uses/{}.rs", key_to_snake(&mapping.alias)),
+                render_participant_use_alias_rs(mapping),
+            ));
+        }
+        for (file, source) in files {
+            sources.push((
+                PathBuf::from("participants")
+                    .join(module.trim_start_matches("r#"))
+                    .join(&file),
+                source,
+                module_root(&file),
+            ));
+        }
+    }
+    write_if_changed(&out_dir.join("Cargo.toml"), &format!("# Generated by Trellis. Do not edit.\n[package]\nname = {}\nversion = \"0.0.0\"\nedition = \"2021\"\npublish = false\n\n[dependencies]\n{}\n", string_literal(name), dependencies.into_iter().collect::<Vec<_>>().join("\n")))?;
+    write_if_changed(&out_dir.join("src/lib.rs"), "// Generated by Trellis. Do not edit.\n//! Generated Trellis APIs and participants.\npub mod apis;\npub mod participants;\n")?;
+    push_rust_prepared_events(&mut guide);
+    write_if_changed(&out_dir.join("README.md"), &(guide.join("\n") + "\n"))?;
+    write_module_sources(&out_dir.join("src"), sources)?;
+    format_generated_rust_files(out_dir)
 }
 
-fn generate_rust_participant_generated_sources(
-    opts: &GenerateRustParticipantFacadeOpts,
-    api: &ApiInput,
-    participant: &ParticipantInput,
-    mappings: &[ValidatedParticipantAlias],
+fn render_api_sources(api: &ApiInput) -> Vec<(&'static str, String)> {
+    vec![
+        ("mod.rs", render_lib_rs(api)),
+        ("api.rs", render_api_rs(api, &api.canonical, &api.digest)),
+        ("types.rs", render_types_rs(api)),
+        ("rpc.rs", render_rpc_rs(api)),
+        ("operations.rs", render_operations_rs(api)),
+        ("events.rs", render_events_rs(api)),
+        ("feeds.rs", render_feeds_rs(api)),
+        ("schemas.rs", render_schemas_rs(api)),
+        ("client.rs", render_client_rs(api)),
+    ]
+}
+
+/// Render an API module embedded in a Trellis-owned runtime crate, without package metadata.
+///
+/// # Errors
+/// Returns source validation, formatting, or I/O errors.
+pub fn generate_rust_api_module(api: &ApiArtifact, out_dir: &Path) -> Result<(), CodegenRustError> {
+    let api = project_api(api)?;
+    validate_generated_identifiers(&api)?;
+    validate_supported_schemas(&api)?;
+    let sources = render_api_sources(&api)
+        .into_iter()
+        .map(|(file, source)| (PathBuf::from(file), source, module_root(file)));
+    write_module_sources(out_dir, sources)?;
+    format_generated_rust_files(out_dir)
+}
+
+fn module_root(file: &str) -> String {
+    let path = Path::new(file);
+    let parents = path.components().count()
+        - usize::from(path.file_name().is_some_and(|name| name == "mod.rs"));
+    if parents == 0 {
+        "self".to_owned()
+    } else {
+        vec!["super"; parents].join("::")
+    }
+}
+
+fn write_module_sources(
+    out_dir: &Path,
+    sources: impl IntoIterator<Item = (PathBuf, String, String)>,
 ) -> Result<(), CodegenRustError> {
-    fs::create_dir_all(opts.out_dir.join("src/uses"))?;
-    write_rust_if_changed(
-        &opts.out_dir.join("src/facade.rs"),
-        &render_participant_facade_rs(participant, mappings),
-    )?;
-    write_rust_if_changed(
-        &opts.out_dir.join("src/owned.rs"),
-        &render_participant_owned_rs(
-            api,
-            participant,
-            opts.owned_sdk_crate_name.as_deref(),
-            mappings
-                .iter()
-                .map(|mapping| (mapping.contract_id.clone(), mapping.manifest.api.clone()))
-                .collect(),
-        )?,
-    )?;
-    write_rust_if_changed(
-        &opts.out_dir.join("src/schemas.rs"),
-        &render_schemas_rs(api),
-    )?;
-    write_rust_if_changed(
-        &opts.out_dir.join("src/state.rs"),
-        &render_participant_state_rs(participant),
-    )?;
-    if !participant.render_model.jobs.is_empty() {
-        write_rust_if_changed(
-            &opts.out_dir.join("src/jobs.rs"),
+    for (file, source, scope) in sources {
+        let path = out_dir.join(file);
+        let mut parsed =
+            syn::parse_file(&source).map_err(|error| CodegenRustError::RustSyntax {
+                path: path.display().to_string(),
+                message: error.to_string(),
+            })?;
+        if !scope.is_empty() {
+            ModuleRoot(
+                syn::parse_str(&scope).map_err(|error| CodegenRustError::RustSyntax {
+                    path: path.display().to_string(),
+                    message: format!("invalid module root: {error}"),
+                })?,
+            )
+            .visit_file_mut(&mut parsed);
+        }
+        fs::create_dir_all(path.parent().expect("module parent"))?;
+        write_if_changed(
+            &path,
             &format!(
-                "{}\n{}",
-                render_participant_job_descriptors_rs(participant),
-                render_participant_jobs_facade_rs(participant),
+                "// Generated by Trellis. Do not edit.\n{}",
+                prettyplease::unparse(&parsed)
             ),
         )?;
     }
-    if !participant.render_model.event_consumers.is_empty() {
-        write_rust_if_changed(
-            &opts.out_dir.join("src/event_consumers.rs"),
-            &render_participant_event_consumers_rs(
-                participant,
-                mappings,
-                opts.owned_sdk_crate_name.as_deref(),
-            ),
-        )?;
-    }
-    write_rust_if_changed(
-        &opts.out_dir.join("src/uses/mod.rs"),
-        &render_participant_uses_mod_rs(mappings),
-    )?;
-
-    for mapping in mappings {
-        write_rust_if_changed(
-            &opts
-                .out_dir
-                .join("src/uses")
-                .join(format!("{}.rs", key_to_snake(&mapping.alias))),
-            &render_participant_use_alias_rs(mapping),
-        )?;
-    }
-
     Ok(())
 }
 
-/// Render a validated participant into an empty caller-owned staging directory.
-/// Publish the directory only after this function succeeds.
-pub fn generate_rust_participant_facade(
-    api: &ApiArtifact,
-    participant: &ParticipantArtifact,
-    opts: &GenerateRustParticipantFacadeOpts,
-) -> Result<(), CodegenRustError> {
-    let api = project_api(api)?;
-    let participant = project_participant(participant)?;
-    if participant_requires_owned_sdk(&api, &participant)
-        && (opts.owned_sdk_crate_name.is_none() || opts.owned_sdk_path.is_none())
-    {
-        return Err(CodegenRustError::MissingOwnedSdk {
-            contract: participant.render_model.id.clone(),
-        });
-    }
-    let mappings = validate_participant_mappings(&participant, &opts.alias_mappings)?;
-    fs::create_dir_all(opts.out_dir.join("src"))?;
-    write_if_changed(
-        &opts.out_dir.join("Cargo.toml"),
-        &render_participant_cargo_toml(opts, &mappings, !api.render_model.feeds.is_empty())?,
-    )?;
-    write_if_changed(
-        &opts.out_dir.join("TRELLIS.md"),
-        &render_rust_participant_trellis_md(opts, &api, &participant, &mappings),
-    )?;
-    write_rust_if_changed(
-        &opts.out_dir.join("src/lib.rs"),
-        &render_participant_shim_lib_rs(&participant),
-    )?;
-    write_rust_if_changed(
-        &opts.out_dir.join("src/connect.rs"),
-        &render_participant_connect_rs(&participant, &mappings),
-    )?;
-    write_rust_if_changed(
-        &opts.out_dir.join("src/participant.rs"),
-        &render_participant_metadata_rs(&api, &participant, &mappings)?,
-    )?;
-    generate_rust_participant_generated_sources(opts, &api, &participant, &mappings)?;
-    format_generated_rust_files(&opts.out_dir)
-}
+// Rebase syntax paths, never string literals containing canonical application data.
+struct ModuleRoot(syn::Path);
 
-fn participant_requires_owned_sdk(api: &ApiInput, participant: &ParticipantInput) -> bool {
-    !api.render_model.rpc.is_empty()
-        || !api.render_model.operations.is_empty()
-        || !api.render_model.events.is_empty()
-        || !api.render_model.feeds.is_empty()
-        || !participant.render_model.jobs.is_empty()
-}
-
-fn render_cargo_toml(
-    opts: &GenerateRustSdkOpts,
-    has_feeds: bool,
-    publish_false: bool,
-) -> Result<String, CodegenRustError> {
-    let mut dependency_lines = runtime_dependency_lines(&opts.runtime_deps, &opts.out_dir)?;
-    if has_feeds {
-        dependency_lines.push("futures-util = \"0.3\"".to_string());
-    }
-    dependency_lines.sort();
-    let description = format!("Generated Rust SDK crate for {}.", opts.crate_name);
-    let publish_line = if publish_false {
-        "publish = false\n"
-    } else {
-        ""
-    };
-    Ok(format!(
-        "[package]\nname = \"{}\"\nversion = \"{}\"\nedition = \"2021\"\nlicense = \"Apache-2.0\"\nrepository = \"https://github.com/qlever-llc/trellis\"\ndescription = \"{}\"\nreadme = \"README.md\"\n{}\n[dependencies]\nserde = {{ version = \"1.0\", features = [\"derive\"] }}\nserde_json = \"1.0\"\n{}\n\n[workspace]\n",
-        opts.crate_name,
-        opts.crate_version,
-        description,
-        publish_line,
-        dependency_lines.join("\n"),
-    ))
-}
-
-fn runtime_dependency_lines(
-    runtime_deps: &RustRuntimeDeps,
-    out_dir: &Path,
-) -> Result<Vec<String>, CodegenRustError> {
-    match runtime_deps.source {
-        RustRuntimeSource::Registry => {
-            Ok(vec![format!("trellis-rs = \"{}\"", runtime_deps.version)])
+impl VisitMut for ModuleRoot {
+    fn visit_use_tree_mut(&mut self, tree: &mut syn::UseTree) {
+        syn::visit_mut::visit_use_tree_mut(self, tree);
+        let syn::UseTree::Path(root) = tree else {
+            return;
+        };
+        if root.ident != "crate"
+            || matches!(root.tree.as_ref(), syn::UseTree::Path(path) if path.ident == "apis" || path.ident == "participants")
+        {
+            return;
         }
-        RustRuntimeSource::Local => {
-            let repo_root = runtime_deps
-                .repo_root
-                .as_ref()
-                .ok_or(CodegenRustError::MissingRuntimeRepoRoot)?;
-            let repo_root = fs::canonicalize(repo_root).unwrap_or_else(|_| repo_root.clone());
-            let trellis_path = workspace_package_dir(&repo_root, "trellis-rs")?;
-            let trellis_path = cargo_dependency_path(&trellis_path, out_dir)?;
-            Ok(vec![format!(
-                "trellis-rs = {{ path = {} }}",
-                string_literal(&trellis_path.display().to_string())
-            )])
+        let mut scoped = *root.tree.clone();
+        for segment in self.0.segments.iter().rev() {
+            scoped = syn::UseTree::Path(syn::UsePath {
+                ident: segment.ident.clone(),
+                colon2_token: Default::default(),
+                tree: Box::new(scoped),
+            });
+        }
+        *tree = scoped;
+    }
+
+    fn visit_path_mut(&mut self, path: &mut syn::Path) {
+        syn::visit_mut::visit_path_mut(self, path);
+        if path
+            .segments
+            .first()
+            .is_some_and(|segment| segment.ident == "crate")
+            && !path
+                .segments
+                .iter()
+                .nth(1)
+                .is_some_and(|segment| segment.ident == "apis" || segment.ident == "participants")
+        {
+            path.segments = self
+                .0
+                .segments
+                .iter()
+                .cloned()
+                .chain(path.segments.iter().skip(1).cloned())
+                .collect();
         }
     }
-}
-
-fn cargo_dependency_path(path: &Path, out_dir: &Path) -> std::io::Result<PathBuf> {
-    let path = fs::canonicalize(path).or_else(|_| std::path::absolute(path))?;
-    let out_dir = fs::canonicalize(out_dir).or_else(|_| std::path::absolute(out_dir))?;
-    Ok(out_dir
-        .ancestors()
-        .find_map(|base| {
-            let tail = path.strip_prefix(base).ok()?;
-            let depth = out_dir.components().count() - base.components().count();
-            Some(PathBuf::from("../".repeat(depth)).join(tail))
-        })
-        .unwrap_or(path))
-}
-
-fn render_rust_sdk_trellis_md(opts: &GenerateRustSdkOpts, loaded: &ApiInput) -> String {
-    let mut lines = vec![
-        format!(
-            "# Trellis API Guide: {}", loaded.render_model.id
-        ),
-        String::new(),
-        "This file is generated for AI agents and out-of-tree Trellis services.".to_string(),
-        String::new(),
-        "## Global Trellis Context".to_string(),
-        String::new(),
-        "- llms.txt: https://raw.githubusercontent.com/qlever-llc/trellis/main/docs/static/llms.txt".to_string(),
-        "- llms-full.txt: https://raw.githubusercontent.com/qlever-llc/trellis/main/docs/static/llms-full.txt".to_string(),
-        String::new(),
-        "## Crate".to_string(),
-        String::new(),
-        format!("- crate: `{}`", opts.crate_name),
-        format!("- contract id: `{}`", loaded.render_model.id),
-        String::new(),
-        "## Rust Facades".to_string(),
-        String::new(),
-        "Owned surfaces:".to_string(),
-    ];
-    push_rust_owned_surfaces(&mut lines, loaded, "crate", false);
-    lines.extend([
-        String::new(),
-        "Dependency surfaces are declared by participant packages.".to_string(),
-    ]);
-    push_rust_prepared_events(&mut lines);
-    lines.join("\n") + "\n"
-}
-
-fn render_rust_participant_trellis_md(
-    opts: &GenerateRustParticipantFacadeOpts,
-    api: &ApiInput,
-    participant: &ParticipantInput,
-    mappings: &[ValidatedParticipantAlias],
-) -> String {
-    let mut lines = vec![
-        format!("# Trellis Participant Guide: {}", participant.render_model.id),
-        String::new(),
-        "This file is generated for AI agents and out-of-tree Trellis services.".to_string(),
-        String::new(),
-        "## Global Trellis Context".to_string(),
-        String::new(),
-        "- llms.txt: https://raw.githubusercontent.com/qlever-llc/trellis/main/docs/static/llms.txt".to_string(),
-        "- llms-full.txt: https://raw.githubusercontent.com/qlever-llc/trellis/main/docs/static/llms-full.txt".to_string(),
-        String::new(),
-        "## Crate".to_string(),
-        String::new(),
-        format!("- crate: `{}`", opts.crate_name),
-        format!("- contract id: `{}`", participant.render_model.id),
-        format!("- kind: `{:?}`", participant.render_model.kind),
-        String::new(),
-        "## Participant Facades".to_string(),
-        String::new(),
-        "Owned surfaces are available through `connected_service.service().owned()`, `connected_service.handle()`, and `connected_client.client().owned()`:".to_string(),
-    ];
-    push_rust_owned_surfaces(&mut lines, api, "owned_sdk", true);
-    lines.extend([String::new(), "Mapped dependency aliases:".to_string()]);
-    if mappings.is_empty() {
-        lines.push("- No mapped dependency aliases.".to_string());
-    } else {
-        for mapping in mappings {
-            lines.push(format!(
-                "- alias `{}` -> crate `{}` contract `{}`",
-                mapping.alias, mapping.crate_name, mapping.contract_id
-            ));
-            push_rust_used_mapping_surfaces(&mut lines, mapping);
-        }
-    }
-    push_rust_prepared_events(&mut lines);
-    lines.join("\n") + "\n"
 }
 
 fn push_rust_owned_surfaces(
@@ -692,7 +562,6 @@ struct ValidatedParticipantAlias {
     alias_ident: String,
     crate_name: String,
     crate_ident: String,
-    crate_path: PathBuf,
     contract_id: String,
     manifest: ApiInput,
     use_ref: ParticipantUse,
@@ -788,7 +657,6 @@ fn validate_participant_mappings(
             alias_ident: rust_ident(&key_to_snake(&mapping.alias)),
             crate_name: mapping.crate_name.clone(),
             crate_ident: crate_ident(&mapping.crate_name),
-            crate_path: mapping.crate_path.clone(),
             contract_id: manifest.render_model.id.clone(),
             manifest,
             use_ref: use_ref.clone(),
@@ -998,79 +866,6 @@ fn is_runtime_owned_baseline_use(
     }
 
     false
-}
-
-fn render_participant_cargo_toml(
-    opts: &GenerateRustParticipantFacadeOpts,
-    mappings: &[ValidatedParticipantAlias],
-    has_owned_feeds: bool,
-) -> Result<String, CodegenRustError> {
-    let mut dependency_lines =
-        participant_runtime_dependency_lines(&opts.runtime_deps, &opts.out_dir)?;
-    if has_owned_feeds
-        || mappings.iter().any(|mapping| {
-            let subscribes_events = mapping
-                .use_ref
-                .events
-                .as_ref()
-                .and_then(|events| events.subscribe.as_ref())
-                .is_some_and(|subscribe| !subscribe.is_empty());
-            let subscribes_feeds = mapping
-                .use_ref
-                .feeds
-                .as_ref()
-                .and_then(|feeds| feeds.subscribe.as_ref())
-                .is_some_and(|subscribe| !subscribe.is_empty());
-            subscribes_events || subscribes_feeds
-        })
-    {
-        dependency_lines.push("futures-util = \"0.3\"".to_string());
-    }
-    if mappings.iter().any(|mapping| {
-        mapping
-            .use_ref
-            .rpc
-            .as_ref()
-            .and_then(|rpc| rpc.call.as_ref())
-            .is_some_and(|calls| {
-                calls
-                    .iter()
-                    .any(|key| mapping.manifest.render_model.rpc[key].transfer.is_some())
-            })
-    }) {
-        dependency_lines.push("tokio = { version = \"1\", features = [\"io-util\"] }".to_string());
-    }
-    if let (Some(crate_name), Some(path)) = (&opts.owned_sdk_crate_name, &opts.owned_sdk_path) {
-        let path = cargo_dependency_path(path, &opts.out_dir)?;
-        dependency_lines.push(format!(
-            "{} = {{ path = {} }}",
-            crate_name,
-            string_literal(&path.display().to_string())
-        ));
-    }
-    for mapping in mappings {
-        let path = cargo_dependency_path(&mapping.crate_path, &opts.out_dir)?;
-        dependency_lines.push(format!(
-            "{} = {{ path = {} }}",
-            mapping.crate_name,
-            string_literal(&path.display().to_string())
-        ));
-    }
-    dependency_lines.sort();
-
-    Ok(format!(
-        "[package]\nname = \"{}\"\nversion = \"{}\"\nedition = \"2021\"\nlicense = \"Apache-2.0\"\npublish = false\n\n[dependencies]\nserde = {{ version = \"1.0\", features = [\"derive\"] }}\nserde_json = \"1.0\"\n{}\n\n[workspace]\n",
-        opts.crate_name,
-        opts.crate_version,
-        dependency_lines.join("\n")
-    ))
-}
-
-fn participant_runtime_dependency_lines(
-    runtime_deps: &RustRuntimeDeps,
-    out_dir: &Path,
-) -> Result<Vec<String>, CodegenRustError> {
-    runtime_dependency_lines(runtime_deps, out_dir)
 }
 
 fn render_participant_shim_lib_rs(loaded: &ParticipantInput) -> String {
@@ -1326,6 +1121,7 @@ use std::sync::Arc;
 use trellis_rs::generated::{AuthorizationContextStore, AuthorizationInstallation, Caller, TrellisClientError, UserAuthorizationContext, UserConnectOptions, UserSessionCredentials};
 
 use crate::Client;
+use crate::participant::{PARTICIPANT_ID, PARTICIPANT_DIGEST};
 
 /// User-authenticated participant connection options.
 pub struct ConnectOptions<'a> {
@@ -1366,8 +1162,8 @@ pub async fn connect(opts: ConnectOptions<'_>) -> Result<ConnectedClient, Trelli
                 binding: format!(
                     "installation:{}:{}:{}",
                     origin,
-                    crate::participant::PARTICIPANT_ID,
-                    crate::participant::PARTICIPANT_DIGEST,
+                    PARTICIPANT_ID,
+                    PARTICIPANT_DIGEST,
                 ),
                 store: opts.authorization_context_store,
             },
@@ -3390,23 +3186,6 @@ fn write_if_changed(path: &Path, contents: &str) -> Result<(), CodegenRustError>
     Ok(())
 }
 
-fn write_rust_if_changed(path: &Path, contents: &str) -> Result<(), CodegenRustError> {
-    let contents = format_generated_rust_source(path, contents)?;
-    write_if_changed(path, &contents)
-}
-
-fn format_generated_rust_source(
-    path: impl AsRef<Path>,
-    contents: &str,
-) -> Result<String, CodegenRustError> {
-    let path = path.as_ref().display().to_string();
-    let file = syn::parse_file(contents).map_err(|error| CodegenRustError::RustSyntax {
-        path: path.clone(),
-        message: error.to_string(),
-    })?;
-    Ok(prettyplease::unparse(&file))
-}
-
 fn format_generated_rust_files(root: &Path) -> Result<(), CodegenRustError> {
     fn collect(dir: &Path, files: &mut Vec<PathBuf>) -> Result<(), std::io::Error> {
         for entry in fs::read_dir(dir)? {
@@ -4456,6 +4235,14 @@ mod tests {
             .arg("check")
             .arg("--manifest-path")
             .arg(manifest_path)
+            .arg("--config")
+            .arg(format!(
+                "patch.crates-io.trellis-rs.path={:?}",
+                PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                    .join("../trellis")
+                    .canonicalize()
+                    .unwrap()
+            ))
             .arg("--quiet")
             .env(
                 "CARGO_TARGET_DIR",
@@ -4474,36 +4261,26 @@ mod tests {
 
     #[test]
     fn cargo_toml_uses_registry_dependencies() {
-        let cargo = render_cargo_toml(
-            &GenerateRustSdkOpts {
-                out_dir: PathBuf::from(".trellis/rust/apis/core"),
-                crate_name: "trellis-sdk-core".to_string(),
-                crate_version: "0.1.0".to_string(),
-                runtime_deps: RustRuntimeDeps {
-                    source: RustRuntimeSource::Registry,
-                    version: "0.1.0".to_string(),
-                    repo_root: None,
-                },
-            },
-            false,
-            true,
-        )
-        .unwrap();
-
+        let out_dir = unique_temp_dir("package-metadata");
+        generate_rust_package(&Default::default(), &[], &out_dir, "sample-trellis").unwrap();
+        let cargo = fs::read_to_string(out_dir.join("Cargo.toml")).unwrap();
         let manifest: toml::Value = toml::from_str(&cargo).unwrap();
         let dependency = &manifest["dependencies"]["trellis-rs"];
         assert_eq!(
             dependency
                 .as_str()
                 .or_else(|| dependency.get("version").and_then(toml::Value::as_str)),
-            Some("0.1.0")
+            Some(env!("CARGO_PKG_VERSION"))
         );
         assert!(dependency.get("path").is_none());
         assert_eq!(manifest["package"]["publish"].as_bool(), Some(false));
+        assert_eq!(manifest["package"]["name"].as_str(), Some("sample-trellis"));
+        assert_eq!(manifest["package"]["version"].as_str(), Some("0.0.0"));
+        fs::remove_dir_all(out_dir).unwrap();
     }
 
     #[test]
-    fn cargo_toml_uses_workspace_member_paths_for_local_runtime_deps() {
+    fn cargo_toml_is_independent_of_repository_ancestry() {
         let repo_root = unique_temp_dir("workspace-runtime-paths");
         fs::create_dir_all(repo_root.join("rust/crates/runtime-client")).unwrap();
         fs::write(
@@ -4522,42 +4299,16 @@ mod tests {
         )
         .unwrap();
 
-        let cargo = render_cargo_toml(
-            &GenerateRustSdkOpts {
-                out_dir: repo_root.join(".trellis/rust/apis/core"),
-                crate_name: "trellis-sdk-core".to_string(),
-                crate_version: "0.1.0".to_string(),
-                runtime_deps: RustRuntimeDeps {
-                    source: RustRuntimeSource::Local,
-                    version: "0.1.0".to_string(),
-                    repo_root: Some(repo_root.clone()),
-                },
-            },
-            false,
-            true,
-        )
-        .unwrap();
-
-        let manifest: toml::Value = toml::from_str(&cargo).unwrap();
-        let dependency = manifest["dependencies"]["trellis-rs"]["path"]
-            .as_str()
-            .unwrap();
-        let moved_root = repo_root.with_extension("moved");
-        fs::rename(&repo_root, &moved_root).unwrap();
-        let sdk_dir = moved_root.join(".trellis/rust/apis/core");
-        fs::create_dir_all(&sdk_dir).unwrap();
+        let external = unique_temp_dir("external-package");
+        for out in [repo_root.join("trellis"), external.clone()] {
+            generate_rust_package(&Default::default(), &[], &out, "sample-trellis").unwrap();
+        }
         assert_eq!(
-            fs::canonicalize(sdk_dir.join(dependency)).unwrap(),
-            fs::canonicalize(moved_root.join("rust/crates/runtime-client")).unwrap(),
+            fs::read(repo_root.join("trellis/Cargo.toml")).unwrap(),
+            fs::read(external.join("Cargo.toml")).unwrap()
         );
-        fs::remove_dir_all(moved_root).unwrap();
-    }
-
-    #[test]
-    fn generated_rust_source_validation_rejects_invalid_source() {
-        let error = format_generated_rust_source("src/lib.rs", "pub fn broken(").unwrap_err();
-
-        assert!(matches!(error, CodegenRustError::RustSyntax { path, .. } if path == "src/lib.rs"));
+        fs::remove_dir_all(repo_root).unwrap();
+        fs::remove_dir_all(external).unwrap();
     }
 
     #[test]
@@ -4565,7 +4316,15 @@ mod tests {
         let out_dir = unique_temp_dir("invalid-rust-before-write");
         let target = out_dir.join("broken.rs");
 
-        let error = write_rust_if_changed(&target, "pub fn broken(").unwrap_err();
+        let error = write_module_sources(
+            &out_dir,
+            [(
+                PathBuf::from("broken.rs"),
+                "pub fn broken(".to_owned(),
+                String::new(),
+            )],
+        )
+        .unwrap_err();
 
         assert!(matches!(error, CodegenRustError::RustSyntax { .. }));
         assert!(!target.exists());
@@ -4576,16 +4335,10 @@ mod tests {
     }
 
     #[test]
-    fn default_sdk_name_drops_duplicate_trellis_prefix() {
-        assert_eq!(
-            default_sdk_crate_name("trellis.core@v1"),
-            "trellis-sdk-core"
-        );
-        assert_eq!(
-            default_sdk_crate_name("trellis.auth@v1"),
-            "trellis-sdk-auth"
-        );
-        assert_eq!(default_sdk_crate_name("graph@v1"), "trellis-sdk-graph");
+    fn module_stem_drops_duplicate_trellis_prefix() {
+        assert_eq!(default_sdk_stem("trellis.core@v1"), "core");
+        assert_eq!(default_sdk_stem("trellis.auth@v1"), "auth");
+        assert_eq!(default_sdk_stem("graph@v1"), "graph");
     }
 
     #[test]
@@ -4640,27 +4393,15 @@ mod tests {
             "rpc": {"call": ["Auth.Sessions.Me"]}
         });
 
-        let error = generate_rust_participant_facade(
-            &local_manifest,
-            &parse_participant(&participant).unwrap(),
-            &GenerateRustParticipantFacadeOpts {
-                out_dir: out_dir.join("facade"),
-                crate_name: "device-participant".to_string(),
-                crate_version: "0.1.0".to_string(),
-                runtime_deps: RustRuntimeDeps {
-                    source: RustRuntimeSource::Registry,
-                    version: "0.1.0".to_string(),
-                    repo_root: None,
-                },
-                owned_sdk_crate_name: None,
-                owned_sdk_path: None,
-                alias_mappings: vec![ParticipantAliasMapping {
-                    alias: "core".to_string(),
-                    crate_name: "trellis-sdk-core".to_string(),
-                    api: &core_manifest,
-                    crate_path: out_dir.join("core-sdk"),
-                }],
-            },
+        let error = generate_rust_package(
+            &[
+                (local_manifest.id(), &local_manifest),
+                (core_manifest.id(), &core_manifest),
+            ]
+            .into(),
+            &[parse_participant(&participant).unwrap()],
+            &out_dir,
+            "device-trellis",
         )
         .unwrap_err();
 
@@ -4739,40 +4480,15 @@ mod tests {
                 }
             }
         })).unwrap();
-        let owned_sdk_dir = out_dir.join("owned-sdk");
-
-        let runtime_deps = RustRuntimeDeps {
-            source: RustRuntimeSource::Local,
-            version: "0.1.0".to_string(),
-            repo_root: Some(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../..")),
-        };
-
-        generate_rust_sdk(
-            &local_manifest,
-            &GenerateRustSdkOpts {
-                out_dir: owned_sdk_dir.clone(),
-                crate_name: "compile-sdk".to_string(),
-                crate_version: "0.1.0".to_string(),
-                runtime_deps: runtime_deps.clone(),
-            },
-        )
-        .unwrap();
-        generate_rust_participant_facade(
-            &local_manifest,
-            &parse_participant(&self_participant_value(&local_manifest, "service")).unwrap(),
-            &GenerateRustParticipantFacadeOpts {
-                out_dir: out_dir.join("facade"),
-                crate_name: "compile-participant".to_string(),
-                crate_version: "0.1.0".to_string(),
-                runtime_deps,
-                owned_sdk_crate_name: Some("compile-sdk".to_string()),
-                owned_sdk_path: Some(owned_sdk_dir),
-                alias_mappings: vec![],
-            },
+        generate_rust_package(
+            &[(local_manifest.id(), &local_manifest)].into(),
+            &[parse_participant(&self_participant_value(&local_manifest, "service")).unwrap()],
+            &out_dir,
+            "compile-trellis",
         )
         .unwrap();
 
-        cargo_check(&out_dir.join("facade/Cargo.toml"));
+        cargo_check(&out_dir.join("Cargo.toml"));
 
         fs::remove_dir_all(out_dir).unwrap();
     }
@@ -4798,39 +4514,15 @@ mod tests {
                     }
                 }
             })).unwrap();
-            let facade = out_dir.join("facade");
-            let owned_sdk = out_dir.join("owned-sdk");
-            let runtime_deps = RustRuntimeDeps {
-                source: RustRuntimeSource::Local,
-                version: "0.1.0".to_string(),
-                repo_root: Some(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../..")),
-            };
-            generate_rust_sdk(
-                &manifest,
-                &GenerateRustSdkOpts {
-                    out_dir: owned_sdk.clone(),
-                    crate_name: format!("fixture-{kind}-sdk"),
-                    crate_version: "0.1.0".to_string(),
-                    runtime_deps: runtime_deps.clone(),
-                },
-            )
-            .unwrap();
-            generate_rust_participant_facade(
-                &manifest,
-                &parse_participant(&self_participant_value(&manifest, kind)).unwrap(),
-                &GenerateRustParticipantFacadeOpts {
-                    out_dir: facade.clone(),
-                    crate_name: format!("fixture-{kind}-participant"),
-                    crate_version: "0.1.0".to_string(),
-                    runtime_deps,
-                    owned_sdk_crate_name: Some(format!("fixture-{kind}-sdk")),
-                    owned_sdk_path: Some(owned_sdk),
-                    alias_mappings: vec![],
-                },
+            generate_rust_package(
+                &[(manifest.id(), &manifest)].into(),
+                &[parse_participant(&self_participant_value(&manifest, kind)).unwrap()],
+                &out_dir,
+                &format!("fixture-{kind}-trellis"),
             )
             .unwrap();
 
-            cargo_check(&facade.join("Cargo.toml"));
+            cargo_check(&out_dir.join("Cargo.toml"));
             fs::remove_dir_all(out_dir).unwrap();
         }
     }
@@ -4865,27 +4557,15 @@ mod tests {
             json!({"feeds": {"subscribe": ["Evidence.Stream"]}}),
         );
 
-        let error = generate_rust_participant_facade(
-            &local_manifest,
-            &parse_participant(&participant).unwrap(),
-            &GenerateRustParticipantFacadeOpts {
-                out_dir: out_dir.join("generated"),
-                crate_name: "participant".to_string(),
-                crate_version: "0.1.0".to_string(),
-                runtime_deps: RustRuntimeDeps {
-                    source: RustRuntimeSource::Registry,
-                    version: "0.1.0".to_string(),
-                    repo_root: None,
-                },
-                owned_sdk_crate_name: None,
-                owned_sdk_path: None,
-                alias_mappings: vec![ParticipantAliasMapping {
-                    alias: "evidence".to_string(),
-                    crate_name: "evidence-sdk".to_string(),
-                    api: &evidence_manifest,
-                    crate_path: out_dir.join("evidence-sdk"),
-                }],
-            },
+        let error = generate_rust_package(
+            &[
+                (local_manifest.id(), &local_manifest),
+                (evidence_manifest.id(), &evidence_manifest),
+            ]
+            .into(),
+            &[parse_participant(&participant).unwrap()],
+            &out_dir,
+            "participant-trellis",
         )
         .unwrap_err();
 
@@ -4939,18 +4619,11 @@ mod tests {
             }
         })).unwrap();
 
-        generate_rust_sdk(
-            &manifest_path,
-            &GenerateRustSdkOpts {
-                out_dir: out_dir.join("generated"),
-                crate_name: "ops-sdk".to_string(),
-                crate_version: "0.1.0".to_string(),
-                runtime_deps: RustRuntimeDeps {
-                    source: RustRuntimeSource::Local,
-                    version: "0.1.0".to_string(),
-                    repo_root: Some(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../..")),
-                },
-            },
+        generate_rust_package(
+            &[(manifest_path.id(), &manifest_path)].into(),
+            &[],
+            &out_dir.join("generated"),
+            "ops-sdk",
         )
         .unwrap();
 
@@ -4967,12 +4640,12 @@ mod tests {
         .unwrap();
         fs::write(
             consumer_dir.join("src/main.rs"),
-            r#"use ops_sdk::operations::ExampleProcessOperationError;
+            r#"use ops_sdk::apis::ops::operations::ExampleProcessOperationError;
 use trellis_rs::service::OperationFailureLike;
 
 fn main() {
-    let declared = ExampleProcessOperationError::NotFoundError(ops_sdk::NotFoundData {
-        r#type: ops_sdk::NotFoundDataType::NotFoundError,
+    let declared = ExampleProcessOperationError::NotFoundError(ops_sdk::apis::ops::NotFoundData {
+        r#type: ops_sdk::apis::ops::NotFoundDataType::NotFoundError,
         message: "missing".to_string(),
         id: "order-1".to_string(),
     });

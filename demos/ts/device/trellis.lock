@@ -1,5 +1,5 @@
 format = 1
-manifest-digest = "NiRDNcx3QH79snaC4b6HiPdE4GjirUtKrRlgWl64OjY"
+manifest-digest = "YtTGZYV-5V8QI_Y4dH8POlc0Rr4HEV9iO8EBxzgfZ_o"
 
 [[api]]
 id = "demo.service@v1"

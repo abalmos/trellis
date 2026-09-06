@@ -24,6 +24,7 @@
     "jsr:@std/path@^1.1.4": "1.1.5",
     "jsr:@std/path@^1.1.5": "1.1.5",
     "jsr:@ts-morph/bootstrap@0.27": "0.27.0",
+    "jsr:@ts-morph/bootstrap@0.27.0": "0.27.0",
     "jsr:@ts-morph/common@0.27": "0.27.0",
     "npm:@libsql/client@~0.15.15": "0.15.15",
     "npm:@nats-io/jetstream@3.4.0": "3.4.0",
@@ -116,7 +117,7 @@
         "jsr:@std/fmt",
         "jsr:@std/fs@1",
         "jsr:@std/path@1",
-        "jsr:@ts-morph/bootstrap"
+        "jsr:@ts-morph/bootstrap@0.27"
       ]
     },
     "@hono/hono@4.12.23": {
@@ -2661,17 +2662,11 @@
           "npm:@libsql/client@~0.15.15",
           "npm:@nats-io/jetstream@^3.3.1",
           "npm:@nats-io/kv@^3.3.1",
-          "npm:@nats-io/nats-core@^3.3.1"
+          "npm:@nats-io/nats-core@^3.3.1",
+          "npm:fflate@~0.8.2",
+          "npm:ulid@^3.0.2"
         ]
       }
-    },
-    "links": {
-      "jsr:@trellis-sdk/trellis.auth@1.0.0": {},
-      "jsr:@trellis-sdk/trellis.core@1.0.0": {},
-      "jsr:@trellis-sdk/trellis.eventlog@1.0.0": {},
-      "jsr:@trellis-sdk/trellis.health@1.0.0": {},
-      "jsr:@trellis-sdk/trellis.jobs@1.0.0": {},
-      "jsr:@trellis-sdk/trellis.state@1.0.0": {}
     }
   }
 }

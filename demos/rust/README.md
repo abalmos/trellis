@@ -1,8 +1,8 @@
 # Rust Demo
 
 This directory contains independent Rust Field Ops Trellis projects. The service
-and device each own a `contract.trellis`, `trellis.toml`, Cargo crate, and
-project-local `.trellis` generated state.
+and device each own a `contract.trellis`, `trellis.toml`, Cargo crate, and one
+ordinary generated package under `trellis/`.
 
 ## Generate And Check
 
@@ -16,7 +16,11 @@ cargo check --manifest-path demos/rust/device/Cargo.toml
 ```
 
 Use `trellis generate --watch --root <project>` while editing IDL. Everything
-under `.trellis/` is generated or installed state and must not be edited.
+under `trellis/` is generated package output and must not be hand-edited. It has
+`apis` and `participants` modules and a published runtime dependency, not
+separate SDK crates or repository-relative runtime paths. A local runtime can be
+selected through ordinary Cargo overrides supplied by the development/test
+invocation.
 
 ## Service
 

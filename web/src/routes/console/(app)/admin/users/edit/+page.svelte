@@ -1,11 +1,7 @@
 <script lang="ts">
   import { ulid } from "ulid";
   import { isErr } from "@qlever-llc/result";
-  import type {
-    AuthCapabilitiesListOutput,
-    AuthUsersListOutput,
-    AuthUsersUpdateInput,
-  } from "@trellis/apis/trellis.auth";
+  import { type apis } from "trellis-web-generated";
   import { resolve } from "$lib/console_paths";
   import { page } from "$app/state";
   import { onMount } from "svelte";
@@ -21,9 +17,9 @@
   import { getNotifications } from "$lib/notifications.svelte";
   import { getTrellis } from "$lib/trellis";
 
-  type UserView = AuthUsersListOutput["entries"][number];
+  type UserView = apis.auth.AuthUsersListOutput["entries"][number];
   type IdentityView = { provider: string; subject: string };
-  type CapabilityView = AuthCapabilitiesListOutput["entries"][number] & {
+  type CapabilityView = apis.auth.AuthCapabilitiesListOutput["entries"][number] & {
     key: string;
     source: "platform" | "contract";
     contractId: string | null;
@@ -251,7 +247,7 @@
         image: targetUser.image,
         name: targetUser.name,
         state: active ? "active" : "disabled",
-      } satisfies AuthUsersUpdateInput).take();
+      } satisfies apis.auth.AuthUsersUpdateInput).take();
       if (isErr(response)) { error = errorMessage(response); return; }
       notifications.success(`Updated ${targetUser.name ?? targetUser.userId}.`, "Updated");
       await load();

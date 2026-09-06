@@ -18,7 +18,15 @@ from `main`. Public API documentation is linked from the Trellis docs site's
   in `trellis.toml` and commit the resolved `trellis.lock`.
 - Run `trellis update` after dependency changes, `trellis install` to reproduce
   locked dependencies, and `trellis generate` after IDL edits.
-- Regenerate disposable `.trellis/` output instead of hand-editing it.
+- Set `format = 1` and a local package `name` in `trellis.toml`. Configure
+  explicit `[generate.rust].output` and `[generate.typescript].output`
+  destinations for a mixed-language project. Each language gets one package at
+  version `0.0.0`, with `apis` and `participants` namespaces, not per-surface
+  packages.
+- Commit generated packages when ordinary clones must build without the CLI or
+  API cache; regenerate instead of hand-editing them. Runtime dependencies use
+  published packages; local substitutions belong in ordinary ecosystem
+  overrides.
 - Connect through generated participants and supported runtime APIs. Trellis
   owns its proofs, transport metadata, and resolved resource bindings.
 - TypeScript services use `TrellisService.connect(...)` and generated flat

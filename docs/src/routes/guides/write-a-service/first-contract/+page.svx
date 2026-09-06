@@ -47,15 +47,16 @@ trellis update
 trellis generate
 ```
 
-Because the project contains `deno.json`, generation emits TypeScript. A project
-with `Cargo.toml` receives Rust crates; one with both manifests receives both.
-There is no separate TypeScript contract execution or output stanza to
-configure.
+Because the project contains `deno.json`, generation emits one ordinary ESM
+package at `trellis/`, named `orders-trellis` by `trellis.toml`. Its executable
+JavaScript and declarations require no consumer transpilation. A root
+`package.json` or `deno.jsonc` also selects TypeScript; `Cargo.toml` selects Rust.
+A mixed project must configure separate Rust and TypeScript output destinations.
 
-The provider participant is
-`.trellis/ts/participants/acme-orders-service/mod.ts`; the caller is
-`.trellis/ts/participants/acme-orders-caller/mod.ts`. API types and action
-descriptors are exported by `.trellis/ts/apis/acme-orders/mod.ts`.
+Import `apis` and `participants` from `orders-trellis`. The provider is
+`participants.acmeOrdersService.participant`, the caller is
+`participants.acmeOrdersCaller.participant`, and the API vocabulary is
+`apis.acmeOrders`. These are modules of one package, not separate packages.
 
 The API ID, participant ID, API release (`1.0.0`), and RPC transport version
 (`v1`) are distinct. See [native IDL design](/design/contracts/trellis-idl) for

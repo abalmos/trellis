@@ -1,4 +1,4 @@
-import type { AuthCapabilitiesListOutput } from "@trellis/apis/trellis.auth";
+import { type apis } from "trellis-web-generated";
 import type {
   AuthDeploymentAuthorityGetResponse,
   DeploymentAuthority,
@@ -49,7 +49,7 @@ type MaterializedCapabilityGrant = AuthorityMaterialization["grants"][
   "capabilities"
 ][number];
 export type AuthorityCapabilityDefinition = {
-  allows?: AuthCapabilitiesListOutput["entries"][number]["allows"];
+  allows?: apis.auth.AuthCapabilitiesListOutput["entries"][number]["allows"];
   capability?: string;
   displayName: string;
   description: string;

@@ -2,11 +2,7 @@
   import { ulid } from "ulid";
   import { isErr, type BaseError, type Result } from "@qlever-llc/result";
   import type { DeploymentAuthority, DeploymentAuthorityMaterialization, DeploymentAuthorityPlan } from "@qlever-llc/trellis/auth";
-  import type {
-    AuthDeploymentAuthorityGetOutput,
-    AuthDeploymentAuthorityPlansListOutput,
-    AuthServiceInstancesListOutput,
-  } from "@trellis/apis/trellis.auth";
+  import { type apis } from "trellis-web-generated";
   import { resolve } from "$lib/console_paths";
   import { page } from "$app/state";
   import { onMount } from "svelte";
@@ -37,8 +33,8 @@
   type AuthorityDetail = { authority: DeploymentAuthority; materializedAuthority: MaterializedAuthority | null; portalRoute: unknown; grantOverrides: unknown[]; capabilityDefinitions?: AuthorityCapabilityDefinition[] };
   type ReconcileResponse = { authority: DeploymentAuthority; materializedAuthority: MaterializedAuthority };
   type CapabilitiesListResponse = { entries?: AuthorityCapabilityDefinition[] };
-  type ServiceInstance = AuthServiceInstancesListOutput["entries"][number];
-  type AuthorityPlan = AuthDeploymentAuthorityPlansListOutput["entries"][number];
+  type ServiceInstance = apis.auth.AuthServiceInstancesListOutput["entries"][number];
+  type AuthorityPlan = apis.auth.AuthDeploymentAuthorityPlansListOutput["entries"][number];
   type ListResponse<T> = { entries?: T[] };
   type RpcTakeable<T> = { take(): Promise<T | Result<never, BaseError>> };
   type AuthorityRequest = {

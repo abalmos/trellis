@@ -1,21 +1,18 @@
 import { AsyncResult, BaseError, isErr } from "@qlever-llc/result";
-import type {
-  JobsMetricsInput,
-  JobsMetricsOutput,
-} from "@trellis/apis/trellis.jobs";
+import { type apis } from "trellis-web-generated";
 
-export type JobsMetrics = JobsMetricsOutput;
+export type JobsMetrics = apis.jobs.JobsMetricsOutput;
 
 export type JobsMetricsPayload = {
   available: boolean;
   message?: string;
-  metrics?: JobsMetricsOutput;
+  metrics?: apis.jobs.JobsMetricsOutput;
 };
 
 type JobsMetricsRpc = {
   metrics(
-    input: JobsMetricsInput,
-  ): AsyncResult<JobsMetricsOutput, BaseError>;
+    input: apis.jobs.JobsMetricsInput,
+  ): AsyncResult<apis.jobs.JobsMetricsOutput, BaseError>;
 };
 
 async function takeOrThrow<T>(result: AsyncResult<T, BaseError>): Promise<T> {
@@ -59,7 +56,7 @@ function normalizedMetricsUnavailable(error: unknown): string | null {
 /** Loads jobs operational metrics through the typed Jobs.Metrics RPC boundary. */
 export async function loadJobsMetrics(
   rpc: Pick<JobsMetricsRpc, "metrics">,
-  input: JobsMetricsInput,
+  input: apis.jobs.JobsMetricsInput,
 ): Promise<JobsMetricsPayload> {
   try {
     const value = await takeOrThrow(rpc.metrics(input));

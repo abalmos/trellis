@@ -1,4 +1,11 @@
 format = 1
+name = "runtime-trellis"
+
+[generate.rust]
+output = "crates/runtime-trellis"
+
+[generate.typescript]
+output = "packages/runtime-trellis"
 
 [apis."trellis.state@v1"]
 version = "^1.0"

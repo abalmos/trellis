@@ -10,9 +10,9 @@ use futures_util::future::BoxFuture;
 use futures_util::stream;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use tokio::io::{AsyncRead, AsyncWrite};
-use trellis_participant_demo_service::jobs::RefreshSiteSummaryQueueClient;
-use trellis_participant_demo_service::owned::Publisher;
-use trellis_participant_demo_service::{
+use service_trellis::participants::demo_service::jobs::RefreshSiteSummaryQueueClient;
+use service_trellis::participants::demo_service::owned::Publisher;
+use service_trellis::participants::demo_service::{
     ConnectedService, ServiceConnectOptions, ServiceHandlerContext,
 };
 use trellis_rs::client::MemoryAuthorizationContextStore;
@@ -24,8 +24,8 @@ use trellis_rs::service::{
     ServiceOperationProvider, StoreHandle, StoreObjectInfo, StoreResourceClient,
     TransferUploadGrantArgs, UploadTransferGrant, UploadTransferSession,
 };
-use trellis_sdk_demo_service::operations as sdk_operations;
-use trellis_sdk_demo_service::types::{
+use service_trellis::apis::demo_service::operations as sdk_operations;
+use service_trellis::apis::demo_service::types::{
     AssignmentsListRequest, AssignmentsListResponse, AssignmentsListResponseEntriesItem,
     AssignmentsListResponseEntriesItemPriority, AuditRecordedEvent, EvidenceDeleteRequest,
     EvidenceDeleteResponse, EvidenceDownloadRequest, EvidenceDownloadResponse,
@@ -377,8 +377,8 @@ async fn main() -> anyhow::Result<()> {
     if args.contract {
         println!(
             "{} {}",
-            trellis_participant_demo_service::participant::PARTICIPANT_ID,
-            trellis_participant_demo_service::participant::PARTICIPANT_DIGEST
+            service_trellis::participants::demo_service::participant::PARTICIPANT_ID,
+            service_trellis::participants::demo_service::participant::PARTICIPANT_DIGEST
         );
         return Ok(());
     }
@@ -453,7 +453,7 @@ async fn run_authenticated_service(
         Arc::new(MemoryAuthorizationContextStore::default()),
     )
     .with_timeout_ms(REQUEST_TIMEOUT_MS);
-    let mut service = trellis_participant_demo_service::connect(options).await?;
+    let mut service = service_trellis::participants::demo_service::connect(options).await?;
     let site_summaries = SiteSummaryStore(service.kv().site_summaries().await?);
     site_summaries.seed_missing_sample_sites().await?;
     let store = service.store().uploads().await?;
@@ -1323,7 +1323,7 @@ async fn run_sites_refresh(
     let job = context
         .refresh_jobs
         .submit(
-            trellis_participant_demo_service::jobs::SiteRefreshJobPayload {
+            service_trellis::participants::demo_service::jobs::SiteRefreshJobPayload {
                 site_id: input.site_id,
             },
         )
@@ -2227,7 +2227,7 @@ fn evidence_to_response(evidence: &Evidence) -> EvidenceListResponseEntriesItem 
 fn sites_refreshed_event_from_output(output: &SitesRefreshOutput) -> SitesRefreshedEvent {
     SitesRefreshedEvent {
         refresh_id: output.refresh_id.clone(),
-        site: trellis_sdk_demo_service::types::SitesRefreshedEventSite {
+        site: service_trellis::apis::demo_service::types::SitesRefreshedEventSite {
             site_id: output.site.site_id.clone(),
             site_name: output.site.site_name.clone(),
             open_inspections: output.site.open_inspections,

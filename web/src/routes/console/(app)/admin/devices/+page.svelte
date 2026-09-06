@@ -2,14 +2,7 @@
   import { ulid } from "ulid";
   import { isErr, type BaseError, type Result } from "@qlever-llc/result";
   import type { DeploymentAuthority, DeploymentAuthorityMaterialization } from "@qlever-llc/trellis/auth";
-  import type {
-    AuthDeploymentAuthorityGetOutput,
-    AuthDeploymentAuthorityListOutput,
-    AuthDeploymentsListOutput,
-    AuthDevicesListOutput,
-    AuthDeviceUserAuthoritiesListOutput,
-    AuthDeviceUserAuthoritiesReviewsListOutput,
-  } from "@trellis/apis/trellis.auth";
+  import { type apis } from "trellis-web-generated";
   import { resolve } from "$lib/console_paths";
   import { onMount } from "svelte";
   import BulkActionBar from "$lib/components/BulkActionBar.svelte";
@@ -35,12 +28,12 @@
   import { bulkExpectedCount, bulkTargetDetails, runBulk, toggleAll, toggleId } from "$lib/bulk.ts";
   import { getTrellis } from "$lib/trellis";
 
-  type DeviceDeployment = AuthDeploymentsListOutput["entries"][number];
-  type DeviceInstance = AuthDevicesListOutput["entries"][number];
-  type Activation = AuthDeviceUserAuthoritiesListOutput["entries"][number];
-  type Review = AuthDeviceUserAuthoritiesReviewsListOutput["entries"][number];
-  type DeploymentAuthorityView = AuthDeploymentAuthorityListOutput["entries"][number];
-  type AuthorityDetail = { authority: AuthDeploymentAuthorityGetOutput["authority"]; capabilityDefinitions?: AuthorityCapabilityDefinition[] };
+  type DeviceDeployment = apis.auth.AuthDeploymentsListOutput["entries"][number];
+  type DeviceInstance = apis.auth.AuthDevicesListOutput["entries"][number];
+  type Activation = apis.auth.AuthDeviceUserAuthoritiesListOutput["entries"][number];
+  type Review = apis.auth.AuthDeviceUserAuthoritiesReviewsListOutput["entries"][number];
+  type DeploymentAuthorityView = apis.auth.AuthDeploymentAuthorityListOutput["entries"][number];
+  type AuthorityDetail = { authority: apis.auth.AuthDeploymentAuthorityGetOutput["authority"]; capabilityDefinitions?: AuthorityCapabilityDefinition[] };
   type RpcTakeable<T> = { take(): Promise<T | Result<never, BaseError>> };
   type AuthorityRequest = {
     (method: "Auth.DeploymentAuthority.List", input: { kind: "device"; limit: number; offset: number }): RpcTakeable<{ entries?: DeploymentAuthority[] }>;

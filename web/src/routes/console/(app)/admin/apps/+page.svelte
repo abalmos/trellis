@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { AuthIdentityAuthorityListOutput } from "@trellis/apis/trellis.auth";
+  import { type apis } from "trellis-web-generated";
   import { resolve } from "$lib/console_paths";
   import { onMount } from "svelte";
   import ActionMenu from "$lib/components/ActionMenu.svelte";
@@ -18,7 +18,7 @@
 
   let loading = $state(true);
   let error = $state<string | null>(null);
-  let identityGrants = $state<AuthIdentityAuthorityListOutput["entries"]>([]);
+  let identityGrants = $state<apis.auth.AuthIdentityAuthorityListOutput["entries"]>([]);
 
   async function load() {
     loading = true;

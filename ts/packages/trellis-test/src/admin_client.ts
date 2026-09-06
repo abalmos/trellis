@@ -188,29 +188,29 @@ export class TrellisTestAdminAutomation {
   }
 
   async provisionDevice(
-    input: import("../.trellis/ts/apis/auth/mod.ts").AuthDevicesProvisionInput,
+    input: import("../trellis/index.js").apis.auth.AuthDevicesProvisionInput,
   ): Promise<
-    import("../.trellis/ts/apis/auth/mod.ts").AuthDevicesProvisionOutput
+    import("../trellis/index.js").apis.auth.AuthDevicesProvisionOutput
   > {
     return await this.#rpc("authDevicesProvision", input);
   }
 
   async stateAdminGet(
-    input: import("../.trellis/ts/apis/state/mod.ts").StateAdminGetInput,
-  ): Promise<import("../.trellis/ts/apis/state/mod.ts").StateAdminGetOutput> {
+    input: import("../trellis/index.js").apis.state.StateAdminGetInput,
+  ): Promise<import("../trellis/index.js").apis.state.StateAdminGetOutput> {
     return await this.#rpc("stateAdminGet", input);
   }
 
   async stateAdminList(
-    input: import("../.trellis/ts/apis/state/mod.ts").StateAdminListInput,
-  ): Promise<import("../.trellis/ts/apis/state/mod.ts").StateAdminListOutput> {
+    input: import("../trellis/index.js").apis.state.StateAdminListInput,
+  ): Promise<import("../trellis/index.js").apis.state.StateAdminListOutput> {
     return await this.#rpc("stateAdminList", input);
   }
 
   async stateAdminDelete(
-    input: import("../.trellis/ts/apis/state/mod.ts").StateAdminDeleteInput,
+    input: import("../trellis/index.js").apis.state.StateAdminDeleteInput,
   ): Promise<
-    import("../.trellis/ts/apis/state/mod.ts").StateAdminDeleteOutput
+    import("../trellis/index.js").apis.state.StateAdminDeleteOutput
   > {
     return await this.#rpc("stateAdminDelete", input);
   }

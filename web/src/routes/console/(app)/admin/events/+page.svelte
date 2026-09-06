@@ -11,13 +11,7 @@
   import StatusBadge from "$lib/components/StatusBadge.svelte";
   import { compactDuration, errorMessage, formatDate, jsonBlock } from "$lib/format";
   import { getTrellis } from "$lib/trellis";
-  import type {
-    EventLogConsumersQueryInput,
-    EventLogInspectInput,
-    EventLogMetricsInput,
-    EventLogMetricsOutput,
-    EventLogQueryInput,
-  } from "@trellis/apis/trellis.eventlog";
+  import { type apis } from "trellis-web-generated";
 
   type WindowValue = "15m" | "1h" | "6h" | "24h" | "7d";
   type EventResolution = "resolved" | "unresolved" | "malformed";
@@ -120,7 +114,7 @@
   let feedMessage = $state<string | null>(null);
   let rows = $state.raw<EventLogRow[]>([]);
   let consumers = $state.raw<ConsumerRow[]>([]);
-  let metrics = $state.raw<EventLogMetricsOutput | null>(null);
+  let metrics = $state.raw<apis.eventlog.EventLogMetricsOutput | null>(null);
   let selectedEvent = $state.raw<EventInspect | null>(null);
   let selectedConsumer = $state.raw<{ row: ConsumerRow; detail: Record<string, unknown> | null } | null>(null);
   let detailLoading = $state(false);
@@ -346,8 +340,8 @@
     return values.map((value, index) => `${values.length === 1 ? 130 : index * 260 / (values.length - 1)},${52 - value / maximum * 46}`).join(" ");
   }
 
-  function buildEventQuery(): EventLogQueryInput {
-    const input: EventLogQueryInput = {
+  function buildEventQuery(): apis.eventlog.EventLogQueryInput {
+    const input: apis.eventlog.EventLogQueryInput = {
       includeEventTypes: selectedEventType ? [selectedEventType] : undefined,
       limit: pageLimit,
       offset,
@@ -363,7 +357,7 @@
     return input;
   }
 
-  function buildConsumerQuery(): EventLogConsumersQueryInput {
+  function buildConsumerQuery(): apis.eventlog.EventLogConsumersQueryInput {
     return { limit: 100, offset: 0 };
   }
 
@@ -386,7 +380,7 @@
     error = null;
     unavailableMessage = null;
     try {
-      const metricsInput: EventLogMetricsInput = { window: windowValue };
+      const metricsInput: apis.eventlog.EventLogMetricsInput = { window: windowValue };
       const [eventData, consumerData, metricData] = await Promise.all([
         trellis.eventLogQuery(buildEventQuery(), { timeout: rpcTimeout }).orThrow(),
         trellis.eventLogConsumersQuery(buildConsumerQuery(), { timeout: rpcTimeout }).orThrow(),
@@ -480,7 +474,7 @@
     detailError = null;
     selectedConsumer = null;
     try {
-      const input: EventLogInspectInput = row.eventId ? { eventId: row.eventId } : { streamSequence: row.streamSequence };
+      const input: apis.eventlog.EventLogInspectInput = row.eventId ? { eventId: row.eventId } : { streamSequence: row.streamSequence };
       const detail = toInspect(await trellis.eventLogInspect(input, { timeout: rpcTimeout }).orThrow());
       if (sequence !== detailSequence) return;
       selectedEvent = detail ?? { event: row, headers: {}, related: [] };

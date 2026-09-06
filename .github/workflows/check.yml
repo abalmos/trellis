@@ -63,7 +63,7 @@ jobs:
         id: current
         shell: bash
         run: |
-          if git diff --quiet; then
+          if test -z "$(git status --porcelain)"; then
             echo "current=true" >> "$GITHUB_OUTPUT"
           else
             echo "current=false" >> "$GITHUB_OUTPUT"
@@ -74,7 +74,18 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: check-generated
-          path: "**/.trellis/**"
+          path: |
+            rust/crates/runtime/trellis
+            web/trellis
+            ts/packages/trellis-test/trellis
+            integration/fixtures/runtime/crates/runtime-trellis
+            integration/fixtures/runtime/packages/runtime-trellis
+            demos/rust/service/trellis
+            demos/rust/device/trellis
+            demos/ts/service/trellis
+            demos/ts/device/trellis
+            demos/app/trellis
+            docs/examples/orders/trellis
           include-hidden-files: true
           retention-days: 1
 
@@ -319,34 +330,26 @@ jobs:
       - name: Build repository CLI
         run: cargo build --manifest-path rust/Cargo.toml -p trellis-cli
 
-      - name: Check TypeScript service demo
-        working-directory: demos/ts/service
-        run: |
-          deno task generate
-          deno task check
+      - name: Expose repository CLI
+        run: echo "$GITHUB_WORKSPACE/rust/target/debug" >> "$GITHUB_PATH"
 
-      - name: Check TypeScript device demo
-        working-directory: demos/ts/device
+      - name: Check TypeScript demos with packaged dependencies
         run: |
-          deno task update
-          deno task generate
-          deno task check
-
-      - name: Check Field Ops app demo
-        working-directory: demos/app
-        run: |
-          deno task update
-          deno task generate
-          deno task check
-          deno task build
+          deno task -c ts/deno.json packages:build:npm:installed
+          deno run -A -c ts/deno.json ts/tools/package_build/demo_consumers.ts
 
       - name: Check Rust service demo
         working-directory: demos/rust/service
-        run: make generate check
+        run: |
+          trellis generate
+          cargo check --config "patch.crates-io.trellis-rs.path=\"$GITHUB_WORKSPACE/rust/crates/trellis\""
 
       - name: Check Rust device demo
         working-directory: demos/rust/device
-        run: make update generate check
+        run: |
+          trellis update
+          trellis generate
+          cargo check --config "patch.crates-io.trellis-rs.path=\"$GITHUB_WORKSPACE/rust/crates/trellis\""
 
   live:
     name: Live integration
@@ -400,11 +403,10 @@ jobs:
       - name: Verify documented Orders service
         env:
           TRELLIS_TEST_SERVER_BIN: ${{ github.workspace }}/rust/target/debug/trellis-server
-          TRELLIS_TEST_CLI_BIN: ${{ github.workspace }}/rust/target/debug/trellis
         run: |
-          deno task -c docs/examples/orders/deno.json generate
-          deno task -c docs/examples/orders/deno.json check
-          deno task -c docs/examples/orders/deno.json test
+          deno task -c ts/packages/result/deno.json build:npm
+          deno task -c ts/packages/trellis/deno.json build:npm:installed
+          deno run -A -c ts/deno.json ts/tools/package_build/orders_example.ts
 
   ui-hosting:
     name: Built-in UI hosting

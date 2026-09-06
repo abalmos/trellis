@@ -1,7 +1,7 @@
 <script lang="ts">
   import { ulid } from "ulid";
   import { isErr } from "@qlever-llc/result";
-  import type { AuthSessionsMeOutput, AuthUserIdentitiesListOutput } from "@trellis/apis/trellis.auth";
+  import { type apis } from "trellis-web-generated";
   import { resolve } from "$lib/console_paths";
   import { page } from "$app/state";
   import { onMount } from "svelte";
@@ -23,7 +23,7 @@
   import Panel from "$lib/components/Panel.svelte";
   import { getAuthenticatedUser, getConnection, getTrellis } from "$lib/trellis";
 
-  type IdentityRecord = AuthUserIdentitiesListOutput["entries"][number];
+  type IdentityRecord = apis.auth.AuthUserIdentitiesListOutput["entries"][number];
   type RpcTakeable<T> = { take(): Promise<T> };
   type IdentityGrantsRequest = {
     (method: "Auth.IdentityGrants.List", input: { limit: number; offset: number }): RpcTakeable<{ entries?: UserGrantRecord[] }>;
@@ -35,7 +35,7 @@
 
   let loading = $state(true);
   let error = $state<string | null>(null);
-  let user = $state<AuthSessionsMeOutput["user"] | null>(null);
+  let user = $state<apis.auth.AuthSessionsMeOutput["user"] | null>(null);
   let participantKind = $state<ParticipantKind | null>(null);
   let grants = $state<UserGrantRecord[]>([]);
   let identities = $state<IdentityRecord[]>([]);

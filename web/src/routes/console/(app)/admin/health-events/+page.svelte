@@ -1,10 +1,6 @@
 <script lang="ts">
   import { isErr } from "@qlever-llc/result";
-  import type {
-    HealthInspectOutput,
-    HealthMetricsOutput,
-    HealthQueryOutput,
-  } from "@trellis/apis/trellis.health";
+  import { type apis } from "trellis-web-generated";
   import { onMount } from "svelte";
   import DataTable from "$lib/components/DataTable.svelte";
   import EmptyState from "$lib/components/EmptyState.svelte";
@@ -18,14 +14,14 @@
   import { errorMessage, formatDate } from "$lib/format";
   import { getTrellis } from "$lib/trellis";
 
-  type Participant = HealthQueryOutput["entries"][number];
+  type Participant = apis.health.HealthQueryOutput["entries"][number];
 
   const trellis = getTrellis();
   const RPC_TIMEOUT_MS = 10_000;
 
-  let snapshot = $state.raw<HealthQueryOutput | null>(null);
-  let inspection = $state.raw<HealthInspectOutput | null>(null);
-  let healthMetrics = $state.raw<HealthMetricsOutput | null>(null);
+  let snapshot = $state.raw<apis.health.HealthQueryOutput | null>(null);
+  let inspection = $state.raw<apis.health.HealthInspectOutput | null>(null);
+  let healthMetrics = $state.raw<apis.health.HealthMetricsOutput | null>(null);
   let loading = $state(true);
   let detailLoading = $state(false);
   let error = $state<string | null>(null);

@@ -1,10 +1,13 @@
 import { BaseError, isErr, ok, Result, StoreError } from "@qlever-llc/trellis";
 import type { TransferError } from "@qlever-llc/trellis";
 import type { RpcHandler } from "@qlever-llc/trellis/service";
-import type { participant } from "../../../.trellis/ts/participants/demo-service/mod.ts";
+import { type participants } from "../../../trellis/index.js";
 import type { FieldOpsDeps } from "../../deps.ts";
 
-type Handler = RpcHandler<typeof participant, "Evidence.Download">;
+type Handler = RpcHandler<
+  typeof participants.demoService.participant,
+  "Evidence.Download"
+>;
 
 const EVIDENCE_STORE = "uploads";
 const TRANSFER_GRANT_TTL_MS = 60_000;

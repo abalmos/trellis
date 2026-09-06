@@ -1,8 +1,11 @@
 import { ok } from "@qlever-llc/trellis";
 import type { RpcHandler } from "@qlever-llc/trellis/service";
-import type { participant } from "../../../.trellis/ts/participants/demo-service/mod.ts";
+import { type participants } from "../../../trellis/index.js";
 
-type Handler = RpcHandler<typeof participant, "Evidence.List">;
+type Handler = RpcHandler<
+  typeof participants.demoService.participant,
+  "Evidence.List"
+>;
 
 function evidenceIdForKey(
   key: string,

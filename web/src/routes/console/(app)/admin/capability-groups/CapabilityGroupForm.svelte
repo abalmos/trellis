@@ -1,11 +1,7 @@
 <script lang="ts">
   import { ulid } from "ulid";
   import { isErr } from "@qlever-llc/result";
-  import type {
-    AuthCapabilitiesListOutput,
-    AuthCapabilityGroupsListOutput,
-    AuthCapabilityGroupsPutInput,
-  } from "@trellis/apis/trellis.auth";
+  import { type apis } from "trellis-web-generated";
   import { goto } from "$app/navigation";
   import { resolve } from "$lib/console_paths";
   import { onMount } from "svelte";
@@ -18,7 +14,7 @@
   import { errorMessage, formatDate } from "$lib/format";
   import { getTrellis } from "$lib/trellis";
 
-  type CapabilityView = AuthCapabilitiesListOutput["entries"][number] & {
+  type CapabilityView = apis.auth.AuthCapabilitiesListOutput["entries"][number] & {
     key: string;
     source: "platform" | "contract" | "deployment";
     deploymentId: string | null;
@@ -27,7 +23,7 @@
     contractDisplayName: string | null;
     direction: "creates" | "given" | null;
   };
-  type CapabilityGroupView = AuthCapabilityGroupsListOutput["entries"][number];
+  type CapabilityGroupView = apis.auth.AuthCapabilityGroupsListOutput["entries"][number];
   type CapabilityDeploymentSection = {
     key: string;
     title: string;
@@ -255,7 +251,7 @@
         includedGroups: uniqueSorted(selectedIncludedGroups.filter((key) => key !== groupKey)),
         expectedVersion: selectedGroup?.version ?? null,
         idempotencyKey: ulid(),
-      } satisfies AuthCapabilityGroupsPutInput;
+      } satisfies apis.auth.AuthCapabilityGroupsPutInput;
       const response = await trellis.authCapabilityGroupsPut(input).take();
       if (isErr(response)) {
         error = errorMessage(response);

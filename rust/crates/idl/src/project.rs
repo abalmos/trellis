@@ -35,6 +35,12 @@ pub struct RegistryConfig {
 pub struct ProjectManifest {
     /// Manifest format version. Must be `1`.
     pub format: u32,
+    /// Local generated package name; unrelated to API or participant identity.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    /// Ordinary generated package destinations, selected by language markers.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub generate: Option<GenerateConfig>,
     /// Registry used when a package command does not name one.
     #[serde(rename = "default-registry", skip_serializing_if = "Option::is_none")]
     pub default_registry: Option<String>,
@@ -44,6 +50,29 @@ pub struct ProjectManifest {
     /// Dependencies keyed by stable API ID.
     #[serde(default)]
     pub apis: BTreeMap<String, ApiDependency>,
+}
+
+/// Output settings for automatically detected project languages.
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct GenerateConfig {
+    /// Override the `trellis/` destination of a single-language project.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub output: Option<String>,
+    /// Explicit Rust destination, required when both languages are detected.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rust: Option<GenerateOutput>,
+    /// Explicit TypeScript destination, required when both languages are detected.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub typescript: Option<GenerateOutput>,
+}
+
+/// A configured ordinary generated package destination.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct GenerateOutput {
+    /// Package directory, resolved relative to the source project.
+    pub output: String,
 }
 
 impl ProjectManifest {

@@ -1,4 +1,5 @@
 import { buildDntPackage } from "../../../tools/package_build/build_dnt_package.ts";
+import packageConfig from "../deno.json" with { type: "json" };
 
 const npmPackageJsonPath = new URL("../npm/package.json", import.meta.url);
 const npmDirUrl = new URL("../npm/", import.meta.url);
@@ -245,21 +246,9 @@ await buildDntPackage({
   compilerOptions: {
     stripInternal: true,
   },
-  entryPoints: [
-    "./ts/packages/trellis/index.ts",
-    "./ts/packages/trellis/auth.ts",
-    "./ts/packages/trellis/auth/browser.ts",
-    "./ts/packages/trellis/auth/file.ts",
-    "./ts/packages/trellis/browser.ts",
-    "./ts/packages/trellis/device.ts",
-    "./ts/packages/trellis/device/deno.ts",
-    "./ts/packages/trellis/errors/index.ts",
-    "./ts/packages/trellis/service/mod.ts",
-    "./ts/packages/trellis/service/drizzle.ts",
-    "./ts/packages/trellis/service/deno.ts",
-    "./ts/packages/trellis/service/node.ts",
-    "./ts/packages/trellis/telemetry.ts",
-  ],
+  entryPoints: Object.values(packageConfig.exports).map((path) =>
+    `./ts/packages/trellis/${path.slice(2)}`
+  ),
   description:
     "Client-side Trellis runtime, models, and participant helpers for TypeScript applications.",
   dependencies: {

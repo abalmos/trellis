@@ -13,8 +13,10 @@ close to out-of-tree development as possible while remaining in this repository.
 - `demos/rust`: independent Rust Field Ops service and field-device projects.
 
 Every participant is authored in `contract.trellis`. Run `trellis update` for
-registry dependencies and `trellis generate` in each project root. `.trellis/**`
-is installed and generated state and must not be edited.
+registry dependencies and `trellis generate` in each project root. Each project
+generates one ordinary package at its configured destination, normally
+`trellis/`, with `apis` and `participants` namespaces. Dependencies remain in
+the global API cache; regenerate generated packages rather than editing them.
 
 ## Browser App
 

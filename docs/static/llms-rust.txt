@@ -4,14 +4,28 @@ Use with [the consumer guide](llms-full.txt) from the same Trellis revision.
 Trellis does not prescribe an application's configuration parser, database,
 domain types, DI pattern, logging setup, or test framework.
 
-## Generated Crates
+## Generated Package
 
-Author native IDL and run `trellis generate`. Generated API SDKs live under
-`.trellis/rust/apis/`; participant facades live under
-`.trellis/rust/participants/`. They are ordinary Cargo crates with relative
-local dependencies, not build scripts that execute contract authorship. Depend
-on the participant crate to connect and on API vocabulary when needed for
-explicit types. Regenerate rather than editing generated files.
+Author native IDL and set `format = 1` and a local package `name` such as
+`orders-trellis` in `trellis.toml`. Root `Cargo.toml` selects Rust. A Rust-only
+project defaults to `trellis/`, optionally overridden by `[generate].output`;
+mixed-language projects require explicit Rust and TypeScript output tables.
+`trellis generate` is offline after dependencies are available in the global
+validated API cache.
+
+The output is one ordinary crate at version `0.0.0`, with
+`orders_trellis::apis::<api>` and `orders_trellis::participants::<participant>`
+modules, not independent SDK or participant crates. Add an ordinary Cargo path
+dependency, for example `orders-trellis = { path = "trellis" }`. The generated
+crate declares the published runtime dependency matching the CLI. It has no
+generator build script, repository-relative runtime paths, or runtime-path config
+in `trellis.toml`. Use ordinary Cargo overrides when developing against a local
+runtime. Generation does not modify the consumer's Cargo manifest.
+
+Commit generated output when clones should build with Cargo alone, without the
+Trellis CLI or API cache. Regenerate rather than editing it. Canonical tooling
+JSON lives inside the package under `artifacts/apis` and `artifacts/participants`;
+it is not a language import surface.
 
 An API SDK contains types and descriptors. The participant facade supplies the
 connection boundary and only the declared caller/provider surfaces. Its

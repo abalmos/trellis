@@ -1,9 +1,12 @@
 import { ok } from "@qlever-llc/trellis";
 import type { RpcHandler } from "@qlever-llc/trellis/service";
-import type { participant } from "../../../.trellis/ts/participants/demo-service/mod.ts";
+import { type participants } from "../../../trellis/index.js";
 import { listReports as listReportRecords } from "./reportStore.ts";
 
-type Handler = RpcHandler<typeof participant, "Reports.List">;
+type Handler = RpcHandler<
+  typeof participants.demoService.participant,
+  "Reports.List"
+>;
 
 /** Lists completed closeout reports generated during this demo service run. */
 export const listReports: Handler = ({ input }) => {

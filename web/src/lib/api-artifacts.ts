@@ -1,16 +1,10 @@
-export {
-  API as TRELLIS_CORE_API,
-  API_DIGEST as TRELLIS_CORE_DIGEST,
-} from "@trellis/apis/trellis.core";
-export {
-  API as TRELLIS_HEALTH_API,
-  API_DIGEST as TRELLIS_HEALTH_DIGEST,
-} from "@trellis/apis/trellis.health";
-export {
-  API as TRELLIS_JOBS_API,
-  API_DIGEST as TRELLIS_JOBS_DIGEST,
-} from "@trellis/apis/trellis.jobs";
-export {
-  API as TRELLIS_STATE_API,
-  API_DIGEST as TRELLIS_STATE_DIGEST,
-} from "@trellis/apis/trellis.state";
+import { apis } from "trellis-web-generated";
+
+export const TRELLIS_CORE_API = apis.core.API;
+export const TRELLIS_CORE_DIGEST = apis.core.API_DIGEST;
+export const TRELLIS_HEALTH_API = apis.health.API;
+export const TRELLIS_HEALTH_DIGEST = apis.health.API_DIGEST;
+export const TRELLIS_JOBS_API = apis.jobs.API;
+export const TRELLIS_JOBS_DIGEST = apis.jobs.API_DIGEST;
+export const TRELLIS_STATE_API = apis.state.API;
+export const TRELLIS_STATE_DIGEST = apis.state.API_DIGEST;

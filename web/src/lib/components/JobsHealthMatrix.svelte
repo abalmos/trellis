@@ -1,9 +1,9 @@
 <script lang="ts">
-  import type { JobsMetricsOutput } from "@trellis/apis/trellis.jobs";
+  import { type apis } from "trellis-web-generated";
   import { compactDuration } from "../format";
 
-  type SummaryGroup = JobsMetricsOutput["summary"][number];
-  type Bucket = JobsMetricsOutput["buckets"][number];
+  type SummaryGroup = apis.jobs.JobsMetricsOutput["summary"][number];
+  type Bucket = apis.jobs.JobsMetricsOutput["buckets"][number];
 
   type Props = {
     summary: SummaryGroup[];

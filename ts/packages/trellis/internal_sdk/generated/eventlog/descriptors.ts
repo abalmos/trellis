@@ -31,217 +31,329 @@ const ACTION_SOURCE = {
 
 const API_ID = "trellis.eventlog@v1" as const;
 
-export const EventLogConsumersInspect = rpcAction(
+const __EventLogConsumersInspectDescriptor = {
+  subject: "rpc.v1.EventLog.Consumers.Inspect",
+  permission: Object.freeze({
+    apiId: "trellis.eventlog@v1",
+    apiVersion: "v1",
+    surfaceKind: "rpc",
+    surfaceName: "EventLog.Consumers.Inspect",
+    action: "call",
+  }) as {
+    readonly apiId: "trellis.eventlog@v1";
+    readonly apiVersion: "v1";
+    readonly surfaceKind: "rpc";
+    readonly surfaceName: "EventLog.Consumers.Inspect";
+    readonly action: "call";
+  },
+  input: schema<Types.EventLogConsumersInspectInput>(
+    EventLogConsumersInspectRequestSchema,
+  ) as ReturnType<typeof schema<Types.EventLogConsumersInspectInput>>,
+  output: schema<Types.EventLogConsumersInspectOutput>(
+    EventLogConsumersInspectResponseSchema,
+  ) as ReturnType<typeof schema<Types.EventLogConsumersInspectOutput>>,
+  callerCapabilities: ["trellis.eventlog::read"] as const,
+  errors: ["NotFoundError", "UnexpectedError", "ValidationError"] as const,
+  declaredErrorTypes: [
+    "NotFoundError",
+    "UnexpectedError",
+    "ValidationError",
+  ] as const,
+  runtimeErrors: [
+    {
+      type: "NotFoundError",
+      schema: schema<Types.NotFoundErrorData>(
+        NotFoundErrorDataSchema,
+      ) as ReturnType<typeof schema<Types.NotFoundErrorData>>,
+      fromSerializable: Types.NotFoundError
+        .fromSerializable as typeof Types.NotFoundError.fromSerializable,
+    },
+    {
+      type: "UnexpectedError",
+      fromSerializable: Types.UnexpectedError
+        .fromSerializable as typeof Types.UnexpectedError.fromSerializable,
+    },
+    {
+      type: "ValidationError",
+      fromSerializable: Types.ValidationError
+        .fromSerializable as typeof Types.ValidationError.fromSerializable,
+    },
+  ] as const,
+} as const;
+export const EventLogConsumersInspect: ReturnType<
+  typeof rpcAction<
+    typeof API_ID,
+    "EventLog.Consumers.Inspect",
+    typeof __EventLogConsumersInspectDescriptor
+  >
+> = rpcAction(
   API_ID,
   "EventLog.Consumers.Inspect",
-  {
-    subject: "rpc.v1.EventLog.Consumers.Inspect",
-    permission: Object.freeze({
-      apiId: "trellis.eventlog@v1",
-      apiVersion: "v1",
-      surfaceKind: "rpc",
-      surfaceName: "EventLog.Consumers.Inspect",
-      action: "call",
-    }),
-    input: schema<Types.EventLogConsumersInspectInput>(
-      EventLogConsumersInspectRequestSchema,
-    ),
-    output: schema<Types.EventLogConsumersInspectOutput>(
-      EventLogConsumersInspectResponseSchema,
-    ),
-    callerCapabilities: ["trellis.eventlog::read"] as const,
-    errors: ["NotFoundError", "UnexpectedError", "ValidationError"] as const,
-    declaredErrorTypes: [
-      "NotFoundError",
-      "UnexpectedError",
-      "ValidationError",
-    ] as const,
-    runtimeErrors: [
-      {
-        type: "NotFoundError",
-        schema: schema<Types.NotFoundErrorData>(NotFoundErrorDataSchema),
-        fromSerializable: Types.NotFoundError.fromSerializable,
-      },
-      {
-        type: "UnexpectedError",
-        fromSerializable: Types.UnexpectedError.fromSerializable,
-      },
-      {
-        type: "ValidationError",
-        fromSerializable: Types.ValidationError.fromSerializable,
-      },
-    ] as const,
-  },
+  __EventLogConsumersInspectDescriptor,
   "EventLogConsumersInspect",
   ACTION_SOURCE,
 );
 
-export const EventLogConsumersQuery = rpcAction(
+const __EventLogConsumersQueryDescriptor = {
+  subject: "rpc.v1.EventLog.Consumers.Query",
+  permission: Object.freeze({
+    apiId: "trellis.eventlog@v1",
+    apiVersion: "v1",
+    surfaceKind: "rpc",
+    surfaceName: "EventLog.Consumers.Query",
+    action: "call",
+  }) as {
+    readonly apiId: "trellis.eventlog@v1";
+    readonly apiVersion: "v1";
+    readonly surfaceKind: "rpc";
+    readonly surfaceName: "EventLog.Consumers.Query";
+    readonly action: "call";
+  },
+  input: schema<Types.EventLogConsumersQueryInput>(
+    EventLogConsumersQueryRequestSchema,
+  ) as ReturnType<typeof schema<Types.EventLogConsumersQueryInput>>,
+  output: schema<Types.EventLogConsumersQueryOutput>(
+    EventLogConsumersQueryResponseSchema,
+  ) as ReturnType<typeof schema<Types.EventLogConsumersQueryOutput>>,
+  callerCapabilities: ["trellis.eventlog::read"] as const,
+  errors: ["UnexpectedError", "ValidationError"] as const,
+  declaredErrorTypes: ["UnexpectedError", "ValidationError"] as const,
+  runtimeErrors: [
+    {
+      type: "UnexpectedError",
+      fromSerializable: Types.UnexpectedError
+        .fromSerializable as typeof Types.UnexpectedError.fromSerializable,
+    },
+    {
+      type: "ValidationError",
+      fromSerializable: Types.ValidationError
+        .fromSerializable as typeof Types.ValidationError.fromSerializable,
+    },
+  ] as const,
+} as const;
+export const EventLogConsumersQuery: ReturnType<
+  typeof rpcAction<
+    typeof API_ID,
+    "EventLog.Consumers.Query",
+    typeof __EventLogConsumersQueryDescriptor
+  >
+> = rpcAction(
   API_ID,
   "EventLog.Consumers.Query",
-  {
-    subject: "rpc.v1.EventLog.Consumers.Query",
-    permission: Object.freeze({
-      apiId: "trellis.eventlog@v1",
-      apiVersion: "v1",
-      surfaceKind: "rpc",
-      surfaceName: "EventLog.Consumers.Query",
-      action: "call",
-    }),
-    input: schema<Types.EventLogConsumersQueryInput>(
-      EventLogConsumersQueryRequestSchema,
-    ),
-    output: schema<Types.EventLogConsumersQueryOutput>(
-      EventLogConsumersQueryResponseSchema,
-    ),
-    callerCapabilities: ["trellis.eventlog::read"] as const,
-    errors: ["UnexpectedError", "ValidationError"] as const,
-    declaredErrorTypes: ["UnexpectedError", "ValidationError"] as const,
-    runtimeErrors: [
-      {
-        type: "UnexpectedError",
-        fromSerializable: Types.UnexpectedError.fromSerializable,
-      },
-      {
-        type: "ValidationError",
-        fromSerializable: Types.ValidationError.fromSerializable,
-      },
-    ] as const,
-  },
+  __EventLogConsumersQueryDescriptor,
   "EventLogConsumersQuery",
   ACTION_SOURCE,
 );
 
-export const EventLogInspect = rpcAction(
+const __EventLogInspectDescriptor = {
+  subject: "rpc.v1.EventLog.Inspect",
+  permission: Object.freeze({
+    apiId: "trellis.eventlog@v1",
+    apiVersion: "v1",
+    surfaceKind: "rpc",
+    surfaceName: "EventLog.Inspect",
+    action: "call",
+  }) as {
+    readonly apiId: "trellis.eventlog@v1";
+    readonly apiVersion: "v1";
+    readonly surfaceKind: "rpc";
+    readonly surfaceName: "EventLog.Inspect";
+    readonly action: "call";
+  },
+  input: schema<Types.EventLogInspectInput>(
+    EventLogInspectRequestSchema,
+  ) as ReturnType<typeof schema<Types.EventLogInspectInput>>,
+  output: schema<Types.EventLogInspectOutput>(
+    EventLogInspectResponseSchema,
+  ) as ReturnType<typeof schema<Types.EventLogInspectOutput>>,
+  callerCapabilities: ["trellis.eventlog::read"] as const,
+  errors: ["NotFoundError", "UnexpectedError", "ValidationError"] as const,
+  declaredErrorTypes: [
+    "NotFoundError",
+    "UnexpectedError",
+    "ValidationError",
+  ] as const,
+  runtimeErrors: [
+    {
+      type: "NotFoundError",
+      schema: schema<Types.NotFoundErrorData>(
+        NotFoundErrorDataSchema,
+      ) as ReturnType<typeof schema<Types.NotFoundErrorData>>,
+      fromSerializable: Types.NotFoundError
+        .fromSerializable as typeof Types.NotFoundError.fromSerializable,
+    },
+    {
+      type: "UnexpectedError",
+      fromSerializable: Types.UnexpectedError
+        .fromSerializable as typeof Types.UnexpectedError.fromSerializable,
+    },
+    {
+      type: "ValidationError",
+      fromSerializable: Types.ValidationError
+        .fromSerializable as typeof Types.ValidationError.fromSerializable,
+    },
+  ] as const,
+} as const;
+export const EventLogInspect: ReturnType<
+  typeof rpcAction<
+    typeof API_ID,
+    "EventLog.Inspect",
+    typeof __EventLogInspectDescriptor
+  >
+> = rpcAction(
   API_ID,
   "EventLog.Inspect",
-  {
-    subject: "rpc.v1.EventLog.Inspect",
-    permission: Object.freeze({
-      apiId: "trellis.eventlog@v1",
-      apiVersion: "v1",
-      surfaceKind: "rpc",
-      surfaceName: "EventLog.Inspect",
-      action: "call",
-    }),
-    input: schema<Types.EventLogInspectInput>(EventLogInspectRequestSchema),
-    output: schema<Types.EventLogInspectOutput>(EventLogInspectResponseSchema),
-    callerCapabilities: ["trellis.eventlog::read"] as const,
-    errors: ["NotFoundError", "UnexpectedError", "ValidationError"] as const,
-    declaredErrorTypes: [
-      "NotFoundError",
-      "UnexpectedError",
-      "ValidationError",
-    ] as const,
-    runtimeErrors: [
-      {
-        type: "NotFoundError",
-        schema: schema<Types.NotFoundErrorData>(NotFoundErrorDataSchema),
-        fromSerializable: Types.NotFoundError.fromSerializable,
-      },
-      {
-        type: "UnexpectedError",
-        fromSerializable: Types.UnexpectedError.fromSerializable,
-      },
-      {
-        type: "ValidationError",
-        fromSerializable: Types.ValidationError.fromSerializable,
-      },
-    ] as const,
-  },
+  __EventLogInspectDescriptor,
   "EventLogInspect",
   ACTION_SOURCE,
 );
 
-export const EventLogMetrics = rpcAction(
+const __EventLogMetricsDescriptor = {
+  subject: "rpc.v1.EventLog.Metrics",
+  permission: Object.freeze({
+    apiId: "trellis.eventlog@v1",
+    apiVersion: "v1",
+    surfaceKind: "rpc",
+    surfaceName: "EventLog.Metrics",
+    action: "call",
+  }) as {
+    readonly apiId: "trellis.eventlog@v1";
+    readonly apiVersion: "v1";
+    readonly surfaceKind: "rpc";
+    readonly surfaceName: "EventLog.Metrics";
+    readonly action: "call";
+  },
+  input: schema<Types.EventLogMetricsInput>(
+    EventLogMetricsRequestSchema,
+  ) as ReturnType<typeof schema<Types.EventLogMetricsInput>>,
+  output: schema<Types.EventLogMetricsOutput>(
+    EventLogMetricsResponseSchema,
+  ) as ReturnType<typeof schema<Types.EventLogMetricsOutput>>,
+  callerCapabilities: ["trellis.eventlog::read"] as const,
+  errors: ["UnexpectedError", "ValidationError"] as const,
+  declaredErrorTypes: ["UnexpectedError", "ValidationError"] as const,
+  runtimeErrors: [
+    {
+      type: "UnexpectedError",
+      fromSerializable: Types.UnexpectedError
+        .fromSerializable as typeof Types.UnexpectedError.fromSerializable,
+    },
+    {
+      type: "ValidationError",
+      fromSerializable: Types.ValidationError
+        .fromSerializable as typeof Types.ValidationError.fromSerializable,
+    },
+  ] as const,
+} as const;
+export const EventLogMetrics: ReturnType<
+  typeof rpcAction<
+    typeof API_ID,
+    "EventLog.Metrics",
+    typeof __EventLogMetricsDescriptor
+  >
+> = rpcAction(
   API_ID,
   "EventLog.Metrics",
-  {
-    subject: "rpc.v1.EventLog.Metrics",
-    permission: Object.freeze({
-      apiId: "trellis.eventlog@v1",
-      apiVersion: "v1",
-      surfaceKind: "rpc",
-      surfaceName: "EventLog.Metrics",
-      action: "call",
-    }),
-    input: schema<Types.EventLogMetricsInput>(EventLogMetricsRequestSchema),
-    output: schema<Types.EventLogMetricsOutput>(EventLogMetricsResponseSchema),
-    callerCapabilities: ["trellis.eventlog::read"] as const,
-    errors: ["UnexpectedError", "ValidationError"] as const,
-    declaredErrorTypes: ["UnexpectedError", "ValidationError"] as const,
-    runtimeErrors: [
-      {
-        type: "UnexpectedError",
-        fromSerializable: Types.UnexpectedError.fromSerializable,
-      },
-      {
-        type: "ValidationError",
-        fromSerializable: Types.ValidationError.fromSerializable,
-      },
-    ] as const,
-  },
+  __EventLogMetricsDescriptor,
   "EventLogMetrics",
   ACTION_SOURCE,
 );
 
-export const EventLogQuery = rpcAction(
+const __EventLogQueryDescriptor = {
+  subject: "rpc.v1.EventLog.Query",
+  permission: Object.freeze({
+    apiId: "trellis.eventlog@v1",
+    apiVersion: "v1",
+    surfaceKind: "rpc",
+    surfaceName: "EventLog.Query",
+    action: "call",
+  }) as {
+    readonly apiId: "trellis.eventlog@v1";
+    readonly apiVersion: "v1";
+    readonly surfaceKind: "rpc";
+    readonly surfaceName: "EventLog.Query";
+    readonly action: "call";
+  },
+  input: schema<Types.EventLogQueryInput>(
+    EventLogQueryRequestSchema,
+  ) as ReturnType<typeof schema<Types.EventLogQueryInput>>,
+  output: schema<Types.EventLogQueryOutput>(
+    EventLogQueryResponseSchema,
+  ) as ReturnType<typeof schema<Types.EventLogQueryOutput>>,
+  callerCapabilities: ["trellis.eventlog::read"] as const,
+  errors: ["UnexpectedError", "ValidationError"] as const,
+  declaredErrorTypes: ["UnexpectedError", "ValidationError"] as const,
+  runtimeErrors: [
+    {
+      type: "UnexpectedError",
+      fromSerializable: Types.UnexpectedError
+        .fromSerializable as typeof Types.UnexpectedError.fromSerializable,
+    },
+    {
+      type: "ValidationError",
+      fromSerializable: Types.ValidationError
+        .fromSerializable as typeof Types.ValidationError.fromSerializable,
+    },
+  ] as const,
+} as const;
+export const EventLogQuery: ReturnType<
+  typeof rpcAction<
+    typeof API_ID,
+    "EventLog.Query",
+    typeof __EventLogQueryDescriptor
+  >
+> = rpcAction(
   API_ID,
   "EventLog.Query",
-  {
-    subject: "rpc.v1.EventLog.Query",
-    permission: Object.freeze({
-      apiId: "trellis.eventlog@v1",
-      apiVersion: "v1",
-      surfaceKind: "rpc",
-      surfaceName: "EventLog.Query",
-      action: "call",
-    }),
-    input: schema<Types.EventLogQueryInput>(EventLogQueryRequestSchema),
-    output: schema<Types.EventLogQueryOutput>(EventLogQueryResponseSchema),
-    callerCapabilities: ["trellis.eventlog::read"] as const,
-    errors: ["UnexpectedError", "ValidationError"] as const,
-    declaredErrorTypes: ["UnexpectedError", "ValidationError"] as const,
-    runtimeErrors: [
-      {
-        type: "UnexpectedError",
-        fromSerializable: Types.UnexpectedError.fromSerializable,
-      },
-      {
-        type: "ValidationError",
-        fromSerializable: Types.ValidationError.fromSerializable,
-      },
-    ] as const,
-  },
+  __EventLogQueryDescriptor,
   "EventLogQuery",
   ACTION_SOURCE,
 );
 
-export const EventLogWatch = feedAction(
+const __EventLogWatchDescriptor = {
+  subject: "feed.v1.EventLog.Watch",
+  permission: Object.freeze({
+    apiId: "trellis.eventlog@v1",
+    apiVersion: "v1",
+    surfaceKind: "feed",
+    surfaceName: "EventLog.Watch",
+    action: "subscribe",
+  }) as {
+    readonly apiId: "trellis.eventlog@v1";
+    readonly apiVersion: "v1";
+    readonly surfaceKind: "feed";
+    readonly surfaceName: "EventLog.Watch";
+    readonly action: "subscribe";
+  },
+  input: schema<Types.EventLogWatchInput>(
+    EventLogWatchRequestSchema,
+  ) as ReturnType<typeof schema<Types.EventLogWatchInput>>,
+  event: schema<Types.EventLogWatchEvent>(
+    EventLogWatchFrameSchema,
+  ) as ReturnType<typeof schema<Types.EventLogWatchEvent>>,
+  subscribeCapabilities: ["trellis.eventlog::stream"] as const,
+} as const;
+export const EventLogWatch: ReturnType<
+  typeof feedAction<
+    typeof API_ID,
+    "EventLog.Watch",
+    typeof __EventLogWatchDescriptor
+  >
+> = feedAction(
   API_ID,
   "EventLog.Watch",
-  {
-    subject: "feed.v1.EventLog.Watch",
-    permission: Object.freeze({
-      apiId: "trellis.eventlog@v1",
-      apiVersion: "v1",
-      surfaceKind: "feed",
-      surfaceName: "EventLog.Watch",
-      action: "subscribe",
-    }),
-    input: schema<Types.EventLogWatchInput>(EventLogWatchRequestSchema),
-    event: schema<Types.EventLogWatchEvent>(EventLogWatchFrameSchema),
-    subscribeCapabilities: ["trellis.eventlog::stream"] as const,
-  },
+  __EventLogWatchDescriptor,
   "EventLogWatch",
   ACTION_SOURCE,
 );
 
 export const ACTIONS = {
-  "EventLog.Consumers.Inspect": EventLogConsumersInspect,
-  "EventLog.Consumers.Query": EventLogConsumersQuery,
-  "EventLog.Inspect": EventLogInspect,
-  "EventLog.Metrics": EventLogMetrics,
-  "EventLog.Query": EventLogQuery,
-  "EventLog.Watch": EventLogWatch,
+  "EventLog.Consumers.Inspect":
+    EventLogConsumersInspect as typeof EventLogConsumersInspect,
+  "EventLog.Consumers.Query":
+    EventLogConsumersQuery as typeof EventLogConsumersQuery,
+  "EventLog.Inspect": EventLogInspect as typeof EventLogInspect,
+  "EventLog.Metrics": EventLogMetrics as typeof EventLogMetrics,
+  "EventLog.Query": EventLogQuery as typeof EventLogQuery,
+  "EventLog.Watch": EventLogWatch as typeof EventLogWatch,
 } as const;

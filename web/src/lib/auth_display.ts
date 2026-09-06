@@ -1,7 +1,4 @@
-import type {
-  AuthConnectionsListOutput,
-  AuthSessionsListOutput,
-} from "@trellis/apis/trellis.auth";
+import { type apis } from "trellis-web-generated";
 
 export type ParticipantKind = "app" | "agent" | "device" | "service";
 
@@ -16,9 +13,10 @@ type UserPrincipal = {
   };
 };
 
-export type SessionRecord = AuthSessionsListOutput["entries"][number];
+export type SessionRecord = apis.auth.AuthSessionsListOutput["entries"][number];
 
-export type ConnectionRecord = AuthConnectionsListOutput["entries"][number];
+export type ConnectionRecord =
+  apis.auth.AuthConnectionsListOutput["entries"][number];
 
 export type UserGrantRecord = {
   identityGrantId: string;

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { AuthSessionsMeOutput } from "@trellis/apis/trellis.auth";
+  import { type apis } from "trellis-web-generated";
   import { afterNavigate } from "$app/navigation";
   import { base } from "$lib/console_paths";
   import { page } from "$app/state";
@@ -25,7 +25,7 @@
 
   type Props = {
     children: Snippet;
-    profile: AuthSessionsMeOutput["user"] | null;
+    profile: apis.auth.AuthSessionsMeOutput["user"] | null;
     profileLoaded: boolean;
     navSections: NavSection[];
     connectionStatus: ConnectionStatus["phase"];

@@ -65,10 +65,16 @@ Trellis IDL compiles declarative source into canonical protocol artifacts. Rust
 and TypeScript code generators consume those artifacts directly; neither
 language executes application source to discover APIs or participants.
 
-Canonical generated JSON lives at:
+Each selected language gets one ordinary generated package, with separate `apis`
+and `participants` module namespaces. Canonical JSON is tooling material inside
+that configured package at:
 
-- `.trellis/artifacts/apis/<api-id>.json`
-- `.trellis/artifacts/participants/<participant-id>.json`
+- `artifacts/apis/<api-id>.json`
+- `artifacts/participants/<participant-id>.json`
+
+Dependency APIs needed to resolve participants are included. Compilation and
+publication operate on canonical values in memory, not an intermediate artifact
+directory; `trellis publish` consumes the compiler's owned API values directly.
 
 Generated API modules expose API identity and canonical API evidence. Generated
 participant modules expose participant identity, canonical participant data,

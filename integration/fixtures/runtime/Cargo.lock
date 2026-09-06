@@ -1772,6 +1772,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "runtime-trellis"
+version = "0.0.0"
+dependencies = [
+ "futures-util",
+ "serde",
+ "serde_json",
+ "trellis-rs",
+]
+
+[[package]]
 name = "rusqlite"
 version = "0.37.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2503,27 +2513,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "trellis-participant-test-events"
-version = "0.0.0"
-dependencies = [
- "serde",
- "serde_json",
- "trellis-rs",
- "trellis-sdk-test-events",
-]
-
-[[package]]
-name = "trellis-participant-test-provider"
-version = "0.0.0"
-dependencies = [
- "futures-util",
- "serde",
- "serde_json",
- "trellis-rs",
- "trellis-sdk-test-runtime",
-]
-
-[[package]]
 name = "trellis-protocol"
 version = "0.12.0"
 dependencies = [
@@ -2576,32 +2565,9 @@ dependencies = [
 name = "trellis-runtime-acceptance"
 version = "0.0.0"
 dependencies = [
+ "runtime-trellis",
  "tokio",
  "tracing-subscriber",
- "trellis-participant-test-events",
- "trellis-participant-test-provider",
- "trellis-rs",
- "trellis-sdk-test-events",
- "trellis-sdk-test-runtime",
-]
-
-[[package]]
-name = "trellis-sdk-test-events"
-version = "1.0.0"
-dependencies = [
- "futures-util",
- "serde",
- "serde_json",
- "trellis-rs",
-]
-
-[[package]]
-name = "trellis-sdk-test-runtime"
-version = "1.0.0"
-dependencies = [
- "futures-util",
- "serde",
- "serde_json",
  "trellis-rs",
 ]
 

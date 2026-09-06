@@ -1,11 +1,6 @@
 <script lang="ts">
   import { isErr } from "@qlever-llc/result";
-  import type {
-    AuthDeploymentAuthorityListOutput,
-    AuthDeploymentAuthorityPlansListOutput,
-    AuthDeviceUserAuthoritiesReviewsListOutput,
-    AuthServiceInstancesListOutput,
-  } from "@trellis/apis/trellis.auth";
+  import { type apis } from "trellis-web-generated";
   import type { DeploymentAuthorityKind, DeploymentAuthorityPlan } from "@qlever-llc/trellis/auth";
   import { base, resolve } from "$lib/console_paths";
   import { onMount } from "svelte";
@@ -21,16 +16,14 @@
   import { errorMessage } from "$lib/format";
   import { loadJobsPageData } from "$lib/jobs_page.ts";
   import { getTrellis } from "$lib/trellis";
-  import type {
-    JobsQueryOutput,
-  } from "@trellis/apis/trellis.jobs";
+  
 
-  type ServiceInstance = AuthServiceInstancesListOutput["entries"][number];
-  type JobGroup = JobsQueryOutput["groups"][number];
-  type JobStats = JobsQueryOutput["stats"];
-  type DeploymentAuthority = AuthDeploymentAuthorityListOutput["entries"][number];
-  type AuthorityPlan = AuthDeploymentAuthorityPlansListOutput["entries"][number];
-  type DeviceReview = AuthDeviceUserAuthoritiesReviewsListOutput["entries"][number];
+  type ServiceInstance = apis.auth.AuthServiceInstancesListOutput["entries"][number];
+  type JobGroup = apis.jobs.JobsQueryOutput["groups"][number];
+  type JobStats = apis.jobs.JobsQueryOutput["stats"];
+  type DeploymentAuthority = apis.auth.AuthDeploymentAuthorityListOutput["entries"][number];
+  type AuthorityPlan = apis.auth.AuthDeploymentAuthorityPlansListOutput["entries"][number];
+  type DeviceReview = apis.auth.AuthDeviceUserAuthoritiesReviewsListOutput["entries"][number];
   type OverviewInstance = {
     service: string;
     id: string;

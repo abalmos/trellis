@@ -2993,7 +2993,7 @@ export function connectTrellisServiceWithAuthorizationTestHook<
   })());
 }
 
-/** @internal Private connected service session. */
+/** Connected session implementation backing the public service type. */
 export class TrellisServiceSession<
   TOwnedApi extends RuntimeApi = RuntimeApi,
   TTrellisApi extends RuntimeApi = TOwnedApi,

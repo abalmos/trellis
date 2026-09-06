@@ -11,5 +11,5 @@ serde_json = "1.0.149"
 tokio = { version = "1.51.1", features = ["rt-multi-thread"] }
 trellis-cli = { path = "../crates/cli", default-features = false }
 trellis-codegen-ts = { path = "../crates/codegen-ts" }
-trellis-protocol = { path = "../crates/protocol" }
+trellis-codegen-rust = { path = "../crates/codegen-rust" }
 wasm-bindgen-cli-support = "=0.2.125"

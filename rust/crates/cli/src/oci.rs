@@ -113,17 +113,10 @@ pub async fn pull_locked(
     api_digest: &str,
     manifest_digest: &str,
 ) -> Result<PulledApi> {
-    match read_cache(manifest_digest) {
-        Ok(pulled) => {
-            if validate_api(&pulled, api_id, version, Some(api_digest)).is_ok() {
-                return Ok(pulled);
-            }
-            let _ = fs::remove_dir_all(cache_entry(manifest_digest)?);
-        }
-        Err(_) => {
-            let _ = fs::remove_dir_all(cache_entry(manifest_digest)?);
-        }
+    if let Ok(pulled) = read_locked(api_id, version, api_digest, manifest_digest) {
+        return Ok(pulled);
     }
+    let _ = fs::remove_dir_all(cache_entry(manifest_digest)?);
     let reference = Reference::from_str(&format!(
         "{}@{manifest_digest}",
         repository(config, api_id)?
@@ -137,6 +130,18 @@ pub async fn pull_locked(
     }
     validate_api(&pulled, api_id, version, Some(api_digest))?;
     write_cache(&pulled)?;
+    Ok(pulled)
+}
+
+/// Read and verify an exact locked release without credentials or network access.
+pub fn read_locked(
+    api_id: &str,
+    version: &str,
+    api_digest: &str,
+    manifest_digest: &str,
+) -> Result<PulledApi> {
+    let pulled = read_cache(manifest_digest)?;
+    validate_api(&pulled, api_id, version, Some(api_digest))?;
     Ok(pulled)
 }
 

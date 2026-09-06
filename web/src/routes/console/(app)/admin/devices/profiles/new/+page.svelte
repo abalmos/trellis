@@ -1,7 +1,7 @@
 <script lang="ts">
   import { ulid } from "ulid";
   import { isErr } from "@qlever-llc/result";
-  import type { AuthDeploymentsCreateInput } from "@trellis/apis/trellis.auth";
+  import { type apis } from "trellis-web-generated";
   import { resolve } from "$lib/console_paths";
   import Notice from "$lib/components/Notice.svelte";
   import PageToolbar from "$lib/components/PageToolbar.svelte";
@@ -23,7 +23,7 @@
     pending = true;
     error = null;
     try {
-      const input: AuthDeploymentsCreateInput = {
+      const input: apis.auth.AuthDeploymentsCreateInput = {
         displayName: deploymentId.trim(),
         expiresAt: null,
         idempotencyKey: ulid(),

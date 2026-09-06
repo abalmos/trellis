@@ -5,8 +5,12 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use oxc_allocator::Allocator;
+use oxc_codegen::Codegen;
+use oxc_isolated_declarations::{IsolatedDeclarations, IsolatedDeclarationsOptions};
 use oxc_parser::Parser;
+use oxc_semantic::SemanticBuilder;
 use oxc_span::SourceType;
+use oxc_transformer::{TransformOptions, Transformer};
 use serde_json::Value;
 use trellis_protocol::{ApiArtifact, ParticipantArtifact};
 
@@ -24,12 +28,6 @@ pub enum CodegenTsError {
 
     #[error("json error: {0}")]
     Json(#[from] serde_json::Error),
-
-    #[error("missing runtime repo root for local runtime source")]
-    MissingRuntimeRepoRoot,
-
-    #[error("could not find a Deno config under runtime repo root")]
-    MissingRuntimeConfig,
 
     #[error("invalid generated TypeScript in {path}: {message}")]
     InvalidTypeScript { path: PathBuf, message: String },
@@ -55,15 +53,6 @@ fn project_api(api: &ApiArtifact) -> Result<ApiInput, CodegenTsError> {
     })
 }
 
-/// Options for generating one TypeScript SDK package.
-#[derive(Debug, Clone)]
-pub struct GenerateTsSdkOpts {
-    pub out_dir: PathBuf,
-    pub package_name: String,
-    pub package_version: String,
-    pub runtime_deps: TsRuntimeDeps,
-}
-
 /// One generated TypeScript SDK source file.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GeneratedTsSource {
@@ -71,44 +60,97 @@ pub struct GeneratedTsSource {
     pub contents: String,
 }
 
-/// Runtime dependency configuration for generated TypeScript SDKs.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct TsRuntimeDeps {
-    pub source: TsRuntimeSource,
-    pub version: String,
-    pub repo_root: Option<PathBuf>,
-}
-
-/// Where generated SDKs should resolve Trellis runtime packages from.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum TsRuntimeSource {
-    Registry,
-    Local,
-}
-
-/// Render a validated API into an empty caller-owned staging directory.
+/// Render one ordinary ESM package into an empty caller-owned staging directory.
 /// Publish the directory only after this function succeeds.
-pub fn generate_ts_sdk(api: &ApiArtifact, opts: &GenerateTsSdkOpts) -> Result<(), CodegenTsError> {
-    let sources = collect_ts_sdk_sources(api, opts)?;
-    write_ts_sdk_sources(&opts.out_dir, &sources)
-}
-
-/// Render a validated participant into an empty caller-owned staging directory.
-/// Publish the directory only after this function succeeds.
-pub fn generate_ts_participant(
-    participant: &ParticipantArtifact,
-    owned: &ApiArtifact,
+pub fn generate_ts_package(
     apis: &BTreeMap<&str, &ApiArtifact>,
+    participants: &[ParticipantArtifact],
     out_dir: &Path,
+    name: &str,
 ) -> Result<(), CodegenTsError> {
-    let source = render_ts_participant(participant, owned, apis)?;
-    write_ts_sdk_sources(
-        out_dir,
-        &[GeneratedTsSource {
-            path: PathBuf::from("mod.ts"),
-            contents: source,
-        }],
-    )
+    let mut sources = vec![GeneratedTsSource {
+        path: "package.json".into(),
+        contents: serde_json::to_string_pretty(&serde_json::json!({
+            "name": name,
+            "version": "0.0.0",
+            "private": true,
+            "description": "Generated Trellis APIs and participants.",
+            "type": "module",
+            "exports": {".": {"types": "./index.d.ts", "import": "./index.js"}},
+            "dependencies": {"@qlever-llc/trellis": format!("^{}", env!("CARGO_PKG_VERSION"))}
+        }))?,
+    }];
+    for (namespace, ids) in [
+        ("apis", apis.keys().copied().collect::<Vec<_>>()),
+        (
+            "participants",
+            participants.iter().map(ParticipantArtifact::id).collect(),
+        ),
+    ] {
+        let mut names = BTreeMap::new();
+        let mut exports = String::new();
+        for id in ids {
+            let stem = sdk_output_stem(id);
+            let module = lower_camel_ident(&stem);
+            if let Some(previous) = names.insert(module.clone(), id) {
+                return Err(CodegenTsError::ExportNameCollision(format!(
+                    "{namespace}/{module}: '{previous}' and '{id}'"
+                )));
+            }
+            exports.push_str(&format!("export * as {module} from \"./{stem}/mod.ts\";\n"));
+        }
+        if exports.is_empty() {
+            exports.push_str("export {};\n");
+        }
+        sources.push(GeneratedTsSource {
+            path: PathBuf::from(namespace).join("index.ts"),
+            contents: exports,
+        });
+    }
+    sources.push(GeneratedTsSource {
+        path: "index.ts".into(),
+        contents: "export * as apis from \"./apis/index.ts\";\nexport * as participants from \"./participants/index.ts\";\n".into(),
+    });
+    for (id, api) in apis {
+        let directory = PathBuf::from("apis").join(sdk_output_stem(id));
+        for mut source in collect_ts_sdk_sources(api)? {
+            source.path = directory.join(source.path);
+            sources.push(source);
+        }
+    }
+    for participant in participants {
+        let value = participant.normalized_value()?;
+        let owned = value["implements"]
+            .as_object()
+            .and_then(|entries| entries.values().next())
+            .and_then(|entry| entry["api"].as_str())
+            .and_then(|id| apis.get(id))
+            .ok_or_else(|| {
+                CodegenTsError::ExportNameCollision(format!(
+                    "participant '{}' has no available implemented API",
+                    participant.id()
+                ))
+            })?;
+        sources.push(GeneratedTsSource {
+            path: PathBuf::from("participants")
+                .join(sdk_output_stem(participant.id()))
+                .join("mod.ts"),
+            contents: render_ts_participant(participant, owned, apis)?,
+        });
+    }
+    let mut emitted = Vec::new();
+    for source in sources {
+        if source
+            .path
+            .extension()
+            .is_some_and(|extension| extension == "ts")
+        {
+            emitted.extend(emit_typescript(&source)?);
+        } else {
+            emitted.push(source);
+        }
+    }
+    write_ts_sdk_sources(out_dir, &emitted)
 }
 
 /// Validate source paths and write a package into a caller-owned staging directory.
@@ -211,32 +253,54 @@ fn render_ts_participant(
         .chain(&optional_actions)
         .cloned()
         .collect::<BTreeSet<_>>();
+    for (name, actions) in [
+        ("owned", owned_actions.clone()),
+        (
+            "used",
+            required_actions.union(&optional_actions).cloned().collect(),
+        ),
+        ("all", all_actions),
+    ] {
+        lines.push(format!(
+            "const __{name}Actions = [{}] as const;",
+            actions
+                .iter()
+                .map(|action| format!("{action} as typeof {action}"))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ));
+    }
     lines.push(String::new());
-    lines.push("export const participant = {".to_owned());
+    lines.push("const __participant = {".to_owned());
     lines.push(format!("  id: {},", js_string(participant.id())));
     lines.push(format!("  digest: {},", js_string(&participant_digest)));
     lines.push(format!(
         "  artifact: {} as const,",
         serde_json::to_string(&participant_value)?
     ));
-    lines.push(format!("  api: {owned_alias}.API,"));
-    lines.push(format!("  apiDigest: {owned_alias}.API_DIGEST,"));
+    lines.push(format!(
+        "  api: {owned_alias}.API as typeof {owned_alias}.API,"
+    ));
+    lines.push(format!(
+        "  apiDigest: {owned_alias}.API_DIGEST as typeof {owned_alias}.API_DIGEST,"
+    ));
     lines.push(format!(
         "  referencedApis: [{}] as const,",
         aliases
             .iter()
             .filter(|(id, _)| *id != &owned.render_model.id)
-            .map(|(_, alias)| format!("{alias}.API"))
+            .map(|(_, alias)| format!("{alias}.API as typeof {alias}.API"))
             .collect::<Vec<_>>()
             .join(", ")
     ));
     for expression in owned_surface_entries(&owned.value, owned_alias) {
         lines.push(format!("  {expression},"));
     }
-    lines.push("  [PARTICIPANT_RUNTIME]: {".to_owned());
+    lines.push("} as const;".to_owned());
+    lines.push("const __metadata = {".to_owned());
+    lines.push("  PARTICIPANT_RUNTIME: {".to_owned());
     lines.push(format!(
-        "    ownedApi: runtimeApiFromActions([{}], {}),",
-        owned_actions.iter().cloned().collect::<Vec<_>>().join(", "),
+        "    ownedApi: runtimeApiFromActions(__ownedActions, {}) as ReturnType<typeof runtimeApiFromActions<typeof __ownedActions>> ,",
         serde_json::to_string(
             &participant_value["implements"]["self"]
                 .get("operationTransfers")
@@ -244,20 +308,9 @@ fn render_ts_participant(
                 .unwrap_or_else(|| serde_json::json!({}))
         )?
     ));
+    lines.push("    usedApi: runtimeApiFromActions(__usedActions) as ReturnType<typeof runtimeApiFromActions<typeof __usedActions>> ,".to_owned());
     lines.push(format!(
-        "    usedApi: runtimeApiFromActions([{}]),",
-        required_actions
-            .iter()
-            .chain(&optional_actions)
-            .cloned()
-            .collect::<BTreeSet<_>>()
-            .into_iter()
-            .collect::<Vec<_>>()
-            .join(", ")
-    ));
-    lines.push(format!(
-        "    api: runtimeApiFromActions([{}], {}),",
-        all_actions.iter().cloned().collect::<Vec<_>>().join(", "),
+        "    api: runtimeApiFromActions(__allActions, {}) as ReturnType<typeof runtimeApiFromActions<typeof __allActions>> ,",
         serde_json::to_string(
             &participant_value["implements"]["self"]
                 .get("operationTransfers")
@@ -270,19 +323,35 @@ fn render_ts_participant(
         owned_actions
             .iter()
             .chain(&required_actions)
-            .map(|action| format!("{{ action: {action}, optional: false }}"))
+            .map(|action| format!("{{ action: {action} as typeof {action}, optional: false }}"))
             .chain(
-                optional_actions
-                    .iter()
-                    .map(|action| format!("{{ action: {action}, optional: true }}"))
+                optional_actions.iter().map(|action| format!(
+                    "{{ action: {action} as typeof {action}, optional: true }}"
+                ))
             )
             .collect::<Vec<_>>()
             .join(", ")
     ));
     lines.push("  },".to_owned());
-    insert_participant_metadata(&mut lines, &participant_value, &metadata_aliases)?;
+    let mut metadata_symbols = vec!["PARTICIPANT_RUNTIME"];
+    metadata_symbols.extend(insert_participant_metadata(
+        &mut lines,
+        &participant_value,
+        &metadata_aliases,
+    )?);
+    lines.push("} as const;".to_owned());
+    lines.push("export const participant: typeof __participant & {".to_owned());
+    for symbol in &metadata_symbols {
+        lines.push(format!(
+            "  readonly [{symbol}]: typeof __metadata.{symbol};"
+        ));
+    }
+    lines.push("} = { ...__participant,".to_owned());
+    for symbol in &metadata_symbols {
+        lines.push(format!("  [{symbol}]: __metadata.{symbol},"));
+    }
     lines.extend([
-        "} as const;".to_owned(),
+        "};".to_owned(),
         String::new(),
         "export default participant;".to_owned(),
         String::new(),
@@ -312,8 +381,8 @@ fn api_action_expressions(api: &Value, alias: &str) -> BTreeSet<String> {
         .flat_map(|value| value.keys())
     {
         let descriptor = format!("{alias}.ACTIONS[{}]", js_string(name));
-        actions.insert(format!("{descriptor}.publish"));
-        actions.insert(format!("{descriptor}.subscribe"));
+        actions.insert(format!("{descriptor}[\"publish\"]"));
+        actions.insert(format!("{descriptor}[\"subscribe\"]"));
     }
     actions
 }
@@ -329,7 +398,10 @@ fn owned_surface_entries(api: &Value, alias: &str) -> BTreeSet<String> {
         })
         .map(|name| {
             let symbol = key_to_pascal(name);
-            format!("{symbol}: {alias}.ACTIONS[{}]", js_string(name))
+            format!(
+                "{symbol}: {alias}.ACTIONS[{0}] as typeof {alias}.ACTIONS[{0}]",
+                js_string(name)
+            )
         })
         .collect()
 }
@@ -381,7 +453,7 @@ fn selected_action_expressions(
                     .filter_map(Value::as_str)
                 {
                     selected.insert(format!(
-                        "{alias}.ACTIONS[{}].{action}",
+                        "{alias}.ACTIONS[{}][\"{action}\"]",
                         js_string(descriptor_name(api, "events", name))
                     ));
                 }
@@ -407,8 +479,9 @@ fn insert_participant_metadata(
     lines: &mut Vec<String>,
     participant: &Value,
     aliases: &[SchemaTypeAlias],
-) -> Result<(), CodegenTsError> {
+) -> Result<Vec<&'static str>, CodegenTsError> {
     let schemas = participant["schemas"].as_object();
+    let mut symbols = Vec::new();
     for (section, symbol) in [
         ("state", "PARTICIPANT_STATE_METADATA"),
         ("jobQueues", "PARTICIPANT_JOBS_METADATA"),
@@ -416,7 +489,8 @@ fn insert_participant_metadata(
         let Some(entries) = participant[section].as_object() else {
             continue;
         };
-        lines.push(format!("  [{symbol}]: {{"));
+        symbols.push(symbol);
+        lines.push(format!("  {symbol}: {{"));
         for (name, entry) in entries {
             let schema_name = entry["schema"]["schema"]
                 .as_str()
@@ -426,10 +500,10 @@ fn insert_participant_metadata(
             let schema = resolve_participant_schema(schemas, schema_name);
             let ty = participant_schema_type(schema_name, schema, aliases);
             if section == "state" {
-                lines.push(format!("    {}: {{ kind: {}, value: typeOnly<{ty}>(), schema: {} as const, stateVersion: {}, acceptedVersions: {{}} }},", js_string(name), js_string(entry["kind"].as_str().expect("state kind")), serde_json::to_string(schema)?, js_string(entry["stateVersion"].as_str().unwrap_or("v1"))));
+                lines.push(format!("    {}: {{ kind: {}, value: typeOnly<{ty}>() as {ty}, schema: {} as const, stateVersion: {}, acceptedVersions: {{}} }},", js_string(name), js_string(entry["kind"].as_str().expect("state kind")), serde_json::to_string(schema)?, js_string(entry["stateVersion"].as_str().unwrap_or("v1"))));
             } else {
                 lines.push(format!(
-                    "    {}: {{ payload: typeOnly<{ty}>(), result: typeOnly<unknown>() }},",
+                    "    {}: {{ payload: typeOnly<{ty}>() as {ty}, result: typeOnly<unknown>() as unknown }},",
                     js_string(name)
                 ));
             }
@@ -444,14 +518,15 @@ fn insert_participant_metadata(
             let Some(entries) = resources.get(section).and_then(Value::as_object) else {
                 continue;
             };
-            lines.push(format!("  [{symbol}]: {{"));
+            symbols.push(symbol);
+            lines.push(format!("  {symbol}: {{"));
             for (name, entry) in entries {
                 if section == "kv" {
                     let schema_name = entry["schema"]["schema"].as_str().expect("KV schema");
                     let schemas = schemas.expect("participant schemas");
                     let schema = resolve_participant_schema(schemas, schema_name);
                     let ty = participant_schema_type(schema_name, schema, aliases);
-                    lines.push(format!("    {}: {{ required: true, value: typeOnly<{ty}>(), schema: {} as const }},", js_string(name), serde_json::to_string(schema)?));
+                    lines.push(format!("    {}: {{ required: true, value: typeOnly<{ty}>() as {ty}, schema: {} as const }},", js_string(name), serde_json::to_string(schema)?));
                 } else {
                     lines.push(format!("    {}: {{ required: true }},", js_string(name)));
                 }
@@ -482,12 +557,13 @@ fn insert_participant_metadata(
                 (name.clone(), Value::Object(consumer))
             })
             .collect::<serde_json::Map<String, Value>>();
+        symbols.push("PARTICIPANT_EVENT_CONSUMERS_METADATA");
         lines.push(format!(
-            "  [PARTICIPANT_EVENT_CONSUMERS_METADATA]: {} as const,",
+            "  PARTICIPANT_EVENT_CONSUMERS_METADATA: {} as const,",
             serde_json::to_string(&consumers)?
         ));
     }
-    Ok(())
+    Ok(symbols)
 }
 
 fn resolve_participant_schema<'a>(
@@ -512,30 +588,18 @@ fn participant_schema_type(name: &str, schema: &Value, aliases: &[SchemaTypeAlia
         .unwrap_or_else(|| schema_to_ts_with_aliases(schema, aliases, None))
 }
 
-/// Render the package configuration for a TypeScript SDK.
-pub fn render_ts_sdk_config(opts: &GenerateTsSdkOpts) -> Result<GeneratedTsSource, CodegenTsError> {
-    Ok(GeneratedTsSource {
-        path: PathBuf::from("deno.json"),
-        contents: format!("{}\n", serde_json::to_string_pretty(&deno_json(opts)?)?),
-    })
-}
-
-/// Render all files that make up a TypeScript SDK package without writing them.
-pub fn collect_ts_sdk_sources(
-    api: &ApiArtifact,
-    opts: &GenerateTsSdkOpts,
-) -> Result<Vec<GeneratedTsSource>, CodegenTsError> {
+/// Render the source modules for one API without writing files or package metadata.
+pub fn collect_ts_sdk_sources(api: &ApiArtifact) -> Result<Vec<GeneratedTsSource>, CodegenTsError> {
     let loaded = project_api(api)?;
     validate_public_export_names(&loaded)?;
     Ok(vec![
-        render_ts_sdk_config(opts)?,
         GeneratedTsSource {
             path: PathBuf::from("descriptors.ts"),
-            contents: render_descriptors_ts(opts, &loaded),
+            contents: render_descriptors_ts(&loaded),
         },
         GeneratedTsSource {
             path: PathBuf::from("types.ts"),
-            contents: render_wire_types_ts(opts, &loaded),
+            contents: render_wire_types_ts(&loaded),
         },
         GeneratedTsSource {
             path: PathBuf::from("schemas.ts"),
@@ -547,15 +611,11 @@ pub fn collect_ts_sdk_sources(
         },
         GeneratedTsSource {
             path: PathBuf::from("mod.ts"),
-            contents: render_mod_ts(opts, &loaded),
-        },
-        GeneratedTsSource {
-            path: PathBuf::from("README.md"),
-            contents: render_readme(opts, &loaded),
+            contents: render_mod_ts(),
         },
         GeneratedTsSource {
             path: PathBuf::from("TRELLIS.md"),
-            contents: render_trellis_md(opts, &loaded),
+            contents: render_trellis_md(&loaded),
         },
     ])
 }
@@ -574,49 +634,6 @@ struct SchemaTypeAlias {
     schema: Value,
 }
 
-fn deno_json(opts: &GenerateTsSdkOpts) -> Result<serde_json::Map<String, Value>, CodegenTsError> {
-    let mut root = serde_json::Map::new();
-    let extends = resolved_extends(opts)?;
-
-    if let Some(extends) = &extends {
-        root.insert("extends".to_string(), Value::String(extends.clone()));
-    }
-    root.insert("name".to_string(), Value::String(opts.package_name.clone()));
-    root.insert(
-        "version".to_string(),
-        Value::String(opts.package_version.clone()),
-    );
-    root.insert("publish".to_string(), Value::Bool(false));
-    root.insert(
-        "exports".to_string(),
-        serde_json::json!({
-            ".": "./mod.ts",
-            "./api": "./api.ts"
-        }),
-    );
-    if extends.is_none() {
-        let mut imports = serde_json::Map::new();
-        imports.insert(
-            "@qlever-llc/trellis".to_string(),
-            Value::String(format!(
-                "jsr:@qlever-llc/trellis@^{}",
-                opts.runtime_deps.version
-            )),
-        );
-        root.insert("imports".to_string(), Value::Object(imports));
-    }
-    root.insert(
-        "compilerOptions".to_string(),
-        serde_json::json!({
-            "strict": true,
-            "lib": ["dom", "dom.iterable", "dom.asynciterable", "deno.ns"],
-            "verbatimModuleSyntax": true
-        }),
-    );
-
-    Ok(root)
-}
-
 fn render_api_ts(loaded: &ApiInput) -> Result<String, CodegenTsError> {
     let source_reference = &loaded.render_model.id;
     Ok(format!(
@@ -628,7 +645,7 @@ fn render_api_ts(loaded: &ApiInput) -> Result<String, CodegenTsError> {
     ))
 }
 
-fn render_wire_types_ts(opts: &GenerateTsSdkOpts, loaded: &ApiInput) -> String {
+fn render_wire_types_ts(loaded: &ApiInput) -> String {
     let source_reference = &loaded.render_model.id;
     let public_schema_exports = public_schema_exports(loaded);
     let schema_type_aliases = public_schema_type_aliases(loaded, &public_schema_exports);
@@ -657,11 +674,11 @@ fn render_wire_types_ts(opts: &GenerateTsSdkOpts, loaded: &ApiInput) -> String {
         lines.extend([
             format!(
                 "import type {{ SerializableErrorData }} from {};",
-                js_string(&trellis_runtime_import(opts))
+                js_string("@qlever-llc/trellis")
             ),
             format!(
                 "import {{ TrellisError }} from {};",
-                js_string(&trellis_runtime_import(opts))
+                js_string("@qlever-llc/trellis")
             ),
         ]);
     }
@@ -808,7 +825,7 @@ fn render_wire_types_ts(opts: &GenerateTsSdkOpts, loaded: &ApiInput) -> String {
         ));
         if let Some(schema) = &error.schema {
             lines.push(format!(
-                "  static readonly schema = {};",
+                "  static readonly schema: typeof {0} = {0};",
                 schema_const_names
                     .get(schema.schema.as_str())
                     .expect("missing public schema export for error schema")
@@ -876,9 +893,9 @@ fn render_schemas_ts(loaded: &ApiInput) -> String {
     )
 }
 
-fn render_descriptors_ts(opts: &GenerateTsSdkOpts, loaded: &ApiInput) -> String {
+fn render_descriptors_ts(loaded: &ApiInput) -> String {
     let source_reference = &loaded.render_model.id;
-    let trellis_runtime_import = trellis_runtime_import(opts);
+    let trellis_runtime_import = "@qlever-llc/trellis";
     let public_schema_exports = public_schema_exports(loaded);
     let schema_const_names = public_schema_exports
         .iter()
@@ -924,7 +941,7 @@ fn render_descriptors_ts(opts: &GenerateTsSdkOpts, loaded: &ApiInput) -> String 
         format!("// Generated from {}", escape_js_string(source_reference)),
         format!(
             "import {{ eventActions, feedAction, operationAction, rpcAction, schema }} from {};",
-            js_string(&trellis_runtime_import)
+            js_string(trellis_runtime_import)
         ),
         if uses_types_as_value {
             "import * as Types from \"./types.ts\";".to_string()
@@ -962,10 +979,7 @@ fn render_descriptors_ts(opts: &GenerateTsSdkOpts, loaded: &ApiInput) -> String 
     for (key, rpc) in &loaded.render_model.rpc {
         let base = key_to_pascal(key);
         lines.push(String::new());
-        lines.push(format!(
-            "export const {base} = rpcAction({owner_id}, {}, {{",
-            js_string(key)
-        ));
+        lines.push(format!("const __{base}Descriptor = {{"));
         lines.push(format!(
             "  subject: {},",
             js_string(&loaded.subjects.rpc[key])
@@ -975,13 +989,13 @@ fn render_descriptors_ts(opts: &GenerateTsSdkOpts, loaded: &ApiInput) -> String 
             permission_literal(&loaded.render_model.id, &rpc.version, "rpc", key, "call",)
         ));
         lines.push(format!(
-            "  input: schema<Types.{base}Input>({}),",
+            "  input: schema<Types.{base}Input>({}) as ReturnType<typeof schema<Types.{base}Input>> ,",
             schema_const_names
                 .get(rpc.input.schema.as_str())
                 .expect("missing public schema export for rpc input")
         ));
         lines.push(format!(
-            "  output: schema<Types.{base}Output>({}),",
+            "  output: schema<Types.{base}Output>({}) as ReturnType<typeof schema<Types.{base}Output>> ,",
             schema_const_names
                 .get(rpc.output.schema.as_str())
                 .expect("missing public schema export for rpc output")
@@ -1037,34 +1051,31 @@ fn render_descriptors_ts(opts: &GenerateTsSdkOpts, loaded: &ApiInput) -> String 
                 ));
                 if let Some(schema) = &error_decl.schema {
                     lines.push(format!(
-                        "      schema: schema<Types.{base}Data>({}),",
+                        "      schema: schema<Types.{base}Data>({}) as ReturnType<typeof schema<Types.{base}Data>> ,",
                         schema_const_names
                             .get(schema.schema.as_str())
                             .expect("missing public schema export for error schema")
                     ));
                 }
                 lines.push(format!(
-                    "      fromSerializable: Types.{base}.fromSerializable,"
+                    "      fromSerializable: Types.{base}.fromSerializable as typeof Types.{base}.fromSerializable,"
                 ));
                 lines.push("    },".to_string());
             }
             lines.push("  ] as const,".to_string());
         }
-        lines.push(format!("}}, {}, ACTION_SOURCE);", js_string(&base)));
+        lines.push(format!("}} as const;\nexport const {base}: ReturnType<typeof rpcAction<typeof {owner_id}, {0}, typeof __{base}Descriptor>> = rpcAction({owner_id}, {0}, __{base}Descriptor, {1}, ACTION_SOURCE);", js_string(key), js_string(&base)));
     }
 
     for (key, operation) in &loaded.render_model.operations {
         let base = key_to_pascal(key);
         lines.push(String::new());
-        lines.push(format!(
-            "export const {base} = operationAction({owner_id}, {}, {{",
-            js_string(key)
-        ));
+        lines.push(format!("const __{base}Descriptor = {{"));
         lines.push(format!(
             "  subject: {},",
             js_string(&loaded.subjects.operations[key])
         ));
-        lines.push("  permissions: Object.freeze({".to_string());
+        lines.push("  permissions: {".to_string());
         lines.push(format!(
             "    invoke: {},",
             permission_literal(
@@ -1095,7 +1106,7 @@ fn render_descriptors_ts(opts: &GenerateTsSdkOpts, loaded: &ApiInput) -> String 
                 "cancel",
             )
         ));
-        lines.push("    control: Object.freeze({".to_string());
+        lines.push("    control: {".to_string());
         for signal_name in operation.signals.keys() {
             lines.push(format!(
                 "      {}: {},",
@@ -1109,17 +1120,17 @@ fn render_descriptors_ts(opts: &GenerateTsSdkOpts, loaded: &ApiInput) -> String 
                 )
             ));
         }
-        lines.push("    }),".to_string());
-        lines.push("  }),".to_string());
+        lines.push("    },".to_string());
+        lines.push("  },".to_string());
         lines.push(format!(
-            "  input: schema<Types.{base}Input>({}),",
+            "  input: schema<Types.{base}Input>({}) as ReturnType<typeof schema<Types.{base}Input>> ,",
             schema_const_names
                 .get(operation.input.schema.as_str())
                 .expect("missing public schema export for operation input")
         ));
         if let Some(progress) = &operation.progress {
             lines.push(format!(
-                "  progress: schema<Types.{base}Progress>({}),",
+                "  progress: schema<Types.{base}Progress>({}) as ReturnType<typeof schema<Types.{base}Progress>> ,",
                 schema_const_names
                     .get(progress.schema.as_str())
                     .expect("missing public schema export for operation progress")
@@ -1127,7 +1138,7 @@ fn render_descriptors_ts(opts: &GenerateTsSdkOpts, loaded: &ApiInput) -> String 
         }
         if let Some(update) = &operation.update {
             lines.push(format!(
-                "  update: schema<Types.{base}Update>({}),",
+                "  update: schema<Types.{base}Update>({}) as ReturnType<typeof schema<Types.{base}Update>> ,",
                 schema_const_names
                     .get(update.schema.as_str())
                     .expect("missing public schema export for operation update")
@@ -1135,7 +1146,7 @@ fn render_descriptors_ts(opts: &GenerateTsSdkOpts, loaded: &ApiInput) -> String 
         }
         if let Some(output) = &operation.output {
             lines.push(format!(
-                "  output: schema<Types.{base}Output>({}),",
+                "  output: schema<Types.{base}Output>({}) as ReturnType<typeof schema<Types.{base}Output>> ,",
                 schema_const_names
                     .get(output.schema.as_str())
                     .expect("missing public schema export for operation output")
@@ -1147,7 +1158,7 @@ fn render_descriptors_ts(opts: &GenerateTsSdkOpts, loaded: &ApiInput) -> String 
                 let signal_base = format!("{base}{}", key_to_pascal(signal_name));
                 lines.push(format!("    {}: {{", js_string(signal_name)));
                 lines.push(format!(
-                    "      input: schema<Types.{signal_base}Signal>({}),",
+                    "      input: schema<Types.{signal_base}Signal>({}) as ReturnType<typeof schema<Types.{signal_base}Signal>> ,",
                     schema_const_names
                         .get(signal.input.schema.as_str())
                         .expect("missing public schema export for operation signal input")
@@ -1222,14 +1233,14 @@ fn render_descriptors_ts(opts: &GenerateTsSdkOpts, loaded: &ApiInput) -> String 
                 ));
                 if let Some(schema) = &error_decl.schema {
                     lines.push(format!(
-                        "      schema: schema<Types.{base}Data>({}),",
+                        "      schema: schema<Types.{base}Data>({}) as ReturnType<typeof schema<Types.{base}Data>> ,",
                         schema_const_names
                             .get(schema.schema.as_str())
                             .expect("missing public schema export for error schema")
                     ));
                 }
                 lines.push(format!(
-                    "      fromSerializable: Types.{base}.fromSerializable,"
+                    "      fromSerializable: Types.{base}.fromSerializable as typeof Types.{base}.fromSerializable,"
                 ));
                 lines.push("    },".to_string());
             }
@@ -1241,16 +1252,13 @@ fn render_descriptors_ts(opts: &GenerateTsSdkOpts, loaded: &ApiInput) -> String 
                 if cancelable { "true" } else { "false" }
             ));
         }
-        lines.push(format!("}}, {}, ACTION_SOURCE);", js_string(&base)));
+        lines.push(format!("}} as const;\nObject.freeze(__{base}Descriptor.permissions.control);\nObject.freeze(__{base}Descriptor.permissions);\nexport const {base}: ReturnType<typeof operationAction<typeof {owner_id}, {0}, typeof __{base}Descriptor>> = operationAction({owner_id}, {0}, __{base}Descriptor, {1}, ACTION_SOURCE);", js_string(key), js_string(&base)));
     }
 
     for (key, event) in &loaded.render_model.events {
         let base = key_to_pascal(key);
         lines.push(String::new());
-        lines.push(format!(
-            "export const {base} = eventActions({owner_id}, {}, {{",
-            js_string(key)
-        ));
+        lines.push(format!("const __{base}Descriptor = {{"));
         lines.push(format!(
             "  subject: {},",
             js_string(&loaded.subjects.events[key].template)
@@ -1284,7 +1292,7 @@ fn render_descriptors_ts(opts: &GenerateTsSdkOpts, loaded: &ApiInput) -> String 
             }
         }
         lines.push(format!(
-            "  event: schema<Types.{base}Event>({}),",
+            "  event: schema<Types.{base}Event>({}) as ReturnType<typeof schema<Types.{base}Event>> ,",
             schema_const_names
                 .get(event.event.schema.as_str())
                 .expect("missing public schema export for event schema")
@@ -1299,16 +1307,13 @@ fn render_descriptors_ts(opts: &GenerateTsSdkOpts, loaded: &ApiInput) -> String 
             "  subscribeCapabilities: {} as const,",
             serde_json::to_string(&subscribe).unwrap()
         ));
-        lines.push(format!("}}, {}, true, ACTION_SOURCE);", js_string(&base)));
+        lines.push(format!("}} as const;\nexport const {base}: ReturnType<typeof eventActions<typeof {owner_id}, {0}, typeof __{base}Descriptor, true>> = eventActions({owner_id}, {0}, __{base}Descriptor, {1}, true, ACTION_SOURCE);", js_string(key), js_string(&base)));
     }
 
     for (key, feed) in &loaded.render_model.feeds {
         let base = key_to_pascal(key);
         lines.push(String::new());
-        lines.push(format!(
-            "export const {base} = feedAction({owner_id}, {}, {{",
-            js_string(key)
-        ));
+        lines.push(format!("const __{base}Descriptor = {{"));
         lines.push(format!(
             "  subject: {},",
             js_string(&loaded.subjects.feeds[key])
@@ -1324,13 +1329,13 @@ fn render_descriptors_ts(opts: &GenerateTsSdkOpts, loaded: &ApiInput) -> String 
             )
         ));
         lines.push(format!(
-            "  input: schema<Types.{base}Input>({}),",
+            "  input: schema<Types.{base}Input>({}) as ReturnType<typeof schema<Types.{base}Input>> ,",
             schema_const_names
                 .get(feed.input.schema.as_str())
                 .expect("missing public schema export for feed input")
         ));
         lines.push(format!(
-            "  event: schema<Types.{base}Event>({}),",
+            "  event: schema<Types.{base}Event>({}) as ReturnType<typeof schema<Types.{base}Event>> ,",
             schema_const_names
                 .get(feed.event.schema.as_str())
                 .expect("missing public schema export for feed event")
@@ -1340,21 +1345,37 @@ fn render_descriptors_ts(opts: &GenerateTsSdkOpts, loaded: &ApiInput) -> String 
             "  subscribeCapabilities: {} as const,",
             serde_json::to_string(&subscribe).unwrap()
         ));
-        lines.push(format!("}}, {}, ACTION_SOURCE);", js_string(&base)));
+        lines.push(format!("}} as const;\nexport const {base}: ReturnType<typeof feedAction<typeof {owner_id}, {0}, typeof __{base}Descriptor>> = feedAction({owner_id}, {0}, __{base}Descriptor, {1}, ACTION_SOURCE);", js_string(key), js_string(&base)));
     }
     lines.push(String::new());
     lines.push("export const ACTIONS = {".to_owned());
     for key in loaded.render_model.rpc.keys() {
-        lines.push(format!("  {}: {},", js_string(key), key_to_pascal(key)));
+        lines.push(format!(
+            "  {}: {1} as typeof {1},",
+            js_string(key),
+            key_to_pascal(key)
+        ));
     }
     for key in loaded.render_model.operations.keys() {
-        lines.push(format!("  {}: {},", js_string(key), key_to_pascal(key)));
+        lines.push(format!(
+            "  {}: {1} as typeof {1},",
+            js_string(key),
+            key_to_pascal(key)
+        ));
     }
     for key in loaded.render_model.events.keys() {
-        lines.push(format!("  {}: {},", js_string(key), key_to_pascal(key)));
+        lines.push(format!(
+            "  {}: {1} as typeof {1},",
+            js_string(key),
+            key_to_pascal(key)
+        ));
     }
     for key in loaded.render_model.feeds.keys() {
-        lines.push(format!("  {}: {},", js_string(key), key_to_pascal(key)));
+        lines.push(format!(
+            "  {}: {1} as typeof {1},",
+            js_string(key),
+            key_to_pascal(key)
+        ));
     }
     lines.push("} as const;".to_owned());
     lines.push(String::new());
@@ -1376,7 +1397,7 @@ fn permission_literal(
     action: &str,
 ) -> String {
     format!(
-        "Object.freeze({{ apiId: {}, apiVersion: {}, surfaceKind: {}, surfaceName: {}, action: {} }})",
+        "Object.freeze({{ apiId: {0}, apiVersion: {1}, surfaceKind: {2}, surfaceName: {3}, action: {4} }}) as {{ readonly apiId: {0}; readonly apiVersion: {1}; readonly surfaceKind: {2}; readonly surfaceName: {3}; readonly action: {4} }}",
         js_string(api_id),
         js_string(api_version),
         js_string(surface_kind),
@@ -1394,89 +1415,9 @@ fn lower_camel_ident(value: &str) -> String {
     }
 }
 
-fn resolved_extends(opts: &GenerateTsSdkOpts) -> Result<Option<String>, CodegenTsError> {
-    match opts.runtime_deps.source {
-        TsRuntimeSource::Registry => Ok(None),
-        TsRuntimeSource::Local => {
-            let repo_root = opts
-                .runtime_deps
-                .repo_root
-                .as_ref()
-                .ok_or(CodegenTsError::MissingRuntimeRepoRoot)?;
-            let repo_root = repo_root.canonicalize()?;
-            let runtime_config = runtime_config_path(&repo_root)?;
-            let out_dir = opts
-                .out_dir
-                .canonicalize()
-                .unwrap_or_else(|_| opts.out_dir.clone());
-            Ok(Some(relative_path_string(&out_dir, &runtime_config)))
-        }
-    }
-}
-
-fn trellis_runtime_import(_opts: &GenerateTsSdkOpts) -> String {
-    "@qlever-llc/trellis".to_string()
-}
-
-fn runtime_config_path(repo_root: &Path) -> Result<PathBuf, CodegenTsError> {
-    let js_deno = repo_root.join("ts/deno.json");
-    if js_deno.exists() {
-        return Ok(js_deno);
-    }
-
-    let root_deno = repo_root.join("deno.json");
-    if root_deno.exists() {
-        return Ok(root_deno);
-    }
-
-    Err(CodegenTsError::MissingRuntimeConfig)
-}
-
-fn relative_path_string(from_dir: &Path, to_path: &Path) -> String {
-    let from_components = from_dir.components().collect::<Vec<_>>();
-    let to_components = to_path.components().collect::<Vec<_>>();
-    let common_len = from_components
-        .iter()
-        .zip(&to_components)
-        .take_while(|(left, right)| left == right)
-        .count();
-
-    let mut relative = PathBuf::new();
-    for _ in common_len..from_components.len() {
-        relative.push("..");
-    }
-    for component in &to_components[common_len..] {
-        relative.push(component.as_os_str());
-    }
-    normalize_relative_path_string(relative.to_string_lossy().replace('\\', "/"))
-}
-
-fn normalize_relative_path_string(path: String) -> String {
-    if path.is_empty() || path.starts_with("../") || path.starts_with("./") || path.starts_with('/')
-    {
-        return path;
-    }
-    format!("./{path}")
-}
-
-fn render_readme(opts: &GenerateTsSdkOpts, loaded: &ApiInput) -> String {
-    let lineage = loaded
-        .render_model
-        .id
-        .split_once('@')
-        .map_or(loaded.render_model.id.as_str(), |(lineage, _)| lineage);
-    let import_specifier = format!("@trellis/apis/{lineage}");
-    format!(
-        "# {}\n\nGenerated TypeScript SDK for API `{}`.\n\nImport descriptors from `{}` and declare their use in the consuming project's native `.trellis` participant.\n\n## Contents\n\n- `descriptors.ts`: RPC, operation, event, and feed action descriptors\n- `types.ts`: portable wire types and declared error classes\n- `schemas.ts`: reachable and explicitly exported JSON Schemas\n- `api.ts`: canonical native API entrypoint\n- `TRELLIS.md`: generated package guidance\n",
-        opts.package_name,
-        loaded.render_model.id,
-        import_specifier,
-    )
-}
-
-fn render_trellis_md(opts: &GenerateTsSdkOpts, loaded: &ApiInput) -> String {
+fn render_trellis_md(loaded: &ApiInput) -> String {
     let mut lines = vec![
-        format!("# Trellis API Guide: {}", loaded.render_model.id),
+        format!("# Generated by Trellis.\n\nAPI guide: `{}`.", loaded.render_model.id),
         String::new(),
         "This file is generated for AI agents and out-of-tree Trellis services.".to_string(),
         String::new(),
@@ -1485,9 +1426,9 @@ fn render_trellis_md(opts: &GenerateTsSdkOpts, loaded: &ApiInput) -> String {
         "- llms.txt: https://raw.githubusercontent.com/qlever-llc/trellis/main/docs/static/llms.txt".to_string(),
         "- llms-full.txt: https://raw.githubusercontent.com/qlever-llc/trellis/main/docs/static/llms-full.txt".to_string(),
         String::new(),
-        "## Package".to_string(),
+        "## API Module".to_string(),
         String::new(),
-        format!("- package: `{}`", opts.package_name),
+        format!("- module: `apis.{}`", lower_camel_ident(&sdk_output_stem(&loaded.render_model.id))),
         format!("- API id: `{}`", loaded.render_model.id),
         String::new(),
         "## Consumer Vocabulary".to_string(),
@@ -1498,7 +1439,7 @@ fn render_trellis_md(opts: &GenerateTsSdkOpts, loaded: &ApiInput) -> String {
     push_ts_owned_surfaces(&mut lines, loaded);
     lines.extend([
         String::new(),
-        "The canonical API is available from the package's `./api` entrypoint.".to_string(),
+        "The module's `API` value contains its canonical API metadata.".to_string(),
         String::new(),
     ]);
     lines.join("\n")
@@ -1579,6 +1520,83 @@ fn validate_typescript(path: &Path, contents: &str) -> Result<(), CodegenTsError
     })
 }
 
+fn emit_typescript(source: &GeneratedTsSource) -> Result<[GeneratedTsSource; 2], CodegenTsError> {
+    let allocator = Allocator::default();
+    let parsed = Parser::new(&allocator, &source.contents, SourceType::ts()).parse();
+    let mut program = parsed.program;
+    let mut errors = parsed.errors;
+    if errors.is_empty() {
+        // Rewrite only AST-identified module literals, never canonical schema strings.
+        let mut executable_source = source.contents.clone();
+        for literal in program
+            .body
+            .iter()
+            .rev()
+            .filter_map(|statement| {
+                statement
+                    .as_module_declaration()
+                    .and_then(|module| module.source())
+            })
+            .filter(|literal| literal.value.starts_with("./") || literal.value.starts_with("../"))
+        {
+            if let Some(stem) = literal.value.strip_suffix(".ts") {
+                executable_source.replace_range(
+                    literal.span.start as usize..literal.span.end as usize,
+                    &js_string(&format!("{stem}.js")),
+                );
+            }
+        }
+        let executable_source = allocator.alloc_str(&executable_source);
+        let executable = Parser::new(&allocator, executable_source, SourceType::ts()).parse();
+        errors.extend(executable.errors);
+        program = executable.program;
+        let declarations =
+            IsolatedDeclarations::new(&allocator, IsolatedDeclarationsOptions::default())
+                .build(&program);
+        errors.extend(declarations.errors);
+        let declaration_source = Codegen::new().build(&declarations.program).code;
+        let semantic = SemanticBuilder::new().build(&program);
+        errors.extend(semantic.errors);
+        if errors.is_empty() {
+            let transformed =
+                Transformer::new(&allocator, &source.path, &TransformOptions::default())
+                    .build_with_scoping(semantic.semantic.into_scoping(), &mut program);
+            errors.extend(transformed.errors);
+            if errors.is_empty() {
+                return Ok([
+                    GeneratedTsSource {
+                        path: source.path.with_extension("js"),
+                        contents: format!(
+                            "// Generated by Trellis. Do not edit.\n// @ts-self-types=\"./{}\"\n{}",
+                            source
+                                .path
+                                .with_extension("d.ts")
+                                .file_name()
+                                .expect("generated module filename")
+                                .to_string_lossy(),
+                            Codegen::new().build(&program).code
+                        ),
+                    },
+                    GeneratedTsSource {
+                        path: source.path.with_extension("d.ts"),
+                        contents: format!(
+                            "// Generated by Trellis. Do not edit.\n{declaration_source}"
+                        ),
+                    },
+                ]);
+            }
+        }
+    }
+    Err(CodegenTsError::InvalidTypeScript {
+        path: source.path.clone(),
+        message: errors
+            .into_iter()
+            .map(|error| format!("{:?}", error.with_source_code(source.contents.clone())))
+            .collect::<Vec<_>>()
+            .join("\n"),
+    })
+}
+
 fn write_if_changed(path: &Path, contents: &str) -> Result<(), CodegenTsError> {
     if fs::read_to_string(path).ok().as_deref() == Some(contents) {
         return Ok(());
@@ -1637,23 +1655,6 @@ fn resolve_schema_ref<'a>(loaded: &'a ApiInput, schema_name: &str) -> &'a Value 
         .schemas
         .get(schema_name)
         .unwrap_or_else(|| panic!("missing schema '{schema_name}' in manifest"))
-}
-
-#[cfg(test)]
-mod path_tests {
-    use super::relative_path_string;
-    use std::path::Path;
-
-    #[test]
-    fn relative_path_string_is_normalized_without_dot_segments() {
-        assert_eq!(
-            relative_path_string(
-                Path::new("/repo/.trellis/ts/apis/core"),
-                Path::new("/repo/ts/packages/trellis"),
-            ),
-            "../../../../ts/packages/trellis"
-        );
-    }
 }
 
 fn key_to_pascal(value: &str) -> String {
@@ -1871,7 +1872,7 @@ fn is_safe_js_ident(value: &str) -> bool {
     chars.all(|ch| ch == '_' || ch == '$' || ch.is_ascii_alphanumeric())
 }
 
-fn render_mod_ts(_opts: &GenerateTsSdkOpts, _loaded: &ApiInput) -> String {
+fn render_mod_ts() -> String {
     [
         "export * from \"./api.ts\";",
         "export * from \"./descriptors.ts\";",
@@ -2121,6 +2122,22 @@ mod tests {
             .unwrap()
             .as_nanos();
         std::env::temp_dir().join(format!("trellis-codegen-ts-{label}-{nanos}"))
+    }
+
+    #[test]
+    fn generated_state_api_emits_native_javascript_and_declarations() {
+        let api = trellis_protocol::parse_api(
+            &serde_json::from_str(include_str!("../../runtime-apis/src/trellis.state@v1.json"))
+                .unwrap(),
+        )
+        .unwrap();
+        let sources = collect_ts_sdk_sources(&api).unwrap();
+        for source in sources
+            .iter()
+            .filter(|source| source.path.extension().is_some_and(|ext| ext == "ts"))
+        {
+            emit_typescript(source).unwrap();
+        }
     }
 
     #[test]

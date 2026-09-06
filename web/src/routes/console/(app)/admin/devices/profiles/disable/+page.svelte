@@ -1,10 +1,7 @@
 <script lang="ts">
   import { ulid } from "ulid";
   import { isErr } from "@qlever-llc/result";
-  import type {
-    AuthDeploymentsDisableInput,
-    AuthDeploymentsListOutput,
-  } from "@trellis/apis/trellis.auth";
+  import { type apis } from "trellis-web-generated";
   import { resolve } from "$lib/console_paths";
   import { page } from "$app/state";
   import { onMount } from "svelte";
@@ -18,7 +15,7 @@
   import { getNotifications } from "$lib/notifications.svelte";
   import { getTrellis } from "$lib/trellis";
 
-  type Deployment = AuthDeploymentsListOutput["entries"][number];
+  type Deployment = apis.auth.AuthDeploymentsListOutput["entries"][number];
 
   const trellis = getTrellis();
   const notifications = getNotifications();
@@ -65,7 +62,7 @@
         expectedVersion: selectedDeployment.version,
         idempotencyKey: ulid(),
         reason: null,
-      } satisfies AuthDeploymentsDisableInput,
+      } satisfies apis.auth.AuthDeploymentsDisableInput,
       ).take();
       if (isErr(response)) { error = errorMessage(response); return; }
       notifications.success(`Device deployment ${selectedDeployment.deploymentId} disabled.`, "Disabled");

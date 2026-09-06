@@ -50,10 +50,15 @@ The intended public startup surface now has two steps:
 
 Your application is still responsible for loading the root secret however it wants before calling into Trellis.
 
+This example uses the ordinary generated package named `device-trellis` in
+`trellis.toml`; the participant remains a module inside that package.
+
 ```ts
 import { TrellisDevice } from "@qlever-llc/trellis";
 import { checkDeviceActivation } from "@qlever-llc/trellis/device/deno";
-import { participant as myDevice } from "./.trellis/ts/participants/acme-my-device/mod.ts";
+import { participants } from "device-trellis";
+
+const myDevice = participants.acmeMyDevice.participant;
 
 const rootSecret = await Deno.readTextFile("./secrets/root.secret");
 

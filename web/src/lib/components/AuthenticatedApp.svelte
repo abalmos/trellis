@@ -2,7 +2,7 @@
   import { goto, afterNavigate } from "$app/navigation";
   import { base, resolve } from "$lib/console_paths";
   import { page } from "$app/state";
-  import type { AuthSessionsMeOutput } from "@trellis/apis/trellis.auth";
+  import { type apis } from "trellis-web-generated";
   import type { Snippet } from "svelte";
   import { onDestroy, onMount } from "svelte";
   import { buildConsoleLoginUrl } from "../auth";
@@ -29,7 +29,7 @@
   let authFailure = $state<string | null>(null);
   const connectionStatus = $derived<ConnectionStatus["phase"]>(connection.status.phase);
   let navSections = $state<NavSection[]>(getVisibleNavSections(null));
-  let profile = $state<AuthSessionsMeOutput["user"] | null>(null);
+  let profile = $state<apis.auth.AuthSessionsMeOutput["user"] | null>(null);
   let profileLoaded = $state(false);
 
   function toRoutePath(pathname: string): string {

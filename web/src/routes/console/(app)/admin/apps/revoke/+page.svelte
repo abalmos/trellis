@@ -1,7 +1,7 @@
 <script lang="ts">
   import { ulid } from "ulid";
   import { isErr } from "@qlever-llc/result";
-  import type { AuthIdentityAuthorityListOutput } from "@trellis/apis/trellis.auth";
+  import { type apis } from "trellis-web-generated";
   import { resolve } from "$lib/console_paths";
   import { page } from "$app/state";
   import { onMount } from "svelte";
@@ -15,7 +15,7 @@
   import { getNotifications } from "$lib/notifications.svelte";
   import { getTrellis } from "$lib/trellis";
 
-  type IdentityGrantEntry = AuthIdentityAuthorityListOutput["entries"][number];
+  type IdentityGrantEntry = apis.auth.AuthIdentityAuthorityListOutput["entries"][number];
 
   const trellis = getTrellis();
   const notifications = getNotifications();

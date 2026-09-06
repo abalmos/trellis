@@ -17,14 +17,18 @@ https://raw.githubusercontent.com/qlever-llc/trellis/main/docs/static/llms-types
 ## Browser app setup
 
 Author the app in `contract.trellis`, run `trellis generate`, and pass its
-generated participant module to the Svelte integration.
+generated participant module to the Svelte integration. Set `format = 1` and a
+package `name`, here `dashboard-trellis`, in `trellis.toml`. Install the resulting
+ordinary ESM package through your application's package manager.
 
 ```ts
 import {
   createTrellisApp,
   type TrellisClientFor,
 } from "@qlever-llc/trellis-svelte";
-import { participant } from "../../.trellis/ts/participants/acme-dashboard/mod.ts";
+import { participants } from "dashboard-trellis";
+
+const participant = participants.acmeDashboard.participant;
 
 type AppClient = TrellisClientFor<typeof participant>;
 
@@ -111,7 +115,9 @@ participant "acme.dashboard@v1" app {
 
 Native generation does not execute TypeScript or require a Vite plugin. The
 application's bundler and type checker still need to resolve imports from the
-generated `.trellis/ts` tree and the installed Trellis packages. Use the
+one generated package and the installed Trellis packages. Its executable `.js`
+and `.d.ts` require no consumer transpilation or Trellis CLI. Commit generated
+output for ordinary clone builds. Use the
 resolver configuration appropriate to that application; the checked-in app demo
 illustrates one Deno/Vite setup, not a required frontend stack.
 

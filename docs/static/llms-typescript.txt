@@ -8,10 +8,23 @@ tools are application choices. Neither Zod nor an ORM is required.
 ## Generate And Connect
 
 Author native IDL, run `trellis update` after dependency changes, and run
-`trellis generate` after IDL changes. Import participants from
-`.trellis/ts/participants/<participant>/mod.ts` and generated vocabulary from
-`.trellis/ts/apis/<api>/mod.ts`. Commit the authored files and lock, not
-generated outputs. There is no TypeScript contract-authoring execution step.
+`trellis generate` after IDL changes. Set `format = 1` and the local package
+`name` in `trellis.toml`. A root `package.json`, `deno.json`, or `deno.jsonc`
+selects TypeScript/JavaScript. A single language defaults to `trellis/`, with
+optional `[generate].output`; mixed-language projects require explicit Rust and
+TypeScript output tables.
+
+Import `apis` and `participants` from that one ordinary local package, for example
+`import { participants } from "orders-trellis"` and
+`participants.acmeOrdersService.participant`. There are no per-API or participant
+packages. Output is executable ESM JavaScript plus declarations and `package.json`,
+always version `0.0.0`, depending on the published runtime matching the CLI. No
+consumer transpiler, generated Deno configuration, or runtime-path setting is
+required. Configure ordinary npm dependencies or Deno import mappings yourself;
+generation never edits them. Commit authored files and the lock, and commit output
+when ordinary clones should build without the Trellis CLI or API cache. Generation
+is offline once locked dependencies are available in the validated global cache.
+There is no TypeScript contract-authoring execution step.
 
 Services import `TrellisService` from `@qlever-llc/trellis/service/deno` or
 `@qlever-llc/trellis/service/node`. Connect with the generated participant,

@@ -7,24 +7,54 @@ trellis update
 trellis generate
 ```
 
-The project-local output is:
+The Orders project's output is one ordinary ESM package:
 
 ```text
-.trellis/
-├── apis/       # lock-verified installed dependency artifacts
-├── artifacts/  # owned canonical API and participant artifacts
-├── rust/       # private generated Rust SDKs and facades
-└── ts/         # private generated TypeScript SDKs and participants
+trellis/
+  package.json
+  index.js
+  index.d.ts
+  apis/
+  participants/
+  artifacts/apis/
+  artifacts/participants/
 ```
 
-The language directories depend on the project manifests: `deno.json` or
-`deno.jsonc` selects TypeScript; `Cargo.toml` selects Rust. A mixed project can
-generate both. The tree above shows both possibilities.
+`trellis.toml` declares `format = 1` and `name = "orders-trellis"`. The generated
+package version is always `0.0.0`; API releases and participant identities remain
+independent. The runtime dependency matches the CLI version. Artifact JSON is
+tooling material, including referenced APIs, not a language import surface.
+
+A root `package.json`, `deno.json`, or `deno.jsonc` selects TypeScript/JavaScript;
+`Cargo.toml` selects Rust. One language defaults to `trellis/`, optionally
+overridden by `[generate].output`. A mixed project requires explicit destinations:
+
+```toml
+format = 1
+name = "orders-trellis"
+
+[generate.rust]
+output = "crates/orders-trellis"
+
+[generate.typescript]
+output = "packages/orders-trellis"
+```
+
+Each destination is one cohesive ordinary package, with separate `apis` and
+`participants` namespaces. There is no language-selection setting. An API-only
+project without a supported language marker generates no package.
 
 `trellis generate` is offline. Local dependencies compile from source; registry
-dependencies use exact installed artifacts from `trellis.lock`. A failed compile
-leaves the previous successful outputs untouched.
+dependencies use exact validated API values from the global OCI cache and
+`trellis.lock`. Compilation and rendering retain canonical values in memory;
+publication uses compiled owned APIs directly. Failed compilation or rendering
+preserves last-good output, and generation protects unrelated user files.
 
 In CI or a fresh checkout, `trellis install` reproduces locked dependency
-artifacts and generates the language outputs. Use `trellis update` when you
+APIs in the global cache and generates the language packages. No project-local
+installation tree or persistent generation index is created. Use `trellis update` when you
 intend to resolve dependency changes, not merely to rebuild an existing lock.
+
+Commit the generated package, as this example does, when a clone must build and
+test without the Trellis CLI or API cache. Consumers use ordinary package-manager
+dependencies; generation never rewrites their language manifests.

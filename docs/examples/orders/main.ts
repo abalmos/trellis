@@ -1,6 +1,6 @@
 import { FileAuthorizationContextStore } from "@qlever-llc/trellis/auth/file";
 import { TrellisService } from "@qlever-llc/trellis/service/deno";
-import { participant } from "./.trellis/ts/participants/acme-orders-service/mod.ts";
+import { participants } from "orders-trellis";
 import { createOrder } from "./service.ts";
 
 // Environment variables are this example's configuration choice, not a Trellis requirement.
@@ -11,7 +11,7 @@ function requiredEnv(name: string): string {
 }
 
 const service = await TrellisService.connect({
-  participant,
+  participant: participants.acmeOrdersService.participant,
   name: "orders-service",
   trellisUrl: requiredEnv("TRELLIS_URL"),
   identity: {

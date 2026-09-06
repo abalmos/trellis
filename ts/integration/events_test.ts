@@ -4,9 +4,8 @@ import { connect } from "@nats-io/transport-deno";
 import { assertEquals } from "@std/assert";
 import { fromFileUrl, join } from "@std/path";
 
-import { participant as alphaParticipant } from "../../integration/fixtures/runtime/.trellis/ts/participants/test-alpha/mod.ts";
-import { participant as betaParticipant } from "../../integration/fixtures/runtime/.trellis/ts/participants/test-beta/mod.ts";
-import { participant as eventParticipant } from "../../integration/fixtures/runtime/.trellis/ts/participants/test-events/mod.ts";
+import { participants } from "../../integration/fixtures/runtime/packages/runtime-trellis/index.js";
+
 import { withTrellisRuntime } from "./_support/runtime.ts";
 
 Deno.test("Rust durable events match registrations and retain unhandled messages", async () => {
@@ -14,11 +13,19 @@ Deno.test("Rust durable events match registrations and retain unhandled messages
     await withTrellisRuntime(async (runtime) => {
       const identity = await runtime.registerService({
         name: "events",
-        contract: eventParticipant,
+        contract: participants.testEvents.participant,
       });
       const process = new Deno.Command("cargo", {
         args: [
           "run",
+          "--config",
+          `patch.crates-io.trellis-rs.path=${
+            JSON.stringify(
+              fromFileUrl(
+                new URL("../../rust/crates/trellis", import.meta.url),
+              ),
+            )
+          }`,
           "--bin",
           "events",
           "--manifest-path",
@@ -59,11 +66,11 @@ Deno.test("Rust durable events match registrations and retain unhandled messages
       try {
         const alpha = await runtime.connectClient({
           name: "alpha",
-          contract: alphaParticipant,
+          contract: participants.testAlpha.participant,
         });
         const beta = await runtime.connectClient({
           name: "beta",
-          contract: betaParticipant,
+          contract: participants.testBeta.participant,
         });
         await runtime.waitFor(async () => {
           if (exited) {

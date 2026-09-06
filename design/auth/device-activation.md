@@ -564,7 +564,9 @@ Implementation status:
 ```ts
 import { isErr, TrellisDevice } from "@qlever-llc/trellis";
 import { checkDeviceActivation } from "@qlever-llc/trellis/device/deno";
-import { participant } from "../.trellis/ts/participants/acme.demo-device@v1.ts";
+import { participants } from "device-trellis";
+
+const participant = participants.acmeDemoDevice.participant;
 
 const authority = await checkDeviceActivation({
   trellisUrl,

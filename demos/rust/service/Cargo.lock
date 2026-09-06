@@ -2173,6 +2173,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "service-trellis"
+version = "0.0.0"
+dependencies = [
+ "futures-util",
+ "serde",
+ "serde_json",
+ "trellis-rs",
+]
+
+[[package]]
 name = "sha2"
 version = "0.10.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2687,17 +2697,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "trellis-participant-demo-service"
-version = "0.0.0"
-dependencies = [
- "futures-util",
- "serde",
- "serde_json",
- "trellis-rs",
- "trellis-sdk-demo-service",
-]
-
-[[package]]
 name = "trellis-protocol"
 version = "0.12.0"
 dependencies = [
@@ -2759,22 +2758,11 @@ dependencies = [
  "rand 0.10.2",
  "serde",
  "serde_json",
+ "service-trellis",
  "time",
  "tokio",
  "tracing",
  "tracing-subscriber",
- "trellis-participant-demo-service",
- "trellis-rs",
- "trellis-sdk-demo-service",
-]
-
-[[package]]
-name = "trellis-sdk-demo-service"
-version = "1.0.0"
-dependencies = [
- "futures-util",
- "serde",
- "serde_json",
  "trellis-rs",
 ]
 

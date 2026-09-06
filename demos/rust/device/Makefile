@@ -1,10 +1,10 @@
 .PHONY: update generate check
 
 update:
-	../../../rust/target/debug/trellis update
+	trellis update
 
 generate:
-	../../../rust/target/debug/trellis generate
+	trellis generate
 
 check:
 	cargo check --locked

@@ -158,23 +158,22 @@ export class TrellisTestRuntime implements AsyncDisposable {
   };
   readonly devices: {
     provision(
-      input:
-        import("../.trellis/ts/apis/auth/mod.ts").AuthDevicesProvisionInput,
+      input: import("../trellis/index.js").apis.auth.AuthDevicesProvisionInput,
     ): Promise<
-      import("../.trellis/ts/apis/auth/mod.ts").AuthDevicesProvisionOutput
+      import("../trellis/index.js").apis.auth.AuthDevicesProvisionOutput
     >;
   };
   readonly state: {
     adminGet(
-      input: import("../.trellis/ts/apis/state/mod.ts").StateAdminGetInput,
-    ): Promise<import("../.trellis/ts/apis/state/mod.ts").StateAdminGetOutput>;
+      input: import("../trellis/index.js").apis.state.StateAdminGetInput,
+    ): Promise<import("../trellis/index.js").apis.state.StateAdminGetOutput>;
     adminList(
-      input: import("../.trellis/ts/apis/state/mod.ts").StateAdminListInput,
-    ): Promise<import("../.trellis/ts/apis/state/mod.ts").StateAdminListOutput>;
+      input: import("../trellis/index.js").apis.state.StateAdminListInput,
+    ): Promise<import("../trellis/index.js").apis.state.StateAdminListOutput>;
     adminDelete(
-      input: import("../.trellis/ts/apis/state/mod.ts").StateAdminDeleteInput,
+      input: import("../trellis/index.js").apis.state.StateAdminDeleteInput,
     ): Promise<
-      import("../.trellis/ts/apis/state/mod.ts").StateAdminDeleteOutput
+      import("../trellis/index.js").apis.state.StateAdminDeleteOutput
     >;
   };
   readonly authority: {

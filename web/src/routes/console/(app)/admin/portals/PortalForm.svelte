@@ -1,9 +1,7 @@
 <script lang="ts">
   import { ulid } from "ulid";
   import { isErr } from "@qlever-llc/result";
-  import type {
-    AuthCapabilitiesListOutput,
-  } from "@trellis/apis/trellis.auth";
+  import { type apis } from "trellis-web-generated";
   import { resolve } from "$lib/console_paths";
   import { goto } from "$app/navigation";
   import { onMount } from "svelte";
@@ -55,7 +53,7 @@
     updatedAt: number;
   };
 
-  type CapabilityView = AuthCapabilitiesListOutput["entries"][number] & { key: string };
+  type CapabilityView = apis.auth.AuthCapabilitiesListOutput["entries"][number] & { key: string };
   type CapabilityGroupView = { groupKey: string; displayName: string; capabilities: string[]; includedGroups: string[] };
 
   const CATALOG_PAGE_SIZE = 100;

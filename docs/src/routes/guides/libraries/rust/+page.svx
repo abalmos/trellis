@@ -1,9 +1,10 @@
 The Rust libraries give services, apps, CLIs, devices, and agents a typed async
-interface to Trellis. Native generation emits two kinds of Cargo artifact:
+interface to Trellis. Native generation emits one ordinary crate with two module
+namespaces:
 
-- an owner SDK containing one API's types, schemas, descriptors, and thin
+- `apis::<api>` containing each API's types, schemas, descriptors, and thin
   inbound/outbound adapters
-- a participant facade containing exactly the owned and used surfaces selected
+- `participants::<participant>` containing exactly the owned and used surfaces selected
   by one local participant
 
 Application code connects through the participant facade. Owner SDKs are typed
@@ -12,12 +13,27 @@ vocabulary, not runnable clients or services.
 Use this page as a practical map. Verify exact generated names and signatures in
 the generated crate source and the Rustdoc links on the [API Reference](/api).
 
-## Generated crates
+## Generated package
 
-Generation writes API SDKs under `.trellis/rust/apis/` and participant facades
-under `.trellis/rust/participants/`. Both are ordinary, materialized Cargo
-crates with relative local dependencies. They do not run a Trellis generator
-from `build.rs`.
+Set `format = 1` and a local package `name`, such as `orders-trellis`, in
+`trellis.toml`. A Rust-only project generates one crate at `trellis/`, optionally
+overridden by `[generate].output`. Mixed-language projects require explicit
+`[generate.rust].output` and `[generate.typescript].output` destinations.
+
+The package version is always `0.0.0`. Add the crate as an ordinary path
+dependency in the consumer's `Cargo.toml`:
+
+```toml
+[dependencies]
+orders-trellis = { path = "trellis" }
+```
+
+It declares the published Trellis runtime dependency matching the CLI version.
+There are no separate API or participant crates, repository-relative runtime
+paths, or generator `build.rs` steps. Commit the output when clones should build
+with Cargo alone, without the Trellis CLI or API cache. Local runtime development
+uses ordinary Cargo overrides supplied by the consumer or test harness, not
+runtime-path settings in `trellis.toml`.
 
 A participant facade normally exposes:
 
@@ -43,7 +59,7 @@ type are example choices, not Trellis requirements:
 ```rust
 use std::sync::Arc;
 
-use orders_participant::{connect, ServiceConnectOptions};
+use orders_trellis::participants::acme_orders_service::{connect, ServiceConnectOptions};
 use trellis_rs::client::FileAuthorizationContextStore;
 
 #[tokio::main]
@@ -82,7 +98,7 @@ an overall deadline; `with_timeout_ms(...)` bounds each request.
 Apps, CLIs, and agents use the generated user-session option type:
 
 ```rust
-use orders_console_participant::{connect, ConnectOptions};
+use orders_trellis::participants::acme_orders_caller::{connect, ConnectOptions};
 
 let connected = connect(ConnectOptions::new(
     "http://127.0.0.1:8080",
@@ -96,7 +112,7 @@ let connected = connect(ConnectOptions::new(
 let response = connected
     .client()
     .orders()
-    .orders_get(&orders_sdk::OrdersGetRequest {
+    .orders_get(&orders_trellis::apis::acme_orders::OrdersGetRequest {
         order_id: "ord_123".into(),
     })
     .await?;
@@ -119,7 +135,7 @@ Activated devices use the generated device option type:
 ```rust
 use std::sync::Arc;
 
-use inspection_device_participant::{connect, ConnectOptions};
+use orders_trellis::participants::inspection_device::{connect, ConnectOptions};
 use trellis_rs::client::FileAuthorizationContextStore;
 
 let connected = connect(ConnectOptions::new(
@@ -148,7 +164,7 @@ inside each alias:
 let order = connected
     .client()
     .orders()
-    .orders_get(&orders_sdk::OrdersGetRequest {
+    .orders_get(&orders_trellis::apis::acme_orders::OrdersGetRequest {
         order_id: "ord_123".into(),
     })
     .await?;
@@ -167,7 +183,7 @@ let operation = connected
     .client()
     .orders()
     .orders_process()
-    .start(&orders_sdk::OrdersProcessInput {
+    .start(&orders_trellis::apis::acme_orders::OrdersProcessInput {
         order_id: "ord_123".into(),
     })
     .await?;
@@ -185,8 +201,8 @@ typed operation reference; applications do not construct transfer subjects.
 Register owned providers before `run()`:
 
 ```rust
-use orders_participant::ServiceHandlerContext;
-use orders_sdk::{OrdersCreateRequest, OrdersCreateResponse};
+use orders_trellis::participants::acme_orders_service::ServiceHandlerContext;
+use orders_trellis::apis::acme_orders::{OrdersCreateRequest, OrdersCreateResponse};
 
 service.handle().rpc().orders().create(
     |_context: ServiceHandlerContext, input: OrdersCreateRequest| async move {
@@ -211,7 +227,7 @@ tasks:
 let publisher = service.publisher();
 
 publisher
-    .publish_orders_shipped(&orders_sdk::OrdersShippedEvent {
+    .publish_orders_shipped(&orders_trellis::apis::acme_orders::OrdersShippedEvent {
         order_id: "ord_123".into(),
         customer_id: "cust_456".into(),
         shipped_at: now_iso(),
@@ -275,7 +291,7 @@ Each declared queue has a cloneable generated queue client:
 ```rust
 let refresh = service.jobs().refresh_summary();
 let job = refresh
-    .submit(orders_sdk::RefreshSummaryJobPayload {
+    .submit(orders_trellis::apis::acme_orders::RefreshSummaryJobPayload {
         order_id: "ord_123".into(),
     })
     .await?;
@@ -284,7 +300,7 @@ refresh
     .handle(|active_job| async move {
         let payload = active_job.payload().clone();
         active_job.progress(10, Some("loading".into())).await?;
-        Ok(orders_sdk::RefreshSummaryJobResult {
+        Ok(orders_trellis::apis::acme_orders::RefreshSummaryJobResult {
             order_id: payload.order_id,
         })
     })

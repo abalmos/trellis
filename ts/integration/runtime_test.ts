@@ -5,21 +5,26 @@ import { TrellisService } from "@qlever-llc/trellis/service/deno";
 import { assert, assertEquals } from "@std/assert";
 import { fromFileUrl } from "@std/path";
 
-import { participant as caller } from "../../integration/fixtures/runtime/.trellis/ts/participants/test-caller/mod.ts";
-import { participant as denied } from "../../integration/fixtures/runtime/.trellis/ts/participants/test-denied/mod.ts";
-import { participant as provider } from "../../integration/fixtures/runtime/.trellis/ts/participants/test-provider/mod.ts";
-import { participant as adminParticipant } from "../../web/.trellis/ts/participants/app-console/mod.ts";
+import { participants } from "../../integration/fixtures/runtime/packages/runtime-trellis/index.js";
+import { participants as webParticipants } from "trellis-web-generated";
+
 import { withTrellisRuntime } from "./_support/runtime.ts";
 
 Deno.test("generated TypeScript caller reaches Rust provider", async () => {
   await withTrellisRuntime(async (runtime) => {
     const identity = await runtime.registerService({
       name: "rust",
-      contract: provider,
+      contract: participants.testProvider.participant,
     });
     const process = new Deno.Command("cargo", {
       args: [
         "run",
+        "--config",
+        `patch.crates-io.trellis-rs.path=${
+          JSON.stringify(
+            fromFileUrl(new URL("../../rust/crates/trellis", import.meta.url)),
+          )
+        }`,
         "--bin",
         "trellis-runtime-acceptance",
         "--manifest-path",
@@ -51,7 +56,7 @@ Deno.test("generated TypeScript caller reaches Rust provider", async () => {
     try {
       const client = await runtime.connectClient({
         name: "cross-language",
-        contract: caller,
+        contract: participants.testCaller.participant,
       });
       const response = await runtime.waitFor(async () => {
         if (exited) {
@@ -76,12 +81,12 @@ Deno.test("generated runtime workflows", async (t) => {
   await withTrellisRuntime(async (runtime) => {
     const identity = await runtime.registerService({
       name: "provider",
-      contract: provider,
+      contract: participants.testProvider.participant,
     });
     const service = await TrellisService.connect({
       authorizationContextEphemeral: true,
       trellisUrl: runtime.trellisUrl,
-      participant: provider,
+      participant: participants.testProvider.participant,
       name: "provider",
       identity,
       telemetry: false,
@@ -121,7 +126,7 @@ Deno.test("generated runtime workflows", async (t) => {
       serviceExit = service.wait().catch((error: unknown) => error);
       const client = await runtime.connectClient({
         name: "caller",
-        contract: caller,
+        contract: participants.testCaller.participant,
       });
       await t.step("operation executes and completes", async () => {
         const operation = await client.work({ value: "work" }).start()
@@ -188,7 +193,7 @@ Deno.test("generated runtime workflows", async (t) => {
         async () => {
           const unauthorized = await runtime.connectClient({
             name: "denied",
-            contract: denied,
+            contract: participants.testDenied.participant,
           });
           const rejected = await unauthorized.echo({ value: "denied" });
           assert(rejected.isErr());
@@ -200,10 +205,10 @@ Deno.test("generated runtime workflows", async (t) => {
           );
           const admin = await runtime.connectClient({
             name: "admin",
-            contract: adminParticipant,
+            contract: webParticipants.appConsole.participant,
           });
           const sessions = await admin.authSessionsList({
-            participantId: caller.id,
+            participantId: participants.testCaller.participant.id,
             state: "active",
           }).orThrow();
           assertEquals(sessions.entries.length, 1);

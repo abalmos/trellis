@@ -159,6 +159,7 @@ Rules:
   resolves aliases by prefix
 
 The Trellis repo's local frontend apps keep explicit `kit.alias` objects in each
-SvelteKit config. App workspaces should add each consumer-local aggregate SDK
-specifier they use, such as `@trellis/apis/demo.service`, to their app-local
-aliases.
+SvelteKit config. App workspaces should resolve their single generated ESM
+package through an ordinary local package dependency, or an app-local alias to
+its `index.js`. The package exposes `apis` and `participants`; do not add
+per-API aliases or mappings into an installation tree.

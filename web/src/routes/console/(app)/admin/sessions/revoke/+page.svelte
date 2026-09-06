@@ -1,7 +1,7 @@
 <script lang="ts">
   import { ulid } from "ulid";
   import { isErr } from "@qlever-llc/result";
-  import type { AuthSessionsRevokeInput } from "@trellis/apis/trellis.auth";
+  import { type apis } from "trellis-web-generated";
   import { goto } from "$app/navigation";
   import { resolve } from "$lib/console_paths";
   import { page } from "$app/state";
@@ -59,7 +59,7 @@
         idempotencyKey: ulid(),
         reason: null,
         sessionId: selectedSession.sessionId,
-      } satisfies AuthSessionsRevokeInput).take();
+      } satisfies apis.auth.AuthSessionsRevokeInput).take();
       if (isErr(response)) { error = errorMessage(response); return; }
       notifications.success(`Session revoked for ${summary.title}.`, "Revoked");
       await goto(resolve("/admin/sessions"));

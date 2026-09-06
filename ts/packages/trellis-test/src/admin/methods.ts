@@ -1,98 +1,19 @@
 import type { CallerRuntime } from "@qlever-llc/trellis";
-import {
-  AuthCapabilityGroupsPut,
-  AuthCapabilityGroupsPutRequestSchema,
-  AuthCapabilityGroupsPutResponseSchema,
-  AuthConnectionsList,
-  AuthConnectionsListRequestSchema,
-  AuthConnectionsListResponseSchema,
-  AuthDeploymentAuthorityAcceptMigration,
-  AuthDeploymentAuthorityAcceptMigrationRequestSchema,
-  AuthDeploymentAuthorityAcceptMigrationResponseSchema,
-  AuthDeploymentAuthorityAcceptUpdate,
-  AuthDeploymentAuthorityAcceptUpdateRequestSchema,
-  AuthDeploymentAuthorityAcceptUpdateResponseSchema,
-  AuthDeploymentAuthorityGet,
-  AuthDeploymentAuthorityGetRequestSchema,
-  AuthDeploymentAuthorityGetResponseSchema,
-  AuthDeploymentAuthorityList,
-  AuthDeploymentAuthorityListRequestSchema,
-  AuthDeploymentAuthorityListResponseSchema,
-  AuthDeploymentAuthorityPlan,
-  AuthDeploymentAuthorityPlanRequestSchema,
-  AuthDeploymentAuthorityPlanResponseSchema,
-  AuthDeploymentAuthorityPlansList,
-  AuthDeploymentAuthorityPlansListRequestSchema,
-  AuthDeploymentAuthorityPlansListResponseSchema,
-  AuthDeploymentAuthorityReconcile,
-  AuthDeploymentAuthorityReconcileRequestSchema,
-  AuthDeploymentAuthorityReconcileResponseSchema,
-  AuthDeploymentAuthorityReject,
-  AuthDeploymentAuthorityRejectRequestSchema,
-  AuthDeploymentAuthorityRejectResponseSchema,
-  AuthDeploymentsCreate,
-  AuthDeploymentsCreateRequestSchema,
-  AuthDeploymentsCreateResponseSchema,
-  AuthDevicesProvision,
-  AuthDevicesProvisionRequestSchema,
-  AuthDevicesProvisionResponseSchema,
-  AuthIdentityAuthorityList,
-  AuthIdentityAuthorityRevoke,
-  AuthPortalsGet,
-  AuthPortalsGetRequestSchema,
-  AuthPortalsGetResponseSchema,
-  AuthPortalsGrantOverridesPut,
-  AuthPortalsGrantOverridesPutRequestSchema,
-  AuthPortalsGrantOverridesPutResponseSchema,
-  AuthPortalsGrantOverridesRemove,
-  AuthPortalsGrantOverridesRemoveRequestSchema,
-  AuthPortalsGrantOverridesRemoveResponseSchema,
-  AuthPortalsList,
-  AuthPortalsListRequestSchema,
-  AuthPortalsListResponseSchema,
-  AuthPortalsLoginSettingsGetResponseSchema,
-  AuthPortalsLoginSettingsUpdate,
-  AuthPortalsLoginSettingsUpdateRequestSchema,
-  AuthPortalsPut,
-  AuthPortalsPutRequestSchema,
-  AuthPortalsPutResponseSchema,
-  AuthPortalsRoutesPut,
-  AuthPortalsRoutesPutRequestSchema,
-  AuthPortalsRoutesPutResponseSchema,
-  AuthServiceInstancesProvision,
-  AuthServiceInstancesProvisionRequestSchema,
-  AuthServiceInstancesProvisionResponseSchema,
-  AuthSessionsRevoke,
-  AuthSessionsRevokeRequestSchema,
-  AuthSessionsRevokeResponseSchema,
-  AuthUserIdentitiesList,
-} from "../../.trellis/ts/apis/auth/mod.ts";
-import { EventLogQuery } from "../../.trellis/ts/apis/eventlog/mod.ts";
-import { HealthQuery } from "../../.trellis/ts/apis/health/mod.ts";
-import { JobsQuery } from "../../.trellis/ts/apis/jobs/mod.ts";
-import {
-  StateAdminDelete,
-  StateAdminDeleteRequestSchema,
-  StateAdminDeleteResponseSchema,
-  StateAdminGet,
-  StateAdminGetRequestSchema,
-  StateAdminGetResponseSchema,
-  StateAdminList,
-  StateAdminListRequestSchema,
-  StateAdminListResponseSchema,
-} from "../../.trellis/ts/apis/state/mod.ts";
+import { apis, participants } from "../../trellis/index.js";
+
 import type { Static, TSchema } from "typebox";
 
-import { participant as adminParticipant } from "../../.trellis/ts/participants/test-admin/mod.ts";
-export { adminParticipant };
+export const adminParticipant = participants.testAdmin.participant;
 
 export const ADMIN_USERNAME = "admin";
 export const ADMIN_PARTICIPANT = {
-  id: adminParticipant.id,
-  artifactDigest: adminParticipant.digest,
+  id: participants.testAdmin.participant.id,
+  artifactDigest: participants.testAdmin.participant.digest,
 } as const;
 
-export type AdminClient = CallerRuntime<typeof adminParticipant>;
+export type AdminClient = CallerRuntime<
+  typeof participants.testAdmin.participant
+>;
 
 function adminMethod<const I extends TSchema, const O extends TSchema>(
   input: I,
@@ -110,125 +31,125 @@ function adminMethod<const I extends TSchema, const O extends TSchema>(
 /** @internal Concrete Auth RPCs available to the shared test host. */
 export const adminMethods = {
   authCapabilityGroupsPut: adminMethod(
-    AuthCapabilityGroupsPutRequestSchema,
-    AuthCapabilityGroupsPutResponseSchema,
+    apis.auth.AuthCapabilityGroupsPutRequestSchema,
+    apis.auth.AuthCapabilityGroupsPutResponseSchema,
     (client, input) => client.authCapabilityGroupsPut(input).orThrow(),
   ),
   authConnectionsList: adminMethod(
-    AuthConnectionsListRequestSchema,
-    AuthConnectionsListResponseSchema,
+    apis.auth.AuthConnectionsListRequestSchema,
+    apis.auth.AuthConnectionsListResponseSchema,
     (client, input) => client.authConnectionsList(input).orThrow(),
   ),
   authPortalsGrantOverridesRemove: adminMethod(
-    AuthPortalsGrantOverridesRemoveRequestSchema,
-    AuthPortalsGrantOverridesRemoveResponseSchema,
+    apis.auth.AuthPortalsGrantOverridesRemoveRequestSchema,
+    apis.auth.AuthPortalsGrantOverridesRemoveResponseSchema,
     (client, input) => client.authPortalsGrantOverridesRemove(input).orThrow(),
   ),
   authPortalsGrantOverridesPut: adminMethod(
-    AuthPortalsGrantOverridesPutRequestSchema,
-    AuthPortalsGrantOverridesPutResponseSchema,
+    apis.auth.AuthPortalsGrantOverridesPutRequestSchema,
+    apis.auth.AuthPortalsGrantOverridesPutResponseSchema,
     (client, input) => client.authPortalsGrantOverridesPut(input).orThrow(),
   ),
   authPortalsGet: adminMethod(
-    AuthPortalsGetRequestSchema,
-    AuthPortalsGetResponseSchema,
+    apis.auth.AuthPortalsGetRequestSchema,
+    apis.auth.AuthPortalsGetResponseSchema,
     (client, input) => client.authPortalsGet(input).orThrow(),
   ),
   authPortalsList: adminMethod(
-    AuthPortalsListRequestSchema,
-    AuthPortalsListResponseSchema,
+    apis.auth.AuthPortalsListRequestSchema,
+    apis.auth.AuthPortalsListResponseSchema,
     (client, input) => client.authPortalsList(input).orThrow(),
   ),
   authPortalsLoginSettingsUpdate: adminMethod(
-    AuthPortalsLoginSettingsUpdateRequestSchema,
-    AuthPortalsLoginSettingsGetResponseSchema,
+    apis.auth.AuthPortalsLoginSettingsUpdateRequestSchema,
+    apis.auth.AuthPortalsLoginSettingsGetResponseSchema,
     (client, input) => client.authPortalsLoginSettingsUpdate(input).orThrow(),
   ),
   authPortalsPut: adminMethod(
-    AuthPortalsPutRequestSchema,
-    AuthPortalsPutResponseSchema,
+    apis.auth.AuthPortalsPutRequestSchema,
+    apis.auth.AuthPortalsPutResponseSchema,
     (client, input) => client.authPortalsPut(input).orThrow(),
   ),
   authPortalsRoutesPut: adminMethod(
-    AuthPortalsRoutesPutRequestSchema,
-    AuthPortalsRoutesPutResponseSchema,
+    apis.auth.AuthPortalsRoutesPutRequestSchema,
+    apis.auth.AuthPortalsRoutesPutResponseSchema,
     (client, input) => client.authPortalsRoutesPut(input).orThrow(),
   ),
   authDevicesProvision: adminMethod(
-    AuthDevicesProvisionRequestSchema,
-    AuthDevicesProvisionResponseSchema,
+    apis.auth.AuthDevicesProvisionRequestSchema,
+    apis.auth.AuthDevicesProvisionResponseSchema,
     (client, input) => client.authDevicesProvision(input).orThrow(),
   ),
   stateAdminDelete: adminMethod(
-    StateAdminDeleteRequestSchema,
-    StateAdminDeleteResponseSchema,
+    apis.state.StateAdminDeleteRequestSchema,
+    apis.state.StateAdminDeleteResponseSchema,
     (client, input) => client.stateAdminDelete(input).orThrow(),
   ),
   stateAdminGet: adminMethod(
-    StateAdminGetRequestSchema,
-    StateAdminGetResponseSchema,
+    apis.state.StateAdminGetRequestSchema,
+    apis.state.StateAdminGetResponseSchema,
     (client, input) => client.stateAdminGet(input).orThrow(),
   ),
   stateAdminList: adminMethod(
-    StateAdminListRequestSchema,
-    StateAdminListResponseSchema,
+    apis.state.StateAdminListRequestSchema,
+    apis.state.StateAdminListResponseSchema,
     (client, input) => client.stateAdminList(input).orThrow(),
   ),
   authDeploymentsCreate: adminMethod(
-    AuthDeploymentsCreateRequestSchema,
-    AuthDeploymentsCreateResponseSchema,
+    apis.auth.AuthDeploymentsCreateRequestSchema,
+    apis.auth.AuthDeploymentsCreateResponseSchema,
     (client, input) => client.authDeploymentsCreate(input).orThrow(),
   ),
   authDeploymentAuthorityPlan: adminMethod(
-    AuthDeploymentAuthorityPlanRequestSchema,
-    AuthDeploymentAuthorityPlanResponseSchema,
+    apis.auth.AuthDeploymentAuthorityPlanRequestSchema,
+    apis.auth.AuthDeploymentAuthorityPlanResponseSchema,
     (client, input) => client.authDeploymentAuthorityPlan(input).orThrow(),
   ),
   authDeploymentAuthorityAcceptUpdate: adminMethod(
-    AuthDeploymentAuthorityAcceptUpdateRequestSchema,
-    AuthDeploymentAuthorityAcceptUpdateResponseSchema,
+    apis.auth.AuthDeploymentAuthorityAcceptUpdateRequestSchema,
+    apis.auth.AuthDeploymentAuthorityAcceptUpdateResponseSchema,
     (client, input) =>
       client.authDeploymentAuthorityAcceptUpdate(input).orThrow(),
   ),
   authDeploymentAuthorityAcceptMigration: adminMethod(
-    AuthDeploymentAuthorityAcceptMigrationRequestSchema,
-    AuthDeploymentAuthorityAcceptMigrationResponseSchema,
+    apis.auth.AuthDeploymentAuthorityAcceptMigrationRequestSchema,
+    apis.auth.AuthDeploymentAuthorityAcceptMigrationResponseSchema,
     (client, input) =>
       client.authDeploymentAuthorityAcceptMigration(input).orThrow(),
   ),
   authDeploymentAuthorityList: adminMethod(
-    AuthDeploymentAuthorityListRequestSchema,
-    AuthDeploymentAuthorityListResponseSchema,
+    apis.auth.AuthDeploymentAuthorityListRequestSchema,
+    apis.auth.AuthDeploymentAuthorityListResponseSchema,
     (client, input) => client.authDeploymentAuthorityList(input).orThrow(),
   ),
   authDeploymentAuthorityReconcile: adminMethod(
-    AuthDeploymentAuthorityReconcileRequestSchema,
-    AuthDeploymentAuthorityReconcileResponseSchema,
+    apis.auth.AuthDeploymentAuthorityReconcileRequestSchema,
+    apis.auth.AuthDeploymentAuthorityReconcileResponseSchema,
     (client, input) => client.authDeploymentAuthorityReconcile(input).orThrow(),
   ),
   authDeploymentAuthorityGet: adminMethod(
-    AuthDeploymentAuthorityGetRequestSchema,
-    AuthDeploymentAuthorityGetResponseSchema,
+    apis.auth.AuthDeploymentAuthorityGetRequestSchema,
+    apis.auth.AuthDeploymentAuthorityGetResponseSchema,
     (client, input) => client.authDeploymentAuthorityGet(input).orThrow(),
   ),
   authServiceInstancesProvision: adminMethod(
-    AuthServiceInstancesProvisionRequestSchema,
-    AuthServiceInstancesProvisionResponseSchema,
+    apis.auth.AuthServiceInstancesProvisionRequestSchema,
+    apis.auth.AuthServiceInstancesProvisionResponseSchema,
     (client, input) => client.authServiceInstancesProvision(input).orThrow(),
   ),
   authDeploymentAuthorityPlansList: adminMethod(
-    AuthDeploymentAuthorityPlansListRequestSchema,
-    AuthDeploymentAuthorityPlansListResponseSchema,
+    apis.auth.AuthDeploymentAuthorityPlansListRequestSchema,
+    apis.auth.AuthDeploymentAuthorityPlansListResponseSchema,
     (client, input) => client.authDeploymentAuthorityPlansList(input).orThrow(),
   ),
   authDeploymentAuthorityReject: adminMethod(
-    AuthDeploymentAuthorityRejectRequestSchema,
-    AuthDeploymentAuthorityRejectResponseSchema,
+    apis.auth.AuthDeploymentAuthorityRejectRequestSchema,
+    apis.auth.AuthDeploymentAuthorityRejectResponseSchema,
     (client, input) => client.authDeploymentAuthorityReject(input).orThrow(),
   ),
   authSessionsRevoke: adminMethod(
-    AuthSessionsRevokeRequestSchema,
-    AuthSessionsRevokeResponseSchema,
+    apis.auth.AuthSessionsRevokeRequestSchema,
+    apis.auth.AuthSessionsRevokeResponseSchema,
     (client, input) => client.authSessionsRevoke(input).orThrow(),
   ),
 } as const;

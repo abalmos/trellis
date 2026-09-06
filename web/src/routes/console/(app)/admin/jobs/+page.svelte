@@ -2,13 +2,7 @@
   import { resolve } from "$lib/console_paths";
   import { page } from "$app/state";
   import { onMount } from "svelte";
-  import type {
-    JobsListServicesOutput,
-    JobsMetricsInput,
-    JobsMetricsOutput,
-    JobsQueryInput,
-    JobsQueryOutput,
-  } from "@trellis/apis/trellis.jobs";
+  import { type apis } from "trellis-web-generated";
   import EmptyState from "$lib/components/EmptyState.svelte";
   import BulkActionBar from "$lib/components/BulkActionBar.svelte";
   import BulkResult from "$lib/components/BulkResult.svelte";
@@ -29,10 +23,10 @@
   import { bulkExpectedCount, bulkTargetDetails, runBulk, toggleAll, toggleId } from "$lib/bulk.ts";
   import { getTrellis } from "$lib/trellis";
 
-  type Job = JobsQueryOutput["entries"][number];
+  type Job = apis.jobs.JobsQueryOutput["entries"][number];
   type JobState = Job["state"];
-  type ServiceInfo = JobsListServicesOutput["entries"][number];
-  type MetricsWindow = JobsMetricsInput["window"];
+  type ServiceInfo = apis.jobs.JobsListServicesOutput["entries"][number];
+  type MetricsWindow = apis.jobs.JobsMetricsInput["window"];
   type Focus = "running-risk" | "running" | "action" | "completed" | "failed" | "dead" | "backlog";
   type JobPathname = `/admin/jobs/${string}` & {};
 
@@ -55,7 +49,7 @@
   let services = $state.raw<ServiceInfo[]>([]);
   let jobs = $state.raw<Job[]>([]);
   let jobCount = $state(0);
-  let metrics = $state.raw<JobsMetricsOutput | null>(null);
+  let metrics = $state.raw<apis.jobs.JobsMetricsOutput | null>(null);
   let metricsWindow = $state<MetricsWindow>("1h");
   let selectedJobType = $state<string | null>(null);
   let focus = $state<Focus>(asFocus(page.url.searchParams.get("focus")) ?? "running-risk");
@@ -129,7 +123,7 @@
     return null;
   }
 
-  function resolveMetricsStep(window: MetricsWindow): JobsMetricsInput["step"] {
+  function resolveMetricsStep(window: MetricsWindow): apis.jobs.JobsMetricsInput["step"] {
     if (window === "15m" || window === "1h") return "1m";
     if (window === "6h") return "5m";
     if (window === "24h") return "15m";
@@ -199,7 +193,7 @@
     return "Pending and retrying work, oldest first";
   }
 
-  function buildQuery(): JobsQueryInput {
+  function buildQuery(): apis.jobs.JobsQueryInput {
     return {
       limit: 40,
       state: focusStates(focus),

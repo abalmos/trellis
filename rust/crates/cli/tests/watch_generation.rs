@@ -49,7 +49,7 @@ fn watch_recovers_after_invalid_dependency_change() {
     fs::write(root.join("deno.json"), "{}").unwrap();
     fs::write(
         root.join("trellis.toml"),
-        "format = 1\n[apis.\"example.b@v1\"]\nversion = \"1.0.0\"\npath = \"dependency\"\n",
+        "format = 1\nname = \"watch-trellis\"\n[apis.\"example.b@v1\"]\nversion = \"1.0.0\"\npath = \"dependency\"\n",
     )
     .unwrap();
     fs::write(dependency.join("trellis.toml"), "format = 1\n").unwrap();
@@ -73,7 +73,7 @@ api "example.b@v1" {
 }
 "#;
     fs::write(dependency.join("contract.trellis"), source).unwrap();
-    fs::write(root.join("consumer.ts"), "import type { StatusGetOutput } from './.trellis/ts/apis/example-b/mod.ts';\nconst value: StatusGetOutput = { ok: true };\nconsole.log(value.ok);\n").unwrap();
+    fs::write(root.join("consumer.ts"), "import type { apis } from './trellis/index.js';\nconst value: apis.exampleB.StatusGetOutput = { ok: true };\nconsole.log(value.ok);\n").unwrap();
     let errors = root.join("watch-errors.log");
     let mut watcher = ChildGuard(
         Command::new(env!("CARGO_BIN_EXE_trellis"))
@@ -103,7 +103,7 @@ api "example.b@v1" {
         "invalid authoring destroyed usable output"
     );
 
-    fs::write(root.join("consumer.ts"), "import type { StatusGetOutput } from './.trellis/ts/apis/example-b/mod.ts';\nconst value: StatusGetOutput = { ok: true, detail: 'recovered' };\nconsole.log(value.detail.toUpperCase());\n").unwrap();
+    fs::write(root.join("consumer.ts"), "import type { apis } from './trellis/index.js';\nconst value: apis.exampleB.StatusGetOutput = { ok: true, detail: 'recovered' };\nconsole.log(value.detail.toUpperCase());\n").unwrap();
     assert!(!check(root, &config), "new field must require regeneration");
     fs::write(
         dependency.join("contract.trellis"),
@@ -112,4 +112,6 @@ api "example.b@v1" {
     .unwrap();
     wait_for(|| check(root, &config));
     assert!(watcher.0.try_wait().unwrap().is_none());
+    assert!(!root.join(".trellis").exists());
+    assert!(!dependency.join(".trellis").exists());
 }

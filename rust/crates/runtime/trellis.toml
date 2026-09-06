@@ -1,4 +1,5 @@
 format = 1
+name = "trellis-runtime-generated"
 default-registry = "trellis"
 
 [registries.trellis]

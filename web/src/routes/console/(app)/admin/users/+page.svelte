@@ -1,7 +1,7 @@
 <script lang="ts">
   import { ulid } from "ulid";
   import { isErr } from "@qlever-llc/result";
-  import type { AuthUsersListOutput } from "@trellis/apis/trellis.auth";
+  import { type apis } from "trellis-web-generated";
   import { resolve } from "$lib/console_paths";
   import { onMount } from "svelte";
   import ActionMenu from "$lib/components/ActionMenu.svelte";
@@ -18,7 +18,7 @@
   const trellis = getTrellis();
   const notifications = getNotifications();
 
-  type UserView = AuthUsersListOutput["entries"][number];
+  type UserView = apis.auth.AuthUsersListOutput["entries"][number];
   type IdentityView = { provider: string; subject: string; displayName?: string | null; email?: string | null };
   type PasswordResetResult = {
     name: string | null;

@@ -1,13 +1,7 @@
 <script lang="ts">
   import { ulid } from "ulid";
   import { isErr } from "@qlever-llc/result";
-  import type {
-    AuthCapabilitiesListOutput,
-    AuthCapabilityGroupsListOutput,
-    AuthPortalsGrantOverridesListOutput,
-    AuthPortalsGrantOverridesPutInput,
-    AuthPortalsListOutput,
-  } from "@trellis/apis/trellis.auth";
+  import { type apis } from "trellis-web-generated";
   import { goto } from "$app/navigation";
   import { resolve } from "$lib/console_paths";
   import { page } from "$app/state";
@@ -23,10 +17,10 @@
   import { hasDuplicateRoleMapping } from "$lib/portal-grants";
   import { getTrellis } from "$lib/trellis";
 
-  type Capability = AuthCapabilitiesListOutput["entries"][number];
-  type Group = AuthCapabilityGroupsListOutput["entries"][number];
-  type Portal = AuthPortalsListOutput["entries"][number];
-  type Policy = AuthPortalsGrantOverridesListOutput["entries"][number];
+  type Capability = apis.auth.AuthCapabilitiesListOutput["entries"][number];
+  type Group = apis.auth.AuthCapabilityGroupsListOutput["entries"][number];
+  type Portal = apis.auth.AuthPortalsListOutput["entries"][number];
+  type Policy = apis.auth.AuthPortalsGrantOverridesListOutput["entries"][number];
   type RoleDraft = {
     id: string;
     providerId: string;
@@ -163,7 +157,7 @@
         portalId, participantId: participantId.trim(), directCapabilities: directCapabilities.toSorted(),
         capabilityGroupKeys: capabilityGroupKeys.toSorted(), roleMappings: mappings,
         expectedVersion: existing?.version ?? null, idempotencyKey: ulid(),
-      } satisfies AuthPortalsGrantOverridesPutInput;
+      } satisfies apis.auth.AuthPortalsGrantOverridesPutInput;
       const response = await trellis.authPortalsGrantOverridesPut(input).take();
       if (isErr(response)) throw new Error(errorMessage(response));
       await goto(resolve("/admin/grants"));

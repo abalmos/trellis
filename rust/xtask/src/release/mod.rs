@@ -332,7 +332,7 @@ mod tests {
 
     #[test]
     fn rewrite_cargo_manifest_preserves_non_release_sentinel_version() {
-        let original = "[package]\nname = \"trellis-sdk-console\"\nversion = \"0.0.0\"\n\n[dependencies]\ntrellis-rs = { path = \"../trellis\", version = \"0.8.2\" }\n";
+        let original = "[package]\nname = \"console-trellis\"\nversion = \"0.0.0\"\n\n[dependencies]\ntrellis-rs = { version = \"0.8.2\" }\n";
         let updated = rewrite_cargo_manifest_versions(
             original,
             "0.8.2",
@@ -345,8 +345,8 @@ mod tests {
     }
 
     #[test]
-    fn rewrite_cargo_manifest_for_release_updates_generated_sdk_dependencies() {
-        let original = "[workspace.package]\nversion = \"0.8.2\"\n\n[dependencies]\ntrellis-rs = { path = \"../trellis\", version = \"0.8.2\" }\ntrellis-sdk-state = { path = \"../.trellis/rust/apis/state\", version = \"0.8.2\" }\n";
+    fn rewrite_cargo_manifest_for_release_preserves_local_generated_dependency_versions() {
+        let original = "[workspace.package]\nversion = \"0.8.2\"\n\n[dependencies]\ntrellis-rs = { version = \"0.8.2\" }\nconsole-trellis = { path = \"trellis\", version = \"0.0.0\" }\n";
         let updated = rewrite_cargo_manifest_versions_for_release(
             original,
             "0.8.2-rc.1",
@@ -355,6 +355,7 @@ mod tests {
         )
         .expect("rewrite cargo release versions");
         assert!(updated.contains("0.8.2-rc.1"));
+        assert!(updated.contains("console-trellis = { path = \"trellis\", version = \"0.0.0\" }"));
     }
 
     #[test]

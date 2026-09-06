@@ -1,10 +1,7 @@
 <script lang="ts">
   import { ulid } from "ulid";
   import { isErr } from "@qlever-llc/result";
-  import type {
-    AuthCapabilitiesListOutput,
-    AuthUsersCreateInput,
-  } from "@trellis/apis/trellis.auth";
+  import { type apis } from "trellis-web-generated";
   import { resolve } from "$lib/console_paths";
   import { onMount } from "svelte";
   import ChoiceRow from "$lib/components/ChoiceRow.svelte";
@@ -17,7 +14,7 @@
   import { getNotifications } from "$lib/notifications.svelte";
   import { getTrellis } from "$lib/trellis";
 
-  type CapabilityView = AuthCapabilitiesListOutput["entries"][number] & {
+  type CapabilityView = apis.auth.AuthCapabilitiesListOutput["entries"][number] & {
     key: string;
     source: "platform" | "contract";
     contractId: string | null;
@@ -115,8 +112,8 @@
     return { href };
   }
 
-  function buildCreateInput(_username: string): AuthUsersCreateInput {
-    const input: AuthUsersCreateInput = {
+  function buildCreateInput(_username: string): apis.auth.AuthUsersCreateInput {
+    const input: apis.auth.AuthUsersCreateInput = {
       email: null,
       idempotencyKey: ulid(),
       image: null,

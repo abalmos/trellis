@@ -48,30 +48,7 @@ const config = {
         rootDir,
         "../ts/packages/trellis/health.ts",
       ),
-      "@trellis/apis/trellis.auth": resolve(
-        rootDir,
-        ".trellis/ts/apis/auth/mod.ts",
-      ),
-      "@trellis/apis/trellis.core": resolve(
-        rootDir,
-        ".trellis/ts/apis/trellis-core/mod.ts",
-      ),
-      "@trellis/apis/trellis.eventlog": resolve(
-        rootDir,
-        ".trellis/ts/apis/eventlog/mod.ts",
-      ),
-      "@trellis/apis/trellis.health": resolve(
-        rootDir,
-        ".trellis/ts/apis/health/mod.ts",
-      ),
-      "@trellis/apis/trellis.jobs": resolve(
-        rootDir,
-        ".trellis/ts/apis/jobs/mod.ts",
-      ),
-      "@trellis/apis/trellis.state": resolve(
-        rootDir,
-        ".trellis/ts/apis/state/mod.ts",
-      ),
+      "trellis-web-generated": resolve(rootDir, "trellis"),
       "@qlever-llc/trellis/service/deno": resolve(
         rootDir,
         "../ts/packages/trellis/service/deno.ts",

@@ -373,27 +373,29 @@ Do not add commands like `trellis build project` with ambiguous behavior.
 ### Project API dependency files
 
 The CLI project model reads `trellis.toml` API dependencies keyed by stable API
-ID, with a Semantic Version requirement and exactly one source: a local
-canonical artifact path or a named OCI registry. Registry configuration is a
-named host/repository prefix with an optional project default. `trellis.lock`
-records exact release and semantic API digests; remote entries also record the
-exact OCI manifest digest. Release and OCI distribution identity remain package
-metadata; runtime evidence remains stable API ID plus semantic digest.
+ID, with a Semantic Version requirement and exactly one source: a local Trellis
+source project root or a named OCI registry. Registry configuration is a named
+host/repository prefix with an optional project default. `trellis.lock` records
+exact release and semantic API digests; remote entries also record the exact OCI
+manifest digest. Release and OCI distribution identity remain package metadata;
+runtime evidence remains stable API ID plus semantic digest.
 
 `trellis add`, `trellis rm`, and `trellis update` resolve local paths or the
 highest matching Semantic Version OCI tag and write an exact lock. Remote
 artifacts are canonical `trellis.api.v1` JSON layers in deterministic OCI image
 manifests. `trellis install` is lock-stable: remote installs pull by OCI digest,
 validate the manifest, layer, API identity, release, and semantic digest, and
-use a content-addressed global cache. It then follows the same consumer-local
-SDK generation path as local dependencies under disposable `.trellis/` output.
-It never executes a dependency producer's source and never changes project
-files. `trellis publish` publishes project-owned canonical APIs, reuses
-Docker-compatible credentials, keeps release tags immutable, requires
-monotonically increasing releases, and uses `compare_api_replacement` to reject
-incompatible releases under an existing stable API ID. Dependency SDKs are
-generated before the consumer's own participant source is evaluated, while
-participant evidence continues to pin only API ID plus semantic digest.
+use a content-addressed global cache. Validated API values from that cache and
+direct local API compilation feed the same compiler and package renderers. Local
+dependencies contribute only requested APIs, without recursively resolving
+producer participants or manifests. Tooling never executes source-language
+modules or edits the consumer's language manifest. `trellis publish` consumes
+compiled project-owned API values directly, reuses Docker-compatible
+credentials, keeps release tags immutable, requires monotonically increasing
+releases, and uses `compare_api_replacement` to reject incompatible releases
+under an existing stable API ID. All canonical values stay in memory through
+resolution, compilation, and rendering. Participant evidence continues to pin
+only API ID plus semantic digest.
 
 ## IDL boundary
 
@@ -403,14 +405,28 @@ The developer-facing CLI boundary is native Trellis IDL.
 - `trellis-idl` compiles all project sources before outputs are replaced
 - `trellis-protocol` validates and normalizes canonical API and participant
   artifacts and remains authoritative for semantic digests and resolution
-- local dependencies compile from source; registry dependencies use exact
-  lock-verified artifacts under `.trellis/apis`
-- generated TypeScript and Rust SDKs are private project-local outputs under
-  `.trellis/ts` and `.trellis/rust`
+- local dependencies compile from source; tooling supplies exact lock-verified
+  registry API values from the global cache to the compiler
+- `format = 1` selects the project manifest format; `name` identifies the local
+  generated package and is required only when a package is generated
+- root `Cargo.toml`, `package.json`, `deno.json`, and `deno.jsonc` markers
+  select languages; a single language defaults to `trellis/` with optional
+  `[generate].output`, while multiple languages require explicit
+  `[generate.rust].output` and `[generate.typescript].output`
+- each language produces one ordinary package at version `0.0.0`, with `apis`
+  and `participants` modules, never separate API or participant packages
+- TypeScript output is executable ESM JavaScript plus declarations; native Oxc
+  emission requires no Node, Deno, TypeScript, DNT, or repository build tooling
+- generated packages declare published runtime dependencies matching the CLI;
+  local runtime substitutions belong to ecosystem overrides, not `trellis.toml`
 - `trellis generate` is offline and never executes source-language modules
-- a failed compile preserves the last successful generated outputs
+- failed compilation or rendering preserves last-good output; short-lived
+  staging and backups protect publication without a persistent generation index
 
-`.trellis/artifacts` contains owned canonical API and participant artifacts.
+Each generated package retains tooling JSON at `artifacts/apis` and
+`artifacts/participants`, including referenced API evidence. File-based
+deployment continues to consume these artifacts. Source-project deployment and
+authentication redesign remain deferred.
 
 ## Implementation
 
