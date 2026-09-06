@@ -1,5 +1,5 @@
 import { FileAuthorizationContextStore } from "@qlever-llc/trellis/auth/file";
-import { TrellisService } from "@qlever-llc/trellis/service/deno";
+import { TrellisService } from "@qlever-llc/trellis/service";
 import { participants } from "orders-trellis";
 import { createOrder } from "./service.ts";
 

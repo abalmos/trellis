@@ -1,8 +1,8 @@
-// Generated from ./ts/packages/trellis/.trellis/generated/protocol/apis/trellis.core@v1.json
+// Generated from trellis.core@v1
 
 export const API_ID = "trellis.core@v1" as const;
 export const API_DIGEST =
-  "5hQQ8APSyxcdMSl6BgaNNjskL-B4sWTabNslL35hT_8" as const;
+  "WKuZkcLP-PPVvg5vymwb6n-QTpb43djf3DokC6UNqKE" as const;
 export const API = {
   "capabilities": {
     "trellis.core::authority.read": {
@@ -17,31 +17,14 @@ export const API = {
       }],
     },
   },
-  "consent": {
-    "trellis.core::authority.read": {
-      "consequence": "",
-      "description": "Inspect native participant surface authority.",
-      "title": "Read participant authority",
-    },
-  },
   "description":
     "Trellis runtime RPCs available to all connected participants.",
   "displayName": "Trellis Core",
-  "docs": {
-    "markdown":
-      "Exposes runtime bindings and surface availability checks used by platform participants.",
-    "summary": "Runtime authority and binding APIs.",
-  },
   "errors": { "UnexpectedError": {}, "ValidationError": {} },
   "format": "trellis.api.v1",
   "id": "trellis.core@v1",
   "rpc": {
     "Trellis.Surface.Status": {
-      "docs": {
-        "markdown":
-          "Reports capability and deployment authority status for a contract-owned surface.",
-        "summary": "Inspect surface availability.",
-      },
       "errors": ["UnexpectedError", "ValidationError"],
       "input": { "schema": "TrellisSurfaceStatusRequest" },
       "output": { "schema": "TrellisSurfaceStatusResponse" },
@@ -87,19 +70,14 @@ export const API = {
               },
               "state": { "const": "available", "type": "string" },
             },
-            "required": ["state", "liveImplementer", "runtime"],
+            "required": ["liveImplementer", "runtime", "state"],
             "type": "object",
           }, {
             "properties": {
-              "reason": {
-                "anyOf": [{
-                  "const": "authority_unavailable",
-                  "type": "string",
-                }],
-              },
+              "reason": { "const": "authority_unavailable", "type": "string" },
               "state": { "const": "unavailable", "type": "string" },
             },
-            "required": ["state", "reason"],
+            "required": ["reason", "state"],
             "type": "object",
           }, {
             "properties": {
@@ -109,14 +87,14 @@ export const API = {
               },
               "state": { "const": "unauthorized", "type": "string" },
             },
-            "required": ["state", "missingCapabilities"],
+            "required": ["missingCapabilities", "state"],
             "type": "object",
           }, {
             "properties": {
               "contractId": { "minLength": 1, "type": "string" },
               "state": { "const": "unknown_contract", "type": "string" },
             },
-            "required": ["state", "contractId"],
+            "required": ["contractId", "state"],
             "type": "object",
           }, {
             "properties": {
@@ -125,12 +103,63 @@ export const API = {
               "state": { "const": "unknown_surface", "type": "string" },
               "surface": { "minLength": 1, "type": "string" },
             },
-            "required": ["state", "contractId", "kind", "surface"],
+            "required": ["contractId", "kind", "state", "surface"],
             "type": "object",
           }],
         },
       },
       "required": ["status"],
+      "type": "object",
+    },
+    "TrellisSurfaceStatusResponsestatus1": {
+      "properties": {
+        "liveImplementer": { "type": "boolean" },
+        "runtime": {
+          "anyOf": [{ "const": "live", "type": "string" }, {
+            "const": "no_live_implementer",
+            "type": "string",
+          }, { "const": "disabled", "type": "string" }],
+        },
+        "state": { "const": "available", "type": "string" },
+      },
+      "required": ["liveImplementer", "runtime", "state"],
+      "type": "object",
+    },
+    "TrellisSurfaceStatusResponsestatus2": {
+      "properties": {
+        "reason": { "const": "authority_unavailable", "type": "string" },
+        "state": { "const": "unavailable", "type": "string" },
+      },
+      "required": ["reason", "state"],
+      "type": "object",
+    },
+    "TrellisSurfaceStatusResponsestatus3": {
+      "properties": {
+        "missingCapabilities": {
+          "items": { "type": "string" },
+          "type": "array",
+        },
+        "state": { "const": "unauthorized", "type": "string" },
+      },
+      "required": ["missingCapabilities", "state"],
+      "type": "object",
+    },
+    "TrellisSurfaceStatusResponsestatus4": {
+      "properties": {
+        "contractId": { "minLength": 1, "type": "string" },
+        "state": { "const": "unknown_contract", "type": "string" },
+      },
+      "required": ["contractId", "state"],
+      "type": "object",
+    },
+    "TrellisSurfaceStatusResponsestatus5": {
+      "properties": {
+        "contractId": { "minLength": 1, "type": "string" },
+        "kind": { "minLength": 1, "type": "string" },
+        "state": { "const": "unknown_surface", "type": "string" },
+        "surface": { "minLength": 1, "type": "string" },
+      },
+      "required": ["contractId", "kind", "state", "surface"],
       "type": "object",
     },
   },

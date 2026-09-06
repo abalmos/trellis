@@ -1,6 +1,6 @@
 // Generated from trellis.auth@v1
-import type { SerializableErrorData } from "@qlever-llc/trellis";
-import { TrellisError } from "@qlever-llc/trellis";
+import type { SerializableErrorData } from "../../../generated.ts";
+import { TrellisError } from "../../../generated.ts";
 import { AuthErrorDetailsSchema } from "./schemas.ts";
 
 export type AuthCapabilitiesListInput = {

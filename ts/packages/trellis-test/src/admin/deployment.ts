@@ -1,8 +1,4 @@
-import { createAuth } from "@qlever-llc/trellis";
-import {
-  type ParticipantPresentation,
-  participantPresentation,
-} from "@qlever-llc/trellis/participant";
+import { createAuth, isJsonValue, type JsonValue } from "@qlever-llc/trellis";
 import { ulid } from "ulid";
 
 import { generateSessionSeed } from "../control_plane_config.ts";
@@ -20,6 +16,42 @@ import type {
   TrellisTestAdminRpcMethod,
 } from "./methods.ts";
 
+type JsonObject = Record<string, JsonValue>;
+
+// Temporary private projection until source-project deployment replaces these calls.
+function checkedObject(value: Readonly<Record<string, unknown>>): JsonObject {
+  if (!Object.values(value).every(isJsonValue)) {
+    throw new Error(
+      "Generated participant evidence must contain only JSON values",
+    );
+  }
+  return value as JsonObject;
+}
+
+function participantPresentation(participant: TrellisTestParticipantLike) {
+  const api = checkedObject(participant.api);
+  const artifact = checkedObject(participant.artifact);
+  const implementsApi = artifact.implements &&
+      typeof artifact.implements === "object" &&
+      !Array.isArray(artifact.implements) &&
+      "self" in artifact.implements &&
+      artifact.implements.self &&
+      typeof artifact.implements.self === "object" &&
+      !Array.isArray(artifact.implements.self)
+    ? artifact.implements.self.api
+    : undefined;
+  if (api.id !== implementsApi || artifact.id !== participant.id) {
+    throw new Error(
+      "Generated participant identity does not match its artifacts",
+    );
+  }
+  return {
+    api,
+    participant: artifact,
+    referencedApis: participant.referencedApis.map(checkedObject),
+  };
+}
+
 export type AdminDeploymentRpc = <M extends TrellisTestAdminRpcMethod>(
   method: M,
   input: AdminRpcInput<M>,
@@ -32,7 +64,7 @@ export type AdminDeploymentContext = {
   createdDeployments: Map<string, Promise<void>>;
   deploymentIds: Map<string, string>;
   authorityIds: Map<string, string>;
-  protocolApis: Map<string, ParticipantPresentation["api"]>;
+  protocolApis: Map<string, JsonObject>;
   rpc: AdminDeploymentRpc;
 };
 
@@ -52,6 +84,7 @@ export async function createDeployment(
   args: {
     deployment?: string;
     kind?: "service" | "device";
+    reviewMode?: "none" | "required";
   } = {},
 ): Promise<void> {
   const deployment = args.deployment ?? context.defaultDeployment;
@@ -68,7 +101,7 @@ export async function createDeployment(
       participantId: null,
       portalId: null,
       requiresDeviceDelegation: false,
-      reviewMode: args.kind === "device" ? "none" : null,
+      reviewMode: args.kind === "device" ? args.reviewMode ?? "none" : null,
     });
     context.deploymentIds.set(deployment, created.deployment.deploymentId);
     context.createdDeployments.set(key, Promise.resolve());

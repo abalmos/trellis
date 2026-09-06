@@ -19,6 +19,8 @@ participant "test.admin" app {
     call rpc "Auth.DeploymentAuthority.Reject";
     call rpc "Auth.Deployments.Create";
     call rpc "Auth.Devices.Provision";
+    call rpc "Auth.DeviceUserAuthorities.Reviews.List";
+    call rpc "Auth.DeviceUserAuthorities.Reviews.Decide";
     call rpc "Auth.IdentityAuthority.List";
     call rpc "Auth.IdentityAuthority.Revoke";
     call rpc "Auth.Portals.Get";

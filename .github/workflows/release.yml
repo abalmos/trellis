@@ -206,6 +206,8 @@ jobs:
             CHANGELOG.md
             art
             conformance
+            demos/ts
+            demos/app
             ts
             rust
             scripts
@@ -297,7 +299,6 @@ jobs:
             ts/packages/result/npm
             ts/packages/trellis/npm
             ts/packages/trellis-svelte/npm
-            dist/npm
 
   build-cli:
     name: Build ${{ matrix.target }} CLI

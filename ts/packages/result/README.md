@@ -3,6 +3,10 @@
 Class-based `Result<T, E>` and `AsyncResult<T, E>` types for TypeScript,
 inspired by Rust.
 
+The npm package contains ESM JavaScript and TypeScript declarations. Use
+`import`; CommonJS output and `require()` support have intentionally been
+removed. JSR publication remains supported.
+
 Provides explicit error handling with method chaining and the `take()` pattern
 for early returns, without relying on exceptions.
 

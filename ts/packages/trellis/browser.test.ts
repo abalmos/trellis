@@ -22,8 +22,8 @@ import {
   ValidationError,
   type WatchEvent,
   type WatchOptions,
-} from "./browser.ts";
-import * as browser from "./browser.ts";
+} from "./index.ts";
+import * as browser from "./index.ts";
 
 const browserCspUnsafeSourcePattern = /\bnew\s+Function\b|\beval\s*\(/;
 
@@ -34,7 +34,7 @@ async function assertSourceFileCspSafe(path: string): Promise<void> {
 
 Deno.test("browser source avoids CSP-unsafe evaluation", async () => {
   await Promise.all([
-    assertSourceFileCspSafe("./browser.ts"),
+    assertSourceFileCspSafe("./index.ts"),
     assertSourceFileCspSafe("./client_connect.ts"),
     assertSourceFileCspSafe("./runtime_transport.ts"),
     assertSourceFileCspSafe("./telemetry/env.ts"),

@@ -5,7 +5,7 @@ import {
   operationAction,
   rpcAction,
   schema,
-} from "@qlever-llc/trellis";
+} from "../../../generated.ts";
 import * as Types from "./types.ts";
 import {
   EventLogConsumersInspectRequestSchema,

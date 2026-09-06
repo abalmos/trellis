@@ -17,6 +17,6 @@ This file is generated for AI agents and out-of-tree Trellis services.
 ## Consumer Vocabulary
 
 Declare selected actions in the local native `.trellis` participant's `use` block.
-- RPC `Orders.Create`: descriptor `OrdersCreate`, connected call `client.ordersCreate(input)`
+- RPC `Orders.Create`: descriptor `OrdersCreate`, connected call `client.rpc.orders.create(input)`
 
 The module's `API` value contains its canonical API metadata.

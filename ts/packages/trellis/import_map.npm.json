@@ -1,7 +1,0 @@
-{
-  "imports": {
-    "@qlever-llc/trellis": "./index.ts",
-    "@qlever-llc/trellis/errors": "./errors/index.ts",
-    "drizzle-orm": "npm:drizzle-orm@0.44.7"
-  }
-}

@@ -5,26 +5,18 @@
   "license": "Apache-2.0",
   "exports": {
     ".": "./index.ts",
+    "./generated": "./generated.ts",
     "./auth": "./auth.ts",
     "./auth/browser": "./auth/browser.ts",
     "./auth/file": "./auth/file.ts",
-    "./browser": "./browser.ts",
-    "./participant": "./participant.ts",
     "./device": "./device.ts",
-    "./device/deno": "./device/deno.ts",
-    "./jobs": "./jobs.ts",
     "./service": "./service/mod.ts",
-    "./service/drizzle": "./service/drizzle.ts",
-    "./service/deno": "./service/deno.ts",
-    "./service/node": "./service/node.ts",
     "./telemetry": "./telemetry.ts",
     "./errors": "./errors/index.ts"
   },
   "publish": {
     "exclude": [
       ".build/**",
-      "deno.npm.json",
-      "import_map.npm.json",
       "npm/**",
       "scripts/**",
       "tests/**",
@@ -34,9 +26,6 @@
       "**/*.api_check.ts",
       "!auth/protocol_wasm/**"
     ]
-  },
-  "imports": {
-    "drizzle-orm": "npm:drizzle-orm@0.44.7"
   },
   "tasks": {
     "build:npm": "deno task -c ../../deno.json protocol:wasm && deno run -A ./scripts/build_npm.ts",

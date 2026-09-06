@@ -1,12 +1,34 @@
-import { TrellisDevice } from "@qlever-llc/trellis";
-import { checkDeviceActivation } from "@qlever-llc/trellis/device/deno";
+import {
+  checkDeviceActivation,
+  TrellisDevice,
+} from "@qlever-llc/trellis/device";
 import { TransportError } from "@qlever-llc/trellis/errors";
 import chalk from "chalk";
+import { readFile, writeFile } from "node:fs/promises";
+import process from "node:process";
+import { createInterface } from "node:readline";
 import { ulid } from "ulid";
 import { participants } from "../trellis/index.js";
 import { renderCompactQr } from "../../shared/compact_qr.ts";
 
 const EVENT_WATCH_MS = 15_000;
+const terminal = createInterface({
+  input: process.stdin,
+  output: process.stdout,
+});
+
+const inputLines = terminal[Symbol.asyncIterator]();
+
+async function prompt(
+  message: string,
+  defaultValue = "",
+): Promise<string | null> {
+  process.stdout.write(
+    `${message}${defaultValue ? ` [${defaultValue}]` : ""}: `,
+  );
+  const line = await inputLines.next();
+  return line.done ? null : line.value || defaultValue;
+}
 const LIST_PAGE = { limit: 50, offset: 0 };
 
 async function main(): Promise<void> {
@@ -20,7 +42,7 @@ async function main(): Promise<void> {
     participantArtifactDigest,
     participantNeedsDigest,
     provisioningSecret,
-  ] = Deno.args;
+  ] = process.argv.slice(2);
   if (
     !trellisUrl || !rootSecret || !deploymentId || !instanceId ||
     !principalId || !participantId || !participantArtifactDigest ||
@@ -29,7 +51,7 @@ async function main(): Promise<void> {
     console.error(
       "Usage: deno task start <trellisUrl> <rootSecret> <deploymentId> <instanceId> <principalId> <participantId> <participantArtifactDigest> <participantNeedsDigest> [provisioningSecret]",
     );
-    Deno.exit(1);
+    process.exit(1);
   }
   const identity = {
     deploymentId,
@@ -70,7 +92,7 @@ async function main(): Promise<void> {
 
     while (true) {
       printMenu();
-      const selectedOption = prompt("Select option");
+      const selectedOption = await prompt("Select option");
       if (selectedOption === null) {
         return;
       }
@@ -166,7 +188,7 @@ async function runGuidedInspectionWizard(device: Device): Promise<void> {
     );
   });
   const selectedIndex =
-    Number(prompt("Inspection number", "1")?.trim() || "1") - 1;
+    Number((await prompt("Inspection number", "1"))?.trim() || "1") - 1;
   const selected = assignments[selectedIndex] ?? assignments[0];
 
   await device.state.selectedSite.put({
@@ -182,13 +204,14 @@ async function runGuidedInspectionWizard(device: Device): Promise<void> {
   await refreshSiteById(device, selected.siteId);
 
   console.info("Step 3: attach optional evidence.");
-  const evidencePath = prompt("Evidence file path, or Enter to skip")?.trim();
+  const evidencePath = (await prompt("Evidence file path, or Enter to skip"))
+    ?.trim();
   if (evidencePath) {
     await uploadEvidenceFile(device, evidencePath);
   }
 
   console.info("Step 4: generate the inspection report.");
-  const reportComment = prompt("Report comment")?.trim() ||
+  const reportComment = (await prompt("Report comment"))?.trim() ||
     "Guided field inspection completed.";
   await generateReportForInspection(
     device,
@@ -197,7 +220,7 @@ async function runGuidedInspectionWizard(device: Device): Promise<void> {
   );
 
   console.info("Step 5: save local draft notes.");
-  const notes = prompt("Draft notes")?.trim() ||
+  const notes = (await prompt("Draft notes"))?.trim() ||
     "Guided workflow notes captured from the field device.";
   await device.state.draftInspections.put(selected.inspectionId, {
     inspectionId: selected.inspectionId,
@@ -265,7 +288,7 @@ async function viewSelectedSite(device: Device): Promise<void> {
 }
 
 async function refreshSite(device: Device): Promise<void> {
-  const siteId = prompt("Site ID to refresh")?.trim();
+  const siteId = (await prompt("Site ID to refresh"))?.trim();
   if (!siteId) {
     console.info("Refresh skipped: site ID is required.");
     return;
@@ -298,13 +321,13 @@ async function refreshSiteById(device: Device, siteId: string): Promise<void> {
 }
 
 async function generateReport(device: Device): Promise<void> {
-  const inspectionId = prompt("Inspection ID")?.trim();
+  const inspectionId = (await prompt("Inspection ID"))?.trim();
   if (!inspectionId) {
     console.info("Report skipped: inspection ID is required.");
     return;
   }
 
-  const reportComment = prompt("Report comment")?.trim();
+  const reportComment = (await prompt("Report comment"))?.trim();
   if (!reportComment) {
     console.info("Report skipped: report comment is required.");
     return;
@@ -344,7 +367,7 @@ async function generateReportForInspection(
 }
 
 async function uploadEvidence(device: Device): Promise<void> {
-  const filePath = prompt("Evidence file path")?.trim();
+  const filePath = (await prompt("Evidence file path"))?.trim();
   if (!filePath) {
     console.info("Upload skipped: file path is required.");
     return;
@@ -357,7 +380,7 @@ async function uploadEvidenceFile(
   device: Device,
   filePath: string,
 ): Promise<void> {
-  const bytes = await Deno.readFile(filePath);
+  const bytes = new Uint8Array(await readFile(filePath));
   const originalFileName = filePath.split(/[\\/]/).at(-1) || "evidence.bin";
   const evidenceId = ulid();
   const key = `evidence/${evidenceId}-${safeFileName(originalFileName)}`;
@@ -422,7 +445,7 @@ async function listAndDownloadEvidence(device: Device): Promise<void> {
     console.info(`   key=${item.key}`);
   });
 
-  const rawChoice = prompt("Download which number? Press Enter to skip")
+  const rawChoice = (await prompt("Download which number? Press Enter to skip"))
     ?.trim();
   if (!rawChoice) return;
 
@@ -438,7 +461,8 @@ async function listAndDownloadEvidence(device: Device): Promise<void> {
   const defaultName = safeFileName(
     selected.fileName ?? selected.key.split("/").at(-1) ?? "evidence.bin",
   );
-  const outputPath = prompt("Output path", `./${defaultName}`)?.trim() ||
+  const outputPath =
+    (await prompt("Output path", `./${defaultName}`))?.trim() ||
     `./${defaultName}`;
   const download = await device.evidenceDownload({
     key: selected.key,
@@ -455,7 +479,7 @@ async function listAndDownloadEvidence(device: Device): Promise<void> {
     ...download.transfer,
     info: { ...download.transfer.info, metadata },
   }).bytes().orThrow();
-  await Deno.writeFile(outputPath, downloaded);
+  await writeFile(outputPath, downloaded);
   console.info(`Downloaded ${downloaded.byteLength} bytes to ${outputPath}`);
 }
 
@@ -507,7 +531,7 @@ async function saveAndListDraftState(device: Device): Promise<void> {
     selectedAt: new Date().toISOString(),
   }).orThrow();
 
-  const notes = prompt("Draft notes")?.trim() ||
+  const notes = (await prompt("Draft notes"))?.trim() ||
     "Field notes captured from the consolidated device demo.";
   await device.state.draftInspections.put(selected.inspectionId, {
     inspectionId: selected.inspectionId,
@@ -557,18 +581,20 @@ if (import.meta.main) {
   try {
     await main();
   } catch (error) {
-    if (error instanceof Deno.errors.NotFound) {
+    if (error instanceof Error && "code" in error && error.code === "ENOENT") {
       console.error(chalk.red.bold("File not found"));
       console.error(error.message);
-      Deno.exit(1);
+      process.exit(1);
     }
     if (error instanceof TransportError) {
       console.error(chalk.red.bold("Trellis request failed"));
       console.error(`${error.message} (${error.code})`);
       console.error(error.hint);
-      Deno.exit(1);
+      process.exit(1);
     }
 
     throw error;
+  } finally {
+    terminal.close();
   }
 }

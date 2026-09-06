@@ -130,7 +130,13 @@ export class TrellisTestRuntime implements AsyncDisposable {
   readonly natsUrl: string;
   readonly workdir: string;
   readonly deployments: {
-    create(args: { id?: string; kind?: "service" | "device" }): Promise<void>;
+    create(
+      args: {
+        id?: string;
+        kind?: "service" | "device";
+        reviewMode?: "none" | "required";
+      },
+    ): Promise<void>;
     reconcile(deployment: string): Promise<void>;
     waitReady(deployment: string): Promise<void>;
   };
@@ -241,10 +247,11 @@ export class TrellisTestRuntime implements AsyncDisposable {
     this.#trellisOptions = args.trellisOptions;
     this.#admin = args.admin;
     this.deployments = {
-      create: ({ id, kind }) =>
+      create: ({ id, kind, reviewMode }) =>
         this.#admin.createDeployment({
           deployment: id ?? this.#deployment,
           kind,
+          reviewMode,
         }),
       reconcile: (deployment) => this.#admin.reconcile(deployment),
       waitReady: (deployment) => this.#admin.waitReady(deployment),

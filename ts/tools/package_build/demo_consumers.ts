@@ -1,119 +1,293 @@
-import { assertEquals } from "@std/assert";
-import { ensureDir } from "@std/fs";
+import { copy, ensureDir } from "@std/fs";
 import { dirname, fromFileUrl, join } from "@std/path";
 import { z } from "zod";
+import { assertEquals, assertStringIncludes } from "@std/assert";
+import { TrellisTestRuntime } from "@qlever-llc/trellis-test";
+import { deriveDeviceIdentity } from "@qlever-llc/trellis/auth";
+import { ulid } from "ulid";
+import { participants as serviceParticipants } from "../../../demos/ts/service/trellis/index.js";
+import { participants as deviceParticipants } from "../../../demos/ts/device/trellis/index.js";
+import { participants as appParticipants } from "../../../demos/app/trellis/index.js";
+import { participants as testParticipants } from "../../packages/trellis-test/trellis/index.js";
 
 const repository = fromFileUrl(new URL("../../../", import.meta.url));
-const isolated = await Deno.makeTempDir({ prefix: "trellis-demo-consumers-" });
-const configSchema = z.object({ imports: z.record(z.string(), z.string()) })
-  .passthrough();
+const isolated = await Deno.makeTempDir({ prefix: "trellis-demos-" });
+const failures: unknown[] = [];
 
-async function run(command: string, args: string[], cwd = isolated) {
-  const result = await new Deno.Command(command, {
+async function run(args: string[], cwd: string) {
+  const status = await new Deno.Command(Deno.execPath(), {
     args,
     cwd,
-    stdout: "piped",
+    env: {
+      PATH: `${join(isolated, "bin")}:/usr/bin:/bin`,
+      NODE_PATH: "",
+      TRELLIS_CACHE: join(isolated, "empty-api-cache"),
+    },
+    stdout: "inherit",
     stderr: "inherit",
-  }).output();
-  const output = new TextDecoder().decode(result.stdout);
-  assertEquals(result.code, 0, `${command} ${args.join(" ")}\n${output}`);
-  return output;
+  }).spawn().status;
+  if (!status.success) {
+    throw new Error(`deno ${args.join(" ")} failed (${status.code})`);
+  }
 }
 
 try {
-  const files = await run("git", [
-    "ls-files",
-    "-co",
-    "--exclude-standard",
-    "-z",
-    "--",
-    "demos/ts",
-    "demos/app",
-  ], repository);
-  for (const file of files.split("\0").filter(Boolean)) {
-    if (!(await Deno.lstat(join(repository, file))).isFile) continue;
-    const target = join(isolated, file);
-    await ensureDir(dirname(target));
-    await Deno.copyFile(join(repository, file), target);
-  }
-  const dependencies = new Map<string, string>();
-  for (const file of ["demos/ts/deno.json", "demos/app/deno.json"]) {
-    const path = join(isolated, file);
-    const config = configSchema.parse(
-      JSON.parse(await Deno.readTextFile(path)),
-    );
-    for (const value of Object.values(config.imports)) {
-      const match = /^npm:((?:@[^/]+\/)?[^/@]+)(@[^/]+)?/.exec(value);
+  await ensureDir(join(isolated, "bin"));
+  await Deno.symlink(Deno.execPath(), join(isolated, "bin", "deno"));
+  const node = await new Deno.Command("node", {
+    args: ["-p", "process.execPath"],
+  }).output();
+  if (!node.success) throw new Error("Could not locate installed Node");
+  await Deno.symlink(
+    new TextDecoder().decode(node.stdout).trim(),
+    join(isolated, "bin", "node"),
+  );
+  for (const project of ["demos/ts", "demos/app"]) {
+    const destination = join(isolated, project);
+    const files = await new Deno.Command("git", {
+      args: ["ls-files", "-z", "--", project],
+      cwd: repository,
+    }).output();
+    if (!files.success) throw new Error("Could not list demo sources");
+    for (
+      const file of new TextDecoder().decode(files.stdout).split("\0").filter(
+        Boolean,
+      )
+    ) {
       if (
-        match && !match[1].startsWith("@qlever-llc/") &&
-        (!dependencies.has(match[1]) || match[2])
-      ) {
-        dependencies.set(match[1], match[1] + (match[2] ?? ""));
+        file.split("/").some((part) =>
+          part === ".trellis" || part === "trellis"
+        )
+      ) continue;
+      const target = join(isolated, file);
+      await ensureDir(dirname(target));
+      await Deno.copyFile(join(repository, file), target);
+    }
+    // Generated packages are deliberately ignored, but required before an ordinary build.
+    for (
+      const output of project === "demos/ts"
+        ? ["service/trellis", "device/trellis"]
+        : ["trellis"]
+    ) {
+      await copy(join(repository, project, output), join(destination, output));
+    }
+    const configPath = join(destination, "deno.json");
+    const config = z.object({ links: z.array(z.string()).optional() })
+      .passthrough().parse(JSON.parse(await Deno.readTextFile(configPath)));
+    config.links = [];
+    for (
+      const name of project === "demos/ts"
+        ? ["result", "trellis"]
+        : ["result", "trellis", "trellis-svelte"]
+    ) {
+      await copy(
+        join(repository, "ts/packages", name, "npm"),
+        join(destination, ".sdk", name),
+      );
+      config.links.push(`./.sdk/${name}`);
+    }
+    await Deno.writeTextFile(configPath, JSON.stringify(config, null, 2));
+    await run(["install"], destination);
+    await run(["task", "check"], destination);
+    if (project === "demos/ts") {
+      await run(["task", "-c", "service/deno.json", "build"], destination);
+      await run(["task", "-c", "device/deno.json", "build"], destination);
+      const runtime = await TrellisTestRuntime.start({
+        trellis: {
+          command: {
+            cmd: Deno.env.get("TRELLIS_TEST_SERVER_BIN") ??
+              join(repository, "rust/target/debug/trellis-server"),
+            args: ["--config", "{config}", "all"],
+          },
+        },
+      });
+      try {
+        const identity = await runtime.registerService({
+          name: "native-demo",
+          contract: serviceParticipants.demoService.participant,
+        });
+        const caller = await runtime.connectClient({
+          name: "demo-app",
+          contract: appParticipants.demoApp.participant,
+        });
+        const admin = await runtime.connectClient({
+          name: "device-reviewer",
+          contract: testParticipants.testAdmin.participant,
+        });
+        await runtime.deployments.create({
+          id: "device",
+          kind: "device",
+          reviewMode: "required",
+        });
+        const approval = await runtime.contracts.approve({
+          deployment: "device",
+          contract: deviceParticipants.demoDevice.participant,
+        });
+        const secret = crypto.getRandomValues(new Uint8Array(32));
+        const rootSecret = btoa(String.fromCharCode(...secret))
+          .replaceAll("+", "-").replaceAll("/", "_").replaceAll("=", "");
+        const deviceIdentity = await deriveDeviceIdentity(secret);
+        const provisioned = await runtime.devices.provision({
+          deploymentId: approval.deploymentId,
+          idempotencyKey: ulid(),
+          identityPublicKey: deviceIdentity.publicIdentityKey,
+          instanceId: null,
+          participantId: approval.participantId,
+        });
+        await runtime.deployments.reconcile("device");
+        await runtime.deployments.waitReady("device");
+        for (const engine of ["node", "deno"]) {
+          const command = join(isolated, "bin", engine);
+          const prefix = engine === "deno" ? ["run", "-A"] : [];
+          const env = {
+            PATH: `${join(isolated, "bin")}:/usr/bin:/bin`,
+            NODE_PATH: "",
+            TRELLIS_CACHE: join(isolated, "empty-api-cache"),
+            XDG_STATE_HOME: join(isolated, "state", engine),
+            OTEL_SDK_DISABLED: "true",
+          };
+          const service = new Deno.Command(command, {
+            args: [
+              ...prefix,
+              "service/build/main.mjs",
+              runtime.trellisUrl,
+              identity.seed,
+              identity.deploymentId,
+              identity.instanceId,
+              identity.participantId,
+              identity.participantArtifactDigest,
+              identity.participantNeedsDigest,
+            ],
+            cwd: destination,
+            env,
+            stdout: "inherit",
+            stderr: "inherit",
+          }).spawn();
+          let exited = false;
+          const serviceStatus = service.status.then((status) => {
+            exited = true;
+            return status;
+          });
+          try {
+            const result = await runtime.waitFor(async () => {
+              if (exited) {
+                throw new Error(
+                  `${engine} demo service exited (${
+                    (await serviceStatus).code
+                  })`,
+                );
+              }
+              const response = await caller.assignmentsList(
+                { limit: 50, offset: 0 },
+                { timeout: 1000 },
+              );
+              return response.isOk() ? response.orThrow() : false;
+            }, { timeoutMs: 30_000 });
+            assertEquals(result.entries.length > 0, true);
+            const sites = await caller.sitesList({ limit: 50, offset: 0 });
+            if (sites.isErr()) {
+              failures.push(
+                new Error(
+                  `${engine} demo Sites.List: ${JSON.stringify(sites)}`,
+                ),
+              );
+            }
+            const device = new Deno.Command(command, {
+              args: [
+                ...prefix,
+                "device/build/main.mjs",
+                runtime.trellisUrl,
+                rootSecret,
+                approval.deploymentId,
+                provisioned.device.instanceId,
+                provisioned.device.principalId,
+                approval.participantId,
+                approval.participantDigest,
+                approval.participantNeedsDigest,
+              ],
+              cwd: destination,
+              env,
+              stdin: "piped",
+              stdout: "piped",
+              stderr: "inherit",
+            }).spawn();
+            let deviceExited = false;
+            const deviceStatus = device.status.then((status) => {
+              deviceExited = true;
+              return status;
+            });
+            const writer = device.stdin.getWriter();
+            let output = "";
+            let selections = 0;
+            let approved = false;
+            const timeout = setTimeout(() => device.kill("SIGTERM"), 30_000);
+            try {
+              for await (
+                const text of device.stdout.pipeThrough(new TextDecoderStream())
+              ) {
+                output += text;
+                if (
+                  !approved && output.includes("Please activate device at:")
+                ) {
+                  const review = await runtime.waitFor(async () => {
+                    const reviews = await admin
+                      .authDeviceUserAuthoritiesReviewsList({
+                        deploymentId: approval.deploymentId,
+                        state: "pending",
+                      }).orThrow();
+                    return reviews.entries[0] ?? false;
+                  });
+                  const decision = await admin
+                    .authDeviceUserAuthoritiesReviewsDecide({
+                      decision: "approve",
+                      expectedVersion: review.version,
+                      idempotencyKey: ulid(),
+                      reason: null,
+                      reviewId: review.reviewId,
+                    });
+                  assertEquals(decision.isOk(), true, JSON.stringify(decision));
+                  approved = true;
+                }
+                if (
+                  (output.match(/Select option: /g)?.length ?? 0) > selections
+                ) {
+                  await writer.write(
+                    new TextEncoder().encode(
+                      selections++ === 0 ? "1\n" : "0\n",
+                    ),
+                  );
+                }
+              }
+              assertEquals((await deviceStatus).code, 0, output);
+              assertStringIncludes(output, "Connected Field Device");
+              assertStringIncludes(output, "Assigned Inspections");
+              assertStringIncludes(output, "[HIGH]");
+            } finally {
+              clearTimeout(timeout);
+              writer.releaseLock();
+              if (!deviceExited) device.kill("SIGTERM");
+              await deviceStatus;
+            }
+            console.log(
+              `${engine}: actual demo service RPC and device assignment workflow passed`,
+            );
+          } catch (error) {
+            console.error(`${engine}: native demo failure`, error);
+            failures.push(error);
+          } finally {
+            if (!exited) service.kill("SIGTERM");
+            assertEquals((await serviceStatus).code, 0);
+          }
+        }
+      } finally {
+        await runtime.stop();
       }
     }
-    config.nodeModulesDir = "manual";
-    await Deno.writeTextFile(path, JSON.stringify(config));
+    if (project === "demos/app") await run(["task", "build"], destination);
   }
-  const lock = z.object({ npm: z.record(z.string(), z.unknown()) }).parse(
-    JSON.parse(await Deno.readTextFile(join(isolated, "demos/app/deno.lock"))),
-  );
-  const lockedVersions = new Map<string, Set<string>>();
-  for (const entry of Object.keys(lock.npm)) {
-    const specifier = entry.split("_")[0];
-    const separator = specifier.lastIndexOf("@");
-    const name = specifier.slice(0, separator);
-    const versions = lockedVersions.get(name) ?? new Set<string>();
-    versions.add(specifier.slice(separator + 1));
-    lockedVersions.set(name, versions);
+  if (failures.length) {
+    throw new AggregateError(failures, "Native demo workflow failures");
   }
-  const overrides: Record<string, string> = {};
-  // Preserve unambiguous versions from the demo's checked-in Deno lock instead
-  // of accidentally testing a newly resolved frontend dependency graph.
-  for (const [name, versions] of lockedVersions) {
-    if (versions.size !== 1 || name.startsWith("@qlever-llc/")) continue;
-    const [version] = versions;
-    if (dependencies.has(name)) dependencies.set(name, `${name}@${version}`);
-    else overrides[name] = version;
-  }
-  await Deno.writeTextFile(
-    join(isolated, "package.json"),
-    JSON.stringify({ private: true, type: "module", overrides }),
-  );
-  const tarballs: string[] = [];
-  for (const name of ["result", "trellis", "trellis-svelte"]) {
-    const packed: { filename: string }[] = JSON.parse(
-      await run("npm", [
-        "pack",
-        join(repository, "ts/packages", name, "npm"),
-        "--json",
-        "--pack-destination",
-        isolated,
-      ]),
-    );
-    tarballs.push(join(isolated, packed[0].filename));
-  }
-  await run("npm", [
-    "install",
-    "--ignore-scripts",
-    "--no-audit",
-    "--no-fund",
-    ...tarballs,
-    ...dependencies.values(),
-  ]);
-  for (const project of ["demos/ts/service", "demos/ts/device"]) {
-    console.log(
-      await run(Deno.execPath(), ["task", "check"], join(isolated, project)),
-    );
-  }
-  const app = join(isolated, "demos/app");
-  for (
-    const args of [
-      ["run", "-A", "@sveltejs/kit", "sync"],
-      ["run", "-A", "svelte-check", "--tsconfig", "./tsconfig.check.json"],
-      ["run", "-A", "vite", "build"],
-    ]
-  ) console.log(await run(Deno.execPath(), args, app));
-  console.log("Demo consumers pass with packed runtime dependencies.");
 } finally {
   await Deno.remove(isolated, { recursive: true });
 }

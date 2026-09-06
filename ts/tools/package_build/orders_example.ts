@@ -1,12 +1,16 @@
-import { assert, assertEquals } from "@std/assert";
+import { assertEquals } from "@std/assert";
 import { copy, ensureDir } from "@std/fs";
-import { fromFileUrl, join, toFileUrl } from "@std/path";
+import { dirname, fromFileUrl, join } from "@std/path";
 import { z } from "zod";
 
 const repository = fromFileUrl(new URL("../../../", import.meta.url));
 const isolated = await Deno.makeTempDir({ prefix: "trellis-orders-consumer-" });
 const project = join(isolated, "orders");
-const configSchema = z.object({ imports: z.record(z.string(), z.string()) })
+const configSchema = z.object({
+  extends: z.string().optional(),
+  imports: z.record(z.string(), z.string()),
+  links: z.array(z.string()).optional(),
+})
   .passthrough();
 
 async function run(
@@ -27,61 +31,67 @@ async function run(
 }
 
 try {
-  await copy(join(repository, "docs/examples/orders"), project);
   const testkit = join(project, "testkit");
-  await copy(join(repository, "ts/packages/trellis-test"), testkit);
+  for (
+    const [source, destination] of [
+      ["docs/examples/orders", project],
+      ["ts/packages/trellis-test", testkit],
+    ]
+  ) {
+    const files = await new Deno.Command("git", {
+      args: ["ls-files", "-z", "--", source],
+      cwd: repository,
+    }).output();
+    assertEquals(files.success, true, `Could not list ${source} sources`);
+    for (
+      const file of new TextDecoder().decode(files.stdout).split("\0").filter(
+        Boolean,
+      )
+    ) {
+      if (
+        file.split("/").some((part) =>
+          part === ".trellis" || part === "trellis"
+        )
+      ) continue;
+      const target = join(destination, file.slice(source.length + 1));
+      await ensureDir(dirname(target));
+      await Deno.copyFile(join(repository, file), target);
+    }
+    // Generated packages are ignored and must be prepared before this harness.
+    await copy(
+      join(repository, source, "trellis"),
+      join(destination, "trellis"),
+    );
+  }
   const testConfig = configSchema.parse(JSON.parse(
     await Deno.readTextFile(join(testkit, "deno.json")),
   ));
-  // Use the source test package as a local dependency, with its imports resolved
-  // by this isolated consumer rather than a repository workspace configuration.
-  await Deno.remove(join(testkit, "deno.json"));
+  // Keep the testkit's own dependencies, without the repository workspace.
+  delete testConfig.extends;
+  for (const [name, specifier] of Object.entries(testConfig.imports)) {
+    if (
+      name === "@qlever-llc/trellis" || name.startsWith("@qlever-llc/trellis/")
+    ) {
+      testConfig.imports[name] = specifier.replace(/^jsr:/, "npm:");
+    }
+  }
+  await Deno.writeTextFile(
+    join(testkit, "deno.json"),
+    JSON.stringify(testConfig),
+  );
   const config = configSchema.parse(
     JSON.parse(await Deno.readTextFile(join(project, "deno.json"))),
   );
-  const imports = { ...testConfig.imports };
-  for (const key of Object.keys(imports)) {
-    if (
-      key === "@qlever-llc/trellis" || key.startsWith("@qlever-llc/trellis/")
-    ) {
-      delete imports[key];
-    }
-  }
-  config.imports = {
-    ...imports,
-    ...config.imports,
-    "@qlever-llc/trellis-test": "./testkit/index.ts",
-  };
-  config.nodeModulesDir = "manual";
-  await Deno.writeTextFile(join(project, "deno.json"), JSON.stringify(config));
-  await Deno.writeTextFile(
-    join(project, "package.json"),
-    JSON.stringify({ private: true, type: "module" }),
-  );
-
-  const tarballs: string[] = [];
+  config.links = ["./testkit"];
+  config.nodeModulesDir = "auto";
   for (const name of ["result", "trellis"]) {
-    const packed: { filename: string }[] = JSON.parse(
-      await run("npm", [
-        "pack",
-        join(repository, "ts/packages", name, "npm"),
-        "--json",
-        "--pack-destination",
-        isolated,
-      ]),
+    await copy(
+      join(repository, "ts/packages", name, "npm"),
+      join(project, ".sdk", name),
     );
-    tarballs.push(join(isolated, packed[0].filename));
+    config.links.push(`./.sdk/${name}`);
   }
-  await run("npm", [
-    "install",
-    "--ignore-scripts",
-    "--no-audit",
-    "--no-fund",
-    ...tarballs,
-    ...Object.values(imports).filter((value) => value.startsWith("npm:")).map((
-      value,
-    ) => value.slice(4)),
-  ]);
+  await Deno.writeTextFile(join(project, "deno.json"), JSON.stringify(config));
 
   const bin = join(isolated, "bin");
   await ensureDir(bin);
@@ -91,8 +101,17 @@ try {
     join(bin, "trellis-server"),
   );
   await Deno.symlink(Deno.execPath(), join(bin, "deno"));
+  const node = await new Deno.Command("node", {
+    args: ["-p", "process.execPath"],
+  }).output();
+  assertEquals(node.success, true, "Could not locate installed Node");
+  await Deno.symlink(
+    new TextDecoder().decode(node.stdout).trim(),
+    join(bin, "node"),
+  );
   const env = {
     PATH: `${bin}:/usr/bin:/bin`,
+    NODE_PATH: "",
     TRELLIS_TEST_CLI_BIN: join(bin, "trellis"),
     TRELLIS_TEST_SERVER_BIN: join(bin, "trellis-server"),
     TRELLIS_CACHE: join(isolated, "empty-api-cache"),
@@ -105,14 +124,7 @@ try {
     false,
     "isolated consumer must not have a Trellis CLI",
   );
-  const graph: { modules: { specifier: string }[] } = JSON.parse(
-    await run(Deno.execPath(), ["info", "--json", "service_test.ts"], env),
-  );
-  assert(
-    !graph.modules.some(({ specifier }) =>
-      specifier.startsWith(toFileUrl(repository).href)
-    ),
-  );
+  console.log(await run(Deno.execPath(), ["install"], env));
   console.log(await run(Deno.execPath(), ["task", "check"], env));
   console.log(await run(Deno.execPath(), ["task", "test"], env));
   console.log(

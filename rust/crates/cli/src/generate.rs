@@ -26,29 +26,32 @@ pub(crate) fn validate_output_identity(kind: &str, id: &str) -> Result<()> {
 pub fn run(args: &GenerateArgs) -> Result<()> {
     let root = args.project.root.canonicalize().into_diagnostic()?;
     if args.watch {
+        let manifest = read_manifest(&root.join("trellis.toml"))?;
+        output_paths(&root, &manifest)?;
         watch(&root)
     } else {
-        generate_project(&root)
+        generate_once(&root, args.check).map(|_| ())
     }
 }
 
 /// Compile current local sources and exact cached dependencies without network access.
 pub fn generate_project(root: &Path) -> Result<()> {
-    generate_once(root).map(|_| ())
+    generate_once(root, false).map(|_| ())
 }
 
-pub(crate) fn generate_once(root: &Path) -> Result<usize> {
+pub(crate) fn generate_once(root: &Path, check: bool) -> Result<usize> {
     let root = root.canonicalize().into_diagnostic()?;
     let manifest = read_manifest(&root.join("trellis.toml"))?;
+    output_paths(&root, &manifest)?;
     let compiled = crate::package::compile_project(&root, &manifest)?;
-    generate_compiled(&root, &manifest, &compiled)
+    generate_compiled(&root, &manifest, &compiled, check)
 }
 
-pub(crate) fn generate_compiled(
+pub(crate) fn output_paths(
     root: &Path,
     manifest: &ProjectManifest,
-    compiled: &trellis_idl::CompiledProject,
-) -> Result<usize> {
+) -> Result<Vec<(&'static str, PathBuf)>> {
+    let root = root.canonicalize().into_diagnostic()?;
     let has_rust = root.join("Cargo.toml").is_file();
     let has_ts = ["package.json", "deno.json", "deno.jsonc"]
         .iter()
@@ -56,42 +59,27 @@ pub(crate) fn generate_compiled(
     let config = manifest.generate.clone().unwrap_or_default();
     let languages = usize::from(has_rust) + usize::from(has_ts);
     miette::ensure!(
+        (has_rust || config.rust.is_none()) && (has_ts || config.typescript.is_none()),
+        "generation table names a language absent from the project root"
+    );
+    miette::ensure!(
         config.output.is_none() || languages == 1,
         "[generate].output requires exactly one detected language"
     );
     if languages == 0 {
-        return Ok(0);
+        return Ok(Vec::new());
     }
     let name = manifest
         .name
         .as_deref()
         .ok_or_else(|| miette!("trellis.toml requires name when generating a language package"))?;
-    if has_rust {
-        miette::ensure!(
-            name.starts_with(|character: char| character.is_ascii_alphabetic() || character == '_')
-                && name
-                    .chars()
-                    .all(|character| character.is_ascii_alphanumeric()
-                        || character == '_'
-                        || character == '-'),
-            "invalid Cargo package name '{name}'"
-        );
-    }
-    if has_ts {
-        let parts = name
-            .strip_prefix('@')
-            .map_or_else(|| vec![name], |scoped| scoped.split('/').collect());
-        miette::ensure!(
-            name.len() <= 214
-                && parts.len() == if name.starts_with('@') { 2 } else { 1 }
-                && parts.iter().all(|part| !part.is_empty()
-                    && !part.starts_with(['.', '_'])
-                    && part.chars().all(|character| character.is_ascii_lowercase()
-                        || character.is_ascii_digit()
-                        || matches!(character, '.' | '_' | '-'))),
-            "invalid npm package name '{name}'"
-        );
-    }
+    miette::ensure!(
+        name.len() <= 214
+            && name.starts_with(|character: char| character.is_ascii_lowercase())
+            && name.bytes().all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-')
+            && !name.ends_with('-') && !name.contains("--"),
+        "invalid generated package name '{name}'; use at most 214 characters: a lowercase ASCII letter followed by lowercase letters, digits, or single hyphens"
+    );
     let mut outputs = Vec::new();
     for (language, detected, selected) in [
         ("rust", has_rust, config.rust.as_ref()),
@@ -132,6 +120,11 @@ pub(crate) fn generate_compiled(
                 );
             }
         }
+        miette::ensure!(
+            resolved != root && resolved.starts_with(&root),
+            "generated output {} must be a descendant of the project root",
+            resolved.display()
+        );
         for source in std::iter::once(root.to_path_buf()).chain(
             manifest
                 .apis
@@ -141,8 +134,9 @@ pub(crate) fn generate_compiled(
         ) {
             let source = source.canonicalize().into_diagnostic()?;
             miette::ensure!(
-                !source.starts_with(&resolved),
-                "generated output {} contains a source project",
+                !source.starts_with(&resolved)
+                    && (source == root || !resolved.starts_with(&source)),
+                "generated output {} overlaps a source project",
                 resolved.display()
             );
             for protected in ["contracts", ".git", ".trellis", "trellis_modules"] {
@@ -161,6 +155,20 @@ pub(crate) fn generate_compiled(
         }
         outputs.push((language, resolved));
     }
+    Ok(outputs)
+}
+
+pub(crate) fn generate_compiled(
+    root: &Path,
+    manifest: &ProjectManifest,
+    compiled: &trellis_idl::CompiledProject,
+    check: bool,
+) -> Result<usize> {
+    let outputs = output_paths(root, manifest)?;
+    if outputs.is_empty() {
+        return Ok(0);
+    }
+    let name = manifest.name.as_deref().expect("validated package name");
     let apis = compiled
         .apis
         .iter()
@@ -177,14 +185,21 @@ pub(crate) fn generate_compiled(
     let mut staged = Vec::new();
     let mut changes = Vec::new();
     for (language, destination) in &outputs {
-        let parent = destination
-            .parent()
-            .ok_or_else(|| miette!("output requires a parent directory"))?;
-        fs::create_dir_all(parent).into_diagnostic()?;
-        let staging = tempfile::Builder::new()
-            .prefix(".trellis-stage-")
-            .tempdir_in(parent)
-            .into_diagnostic()?;
+        // Check staging never creates an output or its parents. Publication staging
+        // stays on the destination filesystem without creating missing ancestors.
+        let staging = if check {
+            tempfile::tempdir()
+        } else {
+            let parent = destination
+                .ancestors()
+                .skip(1)
+                .find(|path| path.is_dir())
+                .expect("project root exists");
+            tempfile::Builder::new()
+                .prefix(".trellis-stage-")
+                .tempdir_in(parent)
+        }
+        .into_diagnostic()?;
         let fresh = staging.path().join("new");
         match *language {
             "rust" => trellis_codegen_rust::generate_rust_package(
@@ -225,15 +240,16 @@ pub(crate) fn generate_compiled(
         if destination.exists() {
             collect_files(destination, destination, &mut existing)?;
         }
-        let mut package_owned = false;
-        for manifest in ["Cargo.toml", "package.json"] {
-            if existing.contains(Path::new(manifest)) {
-                package_owned |= generated_file(
-                    Path::new(manifest),
-                    &fs::read(destination.join(manifest)).into_diagnostic()?,
-                );
-            }
-        }
+        let package_manifest = if *language == "rust" {
+            "Cargo.toml"
+        } else {
+            "package.json"
+        };
+        let package_owned = existing.contains(Path::new(package_manifest))
+            && generated_file(
+                Path::new(package_manifest),
+                &fs::read(destination.join(package_manifest)).into_diagnostic()?,
+            );
         for relative in files.union(&existing) {
             let old = destination.join(relative);
             let new = fresh.join(relative);
@@ -246,18 +262,16 @@ pub(crate) fn generate_compiled(
                 && previous
                     .as_ref()
                     .is_some_and(|bytes| generated_file(relative, bytes));
+            miette::ensure!(
+                check || previous.is_none() || owned,
+                "refusing to overwrite unrelated file {} (generated packages require an explicit Trellis package marker)",
+                old.display()
+            );
             if new.is_file() {
-                miette::ensure!(
-                    previous.is_none() || owned,
-                    "refusing to overwrite unrelated file {}",
-                    old.display()
-                );
                 let next = fs::read(&new).into_diagnostic()?;
                 if previous.as_deref() == Some(next.as_slice()) {
                     continue;
                 }
-            } else if !owned {
-                continue;
             }
             changes.push((
                 old,
@@ -267,6 +281,21 @@ pub(crate) fn generate_compiled(
             ));
         }
         staged.push(staging);
+    }
+
+    if check {
+        for (old, new, _, exists) in &changes {
+            let kind = if !exists {
+                "missing"
+            } else if new.is_file() {
+                "stale"
+            } else {
+                "extra"
+            };
+            eprintln!("{kind}: {}", old.display());
+        }
+        miette::ensure!(changes.is_empty(), "generated output is not up to date");
+        return Ok(outputs.len());
     }
 
     let mut saved = Vec::new();
@@ -322,12 +351,7 @@ fn collect_files(root: &Path, directory: &Path, files: &mut BTreeSet<PathBuf>) -
             path.display()
         );
         if kind.is_dir() {
-            if !matches!(
-                entry.file_name().to_str(),
-                Some("node_modules" | "target" | ".git")
-            ) {
-                collect_files(root, &path, files)?;
-            }
+            collect_files(root, &path, files)?;
         } else {
             miette::ensure!(
                 kind.is_file(),
@@ -345,6 +369,30 @@ fn collect_files(root: &Path, directory: &Path, files: &mut BTreeSet<PathBuf>) -
 }
 
 fn generated_file(path: &Path, bytes: &[u8]) -> bool {
+    if path == Path::new("package.json") {
+        return serde_json::from_slice::<serde_json::Value>(bytes)
+            .is_ok_and(|value| value["trellisGenerated"] == true);
+    }
+    if path == Path::new("Cargo.toml") {
+        return std::str::from_utf8(bytes)
+            .ok()
+            .and_then(|text| toml::from_str::<toml::Value>(text).ok())
+            .is_some_and(|value| {
+                value
+                    .get("package")
+                    .and_then(|value| value.get("metadata"))
+                    .and_then(|value| value.get("trellis"))
+                    .and_then(|value| value.get("generated"))
+                    .and_then(toml::Value::as_bool)
+                    == Some(true)
+            });
+    }
+    if path
+        .extension()
+        .is_some_and(|extension| extension == "trellis")
+    {
+        return false;
+    }
     if bytes.starts_with(b"// Generated by Trellis.")
         || bytes.starts_with(b"# Generated by Trellis.")
     {
@@ -353,11 +401,6 @@ fn generated_file(path: &Path, bytes: &[u8]) -> bool {
     let Ok(value) = serde_json::from_slice::<serde_json::Value>(bytes) else {
         return false;
     };
-    if path == Path::new("package.json") {
-        return value["description"] == "Generated Trellis APIs and participants."
-            && value["private"] == true
-            && value["version"] == "0.0.0";
-    }
     if path.parent() == Some(Path::new("artifacts/apis")) {
         return trellis_protocol::parse_api(&value)
             .is_ok_and(|api| path.file_stem().is_some_and(|stem| stem == api.id()));
@@ -384,14 +427,14 @@ fn watch(root: &Path) -> Result<()> {
         .into_diagnostic()?;
     watched.insert(root.to_path_buf());
     refresh_watch_roots(&mut debouncer, root, &mut watched);
-    if let Err(error) = generate_once(root) {
+    if let Err(error) = generate_once(root, false) {
         eprintln!("{error:?}");
     }
     while let Ok(events) = receiver.recv() {
         match events {
             Ok(events) if events.iter().any(|event| relevant(&event.path)) => {
                 refresh_watch_roots(&mut debouncer, root, &mut watched);
-                if let Err(error) = generate_once(root) {
+                if let Err(error) = generate_once(root, false) {
                     eprintln!("{error:?}");
                 }
             }

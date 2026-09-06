@@ -14,8 +14,7 @@
     "build:runtime": "deno task install && deno task protocol:wasm && deno task browser:embedded",
     "packages:build:npm": "deno task -c packages/result/deno.json build:npm && deno task -c packages/trellis/deno.json build:npm && deno task -c packages/trellis-svelte/deno.json build:npm",
     "packages:build:npm:installed": "deno task -c packages/result/deno.json build:npm && deno task -c packages/trellis/deno.json build:npm:installed && deno task -c packages/trellis-svelte/deno.json build:npm",
-    "smoke:npm": "deno run -A tools/package_build/npm_smoke.ts",
-    "check:npm-release": "deno task build:npm && deno task smoke:npm",
+    "test:packaging:built": "deno test -A tools/package_build && deno run -A tools/package_build/demo_consumers.ts",
     "build:npm": "deno task install && deno task packages:build:npm",
     "check": "deno task install && deno task protocol:wasm && deno check packages/trellis/index.ts packages/trellis-svelte/src/index.ts packages/trellis-svelte/src/context.svelte.ts packages/trellis-test/index.ts",
     "check:integration": "deno task install && deno task protocol:wasm && deno task --config integration/deno.json check",
@@ -34,7 +33,7 @@
         "test:trellis-test"
       ]
     },
-    "test:ui-tools": "deno test -A --ignore=tools/package_build ../web tools",
+    "test:ui-tools": "deno test -A ../web tools",
     "test": {
       "dependencies": [
         "test:packages",
@@ -46,8 +45,6 @@
     "test:browser:coverage": "TRELLIS_BROWSER_COVERAGE_SOURCEMAP=1 deno task browser:embedded && deno test -A -c browser/deno.json browser/*.browser_test.ts && deno task coverage:browser",
     "coverage:browser": "deno run -A tools/browser_v8_to_lcov.ts",
     "coverage:browser:merge": "deno run -A tools/browser_v8_to_lcov.ts --append-to ../coverage/live-integration/lcov.info",
-    "test:packaging": "deno task packages:build:npm:installed && deno task test:packaging:built",
-    "test:packaging:built": "deno test -A packages/trellis/tests/npm_artifact_smoke_test.ts packages/trellis/tests/publishing_targets_test.ts tools/package_build",
     "trellis": "bash ../scripts/trellis-cli.sh"
   },
   "imports": {
@@ -63,7 +60,6 @@
     "@nats-io/nats-core": "npm:@nats-io/nats-core@^3.3.1",
     "@nats-io/nats-core/internal": "npm:@nats-io/nats-core@^3.3.1/internal",
     "@nats-io/transport-node": "npm:@nats-io/transport-node@^3.3.1",
-    "@nats-io/transport-deno": "jsr:@nats-io/transport-deno@^3.3.1",
     "@opentelemetry/api": "npm:@opentelemetry/api@^1.9.1",
     "@opentelemetry/exporter-metrics-otlp-proto": "npm:@opentelemetry/exporter-metrics-otlp-proto@^0.215.0",
     "@opentelemetry/exporter-trace-otlp-proto": "npm:@opentelemetry/exporter-trace-otlp-proto@^0.215.0",
@@ -78,7 +74,6 @@
     "@std/collections": "jsr:@std/collections@^1.1.7",
     "@std/fs": "jsr:@std/fs@^1.0.23",
     "@std/path": "jsr:@std/path@^1.1.4",
-    "@deno/dnt": "jsr:@deno/dnt@^0.42.3",
     "@standard-schema/spec": "npm:@standard-schema/spec@^1.1.0",
     "@sveltejs/acorn-typescript": "npm:@sveltejs/acorn-typescript@^1.0.9",
     "@sveltejs/adapter-auto": "npm:@sveltejs/adapter-auto@^7.0.1",
@@ -99,7 +94,6 @@
     "daisyui": "npm:daisyui@5.5.19/index.js",
     "devalue": "npm:devalue@^5.7.1",
     "diff": "npm:diff@^9.0.0",
-    "drizzle-orm": "npm:drizzle-orm@0.44.7",
     "lucide-svelte": "npm:lucide-svelte@^1.0.1",
     "esm-env": "npm:esm-env@^1.2.2",
     "json-schema-library": "npm:json-schema-library@^11.4.0",

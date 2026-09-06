@@ -71,26 +71,6 @@ export type EventActions<
   publish: TPublish;
 }>;
 
-/** A required or optional group of actions from one owner contract. */
-export type OptionalActionGroup<
-  TActions extends readonly ActionDescriptor[],
-> = Readonly<{
-  optional: true;
-  actions: TActions;
-}>;
-
-/** A local connected-name override that does not affect canonical identity. */
-export type AliasedAction<
-  TAction extends ActionDescriptor,
-  TConnectedName extends string,
-> = ActionDescriptor<
-  TAction["contractId"],
-  TAction["name"],
-  TAction["kind"],
-  TAction[typeof ACTION_METADATA]["descriptor"],
-  TConnectedName
->;
-
 function createAction<
   const TContractId extends string,
   const TName extends string,
@@ -292,74 +272,6 @@ export function eventActions<
       >
       : undefined
   >;
-}
-
-/** Marks actions from one owner contract as an optional dependency. */
-export function optional<const TActions extends readonly ActionDescriptor[]>(
-  ...actions: TActions
-): OptionalActionGroup<TActions> {
-  if (actions.length === 0) {
-    throw new Error("optional(...) requires at least one action");
-  }
-  const owner = actions[0]!.contractId;
-  if (actions.some((action) => action.contractId !== owner)) {
-    throw new Error("optional(...) actions must have the same owner contract");
-  }
-  return Object.freeze({ optional: true, actions: Object.freeze(actions) });
-}
-
-/** Selects the control surfaces requested for one operation dependency. */
-export function operationAccess<
-  const TAction extends ActionDescriptor<
-    string,
-    string,
-    "operation",
-    OperationDesc,
-    string
-  >,
->(
-  action: TAction,
-  access: { readonly cancel?: boolean; readonly control?: boolean },
-): TAction {
-  const descriptor = action[ACTION_METADATA].descriptor;
-  return createAction({
-    contractId: action.contractId,
-    name: action.name,
-    kind: action.kind,
-    descriptor: {
-      ...descriptor,
-      cancel: access.cancel === true && descriptor.cancel === true,
-      controlCapabilities: access.control === true
-        ? descriptor.controlCapabilities
-        : [],
-      signals: access.control === true ? descriptor.signals : undefined,
-    },
-    source: action[ACTION_METADATA].source,
-    exportName: action.exportName,
-    connectedName: action.connectedName,
-  }) as TAction;
-}
-
-/** Overrides only the local connected method name for an action. */
-export function as<
-  const TConnectedName extends string,
-  const TAction extends ActionDescriptor,
->(
-  connectedName: TConnectedName,
-  action: TAction,
-): AliasedAction<TAction, TConnectedName> {
-  if (!connectedName) {
-    throw new Error("Action alias must not be empty");
-  }
-  return createAction({
-    contractId: action.contractId,
-    name: action.name,
-    kind: action.kind,
-    descriptor: action[ACTION_METADATA].descriptor,
-    source: action[ACTION_METADATA].source,
-    exportName: action.exportName,
-    connectedName,
-  });
 }
 
 /** Returns the private runtime descriptor associated with an action. */

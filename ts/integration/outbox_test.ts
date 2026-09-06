@@ -1,4 +1,4 @@
-import { connect, credsAuthenticator } from "@nats-io/transport-deno";
+import { connect, credsAuthenticator } from "@nats-io/transport-node";
 import { assert, assertEquals } from "@std/assert";
 import { TypedKV } from "../packages/trellis/kv.ts";
 import {

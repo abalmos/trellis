@@ -32,38 +32,18 @@ const config = {
         rootDir,
         "../ts/packages/trellis/auth.ts",
       ),
-      "@qlever-llc/trellis/browser": resolve(
+      "@qlever-llc/trellis/generated": resolve(
         rootDir,
-        "../ts/packages/trellis/browser.ts",
-      ),
-      "@qlever-llc/trellis/device/deno": resolve(
-        rootDir,
-        "../ts/packages/trellis/device/deno.ts",
+        "../ts/packages/trellis/generated.ts",
       ),
       "@qlever-llc/trellis/device": resolve(
         rootDir,
         "../ts/packages/trellis/device.ts",
       ),
-      "@qlever-llc/trellis/health": resolve(
-        rootDir,
-        "../ts/packages/trellis/health.ts",
-      ),
       "trellis-web-generated": resolve(rootDir, "trellis"),
-      "@qlever-llc/trellis/service/deno": resolve(
-        rootDir,
-        "../ts/packages/trellis/service/deno.ts",
-      ),
-      "@qlever-llc/trellis/service/node": resolve(
-        rootDir,
-        "../ts/packages/trellis/service/node.ts",
-      ),
       "@qlever-llc/trellis/service": resolve(
         rootDir,
         "../ts/packages/trellis/service/mod.ts",
-      ),
-      "@qlever-llc/trellis/jobs": resolve(
-        rootDir,
-        "../ts/packages/trellis/jobs.ts",
       ),
       "@qlever-llc/trellis/telemetry": resolve(
         rootDir,

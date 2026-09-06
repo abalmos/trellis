@@ -1,31 +1,15 @@
 {
   "version": "5",
   "specifiers": {
-    "jsr:@david/code-block-writer@^13.0.3": "13.0.3",
-    "jsr:@deno/dnt@~0.42.3": "0.42.3",
     "jsr:@hono/hono@^4.12.15": "4.12.23",
-    "jsr:@nats-io/nats-core@3.4.0": "3.4.0",
-    "jsr:@nats-io/nkeys@2.0.3": "2.0.3",
-    "jsr:@nats-io/nuid@3.0.0": "3.0.0",
-    "jsr:@nats-io/transport-deno@^3.3.1": "3.4.0",
-    "jsr:@std/assert@*": "1.0.19",
     "jsr:@std/assert@^1.0.19": "1.0.19",
-    "jsr:@std/bytes@^1.0.5": "1.0.6",
     "jsr:@std/cli@^1.0.29": "1.0.30",
     "jsr:@std/collections@^1.1.7": "1.2.0",
-    "jsr:@std/fmt@1": "1.0.10",
-    "jsr:@std/fs@1": "1.0.24",
     "jsr:@std/fs@^1.0.23": "1.0.24",
     "jsr:@std/internal@^1.0.12": "1.0.14",
     "jsr:@std/internal@^1.0.14": "1.0.14",
-    "jsr:@std/io@0.225.2": "0.225.2",
-    "jsr:@std/path@1": "1.1.5",
-    "jsr:@std/path@^1.1.2": "1.1.5",
-    "jsr:@std/path@^1.1.4": "1.1.5",
-    "jsr:@std/path@^1.1.5": "1.1.5",
-    "jsr:@ts-morph/bootstrap@0.27": "0.27.0",
-    "jsr:@ts-morph/bootstrap@0.27.0": "0.27.0",
-    "jsr:@ts-morph/common@0.27": "0.27.0",
+    "jsr:@std/path@^1.1.4": "1.1.6",
+    "jsr:@std/path@^1.1.5": "1.1.6",
     "npm:@libsql/client@~0.15.15": "0.15.15",
     "npm:@nats-io/jetstream@3.4.0": "3.4.0",
     "npm:@nats-io/jetstream@^3.3.1": "3.4.0",
@@ -67,7 +51,6 @@
     "npm:daisyui@5.5.19": "5.5.19",
     "npm:devalue@^5.7.1": "5.8.1",
     "npm:diff@9": "9.0.0",
-    "npm:drizzle-orm@0.44.7": "0.44.7_@libsql+client@0.15.15_@opentelemetry+api@1.9.1_sql.js@1.14.1",
     "npm:esm-env@^1.2.2": "1.2.2",
     "npm:fake-indexeddb@6.2.5": "6.2.5",
     "npm:fflate@~0.8.2": "0.8.3",
@@ -95,7 +78,6 @@
     "npm:svelteplot@0.14.2": "0.14.2_svelte@5.55.5",
     "npm:tailwindcss@4.2.4": "4.2.4",
     "npm:ts-deepmerge@^7.0.3": "7.0.3",
-    "npm:tweetnacl@1.0.3": "1.0.3",
     "npm:tweetnacl@^1.0.3": "1.0.3",
     "npm:type-fest@^5.6.0": "5.7.0",
     "npm:typebox@^1.1.33": "1.2.16",
@@ -107,44 +89,8 @@
     "npm:zod@^4.3.6": "4.4.3"
   },
   "jsr": {
-    "@david/code-block-writer@13.0.3": {
-      "integrity": "f98c77d320f5957899a61bfb7a9bead7c6d83ad1515daee92dbacc861e13bb7f"
-    },
-    "@deno/dnt@0.42.3": {
-      "integrity": "62a917a0492f3c8af002dce90605bb0d41f7d29debc06aca40dba72ab65d8ae3",
-      "dependencies": [
-        "jsr:@david/code-block-writer",
-        "jsr:@std/fmt",
-        "jsr:@std/fs@1",
-        "jsr:@std/path@1",
-        "jsr:@ts-morph/bootstrap@0.27"
-      ]
-    },
     "@hono/hono@4.12.23": {
       "integrity": "9d9f3da498f69c311b5f92d973eb3b8ebc973b5fd2b4972781b556e07818a745"
-    },
-    "@nats-io/nats-core@3.4.0": {
-      "integrity": "55aadb128a34a591a8fb251ab2f525c55e3473958e04bfd057e71bbe6f278c52",
-      "dependencies": [
-        "jsr:@nats-io/nkeys@2.0.3",
-        "jsr:@nats-io/nuid"
-      ]
-    },
-    "@nats-io/nkeys@2.0.3": {
-      "integrity": "e92c96eea32b559f2e0f32555b49376942d66c07e59efff9180dbf29e516fbd8",
-      "dependencies": [
-        "npm:tweetnacl@1.0.3"
-      ]
-    },
-    "@nats-io/nuid@3.0.0": {
-      "integrity": "af637fd340e763d48845402f71ffd313808d88beb9abefbaf02037003056a07d"
-    },
-    "@nats-io/transport-deno@3.4.0": {
-      "integrity": "13235bb178853647c01584e5b1f1e59946ffa3157cfc1c7336d70bf3db600575",
-      "dependencies": [
-        "jsr:@nats-io/nats-core@3.4.0",
-        "jsr:@std/io"
-      ]
     },
     "@std/assert@1.0.19": {
       "integrity": "eaada96ee120cb980bc47e040f82814d786fe8162ecc53c91d8df60b8755991e",
@@ -152,17 +98,11 @@
         "jsr:@std/internal@^1.0.12"
       ]
     },
-    "@std/bytes@1.0.6": {
-      "integrity": "f6ac6adbd8ccd99314045f5703e23af0a68d7f7e58364b47d2c7f408aeb5820a"
-    },
     "@std/cli@1.0.30": {
       "integrity": "769446536522d0417d7127ebcabcafac1ab0ce6766d0eb3fca1d36326fe98d13"
     },
     "@std/collections@1.2.0": {
       "integrity": "47627a21d3a13138b77fd0e4d790ba9d2e603c3510b686cde6b132fe9aa98a88"
-    },
-    "@std/fmt@1.0.10": {
-      "integrity": "90dfba288802ac6de82fb31d0917eb9e4450b9925b954d5e51fc29ac07419db5"
     },
     "@std/fs@1.0.24": {
       "integrity": "f3061b45b81673a2bece689da041df32d174be064c89eb6397fb5718d3fb7877",
@@ -174,29 +114,10 @@
     "@std/internal@1.0.14": {
       "integrity": "291516b3d4c35024d6ffbc0a9df5bf4c64116e05b50012cf846710152d2ffdf7"
     },
-    "@std/io@0.225.2": {
-      "integrity": "3c740cd4ee4c082e6cfc86458f47e2ab7cb353dc6234d5e9b1f91a2de5f4d6c7",
-      "dependencies": [
-        "jsr:@std/bytes"
-      ]
-    },
-    "@std/path@1.1.5": {
-      "integrity": "ccea00982ea28c36becaf6e62f855406c76a8c32d462f66f415bbb7d83a271bc",
+    "@std/path@1.1.6": {
+      "integrity": "c68485c2a4dfbb5ae3cc74fae4e8c4e5d874cf8a8ed12927917235c758b46cbe",
       "dependencies": [
         "jsr:@std/internal@^1.0.14"
-      ]
-    },
-    "@ts-morph/bootstrap@0.27.0": {
-      "integrity": "b8d7bc8f7942ce853dde4161b28f9aa96769cef3d8eebafb379a81800b9e2448",
-      "dependencies": [
-        "jsr:@ts-morph/common"
-      ]
-    },
-    "@ts-morph/common@0.27.0": {
-      "integrity": "c7b73592d78ce8479b356fd4f3d6ec3c460d77753a8680ff196effea7a939052",
-      "dependencies": [
-        "jsr:@std/fs@1",
-        "jsr:@std/path@1"
       ]
     }
   },
@@ -1284,19 +1205,6 @@
     },
     "diff@9.0.0": {
       "integrity": "sha512-svtcdpS8CgJyqAjEQIXdb3OjhFVVYjzGAPO8WGCmRbrml64SPw/jJD4GoE98aR7r25A0XcgrK3F02yw9R/vhQw=="
-    },
-    "drizzle-orm@0.44.7_@libsql+client@0.15.15_@opentelemetry+api@1.9.1_sql.js@1.14.1": {
-      "integrity": "sha512-quIpnYznjU9lHshEOAYLoZ9s3jweleHlZIAWR/jX9gAWNg/JhQ1wj0KGRf7/Zm+obRrYd9GjPVJg790QY9N5AQ==",
-      "dependencies": [
-        "@libsql/client",
-        "@opentelemetry/api",
-        "sql.js"
-      ],
-      "optionalPeers": [
-        "@libsql/client",
-        "@opentelemetry/api",
-        "sql.js"
-      ]
     },
     "enhanced-resolve@5.24.0": {
       "integrity": "sha512-SkE2t82KlkkxQRVMVLAGKxLfORGQfrkx5dkj+vlgXRVNEdPc4eZcR+J/Fvj8C+yKSFH5L0q3NFlyufOVQnCcYQ==",
@@ -2567,9 +2475,7 @@
   },
   "workspace": {
     "dependencies": [
-      "jsr:@deno/dnt@~0.42.3",
       "jsr:@hono/hono@^4.12.15",
-      "jsr:@nats-io/transport-deno@^3.3.1",
       "jsr:@std/assert@^1.0.19",
       "jsr:@std/cli@^1.0.29",
       "jsr:@std/collections@^1.1.7",
@@ -2608,7 +2514,6 @@
       "npm:daisyui@5.5.19",
       "npm:devalue@^5.7.1",
       "npm:diff@9",
-      "npm:drizzle-orm@0.44.7",
       "npm:esm-env@^1.2.2",
       "npm:fake-indexeddb@6.2.5",
       "npm:fflate@~0.8.2",
@@ -2648,14 +2553,8 @@
           "npm:ulid@^3.0.2"
         ]
       },
-      "packages/trellis": {
-        "dependencies": [
-          "npm:drizzle-orm@0.44.7"
-        ]
-      },
       "packages/trellis-test": {
         "dependencies": [
-          "jsr:@nats-io/transport-deno@^3.3.1",
           "jsr:@qlever-llc/trellis@0.12",
           "jsr:@std/assert@^1.0.19",
           "jsr:@std/path@^1.1.4",
@@ -2663,6 +2562,7 @@
           "npm:@nats-io/jetstream@^3.3.1",
           "npm:@nats-io/kv@^3.3.1",
           "npm:@nats-io/nats-core@^3.3.1",
+          "npm:@nats-io/transport-node@^3.3.1",
           "npm:fflate@~0.8.2",
           "npm:ulid@^3.0.2"
         ]

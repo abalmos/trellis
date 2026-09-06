@@ -1,4 +1,4 @@
-// Generated from ./ts/packages/trellis/.trellis/generated/protocol/apis/trellis.core@v1.json
+// Generated from trellis.core@v1
 export const TrellisSurfaceStatusRequestSchema = {
   "properties": {
     "action": {
@@ -38,16 +38,14 @@ export const TrellisSurfaceStatusResponseSchema = {
           },
           "state": { "const": "available", "type": "string" },
         },
-        "required": ["state", "liveImplementer", "runtime"],
+        "required": ["liveImplementer", "runtime", "state"],
         "type": "object",
       }, {
         "properties": {
-          "reason": {
-            "anyOf": [{ "const": "authority_unavailable", "type": "string" }],
-          },
+          "reason": { "const": "authority_unavailable", "type": "string" },
           "state": { "const": "unavailable", "type": "string" },
         },
-        "required": ["state", "reason"],
+        "required": ["reason", "state"],
         "type": "object",
       }, {
         "properties": {
@@ -57,14 +55,14 @@ export const TrellisSurfaceStatusResponseSchema = {
           },
           "state": { "const": "unauthorized", "type": "string" },
         },
-        "required": ["state", "missingCapabilities"],
+        "required": ["missingCapabilities", "state"],
         "type": "object",
       }, {
         "properties": {
           "contractId": { "minLength": 1, "type": "string" },
           "state": { "const": "unknown_contract", "type": "string" },
         },
-        "required": ["state", "contractId"],
+        "required": ["contractId", "state"],
         "type": "object",
       }, {
         "properties": {
@@ -73,7 +71,7 @@ export const TrellisSurfaceStatusResponseSchema = {
           "state": { "const": "unknown_surface", "type": "string" },
           "surface": { "minLength": 1, "type": "string" },
         },
-        "required": ["state", "contractId", "kind", "surface"],
+        "required": ["contractId", "kind", "state", "surface"],
         "type": "object",
       }],
     },

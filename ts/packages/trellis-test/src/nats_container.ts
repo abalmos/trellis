@@ -9,7 +9,7 @@
 import { jetstreamManager } from "@nats-io/jetstream";
 import type { StreamConfig } from "@nats-io/jetstream";
 import type { NatsConnection } from "@nats-io/nats-core";
-import { connect, credsAuthenticator } from "@nats-io/transport-deno";
+import { connect, credsAuthenticator } from "@nats-io/transport-node";
 import { join } from "@std/path";
 
 import {

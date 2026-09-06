@@ -1,6 +1,6 @@
 import { isErr } from "@qlever-llc/trellis";
-import { TrellisService } from "@qlever-llc/trellis/service/deno";
-import { Command } from "@cliffy/command";
+import { TrellisService } from "@qlever-llc/trellis/service";
+import process from "node:process";
 import chalk from "chalk";
 import { getSiteSummary, SITE_SUMMARIES } from "../../shared/field_data.ts";
 import { participants } from "../trellis/index.js";
@@ -8,22 +8,25 @@ import type { FieldOpsDeps } from "./deps.ts";
 import * as features from "./features/index.ts";
 
 async function main(): Promise<void> {
-  const {
-    args: [
-      trellisUrl,
-      seed,
-      deploymentId,
-      instanceId,
-      participantId,
-      participantArtifactDigest,
-      participantNeedsDigest,
-    ],
-  } = await new Command()
-    .name("demo-service")
-    .arguments(
-      "<trellisUrl:string> <seed:string> <deploymentId:string> <instanceId:string> <participantId:string> <participantArtifactDigest:string> <participantNeedsDigest:string>",
-    )
-    .parse(Deno.args);
+  const [
+    trellisUrl,
+    seed,
+    deploymentId,
+    instanceId,
+    participantId,
+    participantArtifactDigest,
+    participantNeedsDigest,
+  ] = process.argv.slice(2);
+  if (
+    !trellisUrl || !seed || !deploymentId || !instanceId || !participantId ||
+    !participantArtifactDigest || !participantNeedsDigest ||
+    process.argv.length !== 9
+  ) {
+    console.error(
+      "Usage: demo-service <trellisUrl> <seed> <deploymentId> <instanceId> <participantId> <participantArtifactDigest> <participantNeedsDigest>",
+    );
+    process.exit(1);
+  }
 
   const service = await TrellisService.connect({
     authorizationContextEphemeral: true,
@@ -172,16 +175,16 @@ async function main(): Promise<void> {
 
     try {
       await service.stop();
-      Deno.exit(0);
+      process.exit(0);
     } catch (error) {
       console.error(chalk.red.bold("Failed to stop Field Ops demo service"));
       console.error(error);
-      Deno.exit(1);
+      process.exit(1);
     }
   };
 
-  Deno.addSignalListener("SIGINT", () => void shutdown());
-  Deno.addSignalListener("SIGTERM", () => void shutdown());
+  process.on("SIGINT", () => void shutdown());
+  process.on("SIGTERM", () => void shutdown());
 
   try {
     await service.wait();
@@ -190,7 +193,7 @@ async function main(): Promise<void> {
       chalk.red.bold("Field Ops demo service stopped unexpectedly"),
     );
     console.error(error);
-    Deno.exit(1);
+    process.exit(1);
   }
 }
 

@@ -264,23 +264,9 @@ async function wasmBytes(): Promise<Uint8Array> {
     "./protocol_wasm/trellis_protocol_wasm_bg.wasm",
     import.meta.url,
   );
-  const runtime = globalThis as Record<string, unknown>;
-  const deno = runtime["De" + "no"] as
-    | { readFile(path: URL): Promise<Uint8Array> }
-    | undefined;
-  if (deno) return await deno.readFile(url);
-  const process = runtime["pro" + "cess"] as
-    | {
-      versions?: { node?: string };
-      getBuiltinModule?: (name: string) => {
-        promises: { readFile(path: URL): Promise<Uint8Array> };
-      };
-    }
-    | undefined;
-  if (process?.versions?.node && process.getBuiltinModule) {
-    return new Uint8Array(
-      await process.getBuiltinModule("fs").promises.readFile(url),
-    );
+  if (url.protocol === "file:") {
+    const { readFile } = await import("node:fs/promises");
+    return new Uint8Array(await readFile(url));
   }
   const response = await fetch(url);
   if (!response.ok) {
@@ -305,14 +291,6 @@ function initializeSync(): void {
     import.meta.url,
   );
   const runtime = globalThis as Record<string, unknown>;
-  const deno = runtime["De" + "no"] as
-    | { readFileSync(path: URL): Uint8Array }
-    | undefined;
-  if (deno) {
-    initSync({ module: deno.readFileSync(url) as SyncInitInput });
-    initializedSync = true;
-    return;
-  }
   const process = runtime["pro" + "cess"] as
     | {
       versions?: { node?: string };
@@ -323,7 +301,9 @@ function initializeSync(): void {
     | undefined;
   if (process?.versions?.node && process.getBuiltinModule) {
     initSync({
-      module: process.getBuiltinModule("fs").readFileSync(url) as SyncInitInput,
+      module: process.getBuiltinModule("node:fs").readFileSync(
+        url,
+      ) as SyncInitInput,
     });
     initializedSync = true;
     return;

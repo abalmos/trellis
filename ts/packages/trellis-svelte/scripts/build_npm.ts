@@ -411,10 +411,6 @@ await writeJson(
         `jsr:@qlever-llc/trellis@^${jsrRuntimeDependencyVersion}/auth`,
       "@qlever-llc/trellis/auth/browser":
         `jsr:@qlever-llc/trellis@^${jsrRuntimeDependencyVersion}/auth/browser`,
-      "@qlever-llc/trellis/browser":
-        `jsr:@qlever-llc/trellis@^${jsrRuntimeDependencyVersion}/browser`,
-      "@qlever-llc/trellis/contracts":
-        `jsr:@qlever-llc/trellis@^${jsrRuntimeDependencyVersion}/contracts`,
       "svelte": "npm:svelte@^5.0.0",
       "svelte/internal/client": "npm:svelte@^5.0.0/internal/client",
       "svelte/internal/disclose-version":

@@ -5,6 +5,12 @@ Trellis requirements concern its own APIs and lifecycle. Configuration parsing,
 validation of non-Trellis inputs, databases, DI, code layout, and local testing
 tools are application choices. Neither Zod nor an ORM is required.
 
+The npm packages `@qlever-llc/trellis` and `@qlever-llc/result` contain ESM
+JavaScript and TypeScript declarations. Use `import`. CommonJS output and
+`require()` support have intentionally been removed, with no compatibility
+fallback. Node and Deno adapters remain ESM subpaths; JSR publication remains
+supported.
+
 ## Generate And Connect
 
 Author native IDL, run `trellis update` after dependency changes, and run
@@ -146,10 +152,9 @@ facades do not expose `enqueue`. Job submission intents use the callback's `job`
 tree. `getSqlOutboxMigrations(...)` returns Trellis helper-table migration
 artifacts for the application's migration tool to apply.
 
-Drizzle adapters are optional on `@qlever-llc/trellis/service/drizzle`.
-`createSqlOutbox({ drizzle })` is not a supported option. Other database tools
-can implement the same executor/transaction interfaces. NATS KV outbox/inbox
-helpers do not provide atomicity with unrelated SQL writes.
+Applications adapt their chosen database and transaction handles to the generic
+`SqlExecutor` interface; Trellis does not provide ORM-specific adapters. NATS KV
+outbox/inbox helpers do not provide atomicity with unrelated SQL writes.
 
 SQL and NATS KV outbox claims expire after 30 seconds. `claimDue(...)` returns
 the claimed records; pass a record, not just its ID, to `markDispatched(...)` or

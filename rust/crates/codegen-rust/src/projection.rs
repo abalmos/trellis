@@ -521,6 +521,22 @@ pub(crate) struct ParticipantUse {
 pub(crate) struct ParticipantOperationUse {
     /// Operations the participant may invoke.
     pub(crate) invoke: Option<Vec<String>>,
+    pub(crate) observe: Option<Vec<String>>,
+    pub(crate) cancel: Option<Vec<String>>,
+    #[serde(default)]
+    pub(crate) control: BTreeMap<String, Vec<String>>,
+}
+
+impl ParticipantOperationUse {
+    pub(crate) fn selected(&self) -> std::collections::BTreeSet<&String> {
+        self.invoke
+            .iter()
+            .chain(&self.observe)
+            .chain(&self.cancel)
+            .flatten()
+            .chain(self.control.keys())
+            .collect()
+    }
 }
 
 impl ParticipantUses {

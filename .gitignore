@@ -68,6 +68,18 @@ demos/rust/**/target/
 xtask/Cargo.lock
 rust/xtask/Cargo.lock
 
-.trellis
+# Local generated packages; Orders is intentionally committed.
+/rust/crates/runtime/trellis/
+/rust/crates/eventlog-runtime/trellis/
+/rust/crates/jobs-runtime/trellis/
+/web/trellis/
+/ts/packages/trellis-test/trellis/
+/integration/fixtures/runtime/crates/runtime-trellis/
+/integration/fixtures/runtime/packages/runtime-trellis/
+/demos/rust/service/trellis/
+/demos/rust/device/trellis/
+/demos/ts/service/trellis/
+/demos/ts/device/trellis/
+/demos/app/trellis/
 
 .cortexkit

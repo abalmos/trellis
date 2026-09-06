@@ -1,28 +1,17 @@
-type DenoLike = {
-  env?: {
-    get(key: string): string | undefined;
-  };
-};
-
 type ProcessLike = {
   env?: Record<string, string | undefined>;
 };
 
 type EnvironmentGlobalThis = typeof globalThis & {
-  Deno?: DenoLike;
   process?: ProcessLike;
 };
 
-// Shared telemetry code needs environment access without assuming Deno or Node.
+/** Reads an optional native environment variable without loading Node in browsers. */
 export function getEnv(key: string): string | undefined {
   const environmentGlobal = globalThis as EnvironmentGlobalThis;
-  if (environmentGlobal.Deno?.env?.get) {
-    try {
-      return environmentGlobal.Deno.env.get(key);
-    } catch {
-      return undefined;
-    }
+  try {
+    return environmentGlobal.process?.env?.[key];
+  } catch {
+    return undefined;
   }
-
-  return environmentGlobal.process?.env?.[key];
 }

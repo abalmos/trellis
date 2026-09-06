@@ -1,8 +1,0 @@
-{
-  "extends": "../../deno.json",
-  "name": "@qlever-llc/trellis",
-  "version": "0.12.0",
-  "imports": {
-    "drizzle-orm": "npm:drizzle-orm@0.44.7"
-  }
-}

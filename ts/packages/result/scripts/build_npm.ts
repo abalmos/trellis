@@ -1,17 +1,10 @@
-import { buildDntPackage } from "../../../tools/package_build/build_dnt_package.ts";
+import { buildTypeScriptPackage } from "../../../tools/package_build/build_typescript_package.ts";
+import config from "../deno.json" with { type: "json" };
 
-await buildDntPackage({
-  entryPoints: ["./mod.ts"],
+await buildTypeScriptPackage({
+  name: config.name,
   description:
     "Class-based Result and AsyncResult types for Trellis TypeScript applications.",
-  dependencies: {
-    typebox: "^1.0.15",
-    ulid: "^3.0.1",
-  },
-  npmInstallDeps: {
-    typebox: "^1.0.15",
-    ulid: "^3.0.1",
-  },
-  denoShims: false,
-  typeCheck: false,
-});
+  exports: { ".": { types: "./mod.d.ts", import: "./mod.js" } },
+  dependencies: { typebox: "^1.1.33", ulid: "^3.0.2" },
+}, config.version);

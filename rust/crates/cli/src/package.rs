@@ -132,11 +132,7 @@ pub async fn update(format: OutputFormat, args: &ProjectRootArgs) -> Result<()> 
 pub async fn install(format: OutputFormat, args: &ProjectRootArgs) -> Result<()> {
     let root = canonical_root(&args.root)?;
     let manifest = read_manifest(&root.join("trellis.toml"))?;
-    let lock_path = root.join("trellis.lock");
-    if !lock_path.exists() {
-        return Err(miette!("trellis.lock is missing; run `trellis update`"));
-    }
-    let lock = read_lock(&lock_path)?;
+    let lock = project_lock(&root, &manifest)?;
     let result = install_root(&root, &manifest, &lock).await?;
     print_result(format, &result, None)
 }
@@ -144,7 +140,7 @@ pub async fn install(format: OutputFormat, args: &ProjectRootArgs) -> Result<()>
 pub async fn publish(format: OutputFormat, args: &PublishArgs) -> Result<()> {
     let root = canonical_root(&args.project.root)?;
     let manifest = read_manifest(&root.join("trellis.toml"))?;
-    let lock = read_lock(&root.join("trellis.lock"))?;
+    let lock = project_lock(&root, &manifest)?;
     let (apis, _) = acquire_dependencies(&root, &manifest, &lock).await?;
     let compiled = trellis_idl::compile_project(&root, apis)?;
     let registry = args
@@ -240,6 +236,23 @@ fn read_optional(path: &Path) -> Result<Option<Vec<u8>>> {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
         Err(error) => Err(error).into_diagnostic(),
     }
+}
+
+fn project_lock(root: &Path, manifest: &ProjectManifest) -> Result<ProjectLock> {
+    let outputs = crate::generate::output_paths(root, manifest)?;
+    let path = root.join("trellis.lock");
+    if read_optional(&path)?.is_none() {
+        miette::ensure!(
+            manifest.apis.is_empty() && outputs.is_empty(),
+            "trellis.lock is missing; run `trellis update`"
+        );
+        return Ok(ProjectLock {
+            format: 1,
+            manifest_digest: manifest.digest()?,
+            api: Vec::new(),
+        });
+    }
+    read_lock(&path)
 }
 
 async fn commit_and_install(
@@ -399,7 +412,7 @@ async fn install_root(
 ) -> Result<PackageResult> {
     let (apis, changed_dependencies) = acquire_dependencies(root, manifest, lock).await?;
     let compiled = trellis_idl::compile_project(root, apis)?;
-    let generated = crate::generate::generate_compiled(root, manifest, &compiled)?;
+    let generated = crate::generate::generate_compiled(root, manifest, &compiled, false)?;
     Ok(PackageResult {
         installed_apis: lock.api.len(),
         changed_dependencies,
@@ -1125,16 +1138,15 @@ mod tests {
 
         let empty_lock = crate::project::read_lock(&root.path().join("trellis.lock")).unwrap();
         fs::remove_file(root.path().join("trellis.lock")).unwrap();
-        assert!(install(
+        install(
             OutputFormat::Text,
             &ProjectRootArgs {
-                root: root.path().to_path_buf()
-            }
+                root: root.path().to_path_buf(),
+            },
         )
         .await
-        .unwrap_err()
-        .to_string()
-        .contains("trellis.lock is missing"));
+        .unwrap();
+        assert!(!root.path().join("trellis.lock").exists());
         crate::project::write_lock(&root.path().join("trellis.lock"), &empty_lock).unwrap();
         let mut changed_manifest =
             crate::project::read_manifest(&root.path().join("trellis.toml")).unwrap();

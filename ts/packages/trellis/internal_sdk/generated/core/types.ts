@@ -1,6 +1,6 @@
-// Generated from ./ts/packages/trellis/.trellis/generated/protocol/apis/trellis.core@v1.json
-import type { SerializableErrorData } from "../../../contracts.ts";
-import { TrellisError } from "../../../errors/index.ts";
+// Generated from trellis.core@v1
+import type { SerializableErrorData } from "../../../generated.ts";
+import { TrellisError } from "../../../generated.ts";
 
 export type TrellisSurfaceStatusInput = {
   action?: "call" | "publish" | "subscribe" | "observe";

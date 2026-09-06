@@ -5,7 +5,6 @@ import type {
   ClientAuthOptions,
   ClientAuthRequiredContext,
 } from "@qlever-llc/trellis";
-import type { GeneratedParticipantEvidence } from "@qlever-llc/trellis/participant";
 
 import type {
   TrellisControlPlaneOAuthProvider,
@@ -13,7 +12,7 @@ import type {
 } from "./control_plane_config.ts";
 
 /** Native contract artifacts accepted by Trellis test admin automation. */
-export type TrellisTestParticipantLike = GeneratedParticipantEvidence;
+export type TrellisTestParticipantLike = CallerParticipant;
 
 /** Authority plan classifications the test runtime may approve automatically. */
 export type TrellisTestAuthorityPlanClassification =

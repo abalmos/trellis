@@ -160,6 +160,7 @@ fn run_install() -> Result<()> {
     for (project, api_id, module) in [
         ("runtime", "trellis.auth@v1", "auth"),
         ("eventlog-runtime", "trellis.eventlog@v1", "eventlog"),
+        ("runtime", "trellis.core@v1", "core"),
         ("runtime", "trellis.health@v1", "health"),
         ("jobs-runtime", "trellis.jobs@v1", "jobs"),
         ("runtime", "trellis.state@v1", "state"),
@@ -170,8 +171,15 @@ fn run_install() -> Result<()> {
         if out_dir.exists() {
             std::fs::remove_dir_all(&out_dir).into_diagnostic()?;
         }
-        let sources = trellis_codegen_ts::collect_ts_sdk_sources(&compiled[project].apis[api_id])
-            .into_diagnostic()?;
+        let mut sources =
+            trellis_codegen_ts::collect_ts_sdk_sources(&compiled[project].apis[api_id])
+                .into_diagnostic()?;
+        for source in &mut sources {
+            source.contents = source.contents.replace(
+                "\"@qlever-llc/trellis/generated\"",
+                "\"../../../generated.ts\"",
+            );
+        }
         trellis_codegen_ts::write_ts_sdk_sources(&out_dir, &sources)
             .map_err(|error| miette::miette!(error.to_string()))?;
         let status = Command::new("deno")

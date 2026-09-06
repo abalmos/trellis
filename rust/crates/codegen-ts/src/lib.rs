@@ -37,6 +37,9 @@ pub enum CodegenTsError {
 
     #[error("generated TypeScript output path must stay within the package: {0}")]
     InvalidOutputPath(PathBuf),
+
+    #[error("missing generated reference: {0}")]
+    MissingReference(String),
 }
 
 fn project_api(api: &ApiArtifact) -> Result<ApiInput, CodegenTsError> {
@@ -74,6 +77,7 @@ pub fn generate_ts_package(
             "name": name,
             "version": "0.0.0",
             "private": true,
+            "trellisGenerated": true,
             "description": "Generated Trellis APIs and participants.",
             "type": "module",
             "exports": {".": {"types": "./index.d.ts", "import": "./index.js"}},
@@ -234,7 +238,7 @@ fn render_ts_participant(
         "  PARTICIPANT_STATE_METADATA,".to_owned(),
         "  PARTICIPANT_STORE_METADATA,".to_owned(),
         "  runtimeApiFromActions,".to_owned(),
-        "} from \"@qlever-llc/trellis\";".to_owned(),
+        "} from \"@qlever-llc/trellis/generated\";".to_owned(),
     ];
     for (id, alias) in &aliases {
         lines.push(format!(
@@ -246,7 +250,7 @@ fn render_ts_participant(
 
     let owned_actions = api_action_expressions(&owned.value, owned_alias);
     let (required_actions, optional_actions) =
-        selected_action_expressions(&participant_value, &aliases, &apis);
+        selected_action_expressions(&participant_value, &aliases, &apis)?;
     let all_actions = owned_actions
         .iter()
         .chain(&required_actions)
@@ -410,7 +414,7 @@ fn selected_action_expressions(
     participant: &Value,
     aliases: &BTreeMap<String, String>,
     apis: &BTreeMap<String, Value>,
-) -> (BTreeSet<String>, BTreeSet<String>) {
+) -> Result<(BTreeSet<String>, BTreeSet<String>), CodegenTsError> {
     let mut required = BTreeSet::new();
     let mut optional = BTreeSet::new();
     for (category, selected) in [("required", &mut required), ("optional", &mut optional)] {
@@ -420,8 +424,22 @@ fn selected_action_expressions(
             .flat_map(|value| value.values())
         {
             let api_id = used["api"].as_str().expect("validated API use");
-            let alias = &aliases[api_id];
-            let api = &apis[api_id];
+            let alias = aliases
+                .get(api_id)
+                .ok_or_else(|| CodegenTsError::MissingReference(format!("API '{api_id}'")))?;
+            let api = apis
+                .get(api_id)
+                .ok_or_else(|| CodegenTsError::MissingReference(format!("API '{api_id}'")))?;
+            for name in used["operations"]["control"]
+                .as_object()
+                .into_iter()
+                .flat_map(|entries| entries.keys())
+            {
+                selected.insert(format!(
+                    "{alias}.ACTIONS[{}]",
+                    js_string(descriptor_name(api, "operations", name)?)
+                ));
+            }
             for (section, suffix) in [("rpc", ""), ("operations", ""), ("feeds", "")] {
                 for actions in used[section]
                     .as_object()
@@ -436,7 +454,7 @@ fn selected_action_expressions(
                     {
                         selected.insert(format!(
                             "{alias}.ACTIONS[{}]{suffix}",
-                            js_string(descriptor_name(api, section, name))
+                            js_string(descriptor_name(api, section, name)?)
                         ));
                     }
                 }
@@ -454,25 +472,27 @@ fn selected_action_expressions(
                 {
                     selected.insert(format!(
                         "{alias}.ACTIONS[{}][\"{action}\"]",
-                        js_string(descriptor_name(api, "events", name))
+                        js_string(descriptor_name(api, "events", name)?)
                     ));
                 }
             }
         }
     }
-    (required, optional)
+    Ok((required, optional))
 }
 
-fn descriptor_name<'a>(api: &'a Value, section: &str, selected: &'a str) -> &'a str {
+fn descriptor_name<'a>(
+    api: &Value,
+    section: &str,
+    selected: &'a str,
+) -> Result<&'a str, CodegenTsError> {
     api[section]
         .as_object()
-        .and_then(|entries| {
-            entries
-                .keys()
-                .find(|name| *name == selected || name.ends_with(&format!(".{selected}")))
+        .filter(|entries| entries.contains_key(selected))
+        .map(|_| selected)
+        .ok_or_else(|| {
+            CodegenTsError::MissingReference(format!("{} {section}.{selected}", api["id"]))
         })
-        .map(String::as_str)
-        .unwrap_or(selected)
 }
 
 fn insert_participant_metadata(
@@ -496,8 +516,10 @@ fn insert_participant_metadata(
                 .as_str()
                 .or_else(|| entry["payload"]["schema"].as_str())
                 .expect("validated participant schema reference");
-            let schemas = schemas.expect("participant schemas");
-            let schema = resolve_participant_schema(schemas, schema_name);
+            let schemas = schemas.ok_or_else(|| {
+                CodegenTsError::MissingReference(format!("participant schema '{schema_name}'"))
+            })?;
+            let schema = resolve_participant_schema(schemas, schema_name)?;
             let ty = participant_schema_type(schema_name, schema, aliases);
             if section == "state" {
                 lines.push(format!("    {}: {{ kind: {}, value: typeOnly<{ty}>() as {ty}, schema: {} as const, stateVersion: {}, acceptedVersions: {{}} }},", js_string(name), js_string(entry["kind"].as_str().expect("state kind")), serde_json::to_string(schema)?, js_string(entry["stateVersion"].as_str().unwrap_or("v1"))));
@@ -523,8 +545,12 @@ fn insert_participant_metadata(
             for (name, entry) in entries {
                 if section == "kv" {
                     let schema_name = entry["schema"]["schema"].as_str().expect("KV schema");
-                    let schemas = schemas.expect("participant schemas");
-                    let schema = resolve_participant_schema(schemas, schema_name);
+                    let schemas = schemas.ok_or_else(|| {
+                        CodegenTsError::MissingReference(format!(
+                            "participant schema '{schema_name}'"
+                        ))
+                    })?;
+                    let schema = resolve_participant_schema(schemas, schema_name)?;
                     let ty = participant_schema_type(schema_name, schema, aliases);
                     lines.push(format!("    {}: {{ required: true, value: typeOnly<{ty}>() as {ty}, schema: {} as const }},", js_string(name), serde_json::to_string(schema)?));
                 } else {
@@ -569,23 +595,37 @@ fn insert_participant_metadata(
 fn resolve_participant_schema<'a>(
     schemas: &'a serde_json::Map<String, Value>,
     name: &str,
-) -> &'a Value {
-    let schema = &schemas[name];
-    schema
-        .get("$ref")
-        .and_then(Value::as_str)
-        .and_then(|reference| reference.strip_prefix("#/schemas/"))
-        .map(|name| resolve_participant_schema(schemas, name))
-        .unwrap_or(schema)
+) -> Result<&'a Value, CodegenTsError> {
+    let mut name = name;
+    let mut visited = BTreeSet::new();
+    loop {
+        if !visited.insert(name) {
+            return Err(CodegenTsError::MissingReference(format!(
+                "cyclic participant schema '{name}'"
+            )));
+        }
+        let schema = schemas.get(name).ok_or_else(|| {
+            CodegenTsError::MissingReference(format!("participant schema '{name}'"))
+        })?;
+        match schema.get("$ref").and_then(Value::as_str) {
+            Some(reference) => {
+                name = reference
+                    .strip_prefix("#/schemas/")
+                    .ok_or_else(|| CodegenTsError::MissingReference(reference.to_owned()))?
+            }
+            None => return Ok(schema),
+        }
+    }
 }
 
 fn participant_schema_type(name: &str, schema: &Value, aliases: &[SchemaTypeAlias]) -> String {
-    aliases
+    let mut matches = aliases
         .iter()
-        .filter(|alias| name.ends_with(&alias.key))
-        .max_by_key(|alias| alias.key.len())
-        .map(|alias| alias.type_name.clone())
-        .unwrap_or_else(|| schema_to_ts_with_aliases(schema, aliases, None))
+        .filter(|alias| name == alias.key && *schema == alias.schema);
+    match (matches.next(), matches.next()) {
+        (Some(alias), None) => alias.type_name.clone(),
+        _ => schema_to_ts_with_aliases(schema, &[], None),
+    }
 }
 
 /// Render the source modules for one API without writing files or package metadata.
@@ -674,11 +714,11 @@ fn render_wire_types_ts(loaded: &ApiInput) -> String {
         lines.extend([
             format!(
                 "import type {{ SerializableErrorData }} from {};",
-                js_string("@qlever-llc/trellis")
+                js_string("@qlever-llc/trellis/generated")
             ),
             format!(
                 "import {{ TrellisError }} from {};",
-                js_string("@qlever-llc/trellis")
+                js_string("@qlever-llc/trellis/generated")
             ),
         ]);
     }
@@ -895,7 +935,7 @@ fn render_schemas_ts(loaded: &ApiInput) -> String {
 
 fn render_descriptors_ts(loaded: &ApiInput) -> String {
     let source_reference = &loaded.render_model.id;
-    let trellis_runtime_import = "@qlever-llc/trellis";
+    let trellis_runtime_import = "@qlever-llc/trellis/generated";
     let public_schema_exports = public_schema_exports(loaded);
     let schema_const_names = public_schema_exports
         .iter()
@@ -1446,19 +1486,23 @@ fn render_trellis_md(loaded: &ApiInput) -> String {
 }
 
 fn push_ts_owned_surfaces(lines: &mut Vec<String>, loaded: &ApiInput) {
+    let connected_path = |key: &str| {
+        let (group, leaf) = key.split_once('.').unwrap_or((key, key));
+        format!("{}.{}", lower_camel_ident(group), lower_camel_ident(leaf))
+    };
     let has_public_rpc = !loaded.render_model.rpc.is_empty();
     for key in loaded.render_model.rpc.keys() {
         let descriptor = key_to_pascal(key);
-        let connected = lower_camel_ident(key);
+        let connected = connected_path(key);
         lines.push(format!(
-            "- RPC `{key}`: descriptor `{descriptor}`, connected call `client.{connected}(input)`"
+            "- RPC `{key}`: descriptor `{descriptor}`, connected call `client.rpc.{connected}(input)`"
         ));
     }
     for (key, event) in &loaded.render_model.events {
         let descriptor = key_to_pascal(key);
-        let connected = key_to_pascal(&lower_camel_ident(key));
+        let connected = connected_path(key);
         lines.push(format!(
-            "- Event `{key}`: subscribe descriptor `{descriptor}.subscribe`, connected listener `client.on{connected}(handler)`"
+            "- Event `{key}`: subscribe descriptor `{descriptor}.subscribe`, connected listener `client.event.{connected}.listen(handler)`"
         ));
         if event
             .capabilities
@@ -1466,22 +1510,22 @@ fn push_ts_owned_surfaces(lines: &mut Vec<String>, loaded: &ApiInput) {
             .is_some_and(|capabilities| capabilities.publish.is_some())
         {
             lines.push(format!(
-                "- Event `{key}` delegated publish: `{descriptor}.publish`, connected publisher `client.publish{connected}(event)`"
+                "- Event `{key}` delegated publish: `{descriptor}.publish`, connected publisher `client.event.{connected}.publish(event)`"
             ));
         }
     }
     for key in loaded.render_model.feeds.keys() {
         let descriptor = key_to_pascal(key);
-        let connected = lower_camel_ident(key);
+        let connected = connected_path(key);
         lines.push(format!(
-            "- Feed `{key}`: descriptor `{descriptor}`, connected subscribe `client.{connected}(input)`"
+            "- Feed `{key}`: descriptor `{descriptor}`, connected subscribe `client.feed.{connected}(input)`"
         ));
     }
     for key in loaded.render_model.operations.keys() {
         let descriptor = key_to_pascal(key);
-        let connected = lower_camel_ident(key);
+        let connected = connected_path(key);
         lines.push(format!(
-            "- Operation `{key}`: descriptor `{descriptor}`, connected call `client.{connected}(input).start()`"
+            "- Operation `{key}`: descriptor `{descriptor}`, connected call `client.operation.{connected}.start(input)`"
         ));
     }
     if !has_public_rpc
@@ -2132,6 +2176,13 @@ mod tests {
         )
         .unwrap();
         let sources = collect_ts_sdk_sources(&api).unwrap();
+        let guide = &sources
+            .iter()
+            .find(|source| source.path == Path::new("TRELLIS.md"))
+            .unwrap()
+            .contents;
+        assert!(guide.contains("client.rpc.state.get(input)"));
+        assert!(guide.contains("client.rpc.state.adminGet(input)"));
         for source in sources
             .iter()
             .filter(|source| source.path.extension().is_some_and(|ext| ext == "ts"))
@@ -2154,6 +2205,105 @@ mod tests {
 
         assert!(matches!(error, CodegenTsError::InvalidOutputPath(_)));
         assert!(!root.join("escape.ts").exists());
+    }
+
+    #[test]
+    fn generated_exact_identity_consumer_type_checks() {
+        let root = unique_temp_dir("exact-identity");
+        let api = trellis_protocol::parse_api(&serde_json::json!({
+            "format": "trellis.api.v1", "id": "identity@v1", "version": "1.0.0",
+            "displayName": "Identity", "description": "Exact identity regression.",
+            "schemas": {
+                "Row": {"type": "object", "properties": {"id": {"type": "string"}}, "required": ["id"]},
+                "Count": {"type": "integer"}
+            },
+            "exports": {"schemas": ["Row"]},
+            "operations": {"Work": {"version": "v1", "input": {"schema": "Count"}, "output": {"schema": "Row"}, "signals": {"Update": {"input": {"schema": "Row"}}}}},
+            "errors": {"Failed": {}},
+            "rpc": {
+                "A.Get": {"version": "v1", "input": {"schema": "Row"}, "output": {"schema": "Row"}},
+                "Get": {"version": "v1", "input": {"schema": "Count"}, "output": {"schema": "Count"}, "errors": ["Failed"]}
+            }
+        })).unwrap();
+        let owned = trellis_protocol::parse_api(&serde_json::json!({
+            "format": "trellis.api.v1", "id": "consumer@v1", "version": "1.0.0",
+            "displayName": "Consumer", "description": "Exact identity consumer."
+        }))
+        .unwrap();
+        let participant = trellis_protocol::parse_participant(&serde_json::json!({
+            "format": "trellis.participant.v1", "id": "identity@v1", "kind": "service",
+            "displayName": "Identity", "description": "Exact identity regression.",
+            "implements": {"self": {"api": owned.id(), "apiDigest": owned.digest().unwrap()}},
+            "uses": {"required": {"remote": {"api": api.id(), "apiDigest": api.digest().unwrap(), "rpc": {"call": ["Get"]}, "operations": {"control": {"Work": ["Update"]}}}}},
+            "schemas": {"NotRow": {"type": "integer"}},
+            "resources": {"kv": {"count": {"purpose": "Count", "schema": {"schema": "NotRow"}}}}
+        })).unwrap();
+        generate_ts_package(
+            &BTreeMap::from([(api.id(), &api), (owned.id(), &owned)]),
+            std::slice::from_ref(&participant),
+            &root.join("sdk"),
+            "identity-trellis",
+        )
+        .unwrap();
+        let package: Value =
+            serde_json::from_str(&fs::read_to_string(root.join("sdk/package.json")).unwrap())
+                .unwrap();
+        assert_eq!(package["trellisGenerated"], true);
+        let mut invalid = participant.normalized_value().unwrap();
+        invalid["uses"]["required"]["remote"]["rpc"]["call"] = serde_json::json!(["invented.Get"]);
+        let invalid = trellis_protocol::parse_participant(&invalid).unwrap();
+        let error = generate_ts_package(
+            &BTreeMap::from([(api.id(), &api), (owned.id(), &owned)]),
+            &[invalid],
+            &root.join("invalid"),
+            "identity-trellis",
+        )
+        .unwrap_err();
+        assert!(matches!(error, CodegenTsError::MissingReference(_)));
+        assert!(!root.join("invalid").exists());
+        let mut collision = api.normalized_value().unwrap();
+        collision["schemas"]["WorkInput"] = serde_json::json!({"type": "string"});
+        collision["exports"]["schemas"] = serde_json::json!(["WorkInput"]);
+        let collision = trellis_protocol::parse_api(&collision).unwrap();
+        let error = generate_ts_package(
+            &BTreeMap::from([(collision.id(), &collision)]),
+            &[],
+            &root.join("collision"),
+            "identity-trellis",
+        )
+        .unwrap_err();
+        assert!(matches!(error, CodegenTsError::ExportNameCollision(_)));
+        assert!(!root.join("collision").exists());
+        fs::write(
+            root.join("consumer.ts"),
+            r#"
+import { participants, apis } from "./sdk/index.d.ts";
+import { PARTICIPANT_RUNTIME, PARTICIPANT_KV_METADATA } from "@qlever-llc/trellis/generated";
+const participant = participants.identity.participant;
+const name: keyof typeof participant[typeof PARTICIPANT_RUNTIME]["usedApi"]["rpc"] = "Get";
+// @ts-expect-error An unselected suffix match must not appear.
+const wrong: keyof typeof participant[typeof PARTICIPANT_RUNTIME]["usedApi"]["rpc"] = "A.Get";
+const count: number = participant[PARTICIPANT_KV_METADATA].count.value;
+const operation: keyof typeof participant[typeof PARTICIPANT_RUNTIME]["usedApi"]["operations"] = "Work";
+const output: apis.identity.GetOutput = 1;
+const row: apis.identity.Row = { id: "row" };
+void [name, wrong, count, output, row, operation];
+"#,
+        )
+        .unwrap();
+        let repo = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../..");
+        let output = std::process::Command::new("deno")
+            .args(["check", "--no-lock", "-c"])
+            .arg(repo.join("ts/deno.json"))
+            .arg(root.join("consumer.ts"))
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

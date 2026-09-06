@@ -1,6 +1,6 @@
 import { credsAuthenticator } from "@nats-io/nats-core";
 import { jetstreamManager } from "@nats-io/jetstream";
-import { connect } from "@nats-io/transport-deno";
+import { connect } from "@nats-io/transport-node";
 import { assertEquals } from "@std/assert";
 import { fromFileUrl, join } from "@std/path";
 

@@ -1,7 +1,6 @@
 import { Result } from "@qlever-llc/trellis";
 import { TransportError } from "@qlever-llc/trellis/errors";
-import { RetryJobError } from "@qlever-llc/trellis/jobs";
-import { TrellisService } from "@qlever-llc/trellis/service/deno";
+import { RetryJobError, TrellisService } from "@qlever-llc/trellis/service";
 import { assert, assertEquals } from "@std/assert";
 import { fromFileUrl } from "@std/path";
 

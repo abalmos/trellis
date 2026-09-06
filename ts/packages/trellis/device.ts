@@ -1,4 +1,12 @@
 import type { NatsConnection } from "@nats-io/nats-core";
+export { checkDeviceActivation } from "./device/activation.ts";
+export type {
+  CheckDeviceActivationArgs,
+  TrellisDeviceActivatedStatus,
+  TrellisDeviceActivationRequiredStatus,
+  TrellisDeviceActivationStatus,
+  TrellisDeviceNotReadyStatus,
+} from "./device/activation.ts";
 import {
   AsyncResult,
   type BaseError,

@@ -5,11 +5,7 @@ import type {
 } from "../../auth/authorization_context.ts";
 import type { TrellisDurableEventConsumerBeforeReadinessCheckHook } from "../../session.ts";
 
-// Keep the public service package runtime-neutral.
-//
-// Third-party service authors may use Deno or Node, so the shared service core cannot
-// hard-code a transport or file system API. Environment-specific modules wire
-// these adapters in from `./deno.ts` or `./node.ts`.
+// Node and Deno share the native transport loaded by runtime_transport.ts.
 export type NatsConnectOpts = {
   servers: string | string[];
   token?: string;

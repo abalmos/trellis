@@ -183,6 +183,7 @@ export class TrellisTestAdminAutomation {
   async createDeployment(args: {
     deployment?: string;
     kind?: "service" | "device";
+    reviewMode?: "none" | "required";
   } = {}): Promise<void> {
     return await adminDeployment.createDeployment(this.#deployment, args);
   }

@@ -876,6 +876,11 @@ fn constrained(
         if !applies || !valid_value {
             return Err(at(project, ty, format!("constraint '{}' has an invalid type or literal (numeric bounds need numbers; lengths and counts need unsigned integers; pattern and format need strings)", constraint.name)));
         }
+        if matches!(ty.value, Type::Integer { .. })
+            && matches!(&constraint.value, ConstraintValue::Number(value) if !value.as_f64().is_some_and(|value| value.is_finite() && value.fract() == 0.0 && value.abs() <= 9_007_199_254_740_991.0))
+        {
+            return Err(at(project, ty, "integer bounds must be integral signed safe integers (absolute value <= 9007199254740991)"));
+        }
         if !seen.insert(keyword) {
             return Err(at(
                 project,

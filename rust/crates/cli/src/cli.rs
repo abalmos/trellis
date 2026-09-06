@@ -96,6 +96,9 @@ pub struct GenerateArgs {
     #[arg(short = 'w', long)]
     /// Watch the project and direct local dependencies for source changes.
     pub watch: bool,
+    #[arg(long, conflicts_with = "watch")]
+    /// Check for missing, stale, or extra generated files without changing outputs.
+    pub check: bool,
     #[command(flatten)]
     pub project: ProjectRootArgs,
 }

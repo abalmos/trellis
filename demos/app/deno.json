@@ -23,7 +23,6 @@
     "@qlever-llc/result": "npm:@qlever-llc/result@^0.12.0",
     "@qlever-llc/trellis-svelte": "npm:@qlever-llc/trellis-svelte@^0.12.0",
     "@qlever-llc/trellis": "npm:@qlever-llc/trellis@^0.12.0",
-    "@qlever-llc/trellis/": "npm:@qlever-llc/trellis@^0.12.0/",
     "@sveltejs/acorn-typescript": "npm:@sveltejs/acorn-typescript@^1.0.9",
     "@sveltejs/adapter-auto": "npm:@sveltejs/adapter-auto@^7.0.1",
     "@sveltejs/adapter-static": "npm:@sveltejs/adapter-static@3.0.10",
@@ -45,6 +44,7 @@
     "tailwindcss": "npm:tailwindcss@4.2.4",
     "typebox": "npm:typebox@^1.0.15",
     "typescript": "npm:typescript@6.0.3",
+    "ulid": "npm:ulid@^3.0.1",
     "vite": "npm:vite@8.0.10"
   },
   "nodeModulesDir": "auto",

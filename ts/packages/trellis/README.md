@@ -3,6 +3,11 @@
 JavaScript Trellis client runtime. Provides generated-participant client helpers
 and runtime error types.
 
+The npm package contains ESM JavaScript and TypeScript declarations. Use
+`import`; CommonJS output and `require()` support have intentionally been
+removed. Node and Deno adapters remain available as ESM subpaths. JSR
+publication remains supported.
+
 For AI-agent context, start with the generated package `TRELLIS.md` files and
 the raw docs index:
 
@@ -17,8 +22,6 @@ const client = await TrellisClient.connect({
   trellisUrl: "https://trellis.example.com",
   participant: participants.exampleApp.participant,
 }).orThrow();
-const meResult = await client.authSessionsMe({});
-const me = meResult.orThrow();
 ```
 
 The local package name comes from `trellis.toml`. Generation emits one ordinary
@@ -26,10 +29,11 @@ ESM package with `apis` and `participants` namespaces, executable JavaScript and
 declarations, and the matching published runtime dependency. Commit that package
 when ordinary builds should not require the Trellis CLI or API cache.
 
-Generated participants expose flat, typed methods for their declared surfaces.
-Inspect their declarations for exact caller, provider, event, feed, and
-operation names. Do not reconstruct transport subjects or use handwritten
-contract metadata.
+Connected API facades group actions by surface: `.rpc.<group>.<leaf>(input)`,
+`.event.<group>.<leaf>.listen(handler)` or `.publish(event)`,
+`.feed.<group>.<leaf>(input)`, and `.operation.<group>.<leaf>.start(input)`.
+Inspect generated declarations for the exact selected APIs and action names. Do
+not reconstruct transport subjects or use handwritten contract metadata.
 
 Prepared events support durable publish flows. `prepare(...)` returns a
 `PreparedTrellisEvent`; services can persist prepared events in SQL or NATS KV

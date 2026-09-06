@@ -16,6 +16,7 @@ concurrency:
 
 env:
   DENO_VERSION: 2.9.4
+  NODE_VERSION: 24
   CARGO_TERM_COLOR: always
   RUSTUP_INIT_SKIP_PATH_CHECK: "yes"
 
@@ -327,11 +328,16 @@ jobs:
           name: check-protocol-wasm
           path: ts/packages/trellis/auth/protocol_wasm
 
-      - name: Build repository CLI
-        run: cargo build --manifest-path rust/Cargo.toml -p trellis-cli
+      - name: Build repository CLI and server
+        run: cargo build --manifest-path rust/Cargo.toml -p trellis-cli -p trellis-server
 
       - name: Expose repository CLI
         run: echo "$GITHUB_WORKSPACE/rust/target/debug" >> "$GITHUB_PATH"
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
 
       - name: Check TypeScript demos with packaged dependencies
         run: |
@@ -342,13 +348,24 @@ jobs:
         working-directory: demos/rust/service
         run: |
           trellis generate
+          consumer="$(mktemp -d)"
+          trap 'rm -rf "$consumer"' EXIT
+          cp -R Cargo.toml src trellis "$consumer/"
+          export PATH="$(dirname "$(rustup which cargo)"):/usr/bin:/bin"
+          export TRELLIS_CACHE="$consumer/empty-api-cache"
+          cd "$consumer"
           cargo check --config "patch.crates-io.trellis-rs.path=\"$GITHUB_WORKSPACE/rust/crates/trellis\""
 
       - name: Check Rust device demo
         working-directory: demos/rust/device
         run: |
-          trellis update
           trellis generate
+          consumer="$(mktemp -d)"
+          trap 'rm -rf "$consumer"' EXIT
+          cp -R Cargo.toml src trellis "$consumer/"
+          export PATH="$(dirname "$(rustup which cargo)"):/usr/bin:/bin"
+          export TRELLIS_CACHE="$consumer/empty-api-cache"
+          cd "$consumer"
           cargo check --config "patch.crates-io.trellis-rs.path=\"$GITHUB_WORKSPACE/rust/crates/trellis\""
 
   live:
@@ -399,6 +416,11 @@ jobs:
           TRELLIS_TEST_SERVER_BIN: ${{ github.workspace }}/rust/target/debug/trellis-server
           TRELLIS_TEST_CLI_BIN: ${{ github.workspace }}/rust/target/debug/trellis
         run: deno test -A -c ts/integration/deno.json ts/integration
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
 
       - name: Verify documented Orders service
         env:

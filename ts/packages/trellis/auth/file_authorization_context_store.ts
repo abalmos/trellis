@@ -1,3 +1,12 @@
+import {
+  chmod,
+  mkdir,
+  readFile,
+  rename,
+  unlink,
+  writeFile,
+} from "node:fs/promises";
+import { dirname } from "node:path";
 import { ulid } from "ulid";
 
 import type {
@@ -5,15 +14,6 @@ import type {
   AuthorizationContextStore,
 } from "./authorization_context.ts";
 import { validateAuthorizationClientStateTransition } from "./authorization_context.ts";
-
-type RuntimeFs = {
-  readTextFile(path: string): Promise<string>;
-  writeTextFile(path: string, value: string): Promise<void>;
-  mkdir(path: string): Promise<void>;
-  rename(from: string, to: string): Promise<void>;
-  remove(path: string): Promise<void>;
-  chmod(path: string): Promise<void>;
-};
 
 /**
  * Crash-safe private-file store for one active client process.
@@ -77,9 +77,8 @@ export class FileAuthorizationContextStore
   /** Explicitly remove the complete trust floor and context. */
   resetTrust(): Promise<void> {
     return this.#run(async () => {
-      const fs = await runtimeFs();
       try {
-        await fs.remove(this.path);
+        await unlink(this.path);
       } catch (error) {
         if (!isNotFound(error)) throw error;
       }
@@ -87,10 +86,9 @@ export class FileAuthorizationContextStore
   }
 
   async #load(): Promise<AuthorizationClientState | undefined> {
-    const fs = await runtimeFs();
     try {
       return JSON.parse(
-        await fs.readTextFile(this.path),
+        await readFile(this.path, "utf8"),
       ) as AuthorizationClientState;
     } catch (error) {
       if (isNotFound(error)) return undefined;
@@ -99,16 +97,11 @@ export class FileAuthorizationContextStore
   }
 
   async #write(state: AuthorizationClientState): Promise<void> {
-    const fs = await runtimeFs();
-    const separator = Math.max(
-      this.path.lastIndexOf("/"),
-      this.path.lastIndexOf("\\"),
-    );
-    if (separator > 0) await fs.mkdir(this.path.slice(0, separator));
+    await mkdir(dirname(this.path), { recursive: true });
     const temporary = `${this.path}.${ulid()}.tmp`;
-    await fs.writeTextFile(temporary, JSON.stringify(state, null, 2));
-    await fs.chmod(temporary);
-    await fs.rename(temporary, this.path);
+    await writeFile(temporary, JSON.stringify(state, null, 2), { mode: 0o600 });
+    await chmod(temporary, 0o600);
+    await rename(temporary, this.path);
   }
 
   #run<T>(operation: () => Promise<T>): Promise<T> {
@@ -118,56 +111,7 @@ export class FileAuthorizationContextStore
   }
 }
 
-async function runtimeFs(): Promise<RuntimeFs> {
-  const deno = (globalThis as {
-    Deno?: {
-      readTextFile(path: string): Promise<string>;
-      writeTextFile(
-        path: string,
-        value: string,
-        options: { mode: number },
-      ): Promise<void>;
-      mkdir(path: string, options: { recursive: boolean }): Promise<void>;
-      rename(from: string, to: string): Promise<void>;
-      remove(path: string): Promise<void>;
-      chmod(path: string, mode: number): Promise<void>;
-    };
-  }).Deno;
-  if (deno) {
-    return {
-      readTextFile: (path) => deno.readTextFile(path),
-      writeTextFile: (path, value) =>
-        deno.writeTextFile(path, value, { mode: 0o600 }),
-      mkdir: (path) => deno.mkdir(path, { recursive: true }),
-      rename: (from, to) => deno.rename(from, to),
-      remove: (path) => deno.remove(path),
-      chmod: (path) => deno.chmod(path, 0o600),
-    };
-  }
-  if (
-    (globalThis as { process?: { versions?: { node?: string } } }).process
-      ?.versions?.node
-  ) {
-    const fs = await import("node:fs/promises");
-    return {
-      readTextFile: (path) => fs.readFile(path, "utf8"),
-      writeTextFile: (path, value) =>
-        fs.writeFile(path, value, { mode: 0o600 }),
-      mkdir: async (path) => {
-        await fs.mkdir(path, { recursive: true });
-      },
-      rename: (from, to) => fs.rename(from, to),
-      remove: (path) => fs.unlink(path),
-      chmod: (path) => fs.chmod(path, 0o600),
-    };
-  }
-  throw new Error(
-    "file authorization context storage is unavailable in this runtime",
-  );
-}
-
 function isNotFound(error: unknown): boolean {
   return error instanceof Error &&
-    (error.name === "NotFound" ||
-      ("code" in error && (error as { code?: string }).code === "ENOENT"));
+    "code" in error && error.code === "ENOENT";
 }
