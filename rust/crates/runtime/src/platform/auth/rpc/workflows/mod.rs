@@ -1,6 +1,7 @@
 mod authority;
 mod deployments;
 mod devices;
+mod grants;
 mod portals;
 mod sessions;
 mod users;
@@ -13,7 +14,13 @@ pub(super) async fn dispatch(
     payload: &[u8],
     caller: ValidatedRequest,
 ) -> Result<Value, AuthorizationStateError> {
-    if subject.starts_with("rpc.v1.Auth.Sessions.")
+    if subject.starts_with("rpc.v1.Auth.Grants.")
+        || subject == "rpc.v1.Auth.Issuers.Revoke"
+        || subject == "rpc.v1.Auth.Participants.Install"
+        || subject == "rpc.v1.Auth.Deployments.Apply"
+    {
+        grants::dispatch(processor, subject, payload, caller).await
+    } else if subject.starts_with("rpc.v1.Auth.Sessions.")
         || subject.starts_with("rpc.v1.Auth.Connections.")
     {
         sessions::dispatch(processor, subject, payload, caller).await
@@ -59,6 +66,7 @@ mod tests {
         include_str!("deployments.rs"),
         include_str!("devices.rs"),
         include_str!("authority.rs"),
+        include_str!("grants.rs"),
     );
 
     #[test]

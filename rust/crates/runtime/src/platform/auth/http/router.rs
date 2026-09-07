@@ -20,7 +20,7 @@ use super::browser::{
     web_fallback,
 };
 use super::security::{canonical_origin, security_headers};
-use super::well_known::refresh_context;
+use super::well_known::{issuer_key, refresh_context};
 use super::{
     AccountRepository, AuthEphemeralRepository, AuthHttpOptions, AuthHttpState,
     AuthorityEvidenceRepository, AuthorityRepository, AuthorizationStateError, ContextRepository,
@@ -43,6 +43,7 @@ enum RouteHandler {
     ServiceBootstrap,
     DeviceBootstrap,
     ContextRefresh,
+    IssuerKey,
     GetFlow,
     GetPortalFlow,
     LocalLogin,
@@ -82,6 +83,11 @@ impl RouteDefinition {
 }
 
 const ROUTES: &[RouteDefinition] = &[
+    RouteDefinition {
+        method: RouteMethod::Get,
+        path: "/auth/keys/{key_id}",
+        handler: RouteHandler::IssuerKey,
+    },
     RouteDefinition {
         method: RouteMethod::Post,
         path: "/auth/requests",
@@ -205,6 +211,9 @@ where
     E: AuthEphemeralRepository + Clone + Send + Sync + 'static,
 {
     match (route.method, route.handler) {
+        (RouteMethod::Get, RouteHandler::IssuerKey) => {
+            routes.route(route.path, get(issuer_key::<R, E>))
+        }
         (RouteMethod::Post, RouteHandler::StartAuth) => {
             routes.route(route.path, post(start_auth::<R, E>))
         }

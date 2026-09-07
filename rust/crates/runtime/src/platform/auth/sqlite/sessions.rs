@@ -82,12 +82,6 @@ impl SessionRepository for SqliteAuthorizationStore {
                         return Err(AuthorizationStateError::StorageConflict);
                     }
                 } else {
-                    transaction
-                        .execute(
-                            "DELETE FROM auth_authorization_contexts WHERE session_id = ?1",
-                            [&previous.session_id],
-                        )
-                        .map_err(map_write_error)?;
                     let changed = transaction
                         .execute(
                             "DELETE FROM auth_sessions WHERE session_id = ?1 AND version = ?2",

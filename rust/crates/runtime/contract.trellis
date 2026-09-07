@@ -659,6 +659,168 @@ api "trellis.auth@v1" {
   version "1.0.0";
   display_name "Trellis Auth";
   description "Authenticate Trellis principals and administer sessions, deployments, exact authority, devices, and login portals.";
+  model AuthArtifact {
+  }
+  model AuthGrantSet {
+    format: "trellis.grant-set.v1";
+    permissions: list<AuthPermissionAtom>;
+  }
+  model AuthPermissionAtom {
+    action: "call" | "invoke" | "observe" | "cancel" | "control" | "publish" | "subscribe" | "read" | "write" | "delete" | "submit" | "process" | "consume";
+    target: AuthApiSurfaceTarget | AuthOperationSignalTarget | AuthParticipantResourceTarget;
+  }
+  model AuthApiSurfaceTarget {
+    kind: "apiSurface";
+    api: string(min_length=1);
+    surface: "rpc" | "operation" | "event" | "feed" | "state";
+    name: string(min_length=1);
+  }
+  model AuthOperationSignalTarget {
+    kind: "operationSignal";
+    api: string(min_length=1);
+    operation: string(min_length=1);
+    signal: string(min_length=1);
+  }
+  model AuthParticipantResourceTarget {
+    kind: "participantResource";
+    participant: string(min_length=1);
+    resource: "state" | "jobQueue" | "eventConsumer" | "kv" | "store";
+    name: string(min_length=1);
+  }
+  model AuthGrantProvenance {
+    portalId: string(min_length=1);
+    providerId: string(min_length=1);
+    roles: list<string(min_length=1)>;
+    policyDigest: string(pattern="^[A-Za-z0-9_-]{43}$");
+  }
+  model AuthGrantBinding {
+    ownerKind: "deployment" | "user";
+    ownerId: string(min_length=1);
+    participantId: string(min_length=1);
+    installedRevision: int(minimum=1, maximum=9007199254740991);
+    grants: AuthGrantSet;
+    platformPrivileges: list<"trellis.auth::admin" | "trellis.auth::capabilities.delegate">;
+    revision: int(minimum=1, maximum=9007199254740991);
+    state: "active" | "revoked";
+    expiresAt: uint(maximum=9007199254740991) | null;
+    provenance: AuthGrantProvenance | null;
+  }
+  model AuthParticipantsInstallRequest {
+    participantArtifact: AuthArtifact;
+    apiArtifacts: list<AuthArtifact>;
+    expectedRevision: uint(maximum=9007199254740991);
+    idempotencyKey: string(min_length=1);
+  }
+  model AuthParticipantsInstallResponse {
+    participantId: string(min_length=1);
+    revision: int(minimum=1, maximum=9007199254740991);
+    digest: string(pattern="^[A-Za-z0-9_-]{43}$");
+  }
+  model AuthDeploymentsApplyRequest {
+    deploymentId: string(min_length=1);
+    participantArtifact: AuthArtifact;
+    apiArtifacts: list<AuthArtifact>;
+    optionalCapabilities?: list<string(min_length=1)>;
+    expectedRevision: uint(maximum=9007199254740991);
+    idempotencyKey: string(min_length=1);
+  }
+  model AuthDeploymentsApplyResponse {
+    deployment: AuthDeploymentsCreateResponsedeployment;
+    binding: AuthGrantBinding;
+  }
+  model AuthGrantsGetRequest {
+    ownerKind: "deployment" | "user";
+    ownerId: string(min_length=1);
+    participantId: string(min_length=1);
+  }
+  model AuthGrantsGetResponse {
+    binding: AuthGrantBinding | null;
+  }
+  model AuthGrantsSetRequest {
+    ownerKind: "deployment" | "user";
+    ownerId: string(min_length=1);
+    participantId: string(min_length=1);
+    grants: AuthGrantSet;
+    platformPrivileges: list<"trellis.auth::admin" | "trellis.auth::capabilities.delegate">;
+    expiresAt: uint(maximum=9007199254740991) | null;
+    expectedRevision: uint(maximum=9007199254740991);
+    idempotencyKey: string(min_length=1);
+  }
+  model AuthGrantsRevokeRequest {
+    ownerKind: "deployment" | "user";
+    ownerId: string(min_length=1);
+    participantId: string(min_length=1);
+    expectedRevision: uint(maximum=9007199254740991);
+    idempotencyKey: string(min_length=1);
+  }
+  model AuthGrantsMutationResponse {
+    binding: AuthGrantBinding;
+  }
+  model AuthGrantsChangedEvent {
+    eventId: string(min_length=1);
+    occurredAt: uint(maximum=9007199254740991);
+    binding: AuthGrantBinding;
+  }
+  model AuthIssuersRevokeRequest {
+    keyId: string(pattern="^[A-Za-z0-9_-]{43}$");
+    idempotencyKey: string(min_length=1);
+    reason?: string;
+  }
+  model AuthIssuersRevokeResponse {
+    keyId: string(pattern="^[A-Za-z0-9_-]{43}$");
+    state: "revoked";
+  }
+  model AuthIssuersRevokedEvent {
+    eventId: string(min_length=1);
+    occurredAt: uint(maximum=9007199254740991);
+    keyId: string(pattern="^[A-Za-z0-9_-]{43}$");
+    revokedBy: string(min_length=1);
+    reason?: string;
+  }
+  rpc "Auth.Issuers.Revoke" {
+    version "v1";
+    input AuthIssuersRevokeRequest;
+    output AuthIssuersRevokeResponse;
+    errors [AuthError, UnexpectedError, ValidationError];
+  }
+  event "Auth.Issuers.Revoked" {
+    version "v1";
+    event AuthIssuersRevokedEvent;
+  }
+  rpc "Auth.Participants.Install" {
+    version "v1";
+    input AuthParticipantsInstallRequest;
+    output AuthParticipantsInstallResponse;
+    errors [AuthError, UnexpectedError, ValidationError];
+  }
+  rpc "Auth.Deployments.Apply" {
+    version "v1";
+    input AuthDeploymentsApplyRequest;
+    output AuthDeploymentsApplyResponse;
+    errors [AuthError, UnexpectedError, ValidationError];
+  }
+  rpc "Auth.Grants.Get" {
+    version "v1";
+    input AuthGrantsGetRequest;
+    output AuthGrantsGetResponse;
+    errors [AuthError, UnexpectedError, ValidationError];
+  }
+  rpc "Auth.Grants.Set" {
+    version "v1";
+    input AuthGrantsSetRequest;
+    output AuthGrantsMutationResponse;
+    errors [AuthError, UnexpectedError, ValidationError];
+  }
+  rpc "Auth.Grants.Revoke" {
+    version "v1";
+    input AuthGrantsRevokeRequest;
+    output AuthGrantsMutationResponse;
+    errors [AuthError, UnexpectedError, ValidationError];
+  }
+  event "Auth.Grants.Changed" {
+    version "v1";
+    event AuthGrantsChangedEvent;
+  }
   model AuthCapabilitiesListRequest {
     cursor?: string(min_length=1);
     limit?: int(minimum=1, maximum=100);

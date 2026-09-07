@@ -505,6 +505,29 @@ pub struct ConsentMetadata {
     pub consequence: String,
 }
 
+/// Server-assigned meta-authority that cannot be expressed by an action permission.
+///
+/// Participant capabilities and capability groups cannot define these privileges.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
+pub enum PlatformPrivilege {
+    /// Global administration, including access across authorization owners.
+    #[serde(rename = "trellis.auth::admin")]
+    Admin,
+    /// Authority to assign access to another owner through administrative operations.
+    #[serde(rename = "trellis.auth::capabilities.delegate")]
+    Delegate,
+}
+
+/// Server-owned authorization owner shared by grant bindings and signed contexts.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum GrantOwnerKind {
+    /// One deployment and its provisioned service/device instances.
+    Deployment,
+    /// One user account.
+    User,
+}
+
 /// A normalized, content-addressed set of machine permissions.
 ///
 /// Construction sorts by UTF-16 code units and removes duplicate atoms. The

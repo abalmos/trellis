@@ -36,6 +36,36 @@ CREATE TABLE auth_participant_bindings (
     PRIMARY KEY (participant_id, artifact_digest)
 );
 
+CREATE TABLE auth_installed_participants (
+    participant_id TEXT NOT NULL,
+    revision INTEGER NOT NULL CHECK (revision BETWEEN 1 AND 9007199254740991),
+    artifact_digest TEXT NOT NULL,
+    PRIMARY KEY (participant_id, revision),
+    FOREIGN KEY (participant_id, artifact_digest)
+        REFERENCES auth_participant_bindings(participant_id, artifact_digest)
+);
+
+CREATE TABLE auth_grant_bindings (
+    owner_kind TEXT NOT NULL CHECK (owner_kind IN ('deployment', 'user')),
+    owner_id TEXT NOT NULL CHECK (length(owner_id) > 0),
+    participant_id TEXT NOT NULL,
+    installed_revision INTEGER NOT NULL CHECK (installed_revision BETWEEN 1 AND 9007199254740991),
+    grants_json TEXT NOT NULL CHECK (json_valid(grants_json)),
+    platform_privileges_json TEXT NOT NULL CHECK (json_valid(platform_privileges_json)),
+    revision INTEGER NOT NULL CHECK (revision BETWEEN 1 AND 9007199254740991),
+    state TEXT NOT NULL CHECK (state IN ('active', 'revoked')),
+    expires_at INTEGER CHECK (expires_at BETWEEN 0 AND 9007199254740991),
+    provenance_json TEXT CHECK (provenance_json IS NULL OR json_valid(provenance_json)),
+    PRIMARY KEY (owner_kind, owner_id, participant_id),
+    FOREIGN KEY (participant_id, installed_revision)
+        REFERENCES auth_installed_participants(participant_id, revision),
+    CHECK (state != 'revoked' OR (
+        json_array_length(grants_json, '$.permissions') = 0
+        AND json_array_length(platform_privileges_json) = 0
+    )),
+    CHECK (provenance_json IS NULL OR owner_kind = 'user')
+);
+
 CREATE TABLE auth_sessions (
     session_id TEXT PRIMARY KEY CHECK (length(session_id) > 0),
     principal_id TEXT NOT NULL REFERENCES auth_principals(principal_id) ON DELETE CASCADE,

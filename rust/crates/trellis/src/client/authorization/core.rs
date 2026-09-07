@@ -15,12 +15,18 @@ pub struct VerifiedCaller {
     pub inbox_prefix: String,
     /// Digest of the complete signed authorization context.
     pub context_digest: String,
-    /// Signed stable session id.
-    pub session_id: String,
+    /// Signed SDK-owned live connection identity.
+    pub connection_id: String,
+    /// Durable login identity for user connections only.
+    pub login_session_id: Option<String>,
     /// Signed principal identity.
-    pub principal: trellis_protocol::AuthorizationPrincipal,
-    /// Signed participant identity and artifact evidence.
-    pub participant: trellis_protocol::AuthorizationParticipant,
+    pub principal_id: String,
+    /// Signed principal class.
+    pub principal_kind: trellis_protocol::AuthorizationPrincipalKind,
+    /// Installed participant assignment.
+    pub participant_id: String,
+    /// Server-assigned meta-authority, independent of ordinary permission atoms.
+    pub platform_privileges: Vec<trellis_protocol::PlatformPrivilege>,
     /// Signed deployment identity, when present.
     pub deployment_id: Option<String>,
     /// Signed runtime instance identity, when present.
@@ -36,7 +42,7 @@ pub enum AuthorizationVerificationError {
     /// The transport session key is not the key bound into the context.
     #[error("authorization session key does not match verified context")]
     SessionKeyMismatch,
-    /// The protocol proof, permission, capability, or validity check failed.
+    /// The protocol proof, permission, or validity check failed.
     #[error("authorization proof rejected: {0}")]
     Protocol(Box<ProtocolError>),
 }
@@ -88,7 +94,7 @@ impl VerifiedAuthorizationEvent {
 ///
 /// Resolution of trust/context records stays with each provider cache. Once a
 /// verified context is available, this core owns proof parsing, session-key
-/// matching, exact permission and capability checks, and caller projection.
+/// matching, exact permission checks, and caller projection.
 #[derive(Clone, Debug, Default)]
 pub struct AuthorizationVerificationCore {}
 
@@ -117,8 +123,6 @@ pub struct RequestVerificationInput<'a> {
     pub policy: &'a AuthorizationVerificationPolicy,
     /// Required exact permissions.
     pub required_permissions: &'a [PermissionAtom],
-    /// Required platform capabilities.
-    pub required_capabilities: &'a [String],
 }
 
 /// Borrowed transport and authority inputs for shared event verification.
@@ -144,8 +148,6 @@ pub struct EventVerificationInput<'a> {
     pub policy: &'a AuthorizationVerificationPolicy,
     /// Required exact permissions.
     pub required_permissions: &'a [PermissionAtom],
-    /// Required platform capabilities.
-    pub required_capabilities: &'a [String],
     /// Context revocation time, when present.
     pub revoked_at: Option<i64>,
 }
@@ -173,7 +175,6 @@ impl AuthorizationVerificationCore {
             proof,
             policy,
             required_permissions,
-            required_capabilities,
         } = input;
         self.check_context_binding(context, session_key, context_digest)?;
         let proof = AuthorizationRequestProof::parse(proof.to_owned())?;
@@ -187,7 +188,6 @@ impl AuthorizationVerificationCore {
             proof: &proof,
             policy,
             required_permissions,
-            required_capabilities,
         })?;
         Ok(VerifiedAuthorizationRequest {
             caller: project_caller(session_key, request.context()),
@@ -211,7 +211,6 @@ impl AuthorizationVerificationCore {
             proof,
             policy,
             required_permissions,
-            required_capabilities,
             revoked_at,
         } = input;
         self.check_context_binding(context, session_key, context_digest)?;
@@ -225,7 +224,6 @@ impl AuthorizationVerificationCore {
             proof: &proof,
             policy,
             required_permissions,
-            required_capabilities,
             revoked_at,
         })?;
         Ok(VerifiedAuthorizationEvent { event })
@@ -252,9 +250,12 @@ fn project_caller(session_key: &str, context: &VerifiedAuthorizationContext) -> 
         session_key: session_key.to_owned(),
         inbox_prefix: context.inbox_prefix().to_owned(),
         context_digest: context.context_digest().to_owned(),
-        session_id: context.session_id().to_owned(),
-        principal: context.principal().clone(),
-        participant: context.participant().clone(),
+        connection_id: context.connection_id().to_owned(),
+        login_session_id: context.login_session_id().map(ToOwned::to_owned),
+        principal_id: context.principal_id().to_owned(),
+        principal_kind: context.principal_kind(),
+        participant_id: context.participant_id().to_owned(),
+        platform_privileges: context.platform_privileges().to_vec(),
         deployment_id: context.deployment_id().map(ToOwned::to_owned),
         instance_id: context.instance_id().map(ToOwned::to_owned),
     }

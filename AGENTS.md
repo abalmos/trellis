@@ -85,6 +85,14 @@
 - Live integration uses real NATS and Trellis infrastructure. Executable Rust
   and Deno tests are the catalog; separate matrices and inventory reconciliation
   are not maintained. Hidden skips are forbidden.
+- Tests must exercise behavior realizable in an ordinary production build. Do
+  not add or retain `test-support` features, test-only runtime constructors,
+  verified-context injection, readiness bypasses, or instrumentation compiled
+  only for tests. Do not replace these with differently named testing hooks.
+  Ordinary test modules may test pure functions and real adapters, but must
+  exercise unchanged production implementations. Live acceptance uses normal
+  builds, real infrastructure, and public behavior; use existing production
+  diagnostics when measurements are needed.
 - The normal `Check` workflow owns correctness verification, including the full
   live suite. Release verification is limited to metadata, packages, archives,
   images, and publication inputs. Rust supports the current stable toolchain; no

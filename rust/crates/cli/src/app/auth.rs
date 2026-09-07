@@ -217,7 +217,7 @@ fn user_row(user: &Value, last_auth_by_user: &BTreeMap<String, String>) -> Vec<S
 }
 
 async fn users_list_command(format: OutputFormat) -> miette::Result<()> {
-    let (_state, connected) = connect_authenticated_cli_client(format).await?;
+    let (_state, connected) = connect_authenticated_cli_client().await?;
     let auth_client = AuthClient::new(&connected);
     let users = auth_client
         .rpc()
@@ -287,7 +287,7 @@ async fn users_list_command(format: OutputFormat) -> miette::Result<()> {
 }
 
 async fn users_show_command(format: OutputFormat, args: &UserRefArgs) -> miette::Result<()> {
-    let (_state, connected) = connect_authenticated_cli_client(format).await?;
+    let (_state, connected) = connect_authenticated_cli_client().await?;
     let auth_client = AuthClient::new(&connected);
     let user = auth_client
         .rpc()
@@ -316,7 +316,7 @@ async fn users_show_command(format: OutputFormat, args: &UserRefArgs) -> miette:
 }
 
 async fn users_create_command(format: OutputFormat, args: &UserCreateArgs) -> miette::Result<()> {
-    let (_state, connected) = connect_authenticated_cli_client(format).await?;
+    let (_state, connected) = connect_authenticated_cli_client().await?;
     let auth_client = AuthClient::new(&connected);
     let _username = trimmed_optional(&args.username)
         .ok_or_else(|| miette::miette!("--username is required to create a local user"))?;
@@ -366,7 +366,7 @@ async fn users_create_command(format: OutputFormat, args: &UserCreateArgs) -> mi
 }
 
 async fn users_edit_command(format: OutputFormat, args: &UserEditArgs) -> miette::Result<()> {
-    let (_state, connected) = connect_authenticated_cli_client(format).await?;
+    let (_state, connected) = connect_authenticated_cli_client().await?;
     let auth_client = AuthClient::new(&connected);
     let current = auth_client
         .rpc()
@@ -556,7 +556,7 @@ async fn revoke_current_session(
 }
 
 async fn status_command(format: OutputFormat) -> miette::Result<()> {
-    let (state, connected) = connect_authenticated_cli_client(format).await?;
+    let (state, connected) = connect_authenticated_cli_client().await?;
     let me = current_user(&connected).await.into_diagnostic()?;
 
     if output::is_json(format) {
@@ -584,7 +584,7 @@ async fn identity_grants_list_command(
     format: OutputFormat,
     args: &IdentityGrantsListArgs,
 ) -> miette::Result<()> {
-    let (_state, connected) = connect_authenticated_cli_client(format).await?;
+    let (_state, connected) = connect_authenticated_cli_client().await?;
     let auth_client = AuthClient::new(&connected);
     let identity_grants = auth_client
         .rpc()
@@ -662,7 +662,7 @@ async fn identity_grants_revoke_command(
     format: OutputFormat,
     args: &IdentityGrantsRevokeArgs,
 ) -> miette::Result<()> {
-    let (_state, connected) = connect_authenticated_cli_client(format).await?;
+    let (_state, connected) = connect_authenticated_cli_client().await?;
     let auth_client = AuthClient::new(&connected);
     let authority = auth_client
         .rpc()

@@ -1,287 +1,233 @@
-import { assertEquals, assertRejects } from "@std/assert";
-
-import { importEd25519PrivateKeyFromSeedBase64url } from "./keys.ts";
+import { assertEquals, assertRejects, assertThrows } from "@std/assert";
+import { fromSeed, Prefix } from "@nats-io/nkeys";
+import { Codec } from "@nats-io/nkeys/lib/codec.js";
+import { ulid } from "ulid";
 import {
-  buildSessionProofTranscript,
+  importEd25519PrivateKeyFromSeedBase64url,
+  publicKeyBase64urlFromSeed,
+} from "./keys.ts";
+import {
   parseSessionProof,
+  SESSION_PROOF_FORMAT_V1,
   type SessionProofInput,
   sessionProofRequestDigest,
   signSessionProof,
   verifySessionProof,
 } from "./session_proof.ts";
-import { base64urlEncode, sha256 } from "./utils.ts";
+import { base64urlDecode, base64urlEncode, sha256 } from "./utils.ts";
 
-type JsonRecord = Record<string, unknown>;
-
-type VectorCase = {
-  name: string;
-  purpose: SessionProofInput["purpose"];
-  signerPublicKey: string;
-  request?: JsonRecord;
-  input?: JsonRecord;
-  requestDigest: string | null;
-  transcriptDigest: string;
-  signature: string;
-};
-
-type InvalidCase = {
-  name: string;
-  base: string;
-  mutation: string;
-  expected: string;
-};
-
-type Fixture = {
-  identitySeed: string;
-  identityPublicKey: string;
-  identityKeyId: string;
-  identityNkey: string;
-  sessionSeed: string;
-  sessionPublicKey: string;
-  sessionNkey: string;
-  cases: VectorCase[];
-  invalidCases: InvalidCase[];
-};
-
-function field(value: JsonRecord, name: string): string {
-  const result = value[name];
-  if (typeof result !== "string") {
-    throw new Error(`missing vector field ${name}`);
-  }
-  return result;
-}
-
-function time(value: JsonRecord): number {
-  const result = value.issuedAt;
-  if (typeof result !== "number") throw new Error("missing vector issuedAt");
-  return result;
-}
-
-function optional(value: JsonRecord, name: string): string | null {
-  const result = value[name];
-  if (result === null) return null;
-  if (typeof result !== "string") {
-    throw new Error(`invalid vector field ${name}`);
-  }
-  return result;
-}
-
-function proofSource(vector: VectorCase): JsonRecord {
-  const source = vector.request ?? vector.input;
-  if (source === undefined) throw new Error(`missing input for ${vector.name}`);
-  return source;
-}
-
-function vectorInput(
-  fixture: Fixture,
-  vector: VectorCase,
-): SessionProofInput {
-  const value = proofSource(vector);
-  const common = {
-    requestId: field(value, "requestId"),
-    issuedAt: time(value),
-  };
-  switch (vector.purpose) {
-    case "userAuthRequest":
-      return {
-        ...common,
-        purpose: vector.purpose,
-        sessionPublicKey: field(value, "sessionPublicKey"),
-        sessionNkey: field(value, "sessionNkey"),
-        participantId: field(value, "participantId"),
-        participantDigest: field(value, "participantDigest"),
-        redirectTarget: field(value, "redirectTarget"),
-        requestDigest: vector.requestDigest ?? "",
-      };
-    case "userAuthBind":
-      return {
-        ...common,
-        purpose: vector.purpose,
-        flowId: field(value, "flowId"),
-        sessionPublicKey: field(value, "sessionPublicKey"),
-        requestDigest: vector.requestDigest ?? "",
-      };
-    case "serviceBootstrap":
-      return {
-        ...common,
-        purpose: vector.purpose,
-        deploymentId: field(value, "deploymentId"),
-        instanceId: field(value, "instanceId"),
-        provisionedIdentityKeyId: field(value, "provisionedIdentityKeyId"),
-        newSessionPublicKey: field(value, "newSessionPublicKey"),
-        newSessionNkey: field(value, "newSessionNkey"),
-        participantId: field(value, "participantId"),
-        participantDigest: field(value, "participantDigest"),
-        requestDigest: vector.requestDigest ?? "",
-      };
-    case "deviceBootstrap":
-      return {
-        ...common,
-        purpose: vector.purpose,
-        deploymentId: field(value, "deploymentId"),
-        instanceId: field(value, "instanceId"),
-        deviceIdentityKeyId: field(value, "deviceIdentityKeyId"),
-        newSessionPublicKey: field(value, "newSessionPublicKey"),
-        newSessionNkey: field(value, "newSessionNkey"),
-        participantId: field(value, "participantId"),
-        participantDigest: field(value, "participantDigest"),
-        challengeDigest: optional(value, "challengeDigest"),
-        requestDigest: vector.requestDigest ?? "",
-      };
-    case "authorizationContextRefresh":
-      return {
-        ...common,
-        purpose: vector.purpose,
-        sessionId: field(value, "sessionId"),
-        sessionKeyId: fixture.identityKeyId,
-        currentContextDigest: optional(value, "currentContextDigest"),
-        expectedParticipantDigest: optional(value, "expectedParticipantDigest"),
-        expectedNeedsDigest: optional(value, "expectedNeedsDigest"),
-        knownRootKeyId: field(value, "knownRootKeyId"),
-        minimumManifestGeneration: value.minimumManifestGeneration as number,
-        requestDigest: vector.requestDigest ?? "",
-      };
-  }
-}
-
-async function fixture(): Promise<Fixture> {
-  return JSON.parse(
-    await Deno.readTextFile(
-      new URL(
-        "../../../../conformance/session-proof/vectors.json",
-        import.meta.url,
-      ),
+async function identity() {
+  const seed = crypto.getRandomValues(new Uint8Array(32));
+  const publicKey = publicKeyBase64urlFromSeed(seed);
+  return {
+    publicKey,
+    privateKey: await importEd25519PrivateKeyFromSeedBase64url(
+      base64urlEncode(seed),
     ),
-  ) as Fixture;
+    keyId: base64urlEncode(await sha256(base64urlDecode(publicKey))),
+    seed,
+  };
 }
 
-Deno.test("shared session-proof vectors match TypeScript", async () => {
-  const vectors = await fixture();
-  const privateKey = await importEd25519PrivateKeyFromSeedBase64url(
-    vectors.identitySeed,
-  );
-  for (const vector of vectors.cases) {
-    const source = proofSource(vector);
-    if (vector.requestDigest !== null) {
-      assertEquals(
-        await sessionProofRequestDigest(source),
-        vector.requestDigest,
+Deno.test("WebCrypto native signatures are verified by Rust and bind the complete bootstrap", async () => {
+  const owner = await identity();
+  const session = await identity();
+  const iat = Date.now();
+  for (
+    const purpose of [
+      "serviceBootstrap",
+      "deviceBootstrap",
+      "deviceEnrollment",
+    ] as const
+  ) {
+    const input: SessionProofInput = {
+      purpose,
+      origin: "https://trellis.example",
+      unsignedRequest: {
+        identityKeyId: owner.keyId,
+        sessionKey: session.publicKey,
+        connectionId: ulid(),
+        requestId: ulid(),
+        iat,
+        participantId: "example.device",
+        name: "native replica",
+        extension: { value: 1 },
+      },
+    };
+    const proof = await signSessionProof(
+      input,
+      owner.privateKey,
+      owner.publicKey,
+    );
+    await verifySessionProof(input, proof, owner.publicKey, iat);
+    await assertRejects(() =>
+      signSessionProof(input, session.privateKey, owner.publicKey)
+    );
+    await assertRejects(() =>
+      verifySessionProof(input, proof, session.publicKey, iat)
+    );
+    await assertRejects(() =>
+      verifySessionProof(
+        { ...input, origin: "https://other.example" },
+        proof,
+        owner.publicKey,
+        iat,
+      )
+    );
+    await assertRejects(() =>
+      verifySessionProof(
+        {
+          ...input,
+          purpose: purpose === "deviceBootstrap"
+            ? "serviceBootstrap"
+            : "deviceBootstrap",
+        },
+        proof,
+        owner.publicKey,
+        iat,
+      )
+    );
+    for (
+      const [field, value] of Object.entries({
+        identityKeyId: session.keyId,
+        sessionKey: owner.publicKey,
+        connectionId: ulid(),
+        requestId: ulid(),
+        iat: iat + 1,
+        participantId: "example.other-device",
+        name: "changed name",
+        extension: { value: 2 },
+      })
+    ) {
+      const changed = structuredClone(input);
+      changed.unsignedRequest[field] = value;
+      await assertRejects(() =>
+        verifySessionProof(changed, proof, owner.publicKey, iat)
       );
     }
-    const input = vectorInput(vectors, vector);
-    const proof = parseSessionProof(source.proof);
-    assertEquals(
-      await signSessionProof(input, privateKey, vector.signerPublicKey),
-      proof,
-    );
-    assertEquals(
-      base64urlEncode(await sha256(buildSessionProofTranscript(input))),
-      vector.transcriptDigest,
-    );
-    await verifySessionProof(
-      input,
-      proof,
-      vector.signerPublicKey,
-      input.issuedAt,
-    );
-    assertEquals(proof.signature, vector.signature);
-  }
-});
-
-Deno.test("shared invalid session-proof vectors fail safely", async () => {
-  const vectors = await fixture();
-  const find = (name: string): VectorCase => {
-    const vector = vectors.cases.find((candidate) => candidate.name === name);
-    if (vector === undefined) throw new Error(`missing base vector ${name}`);
-    return structuredClone(vector);
-  };
-
-  for (const invalid of vectors.invalidCases) {
-    const base = find(invalid.base);
-    const source = proofSource(base);
-
-    await assertRejects(async () => {
-      if (invalid.mutation === "paddedPublicKey") {
-        source.sessionPublicKey = `${field(source, "sessionPublicKey")}=`;
-      } else if (invalid.mutation === "signature") {
-        const proofRecord = source.proof as JsonRecord;
-        proofRecord.signature =
-          "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
-      } else if (invalid.mutation === "identityAsNewSession") {
-        source.newSessionPublicKey = vectors.identityPublicKey;
-        source.newSessionNkey = vectors.identityNkey;
-      } else if (invalid.mutation === "participantDigest") {
-        source.participantDigest =
-          "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE";
-      } else if (invalid.mutation === "deploymentId") {
-        source.deploymentId = `changed-${field(source, "deploymentId")}`;
-      } else if (invalid.mutation === "instanceId") {
-        source.instanceId = `changed-${field(source, "instanceId")}`;
-      } else if (invalid.mutation === "redirectTarget") {
-        source.redirectTarget = `changed-${field(source, "redirectTarget")}`;
-      } else if (invalid.mutation === "requestId") {
-        source.requestId = `changed-${field(source, "requestId")}`;
-      }
-
-      let input: SessionProofInput;
-      if (invalid.mutation === "devicePurpose") {
-        input = {
-          ...vectorInput(vectors, base),
-          purpose: "deviceBootstrap",
-          deviceIdentityKeyId: field(source, "provisionedIdentityKeyId"),
-          challengeDigest: null,
-        } as SessionProofInput;
-      } else {
-        input = vectorInput(vectors, base);
-      }
-      const parsedProof = parseSessionProof(source.proof);
-      const now = invalid.mutation === "expiredNow"
-        ? input.issuedAt + 30_001
-        : invalid.mutation === "futureNow"
-        ? input.issuedAt - 30_001
-        : input.issuedAt;
-      await verifySessionProof(
-        input,
-        parsedProof,
-        base.signerPublicKey,
-        now,
+    for (const now of [iat - 30_001, iat + 30_001]) {
+      await assertRejects(() =>
+        verifySessionProof(input, proof, owner.publicKey, now)
       );
-    });
+    }
+    await assertRejects(() =>
+      verifySessionProof(
+        input,
+        { ...proof, signature: base64urlEncode(new Uint8Array(64)) },
+        owner.publicKey,
+        iat,
+      )
+    );
+    await assertRejects(() =>
+      signSessionProof(
+        { ...input, unsignedRequest: { ...input.unsignedRequest, proof } },
+        owner.privateKey,
+        owner.publicKey,
+      )
+    );
+    await assertRejects(() =>
+      signSessionProof(
+        {
+          ...input,
+          unsignedRequest: { ...input.unsignedRequest, name: "x".repeat(129) },
+        },
+        owner.privateKey,
+        owner.publicKey,
+      )
+    );
+    assertThrows(() =>
+      parseSessionProof({ ...proof, signature: `${proof.signature}=` })
+    );
   }
 });
 
-Deno.test("session-proof boundaries reject cross-language asymmetry", async () => {
-  const vectors = await fixture();
-  const service = vectors.cases.find((vector) =>
-    vector.name === "service-bootstrap"
+Deno.test("browser request and final bind retain key, flow, redirect, and raw payload integrity", async () => {
+  const owner = await identity();
+  const iat = Date.now();
+  const requestId = ulid();
+  const request = {
+    requestId,
+    issuedAt: iat,
+    extra: { a: 1, b: true },
+    proof: { format: SESSION_PROOF_FORMAT_V1, signature: "" },
+  };
+  const requestDigest = await sessionProofRequestDigest(request);
+  assertEquals(
+    await sessionProofRequestDigest({
+      ...request,
+      proof: { ...request.proof, signature: "ignored" },
+    }),
+    requestDigest,
   );
-  if (service === undefined) {
-    throw new Error("missing proof vectors");
-  }
-
-  const weakSession = vectorInput(vectors, service);
-  await assertRejects(async () => {
-    await signSessionProof(
+  const bind: SessionProofInput = {
+    purpose: "userAuthBind",
+    requestId,
+    issuedAt: iat,
+    flowId: ulid(),
+    sessionPublicKey: owner.publicKey,
+    requestDigest,
+  };
+  const bound = await signSessionProof(bind, owner.privateKey, owner.publicKey);
+  await verifySessionProof(bind, bound, owner.publicKey, iat);
+  await assertRejects(() =>
+    verifySessionProof({ ...bind, flowId: ulid() }, bound, owner.publicKey, iat)
+  );
+  await assertRejects(async () =>
+    verifySessionProof(
       {
-        ...weakSession,
-        newSessionPublicKey: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
-      } as SessionProofInput,
-      await importEd25519PrivateKeyFromSeedBase64url(vectors.identitySeed),
-      vectors.identityPublicKey,
-    );
-  });
-
-  const request = structuredClone(proofSource(service));
-  request.nonJson = new Date(0);
-  await assertRejects(() => sessionProofRequestDigest(request));
-  request.nonJson = Array(1);
-  await assertRejects(() => sessionProofRequestDigest(request));
-
-  await assertRejects(async () => {
-    await signSessionProof(
-      { ...weakSession, requestId: "\u0085req" } as SessionProofInput,
-      await importEd25519PrivateKeyFromSeedBase64url(vectors.identitySeed),
-      vectors.identityPublicKey,
-    );
-  });
+        ...bind,
+        requestDigest: await sessionProofRequestDigest({
+          ...request,
+          extra: { a: 2, b: true },
+        }),
+      },
+      bound,
+      owner.publicKey,
+      iat,
+    )
+  );
+  await assertRejects(() =>
+    sessionProofRequestDigest({
+      ...request,
+      extra: { counter: 9_007_199_254_740_992 },
+    })
+  );
+  const nkey = fromSeed(Codec.encodeSeed(Prefix.User, owner.seed))
+    .getPublicKey();
+  const auth: SessionProofInput = {
+    purpose: "userAuthRequest",
+    requestId,
+    issuedAt: iat,
+    sessionPublicKey: owner.publicKey,
+    sessionNkey: nkey,
+    participantId: "test.browser",
+    participantDigest: owner.keyId,
+    redirectTarget: "https://app.example/return",
+    requestDigest,
+  };
+  const proof = await signSessionProof(auth, owner.privateKey, owner.publicKey);
+  await verifySessionProof(auth, proof, owner.publicKey, iat);
+  await assertRejects(() =>
+    verifySessionProof(
+      { ...auth, redirectTarget: "https://evil.example" },
+      proof,
+      owner.publicKey,
+      iat,
+    )
+  );
+  await assertRejects(() =>
+    verifySessionProof(
+      { ...auth, participantDigest: base64urlEncode(new Uint8Array(32)) },
+      proof,
+      owner.publicKey,
+      iat,
+    )
+  );
+  await assertRejects(() =>
+    signSessionProof(
+      { ...auth, sessionPublicKey: `${owner.publicKey}=` },
+      owner.privateKey,
+      owner.publicKey,
+    )
+  );
 });

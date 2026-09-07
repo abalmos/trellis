@@ -1,19 +1,28 @@
 PRAGMA foreign_keys = ON;
 
-CREATE TABLE auth_authorization_trust_state (
-    singleton_id INTEGER PRIMARY KEY CHECK (singleton_id = 1),
-    authority TEXT NOT NULL CHECK (length(authority) > 0),
-    root_key_id TEXT NOT NULL CHECK (length(root_key_id) = 43),
-    root_digest TEXT NOT NULL CHECK (length(root_digest) = 43),
-    manifest_generation INTEGER NOT NULL CHECK (manifest_generation BETWEEN 1 AND 9007199254740991),
-    manifest_digest TEXT NOT NULL CHECK (length(manifest_digest) = 43),
-    updated_at INTEGER NOT NULL CHECK (updated_at BETWEEN 0 AND 9007199254740991),
-    version INTEGER NOT NULL CHECK (version BETWEEN 1 AND 9007199254740991)
+CREATE TABLE auth_authorization_issuers (
+    key_id TEXT PRIMARY KEY CHECK (length(key_id) = 43),
+    public_key TEXT NOT NULL CHECK (length(public_key) = 43),
+    is_current INTEGER NOT NULL CHECK (is_current IN (0, 1)),
+    live_until_seconds INTEGER NOT NULL DEFAULT 0 CHECK (live_until_seconds >= 0),
+    created_at INTEGER NOT NULL CHECK (created_at BETWEEN 0 AND 9007199254740991),
+    revoked_at INTEGER CHECK (revoked_at BETWEEN 0 AND 9007199254740991),
+    CHECK (is_current = 0 OR revoked_at IS NULL)
 );
+
+CREATE UNIQUE INDEX idx_auth_authorization_current_issuer
+    ON auth_authorization_issuers(is_current) WHERE is_current = 1;
+
+CREATE TRIGGER auth_authorization_issuer_revocation_is_final
+BEFORE UPDATE OF revoked_at ON auth_authorization_issuers
+WHEN OLD.revoked_at IS NOT NULL AND NEW.revoked_at IS NOT OLD.revoked_at
+BEGIN
+    SELECT RAISE(ABORT, 'issuer revocation is irreversible');
+END;
 
 CREATE TABLE auth_authorization_contexts (
     context_digest TEXT PRIMARY KEY CHECK (length(context_digest) = 43),
-    session_id TEXT NOT NULL REFERENCES auth_sessions(session_id),
+    session_id TEXT NOT NULL CHECK (length(session_id) > 0),
     principal_id TEXT NOT NULL CHECK (length(principal_id) > 0),
     authority_kind TEXT NOT NULL CHECK (authority_kind IN ('identity', 'deployment')),
     authority_id TEXT NOT NULL CHECK (length(authority_id) > 0),
@@ -36,6 +45,31 @@ CREATE TABLE auth_authorization_contexts (
     CHECK ((state = 'revoked') = (revocation_reason IS NOT NULL)),
     CHECK (state = 'revoked' OR (revoked_at IS NULL AND revocation_reason IS NULL))
 );
+
+CREATE TRIGGER auth_authorization_context_history_no_delete
+BEFORE DELETE ON auth_authorization_contexts
+BEGIN
+    SELECT RAISE(ABORT, 'authorization context history cannot be deleted');
+END;
+
+CREATE TRIGGER auth_authorization_context_evidence_is_immutable
+BEFORE UPDATE OF context_digest, session_id, principal_id, authority_kind, authority_id,
+    deployment_id, instance_id, issuer_key_id, issuer_manifest_generation,
+    signed_context_json, issuance_snapshot_token, refresh_at, expires_at
+ON auth_authorization_contexts
+BEGIN
+    SELECT RAISE(ABORT, 'issued authorization evidence is immutable');
+END;
+
+CREATE TRIGGER auth_authorization_context_revocation_is_final
+BEFORE UPDATE OF state, revoked_at, revocation_reason ON auth_authorization_contexts
+WHEN OLD.state = 'revoked' AND (
+    NEW.state IS NOT OLD.state OR NEW.revoked_at IS NOT OLD.revoked_at
+    OR NEW.revocation_reason IS NOT OLD.revocation_reason
+)
+BEGIN
+    SELECT RAISE(ABORT, 'context revocation is irreversible');
+END;
 
 CREATE INDEX auth_authorization_contexts_session_idx
     ON auth_authorization_contexts(session_id, state, expires_at);

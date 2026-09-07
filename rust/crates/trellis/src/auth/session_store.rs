@@ -1,9 +1,9 @@
 use std::env;
 use std::fs;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use super::{AdminSessionState, TrellisAuthError};
-use crate::client::{AuthorizationContextStore as _, FileAuthorizationContextStore};
 
 fn cli_config_dir() -> PathBuf {
     if let Ok(dir) = env::var("XDG_CONFIG_HOME") {
@@ -19,21 +19,45 @@ fn admin_session_state_path() -> PathBuf {
     cli_config_dir().join("admin-session.json")
 }
 
-pub(crate) fn admin_authorization_context_state_path() -> PathBuf {
-    cli_config_dir().join("authorization-context.json")
-}
-
 fn write_private_file(path: &Path, contents: &str) -> Result<(), TrellisAuthError> {
     if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
+        let mut directory = fs::DirBuilder::new();
+        directory.recursive(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::DirBuilderExt;
+            directory.mode(0o700);
+        }
+        directory.create(parent)?;
     }
-    fs::write(path, contents)?;
+    let staged = path.with_extension(format!("{}.tmp", ulid::Ulid::new()));
+    let mut options = fs::OpenOptions::new();
+    options.write(true).create_new(true);
     #[cfg(unix)]
     {
-        use std::os::unix::fs::PermissionsExt;
-        fs::set_permissions(path, fs::Permissions::from_mode(0o600))?;
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
     }
-    Ok(())
+    let mut file = options.open(&staged)?;
+    let result = (|| -> std::io::Result<()> {
+        file.write_all(contents.as_bytes())?;
+        file.sync_all()?;
+        drop(file);
+        fs::rename(&staged, path)?;
+        #[cfg(unix)]
+        if let Some(parent) = path.parent() {
+            fs::File::open(parent)?.sync_all()?;
+        }
+        Ok(())
+    })();
+    if result.is_err() {
+        if let Err(error) = fs::remove_file(&staged) {
+            if error.kind() != std::io::ErrorKind::NotFound {
+                tracing::warn!(%error, "cannot remove staged login credentials");
+            }
+        }
+    }
+    Ok(result?)
 }
 
 /// Persist an admin session to the CLI config directory.
@@ -56,25 +80,44 @@ pub fn load_admin_session() -> Result<AdminSessionState, TrellisAuthError> {
     Ok(serde_json::from_str(&state)?)
 }
 
-/// Return whether the durable administration binding matches the current participant.
-pub fn admin_session_matches_participant(
-    participant_digest: &str,
-) -> Result<bool, TrellisAuthError> {
-    Ok(
-        FileAuthorizationContextStore::new(admin_authorization_context_state_path())
-            .load()?
-            .is_some_and(|state| state.runtime.participant_digest == participant_digest),
-    )
-}
-
-/// Remove the stored admin session and related local credential files.
+/// Remove the stored admin login credentials.
 #[doc = concat!("Trellis API operation `", stringify!(clear_admin_session), "`.")]
 pub fn clear_admin_session() -> Result<bool, TrellisAuthError> {
-    FileAuthorizationContextStore::new(admin_authorization_context_state_path()).clear_context()?;
     let path = admin_session_state_path();
     if path.exists() {
         fs::remove_file(path)?;
         return Ok(true);
     }
     Ok(false)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn private_replacement_and_failed_commit_use_real_filesystem() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("session.json");
+        write_private_file(&path, "first").unwrap();
+        write_private_file(&path, "second").unwrap();
+        assert_eq!(fs::read_to_string(&path).unwrap(), "second");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(
+                fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+                0o600
+            );
+        }
+        let occupied = directory.path().join("occupied");
+        fs::create_dir(&occupied).unwrap();
+        fs::write(occupied.join("keep"), "retained").unwrap();
+        assert!(write_private_file(&occupied, "replacement").is_err());
+        assert_eq!(
+            fs::read_to_string(occupied.join("keep")).unwrap(),
+            "retained"
+        );
+        assert_eq!(fs::read_dir(directory.path()).unwrap().count(), 2);
+    }
 }

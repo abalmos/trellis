@@ -47,20 +47,19 @@ pub(super) async fn dispatch(
                 request_id: &request_id,
                 reply: message.reply.as_deref(),
                 required_permission: &required_permission,
-                required_capabilities: &[],
             },
         )
         .await?;
     let validated = ValidatedRequest {
-        principal_id: verified.caller.principal.id.clone(),
-        principal_kind: match verified.caller.principal.kind {
+        principal_id: verified.caller.principal_id.clone(),
+        principal_kind: match verified.caller.principal_kind {
             AuthorizationPrincipalKind::User => PrincipalKind::User,
             AuthorizationPrincipalKind::Service => PrincipalKind::Service,
             AuthorizationPrincipalKind::Device => PrincipalKind::Device,
         },
         session_id: verified.caller.session_id.clone(),
         session_public_key: session_key,
-        capabilities: verified.context.capabilities().to_vec(),
+        platform_privileges: verified.context.platform_privileges().to_vec(),
     };
     workflows::dispatch(processor, subject, &message.payload, validated).await
 }

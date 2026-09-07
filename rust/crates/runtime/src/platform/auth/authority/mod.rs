@@ -144,6 +144,13 @@ pub(crate) struct AuthorityReconciliationOutcome {
 /// Persistence contract for participant bindings and desired authority proposals.
 #[async_trait]
 pub(crate) trait AuthorityRepository: Send + Sync {
+    /// Resolve installed definitions pinned by an active context's current grant binding.
+    async fn get_authorized_participant_binding(
+        &self,
+        context_digest: &str,
+        now_ms: i64,
+    ) -> Result<Option<ParticipantBindingRecord>, AuthorizationStateError>;
+
     /// Load one exact participant artifact by ID and digest.
     async fn get_participant_binding(
         &self,

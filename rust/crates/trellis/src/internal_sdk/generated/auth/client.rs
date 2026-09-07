@@ -280,6 +280,21 @@ impl<'a> AuthRpc<'a> {
             >(input)
             .await
     }
+    /// Call `Auth.Deployments.Apply`.
+    pub async fn deployments_apply(
+        &self,
+        input: &super::types::AuthDeploymentsApplyRequest,
+    ) -> Result<
+        super::types::AuthDeploymentsApplyResponse,
+        trellis_rs::generated::CallError<super::rpc::AuthDeploymentsApplyError>,
+    > {
+        self.inner
+            .call_typed::<
+                super::rpc::AuthDeploymentsApplyRpc,
+                super::rpc::AuthDeploymentsApplyError,
+            >(input)
+            .await
+    }
     /// Call `Auth.Deployments.Create`.
     pub async fn deployments_create(
         &self,
@@ -498,6 +513,42 @@ impl<'a> AuthRpc<'a> {
             )
             .await
     }
+    /// Call `Auth.Grants.Get`.
+    pub async fn grants_get(
+        &self,
+        input: &super::types::AuthGrantsGetRequest,
+    ) -> Result<
+        super::types::AuthGrantsGetResponse,
+        trellis_rs::generated::CallError<super::rpc::AuthGrantsGetError>,
+    > {
+        self.inner
+            .call_typed::<super::rpc::AuthGrantsGetRpc, super::rpc::AuthGrantsGetError>(input)
+            .await
+    }
+    /// Call `Auth.Grants.Revoke`.
+    pub async fn grants_revoke(
+        &self,
+        input: &super::types::AuthGrantsRevokeRequest,
+    ) -> Result<
+        super::types::AuthGrantsRevokeResponse,
+        trellis_rs::generated::CallError<super::rpc::AuthGrantsRevokeError>,
+    > {
+        self.inner
+            .call_typed::<super::rpc::AuthGrantsRevokeRpc, super::rpc::AuthGrantsRevokeError>(input)
+            .await
+    }
+    /// Call `Auth.Grants.Set`.
+    pub async fn grants_set(
+        &self,
+        input: &super::types::AuthGrantsSetRequest,
+    ) -> Result<
+        super::types::AuthGrantsSetResponse,
+        trellis_rs::generated::CallError<super::rpc::AuthGrantsSetError>,
+    > {
+        self.inner
+            .call_typed::<super::rpc::AuthGrantsSetRpc, super::rpc::AuthGrantsSetError>(input)
+            .await
+    }
     /// Call `Auth.IdentityAuthority.Get`.
     pub async fn identity_authority_get(
         &self,
@@ -570,6 +621,35 @@ impl<'a> AuthRpc<'a> {
             .call_typed::<
                 super::rpc::AuthIdentityGrantsRevokeRpc,
                 super::rpc::AuthIdentityGrantsRevokeError,
+            >(input)
+            .await
+    }
+    /// Call `Auth.Issuers.Revoke`.
+    pub async fn issuers_revoke(
+        &self,
+        input: &super::types::AuthIssuersRevokeRequest,
+    ) -> Result<
+        super::types::AuthIssuersRevokeResponse,
+        trellis_rs::generated::CallError<super::rpc::AuthIssuersRevokeError>,
+    > {
+        self.inner
+            .call_typed::<super::rpc::AuthIssuersRevokeRpc, super::rpc::AuthIssuersRevokeError>(
+                input,
+            )
+            .await
+    }
+    /// Call `Auth.Participants.Install`.
+    pub async fn participants_install(
+        &self,
+        input: &super::types::AuthParticipantsInstallRequest,
+    ) -> Result<
+        super::types::AuthParticipantsInstallResponse,
+        trellis_rs::generated::CallError<super::rpc::AuthParticipantsInstallError>,
+    > {
+        self.inner
+            .call_typed::<
+                super::rpc::AuthParticipantsInstallRpc,
+                super::rpc::AuthParticipantsInstallError,
             >(input)
             .await
     }
@@ -1036,6 +1116,14 @@ impl<'a> AuthEvent<'a> {
     ) -> AuthDeviceUserAuthoritiesReviewRequestedEvent<'a> {
         AuthDeviceUserAuthoritiesReviewRequestedEvent { inner: self.inner }
     }
+    /// Access `Auth.Grants.Changed`.
+    pub fn grants_changed(&self) -> AuthGrantsChangedEvent<'a> {
+        AuthGrantsChangedEvent { inner: self.inner }
+    }
+    /// Access `Auth.Issuers.Revoked`.
+    pub fn issuers_revoked(&self) -> AuthIssuersRevokedEvent<'a> {
+        AuthIssuersRevokedEvent { inner: self.inner }
+    }
     /// Access `Auth.Sessions.Revoked`.
     pub fn sessions_revoked(&self) -> AuthSessionsRevokedEvent<'a> {
         AuthSessionsRevokedEvent { inner: self.inner }
@@ -1246,6 +1334,66 @@ impl<'a> AuthDeviceUserAuthoritiesReviewRequestedEvent<'a> {
         let mut stream = self
             .inner
             .subscribe::<super::events::AuthDeviceUserAuthoritiesReviewRequestedEventDescriptor>()
+            .await?;
+        while let Some(event) = futures_util::StreamExt::next(&mut stream).await {
+            handler(event?).await?;
+        }
+        Ok(())
+    }
+}
+/// Typed `Auth.Grants.Changed` event operations.
+pub struct AuthGrantsChangedEvent<'a> {
+    inner: &'a trellis_rs::generated::Caller,
+}
+impl<'a> AuthGrantsChangedEvent<'a> {
+    /// Publish `Auth.Grants.Changed`.
+    pub async fn publish(
+        &self,
+        event: &super::types::AuthGrantsChangedEvent,
+    ) -> Result<(), TrellisClientError> {
+        self.inner
+            .publish::<super::events::AuthGrantsChangedEventDescriptor>(event)
+            .await
+    }
+    /// Listen for live `Auth.Grants.Changed` events.
+    pub async fn listen<F, Fut>(&self, handler: F) -> Result<(), TrellisClientError>
+    where
+        F: Fn(super::types::AuthGrantsChangedEvent) -> Fut,
+        Fut: std::future::Future<Output = Result<(), TrellisClientError>>,
+    {
+        let mut stream = self
+            .inner
+            .subscribe::<super::events::AuthGrantsChangedEventDescriptor>()
+            .await?;
+        while let Some(event) = futures_util::StreamExt::next(&mut stream).await {
+            handler(event?).await?;
+        }
+        Ok(())
+    }
+}
+/// Typed `Auth.Issuers.Revoked` event operations.
+pub struct AuthIssuersRevokedEvent<'a> {
+    inner: &'a trellis_rs::generated::Caller,
+}
+impl<'a> AuthIssuersRevokedEvent<'a> {
+    /// Publish `Auth.Issuers.Revoked`.
+    pub async fn publish(
+        &self,
+        event: &super::types::AuthIssuersRevokedEvent,
+    ) -> Result<(), TrellisClientError> {
+        self.inner
+            .publish::<super::events::AuthIssuersRevokedEventDescriptor>(event)
+            .await
+    }
+    /// Listen for live `Auth.Issuers.Revoked` events.
+    pub async fn listen<F, Fut>(&self, handler: F) -> Result<(), TrellisClientError>
+    where
+        F: Fn(super::types::AuthIssuersRevokedEvent) -> Fut,
+        Fut: std::future::Future<Output = Result<(), TrellisClientError>>,
+    {
+        let mut stream = self
+            .inner
+            .subscribe::<super::events::AuthIssuersRevokedEventDescriptor>()
             .await?;
         while let Some(event) = futures_util::StreamExt::next(&mut stream).await {
             handler(event?).await?;

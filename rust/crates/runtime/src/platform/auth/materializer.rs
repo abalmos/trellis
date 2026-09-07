@@ -566,6 +566,9 @@ fn error_category(error: &AuthorizationStateError) -> &'static str {
         AuthorizationStateError::ContextSnapshotChanged => "context_snapshot_changed",
         AuthorizationStateError::PortalPolicyChanged => "portal_policy_changed",
         AuthorizationStateError::StorageConflict => "storage_conflict",
+        AuthorizationStateError::RevisionConflict { .. } => "revision_conflict",
+        AuthorizationStateError::CurrentIssuerConflict => "issuer_current",
+        AuthorizationStateError::IssuerMissing => "issuer_missing",
         AuthorizationStateError::InvalidRecord(_) => "invalid_record",
         AuthorizationStateError::Storage(_) => "storage_error",
     }

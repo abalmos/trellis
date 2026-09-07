@@ -29,6 +29,8 @@ pub enum SessionProofPurpose {
     ServiceBootstrap,
     /// Bootstrap a provisioned or activated device.
     DeviceBootstrap,
+    /// Request device enrollment without runtime authority or a claimed assignment.
+    DeviceEnrollment,
     /// Refresh an authorization context using the durable session key.
     AuthorizationContextRefresh,
 }
@@ -40,6 +42,7 @@ impl SessionProofPurpose {
             Self::UserAuthBind => "userAuthBind",
             Self::ServiceBootstrap => "serviceBootstrap",
             Self::DeviceBootstrap => "deviceBootstrap",
+            Self::DeviceEnrollment => "deviceEnrollment",
             Self::AuthorizationContextRefresh => "authorizationContextRefresh",
         }
     }
@@ -98,81 +101,24 @@ pub struct UserAuthBindSessionProofInput {
     pub request_digest: String,
 }
 
-/// Owned fields for a provisioned service-instance bootstrap proof.
+/// Proof inputs shared by native service and device bootstrap.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ServiceBootstrapSessionProofInput {
-    /// Caller-generated request identifier.
-    pub request_id: String,
-    /// Claimed Unix issue time in milliseconds.
-    pub issued_at: i64,
-    /// Deployment containing the service instance.
-    pub deployment_id: String,
-    /// Service instance identifier.
-    pub instance_id: String,
-    /// Provisioned identity signing-key identifier.
-    pub provisioned_identity_key_id: String,
-    /// Unpadded base64url Ed25519 public key for the new session.
-    pub new_session_public_key: String,
-    /// NATS User NKey encoding the new session public key.
-    pub new_session_nkey: String,
-    /// Participant identifier presented by the service.
-    pub participant_id: String,
-    /// Canonical participant artifact digest.
-    pub participant_digest: String,
-    /// Digest of the complete request with its proof signature removed.
-    pub request_digest: String,
-}
-
-/// Owned fields for a provisioned or activated device bootstrap proof.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct DeviceBootstrapSessionProofInput {
-    /// Caller-generated request identifier.
-    pub request_id: String,
-    /// Claimed Unix issue time in milliseconds.
-    pub issued_at: i64,
-    /// Deployment containing the device instance.
-    pub deployment_id: String,
-    /// Device instance identifier.
-    pub instance_id: String,
-    /// Device identity signing-key identifier.
-    pub device_identity_key_id: String,
-    /// Unpadded base64url Ed25519 public key for the new session.
-    pub new_session_public_key: String,
-    /// NATS User NKey encoding the new session public key.
-    pub new_session_nkey: String,
-    /// Participant identifier presented by the device.
-    pub participant_id: String,
-    /// Canonical participant artifact digest.
-    pub participant_digest: String,
-    /// Optional digest of the activation challenge.
-    pub challenge_digest: Option<String>,
-    /// Digest of the complete request with its proof signature removed.
-    pub request_digest: String,
+pub struct NativeBootstrapSessionProofInput {
+    /// Exact configured Trellis origin, independently supplied by both peers.
+    pub origin: String,
+    /// Complete canonical request input, with the entire `proof` field omitted.
+    pub unsigned_request: Value,
 }
 
 /// Owned fields for an authorization-context refresh proof.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct AuthorizationContextRefreshSessionProofInput {
-    /// Caller-generated request identifier.
-    pub request_id: String,
-    /// Claimed Unix issue time in milliseconds.
-    pub issued_at: i64,
-    /// Durable session identifier.
-    pub session_id: String,
-    /// Durable session signing-key identifier.
-    pub session_key_id: String,
-    /// Digest of the currently usable context, when one remains usable.
-    pub current_context_digest: Option<String>,
-    /// Expected canonical participant artifact digest, when known.
-    pub expected_participant_digest: Option<String>,
-    /// Expected canonical participant-needs digest, when known.
-    pub expected_needs_digest: Option<String>,
-    /// Pinned authorization root signing-key identifier.
-    pub known_root_key_id: String,
-    /// Lowest accepted issuer-manifest generation.
-    pub minimum_manifest_generation: i64,
-    /// Digest of the complete request with its proof signature removed.
-    pub request_digest: String,
+    /// Exact configured Trellis origin, never taken from a forwarded Host header.
+    pub origin: String,
+    /// Installation public key loaded from the authenticated login.
+    pub session_public_key: String,
+    /// Complete request object with the proof field omitted.
+    pub unsigned_request: Value,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -275,46 +221,14 @@ impl SessionProofInput {
     /// # Errors
     ///
     /// Returns [`ProtocolError::SessionProof`] when a field is noncanonical,
-    /// unsafe, empty, malformed, or the NKey does not encode `new_session_public_key`.
+    /// unsafe, empty, or malformed.
     pub fn service_bootstrap(
-        input: ServiceBootstrapSessionProofInput,
+        input: NativeBootstrapSessionProofInput,
     ) -> Result<Self, ProtocolError> {
-        let ServiceBootstrapSessionProofInput {
-            request_id,
-            issued_at,
-            deployment_id,
-            instance_id,
-            provisioned_identity_key_id,
-            new_session_public_key,
-            new_session_nkey,
-            participant_id,
-            participant_digest,
-            request_digest,
-        } = input;
-        validate_key_id(&provisioned_identity_key_id, &["provisionedIdentityKeyId"])?;
-        let session_key = decode_public_key(&new_session_public_key, &["newSessionPublicKey"])?;
-        let session_nkey_bytes =
-            validate_nkey_binding(&new_session_nkey, &session_key, &["newSessionNkey"])?;
-
-        Self::new(
+        Self::native_bootstrap(
+            input,
             SessionProofPurpose::ServiceBootstrap,
-            request_id,
-            issued_at,
-            provisioned_identity_key_id.clone(),
-            vec![
-                text(&deployment_id, &["deploymentId"])?,
-                text(&instance_id, &["instanceId"])?,
-                digest(&provisioned_identity_key_id, &["provisionedIdentityKeyId"])?,
-                session_key.as_bytes().to_vec(),
-                session_nkey_bytes.to_vec(),
-                text(&participant_id, &["participantId"])?,
-                digest(&participant_digest, &["participantDigest"])?,
-                digest(&request_digest, &["requestDigest"])?,
-            ],
-            Some(NkeyBinding::PublicKey {
-                nkey: new_session_nkey,
-                public_key: session_key,
-            }),
+            "/bootstrap/service",
         )
     }
 
@@ -323,48 +237,110 @@ impl SessionProofInput {
     /// # Errors
     ///
     /// Returns [`ProtocolError::SessionProof`] when a field is noncanonical,
-    /// unsafe, empty, malformed, or the NKey does not encode `new_session_public_key`.
+    /// unsafe, empty, or malformed.
     pub fn device_bootstrap(
-        input: DeviceBootstrapSessionProofInput,
+        input: NativeBootstrapSessionProofInput,
     ) -> Result<Self, ProtocolError> {
-        let DeviceBootstrapSessionProofInput {
-            request_id,
-            issued_at,
-            deployment_id,
-            instance_id,
-            device_identity_key_id,
-            new_session_public_key,
-            new_session_nkey,
-            participant_id,
-            participant_digest,
-            challenge_digest,
-            request_digest,
+        Self::native_bootstrap(
+            input,
+            SessionProofPurpose::DeviceBootstrap,
+            "/bootstrap/device",
+        )
+    }
+
+    /// Build a device enrollment proof bound to the enrollment route.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ProtocolError::SessionProof`] for malformed or noncanonical input.
+    pub fn device_enrollment(
+        input: NativeBootstrapSessionProofInput,
+    ) -> Result<Self, ProtocolError> {
+        Self::native_bootstrap(
+            input,
+            SessionProofPurpose::DeviceEnrollment,
+            "/auth/device/enroll",
+        )
+    }
+
+    fn native_bootstrap(
+        input: NativeBootstrapSessionProofInput,
+        purpose: SessionProofPurpose,
+        route: &str,
+    ) -> Result<Self, ProtocolError> {
+        let NativeBootstrapSessionProofInput {
+            origin,
+            unsigned_request,
         } = input;
-        validate_key_id(&device_identity_key_id, &["deviceIdentityKeyId"])?;
-        let session_key = decode_public_key(&new_session_public_key, &["newSessionPublicKey"])?;
-        let session_nkey_bytes =
-            validate_nkey_binding(&new_session_nkey, &session_key, &["newSessionNkey"])?;
+        validate_safe_json_integers(&unsigned_request, &mut Vec::new())?;
+        let request = unsigned_request.as_object().ok_or_else(|| {
+            proof_error(
+                SessionProofErrorCode::InvalidFormat,
+                ["request"],
+                "unsigned request must be an object",
+            )
+        })?;
+        if request.contains_key("proof") {
+            return Err(proof_error(
+                SessionProofErrorCode::InvalidFormat,
+                ["proof"],
+                "unsigned request must omit proof",
+            ));
+        }
+        let required_text = |field: &str| -> Result<String, ProtocolError> {
+            request
+                .get(field)
+                .and_then(Value::as_str)
+                .map(str::to_owned)
+                .ok_or_else(|| {
+                    proof_error(
+                        SessionProofErrorCode::InvalidFormat,
+                        [field],
+                        "required string is missing",
+                    )
+                })
+        };
+        let request_id = required_text("requestId")?;
+        let identity_key_id = required_text("identityKeyId")?;
+        let session_key = required_text("sessionKey")?;
+        let connection_id = required_text("connectionId")?;
+        if purpose == SessionProofPurpose::DeviceEnrollment {
+            text(&required_text("participantId")?, &["participantId"])?;
+        }
+        let issued_at = request.get("iat").and_then(Value::as_i64).ok_or_else(|| {
+            proof_error(
+                SessionProofErrorCode::InvalidFormat,
+                ["iat"],
+                "iat must be an integer",
+            )
+        })?;
+        if let Some(name) = request.get("name") {
+            if name.as_str().is_none_or(|name| name.chars().count() > 128) {
+                return Err(proof_error(
+                    SessionProofErrorCode::InvalidFormat,
+                    ["name"],
+                    "name must be a string of at most 128 characters",
+                ));
+            }
+        }
+        validate_key_id(&identity_key_id, &["identityKeyId"])?;
+        let session_key = decode_public_key(&session_key, &["sessionKey"])?;
+        let request_digest = Sha256::digest(canonicalize_json(&unsigned_request)?.as_bytes());
 
         Self::new(
-            SessionProofPurpose::DeviceBootstrap,
+            purpose,
             request_id,
             issued_at,
-            device_identity_key_id.clone(),
+            identity_key_id.clone(),
             vec![
-                text(&deployment_id, &["deploymentId"])?,
-                text(&instance_id, &["instanceId"])?,
-                digest(&device_identity_key_id, &["deviceIdentityKeyId"])?,
+                text(&origin, &["origin"])?,
+                text(route, &["route"])?,
+                digest(&identity_key_id, &["identityKeyId"])?,
                 session_key.as_bytes().to_vec(),
-                session_nkey_bytes.to_vec(),
-                text(&participant_id, &["participantId"])?,
-                digest(&participant_digest, &["participantDigest"])?,
-                optional_digest(challenge_digest.as_deref(), &["challengeDigest"])?,
-                digest(&request_digest, &["requestDigest"])?,
+                text(&connection_id, &["connectionId"])?,
+                request_digest.to_vec(),
             ],
-            Some(NkeyBinding::PublicKey {
-                nkey: new_session_nkey,
-                public_key: session_key,
-            }),
+            None,
         )
     }
 
@@ -378,45 +354,88 @@ impl SessionProofInput {
         input: AuthorizationContextRefreshSessionProofInput,
     ) -> Result<Self, ProtocolError> {
         let AuthorizationContextRefreshSessionProofInput {
-            request_id,
-            issued_at,
-            session_id,
-            session_key_id,
-            current_context_digest,
-            expected_participant_digest,
-            expected_needs_digest,
-            known_root_key_id,
-            minimum_manifest_generation,
-            request_digest,
+            origin,
+            session_public_key,
+            unsigned_request,
         } = input;
-        validate_key_id(&session_key_id, &["sessionKeyId"])?;
-        validate_key_id(&known_root_key_id, &["knownRootKeyId"])?;
-        if minimum_manifest_generation <= 0 {
+        validate_safe_json_integers(&unsigned_request, &mut Vec::new())?;
+        let request = unsigned_request.as_object().ok_or_else(|| {
+            proof_error(
+                SessionProofErrorCode::InvalidFormat,
+                ["request"],
+                "unsigned request must be an object",
+            )
+        })?;
+        if request.contains_key("proof") {
             return Err(proof_error(
                 SessionProofErrorCode::InvalidFormat,
-                ["minimumManifestGeneration"],
-                "minimum manifest generation must be positive",
+                ["proof"],
+                "unsigned request must omit proof",
             ));
         }
-        validate_safe_integer(minimum_manifest_generation, &["minimumManifestGeneration"])?;
+        let required_text = |field: &str| {
+            request
+                .get(field)
+                .and_then(Value::as_str)
+                .map(str::to_owned)
+                .ok_or_else(|| {
+                    proof_error(
+                        SessionProofErrorCode::InvalidFormat,
+                        [field],
+                        "required string is missing",
+                    )
+                })
+        };
+        let request_id = required_text("requestId")?;
+        let login_session_id = required_text("loginSessionId")?;
+        let connection_id = required_text("connectionId")?;
+        let issued_at = request
+            .get("issuedAt")
+            .and_then(Value::as_i64)
+            .ok_or_else(|| {
+                proof_error(
+                    SessionProofErrorCode::InvalidFormat,
+                    ["issuedAt"],
+                    "issuedAt must be an integer",
+                )
+            })?;
+        match request.get("currentContextDigest") {
+            Some(Value::Null) => {}
+            Some(Value::String(value)) => {
+                digest(value, &["currentContextDigest"])?;
+            }
+            _ => {
+                return Err(proof_error(
+                    SessionProofErrorCode::InvalidFormat,
+                    ["currentContextDigest"],
+                    "currentContextDigest must be present and nullable",
+                ))
+            }
+        }
+        if let Some(name) = request.get("name") {
+            if name.as_str().is_none_or(|name| name.chars().count() > 128) {
+                return Err(proof_error(
+                    SessionProofErrorCode::InvalidFormat,
+                    ["name"],
+                    "name must be a string of at most 128 characters",
+                ));
+            }
+        }
+        let key = decode_public_key(&session_public_key, &["sessionPublicKey"])?;
+        let request_digest = Sha256::digest(canonicalize_json(&unsigned_request)?.as_bytes());
 
         Self::new(
             SessionProofPurpose::AuthorizationContextRefresh,
             request_id,
             issued_at,
-            session_key_id.clone(),
+            derived_key_id(&key),
             vec![
-                text(&session_id, &["sessionId"])?,
-                digest(&session_key_id, &["sessionKeyId"])?,
-                optional_digest(current_context_digest.as_deref(), &["currentContextDigest"])?,
-                optional_digest(
-                    expected_participant_digest.as_deref(),
-                    &["expectedParticipantDigest"],
-                )?,
-                optional_digest(expected_needs_digest.as_deref(), &["expectedNeedsDigest"])?,
-                digest(&known_root_key_id, &["knownRootKeyId"])?,
-                minimum_manifest_generation.to_string().into_bytes(),
-                digest(&request_digest, &["requestDigest"])?,
+                text(&origin, &["origin"])?,
+                b"/auth/context/refresh".to_vec(),
+                key.as_bytes().to_vec(),
+                text(&login_session_id, &["loginSessionId"])?,
+                text(&connection_id, &["connectionId"])?,
+                request_digest.to_vec(),
             ],
             None,
         )
@@ -985,10 +1004,6 @@ fn digest(value: &str, path: &[&str]) -> Result<Vec<u8>, ProtocolError> {
     Ok(decode_base64url::<32>(value, path, SessionProofErrorCode::InvalidEncoding)?.to_vec())
 }
 
-fn optional_digest(value: Option<&str>, path: &[&str]) -> Result<Vec<u8>, ProtocolError> {
-    value.map_or_else(|| Ok(Vec::new()), |value| digest(value, path))
-}
-
 fn push_length_prefixed(output: &mut Vec<u8>, bytes: &[u8]) -> Result<(), ProtocolError> {
     let length = u32::try_from(bytes.len()).map_err(|_| {
         proof_error(
@@ -1052,23 +1067,67 @@ mod tests {
     }
 
     #[test]
-    fn authorization_context_refresh_requires_positive_manifest_floor() -> Result<(), ProtocolError>
-    {
-        assert!(SessionProofInput::authorization_context_refresh(
-            AuthorizationContextRefreshSessionProofInput {
-                request_id: "req_refresh_1".to_owned(),
-                issued_at: 1_735_689_600_000,
-                session_id: "ses_1".to_owned(),
-                session_key_id: DIGEST.to_owned(),
-                current_context_digest: None,
-                expected_participant_digest: None,
-                expected_needs_digest: None,
-                known_root_key_id: DIGEST.to_owned(),
-                minimum_manifest_generation: 0,
-                request_digest: DIGEST.to_owned(),
-            },
+    fn user_refresh_binds_login_connection_origin_and_complete_unsigned_request(
+    ) -> Result<(), ProtocolError> {
+        let key = SigningKey::from_bytes(&[0x37; 32]);
+        let request = json!({
+            "requestId": "01JY0000000000000000000001", "issuedAt": 1_735_689_600_000_i64,
+            "loginSessionId": "01JY0000000000000000000002", "connectionId": "01JY0000000000000000000003",
+            "currentContextDigest": null, "name": "test runtime", "future": {"bound": true}
+        });
+        let input = AuthorizationContextRefreshSessionProofInput {
+            origin: "https://trellis.example".into(),
+            session_public_key: encode_base64url(key.verifying_key().as_bytes()),
+            unsigned_request: request,
+        };
+        let proof_input = SessionProofInput::authorization_context_refresh(input.clone())?;
+        let proof = sign_session_proof(&proof_input, &key)?;
+        let policy = SessionProofPolicy::new(30_000, 5_000)?;
+        verify_session_proof(
+            &proof_input,
+            &proof,
+            &input.session_public_key,
+            1_735_689_600_000,
+            policy,
+        )?;
+        for (field, value) in [
+            ("requestId", json!("01JY0000000000000000000004")),
+            ("issuedAt", json!(1_735_689_600_001_i64)),
+            ("loginSessionId", json!("01JY0000000000000000000005")),
+            ("connectionId", json!("01JY0000000000000000000006")),
+            ("currentContextDigest", json!(DIGEST)),
+            ("name", json!("changed name")),
+            ("future", json!({"bound": false})),
+        ] {
+            let mut changed = input.clone();
+            changed.unsigned_request[field] = value;
+            let changed = SessionProofInput::authorization_context_refresh(changed)?;
+            assert!(verify_session_proof(
+                &changed,
+                &proof,
+                &input.session_public_key,
+                1_735_689_600_000,
+                policy
+            )
+            .is_err());
+        }
+        let mut changed = input.clone();
+        changed.origin = "https://another.example".into();
+        assert!(verify_session_proof(
+            &SessionProofInput::authorization_context_refresh(changed)?,
+            &proof,
+            &input.session_public_key,
+            1_735_689_600_000,
+            policy
         )
         .is_err());
+        let mut missing = input;
+        missing
+            .unsigned_request
+            .as_object_mut()
+            .unwrap()
+            .remove("currentContextDigest");
+        assert!(SessionProofInput::authorization_context_refresh(missing).is_err());
         Ok(())
     }
 
@@ -1116,291 +1175,168 @@ mod tests {
         ));
     }
 
-    fn vector_field<'a>(value: &'a Value, name: &str) -> &'a str {
-        value[name]
-            .as_str()
-            .unwrap_or_else(|| panic!("missing vector field {name}"))
-    }
-
-    fn vector_time(value: &Value) -> i64 {
-        value["issuedAt"].as_i64().expect("vector issuedAt")
-    }
-
-    fn vector_input(case: &Value) -> Result<SessionProofInput, ProtocolError> {
-        let value = case.get("request").unwrap_or(&case["input"]);
-        let request_digest = case["requestDigest"].as_str();
-        match vector_field(case, "purpose") {
-            "userAuthRequest" => {
-                SessionProofInput::user_auth_request(UserAuthRequestSessionProofInput {
-                    request_id: vector_field(value, "requestId").to_owned(),
-                    issued_at: vector_time(value),
-                    session_public_key: vector_field(value, "sessionPublicKey").to_owned(),
-                    session_nkey: vector_field(value, "sessionNkey").to_owned(),
-                    participant_id: vector_field(value, "participantId").to_owned(),
-                    participant_digest: vector_field(value, "participantDigest").to_owned(),
-                    redirect_target: vector_field(value, "redirectTarget").to_owned(),
-                    request_digest: request_digest.expect("user request digest").to_owned(),
-                })
-            }
-            "serviceBootstrap" => {
-                SessionProofInput::service_bootstrap(ServiceBootstrapSessionProofInput {
-                    request_id: vector_field(value, "requestId").to_owned(),
-                    issued_at: vector_time(value),
-                    deployment_id: vector_field(value, "deploymentId").to_owned(),
-                    instance_id: vector_field(value, "instanceId").to_owned(),
-                    provisioned_identity_key_id: vector_field(value, "provisionedIdentityKeyId")
-                        .to_owned(),
-                    new_session_public_key: vector_field(value, "newSessionPublicKey").to_owned(),
-                    new_session_nkey: vector_field(value, "newSessionNkey").to_owned(),
-                    participant_id: vector_field(value, "participantId").to_owned(),
-                    participant_digest: vector_field(value, "participantDigest").to_owned(),
-                    request_digest: request_digest.expect("service request digest").to_owned(),
-                })
-            }
-            "deviceBootstrap" => {
-                SessionProofInput::device_bootstrap(DeviceBootstrapSessionProofInput {
-                    request_id: vector_field(value, "requestId").to_owned(),
-                    issued_at: vector_time(value),
-                    deployment_id: vector_field(value, "deploymentId").to_owned(),
-                    instance_id: vector_field(value, "instanceId").to_owned(),
-                    device_identity_key_id: vector_field(value, "deviceIdentityKeyId").to_owned(),
-                    new_session_public_key: vector_field(value, "newSessionPublicKey").to_owned(),
-                    new_session_nkey: vector_field(value, "newSessionNkey").to_owned(),
-                    participant_id: vector_field(value, "participantId").to_owned(),
-                    participant_digest: vector_field(value, "participantDigest").to_owned(),
-                    challenge_digest: value["challengeDigest"].as_str().map(str::to_owned),
-                    request_digest: request_digest.expect("device request digest").to_owned(),
-                })
-            }
-            "authorizationContextRefresh" => SessionProofInput::authorization_context_refresh(
-                AuthorizationContextRefreshSessionProofInput {
-                    request_id: vector_field(value, "requestId").to_owned(),
-                    issued_at: vector_time(value),
-                    session_id: vector_field(value, "sessionId").to_owned(),
-                    session_key_id: derived_key_id(&decode_public_key(
-                        vector_field(case, "signerPublicKey"),
-                        &["signerPublicKey"],
-                    )?),
-                    current_context_digest: value["currentContextDigest"]
-                        .as_str()
-                        .map(str::to_owned),
-                    expected_participant_digest: value["expectedParticipantDigest"]
-                        .as_str()
-                        .map(str::to_owned),
-                    expected_needs_digest: value["expectedNeedsDigest"].as_str().map(str::to_owned),
-                    known_root_key_id: vector_field(value, "knownRootKeyId").to_owned(),
-                    minimum_manifest_generation: value["minimumManifestGeneration"]
-                        .as_i64()
-                        .expect("minimum manifest generation"),
-                    request_digest: request_digest
-                        .expect("context refresh request digest")
-                        .to_owned(),
-                },
-            ),
-            purpose => panic!("unknown vector purpose {purpose}"),
-        }
+    fn native_input() -> (SigningKey, NativeBootstrapSessionProofInput) {
+        let identity = SigningKey::from_bytes(&[41; 32]);
+        let session = SigningKey::from_bytes(&[42; 32]);
+        let input = NativeBootstrapSessionProofInput {
+            origin: "https://trellis.example".to_owned(),
+            unsigned_request: json!({
+                "identityKeyId": derived_key_id(&identity.verifying_key()),
+                "sessionKey": encode_base64url(session.verifying_key().as_bytes()),
+                "connectionId": "01JY0000000000000000000001",
+                "requestId": "01JY0000000000000000000002",
+                "iat": 1_750_000_000_000_i64,
+                "name": "replica one",
+                "extension": {"value": 1}
+            }),
+        };
+        (identity, input)
     }
 
     #[test]
-    fn shared_vectors_match_rust() -> Result<(), ProtocolError> {
-        let fixture: Value = serde_json::from_str(include_str!(
-            "../../../../conformance/session-proof/vectors.json"
-        ))?;
-        let seed = decode_base64url::<32>(
-            vector_field(&fixture, "identitySeed"),
-            &["identitySeed"],
-            SessionProofErrorCode::InvalidEncoding,
+    fn native_bootstrap_binds_the_origin_route_identity_and_complete_unsigned_request(
+    ) -> Result<(), ProtocolError> {
+        let (identity, input) = native_input();
+        let service = SessionProofInput::service_bootstrap(input.clone())?;
+        let proof = sign_session_proof(&service, &identity)?;
+        let key = encode_base64url(identity.verifying_key().as_bytes());
+        verify_session_proof(
+            &service,
+            &proof,
+            &key,
+            service.issued_at(),
+            SessionProofPolicy::default(),
         )?;
-        let signing_key = SigningKey::from_bytes(&seed);
-        for case in fixture["cases"].as_array().expect("vector cases") {
-            let value = case.get("request").unwrap_or(&case["input"]);
-            if let Some(expected) = case["requestDigest"].as_str() {
-                assert_eq!(session_proof_request_digest(value)?, expected);
-            }
-            let input = vector_input(case)?;
-            let proof = parse_session_proof(&value["proof"])?;
-            assert_eq!(sign_session_proof(&input, &signing_key)?, proof);
-            verify_session_proof(
-                &input,
-                &proof,
-                vector_field(case, "signerPublicKey"),
-                input.issued_at(),
-                SessionProofPolicy::default(),
-            )?;
-            assert_eq!(
-                session_proof_signing_digest(&input)?,
-                vector_field(case, "transcriptDigest")
+        let device = SessionProofInput::device_bootstrap(input.clone())?;
+        assert!(verify_session_proof(
+            &device,
+            &proof,
+            &key,
+            service.issued_at(),
+            SessionProofPolicy::default()
+        )
+        .is_err());
+        let mut other_origin = input.clone();
+        other_origin.origin = "https://another.example".to_owned();
+        let other_origin = SessionProofInput::service_bootstrap(other_origin)?;
+        assert!(verify_session_proof(
+            &other_origin,
+            &proof,
+            &key,
+            service.issued_at(),
+            SessionProofPolicy::default()
+        )
+        .is_err());
+        for (field, value) in [
+            ("connectionId", json!("01JY0000000000000000000003")),
+            ("requestId", json!("01JY0000000000000000000004")),
+            ("iat", json!(service.issued_at() + 1)),
+            ("name", json!("another replica")),
+            ("extension", json!({"value": 2})),
+            (
+                "sessionKey",
+                json!(encode_base64url(
+                    SigningKey::from_bytes(&[43; 32]).verifying_key().as_bytes()
+                )),
+            ),
+            (
+                "identityKeyId",
+                json!(derived_key_id(
+                    &SigningKey::from_bytes(&[44; 32]).verifying_key()
+                )),
+            ),
+        ] {
+            let mut modified = input.clone();
+            modified.unsigned_request[field] = value;
+            let modified = SessionProofInput::service_bootstrap(modified)?;
+            assert!(
+                verify_session_proof(
+                    &modified,
+                    &proof,
+                    &key,
+                    service.issued_at(),
+                    SessionProofPolicy::default()
+                )
+                .is_err(),
+                "{field} must be signature-bound"
             );
-            assert_eq!(proof.signature(), vector_field(case, "signature"));
         }
+        let session = SigningKey::from_bytes(&[42; 32]);
+        assert!(sign_session_proof(&service, &session).is_err());
+        assert!(SessionProofInput::device_enrollment(input.clone()).is_err());
+        let mut enrollment_request = input;
+        enrollment_request.unsigned_request["participantId"] = json!("example.device");
+        let enrollment = SessionProofInput::device_enrollment(enrollment_request.clone())?;
+        let enrollment_proof = sign_session_proof(&enrollment, &identity)?;
+        verify_session_proof(
+            &enrollment,
+            &enrollment_proof,
+            &key,
+            service.issued_at(),
+            SessionProofPolicy::default(),
+        )?;
+        let ready_device = SessionProofInput::device_bootstrap(enrollment_request)?;
+        assert!(verify_session_proof(
+            &ready_device,
+            &enrollment_proof,
+            &key,
+            service.issued_at(),
+            SessionProofPolicy::default()
+        )
+        .is_err());
         Ok(())
     }
 
     #[test]
-    fn shared_invalid_vectors_cover_failures() -> Result<(), ProtocolError> {
-        let fixture: Value = serde_json::from_str(include_str!(
-            "../../../../conformance/session-proof/vectors.json"
-        ))?;
-        let cases = fixture["cases"].as_array().expect("vector cases");
-        let find = |name: &str| {
-            cases
-                .iter()
-                .find(|case| case["name"] == name)
-                .unwrap_or_else(|| panic!("missing base vector {name}"))
-        };
-        let public_key = vector_field(&fixture, "identityPublicKey");
-        for invalid in fixture["invalidCases"].as_array().expect("invalid cases") {
-            let base = find(vector_field(invalid, "base"));
-            let value = base.get("request").unwrap_or(&base["input"]);
-            let proof = parse_session_proof(&value["proof"])?;
-            let mutation = vector_field(invalid, "mutation");
-            let error = match mutation {
-                "devicePurpose" => {
-                    let request = &base["request"];
-                    let input =
-                        SessionProofInput::device_bootstrap(DeviceBootstrapSessionProofInput {
-                            request_id: vector_field(request, "requestId").to_owned(),
-                            issued_at: vector_time(request),
-                            deployment_id: vector_field(request, "deploymentId").to_owned(),
-                            instance_id: vector_field(request, "instanceId").to_owned(),
-                            device_identity_key_id: vector_field(
-                                request,
-                                "provisionedIdentityKeyId",
-                            )
-                            .to_owned(),
-                            new_session_public_key: vector_field(request, "newSessionPublicKey")
-                                .to_owned(),
-                            new_session_nkey: vector_field(request, "newSessionNkey").to_owned(),
-                            participant_id: vector_field(request, "participantId").to_owned(),
-                            participant_digest: vector_field(request, "participantDigest")
-                                .to_owned(),
-                            challenge_digest: None,
-                            request_digest: vector_field(base, "requestDigest").to_owned(),
-                        })?;
-                    verify_session_proof(
-                        &input,
-                        &proof,
-                        public_key,
-                        input.issued_at(),
-                        SessionProofPolicy::default(),
-                    )
-                    .expect_err("wrong purpose must fail")
-                }
-                "identityAsNewSession" => {
-                    let request = &base["request"];
-                    let input =
-                        SessionProofInput::service_bootstrap(ServiceBootstrapSessionProofInput {
-                            request_id: vector_field(request, "requestId").to_owned(),
-                            issued_at: vector_time(request),
-                            deployment_id: vector_field(request, "deploymentId").to_owned(),
-                            instance_id: vector_field(request, "instanceId").to_owned(),
-                            provisioned_identity_key_id: vector_field(
-                                request,
-                                "provisionedIdentityKeyId",
-                            )
-                            .to_owned(),
-                            new_session_public_key: vector_field(&fixture, "identityPublicKey")
-                                .to_owned(),
-                            new_session_nkey: vector_field(&fixture, "identityNkey").to_owned(),
-                            participant_id: vector_field(request, "participantId").to_owned(),
-                            participant_digest: vector_field(request, "participantDigest")
-                                .to_owned(),
-                            request_digest: vector_field(base, "requestDigest").to_owned(),
-                        })?;
-                    verify_session_proof(
-                        &input,
-                        &proof,
-                        public_key,
-                        input.issued_at(),
-                        SessionProofPolicy::default(),
-                    )
-                    .expect_err("modified session must fail")
-                }
-                "participantDigest" | "deploymentId" | "instanceId" | "redirectTarget"
-                | "requestId" => {
-                    let mut changed = base.clone();
-                    let request = changed["request"].as_object_mut().expect("request object");
-                    let field = match mutation {
-                        "participantDigest" => "participantDigest",
-                        "deploymentId" => "deploymentId",
-                        "instanceId" => "instanceId",
-                        "redirectTarget" => "redirectTarget",
-                        "requestId" => "requestId",
-                        _ => unreachable!(),
-                    };
-                    request.insert(
-                        field.to_owned(),
-                        Value::String(if mutation == "participantDigest" {
-                            "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE".to_owned()
-                        } else {
-                            format!("changed-{}", vector_field(value, field))
-                        }),
-                    );
-                    let input = vector_input(&changed)?;
-                    verify_session_proof(
-                        &input,
-                        &proof,
-                        public_key,
-                        input.issued_at(),
-                        SessionProofPolicy::default(),
-                    )
-                    .expect_err("modified field must fail")
-                }
-                "paddedPublicKey" => {
-                    let request = &base["request"];
-                    SessionProofInput::user_auth_request(UserAuthRequestSessionProofInput {
-                        request_id: vector_field(request, "requestId").to_owned(),
-                        issued_at: vector_time(request),
-                        session_public_key: format!(
-                            "{}=",
-                            vector_field(request, "sessionPublicKey")
-                        ),
-                        session_nkey: vector_field(request, "sessionNkey").to_owned(),
-                        participant_id: vector_field(request, "participantId").to_owned(),
-                        participant_digest: vector_field(request, "participantDigest").to_owned(),
-                        redirect_target: vector_field(request, "redirectTarget").to_owned(),
-                        request_digest: vector_field(base, "requestDigest").to_owned(),
-                    })
-                    .expect_err("padded public key must fail")
-                }
-                "signature" => {
-                    let input = vector_input(base)?;
-                    let bad = parse_session_proof(&json!({
-                        "format": SESSION_PROOF_FORMAT_V1,
-                        "signature": encode_base64url(&[0; 64])
-                    }))?;
-                    verify_session_proof(
-                        &input,
-                        &bad,
-                        public_key,
-                        input.issued_at(),
-                        SessionProofPolicy::default(),
-                    )
-                    .expect_err("bad signature must fail")
-                }
-                "expiredNow" | "futureNow" => {
-                    let input = vector_input(base)?;
-                    let now = if mutation == "expiredNow" {
-                        input.issued_at() + 30_001
-                    } else {
-                        input.issued_at() - 30_001
-                    };
-                    verify_session_proof(
-                        &input,
-                        &proof,
-                        public_key,
-                        now,
-                        SessionProofPolicy::default(),
-                    )
-                    .expect_err("out-of-window proof must fail")
-                }
-                other => panic!("unknown invalid-vector mutation {other}"),
-            };
-            let code = match error {
-                ProtocolError::SessionProof { code, .. } => format!("{code:?}"),
-                other => panic!("unexpected error {other}"),
-            };
-            assert_eq!(code, vector_field(invalid, "expected"));
+    fn native_bootstrap_rejects_invalid_unsigned_inputs_and_stale_proofs(
+    ) -> Result<(), ProtocolError> {
+        let (identity, input) = native_input();
+        let service = SessionProofInput::service_bootstrap(input.clone())?;
+        let proof = sign_session_proof(&service, &identity)?;
+        let key = encode_base64url(identity.verifying_key().as_bytes());
+        for now in [service.issued_at() - 30_001, service.issued_at() + 30_001] {
+            assert!(verify_session_proof(
+                &service,
+                &proof,
+                &key,
+                now,
+                SessionProofPolicy::default()
+            )
+            .is_err());
+        }
+        for (field, value) in [
+            ("proof", json!({"format": SESSION_PROOF_FORMAT_V1})),
+            ("name", json!("x".repeat(129))),
+            ("name", Value::Null),
+            ("iat", json!(9_007_199_254_740_992_u64)),
+            ("iat", json!(0.5)),
+            ("requestId", json!("")),
+            ("connectionId", json!("")),
+            ("identityKeyId", json!("invalid")),
+            ("sessionKey", json!(encode_base64url(&[0; 32]))),
+            ("extension", json!({"value": 9_007_199_254_740_992_u64})),
+        ] {
+            let mut modified = input.clone();
+            modified.unsigned_request[field] = value;
+            assert!(
+                SessionProofInput::service_bootstrap(modified).is_err(),
+                "{field} must fail validation"
+            );
+        }
+        for field in [
+            "identityKeyId",
+            "sessionKey",
+            "connectionId",
+            "requestId",
+            "iat",
+        ] {
+            let mut modified = input.clone();
+            modified
+                .unsigned_request
+                .as_object_mut()
+                .expect("request object")
+                .remove(field);
+            assert!(SessionProofInput::service_bootstrap(modified).is_err());
         }
         Ok(())
     }

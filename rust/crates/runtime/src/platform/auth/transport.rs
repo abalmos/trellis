@@ -26,10 +26,7 @@ pub(crate) fn compile_transport_permissions(
     resource_bindings: &[ResourceBindingEvidence],
     registry: &AuthorizationRegistryBinding,
 ) -> Result<TransportPermissions, AuthorizationStateError> {
-    if binding.participant_id != context.participant.id
-        || binding.artifact_digest != context.participant.artifact_digest
-        || binding.needs_digest != context.participant.needs_digest
-    {
+    if binding.participant_id != context.participant_id {
         return invalid("issuable state does not match participant binding");
     }
     let participant_value: Value = serde_json::from_str(&binding.participant_json)
@@ -48,12 +45,12 @@ pub(crate) fn compile_transport_permissions(
     }
     let resolved = resolve_participant(&participant, &apis)
         .map_err(|error| invalid_error(error.to_string()))?;
-    if resolved.participant_digest() != context.participant.artifact_digest
+    if resolved.participant_digest() != binding.artifact_digest
         || resolved
             .needs()
             .digest()
             .map_err(|error| invalid_error(error.to_string()))?
-            != context.participant.needs_digest
+            != binding.needs_digest
     {
         return invalid("resolved participant identity does not match issuable state");
     }
@@ -61,36 +58,31 @@ pub(crate) fn compile_transport_permissions(
     let mut publish = BTreeSet::new();
     let mut subscribe = BTreeSet::from([format!("{}.>", context.inbox_prefix)]);
 
-    // Narrow authorization-registry read/watch binding for every connected
-    // runtime. Direct reads are limited by key token shape, while watch consumer
-    // creation is bound to the two exact filters used by the registry clients.
+    // Contexts and exact revocation watches are public protocol evidence, not
+    // participant resources. Issuer keys are resolved over the configured HTTPS origin.
     publish.insert("$JS.API.INFO".to_owned());
-    let trust_stream = format!("KV_{}", registry.trust_bucket);
     let context_stream = format!("KV_{}", registry.context_bucket);
-    publish.insert(format!("$JS.API.STREAM.INFO.{trust_stream}"));
     publish.insert(format!("$JS.API.STREAM.INFO.{context_stream}"));
-    publish.insert(format!("$JS.FC.{trust_stream}.>"));
     publish.insert(format!("$JS.FC.{context_stream}.>"));
     publish.insert(format!(
-        "$JS.API.DIRECT.GET.{trust_stream}.$KV.{}.manifest.*",
-        registry.trust_bucket
-    ));
-    publish.insert(format!(
-        "$JS.API.DIRECT.GET.{context_stream}.$KV.{}.>",
+        "$JS.API.DIRECT.GET.{context_stream}.$KV.{}.*",
         registry.context_bucket
     ));
     publish.insert(format!(
-        "$JS.API.CONSUMER.CREATE.{trust_stream}.*.$KV.{}.manifest.current",
-        registry.trust_bucket
+        "$JS.API.DIRECT.GET.{context_stream}.$KV.{}.revocation.*",
+        registry.context_bucket
     ));
-    publish.insert(format!("$JS.API.CONSUMER.INFO.{trust_stream}.*"));
+    publish.insert(format!(
+        "$JS.API.CONSUMER.CREATE.{context_stream}.*.$KV.{}.revocation.*",
+        registry.context_bucket
+    ));
     publish.insert(format!("$JS.API.CONSUMER.INFO.{context_stream}.*"));
     if matches!(
-        context.principal.kind,
+        context.principal_kind,
         AuthorizationPrincipalKind::Service | AuthorizationPrincipalKind::Device
     ) {
         publish.insert("$JS.API.INFO".to_owned());
-        if context.principal.kind == AuthorizationPrincipalKind::Service {
+        if context.principal_kind == AuthorizationPrincipalKind::Service {
             let instance_id = context
                 .instance_id
                 .as_deref()
@@ -109,15 +101,15 @@ pub(crate) fn compile_transport_permissions(
         let instance_id = context.instance_id.as_deref().ok_or_else(|| {
             invalid_error("deployed principal is missing instance identity".to_owned())
         })?;
-        let kind = match context.principal.kind {
+        let kind = match context.principal_kind {
             AuthorizationPrincipalKind::Service => "service",
             AuthorizationPrincipalKind::Device => "device",
             AuthorizationPrincipalKind::User => unreachable!(),
         };
         publish.insert(format!(
             "health.v1.heartbeat.{kind}.{}.{}.{}.{}.{}",
-            URL_SAFE_NO_PAD.encode(context.participant.id.as_bytes()),
-            URL_SAFE_NO_PAD.encode(context.participant.artifact_digest.as_bytes()),
+            URL_SAFE_NO_PAD.encode(context.participant_id.as_bytes()),
+            URL_SAFE_NO_PAD.encode(binding.artifact_digest.as_bytes()),
             URL_SAFE_NO_PAD.encode(deployment_id.as_bytes()),
             URL_SAFE_NO_PAD.encode(instance_id.as_bytes()),
             context.session_key,
@@ -151,7 +143,7 @@ pub(crate) fn compile_transport_permissions(
         subscribe.extend(provided.feeds().values().cloned());
     }
 
-    for atom in context.grant_set.permissions() {
+    for atom in context.grants.permissions() {
         if let Some((api_id, surface, name)) = atom.target().as_api_surface() {
             let api = apis
                 .get(api_id)
@@ -171,7 +163,7 @@ pub(crate) fn compile_transport_permissions(
             }
             publish.insert(format!("{subject}.control"));
         } else if let Some((participant_id, kind, name)) = atom.target().as_participant_resource() {
-            if participant_id != context.participant.id {
+            if participant_id != context.participant_id {
                 return invalid("resource grant belongs to another participant");
             }
             let resource = resource_binding(resource_bindings, kind, name)?;
@@ -469,7 +461,9 @@ mod tests {
     };
 
     fn test_registry_binding() -> super::super::context::AuthorizationRegistryBinding {
-        super::super::context::AuthorizationRegistryBinding::test_binding()
+        super::super::context::AuthorizationRegistryBinding::from_config(
+            &crate::config::AuthorizationConfig::default(),
+        )
     }
 
     #[test]

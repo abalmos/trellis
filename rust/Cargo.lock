@@ -5400,14 +5400,11 @@ name = "trellis-local-bootstrap"
 version = "0.12.0"
 dependencies = [
  "base64 0.22.1",
- "ed25519-dalek",
  "rand 0.10.1",
  "serde",
  "serde_json",
- "sha2 0.11.0",
  "tempfile",
  "thiserror 2.0.18",
- "trellis-protocol",
 ]
 
 [[package]]

@@ -285,21 +285,17 @@ pub use api::{
 pub use authorization::{
     authorization_context_refresh_at, authorization_context_signing_digest,
     build_authorization_event_proof_input, build_authorization_request_proof_input,
-    issuer_manifest_signing_digest, parse_authorization_context, parse_issuer_manifest,
-    sign_authorization_context, sign_authorization_event, sign_authorization_request,
-    sign_issuer_manifest, verify_authorization_context, verify_authorization_event,
-    verify_authorization_request, verify_issuer_manifest, AuthorizationAuthorityKind,
-    AuthorizationAuthorityRef, AuthorizationEventProof, AuthorizationEventProofInput,
-    AuthorizationEventPublisher, AuthorizationEventVerificationInput,
-    AuthorizationIssuerManifestEntry, AuthorizationParticipant, AuthorizationPrincipal,
-    AuthorizationPrincipalKind, AuthorizationRequestProof, AuthorizationRequestProofInput,
-    AuthorizationRequestVerificationInput, AuthorizationTrustRoot, AuthorizationVerificationPolicy,
-    SignedAuthorizationContext, SignedAuthorizationIssuerManifest, UnsignedAuthorizationContext,
-    UnsignedAuthorizationIssuerManifest, VerifiedAuthorizationContext,
-    VerifiedAuthorizationEventProof, VerifiedAuthorizationIssuerManifest,
-    VerifiedAuthorizationRequestProof, AUTHORIZATION_CONTEXT_FORMAT_V1,
-    AUTHORIZATION_EVENT_PROOF_DOMAIN_V1, AUTHORIZATION_ISSUER_MANIFEST_FORMAT_V1,
-    AUTHORIZATION_REQUEST_PROOF_DOMAIN_V1, AUTHORIZATION_TRUST_ROOT_FORMAT_V1,
+    parse_authorization_context, sign_authorization_context, sign_authorization_event,
+    sign_authorization_request, verify_authorization_context, verify_authorization_event,
+    verify_authorization_request, AuthorizationContextPurpose, AuthorizationEventProof,
+    AuthorizationEventProofInput, AuthorizationEventPublisher, AuthorizationEventVerificationInput,
+    AuthorizationIssuerKey, AuthorizationIssuerState, AuthorizationPrincipalKind,
+    AuthorizationRequestProof, AuthorizationRequestProofInput,
+    AuthorizationRequestVerificationInput, AuthorizationVerificationPolicy,
+    SignedAuthorizationContext, UnsignedAuthorizationContext, VerifiedAuthorizationContext,
+    VerifiedAuthorizationEventProof, VerifiedAuthorizationRequestProof,
+    AUTHORIZATION_CONTEXT_FORMAT_V1, AUTHORIZATION_EVENT_PROOF_DOMAIN_V1,
+    AUTHORIZATION_REQUEST_PROOF_DOMAIN_V1,
 };
 pub use canonical::{canonicalize_json, digest_json, sha256_base64url};
 pub use error::{
@@ -311,8 +307,9 @@ pub use participant::{
     PARTICIPANT_AUTHORING_SCHEMA_V1_JSON, PARTICIPANT_FORMAT_V1,
 };
 pub use permissions::{
-    ApiSurfaceKind, CapabilityDefinition, ConsentMetadata, GrantSet, ParticipantResourceKind,
-    PermissionAction, PermissionAtom, PermissionTarget, GRANT_SET_FORMAT_V1,
+    ApiSurfaceKind, CapabilityDefinition, ConsentMetadata, GrantOwnerKind, GrantSet,
+    ParticipantResourceKind, PermissionAction, PermissionAtom, PermissionTarget, PlatformPrivilege,
+    GRANT_SET_FORMAT_V1,
 };
 pub use resolution::{
     resolve_participant, AuthorityCapabilityEvidence, AuthorityProposal, AuthorityProposalSection,
@@ -323,9 +320,9 @@ pub use resolution::{
 pub use session_proof::{
     parse_session_proof, session_proof_request_digest, session_proof_signing_digest,
     sign_session_proof, verify_session_proof, AuthorizationContextRefreshSessionProofInput,
-    DeviceBootstrapSessionProofInput, ServiceBootstrapSessionProofInput, SessionProof,
-    SessionProofInput, SessionProofPolicy, SessionProofPurpose, UserAuthBindSessionProofInput,
-    UserAuthRequestSessionProofInput, SESSION_PROOF_FORMAT_V1,
+    NativeBootstrapSessionProofInput, SessionProof, SessionProofInput, SessionProofPolicy,
+    SessionProofPurpose, UserAuthBindSessionProofInput, UserAuthRequestSessionProofInput,
+    SESSION_PROOF_FORMAT_V1,
 };
 pub use subjects::{
     derive_event_subject, derive_event_wildcard_subject, derive_feed_subject,

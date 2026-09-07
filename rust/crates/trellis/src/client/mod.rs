@@ -21,42 +21,25 @@ mod transfer;
 pub use auth::SessionAuth;
 #[cfg(any(test, feature = "runtime-internals"))]
 pub use authorization::AuthorizationRegistryBinding;
-#[cfg(feature = "test-support")]
-pub use authorization::IntegrationTestAuthorizationIoCounters;
 pub use authorization::{canonical_trellis_origin, AuthorizationProviderCache};
 pub use authorization::{
-    AuthorizationClientState, AuthorizationClientTrustState, AuthorizationContextBundle,
-    AuthorizationContextCache, AuthorizationContextStore, AuthorizationInstallation,
-    AuthorizationNativeTransport, AuthorizationRoutingMaterial, AuthorizationRuntimeBinding,
-    AuthorizationRuntimeTransports, AuthorizationTrustBundle, AuthorizationTrustPolicy,
-    AuthorizationVerificationCore, AuthorizationVerificationError, EventVerificationInput,
-    FileAuthorizationContextStore, MemoryAuthorizationContextStore, RequestVerificationInput,
+    AuthorizationContextBundle, AuthorizationContextCache, AuthorizationContextPolicy,
+    AuthorizationInstallation, AuthorizationNativeTransport, AuthorizationRoutingMaterial,
+    AuthorizationRuntimeBinding, AuthorizationRuntimeTransports, AuthorizationVerificationCore,
+    AuthorizationVerificationError, EventVerificationInput, RequestVerificationInput,
     VerifiedAuthorizationEvent, VerifiedAuthorizationRequest, VerifiedCaller,
 };
 #[cfg(feature = "runtime-internals")]
 pub use authorization::{RuntimeAuthorizationIoCounters, RuntimeAuthorizationTrust};
 
-#[cfg(test)]
-pub(crate) use authorization::inject_own_verified_for_test;
-#[cfg(feature = "test-support")]
-#[doc(hidden)]
-pub use connection::connect_captured_user_admission;
 pub(crate) use connection::fetch_device_activation;
-pub(crate) use connection::ServiceBootstrapResponse;
-#[cfg(not(feature = "test-support"))]
+pub(crate) use connection::DeviceEnrollmentResponse;
 pub(crate) use connection::ServiceConnectWithContractOptions;
 pub(crate) use connection::TrellisClient;
-#[cfg(feature = "test-support")]
-pub(crate) use connection::{
-    fetch_device_activation_with_test_proof, DeviceBootstrapProofOverrides,
-};
 pub use connection::{
     DeviceConnectOptions, EventMessage, EventReplayPolicy, EventSubscribeOptions,
-    EventSubscriptionMode, UserAuthorizationContext, UserConnectOptions, UserSessionCredentials,
+    EventSubscriptionMode, UserConnectOptions, UserSessionCredentials,
 };
-#[cfg(feature = "test-support")]
-#[doc(hidden)]
-pub use connection::{DeviceContractEvidence, ServiceConnectWithContractOptions};
 pub use descriptor::{EventDescriptor, FeedDescriptor, RpcDescriptor};
 pub use error::{
     AuthErrorPayload, AuthenticationError, CallError, DeclaredError, DeclaredErrorPayload,
@@ -70,6 +53,7 @@ pub use events::{
     OutboxStore, PostgresInboxStore, PostgresOutboxStore, PreparedTrellisEvent, SqliteInboxStore,
     SqliteOutboxStore,
 };
+pub(crate) use http_error::read_bounded_http_body;
 pub use http_error::{decode_trellis_http_error, TrellisHttpError};
 pub use operations::{
     control_subject, DeclaredOperationUpdates, HasOperationUpdates, NoOperationUpdates,

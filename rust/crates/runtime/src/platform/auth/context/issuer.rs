@@ -12,8 +12,7 @@ use trellis_rs::client::{AuthorizationProviderCache, RuntimeAuthorizationTrust};
 use super::{
     trust::VerifiedTrustMaterial, AuthorizationContextBundle, AuthorizationContextCommit,
     AuthorizationContextRecord, AuthorizationContextRegistry, AuthorizationContextRepository,
-    AuthorizationContextState, AuthorizationRegistryBinding, AuthorizationTrustBundle,
-    AuthorizationTrustStateRecord,
+    AuthorizationContextState, AuthorizationRegistryBinding,
 };
 use crate::{
     config::AuthorizationConfig,
@@ -46,11 +45,18 @@ pub(crate) struct AuthorizationContextService {
     trust: Arc<VerifiedTrustMaterial>,
     registry: AuthorizationContextRegistry,
     validator_cache: AuthorizationProviderCache,
-    trust_bundle: AuthorizationTrustBundle,
     config: AuthorizationConfig,
 }
 
 impl AuthorizationContextService {
+    /// Resolve retained public issuer material without exposing signing secrets.
+    pub(crate) async fn issuer_key(
+        &self,
+        key_id: String,
+        now_ms: i64,
+    ) -> Result<Option<trellis_protocol::AuthorizationIssuerKey>, AuthorizationStateError> {
+        self.repository.get_issuer_key(key_id, now_ms).await
+    }
     /// Clone of the validator cache backing local request/event verification.
     pub(crate) fn validator_cache(&self) -> AuthorizationProviderCache {
         self.validator_cache.clone()
@@ -125,7 +131,7 @@ impl AuthorizationContextService {
             signed,
             &binding,
             &resources,
-            &AuthorizationRegistryBinding::from_config(&self.config),
+            &AuthorizationRegistryBinding::from_runtime_parts(self.config.context_bucket.clone()),
         )?;
         permissions.publish.push(format!(
             "$JS.API.CONSUMER.CREATE.KV_{}.*.$KV.{}.revocation.{}",
@@ -148,7 +154,6 @@ impl AuthorizationContextService {
         self,
         stop: crate::shutdown::StopHandle,
     ) -> Result<(), crate::supervisor::RuntimeError> {
-        const BATCH: usize = 256;
         loop {
             let now = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -164,21 +169,15 @@ impl AuthorizationContextService {
                 .expire_contexts(now)
                 .await
                 .map_err(|error| crate::supervisor::RuntimeError::Platform(error.to_string()))?;
-            let cleanup_grace = i64::try_from(self.config.cleanup_grace_seconds).map_err(|_| {
-                crate::supervisor::RuntimeError::Platform(
-                    "context cleanup grace overflow".to_owned(),
-                )
-            })?;
-            let before = now.saturating_sub(cleanup_grace);
-            let deleted = self
+            let deleted_idempotency = self
                 .repository
-                .delete_terminal_contexts(before, BATCH)
+                .delete_expired_context_idempotency(now)
                 .await
                 .map_err(|error| crate::supervisor::RuntimeError::Platform(error.to_string()))?;
-            if !expired.is_empty() || deleted > 0 {
+            if !expired.is_empty() || deleted_idempotency > 0 {
                 tracing::debug!(
                     expired = expired.len(),
-                    deleted,
+                    deleted_idempotency,
                     "authorization context janitor completed"
                 );
             }
@@ -259,88 +258,27 @@ impl AuthorizationContextService {
         repository: Arc<SqliteAuthorizationStore>,
         nats: async_nats::Client,
         config: AuthorizationConfig,
+        trellis_origin: String,
         now_seconds: i64,
     ) -> Result<Self, AuthorizationStateError> {
         let trust = Arc::new(
             VerifiedTrustMaterial::load(&config, now_seconds)
                 .map_err(|error| AuthorizationStateError::Storage(error.to_string()))?,
         );
-        let manifest_digest = trust
-            .manifest
-            .digest()
-            .map_err(|error| AuthorizationStateError::Storage(error.to_string()))?;
-        let root_digest = trust
-            .root
-            .digest()
-            .map_err(|error| AuthorizationStateError::Storage(error.to_string()))?;
         let provider_nats = nats.clone();
         let registry = AuthorizationContextRegistry::ensure(nats, &config).await?;
-        let existing = repository.get_trust_state().await?;
-        let registry_floor = registry.trust_floor().await?;
-        super::registry::reconcile_trust_floors(
-            &trust,
-            existing.as_ref(),
-            registry_floor.as_ref(),
-        )?;
-        // Immutable evidence may be safely published before either monotonic floor advances.
-        let trust_bundle = registry.publish_trust_immutables(&trust, &config).await?;
-        let state = AuthorizationTrustStateRecord {
-            authority: trust.root.authority().to_owned(),
-            root_key_id: trust.root.key_id().to_owned(),
-            root_digest,
-            manifest_generation: trust.verified_manifest.generation(),
-            manifest_digest,
-            updated_at: seconds_to_millis(now_seconds)?,
-            version: existing.as_ref().map_or(1, |record| {
-                if record.manifest_generation == trust.verified_manifest.generation()
-                    && record.manifest_digest
-                        == trust.manifest.digest().unwrap_or_else(|_| String::new())
-                {
-                    record.version
-                } else {
-                    record.version.saturating_add(1)
-                }
-            }),
-        };
-        let removed_issuer_key_ids = repository
-            .list_active_issuer_key_ids()
-            .await?
-            .into_iter()
-            .filter(|issuer_key_id| {
-                !trust
-                    .verified_manifest
-                    .manifest()
-                    .unsigned
-                    .issuers
-                    .iter()
-                    .any(|issuer| issuer.key_id == *issuer_key_id)
-            })
-            .collect();
         repository
-            .accept_trust_state(state, removed_issuer_key_ids, now_seconds)
+            .activate_issuer(trust.issuer.clone(), seconds_to_millis(now_seconds)?)
             .await?;
-        registry.advance_trust_pointer(&trust_bundle).await?;
-        let registry_binding = AuthorizationRegistryBinding::from_config(&config);
-        let provider_binding = trellis_rs::client::AuthorizationRegistryBinding::from_runtime_parts(
-            registry_binding.trust_bucket,
-            registry_binding.context_bucket,
-        );
+        let registry_binding =
+            AuthorizationRegistryBinding::from_runtime_parts(config.context_bucket.clone());
         let validator_cache = AuthorizationProviderCache::attach_runtime(
             provider_nats,
-            &provider_binding,
+            &registry_binding,
             RuntimeAuthorizationTrust {
-                root: trust.root.clone(),
+                trellis_origin,
+                issuer: Some(trust.issuer.clone()),
                 policy: trust.policy.clone(),
-                minimum_manifest_generation: trust.verified_manifest.generation(),
-                minimum_manifest_digest: trust
-                    .manifest
-                    .digest()
-                    .map_err(|error| AuthorizationStateError::Storage(error.to_string()))?,
-                manifest: trust.verified_manifest.clone(),
-                manifest_digest: trust
-                    .manifest
-                    .digest()
-                    .map_err(|error| AuthorizationStateError::Storage(error.to_string()))?,
             },
         )
         .await
@@ -350,7 +288,6 @@ impl AuthorizationContextService {
             trust,
             registry,
             validator_cache,
-            trust_bundle,
             config,
         };
         service.repair_unpublished(now_seconds).await?;
@@ -590,7 +527,7 @@ impl AuthorizationContextService {
             expires_at = context.expires_at,
             "issued authorization context"
         );
-        self.bundle(&context)
+        self.bundle(&context, now_seconds).await
     }
 
     async fn publish(
@@ -607,18 +544,44 @@ impl AuthorizationContextService {
             .await
     }
 
-    fn bundle(
+    async fn bundle(
         &self,
         context: &AuthorizationContextRecord,
+        now_seconds: i64,
     ) -> Result<AuthorizationContextBundle, AuthorizationStateError> {
-        Ok(AuthorizationContextBundle {
-            context: serde_json::from_str(&context.signed_context_json).map_err(|error| {
+        let issuer = self
+            .repository
+            .get_issuer_key(
+                context.issuer_key_id.clone(),
+                seconds_to_millis(now_seconds)?,
+            )
+            .await?
+            .filter(|issuer| issuer.state == trellis_protocol::AuthorizationIssuerState::Active)
+            .ok_or(AuthorizationStateError::AuthorityStale)?;
+        Ok(AuthorizationContextBundle::from_runtime_parts(
+            serde_json::from_str(&context.signed_context_json).map_err(|error| {
                 AuthorizationStateError::InvalidRecord(format!(
                     "persisted authorization context is invalid: {error}"
                 ))
             })?,
-            trust: self.trust_bundle.clone(),
-        })
+            issuer,
+            AuthorizationRegistryBinding::from_runtime_parts(self.config.context_bucket.clone()),
+            trellis_rs::client::AuthorizationContextPolicy {
+                allowed_clock_skew_seconds: self.trust.policy.allowed_clock_skew_seconds,
+                maximum_context_lifetime_seconds: self
+                    .trust
+                    .policy
+                    .maximum_context_lifetime_seconds,
+                maximum_context_bytes: self.trust.policy.maximum_context_bytes,
+                maximum_permissions: self.trust.policy.maximum_permissions,
+                refresh_lead_seconds: self.config.refresh_lead_seconds.try_into().map_err(
+                    |_| AuthorizationStateError::InvalidRecord("invalid refresh lead".to_owned()),
+                )?,
+                refresh_jitter_seconds: self.config.refresh_jitter_seconds.try_into().map_err(
+                    |_| AuthorizationStateError::InvalidRecord("invalid refresh jitter".to_owned()),
+                )?,
+            },
+        ))
     }
 }
 

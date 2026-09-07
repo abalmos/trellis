@@ -94,6 +94,30 @@ impl EventDescriptor for AuthDeviceUserAuthoritiesReviewRequestedEventDescriptor
     const DELEGATED_PUBLISH: bool = false;
     const SUBSCRIBE_CAPABILITIES: &'static [&'static str] = &["trellis.auth::events.stream"];
 }
+/// Descriptor for `Auth.Grants.Changed`.
+pub struct AuthGrantsChangedEventDescriptor;
+impl EventDescriptor for AuthGrantsChangedEventDescriptor {
+    type Event = super::types::AuthGrantsChangedEvent;
+    const KEY: &'static str = "Auth.Grants.Changed";
+    const SUBJECT: &'static str = "events.v1.Auth.Grants.Changed";
+    const SUBSCRIBE_SUBJECT: &'static str = "events.v1.Auth.Grants.Changed";
+    const EVENT_SCHEMA_JSON: &'static str = super::schemas::AUTH_GRANTS_CHANGED_EVENT_SCHEMA_JSON;
+    const PUBLISH_CAPABILITIES: &'static [&'static str] = &[];
+    const DELEGATED_PUBLISH: bool = false;
+    const SUBSCRIBE_CAPABILITIES: &'static [&'static str] = &[];
+}
+/// Descriptor for `Auth.Issuers.Revoked`.
+pub struct AuthIssuersRevokedEventDescriptor;
+impl EventDescriptor for AuthIssuersRevokedEventDescriptor {
+    type Event = super::types::AuthIssuersRevokedEvent;
+    const KEY: &'static str = "Auth.Issuers.Revoked";
+    const SUBJECT: &'static str = "events.v1.Auth.Issuers.Revoked";
+    const SUBSCRIBE_SUBJECT: &'static str = "events.v1.Auth.Issuers.Revoked";
+    const EVENT_SCHEMA_JSON: &'static str = super::schemas::AUTH_ISSUERS_REVOKED_EVENT_SCHEMA_JSON;
+    const PUBLISH_CAPABILITIES: &'static [&'static str] = &[];
+    const DELEGATED_PUBLISH: bool = false;
+    const SUBSCRIBE_CAPABILITIES: &'static [&'static str] = &[];
+}
 /// Descriptor for `Auth.Sessions.Revoked`.
 pub struct AuthSessionsRevokedEventDescriptor;
 impl EventDescriptor for AuthSessionsRevokedEventDescriptor {

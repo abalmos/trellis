@@ -42,7 +42,7 @@ pub struct DeviceActivationOptions<'a, C> {
 }
 
 impl<'a, C> DeviceActivationOptions<'a, C> {
-    /// Create activation options for an exact provisioned device and participant.
+    /// Request the generated participant role; approval assigns deployment and instance.
     pub fn new(connect: DeviceConnectOptions<'a, C>, activation_key_base64url: &'a str) -> Self {
         Self {
             nonce: URL_SAFE_NO_PAD.encode(rand::random::<[u8; 32]>()),
@@ -60,7 +60,7 @@ impl<'a, C> DeviceActivationOptions<'a, C> {
     /// Attach ready evidence to the exact options that produced it.
     ///
     /// This consumes both values and returns [`DeviceActivationError::SessionOriginMismatch`]
-    /// before connection when device identity, deployment, instance, contract, activation, or
+    /// before connection when device identity, participant, activation, or
     /// successful session-key evidence differs from the originating activation attempt.
     pub fn into_connect_options(
         self,
@@ -74,9 +74,7 @@ impl<'a, C> DeviceActivationOptions<'a, C> {
         {
             return Err(DeviceActivationError::SessionOriginMismatch);
         }
-        Ok(self
-            .connect
-            .activation_bootstrap(*session.bootstrap, session.session_key_seed_base64url))
+        Ok(self.connect)
     }
 }
 
@@ -108,15 +106,14 @@ pub struct DeviceActivationPending {
     pub retry_after_ms: u64,
 }
 
-/// Proof that `/bootstrap/device` reached ready state.
+/// Evidence that the one-time device enrollment workflow reached ready state.
 ///
-/// This value retains the successful attempt's private session seed and bootstrap credentials
+/// This value retains the successful attempt's private session seed
 /// until [`DeviceActivationOptions::into_connect_options`] consumes it. Its [`Debug`] output is
 /// deliberately redacted and never exposes either secret.
 pub struct DeviceActivationSession {
     /// Server time observed in the ready bootstrap response.
     pub server_now: i64,
-    pub(crate) bootstrap: Box<crate::client::ServiceBootstrapResponse>,
     session_key_seed_base64url: String,
     origin_digest: [u8; 32],
 }
@@ -184,7 +181,7 @@ pub fn derive_device_confirmation_code(
         .collect())
 }
 
-/// Submit one fresh proof-bound `/bootstrap/device` activation request.
+/// Submit one fresh proof-bound device enrollment request.
 pub async fn check_device_activation<C>(
     options: &DeviceActivationOptions<'_, C>,
 ) -> Result<DeviceActivationStatus, DeviceActivationError> {
@@ -197,7 +194,7 @@ async fn check_device_activation_with_attempt<C>(
 ) -> Result<DeviceActivationStatus, DeviceActivationError> {
     let confirmation_code = derive_device_confirmation_code(
         options.activation_key_base64url,
-        options.connect.public_identity_key(),
+        &options.connect.public_identity_key()?,
         &options.nonce,
     )?;
     let challenge_digest = URL_SAFE_NO_PAD.encode(Sha256::digest(options.nonce.as_bytes()));
@@ -226,13 +223,12 @@ async fn check_device_activation_with_attempt<C>(
 fn activation_status<C>(
     options: &DeviceActivationOptions<'_, C>,
     confirmation_code: String,
-    response: crate::client::ServiceBootstrapResponse,
+    response: crate::client::DeviceEnrollmentResponse,
     session_key_seed_base64url: String,
 ) -> Result<DeviceActivationStatus, DeviceActivationError> {
     match response.state.as_str() {
         "ready" => Ok(DeviceActivationStatus::Ready(DeviceActivationSession {
             server_now: response.server_now,
-            bootstrap: Box::new(response),
             origin_digest: options.connect.activation_origin_digest(
                 options.activation_key_base64url,
                 &options.nonce,
@@ -261,40 +257,6 @@ fn activation_status<C>(
         "authority_rejected" => Err(DeviceActivationError::Rejected),
         state => Err(DeviceActivationError::UnexpectedState(state.to_owned())),
     }
-}
-
-/// Submit activation with controlled proof properties for live integration tests.
-#[cfg(feature = "test-support")]
-#[doc(hidden)]
-pub async fn check_device_activation_with_test_proof<C>(
-    options: &DeviceActivationOptions<'_, C>,
-    issued_at_ms: Option<i64>,
-    corrupt_signature: bool,
-) -> Result<DeviceActivationStatus, DeviceActivationError> {
-    let attempt = DeviceActivationAttempt::new()?;
-    let confirmation_code = derive_device_confirmation_code(
-        options.activation_key_base64url,
-        options.connect.public_identity_key(),
-        &options.nonce,
-    )?;
-    let challenge_digest = URL_SAFE_NO_PAD.encode(Sha256::digest(options.nonce.as_bytes()));
-    let response = crate::client::fetch_device_activation_with_test_proof(
-        &options.connect,
-        &attempt.session_auth,
-        &challenge_digest,
-        &confirmation_code,
-        crate::client::DeviceBootstrapProofOverrides {
-            issued_at_ms,
-            corrupt_signature,
-        },
-    )
-    .await?;
-    activation_status(
-        options,
-        confirmation_code,
-        response,
-        attempt.session_key_seed_base64url,
-    )
 }
 
 /// Poll current device activation with fresh request identities and proofs.
@@ -342,66 +304,7 @@ pub async fn wait_for_device_activation<C>(
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
-    use base64::engine::general_purpose::URL_SAFE_NO_PAD;
-    use base64::Engine as _;
-
-    use super::{
-        activation_status, derive_device_confirmation_code, DeviceActivationAttempt,
-        DeviceActivationError, DeviceActivationOptions, DeviceActivationStatus,
-    };
-    use crate::client::{DeviceConnectOptions, MemoryAuthorizationContextStore};
-
-    struct TestContract;
-
-    impl crate::service::GeneratedServiceParticipant for TestContract {
-        const PARTICIPANT_ID: &'static str = "test.device@v1";
-        const PARTICIPANT_DIGEST: &'static str = "contract-digest";
-        const PARTICIPANT_NEEDS_DIGEST: &'static str = "needs-digest";
-        const PARTICIPANT_JSON: &'static str = "participant-json";
-        const API_JSON: &'static str = "api-json";
-        const API_DIGEST: &'static str = "api-digest";
-        const REFERENCED_API_ARTIFACTS: &'static [(&'static str, &'static str)] = &[];
-    }
-
-    fn activation_options(
-        instance_id: &'static str,
-    ) -> DeviceActivationOptions<'static, TestContract> {
-        DeviceActivationOptions::new(
-            DeviceConnectOptions::<TestContract>::new(
-                "http://trellis.test",
-                "deployment",
-                instance_id,
-                "public-identity-key",
-                "identity-seed",
-                Arc::new(MemoryAuthorizationContextStore::default()),
-            ),
-            "activation-key",
-        )
-        .with_nonce("nonce")
-    }
-
-    fn ready_session(
-        options: &DeviceActivationOptions<'_, TestContract>,
-        session_seed: String,
-    ) -> super::DeviceActivationSession {
-        match activation_status(
-            options,
-            "confirmation-code".into(),
-            serde_json::from_value(serde_json::json!({
-                "serverNow": 1,
-                "state": "ready"
-            }))
-            .expect("ready response"),
-            session_seed,
-        )
-        .expect("ready status")
-        {
-            DeviceActivationStatus::Ready(session) => session,
-            DeviceActivationStatus::Pending(_) => panic!("expected ready session"),
-        }
-    }
+    use super::{derive_device_confirmation_code, DeviceActivationAttempt};
 
     #[test]
     fn confirmation_code_is_deterministic_and_crockford_encoded() {
@@ -428,85 +331,12 @@ mod tests {
     }
 
     #[test]
-    fn activation_session_requires_its_exact_origin() {
-        let successful_seed = URL_SAFE_NO_PAD.encode([3_u8; 32]);
-        let matching = activation_options("instance-a");
-        let matching_session = ready_session(&matching, successful_seed.clone());
-        assert!(matching.into_connect_options(matching_session).is_ok());
-
-        let origin = activation_options("instance-a");
-        let unrelated = activation_options("instance-b");
-        assert!(matches!(
-            unrelated.into_connect_options(ready_session(&origin, successful_seed)),
-            Err(DeviceActivationError::SessionOriginMismatch)
-        ));
-    }
-
-    #[test]
-    fn pending_attempts_rotate_keys_and_ready_handoff_keeps_successful_seed() {
-        let options = activation_options("instance");
-        let first = DeviceActivationAttempt::from_seed(URL_SAFE_NO_PAD.encode([1_u8; 32]))
-            .expect("first attempt");
-        let second = DeviceActivationAttempt::from_seed(URL_SAFE_NO_PAD.encode([2_u8; 32]))
-            .expect("second attempt");
-        let first_public = first.session_auth.session_key.clone();
-        let second_public = second.session_auth.session_key.clone();
-        assert_ne!(first_public, second_public);
-
-        for attempt in [first, second] {
-            let status = activation_status(
-                &options,
-                "confirmation-code".into(),
-                serde_json::from_value(serde_json::json!({
-                    "serverNow": 1,
-                    "state": "activation_pending",
-                    "activation": {
-                        "state": "pending",
-                        "activationUrl": "http://trellis.test/activate",
-                        "reviewId": "review",
-                        "expiresAt": 1000,
-                        "retryAfterMs": 1
-                    }
-                }))
-                .expect("pending response"),
-                attempt.session_key_seed_base64url,
-            )
-            .expect("pending status");
-            assert!(matches!(status, DeviceActivationStatus::Pending(_)));
-        }
-
-        let successful_seed = URL_SAFE_NO_PAD.encode([3_u8; 32]);
-        let session = ready_session(&options, successful_seed.clone());
-        let connect = options
-            .into_connect_options(session)
-            .expect("ready handoff");
-        assert_eq!(
-            connect.activation_session_seed(),
-            Some(successful_seed.as_str())
-        );
-    }
-
-    #[test]
     fn production_attempts_generate_distinct_session_keys() {
-        let first = DeviceActivationAttempt::new().expect("first production attempt");
-        let second = DeviceActivationAttempt::new().expect("second production attempt");
+        let first = DeviceActivationAttempt::new().expect("first attempt");
+        let second = DeviceActivationAttempt::new().expect("second attempt");
         assert_ne!(
             first.session_auth.session_key,
             second.session_auth.session_key
         );
-    }
-
-    #[test]
-    fn activation_session_debug_is_redacted_through_status() {
-        let options = activation_options("instance");
-        let private_seed = URL_SAFE_NO_PAD.encode([9_u8; 32]);
-        let debug = format!(
-            "{:?}",
-            DeviceActivationStatus::Ready(ready_session(&options, private_seed.clone()))
-        );
-        assert!(debug.contains("DeviceActivationSession"));
-        assert!(debug.contains("server_now"));
-        assert!(!debug.contains(&private_seed));
-        assert!(!debug.contains("bootstrap"));
     }
 }

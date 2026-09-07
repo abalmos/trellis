@@ -96,10 +96,17 @@ pub(crate) async fn start(context: &RuntimeContext) -> Result<SubsystemHandle, R
         auth::NatsAuthEphemeralRepository::ensure(context.trellis_nats.clone(), connection_max_age)
             .await
             .map_err(|error| RuntimeError::Platform(error.to_string()))?;
+    let public_origin = context
+        .config
+        .http
+        .as_ref()
+        .and_then(|http| http.public_origin.clone())
+        .unwrap_or_else(|| format!("http://localhost:{}", context.config.http_port()));
     let authorization_contexts = auth::AuthorizationContextService::start(
         Arc::new(auth_store.clone()),
         context.trellis_nats.clone(),
         authorization_config.clone(),
+        public_origin.clone(),
         now / 1_000,
     )
     .await
@@ -178,12 +185,6 @@ pub(crate) async fn start(context: &RuntimeContext) -> Result<SubsystemHandle, R
         })?;
     }
 
-    let public_origin = context
-        .config
-        .http
-        .as_ref()
-        .and_then(|http| http.public_origin.clone())
-        .unwrap_or_else(|| format!("http://localhost:{}", context.config.http_port()));
     let (native_nats_servers, websocket_nats_servers) =
         advertised_endpoints(&context.config, &nats, context.nats_override.as_ref());
     let (stop, mut validator_join, verifier) =
@@ -771,7 +772,9 @@ mod tests {
         let permissions = auth::compile_test_transport_permissions(
             &issuable,
             &participant,
-            &auth::AuthorizationRegistryBinding::test_binding(),
+            &auth::AuthorizationRegistryBinding::from_runtime_parts(
+                crate::config::AuthorizationConfig::default().context_bucket,
+            ),
         )
         .unwrap();
         assert!(permissions

@@ -247,9 +247,9 @@ pub async fn check(
         ) {
             Ok(trust) => {
                 report.push(
-                    "trust.files",
+                    "authorization.issuer_file",
                     RuntimeCheckStatus::Ok,
-                    "configured trust chain is valid",
+                    "configured issuer signing material is valid",
                 );
                 trust
             }
@@ -260,22 +260,41 @@ pub async fn check(
                 } else {
                     RuntimeCheckStatus::Error
                 };
-                report.push("trust.files", status, detail);
+                report.push("authorization.issuer_file", status, detail);
                 return Ok(report);
             }
         };
-        let sqlite_floor = if stores.platform()?.exists() {
+        if stores.platform()?.exists() {
             let auth_store = crate::platform::auth::SqliteAuthorizationStore::open_read_only(
                 stores.platform()?,
             )?;
-            crate::platform::auth::context::AuthorizationContextRepository::get_trust_state(
-                &auth_store,
-            )
-            .await
-            .map_err(|error| RuntimeError::Platform(error.to_string()))?
-        } else {
-            None
-        };
+            match auth_store
+                .get_issuer_key(
+                    trust.issuer.key_id.clone(),
+                    now.checked_mul(1_000).ok_or_else(|| {
+                        RuntimeError::Platform("issuer check time overflow".to_owned())
+                    })?,
+                )
+                .await
+                .map_err(|error| RuntimeError::Platform(error.to_string()))?
+            {
+                Some(key) if key == trust.issuer => report.push(
+                    "authorization.issuer_record",
+                    RuntimeCheckStatus::Ok,
+                    "configured public issuer key is retained and active",
+                ),
+                Some(_) => report.push(
+                    "authorization.issuer_record",
+                    RuntimeCheckStatus::Incompatible,
+                    "configured issuer is retired, revoked, or has different public material",
+                ),
+                None => report.push(
+                    "authorization.issuer_record",
+                    RuntimeCheckStatus::Missing,
+                    "configured issuer has not been installed",
+                ),
+            }
+        }
         let user_jwt_ttl_ms = crate::platform::auth_callout::resolve_user_jwt_ttl_ms(
             config
                 .platform
@@ -311,26 +330,22 @@ pub async fn check(
         match crate::platform::auth::context::AuthorizationContextRegistry::check(
             trellis_nats.clone(),
             authorization,
-            &trust,
-            sqlite_floor.as_ref(),
         )
         .await
         {
             Ok(()) => report.push(
-                "trust.registry",
+                "authorization.context_registry",
                 RuntimeCheckStatus::Ok,
-                "SQLite floor, immutable history, and current pointer are monotonic",
+                "context and revocation registry settings match configuration",
             ),
             Err(error) => {
                 let detail = error.to_string();
                 let status = if detail.contains("does not exist") || detail.contains("not found") {
                     RuntimeCheckStatus::Missing
-                } else if detail.contains("rollback") {
-                    RuntimeCheckStatus::Rollback
                 } else {
                     RuntimeCheckStatus::Incompatible
                 };
-                report.push("trust.registry", status, detail);
+                report.push("authorization.context_registry", status, detail);
             }
         }
         for (name, credentials) in [

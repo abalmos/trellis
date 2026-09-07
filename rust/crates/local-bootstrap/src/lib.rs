@@ -7,16 +7,9 @@ use std::process::{Command, Stdio};
 
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine as _;
-use ed25519_dalek::SigningKey;
 use serde::{Deserialize, Serialize};
-use serde_json::{Map, Value};
-use sha2::Digest as _;
+use serde_json::Value;
 use thiserror::Error;
-use trellis_protocol::{
-    canonicalize_json, sign_issuer_manifest, AuthorizationIssuerManifestEntry,
-    AuthorizationTrustRoot, UnsignedAuthorizationIssuerManifest,
-    AUTHORIZATION_ISSUER_MANIFEST_FORMAT_V1,
-};
 
 const DEFAULT_NATS_BOX_IMAGE: &str = "docker.io/natsio/nats-box:0.19.7";
 const DEFAULT_OPERATOR_NAME: &str = "Qlever";
@@ -246,8 +239,6 @@ pub struct LocalTrellisBootstrapPaths {
     pub trellis_config: String,
     /// Trellis session key seed file path.
     pub session_seed: String,
-    /// Offline authorization-root seed file path, outside the runtime tree.
-    pub authorization_root_seed: String,
     /// Trellis service data directory path.
     pub trellis_data: String,
 }
@@ -373,9 +364,6 @@ pub enum LocalBootstrapError {
     /// Generated JSON could not be parsed or written.
     #[error(transparent)]
     Json(#[from] serde_json::Error),
-    /// Authorization trust artifacts could not be generated.
-    #[error("authorization trust generation failed: {0}")]
-    AuthorizationTrust(String),
 }
 
 /// Generate the local NATS bootstrap output directory.
@@ -435,13 +423,7 @@ pub fn generate_local_trellis_bootstrap(
 
     let nats_manifest = generate_local_nats_bootstrap_with_runtime(&nats_options, runtime)?;
     let authorization_directory = trellis_out.join("auth");
-    generate_local_authorization_trust(&authorization_directory, "trellis.local")?;
-    let offline_trust_directory = options.out.join("trust");
-    fs::create_dir_all(&offline_trust_directory)?;
-    fs::rename(
-        authorization_directory.join("authorization-root.seed"),
-        offline_trust_directory.join("authorization-root.seed"),
-    )?;
+    generate_local_authorization_issuer(&authorization_directory)?;
     fs::write(
         trellis_out.join("config.toml"),
         render_trellis_config(options, &nats_manifest),
@@ -528,8 +510,6 @@ target_signing_seed_file = "../nats/secrets/auth-target-signing.seed"
 xkey_seed_file = "../nats/secrets/auth-sx.seed"
 
 [auth.authorization]
-trust_root_file = "./auth/authorization-root.json"
-issuer_manifest_file = "./auth/authorization-issuer-manifest.json"
 issuer_signing_seed_file = "./auth/authorization-issuer.seed"
 context_lifetime_seconds = 300
 refresh_lead_seconds = 60
@@ -540,8 +520,6 @@ cleanup_grace_seconds = 3600
 allowed_clock_skew_seconds = 30
 maximum_context_bytes = 16384
 maximum_permissions = 4096
-maximum_capabilities = 256
-trust_bucket = "trellis_authorization_trust"
 context_bucket = "trellis_authorization_contexts"
 registry_replicas = 1
 
@@ -955,7 +933,6 @@ fn build_trellis_manifest(
             nats_manifest: "nats/manifest.json".to_string(),
             trellis_config: "trellis/config.toml".to_string(),
             session_seed: "trellis/session.seed".to_string(),
-            authorization_root_seed: "trust/authorization-root.seed".to_string(),
             trellis_data: "trellis/data".to_string(),
         },
         urls: LocalTrellisBootstrapUrls {
@@ -1111,100 +1088,26 @@ pub fn generate_session_seed() -> String {
     URL_SAFE_NO_PAD.encode(seed)
 }
 
-/// Generate one local offline root and online authorization-context issuer.
-///
-/// The root seed is retained for offline rotation tooling but is never referenced
-/// by the generated runtime configuration.
-pub fn generate_local_authorization_trust(
-    directory: &Path,
-    authority: &str,
-) -> Result<(), LocalBootstrapError> {
-    const LIFETIME_SECONDS: i64 = 10 * 365 * 24 * 60 * 60;
+/// Generate a private online authorization-context issuer seed without trust files.
+pub fn generate_local_authorization_issuer(directory: &Path) -> Result<(), LocalBootstrapError> {
     fs::create_dir_all(directory)?;
-    let root_seed: [u8; 32] = rand::random();
-    let issuer_seed: [u8; 32] = rand::random();
-    let root_key = SigningKey::from_bytes(&root_seed);
-    let issuer_key = SigningKey::from_bytes(&issuer_seed);
-    let root = AuthorizationTrustRoot::new(
-        authority.to_owned(),
-        URL_SAFE_NO_PAD.encode(root_key.verifying_key().to_bytes()),
-    )
-    .map_err(|error| LocalBootstrapError::AuthorizationTrust(error.to_string()))?;
-    let now = i64::try_from(
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map_err(|error| LocalBootstrapError::AuthorizationTrust(error.to_string()))?
-            .as_secs(),
-    )
-    .map_err(|_| LocalBootstrapError::AuthorizationTrust("current time overflow".to_owned()))?;
-    let expires_at = now.checked_add(LIFETIME_SECONDS).ok_or_else(|| {
-        LocalBootstrapError::AuthorizationTrust("trust expiry overflow".to_owned())
-    })?;
-    let issuer_key_id =
-        URL_SAFE_NO_PAD.encode(sha2::Sha256::digest(issuer_key.verifying_key().as_bytes()));
-    let manifest = sign_issuer_manifest(
-        UnsignedAuthorizationIssuerManifest {
-            format: AUTHORIZATION_ISSUER_MANIFEST_FORMAT_V1.to_owned(),
-            authority: root.authority().to_owned(),
-            root_key_id: root.key_id().to_owned(),
-            generation: 1,
-            issued_at: now,
-            not_before: now.saturating_sub(300),
-            expires_at,
-            issuers: vec![AuthorizationIssuerManifestEntry {
-                key_id: issuer_key_id,
-                public_key: URL_SAFE_NO_PAD.encode(issuer_key.verifying_key().to_bytes()),
-            }],
-            extensions: Map::new(),
-            critical: Vec::new(),
-        },
-        &root_key,
-    )
-    .map_err(|error| LocalBootstrapError::AuthorizationTrust(error.to_string()))?;
-    fs::write(
-        directory.join("authorization-root.json"),
-        format!(
-            "{}\n",
-            root.canonical_json()
-                .map_err(|error| LocalBootstrapError::AuthorizationTrust(error.to_string()))?
-        ),
-    )?;
-    fs::write(
-        directory.join("authorization-issuer-manifest.json"),
-        format!(
-            "{}\n",
-            canonicalize_json(&serde_json::to_value(manifest)?)
-                .map_err(|error| LocalBootstrapError::AuthorizationTrust(error.to_string()))?
-        ),
-    )?;
-    write_secret(
-        &directory.join("authorization-root.seed"),
-        &URL_SAFE_NO_PAD.encode(root_seed),
-    )?;
     write_secret(
         &directory.join("authorization-issuer.seed"),
-        &URL_SAFE_NO_PAD.encode(issuer_seed),
+        &generate_session_seed(),
     )
 }
 
 fn write_secret(path: &Path, value: &str) -> Result<(), LocalBootstrapError> {
+    use std::io::Write as _;
+    let mut options = fs::OpenOptions::new();
+    options.create_new(true).write(true);
     #[cfg(unix)]
     {
-        use std::io::Write as _;
         use std::os::unix::fs::OpenOptionsExt as _;
-        let mut file = fs::OpenOptions::new()
-            .create_new(true)
-            .write(true)
-            .mode(0o600)
-            .open(path)?;
-        writeln!(file, "{value}")?;
-        Ok(())
+        options.mode(0o600);
     }
-    #[cfg(not(unix))]
-    {
-        fs::write(path, format!("{value}\n"))?;
-        Ok(())
-    }
+    writeln!(options.open(path)?, "{value}")?;
+    Ok(())
 }
 
 fn trim_trailing_slashes(value: &str) -> &str {
@@ -1371,6 +1274,10 @@ mod tests {
             .contains("target_signing_seed_file = \"../nats/secrets/auth-target-signing.seed\""));
         assert!(config.contains("xkey_seed_file = \"../nats/secrets/auth-sx.seed\""));
         assert!(config.contains("event_session_seed_file = \"./session.seed\""));
+        assert!(config.contains("issuer_signing_seed_file = \"./auth/authorization-issuer.seed\""));
+        assert!(!config.contains("trust_root_file"));
+        assert!(!config.contains("issuer_manifest_file"));
+        assert!(!config.contains("trust_bucket"));
         assert!(config.contains("event_context_digest_file = \"./data/session-context.digest\""));
         assert!(config.contains("ws_nats_servers = [\"wss://nats.example.test/ws\"]"));
         assert!(config.contains("nats_servers = [\"nats://nats.example.test:4222\"]"));
@@ -1419,42 +1326,42 @@ mod tests {
     }
 
     #[test]
-    fn local_authorization_trust_keeps_root_seed_off_runtime_surface() {
+    fn local_authorization_issuer_is_private_and_never_overwritten() {
         let directory = tempfile::tempdir().expect("temp directory");
-        generate_local_authorization_trust(directory.path(), "trellis-test")
-            .expect("generate trust");
-
-        for name in [
-            "authorization-root.json",
-            "authorization-root.seed",
-            "authorization-issuer-manifest.json",
-            "authorization-issuer.seed",
-        ] {
-            assert!(directory.path().join(name).is_file(), "missing {name}");
-        }
+        generate_local_authorization_issuer(directory.path()).expect("generate issuer");
         assert_eq!(
             fs::read_dir(directory.path())
                 .expect("read trust directory")
                 .map(|entry| entry.expect("read trust entry").file_name())
                 .collect::<std::collections::BTreeSet<_>>(),
-            [
-                "authorization-issuer-manifest.json",
-                "authorization-issuer.seed",
-                "authorization-root.json",
-                "authorization-root.seed",
-            ]
-            .into_iter()
-            .map(OsString::from)
-            .collect()
+            ["authorization-issuer.seed"]
+                .into_iter()
+                .map(OsString::from)
+                .collect()
         );
-        let root: Value = serde_json::from_slice(
-            &fs::read(directory.path().join("authorization-root.json")).expect("read root"),
-        )
-        .expect("parse root");
+        let path = directory.path().join("authorization-issuer.seed");
+        let seed = fs::read_to_string(&path).expect("read issuer seed");
         assert_eq!(
-            root.get("authority").and_then(Value::as_str),
-            Some("trellis-test")
+            URL_SAFE_NO_PAD
+                .decode(seed.trim())
+                .expect("decode seed")
+                .len(),
+            32
         );
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt as _;
+            assert_eq!(
+                fs::metadata(&path)
+                    .expect("seed metadata")
+                    .permissions()
+                    .mode()
+                    & 0o777,
+                0o600
+            );
+        }
+        assert!(generate_local_authorization_issuer(directory.path()).is_err());
+        assert_eq!(fs::read_to_string(&path).expect("read retained seed"), seed);
     }
 
     #[test]

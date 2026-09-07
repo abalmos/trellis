@@ -1,4 +1,4 @@
-use axum::extract::State;
+use axum::extract::{Path, State};
 use axum::Json;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine as _;
@@ -18,6 +18,22 @@ use super::{
     AuthorityRepository, ContextRepository, DeploymentRepository, HttpError, OutboxRepository,
     PortalRepository, ProvisioningRepository, SessionRepository,
 };
+
+pub(super) async fn issuer_key<R, E>(
+    State(state): State<AuthHttpState<R, E>>,
+    Path(key_id): Path<String>,
+) -> Result<impl axum::response::IntoResponse, HttpError>
+where
+    R: Clone + Send + Sync + 'static,
+    E: Clone + Send + Sync + 'static,
+{
+    let key = state
+        .authorization_contexts
+        .issuer_key(key_id, now_ms()?)
+        .await?
+        .ok_or_else(|| HttpError::not_found("issuer_key_not_found"))?;
+    Ok(([(axum::http::header::CACHE_CONTROL, "no-store")], Json(key)))
+}
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]

@@ -1,12 +1,14 @@
 use serde::{Deserialize, Serialize};
 
 use super::AuthenticatedUser;
-use crate::client::{AuthorizationContextBundle, AuthorizationInstallation, SessionAuth};
+use crate::client::SessionAuth;
 
 /// Persisted admin session details for the CLI.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[doc = concat!("Public Trellis data type `", stringify!(AdminSessionState), "`.")]
 pub struct AdminSessionState {
+    /// Durable user-only login identifier.
+    pub login_session_id: String,
     /// Base URL for the Trellis deployment.
     #[doc = concat!("The `", stringify!(trellis_url), "` value.")]
     pub trellis_url: String,
@@ -29,11 +31,11 @@ impl AdminSessionState {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[doc = concat!("Public Trellis data type `", stringify!(BoundSession), "`.")]
 pub struct BoundSession {
+    /// Durable login shared by subsequent CLI connections.
+    pub login_session_id: String,
     /// Session expiry in Unix milliseconds, when bounded.
     #[doc = concat!("The `", stringify!(expires_at), "` value.")]
     pub expires_at: Option<i64>,
-    /// Complete initial runtime/authorization installation.
-    pub installation: AuthorizationInstallation,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -44,10 +46,6 @@ pub struct BindResponseBound {
     pub server_now: i64,
     #[doc = concat!("The `", stringify!(session), "` value.")]
     pub session: BoundSessionRecord,
-    #[doc = concat!("The `", stringify!(nats), "` value.")]
-    pub nats: BoundNatsRecord,
-    #[doc = concat!("The `", stringify!(authorization_context), "` value.")]
-    pub authorization_context: AuthorizationContextBundle,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -56,37 +54,12 @@ pub struct BindResponseBound {
 pub struct BoundSessionRecord {
     #[doc = concat!("The `", stringify!(session_id), "` value.")]
     pub session_id: String,
-    #[doc = concat!("The `", stringify!(inbox_prefix), "` value.")]
-    pub inbox_prefix: String,
+    /// Installed participant selected by the authenticated login flow.
+    pub participant_id: String,
+    /// Installation public key whose possession was proven during binding.
+    pub session_key: String,
     #[doc = concat!("The `", stringify!(expires_at), "` value.")]
     pub expires_at: Option<i64>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "camelCase")]
-#[doc = concat!("Public Trellis data type `", stringify!(BoundNatsRecord), "`.")]
-pub struct BoundNatsRecord {
-    #[doc = concat!("The `", stringify!(jwt), "` value.")]
-    pub jwt: String,
-    /// JWT expiry as Unix seconds.
-    pub jwt_expires_at: i64,
-    /// Typed native and WebSocket transport endpoints.
-    pub transports: BoundNatsTransports,
-}
-
-/// Typed transport endpoints returned with a bound browser session.
-#[derive(Debug, Clone, Deserialize)]
-pub struct BoundNatsTransports {
-    /// Native NATS endpoints, when configured.
-    pub native: Option<BoundNatsTransport>,
-}
-
-/// Endpoints for one NATS transport kind.
-#[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct BoundNatsTransport {
-    /// NATS server URLs for this transport.
-    pub nats_servers: Vec<String>,
 }
 
 /// An in-progress agent login flow waiting for completion.

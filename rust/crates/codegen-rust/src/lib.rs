@@ -1175,26 +1175,23 @@ pub async fn connect(opts: ServiceConnectOptions<'_>) -> Result<ConnectedService
 fn render_user_participant_connect_rs(mappings: &[ValidatedParticipantAlias]) -> String {
     let mut source = r#"//! User-authenticated connection entry point for this participant.
 
-use std::sync::Arc;
-
-use trellis_rs::generated::{AuthorizationContextStore, AuthorizationInstallation, Caller, TrellisClientError, UserAuthorizationContext, UserConnectOptions, UserSessionCredentials};
+use trellis_rs::generated::{Caller, TrellisClientError, UserConnectOptions, UserSessionCredentials};
 
 use crate::Client;
-use crate::participant::{PARTICIPANT_ID, PARTICIPANT_DIGEST};
+use crate::participant::PARTICIPANT_ID;
 
 /// User-authenticated participant connection options.
 pub struct ConnectOptions<'a> {
     trellis_url: &'a str,
+    login_session_id: &'a str,
     session_key_seed_base64url: &'a str,
-    initial: AuthorizationInstallation,
     timeout_ms: u64,
-    authorization_context_store: Arc<dyn AuthorizationContextStore>,
 }
 
 impl<'a> ConnectOptions<'a> {
     /// Create user-authenticated connection options.
-    pub fn new(trellis_url: &'a str, session_key_seed_base64url: &'a str, initial: AuthorizationInstallation, timeout_ms: u64, authorization_context_store: Arc<dyn AuthorizationContextStore>) -> Self {
-        Self { trellis_url, session_key_seed_base64url, initial, timeout_ms, authorization_context_store }
+    pub fn new(trellis_url: &'a str, login_session_id: &'a str, session_key_seed_base64url: &'a str, timeout_ms: u64) -> Self {
+        Self { trellis_url, login_session_id, session_key_seed_base64url, timeout_ms }
     }
 }
 
@@ -1208,24 +1205,15 @@ impl ConnectedClient {
 
 /// Connect this participant with a user-authenticated session.
 pub async fn connect(opts: ConnectOptions<'_>) -> Result<ConnectedClient, TrellisClientError> {
-    let origin = trellis_rs::client::canonical_trellis_origin(opts.trellis_url)?;
     Ok(ConnectedClient {
         inner: Caller::connect_user(UserConnectOptions::new(
             opts.trellis_url,
             opts.timeout_ms,
             UserSessionCredentials {
+                login_session_id: opts.login_session_id,
                 session_key_seed_base64url: opts.session_key_seed_base64url,
             },
-            UserAuthorizationContext {
-                initial: Some(opts.initial),
-                binding: format!(
-                    "installation:{}:{}:{}",
-                    origin,
-                    PARTICIPANT_ID,
-                    PARTICIPANT_DIGEST,
-                ),
-                store: opts.authorization_context_store,
-            },
+            PARTICIPANT_ID,
         )).await?,
     })
 }
@@ -1240,13 +1228,11 @@ pub async fn connect(opts: ConnectOptions<'_>) -> Result<ConnectedClient, Trelli
 fn render_device_participant_connect_rs(mappings: &[ValidatedParticipantAlias]) -> String {
     let mut source = r#"//! Activated-device connection entry point for this participant.
 
-use std::sync::Arc;
-
-use trellis_rs::generated::{AuthorizationContextStore, Caller, DeviceConnectOptions, TrellisClientError};
+use trellis_rs::generated::{Caller, DeviceConnectOptions, TrellisClientError};
 
 use crate::Client;
 
-/// Exact generated participant and API evidence used for device bootstrap.
+/// Generated participant identity and local contract metadata.
 pub struct Participant;
 
 impl trellis_rs::service::GeneratedServiceParticipant for Participant {
@@ -1260,22 +1246,7 @@ impl trellis_rs::service::GeneratedServiceParticipant for Participant {
 }
 
 /// Activated-device participant connection options.
-pub struct ConnectOptions<'a> {
-    trellis_url: &'a str,
-    deployment_id: &'a str,
-    instance_id: &'a str,
-    public_identity_key: &'a str,
-    identity_seed_base64url: &'a str,
-    timeout_ms: u64,
-    authorization_context_store: Arc<dyn AuthorizationContextStore>,
-}
-
-impl<'a> ConnectOptions<'a> {
-    /// Create activated-device connection options.
-    pub fn new(trellis_url: &'a str, deployment_id: &'a str, instance_id: &'a str, public_identity_key: &'a str, identity_seed_base64url: &'a str, timeout_ms: u64, authorization_context_store: Arc<dyn AuthorizationContextStore>) -> Self {
-        Self { trellis_url, deployment_id, instance_id, public_identity_key, identity_seed_base64url, timeout_ms, authorization_context_store }
-    }
-}
+pub type ConnectOptions<'a> = DeviceConnectOptions<'a, Participant>;
 
 /// Connected caller facade for this participant contract.
 pub struct ConnectedClient { inner: Caller }
@@ -1284,7 +1255,7 @@ impl ConnectedClient {
     /// Access only the contract surfaces declared by this participant.
     pub fn client(&self) -> Client<'_> { Client::new(&self.inner) }
 
-    /// Connect using the exact ready bootstrap evidence returned by device activation.
+    /// Finish enrollment, then obtain fresh connection authority from the server.
     pub async fn connect_activated(
         options: trellis_rs::auth::DeviceActivationOptions<'_, Participant>,
         session: trellis_rs::auth::DeviceActivationSession,
@@ -1298,14 +1269,7 @@ impl ConnectedClient {
 /// Connect this activated device.
 pub async fn connect(opts: ConnectOptions<'_>) -> Result<ConnectedClient, TrellisClientError> {
     Ok(ConnectedClient {
-        inner: Caller::connect_device(DeviceConnectOptions::<Participant>::new(
-            opts.trellis_url,
-            opts.deployment_id,
-            opts.instance_id,
-            opts.public_identity_key,
-            opts.identity_seed_base64url,
-            opts.authorization_context_store,
-        ).with_timeout_ms(opts.timeout_ms)).await?,
+        inner: Caller::connect_device(opts).await?,
     })
 }
 "#

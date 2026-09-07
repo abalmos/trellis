@@ -5,6 +5,16 @@ use super::super::AuthorizationStateError;
 
 pub(super) fn public_rpc_error(_subject: &str, error: &AuthorizationStateError) -> Value {
     let (error_type, code, message) = match error {
+        AuthorizationStateError::CurrentIssuerConflict => (
+            "AuthError",
+            "issuer_current",
+            "Select a replacement signing issuer before revoking this key.",
+        ),
+        AuthorizationStateError::RevisionConflict { .. } => (
+            "AuthError",
+            "revision_conflict",
+            "The current revision differs from expectedRevision.",
+        ),
         AuthorizationStateError::InvalidRecord(_) => {
             ("AuthError", "invalid_request", "The request is invalid.")
         }
@@ -21,6 +31,7 @@ pub(super) fn public_rpc_error(_subject: &str, error: &AuthorizationStateError) 
             "The requested identity was not found.",
         ),
         AuthorizationStateError::PrincipalMissing
+        | AuthorizationStateError::IssuerMissing
         | AuthorizationStateError::SessionMissing
         | AuthorizationStateError::AuthorityMissing => (
             "AuthError",

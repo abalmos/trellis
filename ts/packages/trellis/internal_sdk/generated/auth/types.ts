@@ -1105,6 +1105,88 @@ export type AuthDeploymentAuthorityRejectOutput = {
   };
 };
 
+export type AuthDeploymentsApplyInput = {
+  apiArtifacts: Array<{}>;
+  deploymentId: string;
+  expectedRevision: number;
+  idempotencyKey: string;
+  optionalCapabilities?: Array<string>;
+  participantArtifact: {};
+};
+export type AuthDeploymentsApplyOutput = {
+  binding: {
+    expiresAt: number | null;
+    grants: {
+      format: "trellis.grant-set.v1";
+      permissions: Array<
+        {
+          action:
+            | "call"
+            | "invoke"
+            | "observe"
+            | "cancel"
+            | "control"
+            | "publish"
+            | "subscribe"
+            | "read"
+            | "write"
+            | "delete"
+            | "submit"
+            | "process"
+            | "consume";
+          target: {
+            api: string;
+            kind: "apiSurface";
+            name: string;
+            surface: "rpc" | "operation" | "event" | "feed" | "state";
+          } | {
+            api: string;
+            kind: "operationSignal";
+            operation: string;
+            signal: string;
+          } | {
+            kind: "participantResource";
+            name: string;
+            participant: string;
+            resource: "state" | "jobQueue" | "eventConsumer" | "kv" | "store";
+          };
+        }
+      >;
+    };
+    installedRevision: number;
+    ownerId: string;
+    ownerKind: "deployment" | "user";
+    participantId: string;
+    platformPrivileges: Array<
+      ("trellis.auth::admin" | "trellis.auth::capabilities.delegate")
+    >;
+    provenance: {
+      policyDigest: string;
+      portalId: string;
+      providerId: string;
+      roles: Array<string>;
+    } | null;
+    revision: number;
+    state: "active" | "revoked";
+  };
+  deployment: {
+    createdAt: number;
+    deploymentId: string;
+    disabledAt: number | null;
+    displayName: string;
+    expiresAt: number | null;
+    kind: "service" | "device";
+    participantId: string | null;
+    portalId: string | null;
+    requiresDeviceDelegation: boolean;
+    reviewMode: "none" | "required" | null | "none" | "required" | null;
+    revokedAt: number | null;
+    state: "active" | "disabled" | "revoked";
+    updatedAt: number;
+    version: number;
+  };
+};
+
 export type AuthDeploymentsCreateInput = {
   displayName: string;
   expiresAt: number | null;
@@ -1657,6 +1739,240 @@ export type AuthDevicesRemoveOutput = {
   };
 };
 
+export type AuthGrantsGetInput = {
+  ownerId: string;
+  ownerKind: "deployment" | "user";
+  participantId: string;
+};
+export type AuthGrantsGetOutput = {
+  binding: {
+    expiresAt: number | null;
+    grants: {
+      format: "trellis.grant-set.v1";
+      permissions: Array<
+        {
+          action:
+            | "call"
+            | "invoke"
+            | "observe"
+            | "cancel"
+            | "control"
+            | "publish"
+            | "subscribe"
+            | "read"
+            | "write"
+            | "delete"
+            | "submit"
+            | "process"
+            | "consume";
+          target: {
+            api: string;
+            kind: "apiSurface";
+            name: string;
+            surface: "rpc" | "operation" | "event" | "feed" | "state";
+          } | {
+            api: string;
+            kind: "operationSignal";
+            operation: string;
+            signal: string;
+          } | {
+            kind: "participantResource";
+            name: string;
+            participant: string;
+            resource: "state" | "jobQueue" | "eventConsumer" | "kv" | "store";
+          };
+        }
+      >;
+    };
+    installedRevision: number;
+    ownerId: string;
+    ownerKind: "deployment" | "user";
+    participantId: string;
+    platformPrivileges: Array<
+      ("trellis.auth::admin" | "trellis.auth::capabilities.delegate")
+    >;
+    provenance: {
+      policyDigest: string;
+      portalId: string;
+      providerId: string;
+      roles: Array<string>;
+    } | null;
+    revision: number;
+    state: "active" | "revoked";
+  } | null;
+};
+
+export type AuthGrantsRevokeInput = {
+  expectedRevision: number;
+  idempotencyKey: string;
+  ownerId: string;
+  ownerKind: "deployment" | "user";
+  participantId: string;
+};
+export type AuthGrantsRevokeOutput = {
+  binding: {
+    expiresAt: number | null;
+    grants: {
+      format: "trellis.grant-set.v1";
+      permissions: Array<
+        {
+          action:
+            | "call"
+            | "invoke"
+            | "observe"
+            | "cancel"
+            | "control"
+            | "publish"
+            | "subscribe"
+            | "read"
+            | "write"
+            | "delete"
+            | "submit"
+            | "process"
+            | "consume";
+          target: {
+            api: string;
+            kind: "apiSurface";
+            name: string;
+            surface: "rpc" | "operation" | "event" | "feed" | "state";
+          } | {
+            api: string;
+            kind: "operationSignal";
+            operation: string;
+            signal: string;
+          } | {
+            kind: "participantResource";
+            name: string;
+            participant: string;
+            resource: "state" | "jobQueue" | "eventConsumer" | "kv" | "store";
+          };
+        }
+      >;
+    };
+    installedRevision: number;
+    ownerId: string;
+    ownerKind: "deployment" | "user";
+    participantId: string;
+    platformPrivileges: Array<
+      ("trellis.auth::admin" | "trellis.auth::capabilities.delegate")
+    >;
+    provenance: {
+      policyDigest: string;
+      portalId: string;
+      providerId: string;
+      roles: Array<string>;
+    } | null;
+    revision: number;
+    state: "active" | "revoked";
+  };
+};
+
+export type AuthGrantsSetInput = {
+  expectedRevision: number;
+  expiresAt: number | null;
+  grants: {
+    format: "trellis.grant-set.v1";
+    permissions: Array<
+      {
+        action:
+          | "call"
+          | "invoke"
+          | "observe"
+          | "cancel"
+          | "control"
+          | "publish"
+          | "subscribe"
+          | "read"
+          | "write"
+          | "delete"
+          | "submit"
+          | "process"
+          | "consume";
+        target: {
+          api: string;
+          kind: "apiSurface";
+          name: string;
+          surface: "rpc" | "operation" | "event" | "feed" | "state";
+        } | {
+          api: string;
+          kind: "operationSignal";
+          operation: string;
+          signal: string;
+        } | {
+          kind: "participantResource";
+          name: string;
+          participant: string;
+          resource: "state" | "jobQueue" | "eventConsumer" | "kv" | "store";
+        };
+      }
+    >;
+  };
+  idempotencyKey: string;
+  ownerId: string;
+  ownerKind: "deployment" | "user";
+  participantId: string;
+  platformPrivileges: Array<
+    ("trellis.auth::admin" | "trellis.auth::capabilities.delegate")
+  >;
+};
+export type AuthGrantsSetOutput = {
+  binding: {
+    expiresAt: number | null;
+    grants: {
+      format: "trellis.grant-set.v1";
+      permissions: Array<
+        {
+          action:
+            | "call"
+            | "invoke"
+            | "observe"
+            | "cancel"
+            | "control"
+            | "publish"
+            | "subscribe"
+            | "read"
+            | "write"
+            | "delete"
+            | "submit"
+            | "process"
+            | "consume";
+          target: {
+            api: string;
+            kind: "apiSurface";
+            name: string;
+            surface: "rpc" | "operation" | "event" | "feed" | "state";
+          } | {
+            api: string;
+            kind: "operationSignal";
+            operation: string;
+            signal: string;
+          } | {
+            kind: "participantResource";
+            name: string;
+            participant: string;
+            resource: "state" | "jobQueue" | "eventConsumer" | "kv" | "store";
+          };
+        }
+      >;
+    };
+    installedRevision: number;
+    ownerId: string;
+    ownerKind: "deployment" | "user";
+    participantId: string;
+    platformPrivileges: Array<
+      ("trellis.auth::admin" | "trellis.auth::capabilities.delegate")
+    >;
+    provenance: {
+      policyDigest: string;
+      portalId: string;
+      providerId: string;
+      roles: Array<string>;
+    } | null;
+    revision: number;
+    state: "active" | "revoked";
+  };
+};
+
 export type AuthIdentityAuthorityGetInput = { authorityId: string };
 export type AuthIdentityAuthorityGetOutput = {
   authority: {
@@ -2046,6 +2362,25 @@ export type AuthIdentityGrantsRevokeInput = {
   user?: string;
 };
 export type AuthIdentityGrantsRevokeOutput = { success: boolean };
+
+export type AuthIssuersRevokeInput = {
+  idempotencyKey: string;
+  keyId: string;
+  reason?: string;
+};
+export type AuthIssuersRevokeOutput = { keyId: string; state: "revoked" };
+
+export type AuthParticipantsInstallInput = {
+  apiArtifacts: Array<{}>;
+  expectedRevision: number;
+  idempotencyKey: string;
+  participantArtifact: {};
+};
+export type AuthParticipantsInstallOutput = {
+  digest: string;
+  participantId: string;
+  revision: number;
+};
 
 export type AuthPortalsGetInput = { portalId: string };
 export type AuthPortalsGetOutput = {
@@ -2952,6 +3287,74 @@ export type AuthDeviceUserAuthoritiesReviewRequestedEvent = {
   instanceId: string;
   occurredAt: number;
   reviewId: string;
+};
+
+export type AuthGrantsChangedEvent = {
+  binding: {
+    expiresAt: number | null;
+    grants: {
+      format: "trellis.grant-set.v1";
+      permissions: Array<
+        {
+          action:
+            | "call"
+            | "invoke"
+            | "observe"
+            | "cancel"
+            | "control"
+            | "publish"
+            | "subscribe"
+            | "read"
+            | "write"
+            | "delete"
+            | "submit"
+            | "process"
+            | "consume";
+          target: {
+            api: string;
+            kind: "apiSurface";
+            name: string;
+            surface: "rpc" | "operation" | "event" | "feed" | "state";
+          } | {
+            api: string;
+            kind: "operationSignal";
+            operation: string;
+            signal: string;
+          } | {
+            kind: "participantResource";
+            name: string;
+            participant: string;
+            resource: "state" | "jobQueue" | "eventConsumer" | "kv" | "store";
+          };
+        }
+      >;
+    };
+    installedRevision: number;
+    ownerId: string;
+    ownerKind: "deployment" | "user";
+    participantId: string;
+    platformPrivileges: Array<
+      ("trellis.auth::admin" | "trellis.auth::capabilities.delegate")
+    >;
+    provenance: {
+      policyDigest: string;
+      portalId: string;
+      providerId: string;
+      roles: Array<string>;
+    } | null;
+    revision: number;
+    state: "active" | "revoked";
+  };
+  eventId: string;
+  occurredAt: number;
+};
+
+export type AuthIssuersRevokedEvent = {
+  eventId: string;
+  keyId: string;
+  occurredAt: number;
+  reason?: string;
+  revokedBy: string;
 };
 
 export type AuthSessionsRevokedEvent = {

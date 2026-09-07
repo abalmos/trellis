@@ -8,6 +8,8 @@ pub(in crate::platform::auth) mod common;
 pub(super) mod contexts;
 mod deployments;
 mod evidence;
+pub(in crate::platform::auth) mod grants;
+mod issuers;
 pub(super) mod outbox;
 mod policy;
 mod principals;

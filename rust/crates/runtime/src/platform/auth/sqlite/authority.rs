@@ -598,6 +598,44 @@ impl AuthorityRepository for SqliteAuthorizationStore {
         .await
     }
 
+    async fn get_authorized_participant_binding(
+        &self,
+        context_digest: &str,
+        now_ms: i64,
+    ) -> Result<Option<ParticipantBindingRecord>, AuthorizationStateError> {
+        let context_digest = context_digest.to_owned();
+        self.run_read(move |connection| {
+            let binding = connection
+                .query_row(
+                    "SELECT b.participant_id, b.participant_kind, b.artifact_digest,
+                            b.needs_digest, b.participant_json, b.api_artifacts_json,
+                            b.resolved_at, b.state, b.error
+                     FROM auth_authorization_contexts c
+                     JOIN auth_grant_bindings g
+                       ON g.owner_kind = json_extract(c.signed_context_json, '$.ownerKind')
+                      AND g.owner_id = json_extract(c.signed_context_json, '$.ownerId')
+                      AND g.participant_id = json_extract(c.signed_context_json, '$.participantId')
+                      AND g.revision = json_extract(c.signed_context_json, '$.grantRevision')
+                     JOIN auth_installed_participants i
+                       ON i.participant_id = g.participant_id AND i.revision = g.installed_revision
+                     JOIN auth_participant_bindings b
+                       ON b.participant_id = i.participant_id AND b.artifact_digest = i.artifact_digest
+                     WHERE c.context_digest = ?1 AND c.state = 'active' AND c.expires_at > (?2 / 1000)
+                       AND g.state = 'active' AND (g.expires_at IS NULL OR g.expires_at > ?2)
+                       AND b.state = 'resolved'",
+                    params![context_digest, now_ms],
+                    decode_participant_binding,
+                )
+                .optional()
+                .map_err(sql_error)?;
+            if let Some(binding) = &binding {
+                binding.resolve()?;
+            }
+            Ok(binding)
+        })
+        .await
+    }
+
     async fn get_participant_binding(
         &self,
         participant_id: &str,

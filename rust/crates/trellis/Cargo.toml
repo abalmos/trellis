@@ -10,7 +10,6 @@ readme = "../../README.md"
 [features]
 live-integration = []
 runtime-internals = []
-test-support = []
 
 [[test]]
 name = "integration"

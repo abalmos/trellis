@@ -136,6 +136,9 @@ impl From<AuthorizationStateError> for HttpError {
             }
             AuthorizationStateError::PortalPolicyChanged => Self::conflict("portal_policy_changed"),
             AuthorizationStateError::StorageConflict => Self::conflict("storage_conflict"),
+            AuthorizationStateError::RevisionConflict { .. } => Self::conflict("revision_conflict"),
+            AuthorizationStateError::CurrentIssuerConflict => Self::conflict("issuer_current"),
+            AuthorizationStateError::IssuerMissing => Self::not_found("issuer_key_not_found"),
             AuthorizationStateError::Storage(_) => Self::internal("internal_error"),
         }
     }

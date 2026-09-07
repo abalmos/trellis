@@ -642,6 +642,9 @@ fn callout_denial_code(error: &AuthorizationStateError) -> &'static str {
         AuthorizationStateError::ActivationMissing => "delegation_missing",
         AuthorizationStateError::DelegationExpired => "delegation_expired",
         AuthorizationStateError::StorageConflict => "authority_unavailable",
+        AuthorizationStateError::RevisionConflict { .. } => "authority_unavailable",
+        AuthorizationStateError::CurrentIssuerConflict => "issuer_current",
+        AuthorizationStateError::IssuerMissing => "issuer_missing",
         AuthorizationStateError::Storage(_) => "internal_error",
         AuthorizationStateError::InvalidRecord(_) => "invalid_auth_token",
     }

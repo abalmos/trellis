@@ -27,21 +27,17 @@
 //!
 //! Connection and request failures retain typed authentication, transport,
 //! validation, declared-RPC, and bootstrap errors. Callers should retry only
-//! errors documented as transient; service bootstrap already retries the
-//! authority-pending state according to its connect options.
+//! errors documented as transient. Native bootstrap resolves the server-owned
+//! assignment and current grants from a provisioned seed.
 //!
 //! ```no_run
-//! use std::sync::Arc;
-//! use trellis_rs::{client::FileAuthorizationContextStore, service::ServiceConnectOptions};
+//! use trellis_rs::service::ServiceConnectOptions;
 //!
 //! let _options = ServiceConnectOptions::new(
 //!     "http://localhost:3000",
-//!     "documents-worker",
-//!     "dep_documents",
 //!     "base64url-identity-seed",
-//!     "base64url-session-seed",
-//!     Arc::new(FileAuthorizationContextStore::new("./trellis-context.json")),
 //! )
+//! .with_name("documents-worker")
 //! .with_timeout_ms(10_000);
 //! ```
 
@@ -80,14 +76,8 @@ mod tests {
             offset: None,
             limit: 25,
         };
-        let _options = crate::service::ServiceConnectOptions::new(
-            "http://localhost:8080",
-            "svc",
-            "dep_1",
-            "identity-seed",
-            "session-seed",
-            std::sync::Arc::new(crate::client::MemoryAuthorizationContextStore::default()),
-        );
+        let _options =
+            crate::service::ServiceConnectOptions::new("http://localhost:8080", "identity-seed");
         let _state = crate::jobs::JobState::Pending;
     }
 

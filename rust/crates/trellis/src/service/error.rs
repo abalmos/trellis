@@ -245,60 +245,6 @@ pub enum ServerError {
     OperationUnsupportedControl { operation: String, action: String },
 
     #[error(
-        "service '{service_name}' expected active contract '{contract_id}' ({contract_digest})"
-    )]
-    #[doc(hidden)]
-    BootstrapInactiveContract {
-        service_name: String,
-        contract_id: String,
-        contract_digest: String,
-    },
-
-    #[error(
-        "service '{service_name}' has no binding for contract '{contract_id}' ({contract_digest})"
-    )]
-    #[doc(hidden)]
-    BootstrapMissingBinding {
-        service_name: String,
-        contract_id: String,
-        contract_digest: String,
-    },
-
-    #[error(
-        "service '{service_name}' binding mismatch: expected '{expected_contract_id}' ({expected_contract_digest}), got '{actual_contract_id}' ({actual_contract_digest})"
-    )]
-    #[doc(hidden)]
-    BootstrapBindingMismatch {
-        service_name: String,
-        expected_contract_id: String,
-        expected_contract_digest: String,
-        actual_contract_id: Box<str>,
-        actual_contract_digest: Box<str>,
-    },
-
-    #[error(
-        "service '{service_name}' has no auth-installed contract '{contract_id}' ({contract_digest})"
-    )]
-    #[doc(hidden)]
-    BootstrapAuthContractMissing {
-        service_name: String,
-        contract_id: String,
-        contract_digest: String,
-    },
-
-    #[error(
-        "service '{service_name}' auth contract mismatch: expected '{expected_contract_id}' ({expected_contract_digest}), got '{actual_contract_id}' ({actual_contract_digest})"
-    )]
-    #[doc(hidden)]
-    BootstrapAuthContractMismatch {
-        service_name: String,
-        expected_contract_id: String,
-        expected_contract_digest: String,
-        actual_contract_id: Box<str>,
-        actual_contract_digest: Box<str>,
-    },
-
-    #[error(
         "service '{service_name}' is missing {resource_kind} resource binding '{resource_name}'"
     )]
     #[doc(hidden)]

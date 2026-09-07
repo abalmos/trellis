@@ -28,13 +28,12 @@ pub trait TrellisApi {
 }
 
 pub use crate::client::{
-    AuthErrorPayload, AuthorizationContextBundle, AuthorizationContextStore,
-    AuthorizationInstallation, CallError, DeclaredError, DeclaredErrorPayload,
-    DeclaredOperationUpdates, DeviceConnectOptions, DownloadTransferGrant, EventDescriptor,
-    FeedDescriptor, FileInfo, MapStateStore, NoDeclaredError, NoOperationUpdates,
-    OperationDescriptor, OperationInvoker, OperationRef, OperationTransferStartError,
-    RemoteErrorPayload, RpcDescriptor, StartedOperationTransfer, TransferCancellation,
-    TransferOperationDescriptor, TrellisClientError, UserAuthorizationContext, UserConnectOptions,
+    AuthErrorPayload, AuthorizationContextBundle, AuthorizationInstallation, CallError,
+    DeclaredError, DeclaredErrorPayload, DeclaredOperationUpdates, DeviceConnectOptions,
+    DownloadTransferGrant, EventDescriptor, FeedDescriptor, FileInfo, MapStateStore,
+    NoDeclaredError, NoOperationUpdates, OperationDescriptor, OperationInvoker, OperationRef,
+    OperationTransferStartError, RemoteErrorPayload, RpcDescriptor, StartedOperationTransfer,
+    TransferCancellation, TransferOperationDescriptor, TrellisClientError, UserConnectOptions,
     UserSessionCredentials, ValueStateStore,
 };
 

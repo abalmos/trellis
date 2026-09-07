@@ -1,17 +1,14 @@
 use std::sync::Arc;
 
-use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::json;
 use trellis_protocol::{
-    session_proof_request_digest, AuthorizationContextRefreshSessionProofInput, SessionProofInput,
+    AuthorizationContextRefreshSessionProofInput, AuthorizationPrincipalKind,
+    NativeBootstrapSessionProofInput, SessionProofInput,
 };
 
 use super::super::{proof::new_request_id, SessionAuth, TrellisClientError};
-use super::own_context::AuthorizationContextCache;
-use super::types::{
-    AuthorizationContextBundle, AuthorizationInstallation, AuthorizationNativeTransport,
-    AuthorizationRoutingMaterial, AuthorizationRuntimeBinding, AuthorizationRuntimeTransports,
-};
+use super::own_context::{system_now_millis, AuthorizationContextCache};
+use super::types::{AuthorizationCredential, AuthorizationInstallation};
 
 fn is_terminal_refresh_error(code: &str) -> bool {
     matches!(
@@ -21,13 +18,12 @@ fn is_terminal_refresh_error(code: &str) -> bool {
             | "session_revoked"
             | "user_not_found"
             | "user_inactive"
-            | "participant_not_found"
-            | "participant_changed"
-            | "contract_changed"
-            | "authority_not_found"
-            | "authority_rejected"
-            | "authority_revoked"
-            | "authority_expired"
+            | "identity_not_found"
+            | "identity_revoked"
+            | "grant_binding_missing"
+            | "grant_binding_revoked"
+            | "grant_binding_expired"
+            | "participant_not_installed"
             | "deployment_inactive"
             | "instance_inactive"
             | "device_inactive"
@@ -38,192 +34,101 @@ fn is_terminal_refresh_error(code: &str) -> bool {
     )
 }
 
-/// Proof-bound refresh request through the credential/context recovery endpoint.
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct RefreshRequest {
-    request_id: String,
-    issued_at: i64,
-    session_id: String,
-    session_nkey: String,
-    current_context_digest: Option<String>,
-    expected_participant_digest: Option<String>,
-    expected_needs_digest: Option<String>,
-    known_root_key_id: String,
-    minimum_manifest_generation: i64,
-    proof: Value,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct RefreshResponse {
-    server_now: i64,
-    session: RefreshSession,
-    nats: RefreshNats,
-    authorization_context: AuthorizationContextBundle,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct RefreshSession {
-    session_id: String,
-    inbox_prefix: String,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct RefreshNats {
-    jwt: String,
-    jwt_expires_at: i64,
-    transports: RefreshTransports,
-}
-
-#[derive(Deserialize)]
-struct RefreshTransports {
-    native: Option<RefreshTransport>,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct RefreshTransport {
-    nats_servers: Vec<String>,
-}
-
-/// Refresh the current context through the proof-bound auth endpoint.
-///
-/// This is the only HTTP request performed by a connected own-context cache and
-/// is reserved for credential/context recovery.
+/// Obtain or renew connection authority using only the owner credential and proof.
 pub(crate) async fn refresh(
     cache: &AuthorizationContextCache,
     auth: &SessionAuth,
 ) -> Result<bool, TrellisClientError> {
+    if auth.session_key != cache.session_key {
+        return Err(TrellisClientError::Bootstrap(
+            "refresh signing key does not belong to this connection".into(),
+        ));
+    }
     let observed_digest = cache.context_digest().ok();
     let _refresh = cache.lock_refresh().await;
     if observed_digest != cache.context_digest().ok() {
         return Ok(false);
     }
-    let now = cache.corrected_now_seconds()?;
-    let state = cache.state_snapshot()?;
-    let runtime = state
-        .runtime
-        .ok_or_else(|| TrellisClientError::Bootstrap("authorization session unavailable".into()))?;
-    let previous_runtime = runtime.clone();
-    let durable = cache.durable_state()?.ok_or_else(|| {
-        TrellisClientError::Bootstrap("authorization trust floor unavailable".into())
-    })?;
-    let request_started_at = i64::try_from(
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map_err(|error| TrellisClientError::Bootstrap(error.to_string()))?
-            .as_millis(),
-    )
-    .map_err(|_| TrellisClientError::Bootstrap("context refresh time overflow".into()))?;
-    let issued_at = request_started_at
-        .checked_add(cache.clock_offset_ms())
-        .ok_or_else(|| TrellisClientError::Bootstrap("context refresh time overflow".into()))?;
-    let mut request = RefreshRequest {
-        request_id: new_request_id(),
-        issued_at,
-        session_id: runtime.session_id,
-        session_nkey: auth.nkey_pair()?.public_key(),
-        current_context_digest: state
-            .current
-            .as_ref()
-            .filter(|value| value.not_before <= now && value.expires_at > now)
-            .map(|value| value.context_digest.clone()),
-        expected_participant_digest: Some(runtime.participant_digest.clone()),
-        expected_needs_digest: Some(runtime.needs_digest.clone()),
-        known_root_key_id: durable.trust.root_key_id,
-        minimum_manifest_generation: i64::try_from(durable.trust.minimum_manifest_generation)
-            .map_err(|_| TrellisClientError::Bootstrap("manifest generation overflow".into()))?,
-        proof: serde_json::json!({
-            "format": "trellis.session-proof.v1",
-            "signature": "",
-        }),
-    };
-    let request_value = serde_json::to_value(&request)?;
-    let request_digest = session_proof_request_digest(&request_value)
-        .map_err(|error| TrellisClientError::Bootstrap(error.to_string()))?;
-    let input = SessionProofInput::authorization_context_refresh(
-        AuthorizationContextRefreshSessionProofInput {
-            request_id: request.request_id.clone(),
-            issued_at: request.issued_at,
-            session_id: request.session_id.clone(),
-            session_key_id: auth.key_id(),
-            current_context_digest: request.current_context_digest.clone(),
-            expected_participant_digest: request.expected_participant_digest.clone(),
-            expected_needs_digest: request.expected_needs_digest.clone(),
-            known_root_key_id: request.known_root_key_id.clone(),
-            minimum_manifest_generation: request.minimum_manifest_generation,
-            request_digest,
-        },
-    )
-    .map_err(|error| TrellisClientError::Bootstrap(error.to_string()))?;
-    request.proof = serde_json::to_value(auth.sign_session_proof(&input)?)?;
-    let response: RefreshResponse = serde_json::from_value(
-        cache
-            .http()
-            .post_json("/auth/context/refresh", &request)
-            .await?,
-    )
-    .map_err(|error| TrellisClientError::Bootstrap(error.to_string()))?;
-    let response_received_at = i64::try_from(
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map_err(|error| TrellisClientError::Bootstrap(error.to_string()))?
-            .as_millis(),
-    )
-    .map_err(|_| TrellisClientError::Bootstrap("context refresh time overflow".into()))?;
-    let midpoint = request_started_at
-        .checked_add(response_received_at)
-        .and_then(|sum| sum.checked_div(2))
-        .ok_or_else(|| TrellisClientError::Bootstrap("context refresh time overflow".into()))?;
-    let server_clock_offset_ms = response.server_now - midpoint;
-    if response.session.session_id != request.session_id
-        || response.session.inbox_prefix.trim().is_empty()
-        || response
-            .nats
-            .transports
-            .native
-            .as_ref()
-            .is_none_or(|transport| transport.nats_servers.is_empty())
-    {
-        return Err(TrellisClientError::Bootstrap(
-            "context refresh returned invalid session or native transport metadata".into(),
-        ));
+    let previous = cache.state_snapshot()?;
+    let request_started_at = system_now_millis()?;
+    let issued_at = cache.corrected_now_millis()?;
+    let mut request = json!({"requestId": new_request_id(), "connectionId": cache.connection_id});
+    if let Some(name) = &cache.name {
+        request["name"] = json!(name);
     }
-    let native = response.nats.transports.native.ok_or_else(|| {
-        TrellisClientError::Bootstrap("context refresh omitted native transport".into())
-    })?;
-    cache
-        .install(
-            AuthorizationInstallation {
-                context: response.authorization_context,
-                routing: AuthorizationRoutingMaterial {
-                    bootstrap_jwt: response.nats.jwt,
-                    bootstrap_jwt_expires_at: response.nats.jwt_expires_at,
-                },
-                runtime: AuthorizationRuntimeBinding {
-                    session_id: response.session.session_id,
-                    participant_id: runtime.participant_id,
-                    participant_digest: runtime.participant_digest,
-                    needs_digest: runtime.needs_digest,
-                    inbox_prefix: response.session.inbox_prefix,
-                    transports: AuthorizationRuntimeTransports {
-                        native: AuthorizationNativeTransport {
-                            nats_servers: native.nats_servers,
-                        },
+    let (route, input, signer) = match cache.credential.as_ref() {
+        AuthorizationCredential::Native { kind, identity } => {
+            request["identityKeyId"] = json!(identity.key_id());
+            request["sessionKey"] = json!(auth.session_key);
+            request["iat"] = json!(issued_at);
+            let input = NativeBootstrapSessionProofInput {
+                origin: cache.http().origin(),
+                unsigned_request: request.clone(),
+            };
+            match kind {
+                AuthorizationPrincipalKind::Service => (
+                    "/bootstrap/service",
+                    SessionProofInput::service_bootstrap(input),
+                    identity.as_ref(),
+                ),
+                AuthorizationPrincipalKind::Device => (
+                    "/bootstrap/device",
+                    SessionProofInput::device_bootstrap(input),
+                    identity.as_ref(),
+                ),
+                AuthorizationPrincipalKind::User => {
+                    return Err(TrellisClientError::Bootstrap(
+                        "user login cannot use a native credential".into(),
+                    ))
+                }
+            }
+        }
+        AuthorizationCredential::User { login_session_id } => {
+            request["loginSessionId"] = json!(login_session_id);
+            request["issuedAt"] = json!(issued_at);
+            request["currentContextDigest"] = json!(observed_digest);
+            (
+                "/auth/context/refresh",
+                SessionProofInput::authorization_context_refresh(
+                    AuthorizationContextRefreshSessionProofInput {
+                        origin: cache.http().origin(),
+                        session_public_key: auth.session_key.clone(),
+                        unsigned_request: request.clone(),
                     },
-                },
-                server_clock_offset_ms,
-            },
-            response.server_now.div_euclid(1_000),
-        )
-        .await?;
-    Ok(cache.runtime_binding()? != previous_runtime)
+                ),
+                auth,
+            )
+        }
+    };
+    let input = input.map_err(|error| TrellisClientError::Bootstrap(error.to_string()))?;
+    request["proof"] = serde_json::to_value(signer.sign_session_proof(&input)?)?;
+    let response = cache.http().post_json(route, &request).await?;
+    let server_now = response["serverNow"]
+        .as_i64()
+        .filter(|now| (0..=9_007_199_254_740_991).contains(now))
+        .ok_or_else(|| {
+            TrellisClientError::Bootstrap("bootstrap omitted a safe server time".into())
+        })?;
+    let midpoint = request_started_at
+        .checked_add(system_now_millis()?)
+        .and_then(|sum| sum.checked_div(2))
+        .ok_or_else(|| TrellisClientError::Bootstrap("bootstrap time overflow".into()))?;
+    cache.install(AuthorizationInstallation {
+        context: serde_json::from_value(response["authorizationContext"].clone())?,
+        routing: serde_json::from_value(response["routing"].clone())?,
+        runtime: serde_json::from_value(response["runtime"].clone())?,
+        server_clock_offset_ms: server_now
+            .checked_sub(midpoint)
+            .ok_or_else(|| TrellisClientError::Bootstrap("bootstrap time overflow".into()))?,
+        authorization: response
+            .get("authorization")
+            .filter(|value| !value.is_null())
+            .cloned(),
+    })?;
+    Ok(previous.runtime.as_ref() != Some(&cache.runtime_binding()?))
 }
 
-/// Background own-context refresh task.
+/// Background own-context refresh on the retained NATS connection.
 pub(crate) fn spawn_authorization_context_refresh_task(
     contexts: Arc<AuthorizationContextCache>,
     auth: Arc<SessionAuth>,
@@ -246,15 +151,8 @@ pub(crate) fn spawn_authorization_context_refresh_task(
             if requested_digest.is_some_and(|digest| contexts.context_digest().ok() != digest) {
                 continue;
             }
-            let previous = match contexts.runtime_binding() {
-                Ok(runtime) => runtime,
-                Err(error) => {
-                    tracing::warn!(%error, "authorization context refresh stopped");
-                    return;
-                }
-            };
-            let previous_context_digest = match contexts.context_digest() {
-                Ok(context) => context,
+            let previous = match contexts.state_snapshot() {
+                Ok(state) => state,
                 Err(error) => {
                     tracing::warn!(%error, "authorization context refresh stopped");
                     return;
@@ -262,30 +160,35 @@ pub(crate) fn spawn_authorization_context_refresh_task(
             };
             match refresh(&contexts, &auth).await {
                 Ok(_) => {
-                    let refreshed = match contexts.runtime_binding() {
-                        Ok(runtime) => runtime,
+                    let refreshed = match contexts.state_snapshot() {
+                        Ok(state) => state,
                         Err(error) => {
                             tracing::warn!(%error, "refreshed native runtime is invalid");
                             continue;
                         }
                     };
-                    let credentials_changed = match contexts.context_digest() {
-                        Ok(context) => previous_context_digest != context,
-                        Err(error) => {
-                            tracing::warn!(%error, "refreshed authorization context is invalid");
-                            continue;
-                        }
-                    };
-                    if let Err(error) = super::super::connection::apply_native_runtime_refresh(
-                        &nats,
-                        &previous,
-                        &refreshed,
-                        credentials_changed,
-                        timeout_ms,
-                    )
-                    .await
+                    if let (Some(previous_runtime), Some(runtime)) =
+                        (previous.runtime.as_ref(), refreshed.runtime.as_ref())
                     {
-                        tracing::warn!(%error, "native connection refresh will retry");
+                        let changed = previous
+                            .current
+                            .as_ref()
+                            .map(|current| &current.context_digest)
+                            != refreshed
+                                .current
+                                .as_ref()
+                                .map(|current| &current.context_digest);
+                        if let Err(error) = super::super::connection::apply_native_runtime_refresh(
+                            &nats,
+                            previous_runtime,
+                            runtime,
+                            changed,
+                            timeout_ms,
+                        )
+                        .await
+                        {
+                            tracing::warn!(%error, "native connection refresh will retry");
+                        }
                     }
                 }
                 Err(TrellisClientError::BootstrapHttp { status, code })
@@ -314,9 +217,9 @@ mod tests {
     #[test]
     fn refresh_terminality_uses_exact_machine_codes() {
         assert!(is_terminal_refresh_error("session_revoked"));
-        assert!(is_terminal_refresh_error("user_inactive"));
+        assert!(is_terminal_refresh_error("grant_binding_revoked"));
         assert!(is_terminal_refresh_error("context_refresh_mismatch"));
-        assert!(!is_terminal_refresh_error("authorization_pending"));
+        assert!(!is_terminal_refresh_error("required_resources_unavailable"));
         assert!(!is_terminal_refresh_error("session_revoked later"));
     }
 }

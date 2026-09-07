@@ -78,7 +78,7 @@ struct ValidatedRequest {
     principal_kind: PrincipalKind,
     session_id: String,
     session_public_key: String,
-    capabilities: Vec<String>,
+    platform_privileges: Vec<trellis_protocol::PlatformPrivilege>,
 }
 
 impl AuthRpcRuntime {
@@ -1231,15 +1231,6 @@ impl AuthRpcProcessor {
         payload: &[u8],
         caller: &ValidatedRequest,
     ) -> Result<Value, AuthorizationStateError> {
-        if !caller
-            .capabilities
-            .iter()
-            .any(|value| value == "trellis.auth::devices.review")
-        {
-            return Err(AuthorizationStateError::InvalidRecord(
-                "caller lacks administrative review authority".to_owned(),
-            ));
-        }
         let input: Value = serde_json::from_slice(payload)
             .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
         let now = now_millis()?;
@@ -1577,12 +1568,7 @@ impl AuthRpcProcessor {
             .get("user")
             .and_then(Value::as_str)
             .unwrap_or(&caller.principal_id);
-        if principal_id != caller.principal_id
-            && !caller
-                .capabilities
-                .iter()
-                .any(|value| value == "trellis.auth::admin")
-        {
+        if principal_id != caller.principal_id && !caller_is_admin(&caller) {
             return Err(AuthorizationStateError::InvalidRecord(
                 "identity grants belong to another user".to_owned(),
             ));
@@ -1635,11 +1621,7 @@ impl AuthRpcProcessor {
             .and_then(Value::as_str)
             .unwrap_or(&caller.principal_id);
         if authority.principal_id != target
-            || (target != caller.principal_id
-                && !caller
-                    .capabilities
-                    .iter()
-                    .any(|value| value == "trellis.auth::admin"))
+            || (target != caller.principal_id && !caller_is_admin(&caller))
         {
             return Err(AuthorizationStateError::InvalidRecord(
                 "identity grant belongs to another user".to_owned(),
@@ -2395,7 +2377,7 @@ impl AuthRpcProcessor {
                 return Err(AuthorizationStateError::PrincipalInactive);
             }
             let mut value = user_value(UserAccount { principal, profile });
-            value["capabilities"] = json!(validated.capabilities);
+            value["platformPrivileges"] = json!(validated.platform_privileges);
             Some(value)
         } else {
             None
@@ -3769,16 +3751,15 @@ fn require_admin(caller: &ValidatedRequest) -> Result<(), AuthorizationStateErro
         Ok(())
     } else {
         Err(AuthorizationStateError::InvalidRecord(
-            "trellis.auth::admin capability is required".to_owned(),
+            "trellis.auth::admin platform privilege is required".to_owned(),
         ))
     }
 }
 
 fn caller_is_admin(caller: &ValidatedRequest) -> bool {
     caller
-        .capabilities
-        .iter()
-        .any(|capability| capability == "trellis.auth::admin")
+        .platform_privileges
+        .contains(&trellis_protocol::PlatformPrivilege::Admin)
 }
 
 fn authority_is_current_admin(
@@ -3936,7 +3917,8 @@ fn portal_value(portal: LoginPortalRecord, settings: LoginSettingsRecord) -> Val
     })
 }
 
-fn rpc_idempotency(
+/// Bind an Auth mutation's exact input to its caller, purpose, and retry key.
+pub(in crate::platform::auth) fn rpc_idempotency(
     purpose: &str,
     signer_id: &str,
     request_id: &str,
@@ -4012,20 +3994,22 @@ mod tests {
     }
 
     #[test]
-    fn administrator_context_requires_admin_marker() {
+    fn administrator_context_requires_admin_platform_privilege() {
         let mut caller = ValidatedRequest {
             principal_id: "prn_user".to_owned(),
             principal_kind: PrincipalKind::User,
             session_id: "ses_user".to_owned(),
             session_public_key: "UAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
                 .to_owned(),
-            capabilities: vec!["trellis.auth::authorities.mutate".to_owned()],
+            platform_privileges: vec![trellis_protocol::PlatformPrivilege::Delegate],
         };
         assert!(matches!(
             require_admin(&caller),
             Err(AuthorizationStateError::InvalidRecord(_))
         ));
-        caller.capabilities.push("trellis.auth::admin".to_owned());
+        caller
+            .platform_privileges
+            .push(trellis_protocol::PlatformPrivilege::Admin);
         assert!(require_admin(&caller).is_ok());
     }
 

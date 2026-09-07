@@ -440,6 +440,10 @@ pub enum TrellisClientError {
     #[error("Trellis HTTP request failed with status {status}: {code}")]
     BootstrapHttp { status: u16, code: String },
 
+    /// Required authorization evidence could not be obtained or kept current.
+    #[error("authorization evidence unavailable: {0}")]
+    AuthorizationUnavailable(String),
+
     #[error("service bootstrap error: {0}")]
     Bootstrap(String),
 

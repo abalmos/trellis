@@ -1,6 +1,5 @@
 //! High-level Trellis service runtime facade for generated Rust services.
 
-use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet};
 use std::future::Future;
 use std::marker::PhantomData;
@@ -33,8 +32,8 @@ use super::{
 };
 
 use crate::client::{
-    AuthorizationContextStore, EventMessage, EventReplayPolicy, EventSubscribeOptions,
-    EventSubscriptionMode, ServiceConnectWithContractOptions, TrellisClient, TrellisClientError,
+    EventMessage, EventReplayPolicy, EventSubscribeOptions, EventSubscriptionMode,
+    ServiceConnectWithContractOptions, TrellisClient, TrellisClientError,
 };
 use crate::jobs::{
     start_worker_host_from_client, JobDescriptor, JobManager, JobProcessError, JobRef, JobsError,
@@ -72,7 +71,6 @@ struct SharedDurableEventListener {
 struct EventRegistration {
     event_api_id: String,
     event_name: String,
-    publish_capabilities: Vec<String>,
     handlers: BTreeMap<u64, SharedEventHandler>,
 }
 
@@ -109,12 +107,6 @@ impl Drop for ServiceEventListenerRegistryCleanup {
 /// Default request/connect timeout for service bootstrap and NATS RPC calls.
 pub const DEFAULT_TIMEOUT_MS: u64 = 5_000;
 
-/// Default retry delay while service deployment authority is pending.
-pub const DEFAULT_RETRY_DELAY_MS: u64 = 1_000;
-
-/// Default authority-pending wait limit. `None` waits until authority is ready.
-pub const DEFAULT_AUTHORITY_PENDING_TIMEOUT_MS: Option<u64> = None;
-
 /// Native participant and API evidence emitted by generated Rust participant facades.
 ///
 /// Service and device facades use this as their sole source of exact contract evidence.
@@ -142,75 +134,38 @@ pub trait GeneratedServiceParticipant {
 }
 
 /// High-level options for connecting a generated Rust service runtime.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct ServiceConnectOptions<'a> {
     /// Base Trellis runtime URL used for HTTP bootstrap.
     trellis_url: &'a str,
-    /// Service instance name reported to the runtime.
-    name: &'a str,
-    /// Deployment that owns the service instance.
-    deployment_id: &'a str,
+    /// Optional display metadata; never an assignment or authorization identity.
+    name: Option<&'a str>,
     /// Base64url-encoded provisioned service identity seed.
     provisioned_identity_seed_base64url: &'a str,
-    /// Base64url-encoded service session seed.
-    session_key_seed_base64url: Cow<'a, str>,
     /// Request/connect timeout in milliseconds.
     timeout_ms: u64,
-    /// Retry delay in milliseconds while bootstrap is pending authority readiness.
-    retry_delay_ms: u64,
-    /// Optional maximum authority-pending wait time. `None` waits until authority is ready.
-    authority_pending_timeout_ms: Option<u64>,
-    /// Caller-owned durable context and trust-floor storage.
-    authorization_context_store: Arc<dyn AuthorizationContextStore>,
 }
 
 impl<'a> ServiceConnectOptions<'a> {
     /// Create service connect options with ergonomic default timeouts.
-    pub fn new(
-        trellis_url: &'a str,
-        name: &'a str,
-        deployment_id: &'a str,
-        provisioned_identity_seed_base64url: &'a str,
-        session_key_seed_base64url: &'a str,
-        authorization_context_store: Arc<dyn AuthorizationContextStore>,
-    ) -> Self {
+    pub fn new(trellis_url: &'a str, provisioned_identity_seed_base64url: &'a str) -> Self {
         Self {
             trellis_url,
-            name,
-            deployment_id,
+            name: None,
             provisioned_identity_seed_base64url,
-            session_key_seed_base64url: Cow::Borrowed(session_key_seed_base64url),
             timeout_ms: DEFAULT_TIMEOUT_MS,
-            retry_delay_ms: DEFAULT_RETRY_DELAY_MS,
-            authority_pending_timeout_ms: DEFAULT_AUTHORITY_PENDING_TIMEOUT_MS,
-            authorization_context_store,
         }
     }
 
-    /// Replace the session seed, allowing each service process start to use a fresh session key.
-    pub fn with_session_key_seed(
-        mut self,
-        session_key_seed_base64url: impl Into<Cow<'a, str>>,
-    ) -> Self {
-        self.session_key_seed_base64url = session_key_seed_base64url.into();
+    /// Attach optional display metadata without changing the server-owned assignment.
+    pub fn with_name(mut self, name: &'a str) -> Self {
+        self.name = Some(name);
         self
     }
 
     /// Set the request/connect timeout in milliseconds.
     pub const fn with_timeout_ms(mut self, timeout_ms: u64) -> Self {
         self.timeout_ms = timeout_ms;
-        self
-    }
-
-    /// Set the delay between authority-pending bootstrap retries.
-    pub const fn with_retry_delay_ms(mut self, retry_delay_ms: u64) -> Self {
-        self.retry_delay_ms = retry_delay_ms;
-        self
-    }
-
-    /// Limit authority-pending bootstrap wait time, or use `None` to wait indefinitely.
-    pub const fn with_authority_pending_timeout_ms(mut self, timeout_ms: Option<u64>) -> Self {
-        self.authority_pending_timeout_ms = timeout_ms;
         self
     }
 }
@@ -801,60 +756,6 @@ impl<C> std::fmt::Debug for ConnectedServiceRuntime<C> {
 }
 
 impl<C> ConnectedServiceRuntime<C> {
-    /// Return the local provider cache for live integration assertions.
-    #[cfg(feature = "test-support")]
-    #[doc(hidden)]
-    pub fn integration_test_authorization_provider(
-        &self,
-    ) -> crate::client::AuthorizationProviderCache {
-        self.client
-            .integration_test_authorization_provider()
-            .expect("connected service authorization provider is present")
-    }
-
-    /// Return the active authorization context digest for live integration synchronization.
-    #[cfg(feature = "test-support")]
-    #[doc(hidden)]
-    pub fn integration_test_authorization_context_digest(&self) -> String {
-        self.client
-            .authorization_context_digest()
-            .expect("connected service authorization context is present")
-    }
-
-    /// Resolve an exact authorization context through the live verification path.
-    #[cfg(feature = "test-support")]
-    #[doc(hidden)]
-    pub async fn integration_test_resolve_authorization_context(
-        &self,
-        digest: &str,
-    ) -> Result<(), super::EventVerificationFailure> {
-        self.integration_test_authorization_provider()
-            .resolve_event_context_for_verification(
-                digest,
-                time::OffsetDateTime::now_utc().unix_timestamp(),
-            )
-            .await
-            .map(|_| ())
-    }
-
-    /// Return the connected NATS client for live reconnect assertions.
-    #[cfg(feature = "test-support")]
-    #[doc(hidden)]
-    pub fn integration_test_nats(&self) -> async_nats::Client {
-        self.client.integration_test_nats()
-    }
-
-    /// Send one signed raw RPC request through the connected service session.
-    #[cfg(feature = "test-support")]
-    #[doc(hidden)]
-    pub async fn integration_test_request_json_value(
-        &self,
-        subject: &str,
-        input: &serde_json::Value,
-    ) -> Result<serde_json::Value, crate::client::TrellisClientError> {
-        self.client.request_json_value(subject, input).await
-    }
-
     /// Build a connected runtime from an injected client and bootstrap binding.
     pub(crate) fn from_parts(
         service_name: impl Into<String>,
@@ -953,18 +854,6 @@ impl<C> ConnectedServiceRuntime<C> {
     /// Return the Jobs-domain transport used by Trellis infrastructure services.
     pub fn jobs_runtime(&self) -> crate::jobs::JobsRuntime {
         crate::jobs::JobsRuntime::from_client(self.client())
-    }
-
-    /// Return Jobs-only worker host access for Trellis integration tests.
-    #[cfg(feature = "test-support")]
-    #[doc(hidden)]
-    pub fn test_jobs_worker_runtime(
-        &self,
-    ) -> Result<crate::jobs::TestJobsWorkerRuntime, ServiceRuntimeError> {
-        Ok(crate::jobs::TestJobsWorkerRuntime::new(
-            Arc::clone(self.client()),
-            self.binding.jobs_runtime_binding()?,
-        ))
     }
 
     /// Return the Event Log domain transport used by Trellis infrastructure.
@@ -1216,20 +1105,9 @@ impl<C: GeneratedServiceParticipant> ConnectedServiceRuntime<C> {
             TrellisClient::connect_service_with_contract(ServiceConnectWithContractOptions {
                 trellis_url: options.trellis_url,
                 participant_id: C::PARTICIPANT_ID,
-                participant_digest: C::PARTICIPANT_DIGEST,
-                participant_json: C::PARTICIPANT_JSON,
-                api_json: C::API_JSON,
-                api_digest: C::API_DIGEST,
-                referenced_api_artifacts: C::REFERENCED_API_ARTIFACTS,
-                deployment_id: options.deployment_id,
-                instance_id: options.name,
+                name: options.name,
                 provisioned_identity_seed_base64url: options.provisioned_identity_seed_base64url,
-                participant_needs_digest: C::PARTICIPANT_NEEDS_DIGEST,
-                session_key_seed_base64url: options.session_key_seed_base64url.as_ref(),
                 timeout_ms: options.timeout_ms,
-                retry_delay_ms: options.retry_delay_ms,
-                authority_pending_timeout_ms: options.authority_pending_timeout_ms,
-                authorization_context_store: options.authorization_context_store.clone(),
             })
             .await?;
         let binding = parse_bootstrap_binding(&client)?;
@@ -1237,7 +1115,7 @@ impl<C: GeneratedServiceParticipant> ConnectedServiceRuntime<C> {
         let api = trellis_protocol::parse_api(&api_value)
             .map_err(|error| TrellisClientError::Bootstrap(error.to_string()))?;
         Ok(Self::from_parts(
-            options.name,
+            options.name.unwrap_or(C::PARTICIPANT_ID),
             Arc::new(client),
             binding,
             api.id(),
@@ -1306,10 +1184,6 @@ where
     let failures = service.event_failures.clone();
     let event_api_id = event_api_id.to_owned();
     let event_name = D::KEY.to_owned();
-    let publish_capabilities = D::PUBLISH_CAPABILITIES
-        .iter()
-        .map(|capability| (*capability).to_owned())
-        .collect::<Vec<_>>();
     if options.mode == ServiceEventListenerMode::Ephemeral {
         let mut events = client
             .nats()
@@ -1324,7 +1198,6 @@ where
         let event_auth = auth.clone();
         let event_api_id = event_api_id.clone();
         let event_name = event_name.clone();
-        let publish_capabilities = publish_capabilities.clone();
         let task = tokio::spawn(async move {
             let result = async {
                 while let Some(message) = events.next().await {
@@ -1335,7 +1208,6 @@ where
                             message.headers.as_ref(),
                             &event_api_id,
                             &event_name,
-                            &publish_capabilities,
                         )
                         .await
                     {
@@ -1437,7 +1309,6 @@ where
             .or_insert_with(|| EventRegistration {
                 event_api_id,
                 event_name,
-                publish_capabilities,
                 handlers: BTreeMap::new(),
             })
             .handlers
@@ -1488,7 +1359,6 @@ where
                 EventRegistration {
                     event_api_id,
                     event_name,
-                    publish_capabilities,
                     handlers: BTreeMap::from([(handler_id, handler)]),
                 },
             )]),
@@ -1629,7 +1499,6 @@ async fn run_durable_event_pull_loop(
                     message.headers(),
                     &registration.event_api_id,
                     &registration.event_name,
-                    &registration.publish_capabilities,
                 )
                 .await
             {
@@ -1741,20 +1610,6 @@ mod tests {
         KvResourceBinding, StoreResourceBinding,
     };
     use std::collections::BTreeMap;
-
-    #[test]
-    fn service_connect_waits_indefinitely_for_authority_by_default() {
-        let options = ServiceConnectOptions::new(
-            "http://localhost:3000",
-            "svc",
-            "dep_1",
-            "identity-seed",
-            "session-seed",
-            Arc::new(crate::client::MemoryAuthorizationContextStore::default()),
-        );
-
-        assert_eq!(options.authority_pending_timeout_ms, None);
-    }
 
     fn binding() -> CoreBootstrapBinding {
         CoreBootstrapBinding::new(

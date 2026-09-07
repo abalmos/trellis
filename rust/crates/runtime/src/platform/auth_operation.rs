@@ -664,17 +664,17 @@ fn caller_principal_id(context: &RequestContext) -> Result<&str, ServerError> {
         .caller
         .as_ref()
         .ok_or_else(|| ServerError::Nats("authenticated user principal is missing".to_owned()))?;
-    if caller.principal.kind != trellis_protocol::AuthorizationPrincipalKind::User {
+    if caller.principal_kind != trellis_protocol::AuthorizationPrincipalKind::User {
         return Err(ServerError::Nats(
             "device activation requires a user principal".to_owned(),
         ));
     }
-    if caller.principal.id.is_empty() {
+    if caller.principal_id.is_empty() {
         return Err(ServerError::Nats(
             "authenticated user principal is missing".to_owned(),
         ));
     }
-    Ok(&caller.principal.id)
+    Ok(&caller.principal_id)
 }
 
 fn requested_event(

@@ -1,16 +1,28 @@
 use serde_json::Value;
 use trellis_protocol::{parse_authorization_context, SignedAuthorizationContext};
 
+use super::super::http_error::read_bounded_http_body;
 use super::super::{decode_trellis_http_error, TrellisClientError};
 
-/// Returns the canonical origin used to scope persisted client authorization state.
+/// Return the configured HTTPS origin, allowing explicitly selected loopback HTTP.
 pub fn canonical_trellis_origin(trellis_url: &str) -> Result<String, TrellisClientError> {
     let url = reqwest::Url::parse(trellis_url)
         .map_err(|error| TrellisClientError::Bootstrap(format!("invalid Trellis URL: {error}")))?;
     let origin = url.origin().ascii_serialization();
-    if origin == "null" {
+    let loopback = match url.host() {
+        Some(url::Host::Ipv4(address)) => address.is_loopback(),
+        Some(url::Host::Ipv6(address)) => address.is_loopback(),
+        Some(url::Host::Domain("localhost")) => true,
+        _ => false,
+    };
+    if (url.scheme() != "https" && !(url.scheme() == "http" && loopback))
+        || !url.username().is_empty()
+        || url.password().is_some()
+        || url.query().is_some()
+        || url.fragment().is_some()
+    {
         return Err(TrellisClientError::Bootstrap(
-            "Trellis URL must have an HTTP(S) origin".into(),
+            "Trellis URL must be HTTPS, or explicitly configured loopback HTTP, without embedded credentials, query, or fragment".into(),
         ));
     }
     Ok(origin)
@@ -18,8 +30,7 @@ pub fn canonical_trellis_origin(trellis_url: &str) -> Result<String, TrellisClie
 
 /// Pre-NATS HTTP credential and context recovery client.
 ///
-/// This client performs HTTP only for credential or context recovery.
-/// Connected provider-side resolution never uses it.
+/// Credential recovery and unknown issuer keys use only the configured origin.
 #[derive(Clone, Debug)]
 pub(crate) struct BootstrapHttp {
     base: reqwest::Url,
@@ -28,13 +39,65 @@ pub(crate) struct BootstrapHttp {
 
 impl BootstrapHttp {
     pub(crate) fn new(trellis_url: &str) -> Result<Self, TrellisClientError> {
-        let base = reqwest::Url::parse(trellis_url)
+        let base = reqwest::Url::parse(&canonical_trellis_origin(trellis_url)?)
             .map_err(|error| TrellisClientError::Bootstrap(error.to_string()))?;
         let client = reqwest::Client::builder()
             .redirect(reqwest::redirect::Policy::none())
+            .timeout(std::time::Duration::from_secs(30))
             .build()
             .map_err(|error| TrellisClientError::Bootstrap(error.to_string()))?;
         Ok(Self { base, client })
+    }
+
+    pub(crate) fn origin(&self) -> String {
+        self.base.origin().ascii_serialization()
+    }
+
+    /// Fetch an unknown public key only from this runtime's authenticated origin.
+    pub(crate) async fn issuer_key(
+        &self,
+        key_id: &str,
+    ) -> Result<trellis_protocol::AuthorizationIssuerKey, TrellisClientError> {
+        if key_id.len() != 43
+            || !key_id
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'))
+        {
+            return Err(TrellisClientError::Bootstrap(
+                "invalid issuer key id".into(),
+            ));
+        }
+        let url = self
+            .base
+            .join(&format!("/auth/keys/{key_id}"))
+            .map_err(|error| TrellisClientError::Bootstrap(error.to_string()))?;
+        let response = self
+            .client
+            .get(url)
+            .send()
+            .await
+            .map_err(|error| TrellisClientError::AuthorizationUnavailable(error.to_string()))?;
+        if !response.status().is_success() {
+            let error = decode_trellis_http_error(response).await;
+            return Err(TrellisClientError::BootstrapHttp {
+                status: error.status,
+                code: error.code,
+            });
+        }
+        let body = read_bounded_http_body(response, 4096)
+            .await
+            .map_err(|error| TrellisClientError::AuthorizationUnavailable(error.to_string()))?;
+        let issuer: trellis_protocol::AuthorizationIssuerKey = serde_json::from_slice(&body)
+            .map_err(|error| TrellisClientError::AuthorizationUnavailable(error.to_string()))?;
+        issuer
+            .verifying_key()
+            .map_err(|error| TrellisClientError::AuthorizationUnavailable(error.to_string()))?;
+        if issuer.key_id != key_id {
+            return Err(TrellisClientError::AuthorizationUnavailable(
+                "issuer response key id does not match the requested key".into(),
+            ));
+        }
+        Ok(issuer)
     }
 
     /// POST a JSON body to a same-origin path and return the JSON response.
@@ -47,6 +110,11 @@ impl BootstrapHttp {
             .base
             .join(path)
             .map_err(|error| TrellisClientError::Bootstrap(error.to_string()))?;
+        if url.origin() != self.base.origin() {
+            return Err(TrellisClientError::Bootstrap(
+                "cross-origin bootstrap is forbidden".into(),
+            ));
+        }
         let response = self
             .client
             .post(url.clone())
@@ -61,9 +129,8 @@ impl BootstrapHttp {
                 code: error.code,
             });
         }
-        response
-            .json()
-            .await
+        let body = read_bounded_http_body(response, 1024 * 1024).await?;
+        serde_json::from_slice(&body)
             .map_err(|error| TrellisClientError::Bootstrap(error.to_string()))
     }
 }

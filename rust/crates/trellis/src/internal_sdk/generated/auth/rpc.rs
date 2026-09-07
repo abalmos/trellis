@@ -777,6 +777,54 @@ impl trellis_rs::generated::DeclaredError for AuthDeploymentAuthorityRejectError
         }
     }
 }
+/// Descriptor for `Auth.Deployments.Apply`.
+pub struct AuthDeploymentsApplyRpc;
+impl RpcDescriptor for AuthDeploymentsApplyRpc {
+    type Input = super::types::AuthDeploymentsApplyRequest;
+    type Output = super::types::AuthDeploymentsApplyResponse;
+    const INPUT_SCHEMA_JSON: &'static str =
+        super::schemas::AUTH_DEPLOYMENTS_APPLY_INPUT_SCHEMA_JSON;
+    const OUTPUT_SCHEMA_JSON: &'static str =
+        super::schemas::AUTH_DEPLOYMENTS_APPLY_OUTPUT_SCHEMA_JSON;
+    const KEY: &'static str = "Auth.Deployments.Apply";
+    const SUBJECT: &'static str = "rpc.v1.Auth.Deployments.Apply";
+    const CALLER_CAPABILITIES: &'static [&'static str] = &[];
+    const ERRORS: &'static [&'static str] = &["AuthError", "UnexpectedError", "ValidationError"];
+}
+/// Errors declared by `Auth.Deployments.Apply`.
+#[derive(Debug, Clone, PartialEq)]
+pub enum AuthDeploymentsApplyError {
+    /// `AuthError` error payload.
+    AuthError(trellis_rs::generated::AuthErrorPayload),
+    /// `UnexpectedError` error payload.
+    UnexpectedError(super::types::AuthErrorDetails),
+    /// `ValidationError` error payload.
+    ValidationError(super::types::AuthErrorDetails),
+}
+impl trellis_rs::generated::DeclaredError for AuthDeploymentsApplyError {
+    fn decode(
+        payload: &trellis_rs::generated::RemoteErrorPayload,
+    ) -> Result<Option<Self>, serde_json::Error> {
+        match payload.error_type() {
+            Some("AuthError") => payload
+                .decode_declared::<trellis_rs::generated::AuthErrorPayload>("AuthError")
+                .map(|value| value.map(Self::AuthError)),
+            Some("UnexpectedError") => payload
+                .decode_declared::<super::types::AuthErrorDetails>("UnexpectedError")
+                .map(|value| value.map(Self::UnexpectedError)),
+            Some("ValidationError") => payload
+                .decode_declared::<super::types::AuthErrorDetails>("ValidationError")
+                .map(|value| value.map(Self::ValidationError)),
+            _ => Ok(None),
+        }
+    }
+    fn auth_error_reason(&self) -> Option<&str> {
+        match self {
+            Self::AuthError(payload) => Some(payload.reason.as_str()),
+            _ => None,
+        }
+    }
+}
 /// Descriptor for `Auth.Deployments.Create`.
 pub struct AuthDeploymentsCreateRpc;
 impl RpcDescriptor for AuthDeploymentsCreateRpc {
@@ -1489,6 +1537,144 @@ impl trellis_rs::generated::DeclaredError for AuthDevicesRemoveError {
         }
     }
 }
+/// Descriptor for `Auth.Grants.Get`.
+pub struct AuthGrantsGetRpc;
+impl RpcDescriptor for AuthGrantsGetRpc {
+    type Input = super::types::AuthGrantsGetRequest;
+    type Output = super::types::AuthGrantsGetResponse;
+    const INPUT_SCHEMA_JSON: &'static str = super::schemas::AUTH_GRANTS_GET_INPUT_SCHEMA_JSON;
+    const OUTPUT_SCHEMA_JSON: &'static str = super::schemas::AUTH_GRANTS_GET_OUTPUT_SCHEMA_JSON;
+    const KEY: &'static str = "Auth.Grants.Get";
+    const SUBJECT: &'static str = "rpc.v1.Auth.Grants.Get";
+    const CALLER_CAPABILITIES: &'static [&'static str] = &[];
+    const ERRORS: &'static [&'static str] = &["AuthError", "UnexpectedError", "ValidationError"];
+}
+/// Errors declared by `Auth.Grants.Get`.
+#[derive(Debug, Clone, PartialEq)]
+pub enum AuthGrantsGetError {
+    /// `AuthError` error payload.
+    AuthError(trellis_rs::generated::AuthErrorPayload),
+    /// `UnexpectedError` error payload.
+    UnexpectedError(super::types::AuthErrorDetails),
+    /// `ValidationError` error payload.
+    ValidationError(super::types::AuthErrorDetails),
+}
+impl trellis_rs::generated::DeclaredError for AuthGrantsGetError {
+    fn decode(
+        payload: &trellis_rs::generated::RemoteErrorPayload,
+    ) -> Result<Option<Self>, serde_json::Error> {
+        match payload.error_type() {
+            Some("AuthError") => payload
+                .decode_declared::<trellis_rs::generated::AuthErrorPayload>("AuthError")
+                .map(|value| value.map(Self::AuthError)),
+            Some("UnexpectedError") => payload
+                .decode_declared::<super::types::AuthErrorDetails>("UnexpectedError")
+                .map(|value| value.map(Self::UnexpectedError)),
+            Some("ValidationError") => payload
+                .decode_declared::<super::types::AuthErrorDetails>("ValidationError")
+                .map(|value| value.map(Self::ValidationError)),
+            _ => Ok(None),
+        }
+    }
+    fn auth_error_reason(&self) -> Option<&str> {
+        match self {
+            Self::AuthError(payload) => Some(payload.reason.as_str()),
+            _ => None,
+        }
+    }
+}
+/// Descriptor for `Auth.Grants.Revoke`.
+pub struct AuthGrantsRevokeRpc;
+impl RpcDescriptor for AuthGrantsRevokeRpc {
+    type Input = super::types::AuthGrantsRevokeRequest;
+    type Output = super::types::AuthGrantsRevokeResponse;
+    const INPUT_SCHEMA_JSON: &'static str = super::schemas::AUTH_GRANTS_REVOKE_INPUT_SCHEMA_JSON;
+    const OUTPUT_SCHEMA_JSON: &'static str = super::schemas::AUTH_GRANTS_REVOKE_OUTPUT_SCHEMA_JSON;
+    const KEY: &'static str = "Auth.Grants.Revoke";
+    const SUBJECT: &'static str = "rpc.v1.Auth.Grants.Revoke";
+    const CALLER_CAPABILITIES: &'static [&'static str] = &[];
+    const ERRORS: &'static [&'static str] = &["AuthError", "UnexpectedError", "ValidationError"];
+}
+/// Errors declared by `Auth.Grants.Revoke`.
+#[derive(Debug, Clone, PartialEq)]
+pub enum AuthGrantsRevokeError {
+    /// `AuthError` error payload.
+    AuthError(trellis_rs::generated::AuthErrorPayload),
+    /// `UnexpectedError` error payload.
+    UnexpectedError(super::types::AuthErrorDetails),
+    /// `ValidationError` error payload.
+    ValidationError(super::types::AuthErrorDetails),
+}
+impl trellis_rs::generated::DeclaredError for AuthGrantsRevokeError {
+    fn decode(
+        payload: &trellis_rs::generated::RemoteErrorPayload,
+    ) -> Result<Option<Self>, serde_json::Error> {
+        match payload.error_type() {
+            Some("AuthError") => payload
+                .decode_declared::<trellis_rs::generated::AuthErrorPayload>("AuthError")
+                .map(|value| value.map(Self::AuthError)),
+            Some("UnexpectedError") => payload
+                .decode_declared::<super::types::AuthErrorDetails>("UnexpectedError")
+                .map(|value| value.map(Self::UnexpectedError)),
+            Some("ValidationError") => payload
+                .decode_declared::<super::types::AuthErrorDetails>("ValidationError")
+                .map(|value| value.map(Self::ValidationError)),
+            _ => Ok(None),
+        }
+    }
+    fn auth_error_reason(&self) -> Option<&str> {
+        match self {
+            Self::AuthError(payload) => Some(payload.reason.as_str()),
+            _ => None,
+        }
+    }
+}
+/// Descriptor for `Auth.Grants.Set`.
+pub struct AuthGrantsSetRpc;
+impl RpcDescriptor for AuthGrantsSetRpc {
+    type Input = super::types::AuthGrantsSetRequest;
+    type Output = super::types::AuthGrantsSetResponse;
+    const INPUT_SCHEMA_JSON: &'static str = super::schemas::AUTH_GRANTS_SET_INPUT_SCHEMA_JSON;
+    const OUTPUT_SCHEMA_JSON: &'static str = super::schemas::AUTH_GRANTS_SET_OUTPUT_SCHEMA_JSON;
+    const KEY: &'static str = "Auth.Grants.Set";
+    const SUBJECT: &'static str = "rpc.v1.Auth.Grants.Set";
+    const CALLER_CAPABILITIES: &'static [&'static str] = &[];
+    const ERRORS: &'static [&'static str] = &["AuthError", "UnexpectedError", "ValidationError"];
+}
+/// Errors declared by `Auth.Grants.Set`.
+#[derive(Debug, Clone, PartialEq)]
+pub enum AuthGrantsSetError {
+    /// `AuthError` error payload.
+    AuthError(trellis_rs::generated::AuthErrorPayload),
+    /// `UnexpectedError` error payload.
+    UnexpectedError(super::types::AuthErrorDetails),
+    /// `ValidationError` error payload.
+    ValidationError(super::types::AuthErrorDetails),
+}
+impl trellis_rs::generated::DeclaredError for AuthGrantsSetError {
+    fn decode(
+        payload: &trellis_rs::generated::RemoteErrorPayload,
+    ) -> Result<Option<Self>, serde_json::Error> {
+        match payload.error_type() {
+            Some("AuthError") => payload
+                .decode_declared::<trellis_rs::generated::AuthErrorPayload>("AuthError")
+                .map(|value| value.map(Self::AuthError)),
+            Some("UnexpectedError") => payload
+                .decode_declared::<super::types::AuthErrorDetails>("UnexpectedError")
+                .map(|value| value.map(Self::UnexpectedError)),
+            Some("ValidationError") => payload
+                .decode_declared::<super::types::AuthErrorDetails>("ValidationError")
+                .map(|value| value.map(Self::ValidationError)),
+            _ => Ok(None),
+        }
+    }
+    fn auth_error_reason(&self) -> Option<&str> {
+        match self {
+            Self::AuthError(payload) => Some(payload.reason.as_str()),
+            _ => None,
+        }
+    }
+}
 /// Descriptor for `Auth.IdentityAuthority.Get`.
 pub struct AuthIdentityAuthorityGetRpc;
 impl RpcDescriptor for AuthIdentityAuthorityGetRpc {
@@ -1701,6 +1887,100 @@ pub enum AuthIdentityGrantsRevokeError {
     ValidationError(super::types::AuthErrorDetails),
 }
 impl trellis_rs::generated::DeclaredError for AuthIdentityGrantsRevokeError {
+    fn decode(
+        payload: &trellis_rs::generated::RemoteErrorPayload,
+    ) -> Result<Option<Self>, serde_json::Error> {
+        match payload.error_type() {
+            Some("AuthError") => payload
+                .decode_declared::<trellis_rs::generated::AuthErrorPayload>("AuthError")
+                .map(|value| value.map(Self::AuthError)),
+            Some("UnexpectedError") => payload
+                .decode_declared::<super::types::AuthErrorDetails>("UnexpectedError")
+                .map(|value| value.map(Self::UnexpectedError)),
+            Some("ValidationError") => payload
+                .decode_declared::<super::types::AuthErrorDetails>("ValidationError")
+                .map(|value| value.map(Self::ValidationError)),
+            _ => Ok(None),
+        }
+    }
+    fn auth_error_reason(&self) -> Option<&str> {
+        match self {
+            Self::AuthError(payload) => Some(payload.reason.as_str()),
+            _ => None,
+        }
+    }
+}
+/// Descriptor for `Auth.Issuers.Revoke`.
+pub struct AuthIssuersRevokeRpc;
+impl RpcDescriptor for AuthIssuersRevokeRpc {
+    type Input = super::types::AuthIssuersRevokeRequest;
+    type Output = super::types::AuthIssuersRevokeResponse;
+    const INPUT_SCHEMA_JSON: &'static str = super::schemas::AUTH_ISSUERS_REVOKE_INPUT_SCHEMA_JSON;
+    const OUTPUT_SCHEMA_JSON: &'static str = super::schemas::AUTH_ISSUERS_REVOKE_OUTPUT_SCHEMA_JSON;
+    const KEY: &'static str = "Auth.Issuers.Revoke";
+    const SUBJECT: &'static str = "rpc.v1.Auth.Issuers.Revoke";
+    const CALLER_CAPABILITIES: &'static [&'static str] = &[];
+    const ERRORS: &'static [&'static str] = &["AuthError", "UnexpectedError", "ValidationError"];
+}
+/// Errors declared by `Auth.Issuers.Revoke`.
+#[derive(Debug, Clone, PartialEq)]
+pub enum AuthIssuersRevokeError {
+    /// `AuthError` error payload.
+    AuthError(trellis_rs::generated::AuthErrorPayload),
+    /// `UnexpectedError` error payload.
+    UnexpectedError(super::types::AuthErrorDetails),
+    /// `ValidationError` error payload.
+    ValidationError(super::types::AuthErrorDetails),
+}
+impl trellis_rs::generated::DeclaredError for AuthIssuersRevokeError {
+    fn decode(
+        payload: &trellis_rs::generated::RemoteErrorPayload,
+    ) -> Result<Option<Self>, serde_json::Error> {
+        match payload.error_type() {
+            Some("AuthError") => payload
+                .decode_declared::<trellis_rs::generated::AuthErrorPayload>("AuthError")
+                .map(|value| value.map(Self::AuthError)),
+            Some("UnexpectedError") => payload
+                .decode_declared::<super::types::AuthErrorDetails>("UnexpectedError")
+                .map(|value| value.map(Self::UnexpectedError)),
+            Some("ValidationError") => payload
+                .decode_declared::<super::types::AuthErrorDetails>("ValidationError")
+                .map(|value| value.map(Self::ValidationError)),
+            _ => Ok(None),
+        }
+    }
+    fn auth_error_reason(&self) -> Option<&str> {
+        match self {
+            Self::AuthError(payload) => Some(payload.reason.as_str()),
+            _ => None,
+        }
+    }
+}
+/// Descriptor for `Auth.Participants.Install`.
+pub struct AuthParticipantsInstallRpc;
+impl RpcDescriptor for AuthParticipantsInstallRpc {
+    type Input = super::types::AuthParticipantsInstallRequest;
+    type Output = super::types::AuthParticipantsInstallResponse;
+    const INPUT_SCHEMA_JSON: &'static str =
+        super::schemas::AUTH_PARTICIPANTS_INSTALL_INPUT_SCHEMA_JSON;
+    const OUTPUT_SCHEMA_JSON: &'static str =
+        super::schemas::AUTH_PARTICIPANTS_INSTALL_OUTPUT_SCHEMA_JSON;
+    const KEY: &'static str = "Auth.Participants.Install";
+    const SUBJECT: &'static str = "rpc.v1.Auth.Participants.Install";
+    const CALLER_CAPABILITIES: &'static [&'static str] = &[];
+    const ERRORS: &'static [&'static str] = &["AuthError", "UnexpectedError", "ValidationError"];
+}
+/// Errors declared by `Auth.Participants.Install`.
+#[derive(Debug, Clone, PartialEq)]
+pub enum AuthParticipantsInstallError {
+    /// `AuthError` error payload.
+    AuthError(trellis_rs::generated::AuthErrorPayload),
+    /// `UnexpectedError` error payload.
+    UnexpectedError(super::types::AuthErrorDetails),
+    /// `ValidationError` error payload.
+    ValidationError(super::types::AuthErrorDetails),
+}
+impl trellis_rs::generated::DeclaredError for AuthParticipantsInstallError {
     fn decode(
         payload: &trellis_rs::generated::RemoteErrorPayload,
     ) -> Result<Option<Self>, serde_json::Error> {

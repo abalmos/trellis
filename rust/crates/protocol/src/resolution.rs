@@ -563,6 +563,45 @@ impl ResolvedParticipant {
     pub fn optional_apis(&self) -> &[ResolvedUsedApi] {
         &self.optional_apis
     }
+
+    /// Expand required authority and exactly the selected optional capability names.
+    ///
+    /// Names are selection inputs only. The result contains canonical permission
+    /// atoms, never capability names, group keys, or platform privileges.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ProtocolError::ParticipantResolution`] if a name is not declared
+    /// by the resolved optional authority. Equal names across APIs select their
+    /// combined declared permissions.
+    pub fn select_grants(
+        &self,
+        optional_capabilities: &[String],
+    ) -> Result<GrantSet, ProtocolError> {
+        let optional = self.proposal.optional().capabilities();
+        let mut permissions = self.proposal.required().grant_set().permissions().to_vec();
+        for name in optional_capabilities {
+            let mut matched = false;
+            for capability in optional
+                .iter()
+                .filter(|capability| capability.name() == name)
+            {
+                matched = true;
+                permissions.extend_from_slice(capability.allows());
+            }
+            if !matched {
+                return Err(resolution_error(
+                    ResolutionErrorCode::UnknownOptionalCapability,
+                    self.participant_id(),
+                    None,
+                    None,
+                    pointer(["optionalCapabilities"]),
+                    format!("unknown optional capability {name:?}"),
+                ));
+            }
+        }
+        Ok(GrantSet::new(permissions))
+    }
 }
 
 /// Resolve one validated participant against its exact, validated API artifacts.
@@ -1822,6 +1861,45 @@ mod tests {
             changed.proposal().required().capabilities()[0].api_digest(),
             changed_api_digest
         );
+    }
+
+    #[test]
+    fn optional_selection_grants_only_expanded_selected_atoms() {
+        let api = parse_api(&fixture_api("consumer@v1")).unwrap();
+        let mut participant_value = participant_using("optional-app", &api)
+            .normalized_value()
+            .unwrap();
+        participant_value["uses"]["optional"] = participant_value["uses"]["required"].take();
+        participant_value["uses"]["required"] = serde_json::json!({});
+        participant_value["uses"]["optional"]["api"]["state"] =
+            serde_json::json!({"read": ["Consumer.Settings"]});
+        let participant = parse_participant(&participant_value).unwrap();
+        let resolved =
+            resolve_participant(&participant, &BTreeMap::from([(api.id().to_owned(), api)]))
+                .unwrap();
+        assert!(resolved
+            .select_grants(&[])
+            .unwrap()
+            .permissions()
+            .is_empty());
+        let selected = resolved.select_grants(&["rpcOnly".to_owned()]).unwrap();
+        assert_eq!(selected.permissions().len(), 1);
+        assert_eq!(selected.permissions()[0].action(), PermissionAction::Call);
+        assert_eq!(
+            selected,
+            resolved
+                .select_grants(&["rpcOnly".to_owned(), "rpcOnly".to_owned()])
+                .unwrap()
+        );
+        for name in ["admin", "trellis.auth::admin", "unknown", " rpcOnly"] {
+            assert!(matches!(
+                resolved.select_grants(&[name.to_owned()]),
+                Err(ProtocolError::ParticipantResolution {
+                    code: ResolutionErrorCode::UnknownOptionalCapability,
+                    ..
+                })
+            ));
+        }
     }
 
     fn fixture_api(id: &str) -> Value {

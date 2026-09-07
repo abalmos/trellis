@@ -93,16 +93,8 @@ pub(crate) fn base64url_encode(bytes: &[u8]) -> String {
 }
 
 pub(crate) async fn connect_authenticated_cli_client(
-    format: OutputFormat,
 ) -> miette::Result<(authlib::AdminSessionState, Caller)> {
-    let mut state = authlib::load_admin_session().into_diagnostic()?;
-    let participant_digest = authlib::cli_participant_digest().into_diagnostic()?;
-    if !authlib::admin_session_matches_participant(&participant_digest).into_diagnostic()? {
-        if !output::is_json(format) {
-            output::print_info("Saved CLI participant changed; starting agent reauthentication");
-        }
-        state = complete_admin_reauth(format, &state).await?;
-    }
+    let state = authlib::load_admin_session().into_diagnostic()?;
 
     let connected = match authlib::connect_admin_client_async(&state).await {
         Ok(connected) => connected,
@@ -146,12 +138,7 @@ fn is_rejected_admin_session_error(error: &authlib::TrellisAuthError) -> bool {
     admin_session_error_code(error).is_some_and(|code| {
         matches!(
             code.as_str(),
-            "session_not_found"
-                | "session_expired"
-                | "session_revoked"
-                | "authority_rejected"
-                | "authority_revoked"
-                | "authority_expired"
+            "session_not_found" | "session_expired" | "session_revoked"
         )
     })
 }
@@ -179,7 +166,7 @@ fn admin_session_error_code(error: &authlib::TrellisAuthError) -> Option<String>
 
 fn generic_admin_authorization_violation_report() -> miette::Report {
     miette::miette!(
-        "Saved agent session authorization was denied by the server; run `trellis auth login` to reauthenticate."
+        "Authorization was denied by the server. Saved login credentials were retained; ask an administrator to review the participant's grants."
     )
 }
 
@@ -191,28 +178,6 @@ fn rejected_admin_session_report() -> miette::Result<miette::Report> {
         "Saved agent session was rejected by the server; run `trellis auth login` explicitly."
     };
     Ok(miette::miette!(message))
-}
-
-async fn complete_admin_reauth(
-    format: OutputFormat,
-    state: &authlib::AdminSessionState,
-) -> miette::Result<authlib::AdminSessionState> {
-    let next_state = match authlib::start_admin_reauth(state).await {
-        Ok(authlib::AdminReauthOutcome::Bound(outcome)) => outcome.state,
-        Ok(authlib::AdminReauthOutcome::Flow(challenge)) => {
-            let login_url = challenge.login_url().to_string();
-            if output::is_json(format) {
-                output::print_json_progress(&pending_agent_login_json(&login_url))?;
-            } else {
-                output::print_info(&render_agent_login_instructions(&login_url)?);
-            }
-            map_admin_session_result((*challenge).complete(&state.trellis_url).await)?.state
-        }
-        Err(error) => return Err(map_admin_session_error(error)),
-    };
-
-    authlib::save_admin_session(&next_state).into_diagnostic()?;
-    Ok(next_state)
 }
 
 pub(crate) fn generate_session_keypair() -> (String, String) {
@@ -282,6 +247,7 @@ mod tests {
 
     fn test_admin_session_state() -> AdminSessionState {
         AdminSessionState {
+            login_session_id: ulid::Ulid::new().to_string(),
             trellis_url: "http://localhost:3000".to_string(),
             session_seed: "seed".to_string(),
             expires_at: Some(1_767_225_600_000),
@@ -357,7 +323,7 @@ mod tests {
     }
 
     #[test]
-    fn generic_rejected_session_request_authorization_violation_does_not_clear_local_session() {
+    fn authorization_denial_preserves_local_login_credentials() {
         let _guard = config_env_lock().lock().expect("lock config env");
         let test_dir = unique_test_dir("generic-rejected-session-request-error");
         fs::create_dir_all(test_dir.join("trellis")).expect("create test config dir");
@@ -368,16 +334,22 @@ mod tests {
         save_admin_session(&test_admin_session_state()).expect("save admin session");
         assert!(admin_session_path(&test_dir).exists());
 
-        let error = TrellisAuthError::TrellisClient(TrellisClientError::NatsRequest(
-            "authorization violation".to_string(),
-        ));
+        let saved = fs::read(admin_session_path(&test_dir)).expect("read saved login");
+        let error =
+            TrellisAuthError::AuthRequestHttpFailure(403, "authorization_violation".to_string());
         assert!(rejected_admin_session_error_report(&error)
             .expect("map generic authorization request error")
             .is_none());
         let report = map_admin_session_error(error);
 
-        assert!(admin_session_path(&test_dir).exists());
-        assert!(report.to_string().contains("authorization violation"));
+        assert_eq!(
+            fs::read(admin_session_path(&test_dir)).expect("read retained login"),
+            saved
+        );
+        assert!(report
+            .to_string()
+            .contains("review the participant's grants"));
+        assert!(!report.to_string().contains("trellis auth login"));
 
         unsafe {
             env::remove_var("XDG_CONFIG_HOME");
@@ -454,10 +426,10 @@ mod tests {
     }
 
     #[test]
-    fn explicit_rejected_session_clears_local_session() {
+    fn expired_session_clears_local_session() {
         assert_rejected_session_error_clears_local_session(
-            "rejected-rejected-session",
-            TrellisAuthError::AuthRequestHttpFailure(403, "authority_rejected".to_string()),
+            "expired-session",
+            TrellisAuthError::AuthRequestHttpFailure(401, "session_expired".to_string()),
         );
     }
 }

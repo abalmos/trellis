@@ -6,6 +6,7 @@ pub(super) mod companion_provisioning;
 mod deployments;
 mod evidence;
 mod fixtures;
+mod grants;
 mod outbox;
 pub(super) mod portals;
 mod provisioning;

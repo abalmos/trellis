@@ -41,8 +41,7 @@ pub use crate::jobs::{ActiveJob, JobDescriptor, JobRef, JobUpdateDescriptor, Job
 #[doc(hidden)]
 pub use authenticated_router::{AuthenticatedRouter, RequestValidation, RequestValidator};
 pub use bindings::{
-    validate_bootstrap_contract_state, BootstrapBinding, BootstrapContractRef,
-    EventConsumerOrdering, EventConsumerReplay, EventConsumerResourceBinding,
+    BootstrapBinding, EventConsumerOrdering, EventConsumerReplay, EventConsumerResourceBinding,
     JobsQueueResourceBinding, JobsResourceBinding, JobsSchemaRef, KvResourceBinding,
     ServiceResourceBindings, StoreResourceBinding,
 };
@@ -80,8 +79,7 @@ pub use runtime_facade::{
 pub use runtime_facade::{
     ServiceConnectOptions, ServiceEventListenOptions, ServiceEventListenerContext,
     ServiceEventListenerHandle, ServiceEventListenerMode, ServiceEventPublisherContext,
-    ServiceHandlerContext, ServiceRuntimeError, DEFAULT_AUTHORITY_PENDING_TIMEOUT_MS,
-    DEFAULT_RETRY_DELAY_MS, DEFAULT_TIMEOUT_MS,
+    ServiceHandlerContext, ServiceRuntimeError, DEFAULT_TIMEOUT_MS,
 };
 #[doc(hidden)]
 pub use schema_validation::validate_input_schema;

@@ -91,7 +91,7 @@ enum DeploymentKind {
 }
 
 async fn list_services(format: OutputFormat, args: &SvcListArgs) -> miette::Result<()> {
-    let (_state, connected) = connect_authenticated_cli_client(format).await?;
+    let (_state, connected) = connect_authenticated_cli_client().await?;
     let deployments = AuthClient::new(&connected)
         .rpc()
         .auth()
@@ -122,7 +122,7 @@ async fn list_services(format: OutputFormat, args: &SvcListArgs) -> miette::Resu
 }
 
 async fn list_devices(format: OutputFormat, args: &DevListArgs) -> miette::Result<()> {
-    let (_state, connected) = connect_authenticated_cli_client(format).await?;
+    let (_state, connected) = connect_authenticated_cli_client().await?;
     let deployments = AuthClient::new(&connected)
         .rpc()
         .auth()
@@ -153,13 +153,13 @@ async fn list_devices(format: OutputFormat, args: &DevListArgs) -> miette::Resul
 }
 
 async fn show_service(format: OutputFormat, id: &str) -> miette::Result<()> {
-    let (_state, connected) = connect_authenticated_cli_client(format).await?;
+    let (_state, connected) = connect_authenticated_cli_client().await?;
     let deployment = find_deployment(&connected, id, DeploymentKind::Service).await?;
     print_deployment_show_result(format, DeploymentKind::Service, &deployment)
 }
 
 async fn show_device(format: OutputFormat, id: &str) -> miette::Result<()> {
-    let (_state, connected) = connect_authenticated_cli_client(format).await?;
+    let (_state, connected) = connect_authenticated_cli_client().await?;
     let deployment = find_deployment(&connected, id, DeploymentKind::Device).await?;
     print_deployment_show_result(format, DeploymentKind::Device, &deployment)
 }
@@ -169,7 +169,7 @@ async fn create_service(
     id: &str,
     _args: &SvcCreateArgs,
 ) -> miette::Result<()> {
-    let (_state, connected) = connect_authenticated_cli_client(format).await?;
+    let (_state, connected) = connect_authenticated_cli_client().await?;
     let deployment = AuthClient::new(&connected)
         .rpc()
         .auth()
@@ -192,7 +192,7 @@ async fn create_service(
 }
 
 async fn create_device(format: OutputFormat, id: &str, args: &DevCreateArgs) -> miette::Result<()> {
-    let (_state, connected) = connect_authenticated_cli_client(format).await?;
+    let (_state, connected) = connect_authenticated_cli_client().await?;
     let deployment = AuthClient::new(&connected)
         .rpc()
         .auth()
@@ -242,7 +242,7 @@ async fn apply_contract(
                 .into_diagnostic()?,
         );
     }
-    let (_state, connected) = connect_authenticated_cli_client(format).await?;
+    let (_state, connected) = connect_authenticated_cli_client().await?;
     let Value::Object(participant_artifact) = participant.normalized_value().into_diagnostic()?
     else {
         return Err(miette::miette!("participant artifact must be an object"));
@@ -302,7 +302,7 @@ async fn toggle_deployment(
     enable: bool,
     kind: DeploymentKind,
 ) -> miette::Result<()> {
-    let (_state, connected) = connect_authenticated_cli_client(format).await?;
+    let (_state, connected) = connect_authenticated_cli_client().await?;
     let current = find_deployment(&connected, id, kind).await?;
     let expected_version = current
         .get("version")
@@ -367,7 +367,7 @@ async fn remove_deployment(
     if !output::is_json(format) && !args.force && !prompt_for_typed_identifier(&label)? {
         return Err(miette::miette!("deployment removal cancelled"));
     }
-    let (_state, connected) = connect_authenticated_cli_client(format).await?;
+    let (_state, connected) = connect_authenticated_cli_client().await?;
     let current = find_deployment(&connected, id, kind).await?;
     let expected_version = current
         .get("version")
@@ -394,7 +394,7 @@ async fn service_instances(
     id: &str,
     args: &SvcInstancesArgs,
 ) -> miette::Result<()> {
-    let (_state, connected) = connect_authenticated_cli_client(format).await?;
+    let (_state, connected) = connect_authenticated_cli_client().await?;
     let instances = AuthClient::new(&connected)
         .rpc()
         .auth()
@@ -419,7 +419,7 @@ async fn device_instances(
     id: &str,
     args: &DevInstancesArgs,
 ) -> miette::Result<()> {
-    let (_state, connected) = connect_authenticated_cli_client(format).await?;
+    let (_state, connected) = connect_authenticated_cli_client().await?;
     let instances = AuthClient::new(&connected)
         .rpc()
         .auth()
@@ -453,7 +453,7 @@ async fn provision_service(
     id: &str,
     args: &SvcProvisionArgs,
 ) -> miette::Result<()> {
-    let (_state, connected) = connect_authenticated_cli_client(format).await?;
+    let (_state, connected) = connect_authenticated_cli_client().await?;
     let (instance_seed, instance_key, generated_seed) = if let Some(seed) = &args.instance_seed {
         let session_key = authlib::session_public_key(seed).into_diagnostic()?;
         (seed.clone(), session_key, false)
@@ -484,7 +484,7 @@ async fn provision_device(
     id: &str,
     args: &DevProvisionArgs,
 ) -> miette::Result<()> {
-    let (_state, connected) = connect_authenticated_cli_client(format).await?;
+    let (_state, connected) = connect_authenticated_cli_client().await?;
     let seed: [u8; 32] = rand::random();
     let root_secret = URL_SAFE_NO_PAD.encode(seed);
     let identity = authlib::derive_device_identity(&seed).into_diagnostic()?;
@@ -513,7 +513,7 @@ async fn dev_activations(
 ) -> miette::Result<()> {
     match command {
         DevActivationsCommand::List(args) => {
-            let (_state, connected) = connect_authenticated_cli_client(format).await?;
+            let (_state, connected) = connect_authenticated_cli_client().await?;
             let activations = AuthClient::new(&connected)
                 .rpc()
                 .auth()
@@ -544,7 +544,7 @@ async fn dev_activations(
             print_device_activations_result(format, activations)
         }
         DevActivationsCommand::Revoke(args) => {
-            let (_state, connected) = connect_authenticated_cli_client(format).await?;
+            let (_state, connected) = connect_authenticated_cli_client().await?;
             let devices = AuthClient::new(&connected)
                 .rpc()
                 .auth()
@@ -585,7 +585,7 @@ async fn dev_reviews(
     deployment_id: &str,
     command: DevReviewsCommand,
 ) -> miette::Result<()> {
-    let (_state, connected) = connect_authenticated_cli_client(format).await?;
+    let (_state, connected) = connect_authenticated_cli_client().await?;
     let auth_client = AuthClient::new(&connected);
     match command {
         DevReviewsCommand::List(args) => {
@@ -685,7 +685,7 @@ async fn deployment_authority(
     deployment_id: &str,
     command: DeploymentAuthorityCommand,
 ) -> miette::Result<()> {
-    let (_state, connected) = connect_authenticated_cli_client(format).await?;
+    let (_state, connected) = connect_authenticated_cli_client().await?;
     let auth = AuthClient::new(&connected);
     match command {
         DeploymentAuthorityCommand::Show => {

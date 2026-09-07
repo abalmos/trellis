@@ -9,6 +9,8 @@ pub enum ResolutionErrorCode {
     ApiDigestMismatch,
     /// A selected API surface does not exist.
     MissingSurface,
+    /// An administrative selection names no declared optional capability.
+    UnknownOptionalCapability,
     /// Cancellation was selected for a non-cancelable operation.
     InvalidCancelSelection,
     /// A selected operation signal does not exist.
@@ -42,38 +44,28 @@ pub enum AuthorizationErrorCode {
     InvalidKeyId,
     /// A signature is malformed or cryptographically invalid.
     InvalidSignature,
-    /// An object belongs to another authority.
-    WrongAuthority,
     /// A critical extension is not understood.
     UnknownCriticalExtension,
     /// A set-like array is duplicated or out of canonical order.
     NonCanonicalSet,
     /// An authored validity interval is inconsistent.
     InvalidValidityWindow,
-    /// A manifest generation is older than the accepted minimum.
-    ManifestRollback,
-    /// The context was issued against a different manifest generation.
-    ManifestGenerationMismatch,
-    /// The issuer manifest is not yet valid.
-    ManifestNotYetValid,
-    /// The issuer manifest has expired.
-    ManifestExpired,
-    /// The context issuer is absent from the manifest.
-    IssuerNotListed,
+    /// An explicitly revoked issuer cannot verify live or retained authority.
+    IssuerRevoked,
+    /// A retired issuer is eligible only for historical event verification.
+    IssuerRetired,
+    /// A historical-event context handle cannot authorize live requests.
+    HistoricalContext,
     /// The authorization context is not yet valid.
     ContextNotYetValid,
     /// The authorization context has expired.
     ContextExpired,
     /// The context lifetime exceeds explicit policy.
     ContextLifetimeExceeded,
-    /// The context validity exceeds its manifest.
-    ContextOutlivesManifest,
     /// The session verification key is malformed.
     InvalidSessionKey,
     /// One or more exact permission atoms are absent.
     PermissionDenied,
-    /// One or more platform capability keys are absent.
-    CapabilityDenied,
     /// The canonical signed context exceeds explicit policy.
     ContextTooLarge,
     /// The request issue time is outside the accepted skew.
@@ -86,7 +78,7 @@ pub enum AuthorizationErrorCode {
     InvalidEventTime,
     /// The context-bound event signature is invalid.
     InvalidEventProof,
-    /// The event time is at or after the context revocation time.
+    /// The event's signing context was explicitly revoked.
     EventRevoked,
 }
 

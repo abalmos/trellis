@@ -1,12 +1,11 @@
 use std::collections::BTreeSet;
 use std::sync::{Arc, Mutex};
 
-use runtime_trellis::participants::test_events::{ConnectedService, ServiceConnectOptions};
-use trellis_rs::client::MemoryAuthorizationContextStore;
-use trellis_rs::generated::EventDescriptor;
 use runtime_trellis::apis::test_events::events::BetaEventDescriptor;
 use runtime_trellis::apis::test_events::rpc::Empty;
 use runtime_trellis::apis::test_events::{BetaEvent, ObservedResponse};
+use runtime_trellis::participants::test_events::{ConnectedService, ServiceConnectOptions};
+use trellis_rs::generated::EventDescriptor;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -18,19 +17,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         "events.v1.Beta.rust"
     );
     let url = std::env::var("TRELLIS_URL")?;
-    let deployment = std::env::var("TRELLIS_DEPLOYMENT")?;
     let identity = std::env::var("TRELLIS_IDENTITY_SEED")?;
-    let session = std::env::var("TRELLIS_SESSION_SEED")?;
-    let name = std::env::var("TRELLIS_INSTANCE")?;
-    let mut service = ConnectedService::connect(ServiceConnectOptions::new(
-        &url,
-        &name,
-        &deployment,
-        &identity,
-        &session,
-        Arc::new(MemoryAuthorizationContextStore::default()),
-    ))
-    .await?;
+    let mut service =
+        ConnectedService::connect(ServiceConnectOptions::new(&url, &identity)).await?;
     let consumers = service.event_consumers();
     let events = consumers.events();
     let seen = Arc::new(Mutex::new(BTreeSet::new()));

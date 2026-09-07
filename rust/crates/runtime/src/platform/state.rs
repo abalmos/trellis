@@ -423,21 +423,26 @@ impl StateRuntime {
         store: &str,
     ) -> Result<Declaration, ServerError> {
         let caller = context.caller.as_ref().ok_or_else(auth_denied)?;
-        let scope = match (caller.principal.kind, caller.participant.kind) {
+        let binding = self
+            .repository
+            .get_authorized_participant_binding(
+                &caller.context_digest,
+                i64::try_from(
+                    OffsetDateTime::now_utc()
+                        .unix_timestamp_nanos()
+                        .div_euclid(1_000_000),
+                )
+                .map_err(unexpected)?,
+            )
+            .await
+            .map_err(unexpected)?
+            .ok_or_else(auth_denied)?;
+        let scope = match (caller.principal_kind, binding.participant_kind) {
             (AuthorizationPrincipalKind::User, ParticipantKind::App) => Scope::UserApp,
             (AuthorizationPrincipalKind::Device, ParticipantKind::Device) => Scope::DeviceApp,
             _ => return Err(auth_denied()),
         };
-        let binding = self
-            .repository
-            .get_participant_binding(&caller.participant.id, &caller.participant.artifact_digest)
-            .await
-            .map_err(unexpected)?
-            .ok_or_else(|| validation("/store", "participant State declaration is unavailable"))?;
-        if binding.participant_id != caller.participant.id
-            || binding.participant_kind != caller.participant.kind
-            || binding.artifact_digest != caller.participant.artifact_digest
-            || binding.needs_digest != caller.participant.needs_digest
+        if binding.participant_id != caller.participant_id
             || binding.state != ParticipantBindingState::Resolved
         {
             return Err(auth_denied());
@@ -445,8 +450,8 @@ impl StateRuntime {
         declaration_from_binding(
             binding,
             scope,
-            caller.principal.id.clone(),
-            caller.participant.id.clone(),
+            caller.principal_id.clone(),
+            caller.participant_id.clone(),
             store,
         )
     }
@@ -548,7 +553,7 @@ impl StateRuntime {
     ) -> Result<(), ServerError> {
         let caller = context.caller.as_ref().ok_or_else(auth_denied)?;
         let target = PermissionTarget::participant_resource(
-            caller.participant.id.clone(),
+            caller.participant_id.clone(),
             ParticipantResourceKind::State,
             declaration.store.clone(),
         )

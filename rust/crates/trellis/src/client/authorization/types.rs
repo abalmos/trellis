@@ -1,16 +1,10 @@
-use std::fmt;
-
-use super::super::TrellisClientError;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-/// Client authorization state wire format.
-pub(crate) const AUTHORIZATION_CLIENT_STATE_FORMAT_: &str = "trellis.authorization-client-state.v2";
-
-/// Client-side verification limits distributed with the pinned trust root.
+/// Client-side verification and refresh limits from the authenticated server.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct AuthorizationTrustPolicy {
+pub struct AuthorizationContextPolicy {
     /// Symmetric clock skew accepted by the issuer.
     pub allowed_clock_skew_seconds: u32,
     /// Maximum context lease duration.
@@ -19,24 +13,46 @@ pub struct AuthorizationTrustPolicy {
     pub maximum_context_bytes: usize,
     /// Maximum exact permission atoms.
     pub maximum_permissions: usize,
-    /// Maximum platform capability names.
-    pub maximum_capabilities: usize,
     /// Safety lead before expiry used for proactive refresh.
     pub refresh_lead_seconds: u32,
     /// Deterministic earlier-only refresh jitter window.
     pub refresh_jitter_seconds: u32,
 }
 
-/// NATS-backed authorization evidence registry binding distributed with the
-/// pinned trust root.
+impl AuthorizationContextPolicy {
+    /// Construct the shared protocol policy at the server-corrected current time.
+    pub fn verification_policy(
+        &self,
+        now: i64,
+    ) -> Result<trellis_protocol::AuthorizationVerificationPolicy, trellis_protocol::ProtocolError>
+    {
+        trellis_protocol::AuthorizationVerificationPolicy::new(
+            now,
+            self.allowed_clock_skew_seconds,
+            self.maximum_context_lifetime_seconds,
+            self.maximum_context_bytes,
+            self.maximum_permissions,
+        )
+    }
+}
+
+pub(crate) enum AuthorizationCredential {
+    Native {
+        kind: trellis_protocol::AuthorizationPrincipalKind,
+        identity: std::sync::Arc<super::super::SessionAuth>,
+    },
+    User {
+        login_session_id: String,
+    },
+}
+
+/// NATS-backed context and revocation registry binding from the server.
 ///
 /// The binding is internal runtime/SDK material: service authors never receive
 /// raw registry handles or subject names.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct AuthorizationRegistryBinding {
-    /// KV bucket holding immutable trust records.
-    pub trust_bucket: String,
     /// KV bucket holding contexts and revocations.
     pub context_bucket: String,
 }
@@ -45,36 +61,42 @@ pub struct AuthorizationRegistryBinding {
 impl AuthorizationRegistryBinding {
     #[doc(hidden)]
     #[must_use]
-    pub fn from_runtime_parts(trust_bucket: String, context_bucket: String) -> Self {
-        Self {
-            trust_bucket,
-            context_bucket,
-        }
+    pub fn from_runtime_parts(context_bucket: String) -> Self {
+        Self { context_bucket }
     }
 }
 
-/// Pinned root plus the complete current verification chain.
-#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct AuthorizationTrustBundle {
-    /// Pinned public trust root.
-    pub root: Value,
-    /// Complete canonical issuer manifest embedded for local verification.
-    pub manifest: Value,
-    /// NATS-backed authorization evidence registry binding.
-    pub(crate) authorization_registry: AuthorizationRegistryBinding,
-    /// Verification policy bound to this runtime configuration.
-    pub policy: AuthorizationTrustPolicy,
-}
-
-/// Signed authorization context and its minimal trust metadata.
+/// Signed context and its authenticated online issuer and runtime metadata.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AuthorizationContextBundle {
     /// Complete signed authorization context.
     pub context: Value,
-    /// Pinned root and embedded verification chain.
-    pub trust: AuthorizationTrustBundle,
+    /// Current issuer entry received from the configured origin.
+    pub issuer: trellis_protocol::AuthorizationIssuerKey,
+    /// NATS-backed authorization evidence registry binding.
+    pub(crate) authorization_registry: AuthorizationRegistryBinding,
+    /// Verification and refresh policy for this runtime.
+    pub policy: AuthorizationContextPolicy,
+}
+
+#[cfg(feature = "runtime-internals")]
+impl AuthorizationContextBundle {
+    /// Assemble server-issued wire metadata; clients still verify it at installation.
+    #[doc(hidden)]
+    pub fn from_runtime_parts(
+        context: Value,
+        issuer: trellis_protocol::AuthorizationIssuerKey,
+        authorization_registry: AuthorizationRegistryBinding,
+        policy: AuthorizationContextPolicy,
+    ) -> Self {
+        Self {
+            context,
+            issuer,
+            authorization_registry,
+            policy,
+        }
+    }
 }
 
 /// Route-selection JWT installed atomically with an authorization context.
@@ -103,18 +125,16 @@ pub struct AuthorizationRuntimeTransports {
     pub native: AuthorizationNativeTransport,
 }
 
-/// Complete proof-bound runtime/session metadata retained across refresh and restart.
+/// Proof-bound assignment and transport metadata for one runtime connection.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct AuthorizationRuntimeBinding {
-    /// Stable session identifier.
-    pub session_id: String,
+    /// SDK-owned connection identifier.
+    pub connection_id: String,
+    /// Durable user login identifier, absent for native credentials.
+    pub login_session_id: Option<String>,
     /// Stable participant identifier.
     pub participant_id: String,
-    /// Exact participant artifact digest expected during recovery.
-    pub participant_digest: String,
-    /// Exact participant needs digest expected during recovery.
-    pub needs_digest: String,
     /// Current NATS reply-inbox prefix.
     pub inbox_prefix: String,
     /// Current typed runtime transports.
@@ -133,62 +153,8 @@ pub struct AuthorizationInstallation {
     pub runtime: AuthorizationRuntimeBinding,
     /// Server-clock correction in milliseconds.
     pub server_clock_offset_ms: i64,
-}
-
-/// Complete installation-scoped authorization trust rollback floor.
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(deny_unknown_fields, rename_all = "camelCase")]
-pub struct AuthorizationClientTrustState {
-    /// Client trust-state wire format.
-    pub format: String,
-    /// Authorization namespace pinned by the installation.
-    pub authority: String,
-    /// Content-derived root key identifier.
-    pub root_key_id: String,
-    /// Canonical digest of the exact pinned root object.
-    pub root_digest: String,
-    /// Lowest issuer-manifest generation accepted by the installation.
-    pub minimum_manifest_generation: u64,
-    /// Exact manifest digest accepted at the generation floor.
-    pub manifest_digest_at_minimum_generation: String,
-}
-
-/// Atomic client authorization state persisted by a runtime installation.
-#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
-#[serde(deny_unknown_fields, rename_all = "camelCase")]
-pub struct AuthorizationClientState {
-    /// Client state wire format.
-    pub format: String,
-    /// Caller-owned storage binding, such as a service instance or device identity.
-    pub binding: String,
-    /// Durable installation trust floor.
-    pub trust: AuthorizationClientTrustState,
-    /// Proof-bound session and runtime metadata retained across context expiry.
-    pub runtime: AuthorizationRuntimeBinding,
-    /// Current signed context, or `None` after session clearing.
-    pub context: Option<AuthorizationContextBundle>,
-    /// Route JWT paired atomically with the current context.
-    pub routing: Option<AuthorizationRoutingMaterial>,
-    /// Server-clock correction paired atomically with the current installation.
-    pub server_clock_offset_ms: i64,
-}
-
-/// Narrow persistence port for one client installation's trust floor and context.
-pub trait AuthorizationContextStore: fmt::Debug + Send + Sync {
-    /// Load the atomically persisted client state.
-    fn load(&self) -> Result<Option<AuthorizationClientState>, TrellisClientError>;
-
-    /// Atomically advance the trust floor and current context.
-    fn commit(
-        &self,
-        state: AuthorizationClientState,
-    ) -> Result<AuthorizationClientState, TrellisClientError>;
-
-    /// Clear only the session-bound context while retaining installation trust.
-    fn clear_context(&self) -> Result<(), TrellisClientError>;
-
-    /// Explicitly reset both context and installation trust.
-    fn reset_trust(&self) -> Result<(), TrellisClientError>;
+    /// Server-owned native resource evidence, absent for user connections.
+    pub(crate) authorization: Option<Value>,
 }
 
 /// Verified current-context material held by the own-context cache.
@@ -196,10 +162,6 @@ pub trait AuthorizationContextStore: fmt::Debug + Send + Sync {
 pub(crate) struct CurrentContext {
     pub(crate) bundle: AuthorizationContextBundle,
     pub(crate) context_digest: String,
-    pub(crate) manifest_generation: u64,
-    pub(crate) session_id: String,
-    pub(crate) participant_digest: String,
-    pub(crate) needs_digest: String,
     pub(crate) not_before: i64,
     pub(crate) expires_at: i64,
     pub(crate) refresh_at: i64,
@@ -211,4 +173,6 @@ pub(crate) struct CachedAuthorizationState {
     pub(crate) current: Option<CurrentContext>,
     pub(crate) runtime: Option<AuthorizationRuntimeBinding>,
     pub(crate) routing: Option<AuthorizationRoutingMaterial>,
+    pub(crate) server_clock_offset_ms: i64,
+    pub(crate) authorization: Option<Value>,
 }

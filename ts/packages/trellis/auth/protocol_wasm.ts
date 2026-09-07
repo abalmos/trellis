@@ -18,8 +18,6 @@ export type AuthorizationVerificationPolicy = {
   maximumContextLifetimeSeconds: number;
   maximumContextBytes: number;
   maximumPermissions: number;
-  maximumCapabilities: number;
-  minimumManifestGeneration: number;
 };
 
 /** Context verification policy fields used to schedule refresh. */
@@ -30,12 +28,23 @@ export type AuthorizationContextVerificationPolicy =
     refreshJitterSeconds: number;
   };
 
-/** Trust material and signed context supplied to a local verifier. */
+/** Online issuer entry and signed context supplied to a local verifier. */
 export type AuthorizationContextVerificationInput = {
-  root: unknown;
-  manifest: unknown;
+  issuer: AuthorizationIssuerKey;
   context: unknown;
 };
+
+/** Public issuer entry authenticated by the configured Trellis origin. */
+export type AuthorizationIssuerKey = {
+  keyId: string;
+  publicKey: string;
+  state: "active" | "retired" | "revoked";
+};
+
+/** Meta-authority not represented by ordinary permission atoms. */
+export type PlatformPrivilege =
+  | "trellis.auth::admin"
+  | "trellis.auth::capabilities.delegate";
 
 /** One exact API or participant-resource permission target. */
 export type PermissionTarget =
@@ -96,45 +105,28 @@ export type ResolvedParticipant = {
   authorityProposal: JsonObject;
 };
 
-/** Stable principal projection returned by the protocol verifier. */
-export type AuthorizationPrincipal = {
-  kind: "user" | "service" | "device";
-  id: string;
-};
-
-/** Exact participant projection returned by the protocol verifier. */
-export type AuthorizationParticipant = {
-  kind: "service" | "app" | "device" | "agent";
-  id: string;
-  artifactDigest: string;
-  needsDigest: string;
-};
-
-/** Durable authority reference bound into a signed context. */
-export type AuthorizationAuthorityRef = {
-  kind: "identity" | "deployment";
-  id: string;
-  version: number;
-};
-
 /** Complete verified context metadata returned by request/event verification. */
 export type VerifiedAuthorizationContextProjection = {
-  authority: string;
-  authorityRef: AuthorizationAuthorityRef;
-  principal: AuthorizationPrincipal;
-  participant: AuthorizationParticipant;
+  ownerKind: "deployment" | "user";
+  ownerId: string;
+  grantRevision: number;
+  principalId: string;
+  principalKind: "user" | "service" | "device";
+  participantId: string;
+  identityKeyId: string | null;
+  loginSessionId: string | null;
   deploymentId: string | null;
   instanceId: string | null;
   issuerKeyId: string;
-  sessionId: string;
+  connectionId: string;
   sessionKey: string;
   inboxPrefix: string;
   issuedAt: number;
   notBefore: number;
   expiresAt: number;
-  grantSet: GrantSet;
+  grants: GrantSet;
   grantDigest: string;
-  capabilities: string[];
+  platformPrivileges: PlatformPrivilege[];
   extensions: Record<string, unknown>;
   contextDigest: string;
 };
@@ -149,8 +141,8 @@ export type VerifiedAuthorizationEventPublisher = {
   deploymentId: string | null;
   instanceId: string | null;
   participantId: string;
-  participantDigest: string;
-  sessionId: string;
+  connectionId: string;
+  loginSessionId: string | null;
 };
 
 /** Verified event publisher projection. */
@@ -170,21 +162,17 @@ export type AuthorizationVerificationErrorCode =
   | "InvalidPublicKey"
   | "InvalidKeyId"
   | "InvalidSignature"
-  | "WrongAuthority"
   | "UnknownCriticalExtension"
   | "NonCanonicalSet"
   | "InvalidValidityWindow"
-  | "ManifestRollback"
-  | "ManifestNotYetValid"
-  | "ManifestExpired"
-  | "IssuerNotListed"
+  | "IssuerRevoked"
+  | "IssuerRetired"
+  | "HistoricalContext"
   | "ContextNotYetValid"
   | "ContextExpired"
   | "ContextLifetimeExceeded"
-  | "ContextOutlivesManifest"
   | "InvalidSessionKey"
   | "PermissionDenied"
-  | "CapabilityDenied"
   | "ContextTooLarge"
   | "ProofIatOutOfRange"
   | "InvalidRequestProof"
@@ -219,7 +207,6 @@ export type VerifyAuthorizationRequestArgs = {
   requestId: string;
   proof: string;
   requiredPermissions: PermissionAtom[];
-  requiredCapabilities: string[];
   policy: AuthorizationVerificationPolicy;
 };
 
@@ -232,19 +219,14 @@ export type VerifyAuthorizationEventArgs = {
   eventTime: string;
   proof: string;
   requiredPermissions: PermissionAtom[];
-  requiredCapabilities: string[];
   policy: AuthorizationVerificationPolicy;
   revokedAt?: number | null;
 };
 
-/** Projection returned after verifying a complete context trust chain. */
+/** Projection returned after verifying an online-issued context. */
 export type VerifiedAuthorizationContextTokenProjection = {
-  authority: string;
-  rootKeyId: string;
-  rootDigest: string;
-  manifestDigest: string;
+  issuer: AuthorizationIssuerKey;
   contextDigest: string;
-  manifestGeneration: number;
   refreshAt: number;
   context: Record<string, unknown> & {
     issuedAt: number;
@@ -277,14 +259,16 @@ async function wasmBytes(): Promise<Uint8Array> {
   return new Uint8Array(await response.arrayBuffer());
 }
 
-async function initialize(): Promise<void> {
+/** Initialize the shared Rust protocol implementation before asynchronous use. */
+export async function initializeProtocolWasm(): Promise<void> {
   initialized ??= (async () => {
     await init({ module_or_path: await wasmBytes() });
   })();
   await initialized;
 }
 
-function initializeSync(): void {
+/** Initialize the shared Rust protocol implementation before synchronous use. */
+export function initializeProtocolWasmSync(): void {
   if (initializedSync) return;
   const url = new URL(
     "./protocol_wasm/trellis_protocol_wasm_bg.wasm",
@@ -322,7 +306,7 @@ export function resolveParticipantV1WasmSync(args: {
   participant: unknown;
   apis: Record<string, unknown>;
 }): ResolvedParticipant {
-  initializeSync();
+  initializeProtocolWasmSync();
   return JSON.parse(
     protocolWasm.resolve_participant(
       JSON.stringify(args.participant),
@@ -333,8 +317,7 @@ export function resolveParticipantV1WasmSync(args: {
 
 /** Verify a complete signed authorization context through Rust/WASM. */
 export async function verifyAuthorizationContextWasm(args: {
-  root: unknown;
-  manifest: unknown;
+  issuer: AuthorizationIssuerKey;
   context: unknown;
   policy: AuthorizationContextVerificationPolicy;
 }): Promise<VerifiedAuthorizationContextTokenProjection> {
@@ -345,8 +328,7 @@ export async function verifyAuthorizationContextWasm(args: {
 
 /** Verify and retain one authorization context for repeated proof checks. */
 export async function createAuthorizationContextHandleWasm(args: {
-  root: unknown;
-  manifest: unknown;
+  issuer: AuthorizationIssuerKey;
   context: unknown;
   policy: AuthorizationContextVerificationPolicy;
   historical?: boolean;
@@ -354,10 +336,9 @@ export async function createAuthorizationContextHandleWasm(args: {
   handle: AuthorizationContextHandle;
   verified: VerifiedAuthorizationContextTokenProjection;
 }> {
-  await initialize();
+  await initializeProtocolWasm();
   const handle = protocolWasm.create_authorization_context_handle(
-    JSON.stringify(args.root),
-    JSON.stringify(args.manifest),
+    JSON.stringify(args.issuer),
     JSON.stringify(args.context),
     JSON.stringify(wasmVerificationPolicy(args.policy)),
     args.historical ?? false,
@@ -392,33 +373,11 @@ export function assertAuthorizationContextHandleCurrentWasm(
   handle.assert_current(JSON.stringify(wasmVerificationPolicy(policy)));
 }
 
-/** Verify a root-signed issuer manifest through Rust/WASM. */
-export async function verifyAuthorizationManifestWasm(args: {
-  root: unknown;
-  manifest: unknown;
-  policy: AuthorizationVerificationPolicy;
-}): Promise<{
-  authority: string;
-  rootKeyId: string;
-  generation: number;
-  digest: string;
-  issuerKeyIds: string[];
-}> {
-  await initialize();
-  return JSON.parse(
-    protocolWasm.verify_authorization_manifest(
-      JSON.stringify(args.root),
-      JSON.stringify(args.manifest),
-      JSON.stringify(wasmVerificationPolicy(args.policy)),
-    ),
-  );
-}
-
 /** Verify one context-bound request proof using actual received request bytes. */
 export async function verifyAuthorizationRequestWasm(
   args: VerifyAuthorizationRequestArgs,
 ): Promise<VerifyAuthorizationRequestResult> {
-  await initialize();
+  await initializeProtocolWasm();
   const { contextHandle, payload, ...input } = args;
   return JSON.parse(
     protocolWasm.verify_authorization_request(
@@ -436,7 +395,7 @@ export async function verifyAuthorizationRequestWasm(
 export async function verifyAuthorizationEventWasm(
   args: VerifyAuthorizationEventArgs,
 ): Promise<VerifyAuthorizationEventResult> {
-  await initialize();
+  await initializeProtocolWasm();
   const { contextHandle, payload, ...input } = args;
   return JSON.parse(
     protocolWasm.verify_authorization_event(
@@ -459,8 +418,6 @@ function wasmVerificationPolicy(
     maximumContextLifetimeSeconds: policy.maximumContextLifetimeSeconds,
     maximumContextBytes: policy.maximumContextBytes,
     maximumPermissions: policy.maximumPermissions,
-    maximumCapabilities: policy.maximumCapabilities,
-    minimumManifestGeneration: policy.minimumManifestGeneration,
   };
 }
 

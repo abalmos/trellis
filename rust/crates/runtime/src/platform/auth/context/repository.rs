@@ -138,6 +138,7 @@ pub enum AuthorizationContextSelector {
     Session(String),
     Principal(String),
     Authority(AuthorityKind, String),
+    Grant(super::super::GrantOwnerKind, String, String),
     Deployment(String),
     Instance(String),
     Issuer(String),
@@ -198,10 +199,9 @@ pub(crate) trait AuthorizationContextRepository: Send + Sync {
         now: i64,
     ) -> Result<Vec<AuthorizationContextRecord>, AuthorizationStateError>;
 
-    async fn delete_terminal_contexts(
+    async fn delete_expired_context_idempotency(
         &self,
-        before: i64,
-        limit: usize,
+        now: i64,
     ) -> Result<usize, AuthorizationStateError>;
 }
 
@@ -365,6 +365,13 @@ impl AuthorizationContextRepository for SqliteAuthorizationStore {
             if let Some(replay) = sqlite_idempotency_replay(&transaction, &commit.idempotency)? {
                 return Ok(IdempotentOutcome::Replayed(replay));
             }
+            let current_signer = transaction.query_row(
+                "SELECT EXISTS(SELECT 1 FROM auth_authorization_issuers WHERE key_id = ?1 AND is_current = 1 AND revoked_at IS NULL)",
+                [&commit.context.issuer_key_id], |row| row.get::<_, bool>(0),
+            ).map_err(sql_error)?;
+            if !current_signer {
+                return Err(AuthorizationStateError::AuthorityStale);
+            }
             let snapshot = sqlite_issuance_snapshot(&transaction, &commit.context.session_id)?;
             if issuance_snapshot_token(&snapshot)? != commit.expected_snapshot_token {
                 return Err(AuthorizationStateError::StorageConflict);
@@ -408,6 +415,10 @@ impl AuthorizationContextRepository for SqliteAuthorizationStore {
             let action =
                 context_action(&commit.context, PostCommitActionKind::ContextPublish, None)?;
             insert_sql_context(&transaction, &commit.context)?;
+            transaction.execute(
+                "UPDATE auth_authorization_issuers SET live_until_seconds = MAX(live_until_seconds, ?1) WHERE key_id = ?2",
+                params![commit.context.expires_at, commit.context.issuer_key_id],
+            ).map_err(map_write_error)?;
             let mut idempotency = commit.idempotency;
             idempotency.result = json!({ "contextDigest": commit.context.context_digest });
             insert_sql_idempotency_and_actions(&transaction, &idempotency, &[action])?;
@@ -509,43 +520,22 @@ impl AuthorizationContextRepository for SqliteAuthorizationStore {
         .await
     }
 
-    async fn delete_terminal_contexts(
+    async fn delete_expired_context_idempotency(
         &self,
-        before: i64,
-        limit: usize,
+        now: i64,
     ) -> Result<usize, AuthorizationStateError> {
-        require_protocol_timestamp("before", before)?;
-        let limit = i64::try_from(limit).map_err(|_| {
-            AuthorizationStateError::InvalidRecord("context cleanup limit is too large".to_owned())
+        require_protocol_timestamp("now", now)?;
+        let now_millis = now.checked_mul(1_000).ok_or_else(|| {
+            AuthorizationStateError::InvalidRecord(
+                "idempotency cleanup timestamp overflow".to_owned(),
+            )
         })?;
         self.run(move |connection| {
-            let before_millis = before.checked_mul(1_000).ok_or_else(|| {
-                AuthorizationStateError::InvalidRecord(
-                    "context cleanup timestamp overflow".to_owned(),
-                )
-            })?;
             connection
                 .execute(
                     "DELETE FROM auth_idempotency_results
-                     WHERE purpose = 'authorizationContextIssue' AND expires_at <= ?1",
-                    [before_millis],
-                )
-                .map_err(map_write_error)?;
-            connection
-                .execute(
-                    "DELETE FROM auth_authorization_contexts
-                     WHERE context_digest IN (
-                       SELECT context_digest FROM auth_authorization_contexts AS context
-                       WHERE state IN ('expired', 'revoked')
-                          AND expires_at <= ?1
-                         AND NOT EXISTS (
-                           SELECT 1 FROM auth_post_commit_actions AS action
-                           WHERE json_extract(action.payload_json, '$.contextDigest') = context.context_digest
-                         )
-                         ORDER BY expires_at, context_digest
-                       LIMIT ?2
-                     )",
-                    params![before, limit],
+                 WHERE purpose = 'authorizationContextIssue' AND expires_at <= ?1",
+                    [now_millis],
                 )
                 .map_err(map_write_error)
         })
@@ -691,6 +681,7 @@ fn decode_sql_context(row: &Row<'_>) -> rusqlite::Result<AuthorizationContextRec
     })
 }
 
+/// Revoke using Unix seconds; the queued outbox records use Unix milliseconds.
 pub(crate) fn revoke_sql_contexts(
     connection: &rusqlite::Connection,
     selector: &AuthorizationContextSelector,
@@ -727,6 +718,15 @@ pub(crate) fn revoke_sql_contexts(
             "state = 'active' AND deployment_id = ?1 ORDER BY context_digest",
             &[id],
         )?,
+        AuthorizationContextSelector::Grant(kind, id, participant_id) => {
+            let kind = encode_enum(*kind)?;
+            query_sql_contexts(connection,
+                "state = 'active' AND json_extract(signed_context_json, '$.ownerKind') = ?1
+                 AND json_extract(signed_context_json, '$.ownerId') = ?2
+                 AND json_extract(signed_context_json, '$.participantId') = ?3 ORDER BY context_digest",
+                &[&kind, id, participant_id],
+            )?
+        }
         AuthorizationContextSelector::Instance(id) => query_sql_contexts(
             connection,
             "state = 'active' AND instance_id = ?1 ORDER BY context_digest",
@@ -1194,6 +1194,44 @@ mod tests {
             repository.get_context_by_digest(&context_digest).await,
             Err(AuthorizationStateError::Storage(_))
         ));
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn expired_context_history_survives_cleanup_and_rejects_mutation(
+    ) -> Result<(), AuthorizationStateError> {
+        let repository = SqliteAuthorizationStore::open_in_memory()?;
+        let (context, snapshot_token) = seed_context(&repository).await?;
+        commit_seed_context(
+            &repository,
+            context.clone(),
+            snapshot_token,
+            "req_history",
+            20,
+        )
+        .await?;
+        repository.expire_contexts(context.expires_at).await?;
+        repository
+            .delete_expired_context_idempotency(context.expires_at + 60)
+            .await?;
+        let context_digest = context.context_digest.clone();
+        repository.run(move |connection| {
+            for statement in [
+                "DELETE FROM auth_authorization_contexts WHERE context_digest = ?1",
+                "UPDATE auth_authorization_contexts SET signed_context_json = '{}' WHERE context_digest = ?1",
+                "UPDATE auth_authorization_contexts SET expires_at = expires_at + 1 WHERE context_digest = ?1",
+            ] {
+                assert!(connection.execute(statement, [&context_digest]).is_err());
+            }
+            Ok(())
+        }).await?;
+        let retained = repository
+            .get_context_by_digest(&context.context_digest)
+            .await?
+            .expect("expired context remains durable");
+        assert_eq!(retained.state, AuthorizationContextState::Expired);
+        assert_eq!(retained.signed_context_json, context.signed_context_json);
+        assert_eq!(retained.expires_at, context.expires_at);
         Ok(())
     }
 

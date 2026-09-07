@@ -8,7 +8,6 @@ pub(crate) mod trust;
 pub(crate) use issuer::{AuthorizationContextIssueRequest, AuthorizationContextService};
 pub(crate) use registry::{
     AuthorizationContextBundle, AuthorizationContextRegistry, AuthorizationRegistryBinding,
-    AuthorizationTrustBundle,
 };
 pub(crate) use repository::{
     revoke_sql_contexts, AuthorizationContextCommit, AuthorizationContextRecord,

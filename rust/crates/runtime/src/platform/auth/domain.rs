@@ -9,12 +9,102 @@ use sha2::{Digest, Sha256};
 use thiserror::Error;
 use trellis_protocol::{
     parse_api, parse_participant, resolve_participant, ApiArtifact, AuthorizationAuthorityRef,
-    AuthorizationParticipant, AuthorizationPrincipal, GrantSet, ParticipantKind,
+    AuthorizationParticipant, AuthorizationPrincipal, GrantSet, ParticipantKind, PlatformPrivilege,
     ResolvedParticipant,
 };
 
 /// Largest integer exactly representable by interoperable JSON security objects.
 pub const MAX_PROTOCOL_INTEGER: u64 = 9_007_199_254_740_991;
+
+pub use trellis_protocol::GrantOwnerKind;
+
+/// Lifecycle of the retained current binding, including revocation tombstones.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum GrantBindingState {
+    /// The current grants may be issued while owner and credential remain eligible.
+    Active,
+    /// Authority is revoked; the row and its revision remain reserved.
+    Revoked,
+}
+
+/// Verified portal/provider policy association for automatic user grants.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct GrantProvenance {
+    /// Registered trusted portal responsible for the verified login.
+    pub portal_id: String,
+    /// Verified identity provider, never a participant-supplied claim.
+    pub provider_id: String,
+    /// Verified provider roles used by the explicit grant transaction.
+    pub roles: Vec<String>,
+    /// Exact server policy used for that transaction.
+    pub policy_digest: String,
+}
+
+/// The sole current authority for `(ownerKind, ownerId, participantId)`.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct GrantBinding {
+    /// Existing owner record class.
+    pub owner_kind: GrantOwnerKind,
+    /// Existing deployment or user ID; no separately allocated authority ID.
+    pub owner_id: String,
+    /// Stable installed participant ID.
+    pub participant_id: String,
+    /// Server-owned definitions used to interpret these grants.
+    pub installed_revision: u64,
+    /// Expanded, canonical action and resource permissions.
+    pub grants: GrantSet,
+    /// Explicit administrative meta-authority, never participant capability names.
+    pub platform_privileges: Vec<PlatformPrivilege>,
+    /// Positive safe-integer revision covering all authorization-relevant fields.
+    pub revision: u64,
+    /// Current active state or retained revocation tombstone.
+    pub state: GrantBindingState,
+    /// Optional absolute grant expiry in Unix milliseconds.
+    pub expires_at: Option<i64>,
+    /// Verified automatic-policy provenance; manual consent clears it.
+    pub provenance: Option<GrantProvenance>,
+}
+
+impl GrantBinding {
+    /// Validate and canonicalize a binding before transactional storage or signing.
+    pub fn validate(&mut self) -> Result<(), AuthorizationStateError> {
+        require_nonempty("ownerId", &self.owner_id)?;
+        require_nonempty("participantId", &self.participant_id)?;
+        require_positive("installedRevision", self.installed_revision)?;
+        require_positive("revision", self.revision)?;
+        if let Some(expires_at) = self.expires_at {
+            require_protocol_timestamp("expiresAt", expires_at)?;
+        }
+        self.platform_privileges.sort_unstable();
+        self.platform_privileges.dedup();
+        if self.state == GrantBindingState::Revoked
+            && (!self.grants.permissions().is_empty() || !self.platform_privileges.is_empty())
+        {
+            return Err(AuthorizationStateError::InvalidRecord(
+                "revoked grant bindings must contain no authority".to_owned(),
+            ));
+        }
+        if let Some(provenance) = &mut self.provenance {
+            if self.owner_kind != GrantOwnerKind::User {
+                return Err(AuthorizationStateError::InvalidRecord(
+                    "portal provenance requires a user-owned binding".to_owned(),
+                ));
+            }
+            require_nonempty("portalId", &provenance.portal_id)?;
+            require_nonempty("providerId", &provenance.provider_id)?;
+            require_digest("policyDigest", &provenance.policy_digest)?;
+            for role in &provenance.roles {
+                require_nonempty("role", role)?;
+            }
+            provenance.roles.sort();
+            provenance.roles.dedup();
+        }
+        Ok(())
+    }
+}
 
 /// Stable authorization principal class.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -261,6 +351,59 @@ pub struct ParticipantBindingRecord {
 }
 
 impl ParticipantBindingRecord {
+    /// Validate canonical participant/API input for server-owned installation.
+    pub fn from_artifacts(
+        participant: &serde_json::Value,
+        api_artifacts: &[serde_json::Value],
+        now: i64,
+    ) -> Result<Self, AuthorizationStateError> {
+        require_protocol_timestamp("installedAt", now)?;
+        let participant = parse_participant(participant)
+            .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
+        let mut apis = BTreeMap::<String, ApiArtifact>::new();
+        let mut canonical_apis = BTreeMap::new();
+        for value in api_artifacts {
+            let api = parse_api(value)
+                .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
+            let canonical = api
+                .normalized_value()
+                .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
+            if canonical_apis
+                .get(api.id())
+                .is_some_and(|previous| previous != &canonical)
+            {
+                return Err(AuthorizationStateError::InvalidRecord(format!(
+                    "conflicting API artifacts for {}",
+                    api.id(),
+                )));
+            }
+            canonical_apis.insert(api.id().to_owned(), canonical);
+            apis.insert(api.id().to_owned(), api);
+        }
+        let resolved = resolve_participant(&participant, &apis)
+            .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
+        Ok(Self {
+            participant_id: participant.id().to_owned(),
+            participant_kind: participant.kind(),
+            artifact_digest: resolved.participant_digest().to_owned(),
+            needs_digest: resolved
+                .needs()
+                .digest()
+                .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?,
+            participant_json: participant
+                .canonical_json()
+                .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?,
+            api_artifacts_json: trellis_protocol::canonicalize_json(
+                &serde_json::to_value(canonical_apis)
+                    .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?,
+            )
+            .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?,
+            resolved_at: now,
+            state: ParticipantBindingState::Resolved,
+            error: None,
+        })
+    }
+
     /// Parse and verify the exact participant and API artifacts retained by this binding.
     ///
     /// # Errors
@@ -1111,6 +1254,20 @@ pub enum AuthorizationStateError {
     /// An optimistic version guard failed.
     #[error("authorization storage conflict")]
     StorageConflict,
+    /// The requested issuer public key has never been installed.
+    #[error("issuer key is missing")]
+    IssuerMissing,
+    /// A replacement signer must become current before this key can be revoked.
+    #[error("current signing issuer must be replaced before revocation")]
+    CurrentIssuerConflict,
+    /// An explicit grant or installed-participant revision no longer matches.
+    #[error("revision_conflict: expected {expected}, current {current}")]
+    RevisionConflict {
+        /// Revision provided by the caller, with zero meaning absent.
+        expected: u64,
+        /// Current retained revision, with zero meaning absent.
+        current: u64,
+    },
     /// Persistent storage failed unexpectedly.
     #[error("authorization storage failed: {0}")]
     Storage(String),
@@ -1125,6 +1282,8 @@ impl AuthorizationStateError {
             Self::InvalidRecord(_)
                 | Self::PortalPolicyChanged
                 | Self::StorageConflict
+                | Self::CurrentIssuerConflict
+                | Self::RevisionConflict { .. }
                 | Self::Storage(_)
         )
     }

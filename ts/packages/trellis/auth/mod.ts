@@ -77,7 +77,6 @@ export {
   verifyProof,
 } from "./proof.ts";
 export {
-  buildSessionProofTranscript,
   parseSessionProof,
   SESSION_PROOF_FORMAT_V1,
   type SessionProof,
@@ -85,6 +84,7 @@ export {
   type SessionProofPolicy,
   type SessionProofPurpose,
   sessionProofRequestDigest,
+  sessionProofSigningDigest,
   signSessionProof,
   verifySessionProof,
 } from "./session_proof.ts";
